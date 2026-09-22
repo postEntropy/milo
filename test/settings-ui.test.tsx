@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -57,16 +58,26 @@ async function waitUntil(check: () => boolean, timeoutMs = 1500): Promise<void> 
 const readJson = (name: string) => JSON.parse(readFileSync(path.join(home, name), 'utf8'))
 
 function renderSettings(overrides: Record<string, unknown> = {}) {
-  return render(
-    <SettingsScreen
-      config={config}
-      mode="ask"
-      onModeChange={(overrides.onModeChange as (mode: 'auto') => void) ?? (() => {})}
-      onOpenModel={() => {}}
-      onSaved={() => {}}
-      onClose={(overrides.onClose as () => void) ?? (() => {})}
-    />,
-  )
+  /**
+   * Mirrors the shell: it re-reads the config after every save and hands the
+   * screen the fresh copy. Without that a cycling row would not cycle, since it
+   * reads the value it is about to change from its props.
+   */
+  function Live() {
+    const [current, setCurrent] = useState(() => readJson('config.json'))
+    return (
+      <SettingsScreen
+        config={current}
+        mode="ask"
+        onModeChange={(overrides.onModeChange as (mode: 'auto') => void) ?? (() => {})}
+        onOpenModel={() => {}}
+        onSaved={() => setCurrent(readJson('config.json'))}
+        onClose={(overrides.onClose as () => void) ?? (() => {})}
+      />
+    )
+  }
+
+  return render(<Live />)
 }
 
 afterEach(() => cleanup())
@@ -105,8 +116,8 @@ describe('SettingsScreen', () => {
       },
     })
 
-    // Provider & model, API keys, Web search, permissions, gateways, memory
-    for (let index = 0; index < 6; index += 1) await press(app, DOWN)
+    // Provider & model, API keys, Web search, permissions, display, gateways, memory
+    for (let index = 0; index < 7; index += 1) await press(app, DOWN)
     await press(app, '\r')
 
     expect(closed).toBe(true)
@@ -176,7 +187,7 @@ describe('SettingsScreen', () => {
 
   it('walks a gateway through token, access and enable', async () => {
     const app = renderSettings()
-    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    for (let index = 0; index < 5; index += 1) await press(app, DOWN)
     await press(app, '\r') // Gateways list
     await waitFor(app, 'telegram')
 
@@ -205,7 +216,7 @@ describe('SettingsScreen', () => {
 
   it('lets the access step be left empty (anyone)', async () => {
     const app = renderSettings()
-    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    for (let index = 0; index < 5; index += 1) await press(app, DOWN)
     await press(app, '\r')
     await waitFor(app, 'telegram')
 
@@ -221,5 +232,84 @@ describe('SettingsScreen', () => {
     await waitFor(app, 'Step 3 of 3')
 
     expect(readJson('config.json').gateways.telegram.allowlist).toEqual([])
+  })
+
+  it('cycles how much of a tool call is shown, and writes it down', async () => {
+    const app = renderSettings()
+    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    await press(app, '\r') // Display
+    await waitFor(app, 'Tool calls')
+
+    expect(app.lastFrame()).toContain('full')
+    await press(app, '\r') // full -> name
+    await waitUntil(() => readJson('config.json').display?.tools === 'name')
+
+    await press(app, '\r') // name -> off
+    await waitUntil(() => readJson('config.json').display?.tools === 'off')
+    expect(app.lastFrame()).toContain('off')
+  })
+
+  it('toggles thinking and says it applies everywhere', async () => {
+    const app = renderSettings()
+    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    await press(app, '\r')
+    await waitFor(app, 'Thinking')
+
+    await press(app, DOWN)
+    await press(app, '\r')
+
+    await waitUntil(() => readJson('config.json').display?.thinking === false)
+    expect(app.lastFrame()).toContain('applies to every surface')
+  })
+
+  it('sets and clears the output ceiling', async () => {
+    const app = renderSettings()
+    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    await press(app, '\r')
+    await waitFor(app, 'Output limit')
+
+    await press(app, DOWN)
+    await press(app, DOWN)
+    await press(app, '\r')
+    await waitFor(app, 'token ceiling')
+
+    app.stdin.write('8192')
+    await tick(20)
+    app.stdin.write('\r')
+    await waitUntil(() => readJson('config.json').maxTokens === 8192)
+
+    // Reopening shows what is stored; empty means "leave it to the wire", and an
+    // empty field is how that is asked for.
+    await press(app, DOWN)
+    await press(app, DOWN)
+    await press(app, '\r')
+    await waitFor(app, 'token ceiling')
+    await tick(20)
+    expect(app.lastFrame()).toContain('8192')
+
+    // Sent one at a time: a run of backspaces in a single write arrives as one
+    // keypress, the way a terminal delivers it.
+    for (let press = 0; press < 4; press += 1) {
+      app.stdin.write('\u007f')
+      await tick(20)
+    }
+    app.stdin.write('\r')
+    await waitUntil(() => readJson('config.json').maxTokens === undefined)
+  })
+
+  it('rejects a nonsense ceiling rather than writing it', async () => {
+    const app = renderSettings()
+    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    await press(app, '\r')
+    await waitFor(app, 'Output limit')
+    await press(app, DOWN)
+    await press(app, DOWN)
+    await press(app, '\r')
+    await waitFor(app, 'token ceiling')
+
+    app.stdin.write('lots')
+    await tick(20)
+    app.stdin.write('\r')
+    await waitUntil(() => readJson('config.json').maxTokens === undefined)
   })
 })

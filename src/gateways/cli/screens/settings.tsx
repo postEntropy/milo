@@ -31,6 +31,7 @@ const KEY_SLOTS: KeySlot[] = [
 
 const SEARCH_CHOICES = ['off', 'tavily', 'exa', 'parallel'] as const
 const MODES: PermissionMode[] = ['ask', 'auto', 'yolo']
+const TOOL_LEVELS = ['full', 'name', 'off'] as const
 const GATEWAYS: GatewayId[] = ['telegram', 'discord']
 
 interface MenuItem {
@@ -48,6 +49,8 @@ type View =
   | { kind: 'search' }
   | { kind: 'permissions' }
   | { kind: 'permissionEdit'; field: 'threshold' | 'allow' | 'deny' }
+  | { kind: 'display' }
+  | { kind: 'displayEdit' }
   | { kind: 'gateways' }
   | { kind: 'gatewayFlow'; id: GatewayId; steps: FlowStep[]; step: FlowStep }
   | { kind: 'memory' }
@@ -68,6 +71,8 @@ const TITLE: Record<string, string> = {
   search: 'Setup · Web search',
   permissions: 'Setup · Tools & permissions',
   permissionEdit: 'Setup · Tools & permissions',
+  display: 'Setup · Display',
+  displayEdit: 'Setup · Display',
   gateways: 'Setup · Gateways',
   memory: 'Setup · Memory',
 }
@@ -139,12 +144,33 @@ export function SettingsScreen({
       hintColor: mode === 'ask' ? undefined : mode === 'yolo' ? theme.danger : theme.warning,
     },
     {
+      label: 'Display',
+      hint: `${config.display.tools} · thinking ${config.display.thinking ? 'on' : 'off'}`,
+    },
+    {
       label: 'Gateways',
       hint: enabledGateways.join(', ') || 'none enabled',
       hintColor: enabledGateways.length > 0 ? theme.success : undefined,
     },
     { label: 'Memory', hint: config.memory.backend },
     { label: 'Save & exit', hint: 'everything is already saved', hintColor: theme.accent },
+  ]
+
+  const displayItems: MenuItem[] = [
+    {
+      label: 'Tool calls',
+      hint: `${config.display.tools} (Enter cycles full → name → off)`,
+      hintColor: theme.accent,
+    },
+    {
+      label: 'Thinking',
+      hint: config.display.thinking ? 'on' : 'off',
+      hintColor: theme.accent,
+    },
+    {
+      label: 'Output limit',
+      hint: config.maxTokens ? `${config.maxTokens} tokens` : 'wire default (4096 on Anthropic)',
+    },
   ]
 
   const permissionItems: MenuItem[] = [
@@ -217,8 +243,9 @@ export function SettingsScreen({
           else if (index === 1) go({ kind: 'keys' })
           else if (index === 2) go({ kind: 'search' })
           else if (index === 3) go({ kind: 'permissions' })
-          else if (index === 4) go({ kind: 'gateways' })
-          else if (index === 5) go({ kind: 'memory' })
+          else if (index === 4) go({ kind: 'display' })
+          else if (index === 5) go({ kind: 'gateways' })
+          else if (index === 6) go({ kind: 'memory' })
           else onClose()
         } else if (key.escape) onClose()
         break
@@ -274,6 +301,27 @@ export function SettingsScreen({
 
       case 'permissionEdit':
         if (key.escape) go({ kind: 'permissions' })
+        break
+
+      case 'display':
+        if (key.upArrow) setIndex((value) => Math.max(0, value - 1))
+        else if (key.downArrow) setIndex((value) => Math.min(displayItems.length - 1, value + 1))
+        else if (key.return) {
+          if (index === 0) {
+            const next = TOOL_LEVELS[(TOOL_LEVELS.indexOf(config.display.tools) + 1) % TOOL_LEVELS.length]!
+            patchConfig({ display: { ...config.display, tools: next } })
+          } else if (index === 1) {
+            const thinking = !config.display.thinking
+            patchConfig({ display: { ...config.display, thinking } })
+            setNotice(`Thinking: ${thinking ? 'on' : 'off'} — applies to every surface`)
+          } else {
+            go({ kind: 'displayEdit' }, config.maxTokens ? String(config.maxTokens) : '')
+          }
+        } else if (key.escape) go({ kind: 'menu' })
+        break
+
+      case 'displayEdit':
+        if (key.escape) go({ kind: 'display' })
         break
 
       case 'gateways':
@@ -363,6 +411,19 @@ export function SettingsScreen({
       return
     }
 
+    if (view.kind === 'displayEdit') {
+      const tokens = Number(value.trim())
+      // Empty means "leave it to the wire"; anything else has to be a real
+      // ceiling, since a bad value would be rejected by the provider.
+      patchConfig(
+        Number.isFinite(tokens) && tokens > 0
+          ? { maxTokens: Math.floor(tokens) }
+          : { maxTokens: undefined },
+      )
+      go({ kind: 'display' })
+      return
+    }
+
     if (view.kind === 'permissionEdit') {
       const parsed = value
         .split(',')
@@ -437,6 +498,21 @@ export function SettingsScreen({
           />
         )}
         {view.kind === 'permissions' && <Menu items={permissionItems} index={index} />}
+        {view.kind === 'display' && (
+          <Box flexDirection="column">
+            <Menu items={displayItems} index={index} />
+            <Box marginTop={1}>
+              <Text dimColor>
+                One setting for every surface: the terminal and the bots read the same values.
+              </Text>
+            </Box>
+            {notice && (
+              <Box marginTop={1}>
+                <Text color={theme.success}>{notice}</Text>
+              </Box>
+            )}
+          </Box>
+        )}
         {view.kind === 'gateways' && (
           <Box flexDirection="column">
             <Menu items={gatewayItems} index={index} />
@@ -514,6 +590,19 @@ export function SettingsScreen({
                 onSubmit={saveText}
                 mask={view.kind === 'keyEdit' ? '*' : undefined}
               />
+            </Box>
+          </Box>
+        )}
+
+        {view.kind === 'displayEdit' && (
+          <Box flexDirection="column">
+            <Text color={theme.accent}>Output token ceiling (empty leaves it to the wire)</Text>
+            <Text dimColor>
+              The Anthropic wire defaults to 4096, which cuts a long answer or a big file in half.
+            </Text>
+            <Box>
+              <Text color={theme.accent}>❯ </Text>
+              <TextInput value={text} onChange={setText} onSubmit={saveText} />
             </Box>
           </Box>
         )}
