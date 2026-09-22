@@ -1,8 +1,12 @@
+<div align="center">
+  <img src="assets/milo.jpeg" alt="Milo" width="190">
+</div>
+
 # Milo
 
-A multi-surface agent — a transport-agnostic **core** with pluggable **gateways** (CLI, Telegram,
-Discord), pluggable **LLM providers**, and a pluggable **memory** layer. Hand-rolled LLM layer (no
-provider SDKs) built for a fast boot and immediate token streaming.
+A multi-surface agent — one transport-agnostic **core** with pluggable **gateways** (CLI, Telegram,
+Discord), pluggable **LLM providers**, a pluggable **memory** layer and durable **sessions**.
+Hand-rolled LLM layer (no provider SDKs), built for a fast boot and immediate token streaming.
 
 ```
 GATEWAYS   CLI (Ink)      Telegram (grammY)      Discord (discord.js)
@@ -32,8 +36,9 @@ On the first run, an onboarding wizard asks for a provider, API key, and model, 
 
 ## Configuration
 
-- `~/.milo/config.json` — provider, model, memory backend, and enabled gateways.
+- `~/.milo/config.json` — provider, model, memory backend, session settings, enabled gateways.
 - `~/.milo/auth.json` — API keys and bot tokens (written `0600`).
+- `~/.milo/sessions/` — one JSON file per session, plus the address bindings (see below).
 
 Environment variables override stored secrets: `COMMANDCODE_API_KEY`, `OPENROUTER_API_KEY`,
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`.
@@ -92,9 +97,10 @@ fails closed for everyone else, and a blocked sender is told their own id so you
 `milo setup` → Gateways walks through token → access → enable. The allowlist is read when
 `milo serve` starts, so restart it after changing it.
 
-Commands typed in the chat: `/help`, `/mode ask|auto|yolo`, `/yolo`, `/clear`, `/status`. A mode
-change from a chat is written to `config.json` like any other, so it survives a restart of
-`milo serve`. Provider and key changes happen in `milo setup` on the terminal side.
+Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/stats`, `/mode ask|auto|yolo`,
+`/yolo`, `/clear`, `/status`. A mode change from a chat is written to `config.json` like any other,
+so it survives a restart of `milo serve`; sessions are written to `~/.milo/sessions/` and survive it
+too. Provider and key changes happen in `milo setup` on the terminal side.
 
 Both bots are thin shells over one transport-agnostic runner (`src/gateways/runner.ts`) plus a
 `ChatSurface` interface, so the turn logic — streaming, tool lines, permission routing, truncation
@@ -186,6 +192,44 @@ title.
 Without a configured provider, `web_search` is simply not registered — the model never sees a
 tool it cannot use.
 
+## Sessions
+
+A conversation is a **session** with its own name (`calm-otter-7`), stored as one JSON file under
+`~/.milo/sessions/`. The transport address — a Telegram chat, a Discord channel, the CLI — is only
+a **binding** to the session currently attached to it (`bindings.json`), so the same session can be
+picked up from any gateway.
+
+| Command | What it does |
+| --- | --- |
+| `/new [title]` | Starts a fresh session and binds this conversation to it. |
+| `/sessions` | Lists the saved sessions, most recent first. |
+| `/resume <id>` | Binds this conversation to an existing session. |
+| `/stats` | Name, timestamps, message/turn counts and context size for the current session. |
+| `/clear` | Forgets the current session's transcript (destructive). |
+
+In the terminal, `milo` continues the last session bound to the CLI, and `milo --resume <id>` opens
+a specific one (`milo --continue` is the explicit form of the default).
+
+Memory is keyed by the conversation, not the session, so facts you told Milo before a `/new` are
+still available afterwards.
+
+On Telegram and Discord, `/new`, `/sessions` and `/resume` only work on a single-person bot (exactly
+one id in the allowlist). On a shared or open bot they are locked, so nobody can switch into someone
+else's sessions.
+
+### Compaction
+
+A long session would otherwise hit the model's context limit. Once the transcript passes
+`sessions.maxInputTokens` (estimated at ~4 characters per token), the oldest turns are summarized in
+one model call and replaced by an `## Earlier in this conversation` section of the system prompt; the
+last `sessions.keepTurns` turns are kept verbatim. The cut always lands on a user turn, so a tool
+call is never separated from its result. If the summary call fails, the turns are dropped anyway — a
+request that fits beats one the provider rejects.
+
+```json
+{ "sessions": { "maxInputTokens": 12000, "keepTurns": 8, "compaction": true } }
+```
+
 ## Memory
 
 Memory sits behind a thin, vendor-agnostic interface (`remember` / `recall`). The MVP ships a
@@ -211,6 +255,8 @@ npm run build       # bundle to dist/ (tsup)
   - `tools/` — `Tool` interface, registry (zod → JSON Schema), built-in tools.
   - `search/` — `SearchProvider` plus the Tavily, Exa and Parallel adapters.
   - `memory/` — `Memory` interface + `FileMemory`.
+  - `sessions/` — `SessionStore` interface + `FileSessionStore` / `MemorySessionStore`, nickname
+    generation, compaction (`estimateTokens` / `planCut` / `summarize`) and `/stats` formatting.
   - `config/` — paths, zod schema, presets, load/save, onboarding wizard.
   - `runtime.ts` / `session.ts` / `bootstrap.ts`.
 - `src/gateways/` — `cli/` (Ink), `telegram/` (grammY), `discord/` (discord.js).
@@ -220,17 +266,14 @@ npm run build       # bundle to dist/ (tsup)
 
 Known open work, roughly in order:
 
-1. **Session persistence.** Conversations live in memory only: `AgentRuntime.sessions` is a `Map`,
-   so restarting `milo serve` (or the CLI) drops the history — only `FileMemory` facts survive.
-   Storing the message list per scope has to arrive **with a context budget**: nothing trims today,
-   so a resumed long chat would hit the model's context limit immediately. A trim must never
-   separate a tool call from its result.
+1. **Live verification of the bot gateways.** The Telegram and Discord glue is only exercised
+   against fakes, so a real token is still needed to confirm the permission buttons, the rich
+   messages and the turn queue against the live APIs.
 2. **A real memory backend** (mem0 / Honcho / Zep / Letta / Hindsight) behind the same
    `remember` / `recall` interface. Today: keyword overlap plus a recency bonus, over what the user
    said only.
-3. **Live verification of the bot gateways.** The Telegram and Discord glue is only exercised
-   against fakes, so a real token is still needed to confirm the permission buttons, the rich
-   messages and the turn queue against the live APIs.
+3. **Memory across gateways.** Facts are keyed by the conversation address, so something told in
+   Telegram is not visible in the CLI. Sharing them needs a per-person identity map.
 4. **Web search needs a key.** `config.json` has no `search` section, so `web_search` is not even
    registered right now. The Exa and Parallel adapters exist but have never been called for real.
 5. Markdown rendering in the Ink UI (the terminal shows plain text; only the bots get rich messages).
