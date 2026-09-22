@@ -137,7 +137,11 @@ export function Shell({
   const afterSave = () => {
     setLoaded(loadConfig())
     setBusy(false)
-    if (standalone) exit()
+    // `milo setup` finishes the wizard and continues into the settings hub;
+    // `milo model` is done once a model is picked, and a plain `milo` goes
+    // straight to the chat.
+    if (startScreen === 'settings') setScreen('settings')
+    else if (standalone) exit()
     else setScreen('chat')
   }
 
