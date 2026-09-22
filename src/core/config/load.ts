@@ -2,7 +2,16 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { DEFAULT_SEARCH_KEY_ENV } from '../search/types.js'
 import type { PermissionMode } from '../tools/permission.js'
 import { MILO_HOME, authFile, configFile } from './paths.js'
-import { AuthSchema, ConfigSchema, emptyAuth, type Auth, type Config, type ProviderEntry } from './schema.js'
+import {
+  AuthSchema,
+  ConfigSchema,
+  DEFAULT_DISPLAY,
+  emptyAuth,
+  type Auth,
+  type Config,
+  type DisplayConfig,
+  type ProviderEntry,
+} from './schema.js'
 
 const PROVIDER_ENV: Record<string, string[]> = {
   commandcode: ['COMMANDCODE_API_KEY', 'CMD_API_KEY'],
@@ -73,6 +82,26 @@ export function setPermissionMode(mode: PermissionMode): void {
   const config = readConfig()
   if (!config) return
   saveConfig({ ...config, permissions: { ...config.permissions, mode } })
+}
+
+/** Applies a display change and writes it down, for the same reason as `/mode`. */
+export function setDisplay(patch: Partial<DisplayConfig>): void {
+  const config = readConfig()
+  if (!config) return
+  saveConfig({ ...config, display: { ...config.display, ...patch } })
+}
+
+/**
+ * The display settings as they are on disk. Read per turn by the bot gateways,
+ * so a `/tools` typed in a chat takes effect without restarting `milo serve`.
+ * A corrupt file falls back to the defaults rather than failing the turn.
+ */
+export function readDisplay(): DisplayConfig {
+  try {
+    return readConfig()?.display ?? DEFAULT_DISPLAY
+  } catch {
+    return DEFAULT_DISPLAY
+  }
 }
 
 export function resolveApiKey(id: string, entry: ProviderEntry, auth: Auth): string | false | undefined {

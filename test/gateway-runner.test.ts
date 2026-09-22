@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../src/core/agent/events'
+import type { DisplayConfig } from '../src/core/config/schema'
 import type { Session, SendOptions } from '../src/core/session'
 import type { PermissionRequest } from '../src/core/tools/permission'
 import { runTurn } from '../src/gateways/runner'
@@ -7,7 +8,7 @@ import type { ChatSurface } from '../src/gateways/surface'
 
 type StreamFn = (options?: SendOptions) => AsyncGenerator<AgentEvent>
 
-function makeHarness(stream: StreamFn, askAnswer = true) {
+function makeHarness(stream: StreamFn, askAnswer = true, display?: DisplayConfig) {
   const edits: string[] = []
   const asks: PermissionRequest[] = []
 
@@ -28,7 +29,7 @@ function makeHarness(stream: StreamFn, askAnswer = true) {
   } as unknown as Session
 
   const run = (maxLength = 1000) =>
-    runTurn({ session, conversationId: 'c1', text: 'hi', surface, maxLength, flushMs: 0 })
+    runTurn({ session, conversationId: 'c1', text: 'hi', surface, maxLength, display, flushMs: 0 })
 
   return { edits, asks, run }
 }
@@ -218,5 +219,78 @@ describe('runTurn', () => {
     const harness = makeHarness(stream)
     await harness.run()
     expect(harness.edits.at(-1)).toBe('(no response)')
+  })
+})
+
+describe('runTurn — display settings', () => {
+  async function* withCommand(): AsyncGenerator<AgentEvent> {
+    yield { type: 'tool-start', id: '1', name: 'shell_command', args: { command: 'echo hi' } }
+    yield { type: 'tool-end', id: '1', name: 'shell_command', result: 'hi', isError: false }
+    yield { type: 'text-delta', delta: 'pronto' }
+    yield { type: 'done', finishReason: 'stop' }
+  }
+
+  it('shows only the tool name when asked for names', async () => {
+    const harness = makeHarness(withCommand, true, { tools: 'name', thinking: true })
+    await harness.run()
+    expect(harness.edits.at(-1)).toBe('```\n⚡ shell_command\n```\n\npronto')
+  })
+
+  it('keeps tool activity out entirely when off', async () => {
+    const harness = makeHarness(withCommand, true, { tools: 'off', thinking: true })
+    await harness.run()
+    expect(harness.edits.at(-1)).toBe('pronto')
+  })
+
+  it('reports a failure even with tools off', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'tool-start', id: '1', name: 'shell_command', args: { command: 'nope' } }
+      yield { type: 'tool-end', id: '1', name: 'shell_command', result: 'bad', isError: true }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream, true, { tools: 'off', thinking: true })
+    await harness.run()
+    expect(harness.edits.at(-1)).toBe('```\n❌ shell_command failed\n```')
+  })
+
+  it('shows the first line of the reasoning as one line', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'reasoning-delta', delta: 'Preciso conferir o\n' }
+      yield { type: 'reasoning-delta', delta: 'segundo   parágrafo\n' }
+      yield { type: 'text-delta', delta: 'pronto' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+    expect(harness.edits.at(-1)).toBe('> 💭 Preciso conferir o\n\npronto')
+  })
+
+  it('drops the reasoning when thinking is off', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'reasoning-delta', delta: 'algo que não deve aparecer\n' }
+      yield { type: 'text-delta', delta: 'pronto' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream, true, { tools: 'full', thinking: false })
+    await harness.run()
+    expect(harness.edits.at(-1)).toBe('pronto')
+  })
+
+  it('keeps a long thought to one truncated line', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'reasoning-delta', delta: 'x'.repeat(500) }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+
+    const last = harness.edits.at(-1) ?? ''
+    expect(last.startsWith('> 💭 ')).toBe(true)
+    expect(last).toContain('…')
+    expect(last.split('\n')).toHaveLength(1)
   })
 })

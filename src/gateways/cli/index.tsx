@@ -2,8 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Text, useApp } from 'ink'
 import Spinner from 'ink-spinner'
 import { createRuntime } from '../../core/bootstrap.js'
-import { loadConfig, setPermissionMode, type LoadedConfig } from '../../core/config/load.js'
+import { loadConfig, setDisplay, setPermissionMode, type LoadedConfig } from '../../core/config/load.js'
 import { MILO_HOME } from '../../core/config/paths.js'
+import { DEFAULT_DISPLAY, type DisplayConfig } from '../../core/config/schema.js'
 import type { MemoryScope } from '../../core/memory/index.js'
 import type { PermissionMode } from '../../core/tools/permission.js'
 import { ChatScreen } from './screens/chat.js'
@@ -134,6 +135,14 @@ export function Shell({
     setLoaded(loadConfig())
   }
 
+  const changeDisplay = (patch: Partial<DisplayConfig>) => {
+    setDisplay(patch)
+    wroteSettings.current = true
+    setLoaded((current) =>
+      current ? { ...current, config: { ...current.config, display: { ...current.config.display, ...patch } } } : current,
+    )
+  }
+
   const afterSave = () => {
     setLoaded(loadConfig())
     setBusy(false)
@@ -170,6 +179,7 @@ export function Shell({
   const headerRight = loaded
     ? `${sessionId ? `${sessionId} · ` : ''}${loaded.provider.id} · ${loaded.model}`
     : 'setup'
+  const display = loaded?.config.display ?? DEFAULT_DISPLAY
   const accent = busy ? theme.warning : theme.accent
 
   return (
@@ -190,6 +200,18 @@ export function Shell({
               [{mode}]
             </Text>
           )}
+          {display.tools !== 'full' && (
+            <Text bold color={theme.warning}>
+              {' '}
+              [tools {display.tools}]
+            </Text>
+          )}
+          {!display.thinking && (
+            <Text bold color={theme.warning}>
+              {' '}
+              [no thinking]
+            </Text>
+          )}
         </Box>
         <Text dimColor>{headerRight}</Text>
       </Box>
@@ -200,6 +222,8 @@ export function Shell({
           scope={CLI_SCOPE}
           mode={mode}
           onModeChange={changeMode}
+          display={display}
+          onDisplayChange={changeDisplay}
           items={items}
           setItems={setItems}
           onOpenModel={openModel}

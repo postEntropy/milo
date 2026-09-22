@@ -7,7 +7,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 const home = mkdtempSync(path.join(tmpdir(), 'milo-config-'))
 process.env.MILO_HOME = home
 
-const { readConfig, setPermissionMode } = await import('../src/core/config/load')
+const { readConfig, readDisplay, setDisplay, setPermissionMode } = await import(
+  '../src/core/config/load'
+)
 
 const configFile = path.join(home, 'config.json')
 
@@ -51,5 +53,27 @@ describe('setPermissionMode', () => {
 
     expect(() => setPermissionMode('auto')).not.toThrow()
     expect(existsSync(configFile)).toBe(false)
+  })
+})
+
+describe('display settings', () => {
+  it('defaults to showing everything when the file predates them', () => {
+    expect(readDisplay()).toEqual({ tools: 'full', thinking: true })
+  })
+
+  it('writes one setting and leaves the other alone', () => {
+    setDisplay({ tools: 'off' })
+    expect(readDisplay()).toEqual({ tools: 'off', thinking: true })
+
+    setDisplay({ thinking: false })
+    expect(readDisplay()).toEqual({ tools: 'off', thinking: false })
+    expect(readConfig()?.display).toEqual({ tools: 'off', thinking: false })
+  })
+
+  it('falls back to the defaults on an unreadable file rather than throwing', () => {
+    writeFileSync(configFile, '{ not json')
+
+    expect(() => readDisplay()).not.toThrow()
+    expect(readDisplay()).toEqual({ tools: 'full', thinking: true })
   })
 })

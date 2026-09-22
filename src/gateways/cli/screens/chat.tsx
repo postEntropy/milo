@@ -3,6 +3,7 @@ import { Box, Text, useApp, useInput } from 'ink'
 import TextInput from 'ink-text-input'
 import Spinner from 'ink-spinner'
 import type { AgentEvent } from '../../../core/agent/events.js'
+import type { DisplayConfig } from '../../../core/config/schema.js'
 import type { MemoryScope } from '../../../core/memory/index.js'
 import type { AgentRuntime } from '../../../core/runtime.js'
 import { formatSessionList, formatStats } from '../../../core/sessions/index.js'
@@ -31,6 +32,9 @@ export interface ChatScreenProps {
   scope: MemoryScope
   mode: PermissionMode
   onModeChange: (mode: PermissionMode) => void
+  /** How much of a tool call to show, and whether to show thinking. */
+  display: DisplayConfig
+  onDisplayChange: (patch: Partial<DisplayConfig>) => void
   /** The transcript lives in the shell so switching screens does not drop it. */
   items: Item[]
   setItems: Dispatch<SetStateAction<Item[]>>
@@ -43,14 +47,16 @@ export interface ChatScreenProps {
 }
 
 const HELP_TEXT =
-  'Commands: /model · /setup · /mode ask|auto|yolo · /yolo · /new [title] · /sessions · ' +
-  '/resume <id> · /stats · /clear · /help · /exit'
+  'Commands: /model · /setup · /mode ask|auto|yolo · /yolo · /tools full|name|off · ' +
+  '/thinking on|off · /new [title] · /sessions · /resume <id> · /stats · /clear · /help · /exit'
 
 export function ChatScreen({
   runtime,
   scope,
   mode,
   onModeChange,
+  display,
+  onDisplayChange,
   items,
   setItems,
   onOpenModel,
@@ -102,8 +108,8 @@ export function ChatScreen({
 
   const width = Math.max(20, columns - 2)
   const reasonLines = useMemo(
-    () => (reasoning ? wrapText(reasoning, width - 2) : []),
-    [reasoning, width],
+    () => (display.thinking && reasoning ? wrapText(reasoning, width - 2) : []),
+    [display.thinking, reasoning, width],
   )
   const reasonPreview = busy ? reasonLines.slice(-MAX_REASONING_ROWS) : []
   const reasoningRows = reasonPreview.length
@@ -178,6 +184,26 @@ export function ChatScreen({
           push({ kind: 'info', text: `Permission mode: ${mode}. Use /mode ask|auto|yolo` })
         }
         break
+      case 'tools': {
+        const level = argument.trim().toLowerCase()
+        if (level !== 'full' && level !== 'name' && level !== 'off') {
+          push({ kind: 'info', text: `Tools: ${display.tools}. Use /tools full|name|off` })
+          break
+        }
+        onDisplayChange({ tools: level })
+        push({
+          kind: 'info',
+          text: `Tools: ${level}${level === 'off' ? ' — a tool that fails is still reported' : ''}`,
+        })
+        break
+      }
+      case 'thinking': {
+        const asked = argument.trim().toLowerCase()
+        const next = asked === 'on' ? true : asked === 'off' ? false : !display.thinking
+        onDisplayChange({ thinking: next })
+        push({ kind: 'info', text: `Thinking: ${next ? 'on' : 'off'}` })
+        break
+      }
       case 'new': {
         const session = await runtime.newSession(scope, argument || undefined)
         onSessionChange?.(session.id)
@@ -248,14 +274,27 @@ export function ChatScreen({
             setLive(assistant)
             setPhase('writing')
           },
-          onReasoning: (delta) => setReasoning((value) => value + delta),
+          onReasoning: (delta) => {
+            if (display.thinking) setReasoning((value) => value + delta)
+          },
           onToolStart: (name, args) => {
             toolArgsRef.current = args
+            // `off` keeps tool activity out of the transcript and out of the
+            // status line, so the turn reads as plain thinking.
+            if (display.tools === 'off') return
             setToolName(name)
             setPhase('tool')
           },
           onToolEnd: (name, isError) => {
-            push({ kind: 'tool', name, detail: formatArgs(toolArgsRef.current), ok: !isError })
+            // A failure is always shown, even with tools off.
+            if (display.tools !== 'off' || isError) {
+              push({
+                kind: 'tool',
+                name,
+                detail: display.tools === 'name' ? '' : formatArgs(toolArgsRef.current),
+                ok: !isError,
+              })
+            }
             setToolName('')
             setPhase('thinking')
           },

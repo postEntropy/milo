@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import type { DisplayConfig } from '../src/core/config/schema'
 import { DefaultPermissionPolicy } from '../src/core/tools/permission'
 import {
   decodePermission,
@@ -171,6 +172,70 @@ describe('handleCommand', () => {
   it('points /setup and /model at the terminal', async () => {
     expect((await handleCommand('/setup', {})).reply).toContain('milo setup')
     expect((await handleCommand('/model', {})).reply).toContain('milo setup')
+  })
+
+  it('lists the display commands in help', async () => {
+    const reply = (await handleCommand('/help', {})).reply ?? ''
+    expect(reply).toContain('/tools full|name|off')
+    expect(reply).toContain('/thinking on|off')
+  })
+
+  it('sets how much of a tool call to show, and writes it down', async () => {
+    const saved: Partial<DisplayConfig>[] = []
+    const result = await handleCommand('/tools name', {
+      display: { tools: 'full', thinking: true },
+      persistDisplay: (patch) => saved.push(patch),
+    })
+
+    expect(result.reply).toContain('Tools: name')
+    expect(saved).toEqual([{ tools: 'name' }])
+  })
+
+  it('says a failure is still reported when tools are off', async () => {
+    const result = await handleCommand('/tools off', {
+      display: { tools: 'full', thinking: true },
+      persistDisplay: () => {},
+    })
+
+    expect(result.reply).toContain('still reported')
+  })
+
+  it('reports the current level for a bad argument', async () => {
+    const saved: Partial<DisplayConfig>[] = []
+    const result = await handleCommand('/tools nonsense', {
+      display: { tools: 'name', thinking: false },
+      persistDisplay: (patch) => saved.push(patch),
+    })
+
+    expect(result.reply).toContain('Tools: name')
+    expect(result.reply).toContain('/tools full|name|off')
+    expect(saved).toEqual([])
+  })
+
+  it('toggles thinking with no argument and takes on/off', async () => {
+    const saved: Partial<DisplayConfig>[] = []
+    const context = {
+      display: { tools: 'full' as const, thinking: true },
+      persistDisplay: (patch: Partial<DisplayConfig>) => saved.push(patch),
+    }
+
+    await handleCommand('/thinking', context)
+    await handleCommand('/thinking on', { ...context, display: { tools: 'full', thinking: false } })
+    await handleCommand('/thinking off', context)
+
+    expect(saved).toEqual([{ thinking: false }, { thinking: true }, { thinking: false }])
+  })
+
+  it('refuses display changes on a surface without them', async () => {
+    expect((await handleCommand('/tools off', {})).reply).toContain('not available')
+    expect((await handleCommand('/thinking off', {})).reply).toContain('not available')
+  })
+
+  it('reports display settings in /status', async () => {
+    const reply = (await handleCommand('/status', { display: { tools: 'off', thinking: false } }))
+      .reply
+    expect(reply).toContain('Tools: off')
+    expect(reply).toContain('thinking: off')
   })
 
   it('rejects unknown commands', async () => {

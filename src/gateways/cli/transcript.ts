@@ -63,11 +63,15 @@ export function buildLines(items: Item[], width: number): Line[] {
       case 'assistant':
         for (const text of wrapText(item.text, width)) push(text)
         break
-      case 'tool':
-        for (const text of wrapText(`${item.ok ? toolIcon(item.name) : '✗'} ${item.name}(${item.detail})`, width)) {
+      case 'tool': {
+        // No parentheses when there is no detail to show (`/tools name`).
+        const call = item.detail ? `${item.name}(${item.detail})` : item.name
+        const head = item.ok ? toolIcon(item.name) : '✗'
+        for (const text of wrapText(`${head} ${call}`, width)) {
           push(text, { color: item.ok ? theme.muted : theme.danger })
         }
         break
+      }
       case 'error':
         for (const text of wrapText(`error: ${item.text}`, width)) push(text, { color: theme.danger })
         break

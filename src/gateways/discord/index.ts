@@ -3,7 +3,7 @@ import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
-import { setPermissionMode } from '../../core/config/load.js'
+import { readDisplay, setDisplay, setPermissionMode } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
 import { handleCommand, modeLockMessage, sessionLockMessage } from '../commands.js'
 import { runTurn } from '../runner.js'
@@ -98,12 +98,15 @@ export class DiscordGateway implements Gateway {
     const scope: MemoryScope = { gateway: 'discord', conversationId: message.channelId }
     const session = await this.options.runtime.getSession(scope)
 
+    const display = readDisplay()
     const command = await handleCommand(text, {
       policy: this.options.runtime.permissions,
       resetSession: () => session.clear(),
       persistMode: setPermissionMode,
       modeLocked: modeLockMessage(this.options.allowlist),
       sessionLocked: sessionLockMessage(this.options.allowlist),
+      display,
+      persistDisplay: setDisplay,
       newSession: (title) => this.options.runtime.newSession(scope, title),
       resumeSession: async (id) => (await this.options.runtime.resumeSession(scope, id)) !== null,
       listSessions: () => this.options.runtime.listSessions(),
@@ -131,6 +134,7 @@ export class DiscordGateway implements Gateway {
         text,
         surface,
         maxLength: MAX_LENGTH,
+        display,
       })
     } catch (error) {
       await message.reply(`[error] ${errorMessage(error)}`).catch(() => undefined)

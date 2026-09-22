@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render } from 'ink-testing-library'
 import type { AgentEvent } from '../src/core/agent/events'
+import type { DisplayConfig } from '../src/core/config/schema'
 import type { AgentRuntime } from '../src/core/runtime'
 import type { PermissionMode } from '../src/core/tools/permission'
 import { ChatScreen } from '../src/gateways/cli/screens/chat'
@@ -27,6 +28,8 @@ async function submit(stdin: { write: (data: string) => void }, text: string): P
 interface RenderOptions {
   mode?: PermissionMode
   onModeChange?: (mode: PermissionMode) => void
+  display?: DisplayConfig
+  onDisplayChange?: (patch: Partial<DisplayConfig>) => void
   onOpenModel?: () => void
   onOpenSettings?: () => void
   onSessionChange?: (id: string) => void
@@ -40,6 +43,8 @@ function Harness({ runtime, options }: { runtime: AgentRuntime; options: RenderO
       scope={scope}
       mode={options.mode ?? 'ask'}
       onModeChange={options.onModeChange ?? (() => {})}
+      display={options.display ?? { tools: 'full', thinking: true }}
+      onDisplayChange={options.onDisplayChange ?? (() => {})}
       items={items}
       setItems={setItems}
       onOpenModel={options.onOpenModel ?? (() => {})}
@@ -183,6 +188,58 @@ describe('ChatScreen', () => {
     await submit(stdin, '/mode auto')
 
     expect(modes).toEqual(['yolo', 'auto'])
+  })
+
+  it('hands /tools and /thinking to the shell instead of keeping them local', async () => {
+    const patches: Partial<DisplayConfig>[] = []
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const { stdin } = renderChat(makeRuntime(stream), {
+      onDisplayChange: (patch) => patches.push(patch),
+    })
+
+    await submit(stdin, '/tools name')
+    await submit(stdin, '/tools nonsense')
+    await submit(stdin, '/thinking off')
+
+    expect(patches).toEqual([{ tools: 'name' }, { thinking: false }])
+  })
+
+  it('hides tool lines and reasoning when the display settings say so', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'reasoning-delta', delta: 'pensando alto\n' }
+      yield { type: 'tool-start', id: 'c1', name: 'shell_command', args: { command: 'ls -la' } }
+      yield { type: 'tool-end', id: 'c1', name: 'shell_command', result: 'ok', isError: false }
+      yield { type: 'text-delta', delta: 'feito' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const { lastFrame, stdin } = renderChat(makeRuntime(stream), {
+      display: { tools: 'off', thinking: false },
+    })
+    await submit(stdin, 'roda isso')
+
+    const frame = lastFrame() ?? ''
+    expect(frame).toContain('feito')
+    expect(frame).not.toContain('shell_command')
+    expect(frame).not.toContain('pensando alto')
+  })
+
+  it('keeps a failure visible even with tools off', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'tool-start', id: 'c1', name: 'shell_command', args: { command: 'nope' } }
+      yield { type: 'tool-end', id: 'c1', name: 'shell_command', result: 'bad', isError: true }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const { lastFrame, stdin } = renderChat(makeRuntime(stream), {
+      display: { tools: 'off', thinking: true },
+    })
+    await submit(stdin, 'roda isso')
+
+    expect(lastFrame()).toContain('shell_command')
   })
 
   it('starts, lists and switches sessions via the slash commands', async () => {

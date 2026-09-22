@@ -13,6 +13,7 @@ const config = {
   model: 'some-model',
   providers: { commandcode: { baseURL: 'https://api.commandcode.ai/provider/v1' } },
   memory: { backend: 'file' as const },
+  display: { tools: 'full' as const, thinking: true },
   gateways: {},
   permissions: { mode: 'ask' as const, allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
 }

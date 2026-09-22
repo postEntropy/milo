@@ -1,5 +1,6 @@
 import { formatSessionList, formatStats } from '../core/sessions/index.js'
 import type { SessionStats, SessionSummary } from '../core/sessions/index.js'
+import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
 import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.js'
 
 export interface CommandContext {
@@ -10,6 +11,10 @@ export interface CommandContext {
   persistMode?: (mode: PermissionMode) => void
   /** Set when this surface is not allowed to change the mode; used as the reply. */
   modeLocked?: string
+  /** How much of a tool call this surface is showing right now. */
+  display?: DisplayConfig
+  /** Applies a display change to the running surface and writes it down. */
+  persistDisplay?: (patch: Partial<DisplayConfig>) => void
   /** Starts a fresh session and binds it to this conversation. */
   newSession?: (title?: string) => Promise<{ id: string }>
   /** Binds this conversation to an existing session. */
@@ -31,15 +36,24 @@ const HELP = [
   'Commands:',
   '/mode ask|auto|yolo — permission mode, saved for every surface',
   '/yolo — toggle yolo mode',
+  '/tools full|name|off — how much of each tool call to show',
+  '/thinking on|off — show what the model is thinking',
   '/new [title] — start a new session',
   '/sessions — list saved sessions',
   '/resume <id> — switch to another session',
   '/stats — numbers for the current session',
   '/clear — forget this conversation',
-  '/status — current permission mode',
+  '/status — permission mode and display settings',
   '/help — this message',
   'Provider, model and keys: run `milo setup` in a terminal.',
 ].join('\n')
+
+const TOOL_LEVELS = ['full', 'name', 'off'] as const
+
+function describeDisplay(display: DisplayConfig | undefined): string {
+  const settings = display ?? DEFAULT_DISPLAY
+  return `Tools: ${settings.tools} · thinking: ${settings.thinking ? 'on' : 'off'}`
+}
 
 /**
  * A bot that answers several people must not let one of them turn off
@@ -121,6 +135,45 @@ export async function handleCommand(
       }
     }
 
+    case 'tools': {
+      if (!context.persistDisplay) {
+        return { handled: true, reply: 'Display settings are not available on this surface.' }
+      }
+      const level = argument.trim().toLowerCase()
+      if (!(TOOL_LEVELS as readonly string[]).includes(level)) {
+        return { handled: true, reply: `${describeDisplay(context.display)}. Use /tools full|name|off` }
+      }
+      const tools = level as DisplayConfig['tools']
+      context.persistDisplay({ tools })
+      return {
+        handled: true,
+        reply: `Tools: ${tools} — saved for every surface.${
+          tools === 'off' ? ' A tool that fails is still reported.' : ''
+        }`,
+      }
+    }
+
+    case 'thinking': {
+      if (!context.persistDisplay) {
+        return { handled: true, reply: 'Display settings are not available on this surface.' }
+      }
+      const asked = argument.trim().toLowerCase()
+      const current = context.display?.thinking ?? true
+      const next =
+        asked === 'on' || asked === 'true'
+          ? true
+          : asked === 'off' || asked === 'false'
+            ? false
+            : !current
+      context.persistDisplay({ thinking: next })
+      return {
+        handled: true,
+        reply: next
+          ? 'Thinking: on — the model\'s reasoning is shown. Saved for every surface.'
+          : "Thinking: off — the model's reasoning is hidden. Saved for every surface.",
+      }
+    }
+
     case 'new': {
       if (context.sessionLocked) return { handled: true, reply: context.sessionLocked }
       if (!context.newSession) {
@@ -175,7 +228,9 @@ export async function handleCommand(
     case 'status':
       return {
         handled: true,
-        reply: context.status ?? `Permission mode: ${context.policy?.mode ?? 'ask'}`,
+        reply:
+          context.status ??
+          `Permission mode: ${context.policy?.mode ?? 'ask'}. ${describeDisplay(context.display)}`,
       }
 
     case 'model':

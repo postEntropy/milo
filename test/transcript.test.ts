@@ -49,6 +49,12 @@ describe('buildLines', () => {
       '✗ web_search(bun 1.2)',
     ])
   })
+
+  it('omits the parentheses when there is no detail to show', () => {
+    const lines = buildLines([{ kind: 'tool', name: 'read_file', detail: '', ok: true }], 40)
+
+    expect(lines.map((line) => line.text)).toEqual(['📄 read_file'])
+  })
 })
 
 describe('visibleWindow', () => {

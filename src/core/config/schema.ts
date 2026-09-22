@@ -68,12 +68,30 @@ export const DEFAULT_SESSIONS: SessionsConfig = {
   compaction: true,
 }
 
+export const DisplaySchema = z.object({
+  /**
+   * How much of each tool call the surfaces show: the whole call with its
+   * arguments, just the tool name, or no tool lines at all. A failure is always
+   * shown — hiding that it went wrong is worse than the noise.
+   */
+  tools: z.enum(['full', 'name', 'off']).default('full'),
+  /**
+   * Show the model's reasoning: a live pane in the CLI, one line on a chat
+   * surface (the whole thing would crowd out the answer in a single message).
+   */
+  thinking: z.boolean().default(true),
+})
+export type DisplayConfig = z.infer<typeof DisplaySchema>
+
+export const DEFAULT_DISPLAY: DisplayConfig = { tools: 'full', thinking: true }
+
 export const ConfigSchema = z.object({
   provider: z.string(),
   model: z.string(),
   providers: z.record(z.string(), ProviderEntrySchema),
   memory: MemorySchema.default({ backend: 'file' }),
   sessions: SessionsSchema.default(DEFAULT_SESSIONS),
+  display: DisplaySchema.default(DEFAULT_DISPLAY),
   gateways: z.record(z.string(), GatewaySchema).default({}),
   permissions: PermissionsSchema.default(DEFAULT_PERMISSIONS),
   search: SearchSchema.optional(),
