@@ -76,8 +76,10 @@ npm run serve
 Each conversation maps to its own session and memory scope (`telegram:<chatId>`,
 `discord:<channelId>`). Replies stream by editing one message; tool activity is grouped into blocks —
 a **code block** for shell commands, with the command itself, and a **quote box** for searches and
-file reads. On Telegram the answer goes out as a **rich message** (Bot API 10.1+), so Markdown
-renders — headings, lists, tables, code blocks — falling back to plain text if the API refuses it.
+file reads. Every tool line opens with an emoji, never a typographic glyph (these are read in chat
+clients), and a tool that fails adds `❌ <name> failed` to the same block. On Telegram the answer
+goes out as a **rich message** (Bot API 10.1+), so Markdown renders — headings, lists, tables, code
+blocks — falling back to plain text if the API refuses it.
 For Discord, enable the **Message Content** privileged intent in the Developer Portal.
 
 Tool confirmations arrive as **inline buttons** (Telegram) or **buttons** (Discord) — the turn
@@ -98,7 +100,7 @@ fails closed for everyone else, and a blocked sender is told their own id so you
 `milo serve` starts, so restart it after changing it.
 
 Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/stats`, `/mode ask|auto|yolo`,
-`/yolo`, `/clear`, `/status`. A mode change from a chat is written to `config.json` like any other,
+`/yolo`, `/tools full|name|off`, `/thinking on|off`, `/clear`, `/status`. A mode change from a chat is written to `config.json` like any other,
 so it survives a restart of `milo serve`; sessions are written to `~/.milo/sessions/` and survive it
 too. Provider and key changes happen in `milo setup` on the terminal side.
 
@@ -118,8 +120,26 @@ denied tool. The queue also stops two turns from mutating the same session at on
 | Tool | Read-only | Notes |
 | --- | --- | --- |
 | `read_file` | yes | Line-numbered file contents. |
+| `list_dir` | yes | One directory, not recursive. |
+| `glob` | yes | Files matching a pattern, most recently modified first. |
+| `grep` | yes | Regex over file contents, returning `path:line: text`. |
+| `write_file` | no | Creates or replaces a file; asks for confirmation. |
+| `edit_file` | no | Exact string replacement; asks for confirmation. |
+| `remember` | — | Saves a durable fact; only touches Milo's own memory, so it never asks. |
 | `web_search` | yes | Registered only when a search provider is configured. |
 | `shell_command` | no | Runs with `/bin/sh`; asks for confirmation first. |
+
+Read-only tools never ask for confirmation, so exploring is free: `list_dir`, `glob` and `grep`
+replace the `ls`, `find` and `rg` calls that would otherwise go through `shell_command` and its
+prompt. `glob` and `grep` skip build output and dependency directories (`node_modules`, `dist`,
+`build`, `target`, `.venv`, …) so a search answers about your code, not about `node_modules`; pass
+one of them as `path` to search inside it. `grep` skips binary or oversized files and says how many
+it skipped, and both tools report when they truncated their own results.
+
+`edit_file` replaces an exact string and **fails rather than guess**: a string that is absent, or
+that appears more than once without `replace_all`, is an error instead of an edit in the wrong
+place. It returns where it landed (`at line 12`), not the file, so a long file does not come back
+into the context. A leading `~` in any path is expanded, in every tool.
 
 Anything with side effects goes through the permission policy in the core:
 
@@ -141,8 +161,17 @@ Anything with side effects goes through the permission policy in the core:
 | `auto` | Deterministic rules block the catastrophic cases first; the grey zone is reviewed by `typesafe/jev` — below `jevThreshold` it runs, above it asks. Fails closed on reviewer errors and timeouts. |
 | `yolo` | Everything runs, no prompts. |
 
-`deny` beats everything except `yolo`. Read-only tools never ask. On a surface that cannot ask
-(a bot gateway with no confirmation UI yet) an `ask` decision **fails closed**.
+`deny` beats everything except `yolo`. Read-only tools never ask, and neither does a tool whose only
+side effect is on Milo's own state (`remember`). On a surface that cannot ask (a bot gateway with no
+confirmation UI yet) an `ask` decision **fails closed**.
+
+The deterministic rules cover two shapes, and only in `auto`: a shell command that is catastrophic
+(`rm -rf /`, `mkfs`, a `curl … | sh`), and a file write into a path that is never a legitimate
+target — a system directory (`/etc`, `/usr`, `/bin`, `/boot`, …, including one reached by
+traversal) or a credential store (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.netrc`). Both are refused
+outright rather than reviewed. Everything else with side effects — including an ordinary file
+write — goes to the reviewer. Note that the rules are an `auto`-only backstop: in `ask` a write to
+`/etc` is a prompt the user answers, not a refusal.
 
 Switch at runtime with `/mode ask|auto|yolo` or `/yolo` — from the terminal or from a bot. The mode
 is **saved** whenever a command changes it, and it is one value for every surface: a `/mode` typed in
@@ -156,6 +185,35 @@ for the others; the reply says so and points at `milo setup`.
 
 The `auto` reviewer only exists where the decision model does — a Command Code provider. Anywhere
 else, `auto` degrades to `ask`.
+
+### Display
+
+How much of a turn you get to see is a per-install setting, not a per-surface one, so `/tools` typed
+in Telegram applies to the terminal too — and the other way round. The bot gateways read it from
+disk on every turn, so a change takes effect without restarting `milo serve`.
+
+```json
+{ "display": { "tools": "full", "thinking": true } }
+```
+
+| Setting | Values | What it does |
+| --- | --- | --- |
+| `tools` | `full` (default) | The tool call with its arguments: `⚡ shell_command npm test`. |
+| | `name` | Just which tool ran: `⚡ shell_command` — the answer to "what is it doing?" without the argument dump. |
+| | `off` | No tool lines at all. |
+| `thinking` | `true` (default) | Show the model's reasoning. |
+| | `false` | Hide it. |
+
+A tool that **fails** is reported whichever level is set (`❌ shell_command failed`), and the CLI
+stops naming the tool in its status line when `tools` is `off`: hiding that something went wrong is
+worse than the noise it saves.
+
+The two surfaces show reasoning differently, because they can: the CLI keeps a live pane with the
+last few lines of the thought above the input, while a bot appends **one** line — `💭 the first line
+of the thought` — since it edits a single message and the whole reasoning would crowd the answer out
+of it.
+
+The active settings are visible in the CLI header (`[tools name]`, `[no thinking]`) and in `/status`.
 
 ### Measuring jev latency
 
@@ -237,6 +295,12 @@ local `FileMemory` (JSON per conversation scope, keyword + recency retrieval). T
 (mem0, Honcho, Zep/Graphiti, Letta, MemPalace, Hindsight) plug in behind the same interface later —
 nothing in the agent calls a vendor SDK directly.
 
+Both halves of the interface are used. At the end of every turn Milo stores what the user said, and
+the `remember` tool lets the model save a durable fact deliberately — a preference, a convention, a
+decision — tagged `assistant` to tell it apart from a stored user message. Recall is keyword
+overlap, so the tool is told to write short standalone sentences and not to save what is already in
+the code or the transcript. It takes a batch, so one call can save several facts.
+
 ## Skills / development
 
 ```bash
@@ -277,5 +341,3 @@ Known open work, roughly in order:
 4. **Web search needs a key.** `config.json` has no `search` section, so `web_search` is not even
    registered right now. The Exa and Parallel adapters exist but have never been called for real.
 5. Markdown rendering in the Ink UI (the terminal shows plain text; only the bots get rich messages).
-6. `milo setup` on a fresh install runs the onboarding wizard and exits, instead of continuing into
-   the settings hub.
