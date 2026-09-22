@@ -5,7 +5,7 @@ import type { PermissionRequest } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
 import { setPermissionMode } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
-import { handleCommand, modeLockMessage } from '../commands.js'
+import { handleCommand, modeLockMessage, sessionLockMessage } from '../commands.js'
 import { runTurn } from '../runner.js'
 import { TurnQueue } from '../turns.js'
 import type { ChatSurface } from '../surface.js'
@@ -96,18 +96,22 @@ export class DiscordGateway implements Gateway {
     ask: (target: Message, request: PermissionRequest) => Promise<boolean>,
   ): Promise<void> {
     const scope: MemoryScope = { gateway: 'discord', conversationId: message.channelId }
-    const session = this.options.runtime.getSession(scope)
+    const session = await this.options.runtime.getSession(scope)
 
-    const command = handleCommand(text, {
+    const command = await handleCommand(text, {
       policy: this.options.runtime.permissions,
-      resetSession: () => {
-        session.messages.length = 0
-      },
+      resetSession: () => session.clear(),
       persistMode: setPermissionMode,
       modeLocked: modeLockMessage(this.options.allowlist),
+      sessionLocked: sessionLockMessage(this.options.allowlist),
+      newSession: (title) => this.options.runtime.newSession(scope, title),
+      resumeSession: async (id) => (await this.options.runtime.resumeSession(scope, id)) !== null,
+      listSessions: () => this.options.runtime.listSessions(),
+      sessionStats: () => session.stats(),
     })
     if (command.handled) {
-      await message.reply(command.reply ?? '')
+      // Discord renders Markdown natively, so the richer rendering goes as-is.
+      await message.reply(command.markdown ?? command.reply ?? '')
       return
     }
 

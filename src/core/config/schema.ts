@@ -53,11 +53,27 @@ export const SearchSchema = z.object({
 })
 export type SearchConfig = z.infer<typeof SearchSchema>
 
+export const SessionsSchema = z.object({
+  /** Compact the transcript once it grows past this many estimated tokens. */
+  maxInputTokens: z.number().int().positive().default(12000),
+  /** Turns kept verbatim when compacting; the older ones get summarized. */
+  keepTurns: z.number().int().positive().default(8),
+  compaction: z.boolean().default(true),
+})
+export type SessionsConfig = z.infer<typeof SessionsSchema>
+
+export const DEFAULT_SESSIONS: SessionsConfig = {
+  maxInputTokens: 12000,
+  keepTurns: 8,
+  compaction: true,
+}
+
 export const ConfigSchema = z.object({
   provider: z.string(),
   model: z.string(),
   providers: z.record(z.string(), ProviderEntrySchema),
   memory: MemorySchema.default({ backend: 'file' }),
+  sessions: SessionsSchema.default(DEFAULT_SESSIONS),
   gateways: z.record(z.string(), GatewaySchema).default({}),
   permissions: PermissionsSchema.default(DEFAULT_PERMISSIONS),
   search: SearchSchema.optional(),

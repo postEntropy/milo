@@ -29,6 +29,7 @@ interface RenderOptions {
   onModeChange?: (mode: PermissionMode) => void
   onOpenModel?: () => void
   onOpenSettings?: () => void
+  onSessionChange?: (id: string) => void
 }
 
 function Harness({ runtime, options }: { runtime: AgentRuntime; options: RenderOptions }) {
@@ -44,6 +45,7 @@ function Harness({ runtime, options }: { runtime: AgentRuntime; options: RenderO
       onOpenModel={options.onOpenModel ?? (() => {})}
       onOpenSettings={options.onOpenSettings ?? (() => {})}
       onExit={() => {}}
+      onSessionChange={options.onSessionChange}
     />
   )
 }
@@ -181,6 +183,64 @@ describe('ChatScreen', () => {
     await submit(stdin, '/mode auto')
 
     expect(modes).toEqual(['yolo', 'auto'])
+  })
+
+  it('starts, lists and switches sessions via the slash commands', async () => {
+    const changes: string[] = []
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const current = {
+      id: 'calm-otter-7',
+      messages: [],
+      send: () => stream(),
+      clear: async () => undefined,
+      stats: () => ({
+        id: 'calm-otter-7',
+        createdAt: 0,
+        updatedAt: 0,
+        messages: 2,
+        turns: 1,
+        tokens: 42,
+        compacted: false,
+      }),
+    }
+    const runtime = {
+      getSession: async () => current,
+      newSession: async (_scope: unknown, title?: string) => ({ id: 'brave-wolf-2', title }),
+      listSessions: async () => [
+        { id: 'calm-otter-7', createdAt: 0, updatedAt: 0, messageCount: 2, preview: 'hi' },
+      ],
+      resumeSession: async (_scope: unknown, id: string) =>
+        id === 'calm-otter-7' ? current : null,
+    } as unknown as AgentRuntime
+
+    const { lastFrame, stdin } = renderChat(runtime, {
+      onSessionChange: (id) => changes.push(id),
+    })
+
+    await submit(stdin, '/new my project')
+    await tick()
+    expect(lastFrame()).toContain('brave-wolf-2')
+
+    await submit(stdin, '/sessions')
+    await tick()
+    expect(lastFrame()).toContain('calm-otter-7')
+
+    await submit(stdin, '/stats')
+    await tick()
+    expect(lastFrame()).toContain('~42 tokens')
+
+    await submit(stdin, '/resume calm-otter-7')
+    await tick()
+    expect(lastFrame()).toContain('Switched to session calm-otter-7')
+
+    await submit(stdin, '/resume nope-nope-9')
+    await tick()
+    expect(lastFrame()).toContain('No session')
+
+    expect(changes).toEqual(['brave-wolf-2', 'calm-otter-7'])
   })
 })
 

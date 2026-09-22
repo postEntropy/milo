@@ -1,24 +1,40 @@
+import { formatSessionList, formatStats } from '../core/sessions/index.js'
+import type { SessionStats, SessionSummary } from '../core/sessions/index.js'
 import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.js'
 
 export interface CommandContext {
   policy?: PermissionPolicy
-  resetSession?: () => void
+  resetSession?: () => void | Promise<void>
   status?: string
   /** Writes the new mode to disk, so it survives a restart. */
   persistMode?: (mode: PermissionMode) => void
   /** Set when this surface is not allowed to change the mode; used as the reply. */
   modeLocked?: string
+  /** Starts a fresh session and binds it to this conversation. */
+  newSession?: (title?: string) => Promise<{ id: string }>
+  /** Binds this conversation to an existing session. */
+  resumeSession?: (id: string) => Promise<boolean>
+  listSessions?: () => Promise<SessionSummary[]>
+  sessionStats?: () => SessionStats | Promise<SessionStats>
+  /** Set when this surface may not create or switch sessions; used as the reply. */
+  sessionLocked?: string
 }
 
 export interface CommandResult {
   handled: boolean
   reply?: string
+  /** The same reply with Markdown, for surfaces that render it. */
+  markdown?: string
 }
 
 const HELP = [
   'Commands:',
   '/mode ask|auto|yolo — permission mode, saved for every surface',
   '/yolo — toggle yolo mode',
+  '/new [title] — start a new session',
+  '/sessions — list saved sessions',
+  '/resume <id> — switch to another session',
+  '/stats — numbers for the current session',
   '/clear — forget this conversation',
   '/status — current permission mode',
   '/help — this message',
@@ -38,17 +54,43 @@ export function modeLockMessage(allowlist: string[] | undefined): string | undef
     : `🔒 /mode is locked while this bot answers ${count} ids. Set the mode in \`milo setup\` on the terminal.`
 }
 
+/**
+ * Sessions are per-person: on a bot that answers several people (or anyone),
+ * letting one of them list or switch sessions would expose the others'.
+ */
+export function sessionLockMessage(allowlist: string[] | undefined): string | undefined {
+  const count = allowlist?.length ?? 0
+  if (count === 1) return undefined
+  return count === 0
+    ? '🔒 /new, /sessions and /resume are locked while this bot answers anyone. Add your id in `milo setup` → Gateways.'
+    : `🔒 /new, /sessions and /resume are locked while this bot answers ${count} ids. Manage sessions from the CLI.`
+}
+
 /** Applies a mode change to the running policy and to disk. */
 function applyMode(context: CommandContext, mode: PermissionMode): void {
   context.policy?.setMode(mode)
   context.persistMode?.(mode)
 }
 
-/** Handles the non-interactive slash commands shared by the bot gateways. */
-export function handleCommand(raw: string, context: CommandContext): CommandResult {
+/** Splits `/command the rest` into the command and everything after it. */
+function parse(raw: string): { command: string; argument: string } {
+  const trimmed = raw.slice(1).trim()
+  const spaceIndex = trimmed.search(/\s/)
+  if (spaceIndex === -1) return { command: trimmed, argument: '' }
+  return {
+    command: trimmed.slice(0, spaceIndex),
+    argument: trimmed.slice(spaceIndex + 1).trim(),
+  }
+}
+
+/** Handles the non-interactive slash commands shared by the gateways. */
+export async function handleCommand(
+  raw: string,
+  context: CommandContext,
+): Promise<CommandResult> {
   if (!raw.startsWith('/')) return { handled: false }
 
-  const [command, argument] = raw.slice(1).split(/\s+/)
+  const { command, argument } = parse(raw)
 
   switch (command) {
     case 'start':
@@ -79,12 +121,62 @@ export function handleCommand(raw: string, context: CommandContext): CommandResu
       }
     }
 
+    case 'new': {
+      if (context.sessionLocked) return { handled: true, reply: context.sessionLocked }
+      if (!context.newSession) {
+        return { handled: true, reply: 'Session switching is not available on this surface.' }
+      }
+      const { id } = await context.newSession(argument || undefined)
+      return {
+        handled: true,
+        reply: `Started a new session: ${id}. /sessions to list, /resume ${id} to come back.`,
+      }
+    }
+
+    case 'sessions': {
+      if (context.sessionLocked) return { handled: true, reply: context.sessionLocked }
+      if (!context.listSessions) {
+        return { handled: true, reply: 'Session switching is not available on this surface.' }
+      }
+      const sessions = await context.listSessions()
+      return {
+        handled: true,
+        reply: formatSessionList(sessions),
+        markdown: formatSessionList(sessions, { markdown: true }),
+      }
+    }
+
+    case 'resume': {
+      if (context.sessionLocked) return { handled: true, reply: context.sessionLocked }
+      if (!context.resumeSession) {
+        return { handled: true, reply: 'Session switching is not available on this surface.' }
+      }
+      if (!argument) return { handled: true, reply: 'Usage: /resume <id>. See /sessions for the ids.' }
+      const switched = await context.resumeSession(argument)
+      return {
+        handled: true,
+        reply: switched
+          ? `Switched to session ${argument}.`
+          : `No session "${argument}". See /sessions for the ids.`,
+      }
+    }
+
+    case 'stats': {
+      if (!context.sessionStats) {
+        return { handled: true, reply: 'Session stats are not available on this surface.' }
+      }
+      return { handled: true, reply: formatStats(await context.sessionStats()) }
+    }
+
     case 'clear':
-      context.resetSession?.()
+      await context.resetSession?.()
       return { handled: true, reply: 'Conversation cleared.' }
 
     case 'status':
-      return { handled: true, reply: context.status ?? `Permission mode: ${context.policy?.mode ?? 'ask'}` }
+      return {
+        handled: true,
+        reply: context.status ?? `Permission mode: ${context.policy?.mode ?? 'ask'}`,
+      }
 
     case 'model':
     case 'setup':

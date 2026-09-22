@@ -23,6 +23,8 @@ export interface ShellProps {
   startScreen?: 'chat' | 'model' | 'settings'
   standalone?: boolean
   initialMode?: PermissionMode
+  /** `milo --resume <id>`: open this session instead of the last one bound here. */
+  resumeId?: string
 }
 
 export function Shell({
@@ -31,6 +33,7 @@ export function Shell({
   startScreen = 'chat',
   standalone = false,
   initialMode,
+  resumeId,
 }: ShellProps) {
   const { exit } = useApp()
   const { rows, columns } = useTerminalSize()
@@ -52,6 +55,38 @@ export function Shell({
   const [mode, setMode] = useState<PermissionMode>(
     () => initialMode ?? runtime?.permissions?.mode ?? 'ask',
   )
+
+  // The session bound to this terminal, resolved once the runtime exists.
+  const [sessionId, setSessionId] = useState<string | null>(null)
+  // `--resume` applies once: rebuilding the runtime (a model change) must not
+  // yank the user back to the session they asked for at startup.
+  const resumed = useRef(false)
+  useEffect(() => {
+    if (!runtime) return
+    let cancelled = false
+    const resolve = async () => {
+      if (resumeId && !resumed.current) {
+        resumed.current = true
+        const target = await runtime.resumeSession(CLI_SCOPE, resumeId)
+        if (target) {
+          if (!cancelled) setSessionId(target.id)
+          return
+        }
+        if (!cancelled) {
+          setItems((previous) => [
+            ...previous,
+            { kind: 'info', text: `No session "${resumeId}" — continuing the last one.` },
+          ])
+        }
+      }
+      const session = await runtime.getSession(CLI_SCOPE)
+      if (!cancelled) setSessionId(session.id)
+    }
+    void resolve()
+    return () => {
+      cancelled = true
+    }
+  }, [runtime, resumeId])
 
   // Push live settings edits into the existing policy.
   useEffect(() => {
@@ -128,7 +163,9 @@ export function Shell({
     setScreen('model')
   }
 
-  const headerRight = loaded ? `${loaded.provider.id} · ${loaded.model}` : 'setup'
+  const headerRight = loaded
+    ? `${sessionId ? `${sessionId} · ` : ''}${loaded.provider.id} · ${loaded.model}`
+    : 'setup'
   const accent = busy ? theme.warning : theme.accent
 
   return (
@@ -165,6 +202,7 @@ export function Shell({
           onOpenSettings={() => setScreen('settings')}
           onExit={exit}
           onBusyChange={setBusy}
+          onSessionChange={setSessionId}
         />
       ) : screen === 'settings' && loaded ? (
         <SettingsScreen

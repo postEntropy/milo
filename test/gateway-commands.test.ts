@@ -1,27 +1,34 @@
 import { describe, expect, it } from 'vitest'
 import { DefaultPermissionPolicy } from '../src/core/tools/permission'
-import { decodePermission, encodePermission, handleCommand, modeLockMessage } from '../src/gateways/commands'
+import {
+  decodePermission,
+  encodePermission,
+  handleCommand,
+  modeLockMessage,
+  sessionLockMessage,
+} from '../src/gateways/commands'
 import { PendingDecisions } from '../src/gateways/pending'
 
 describe('handleCommand', () => {
-  it('ignores normal messages', () => {
-    expect(handleCommand('hello there', {}).handled).toBe(false)
+  it('ignores normal messages', async () => {
+    expect((await handleCommand('hello there', {})).handled).toBe(false)
   })
 
-  it('lists the commands', () => {
-    const result = handleCommand('/help', {})
+  it('lists the commands', async () => {
+    const result = await handleCommand('/help', {})
     expect(result.handled).toBe(true)
     expect(result.reply).toContain('/mode')
+    expect(result.reply).toContain('/sessions')
   })
 
-  it('treats /start as help (Telegram suggests it)', () => {
-    expect(handleCommand('/start', {}).reply).toContain('/mode')
+  it('treats /start as help (Telegram suggests it)', async () => {
+    expect((await handleCommand('/start', {})).reply).toContain('/mode')
   })
 
-  it('sets the permission mode and writes it down', () => {
+  it('sets the permission mode and writes it down', async () => {
     const policy = new DefaultPermissionPolicy()
     const saved: string[] = []
-    const result = handleCommand('/mode auto', {
+    const result = await handleCommand('/mode auto', {
       policy,
       persistMode: (mode) => saved.push(mode),
     })
@@ -31,50 +38,143 @@ describe('handleCommand', () => {
     expect(saved).toEqual(['auto'])
   })
 
-  it('reports the current mode for a bad argument', () => {
+  it('reports the current mode for a bad argument', async () => {
     const policy = new DefaultPermissionPolicy({ mode: 'yolo' })
-    const result = handleCommand('/mode nonsense', { policy })
+    const result = await handleCommand('/mode nonsense', { policy })
     expect(result.reply).toContain('yolo')
     expect(policy.mode).toBe('yolo')
   })
 
-  it('toggles yolo and writes it down', () => {
+  it('toggles yolo and writes it down', async () => {
     const policy = new DefaultPermissionPolicy()
     const saved: string[] = []
 
-    handleCommand('/yolo', { policy, persistMode: (mode) => saved.push(mode) })
+    await handleCommand('/yolo', { policy, persistMode: (mode) => saved.push(mode) })
     expect(policy.mode).toBe('yolo')
 
-    handleCommand('/yolo', { policy, persistMode: (mode) => saved.push(mode) })
+    await handleCommand('/yolo', { policy, persistMode: (mode) => saved.push(mode) })
     expect(policy.mode).toBe('ask')
     expect(saved).toEqual(['yolo', 'ask'])
   })
 
-  it('refuses to change the mode when the surface is locked', () => {
+  it('refuses to change the mode when the surface is locked', async () => {
     const policy = new DefaultPermissionPolicy()
     const saved: string[] = []
     const context = { policy, persistMode: (mode: string) => saved.push(mode), modeLocked: '🔒 locked' }
 
-    expect(handleCommand('/mode yolo', context).reply).toBe('🔒 locked')
-    expect(handleCommand('/yolo', context).reply).toBe('🔒 locked')
+    expect((await handleCommand('/mode yolo', context)).reply).toBe('🔒 locked')
+    expect((await handleCommand('/yolo', context)).reply).toBe('🔒 locked')
     expect(policy.mode).toBe('ask')
     expect(saved).toEqual([])
   })
 
-  it('clears the session', () => {
+  it('clears the session', async () => {
     let cleared = false
-    const result = handleCommand('/clear', { resetSession: () => { cleared = true } })
+    const result = await handleCommand('/clear', {
+      resetSession: () => {
+        cleared = true
+      },
+    })
     expect(cleared).toBe(true)
     expect(result.reply).toContain('cleared')
   })
 
-  it('points /setup and /model at the terminal', () => {
-    expect(handleCommand('/setup', {}).reply).toContain('milo setup')
-    expect(handleCommand('/model', {}).reply).toContain('milo setup')
+  it('starts a new session with an optional title', async () => {
+    const titles: (string | undefined)[] = []
+    const result = await handleCommand('/new my project', {
+      newSession: async (title) => {
+        titles.push(title)
+        return { id: 'calm-otter-7' }
+      },
+    })
+
+    expect(titles).toEqual(['my project'])
+    expect(result.reply).toContain('calm-otter-7')
   })
 
-  it('rejects unknown commands', () => {
-    expect(handleCommand('/nope', {}).reply).toContain('Unknown command')
+  it('lists saved sessions', async () => {
+    const session = {
+      id: 'calm-otter-7',
+      createdAt: 0,
+      updatedAt: 0,
+      messageCount: 2,
+      preview: 'hi',
+    }
+    const result = await handleCommand('/sessions', { listSessions: async () => [session] })
+    expect(result.reply).toContain('calm-otter-7')
+  })
+
+  it('offers a Markdown rendering of the session list', async () => {
+    const result = await handleCommand('/sessions', {
+      listSessions: async () => [
+        {
+          id: 'calm-otter-7',
+          title: 'my project',
+          createdAt: 0,
+          updatedAt: 0,
+          messageCount: 2,
+          preview: 'hi',
+        },
+      ],
+    })
+
+    expect(result.markdown).toContain('**calm-otter-7 — my project**')
+    // The plain rendering stays free of Markdown for the CLI.
+    expect(result.reply).not.toContain('**')
+  })
+
+  it('resumes a session and reports unknown ids', async () => {
+    let used = ''
+    const ok = await handleCommand('/resume calm-otter-7', {
+      resumeSession: async (id) => {
+        used = id
+        return true
+      },
+    })
+    expect(used).toBe('calm-otter-7')
+    expect(ok.reply).toContain('Switched to session calm-otter-7')
+
+    const missing = await handleCommand('/resume nope-nope-1', {
+      resumeSession: async () => false,
+    })
+    expect(missing.reply).toContain('No session')
+
+    const noArg = await handleCommand('/resume', { resumeSession: async () => true })
+    expect(noArg.reply).toContain('Usage: /resume')
+  })
+
+  it('shows the current session stats', async () => {
+    const result = await handleCommand('/stats', {
+      sessionStats: () => ({
+        id: 'calm-otter-7',
+        createdAt: 0,
+        updatedAt: 0,
+        messages: 4,
+        turns: 2,
+        tokens: 100,
+        compacted: false,
+      }),
+    })
+    expect(result.reply).toContain('calm-otter-7')
+    expect(result.reply).toContain('2 turns')
+    expect(result.reply).toContain('~100 tokens')
+    expect(result.reply).not.toContain('compacted')
+  })
+
+  it('locks session commands on a shared or open bot', async () => {
+    const context = { sessionLocked: '🔒 locked' }
+    expect((await handleCommand('/new', context)).reply).toBe('🔒 locked')
+    expect((await handleCommand('/sessions', context)).reply).toBe('🔒 locked')
+    expect((await handleCommand('/resume x-y-1', context)).reply).toBe('🔒 locked')
+  })
+
+  it('points /setup and /model at the terminal', async () => {
+    expect((await handleCommand('/setup', {})).reply).toContain('milo setup')
+    expect((await handleCommand('/model', {})).reply).toContain('milo setup')
+  })
+
+  it('rejects unknown commands', async () => {
+    expect((await handleCommand('/nope', {})).reply).toContain('Unknown command')
   })
 })
 
@@ -90,6 +190,21 @@ describe('modeLockMessage', () => {
 
   it('locks a shared bot and says how many', () => {
     expect(modeLockMessage(['42', '43'])).toContain('2 ids')
+  })
+})
+
+describe('sessionLockMessage', () => {
+  it('leaves a single-person bot alone', () => {
+    expect(sessionLockMessage(['42'])).toBeUndefined()
+  })
+
+  it('locks a bot that answers anyone', () => {
+    expect(sessionLockMessage([])).toContain('anyone')
+    expect(sessionLockMessage(undefined)).toContain('anyone')
+  })
+
+  it('locks a shared bot and says how many', () => {
+    expect(sessionLockMessage(['42', '43'])).toContain('2 ids')
   })
 })
 

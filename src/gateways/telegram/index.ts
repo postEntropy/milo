@@ -11,6 +11,8 @@ import {
   encodePermission,
   handleCommand,
   modeLockMessage,
+  sessionLockMessage,
+  type CommandResult,
 } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
 import { runTurn } from '../runner.js'
@@ -45,6 +47,10 @@ export class TelegramGateway implements Gateway {
     await bot.api
       .setMyCommands([
         { command: 'help', description: 'Show the available commands' },
+        { command: 'new', description: 'Start a new session' },
+        { command: 'sessions', description: 'List saved sessions' },
+        { command: 'resume', description: 'Switch to another session: /resume <id>' },
+        { command: 'stats', description: 'Numbers for the current session' },
         { command: 'mode', description: 'Permission mode: ask, auto or yolo' },
         { command: 'yolo', description: 'Toggle yolo mode' },
         { command: 'clear', description: 'Forget this conversation' },
@@ -93,21 +99,22 @@ export class TelegramGateway implements Gateway {
   }
 
   private async handleTurn(bot: Bot, ctx: Context, chatId: string, text: string): Promise<void> {
-    const session = this.options.runtime.getSession({
-      gateway: 'telegram',
-      conversationId: chatId,
-    })
+    const scope: MemoryScope = { gateway: 'telegram', conversationId: chatId }
+    const session = await this.options.runtime.getSession(scope)
 
-    const command = handleCommand(text, {
+    const command = await handleCommand(text, {
       policy: this.options.runtime.permissions,
-      resetSession: () => {
-        session.messages.length = 0
-      },
+      resetSession: () => session.clear(),
       persistMode: setPermissionMode,
       modeLocked: modeLockMessage(this.options.allowlist),
+      sessionLocked: sessionLockMessage(this.options.allowlist),
+      newSession: (title) => this.options.runtime.newSession(scope, title),
+      resumeSession: async (id) => (await this.options.runtime.resumeSession(scope, id)) !== null,
+      listSessions: () => this.options.runtime.listSessions(),
+      sessionStats: () => session.stats(),
     })
     if (command.handled) {
-      await ctx.reply(command.reply ?? '')
+      await this.reply(bot, ctx, chatId, command)
       return
     }
 
@@ -147,6 +154,28 @@ export class TelegramGateway implements Gateway {
     } catch (error) {
       await ctx.reply(`[error] ${errorMessage(error)}`).catch(() => undefined)
     }
+  }
+
+  /**
+   * Most command replies are plain text. A few — `/sessions` — also come with a
+   * Markdown rendering, which goes out as a rich message and falls back to the
+   * plain text when the API refuses it.
+   */
+  private async reply(
+    bot: Bot,
+    ctx: Context,
+    chatId: string,
+    command: CommandResult,
+  ): Promise<void> {
+    if (command.markdown) {
+      try {
+        await bot.api.sendRichMessage(chatId, { markdown: command.markdown })
+        return
+      } catch {
+        // Fall through to the plain text, which never trips on Markdown syntax.
+      }
+    }
+    await ctx.reply(command.reply ?? '')
   }
 
   private async ask(bot: Bot, chatId: string, request: PermissionRequest): Promise<boolean> {

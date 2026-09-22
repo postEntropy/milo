@@ -51,6 +51,8 @@ export interface SystemPromptInput {
   model: string
   tools: ToolSpec[]
   memories: MemoryItem[]
+  /** Compaction summary of the turns already dropped from the transcript. */
+  summary?: string
   now?: Date
 }
 
@@ -79,6 +81,10 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   if (input.memories.length > 0) {
     const list = input.memories.map((item) => `- ${item.text}`)
     sections.push(`## What you remember\n${list.join('\n')}`)
+  }
+
+  if (input.summary?.trim()) {
+    sections.push(`## Earlier in this conversation\n${input.summary.trim()}`)
   }
 
   return sections.filter(Boolean).join('\n\n')

@@ -10,6 +10,7 @@ import {
   type LoadedConfig,
 } from '../core/config/load.js'
 import { errorMessage } from '../util/errors.js'
+import { isValidSessionId } from '../core/sessions/index.js'
 import { enterAltScreen, exitAltScreen } from '../gateways/cli/ansi.js'
 import { Shell } from '../gateways/cli/index.js'
 import type { PermissionMode } from '../core/tools/permission.js'
@@ -24,10 +25,18 @@ interface Args {
   yolo: boolean
   version: boolean
   help: boolean
+  resume?: string
+  continueSession: boolean
 }
 
 function parseArgs(argv: string[]): Args {
-  const args: Args = { command: 'chat', version: false, help: false, yolo: false }
+  const args: Args = {
+    command: 'chat',
+    version: false,
+    help: false,
+    yolo: false,
+    continueSession: false,
+  }
   if (argv[0] && !argv[0].startsWith('-')) args.command = argv[0]
 
   for (let i = 0; i < argv.length; i += 1) {
@@ -38,6 +47,8 @@ function parseArgs(argv: string[]): Args {
     else if (flag === '--mode') args.mode = argv[++i]
     else if (flag === '--provider') args.provider = argv[++i]
     else if (flag === '--model' || flag === '-m') args.model = argv[++i]
+    else if (flag === '--resume') args.resume = argv[++i]
+    else if (flag === '--continue' || flag === '-c') args.continueSession = true
   }
   return args
 }
@@ -50,14 +61,17 @@ Usage:
   milo setup                 Configure providers, keys, tools, gateways, memory
   milo model                 Choose the provider/model (setup wizard)
   milo serve                 Run the enabled bot gateways (Telegram, Discord)
+  milo --continue            Continue the last session in this terminal
+  milo --resume <id>         Open a specific session (see /sessions)
   milo --model <id>          Override the model for this session
   milo --provider <id>       Use another configured provider
   milo --mode <mode>         Permission mode: ask | auto | yolo
   milo --yolo                Shorthand for --mode yolo
 
-In the chat: /model · /setup · /mode ask|auto|yolo · /yolo · /clear · /help · /exit
+In the chat: /model · /setup · /mode ask|auto|yolo · /yolo · /new · /sessions · /resume · /stats · /clear · /help · /exit
 
 Config:  ~/.milo/config.json
+Sessions: ~/.milo/sessions/
 Keys:    ~/.milo/auth.json (or env: COMMANDCODE_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY, …)`)
 }
 
@@ -101,6 +115,7 @@ async function runTui(
         startScreen: screen,
         standalone,
         initialMode,
+        resumeId: args.resume,
       }),
       { exitOnCtrlC: false },
     )
@@ -124,6 +139,11 @@ async function main(): Promise<void> {
 
   if (args.mode && !['ask', 'auto', 'yolo'].includes(args.mode)) {
     console.error(`Invalid --mode "${args.mode}". Use ask, auto or yolo.`)
+    process.exitCode = 1
+    return
+  }
+  if (args.resume && !isValidSessionId(args.resume)) {
+    console.error(`Invalid session id "${args.resume}". Expected something like calm-otter-7.`)
     process.exitCode = 1
     return
   }

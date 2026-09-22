@@ -77,7 +77,7 @@ describe('end-to-end turn', () => {
     })
 
     const scope = { gateway: 'cli', conversationId: 'it' }
-    const session = runtime.getSession(scope)
+    const session = await runtime.getSession(scope)
 
     const events: AgentEvent[] = []
     for await (const event of session.send('what is the package called?')) events.push(event)

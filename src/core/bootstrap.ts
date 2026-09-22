@@ -1,9 +1,10 @@
 import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
-import { memoryDir } from './config/paths.js'
+import { memoryDir, sessionsDir } from './config/paths.js'
 import { readAuth, resolveSearchKey, type LoadedConfig } from './config/load.js'
 import { createMemory } from './memory/index.js'
 import { createProvider } from './providers/create.js'
 import { AgentRuntime } from './runtime.js'
+import { FileSessionStore } from './sessions/index.js'
 import { createSearchProvider } from './search/index.js'
 import { createJevReviewer } from './tools/jev.js'
 import {
@@ -25,6 +26,8 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     system: loaded.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     registry: createToolRegistry({ search }),
     memory: createMemory(loaded.config.memory, memoryDir()),
+    store: new FileSessionStore({ dir: sessionsDir() }),
+    sessions: loaded.config.sessions,
     cwd,
     maxSteps: loaded.config.maxSteps,
     permissionPolicy: new DefaultPermissionPolicy({

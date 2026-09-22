@@ -6,7 +6,7 @@ import { errorMessage } from '../../../util/errors.js'
 import { readAuth, readConfig, resolveApiKey, saveAuth, saveConfig } from '../../../core/config/load.js'
 import { PRESETS, type Preset } from '../../../core/config/presets.js'
 import type { Config, ProviderEntry } from '../../../core/config/schema.js'
-import { DEFAULT_PERMISSIONS } from '../../../core/config/schema.js'
+import { DEFAULT_PERMISSIONS, DEFAULT_SESSIONS } from '../../../core/config/schema.js'
 import { listModels, type ModelInfo } from '../../../core/providers/models.js'
 import { isCtrlC } from '../keys.js'
 import { theme } from '../theme.js'
@@ -129,6 +129,7 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
       model,
       providers: { ...(existing?.providers ?? {}), [preset.id]: presetEntry() },
       memory: existing?.memory ?? { backend: 'file' },
+      sessions: existing?.sessions ?? DEFAULT_SESSIONS,
       gateways: existing?.gateways ?? {},
       permissions: existing?.permissions ?? DEFAULT_PERMISSIONS,
       ...(existing?.search ? { search: existing.search } : {}),

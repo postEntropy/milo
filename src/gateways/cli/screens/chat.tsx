@@ -5,6 +5,7 @@ import Spinner from 'ink-spinner'
 import type { AgentEvent } from '../../../core/agent/events.js'
 import type { MemoryScope } from '../../../core/memory/index.js'
 import type { AgentRuntime } from '../../../core/runtime.js'
+import { formatSessionList, formatStats } from '../../../core/sessions/index.js'
 import type {
   PermissionAsker,
   PermissionMode,
@@ -37,7 +38,13 @@ export interface ChatScreenProps {
   onOpenSettings: () => void
   onExit: () => void
   onBusyChange?: (busy: boolean) => void
+  /** Fired when /new or /resume rebinds this conversation to another session. */
+  onSessionChange?: (id: string) => void
 }
+
+const HELP_TEXT =
+  'Commands: /model · /setup · /mode ask|auto|yolo · /yolo · /new [title] · /sessions · ' +
+  '/resume <id> · /stats · /clear · /help · /exit'
 
 export function ChatScreen({
   runtime,
@@ -50,6 +57,7 @@ export function ChatScreen({
   onOpenSettings,
   onExit,
   onBusyChange,
+  onSessionChange,
 }: ChatScreenProps) {
   const { exit } = useApp()
   const { rows, columns } = useTerminalSize()
@@ -140,8 +148,9 @@ export function ChatScreen({
     }
   })
 
-  const runCommand = (raw: string) => {
-    const [command, argument] = raw.slice(1).split(/\s+/)
+  const runCommand = async (raw: string) => {
+    const [command, ...rest] = raw.slice(1).trim().split(/\s+/)
+    const argument = rest.join(' ')
     switch (command) {
       case 'model':
         onOpenModel()
@@ -169,15 +178,43 @@ export function ChatScreen({
           push({ kind: 'info', text: `Permission mode: ${mode}. Use /mode ask|auto|yolo` })
         }
         break
-      case 'clear':
-        setItems([])
-        push({ kind: 'info', text: 'Screen cleared. The conversation history is still in context.' })
+      case 'new': {
+        const session = await runtime.newSession(scope, argument || undefined)
+        onSessionChange?.(session.id)
+        push({ kind: 'info', text: `New session: ${session.id}` })
         break
+      }
+      case 'sessions':
+        push({ kind: 'info', text: formatSessionList(await runtime.listSessions()) })
+        break
+      case 'resume': {
+        if (!argument) {
+          push({ kind: 'info', text: 'Usage: /resume <id>. See /sessions for the ids.' })
+          break
+        }
+        const session = await runtime.resumeSession(scope, argument)
+        if (!session) {
+          push({ kind: 'info', text: `No session "${argument}". See /sessions for the ids.` })
+          break
+        }
+        onSessionChange?.(session.id)
+        push({ kind: 'info', text: `Switched to session ${session.id}.` })
+        break
+      }
+      case 'stats': {
+        const session = await runtime.getSession(scope)
+        push({ kind: 'info', text: formatStats(session.stats()) })
+        break
+      }
+      case 'clear': {
+        const session = await runtime.getSession(scope)
+        await session.clear()
+        setItems([])
+        push({ kind: 'info', text: `Session ${session.id} cleared.` })
+        break
+      }
       case 'help':
-        push({
-          kind: 'info',
-          text: 'Commands: /model · /setup · /mode ask|auto|yolo · /yolo · /clear · /help · /exit',
-        })
+        push({ kind: 'info', text: HELP_TEXT })
         break
       case 'exit':
       case 'quit':
@@ -199,7 +236,7 @@ export function ChatScreen({
 
     const controller = new AbortController()
     abortRef.current = controller
-    const session = runtime.getSession(scope)
+    const session = await runtime.getSession(scope)
     const startedAtMs = Date.now()
 
     let assistant = ''
@@ -244,7 +281,7 @@ export function ChatScreen({
     const text = raw.trim()
     if (!text || busy) return
     setInput('')
-    if (text.startsWith('/')) runCommand(text)
+    if (text.startsWith('/')) void runCommand(text)
     else void send(text)
   }
 
@@ -307,7 +344,7 @@ export function ChatScreen({
         ) : (
           <Text dimColor>
             {window.offset > 0 ? `▲ scrolled (${window.offset}) · ` : ''}
-            PgUp/PgDn scroll · Enter send · /model · Ctrl+C quit
+            PgUp/PgDn scroll · Enter send · /new · /sessions · /help · Ctrl+C quit
           </Text>
         )}
         <Text dimColor>
