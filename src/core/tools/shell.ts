@@ -14,6 +14,8 @@ export type ShellArgs = z.infer<typeof schema>
 const DEFAULT_TIMEOUT = 30_000
 const MAX_TIMEOUT = 120_000
 const MAX_OUTPUT = 20_000
+/** How much of a truncated output survives from the front. */
+const HEAD_SHARE = 0.6
 const MAX_BUFFER = 10 * 1024 * 1024
 
 export const shellTool: Tool<ShellArgs> = {
@@ -51,6 +53,16 @@ export const shellTool: Tool<ShellArgs> = {
   },
 }
 
+/**
+ * Long output is cut in the middle rather than at the end: the head carries the
+ * command's own chatter and the tail carries the error (stderr is appended
+ * last), and a failed command whose message was trimmed away is worse than one
+ * with no output at all.
+ */
 function truncate(text: string): string {
-  return text.length > MAX_OUTPUT ? `${text.slice(0, MAX_OUTPUT)}\n… (truncated)` : text
+  if (text.length <= MAX_OUTPUT) return text
+  const head = text.slice(0, MAX_OUTPUT * HEAD_SHARE)
+  const tail = text.slice(-(MAX_OUTPUT - head.length))
+  const omitted = text.length - head.length - tail.length
+  return `${head}\n… ${omitted} character(s) omitted …\n${tail}`
 }

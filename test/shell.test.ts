@@ -24,4 +24,20 @@ describe('shell_command', () => {
   it('is not read-only (needs confirmation)', () => {
     expect(shellTool.readOnly).toBe(false)
   })
+
+  it('keeps the end of a long output, where the error is', async () => {
+    // stdout is long enough to be truncated, and the failure lands in stderr.
+    const command = `printf 'x%.0s' $(seq 1 30000); echo 'THE-ERROR' >&2; exit 1`
+    const result = await shellTool.execute({ command }, ctx)
+
+    expect(result.content).toContain('exit 1')
+    expect(result.content).toContain('character(s) omitted')
+    expect(result.content).toContain('THE-ERROR')
+    expect(result.content.length).toBeLessThan(21_000)
+  })
+
+  it('leaves a short output untouched', async () => {
+    const result = await shellTool.execute({ command: `echo short` }, ctx)
+    expect(result.content).not.toContain('omitted')
+  })
 })
