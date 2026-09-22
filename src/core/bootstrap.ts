@@ -36,6 +36,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
       deny: permissions.deny,
       threshold: permissions.jevThreshold,
       reviewer: createReviewer(loaded),
+      cwd,
     }),
   })
 }

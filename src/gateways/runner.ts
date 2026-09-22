@@ -97,7 +97,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
           break
         }
         case 'tool-end':
-          if (event.isError) await appendLine(`✗ ${event.name} failed`, toolStyle(event.name))
+          if (event.isError) await appendLine(`❌ ${event.name} failed`, toolStyle(event.name))
           break
         case 'error':
           await appendLine(`[error] ${event.message}`)

@@ -17,14 +17,15 @@ const DEFAULT_TIMEOUT = 1500
 const DEFAULT_CACHE_SIZE = 200
 
 const INSTRUCTIONS =
-  'Is running this shell command destructive or dangerous — able to cause irreversible ' +
-  'damage to the system, data, or the repository?'
+  'Is this action destructive or dangerous — able to cause irreversible damage to the system, ' +
+  'data, or the repository?'
 
 /**
- * Reviews a command with Command Code's decision model (`typesafe/jev`), which
- * answers typed questions with probabilities instead of text. Returns the
- * probability that the command is dangerous (0..1). Throws on any failure —
- * including a timeout — so the caller fails closed.
+ * Reviews a proposed action — a shell command, or a file write — with Command
+ * Code's decision model (`typesafe/jev`), which answers typed questions with
+ * probabilities instead of text. Returns the probability that the action is
+ * dangerous (0..1). Throws on any failure — including a timeout — so the caller
+ * fails closed.
  *
  * Latency notes: identical states are served from an in-memory LRU (so a
  * repeated command costs nothing), and the request is aborted after `timeoutMs`

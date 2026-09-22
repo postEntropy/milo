@@ -116,7 +116,13 @@ export class Session {
         tools,
         registry,
         messages: this.messages,
-        context: { cwd, signal: signal ?? new AbortController().signal },
+        context: {
+          cwd,
+          signal: signal ?? new AbortController().signal,
+          // Read through `this.scope` at call time: a gateway can rebind the
+          // session to another conversation while it is running.
+          remember: (items) => memory.remember(this.scope, items),
+        },
         maxSteps,
         temperature,
         signal,

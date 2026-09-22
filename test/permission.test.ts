@@ -123,6 +123,105 @@ describe('DefaultPermissionPolicy — auto mode', () => {
   })
 })
 
+describe('DefaultPermissionPolicy — auto mode and file writes', () => {
+  const cwd = '/home/dev/project'
+
+  const fileWriteTool: Tool<{ path: string; content: string }> = {
+    name: 'write_file',
+    description: '',
+    schema: z.object({ path: z.string(), content: z.string() }),
+    readOnly: false,
+    async execute() {
+      return { content: '' }
+    },
+  }
+
+  const fileEditTool: Tool<{ path: string; old_string: string; new_string: string }> = {
+    name: 'edit_file',
+    description: '',
+    schema: z.object({ path: z.string(), old_string: z.string(), new_string: z.string() }),
+    readOnly: false,
+    async execute() {
+      return { content: '' }
+    },
+  }
+
+  it('denies a write into a system path, including through traversal', async () => {
+    const policy = new DefaultPermissionPolicy({
+      mode: 'auto',
+      cwd,
+      reviewer: reviewerReturning(0),
+    })
+
+    expect(await policy.decide(fileWriteTool, { path: '/etc/hosts', content: 'x' })).toBe('deny')
+    expect(
+      await policy.decide(fileWriteTool, { path: '../../../etc/passwd', content: 'x' }),
+    ).toBe('deny')
+  })
+
+  it('denies a write into a credential store', async () => {
+    const policy = new DefaultPermissionPolicy({
+      mode: 'auto',
+      cwd,
+      reviewer: reviewerReturning(0),
+    })
+
+    expect(
+      await policy.decide(fileWriteTool, { path: '~/.ssh/authorized_keys', content: 'ssh-ed25519 …' }),
+    ).toBe('deny')
+  })
+
+  it('sends an ordinary write to the reviewer instead of always asking', async () => {
+    const policy = new DefaultPermissionPolicy({
+      mode: 'auto',
+      cwd,
+      reviewer: reviewerReturning(0.1),
+    })
+
+    expect(await policy.decide(fileWriteTool, { path: 'src/a.ts', content: 'x' })).toBe('allow')
+  })
+
+  it('still asks above the threshold', async () => {
+    const policy = new DefaultPermissionPolicy({
+      mode: 'auto',
+      cwd,
+      reviewer: reviewerReturning(0.9),
+    })
+
+    expect(await policy.decide(fileWriteTool, { path: 'src/a.ts', content: 'x' })).toBe('ask')
+  })
+
+  it('gives the reviewer the target and both sides of an edit', async () => {
+    const states: string[] = []
+    const policy = new DefaultPermissionPolicy({
+      mode: 'auto',
+      cwd,
+      reviewer: {
+        review: async (state) => {
+          states.push(state)
+          return 0
+        },
+      },
+    })
+
+    await policy.decide(fileEditTool, {
+      path: 'src/auth.ts',
+      old_string: 'return allow',
+      new_string: 'return allowAll',
+    })
+
+    expect(states[0]).toContain('src/auth.ts')
+    expect(states[0]).toContain('return allow')
+    expect(states[0]).toContain('return allowAll')
+  })
+
+  it('leaves the rules out of ask mode: a system write is a prompt, not a refusal', async () => {
+    const policy = new DefaultPermissionPolicy({ mode: 'ask', cwd, reviewer: reviewerReturning(0) })
+
+    expect(await policy.decide(fileWriteTool, { path: '/etc/hosts', content: 'x' })).toBe('ask')
+  })
+})
+
 describe('summarizeToolCall', () => {
   it('prefers command, then query, then path', () => {
     expect(summarizeToolCall('shell_command', { command: 'ls -la' })).toBe('ls -la')

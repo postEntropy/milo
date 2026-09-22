@@ -56,7 +56,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('> ▸ read_file\n\ndone')
+    expect(harness.edits.at(-1)).toBe('> 📄 read_file\n\ndone')
   })
 
   it('keeps consecutive tool calls inside one quote block', async () => {
@@ -73,7 +73,7 @@ describe('runTurn', () => {
     await harness.run()
     // Only the first line carries `>`: repeating it inside the block makes
     // Telegram render the marker as literal text.
-    expect(harness.edits.at(-1)).toBe('> ▸ read_file\n🌐 web_search\n\nanswer')
+    expect(harness.edits.at(-1)).toBe('> 📄 read_file\n🌐 web_search\n\nanswer')
   })
 
   it('opens a new block for tools after the prose', async () => {
@@ -89,7 +89,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('> ▸ read_file\n\nachei\n\n```\n▸ shell_command\n```\n\npronto')
+    expect(harness.edits.at(-1)).toBe('> 📄 read_file\n\nachei\n\n```\n⚡ shell_command\n```\n\npronto')
   })
 
   it('shows a shell command as a code block with the command itself', async () => {
@@ -102,7 +102,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('```\n▸ shell_command echo hi\n```\n\npronto')
+    expect(harness.edits.at(-1)).toBe('```\n⚡ shell_command echo hi\n```\n\npronto')
   })
 
   it('keeps consecutive shell commands in one code block', async () => {
@@ -117,7 +117,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('```\n▸ shell_command ls\n▸ shell_command pwd\n```\n\npronto')
+    expect(harness.edits.at(-1)).toBe('```\n⚡ shell_command ls\n⚡ shell_command pwd\n```\n\npronto')
   })
 
   it('closes an open code block even when the turn ends right after it', async () => {
@@ -129,7 +129,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('```\n▸ shell_command ls\n```')
+    expect(harness.edits.at(-1)).toBe('```\n⚡ shell_command ls\n```')
   })
 
   it('separates tool lines from prose with a blank line, not a soft break', async () => {
@@ -143,7 +143,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('Vou rodar\n\n```\n▸ shell_command\n```\n\nRodou.')
+    expect(harness.edits.at(-1)).toBe('Vou rodar\n\n```\n⚡ shell_command\n```\n\nRodou.')
   })
 
   it('gives web_search the globe instead of the marker', async () => {
@@ -168,7 +168,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toContain('✗ shell_command failed')
+    expect(harness.edits.at(-1)).toContain('❌ shell_command failed')
   })
 
   it('routes permission requests to the surface and reflects the answer', async () => {

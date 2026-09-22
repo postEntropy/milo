@@ -12,12 +12,25 @@ export interface ToolLine {
   style: ToolLineStyle
 }
 
+/**
+ * Every line starts with a real emoji, never a typographic glyph: these lines
+ * are read in chat clients, where `▸` renders as a stray character next to the
+ * emoji around it. The fallback is an emoji too, so an unknown tool cannot
+ * reintroduce one.
+ */
 const TOOLS: Record<string, { icon: string; style: ToolLineStyle }> = {
+  read_file: { icon: '📄', style: 'quote' },
+  list_dir: { icon: '📁', style: 'quote' },
+  glob: { icon: '🔎', style: 'quote' },
+  grep: { icon: '🔍', style: 'quote' },
+  write_file: { icon: '📝', style: 'code' },
+  edit_file: { icon: '✏️', style: 'code' },
+  remember: { icon: '🧠', style: 'quote' },
   web_search: { icon: '🌐', style: 'quote' },
-  shell_command: { icon: '▸', style: 'code' },
+  shell_command: { icon: '⚡', style: 'code' },
 }
 
-const FALLBACK: { icon: string; style: ToolLineStyle } = { icon: '▸', style: 'quote' }
+const FALLBACK: { icon: string; style: ToolLineStyle } = { icon: '🔧', style: 'quote' }
 
 /** The icon alone, for surfaces that draw their own line (the CLI). */
 export function toolIcon(name: string): string {
@@ -46,7 +59,7 @@ const GIST_LIMIT = 120
 function gist(args: unknown): string {
   if (!args || typeof args !== 'object') return ''
   const record = args as Record<string, unknown>
-  for (const key of ['command', 'query', 'path']) {
+  for (const key of ['command', 'query', 'pattern', 'path']) {
     const value = record[key]
     if (typeof value === 'string' && value.trim()) {
       const flat = value.trim().replace(/\s+/g, ' ')

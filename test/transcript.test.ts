@@ -45,7 +45,7 @@ describe('buildLines', () => {
     // buildLines puts a blank line between items; the icons are what matters.
     expect(lines.filter((line) => line.text !== '').map((line) => line.text)).toEqual([
       '🌐 web_search(bun 1.2)',
-      '▸ read_file(a.txt)',
+      '📄 read_file(a.txt)',
       '✗ web_search(bun 1.2)',
     ])
   })

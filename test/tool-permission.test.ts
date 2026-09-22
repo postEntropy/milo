@@ -4,6 +4,7 @@ import type { AgentEvent } from '../src/core/agent/events'
 import { runAgent } from '../src/core/agent/loop'
 import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types'
 import { DefaultPermissionPolicy, type PermissionAsker } from '../src/core/tools/permission'
+import { builtinTools } from '../src/core/tools/index'
 import { ToolRegistry } from '../src/core/tools/registry'
 import type { Tool } from '../src/core/tools/types'
 
@@ -54,6 +55,29 @@ const resultOf = (events: AgentEvent[]) =>
   events.find((event): event is Extract<AgentEvent, { type: 'tool-end' }> => event.type === 'tool-end')
 
 describe('tool permission gating', () => {
+  it('classifies every builtin tool, which is what decides a prompt', () => {
+    const readOnly = Object.fromEntries(
+      builtinTools.map((tool) => [tool.name, tool.readOnly ?? false]),
+    )
+
+    expect(readOnly).toEqual({
+      read_file: true,
+      list_dir: true,
+      glob: true,
+      grep: true,
+      write_file: false,
+      edit_file: false,
+      remember: false,
+      shell_command: false,
+    })
+  })
+
+  it('never asks for a tool whose side effect is Milo\'s own state', () => {
+    const internal = builtinTools.filter((tool) => tool.internal).map((tool) => tool.name)
+
+    expect(internal).toEqual(['remember'])
+  })
+
   it('runs the tool when allowed', async () => {
     const events = await run({
       policy: new DefaultPermissionPolicy(),

@@ -1,8 +1,8 @@
 import { readFile } from 'node:fs/promises'
-import path from 'node:path'
 import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
 import type { Tool } from './types.js'
+import { resolveToolPath } from './walk.js'
 
 const schema = z.object({
   path: z.string().describe('File path, relative to the working directory (or absolute).'),
@@ -22,7 +22,7 @@ export const readFileTool: Tool<ReadFileArgs> = {
   schema,
   readOnly: true,
   async execute(args, ctx) {
-    const target = path.isAbsolute(args.path) ? args.path : path.resolve(ctx.cwd, args.path)
+    const target = resolveToolPath(ctx.cwd, args.path)
     try {
       const raw = await readFile(target, 'utf8')
       const lines = raw.split('\n')

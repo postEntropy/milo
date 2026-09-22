@@ -63,6 +63,58 @@ describe('Session', () => {
     expect(assistantHits).toEqual([])
   })
 
+  it('lets the model save a fact with the remember tool', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+    const memory = new FileMemory({ dir })
+    const store = new MemorySessionStore()
+    const scope: MemoryScope = { gateway: 'cli', conversationId: 'remember' }
+    const record = await store.create()
+
+    // First step asks for a tool, second answers — the shape of a real turn.
+    let step = 0
+    const provider: Provider = {
+      id: 'remembering',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        step += 1
+        if (step === 1) {
+          yield {
+            type: 'tool-call',
+            id: 'c1',
+            name: 'remember',
+            args: { facts: ['Renato deploys on Fridays'] },
+          }
+          yield { type: 'done', finishReason: 'tool_calls' }
+          return
+        }
+        yield { type: 'text', delta: 'noted' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory,
+      store,
+      scope,
+      record,
+      cwd: process.cwd(),
+      provider,
+      maxSteps: 4,
+    })
+
+    const events = []
+    for await (const event of session.send('note that for later')) events.push(event)
+
+    const toolEnd = events.find((event) => event.type === 'tool-end')
+    expect(toolEnd).toMatchObject({ name: 'remember', isError: false })
+
+    // Recalled by a later question, through the same scope the tool wrote to.
+    const hits = await memory.recall(scope, 'what happens on fridays?', { limit: 5 })
+    expect(hits.some((hit) => hit.text.includes('Fridays'))).toBe(true)
+  })
+
   it('persists the transcript and reloads it into a new session', async () => {
     const { store, session, scope, base, provider, memory } = await run('what is the package?')
 

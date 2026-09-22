@@ -1,4 +1,4 @@
-import { extractCommandText, scanCommand } from './rules.js'
+import { extractCommandText, reviewText, scanCommand, scanWriteTarget } from './rules.js'
 import type { Tool } from './types.js'
 
 export type PermissionDecision = 'allow' | 'ask' | 'deny'
@@ -44,6 +44,8 @@ export interface PermissionPolicyOptions {
   reviewer?: DangerReviewer | null
   /** Allow when P(dangerous) is below this. */
   threshold?: number
+  /** Resolves a relative write target before it is judged. */
+  cwd?: string
 }
 
 export const DEFAULT_JEV_THRESHOLD = 0.35
@@ -60,6 +62,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   private allow: Set<string>
   private deny: Set<string>
   private readonly reviewer: DangerReviewer | null
+  private readonly cwd: string
   private threshold: number
 
   constructor(options: PermissionPolicyOptions = {}) {
@@ -68,6 +71,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     this.deny = new Set(options.deny ?? [])
     this.reviewer = options.reviewer ?? null
     this.threshold = options.threshold ?? DEFAULT_JEV_THRESHOLD
+    this.cwd = options.cwd ?? process.cwd()
   }
 
   setMode(mode: PermissionMode): void {
@@ -85,23 +89,23 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   decide(tool: Tool<any>, args: unknown): PermissionDecision | Promise<PermissionDecision> {
     if (this.mode === 'yolo') return 'allow'
     if (this.deny.has(tool.name)) return 'deny'
-    if (tool.readOnly) return 'allow'
+    if (tool.readOnly || tool.internal) return 'allow'
     if (this.allow.has(tool.name)) return 'allow'
     if (this.mode === 'ask') return 'ask'
 
     const command = extractCommandText(args)
-    if (!command) return 'ask'
-
-    const hit = scanCommand(command)
-    if (hit) return 'deny'
+    if (command && scanCommand(command)) return 'deny'
+    if (scanWriteTarget(args, this.cwd)) return 'deny'
 
     if (!this.reviewer) return 'ask'
-    return this.review(command)
+    const state = reviewText(args)
+    if (!state) return 'ask'
+    return this.review(state)
   }
 
-  private async review(command: string): Promise<PermissionDecision> {
+  private async review(state: string): Promise<PermissionDecision> {
     try {
-      const probability = await this.reviewer!.review(`Command to run:\n${command}`)
+      const probability = await this.reviewer!.review(state)
       return probability < this.threshold ? 'allow' : 'ask'
     } catch {
       return 'ask'
