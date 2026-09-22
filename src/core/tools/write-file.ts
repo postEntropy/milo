@@ -1,7 +1,8 @@
-import { mkdir, stat, writeFile } from 'node:fs/promises'
+import { mkdir, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
+import { writeFileAtomic } from '../../util/fs.js'
 import type { Tool } from './types.js'
 import { displayPath, resolveToolPath } from './walk.js'
 
@@ -28,7 +29,7 @@ export const writeFileTool: Tool<WriteFileArgs> = {
       }
 
       await mkdir(path.dirname(target), { recursive: true })
-      await writeFile(target, args.content, 'utf8')
+      await writeFileAtomic(target, args.content)
 
       const verb = existing ? 'Replaced' : 'Created'
       const size = Buffer.byteLength(args.content, 'utf8')

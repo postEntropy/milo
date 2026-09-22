@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { chmodSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { writeFileTool } from '../src/core/tools/write-file'
@@ -83,5 +83,25 @@ describe('write_file', () => {
 
   it('is not read-only (it asks for confirmation)', () => {
     expect(writeFileTool.readOnly).toBe(false)
+  })
+
+  it('keeps the mode of the file it replaces', async () => {
+    const { root } = build({ 'run.sh': '#!/bin/sh\necho old\n' })
+    chmodSync(path.join(root, 'run.sh'), 0o755)
+
+    await writeFileTool.execute({ path: 'run.sh', content: '#!/bin/sh\necho new\n' }, ctxFor(root))
+
+    // A rename replaces the inode, so this is the write that would drop the
+    // executable bit if the mode were not copied over.
+    expect(statSync(path.join(root, 'run.sh')).mode & 0o777).toBe(0o755)
+    expect(read(root, 'run.sh')).toContain('echo new')
+  })
+
+  it('leaves no temporary file behind', async () => {
+    const { root } = build({})
+
+    await writeFileTool.execute({ path: 'a.txt', content: 'x' }, ctxFor(root))
+
+    expect(readdirSync(root)).toEqual(['a.txt'])
   })
 })

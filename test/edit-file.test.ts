@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { chmodSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { editFileTool } from '../src/core/tools/edit-file'
@@ -115,5 +115,25 @@ describe('edit_file', () => {
 
   it('is not read-only (it asks for confirmation)', () => {
     expect(editFileTool.readOnly).toBe(false)
+  })
+
+  it('keeps the mode of a file it edits', async () => {
+    const { root } = build({ 'run.sh': '#!/bin/sh\necho old\n' })
+    chmodSync(path.join(root, 'run.sh'), 0o755)
+
+    await editFileTool.execute(
+      { path: 'run.sh', old_string: 'echo old', new_string: 'echo new' },
+      ctxFor(root),
+    )
+
+    expect(statSync(path.join(root, 'run.sh')).mode & 0o777).toBe(0o755)
+  })
+
+  it('leaves no temporary file behind', async () => {
+    const { root } = build({ 'a.ts': 'x\n' })
+
+    await editFileTool.execute({ path: 'a.ts', old_string: 'x', new_string: 'y' }, ctxFor(root))
+
+    expect(readdirSync(root)).toEqual(['a.ts'])
   })
 })

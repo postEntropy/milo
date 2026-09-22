@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync } from 'node:fs'
+import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -61,7 +61,45 @@ describe('FileSessionStore', () => {
     const files = readdirSync(dir)
     expect(files.some((file) => file.endsWith('.tmp'))).toBe(false)
     expect(files).toContain('calm-otter-1.json')
-    expect(files).toContain('bindings.json')
+    // Each scope owns its own binding file, so two processes never rewrite a
+    // shared map.
+    expect(readdirSync(path.join(dir, 'bindings'))).toHaveLength(1)
+  })
+
+  it('keeps two scopes apart, including ones that sanitize to the same name', async () => {
+    const dir = tempDir()
+    const store = new FileSessionStore({ dir })
+    await store.setBinding('telegram:42', 'calm-otter-1')
+    await store.setBinding('telegram-42', 'brave-wolf-2')
+    await store.setBinding('discord:9', 'calm-otter-3')
+
+    expect(await store.getBinding('telegram:42')).toBe('calm-otter-1')
+    expect(await store.getBinding('telegram-42')).toBe('brave-wolf-2')
+    expect(await store.getBinding('discord:9')).toBe('calm-otter-3')
+    expect(readdirSync(path.join(dir, 'bindings'))).toHaveLength(3)
+  })
+
+  it('still reads the single-file layout an older version wrote', async () => {
+    const dir = tempDir()
+    writeFileSync(
+      path.join(dir, 'bindings.json'),
+      JSON.stringify({ 'cli:main': 'calm-otter-1', 'bad:id': '../evil' }),
+    )
+    const store = new FileSessionStore({ dir })
+
+    expect(await store.getBinding('cli:main')).toBe('calm-otter-1')
+    expect(await store.getBinding('bad:id')).toBeUndefined()
+  })
+
+  it('claims the id on disk when it hands one out', async () => {
+    const dir = tempDir()
+    const store = new FileSessionStore({ dir })
+    const created = await store.create()
+
+    // The file exists from the moment the id does, so a second process cannot
+    // take the same nickname.
+    expect(readdirSync(dir)).toContain(`${created.id}.json`)
+    expect(await store.create()).not.toBe(created.id)
   })
 
   it('persists bindings across store instances', async () => {

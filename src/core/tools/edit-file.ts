@@ -1,6 +1,7 @@
-import { readFile, stat, writeFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
+import { writeFileAtomic } from '../../util/fs.js'
 import type { Tool } from './types.js'
 import { displayPath, resolveToolPath } from './walk.js'
 
@@ -68,7 +69,7 @@ export const editFileTool: Tool<EditFileArgs> = {
       : content.replace(args.old_string, () => args.new_string)
 
     try {
-      await writeFile(target, updated, 'utf8')
+      await writeFileAtomic(target, updated)
     } catch (error) {
       return { content: `Failed to write ${shown}: ${errorMessage(error)}`, isError: true }
     }

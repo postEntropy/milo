@@ -1,13 +1,7 @@
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs'
+import { createHash } from 'node:crypto'
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { writeFileAtomic } from '../../util/fs.js'
 import type { Message } from '../providers/types.js'
 import { generateNickname } from './nickname.js'
 import {
@@ -18,7 +12,8 @@ import {
   type SessionSummary,
 } from './types.js'
 
-const BINDINGS_FILE = 'bindings.json'
+const BINDINGS_DIR = 'bindings'
+const LEGACY_BINDINGS_FILE = 'bindings.json'
 const RECORD_SUFFIX = '.json'
 
 export interface FileSessionStoreOptions {
@@ -46,15 +41,37 @@ export class FileSessionStore implements SessionStore {
 
   async create(): Promise<SessionRecord> {
     return this.run(() => {
-      const id = generateNickname((candidate) => existsSync(this.fileFor(candidate)))
+      mkdirSync(this.dir, { recursive: true })
       const timestamp = this.now()
-      return {
-        id,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        messages: [],
-      } satisfies SessionRecord
+
+      for (let attempt = 0; attempt < 100; attempt += 1) {
+        const id = generateNickname((candidate) => existsSync(this.fileFor(candidate)))
+        const record = {
+          id,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+          messages: [],
+        } satisfies SessionRecord
+        // Creating the file exclusively is what makes the id ours: two `milo`
+        // processes picking the same nickname is only a race if nothing claims
+        // it, and the write is the claim.
+        if (this.claim(record)) return record
+      }
+      throw new Error('Could not find a free session id')
     })
+  }
+
+  /** Writes the record's file only if it does not exist yet. */
+  private claim(record: SessionRecord): boolean {
+    try {
+      writeFileSync(this.fileFor(record.id), `${JSON.stringify(record, null, 2)}\n`, {
+        flag: 'wx',
+      })
+      return true
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
+      throw error
+    }
   }
 
   async load(id: string): Promise<SessionRecord | null> {
@@ -72,8 +89,9 @@ export class FileSessionStore implements SessionStore {
     if (!isValidSessionId(record.id)) {
       throw new Error(`Invalid session id: ${record.id}`)
     }
-    await this.run(() => {
-      this.writeAtomic(this.fileFor(record.id), `${JSON.stringify(record, null, 2)}\n`)
+    await this.run(async () => {
+      mkdirSync(this.dir, { recursive: true })
+      await writeFileAtomic(this.fileFor(record.id), `${JSON.stringify(record, null, 2)}\n`)
     })
   }
 
@@ -96,26 +114,38 @@ export class FileSessionStore implements SessionStore {
   }
 
   async getBinding(scopeKey: string): Promise<string | undefined> {
-    return this.readBindings()[scopeKey]
+    const own = this.readBindingFile(this.bindingFile(scopeKey))
+    if (own) return own
+    // A store written by an older version keeps every binding in one file. Read
+    // it, never write it: the first `setBinding` per scope moves that scope on.
+    return this.readLegacyBindings()[scopeKey]
   }
 
   async setBinding(scopeKey: string, id: string): Promise<void> {
-    await this.run(() => {
-      const bindings = this.readBindings()
-      bindings[scopeKey] = id
-      this.writeAtomic(
-        path.join(this.dir, BINDINGS_FILE),
-        `${JSON.stringify(bindings, null, 2)}\n`,
-      )
+    if (!isValidSessionId(id)) return
+    await this.run(async () => {
+      const file = this.bindingFile(scopeKey)
+      mkdirSync(path.dirname(file), { recursive: true })
+      await writeFileAtomic(file, `${JSON.stringify(id)}\n`)
     })
+  }
+
+  private readBindingFile(file: string): string | undefined {
+    if (!existsSync(file)) return undefined
+    try {
+      const value: unknown = JSON.parse(readFileSync(file, 'utf8'))
+      return typeof value === 'string' && isValidSessionId(value) ? value : undefined
+    } catch {
+      return undefined
+    }
   }
 
   private fileFor(id: string): string {
     return path.join(this.dir, `${id}${RECORD_SUFFIX}`)
   }
 
-  private readBindings(): Record<string, string> {
-    const file = path.join(this.dir, BINDINGS_FILE)
+  private readLegacyBindings(): Record<string, string> {
+    const file = path.join(this.dir, LEGACY_BINDINGS_FILE)
     if (!existsSync(file)) return {}
     try {
       const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown
@@ -130,11 +160,17 @@ export class FileSessionStore implements SessionStore {
     }
   }
 
-  private writeAtomic(file: string, content: string): void {
-    mkdirSync(this.dir, { recursive: true })
-    const temp = `${file}.tmp`
-    writeFileSync(temp, content)
-    renameSync(temp, file)
+  /**
+   * A binding lives in its own file, named after the scope. One shared
+   * `bindings.json` meant a read-modify-write of the whole map on every turn —
+   * which drifts the moment `milo` and `milo serve` run at the same time.
+   */
+  private bindingFile(scopeKey: string): string {
+    const safe = scopeKey.replace(/[^a-zA-Z0-9._-]+/g, '_')
+    // A readable name plus a short hash: two different scopes must not collide
+    // just because their punctuation sanitized to the same characters.
+    const digest = createHash('sha1').update(scopeKey).digest('hex').slice(0, 8)
+    return path.join(this.dir, BINDINGS_DIR, `${safe}-${digest}.json`)
   }
 
   /** Runs `work` after every previously queued write has finished. */
