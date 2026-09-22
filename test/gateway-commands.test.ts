@@ -3,6 +3,7 @@ import type { DisplayConfig } from '../src/core/config/schema'
 import { DefaultPermissionPolicy } from '../src/core/tools/permission'
 import {
   decodePermission,
+  displayLockMessage,
   encodePermission,
   handleCommand,
   modeLockMessage,
@@ -229,6 +230,27 @@ describe('handleCommand', () => {
   it('refuses display changes on a surface without them', async () => {
     expect((await handleCommand('/tools off', {})).reply).toContain('not available')
     expect((await handleCommand('/thinking off', {})).reply).toContain('not available')
+  })
+
+  it('refuses them on a bot that answers several people', async () => {
+    const saved: Partial<DisplayConfig>[] = []
+    const locked = displayLockMessage(['1', '2'])!
+    const context = {
+      display: { tools: 'full' as const, thinking: true },
+      persistDisplay: (patch: Partial<DisplayConfig>) => saved.push(patch),
+      displayLocked: locked,
+    }
+
+    expect((await handleCommand('/tools off', context)).reply).toBe(locked)
+    expect((await handleCommand('/thinking off', context)).reply).toBe(locked)
+    expect(saved).toEqual([])
+  })
+
+  it('leaves them open for a single allowed id, and for the terminal', () => {
+    expect(displayLockMessage(['1'])).toBeUndefined()
+    expect(displayLockMessage(undefined)).toBeDefined()
+    expect(displayLockMessage([])).toContain('answers anyone')
+    expect(displayLockMessage(['1', '2'])).toContain('answers 2 ids')
   })
 
   it('reports display settings in /status', async () => {

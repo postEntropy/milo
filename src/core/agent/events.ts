@@ -5,4 +5,6 @@ export type AgentEvent =
   | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   | { type: 'done'; finishReason: string }
+  /** The turn was stopped (Ctrl+C, shutdown) — not a failure. */
+  | { type: 'aborted' }
   | { type: 'error'; message: string }

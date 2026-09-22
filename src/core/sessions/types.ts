@@ -35,6 +35,8 @@ export interface SessionStats {
   messages: number
   turns: number
   tokens: number
+  /** Estimated size of the system prompt, which `tokens` does not include. */
+  systemTokens?: number
   compacted: boolean
   droppedTokens?: number
 }

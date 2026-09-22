@@ -21,6 +21,11 @@ export function estimateTokens(messages: Message[]): number {
   return Math.ceil(chars / 4)
 }
 
+/** The same rough estimate for a plain string — a system prompt, say. */
+export function estimateText(text: string): number {
+  return Math.ceil(text.length / 4)
+}
+
 /**
  * Where to cut so the last `keepTurns` user turns survive.
  *

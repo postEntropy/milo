@@ -5,9 +5,10 @@ import type { Message, Provider } from './providers/types.js'
 import type { PermissionAsker, PermissionPolicy, ToolRegistry } from './tools/index.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent } from './agent/loop.js'
-import { buildSystemPrompt, type SurfaceKind } from './agent/system.js'
+import { buildSystemPrompt, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import {
   countTurns,
+  estimateText,
   estimateTokens,
   planCut,
   summarize,
@@ -22,6 +23,16 @@ function asSurface(gateway: string): SurfaceKind | undefined {
   return (SURFACES as string[]).includes(gateway) ? (gateway as SurfaceKind) : undefined
 }
 
+/**
+ * Whether the error means "the caller stopped us". A cancelled fetch rejects
+ * with an `AbortError`, but the signal is checked too: a provider is free to
+ * fail in its own way once the request is already gone.
+ */
+function isAbort(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true
+  return error instanceof Error && error.name === 'AbortError'
+}
+
 export interface SessionOptions {
   scope: MemoryScope
   provider: Provider
@@ -31,6 +42,7 @@ export interface SessionOptions {
   memory: Memory
   cwd: string
   maxSteps?: number
+  maxTokens?: number
   temperature?: number
   recallLimit?: number
   permissionPolicy?: PermissionPolicy
@@ -56,6 +68,8 @@ export class Session {
   private readonly store: SessionStore
   private readonly options: SessionOptions
   private summary: string | undefined
+  /** Size of the last system prompt sent, which the transcript count omits. */
+  private lastSystemTokens: number | undefined
 
   constructor(options: SessionOptions) {
     this.options = options
@@ -80,18 +94,17 @@ export class Session {
       memory,
       cwd,
       maxSteps,
+      maxTokens,
       temperature,
       permissionPolicy,
     } = this.options
     const signal = opts?.signal
 
-    await this.compactIfNeeded(signal)
-
     const tools = registry.specs()
     const recalled = await memory.recall(this.scope, input, {
       limit: this.options.recallLimit ?? 5,
     })
-    const systemPrompt = buildSystemPrompt({
+    const prompt = {
       base: system,
       surface: asSurface(this.scope.gateway),
       cwd,
@@ -99,8 +112,15 @@ export class Session {
       model,
       tools,
       memories: recalled,
-      summary: this.summary,
-    })
+    }
+
+    // Measured against the request that will actually be sent: the tool list,
+    // the recalled memories and the running summary ride along with every turn,
+    // and leaving them out of the count let the request go over budget.
+    await this.compactIfNeeded(prompt, signal)
+
+    const systemPrompt = buildSystemPrompt({ ...prompt, summary: this.summary })
+    this.lastSystemTokens = estimateText(systemPrompt)
 
     this.messages.push({ role: 'user', content: [{ type: 'text', text: input }] })
     // Persist the user's message now, so a crash mid-answer does not lose it.
@@ -124,6 +144,7 @@ export class Session {
           remember: (items) => memory.remember(this.scope, items),
         },
         maxSteps,
+        maxTokens,
         temperature,
         signal,
         permission: permissionPolicy ? { policy: permissionPolicy, ask: opts?.ask } : undefined,
@@ -132,15 +153,24 @@ export class Session {
         yield event
       }
     } catch (error) {
-      errored = true
-      yield { type: 'error', message: errorMessage(error) }
+      // A stop is not a failure: reporting `AbortError` to the user turns their
+      // own Ctrl+C into a red error line, and the abort is the expected end of
+      // a stream the caller cancelled.
+      if (isAbort(error, signal)) {
+        errored = true
+        yield { type: 'aborted' }
+      } else {
+        errored = true
+        yield { type: 'error', message: errorMessage(error) }
+      }
     } finally {
       // Runs even when the consumer aborts, so the partial turn is on disk.
       await this.persist()
     }
 
     // Remember only what the user said — the assistant's own replies are not
-    // durable facts and would pollute recall.
+    // durable facts and would pollute recall. A turn that failed or was stopped
+    // is skipped as well: it never got as far as an answer.
     if (!errored && input.trim()) {
       await memory.remember(this.scope, [{ text: input, tags: ['user'] }])
     }
@@ -171,6 +201,7 @@ export class Session {
       messages: this.messages.length,
       turns: countTurns(this.messages),
       tokens: estimateTokens(this.messages),
+      systemTokens: this.lastSystemTokens,
       compacted: this.summary !== undefined,
       droppedTokens: this.record.droppedTokens,
     }
@@ -181,10 +212,17 @@ export class Session {
    * If the summary call fails, the turns are dropped anyway — a request that
    * fits beats one that is rejected by the provider.
    */
-  private async compactIfNeeded(signal?: AbortSignal): Promise<void> {
+  private async compactIfNeeded(
+    prompt: Omit<SystemPromptInput, 'summary'>,
+    signal?: AbortSignal,
+  ): Promise<void> {
     const config = this.options.sessions
     if (!config?.compaction) return
-    if (estimateTokens(this.messages) <= config.maxInputTokens) return
+
+    const used = () =>
+      estimateTokens(this.messages) +
+      estimateText(buildSystemPrompt({ ...prompt, summary: this.summary }))
+    if (used() <= config.maxInputTokens) return
 
     const cut = planCut(this.messages, config.keepTurns)
     if (cut <= 0) return

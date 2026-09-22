@@ -293,4 +293,63 @@ describe('runTurn — display settings', () => {
     expect(last).toContain('…')
     expect(last.split('\n')).toHaveLength(1)
   })
+
+  it('says a stopped turn was stopped rather than reporting an error', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'text-delta', delta: 'half an ans' }
+      yield { type: 'aborted' }
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+
+    const last = harness.edits.at(-1) ?? ''
+    expect(last).toContain('🛑 stopped')
+    expect(last).not.toContain('[error]')
+    // The partial answer is still worth keeping.
+    expect(last).toContain('half an ans')
+  })
+
+  it('warns that an answer was cut off at the output limit', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'text-delta', delta: 'the answer starts and then' }
+      yield { type: 'done', finishReason: 'length' }
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+
+    const last = harness.edits.at(-1) ?? ''
+    expect(last).toContain('the answer starts and then')
+    expect(last).toContain('output limit')
+  })
+
+  it('says nothing extra when the answer finished on its own', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'text-delta', delta: 'complete' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+    expect(harness.edits.at(-1)).toBe('complete')
+  })
+
+  it('keeps the end of a turn that outgrew the message limit', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'tool-start', id: '1', name: 'shell_command', args: { command: 'npm test' } }
+      yield { type: 'tool-end', id: '1', name: 'shell_command', result: 'ok', isError: false }
+      yield { type: 'text-delta', delta: `${'A'.repeat(200)}THE-ANSWER-IS-AT-THE-END` }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    // A limit the turn blows past, with the tool log taking the front of it.
+    const harness = makeHarness(stream)
+    await harness.run(200)
+
+    const last = harness.edits.at(-1) ?? ''
+    expect(last.length).toBeLessThanOrEqual(200)
+    expect(last).toContain('trimmed to fit')
+    expect(last.endsWith('THE-ANSWER-IS-AT-THE-END')).toBe(true)
+  })
 })

@@ -30,6 +30,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     sessions: loaded.config.sessions,
     cwd,
     maxSteps: loaded.config.maxSteps,
+    maxTokens: loaded.config.maxTokens,
     permissionPolicy: new DefaultPermissionPolicy({
       mode: permissions.mode,
       allow: permissions.allow,

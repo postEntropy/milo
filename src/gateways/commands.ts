@@ -15,6 +15,8 @@ export interface CommandContext {
   display?: DisplayConfig
   /** Applies a display change to the running surface and writes it down. */
   persistDisplay?: (patch: Partial<DisplayConfig>) => void
+  /** Set when this surface may not change the display settings; used as the reply. */
+  displayLocked?: string
   /** Starts a fresh session and binds it to this conversation. */
   newSession?: (title?: string) => Promise<{ id: string }>
   /** Binds this conversation to an existing session. */
@@ -66,6 +68,19 @@ export function modeLockMessage(allowlist: string[] | undefined): string | undef
   return count === 0
     ? '🔒 /mode is locked while this bot answers anyone. Add your id in `milo setup` → Gateways, or set the mode there.'
     : `🔒 /mode is locked while this bot answers ${count} ids. Set the mode in \`milo setup\` on the terminal.`
+}
+
+/**
+ * Display settings are one value for the whole install, so on a bot that
+ * answers several people one of them would be changing what the others see.
+ * Same rule as `/mode`: only a single-person bot may do it from the chat.
+ */
+export function displayLockMessage(allowlist: string[] | undefined): string | undefined {
+  const count = allowlist?.length ?? 0
+  if (count === 1) return undefined
+  return count === 0
+    ? '🔒 /tools and /thinking are locked while this bot answers anyone. Set them in `milo setup` → Display.'
+    : `🔒 /tools and /thinking are locked while this bot answers ${count} ids. Set them in \`milo setup\` → Display.`
 }
 
 /**
@@ -136,6 +151,7 @@ export async function handleCommand(
     }
 
     case 'tools': {
+      if (context.displayLocked) return { handled: true, reply: context.displayLocked }
       if (!context.persistDisplay) {
         return { handled: true, reply: 'Display settings are not available on this surface.' }
       }
@@ -154,6 +170,7 @@ export async function handleCommand(
     }
 
     case 'thinking': {
+      if (context.displayLocked) return { handled: true, reply: context.displayLocked }
       if (!context.persistDisplay) {
         return { handled: true, reply: 'Display settings are not available on this surface.' }
       }

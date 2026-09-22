@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import type { AgentEvent } from '../src/core/agent/events'
 import { FileMemory } from '../src/core/memory/local'
 import type { MemoryScope } from '../src/core/memory/index'
 import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types'
@@ -14,9 +15,11 @@ type Extra = Omit<SessionOptions, 'record' | 'scope' | 'store' | 'provider' | 'm
 class CapturingProvider implements Provider {
   readonly id = 'capturing'
   lastSystem?: string
+  lastMaxTokens?: number
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     this.lastSystem = req.system
+    this.lastMaxTokens = req.maxTokens
     yield { type: 'text', delta: 'SECRET_ASSISTANT_REPLY' }
     yield { type: 'done', finishReason: 'stop' }
   }
@@ -42,6 +45,35 @@ async function run(input: string) {
   const events = []
   for await (const event of session.send(input)) events.push(event)
   return { provider, memory, store, scope, base, record, session, events }
+}
+
+/** A session on a throwaway store, for testing the provider's behaviour. */
+async function sessionWith(provider: Provider, extra: Partial<SessionOptions> = {}) {
+  const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+  const memory = new FileMemory({ dir })
+  const store = new MemorySessionStore()
+  const scope: MemoryScope = { gateway: 'cli', conversationId: 'abort' }
+  const record = await store.create()
+  const session = new Session({
+    model: 'test-model',
+    system: 'BASE',
+    registry: createToolRegistry(),
+    memory,
+    store,
+    scope,
+    record,
+    cwd: process.cwd(),
+    provider,
+    maxSteps: 4,
+    ...extra,
+  })
+  return { session, memory, scope }
+}
+
+function abortError(): Error {
+  const error = new Error('This operation was aborted')
+  error.name = 'AbortError'
+  return error
 }
 
 describe('Session', () => {
@@ -136,6 +168,9 @@ describe('Session', () => {
     expect(stats.turns).toBe(1)
     expect(stats.tokens).toBeGreaterThan(0)
     expect(stats.compacted).toBe(false)
+    // The system prompt is counted too: it goes with every request and the
+    // transcript number alone would understate what the provider receives.
+    expect(stats.systemTokens).toBeGreaterThan(0)
   })
 
   it('clears the transcript but keeps the session identity', async () => {
@@ -161,5 +196,68 @@ describe('Session', () => {
     expect(fresh.messages).toHaveLength(2)
     expect(provider.lastSystem).toContain('## What you remember')
     expect(provider.lastSystem).toContain('Neovim')
+  })
+
+  it('reports a stopped turn as stopped, not as a failure', async () => {
+    const controller = new AbortController()
+    const provider: Provider = {
+      id: 'stopping',
+      async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+        // What a real provider does once the request it is streaming is gone.
+        if (req.signal?.aborted) throw abortError()
+        yield { type: 'text', delta: 'partial' }
+      },
+    }
+
+    const { session, memory, scope } = await sessionWith(provider)
+    controller.abort()
+
+    const events: AgentEvent[] = []
+    for await (const event of session.send('remember this', { signal: controller.signal })) {
+      events.push(event)
+    }
+
+    expect(events.some((event) => event.type === 'aborted')).toBe(true)
+    expect(events.some((event) => event.type === 'error')).toBe(false)
+    // Nothing was answered, so nothing is kept.
+    expect(await memory.recall(scope, 'remember this', { limit: 5 })).toEqual([])
+  })
+
+  it('still reports a genuine failure as an error', async () => {
+    const provider: Provider = {
+      id: 'failing',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        throw new Error('provider exploded')
+      },
+    }
+
+    const { session } = await sessionWith(provider)
+    const events: AgentEvent[] = []
+    for await (const event of session.send('hello')) events.push(event)
+
+    expect(events.find((event) => event.type === 'error')).toMatchObject({
+      message: 'provider exploded',
+    })
+    expect(events.some((event) => event.type === 'aborted')).toBe(false)
+  })
+
+  it('passes the configured output ceiling down to the provider', async () => {
+    const provider = new CapturingProvider()
+    const { session } = await sessionWith(provider, { maxTokens: 1234 })
+    for await (const _event of session.send('hello')) {
+      // drain
+    }
+
+    expect(provider.lastMaxTokens).toBe(1234)
+  })
+
+  it('leaves the ceiling to the wire when none is configured', async () => {
+    const provider = new CapturingProvider()
+    const { session } = await sessionWith(provider)
+    for await (const _event of session.send('hello')) {
+      // drain
+    }
+
+    expect(provider.lastMaxTokens).toBeUndefined()
   })
 })

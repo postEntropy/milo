@@ -97,6 +97,13 @@ export const ConfigSchema = z.object({
   search: SearchSchema.optional(),
   systemPrompt: z.string().optional(),
   maxSteps: z.number().int().positive().optional(),
+  /**
+   * Output token ceiling per request. Left unset, each wire uses its own
+   * default — 4096 on the Anthropic one, which is low enough to cut a long
+   * answer or a `write_file` of a big file in half. Set it to whatever the
+   * model actually supports.
+   */
+  maxTokens: z.number().int().positive().optional(),
 })
 export type Config = z.infer<typeof ConfigSchema>
 

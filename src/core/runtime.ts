@@ -20,6 +20,7 @@ export interface RuntimeOptions {
   memory: Memory
   cwd: string
   maxSteps?: number
+  maxTokens?: number
   temperature?: number
   recallLimit?: number
   permissionPolicy?: PermissionPolicy
@@ -121,6 +122,7 @@ export class AgentRuntime {
       memory: this.options.memory,
       cwd: this.options.cwd,
       maxSteps: this.options.maxSteps,
+      maxTokens: this.options.maxTokens,
       temperature: this.options.temperature,
       recallLimit: this.options.recallLimit,
       permissionPolicy: this.options.permissionPolicy,

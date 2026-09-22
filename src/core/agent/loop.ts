@@ -21,6 +21,7 @@ export interface RunAgentOptions {
   messages: Message[]
   context: ToolContext
   maxSteps?: number
+  maxTokens?: number
   temperature?: number
   signal?: AbortSignal
   permission?: ToolPermission
@@ -48,6 +49,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       system: options.system,
       tools: options.tools.length > 0 ? options.tools : undefined,
       temperature: options.temperature,
+      maxTokens: options.maxTokens,
       signal: options.signal,
     })) {
       if (event.type === 'text') {

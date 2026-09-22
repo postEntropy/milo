@@ -299,6 +299,16 @@ export function ChatScreen({
             setPhase('thinking')
           },
           onUsage: (total) => setTokens((value) => value + total),
+          onDone: (finishReason) => {
+            // A capped answer otherwise looks like a complete one.
+            if (finishReason === 'length') {
+              push({
+                kind: 'info',
+                text: '⚠ hit the output limit — the answer was cut off. Raise "maxTokens" in config.json.',
+              })
+            }
+          },
+          onAborted: () => push({ kind: 'info', text: 'stopped.' }),
           onError: (message) => push({ kind: 'error', text: message }),
         })
       }
@@ -320,8 +330,13 @@ export function ChatScreen({
     const text = raw.trim()
     if (!text || busy) return
     setInput('')
-    if (text.startsWith('/')) void runCommand(text)
-    else void send(text)
+    // A command that throws must not become an unhandled rejection: say what
+    // broke instead of appearing to ignore the line.
+    if (text.startsWith('/')) {
+      void runCommand(text).catch((error) => push({ kind: 'error', text: errorMessage(error) }))
+    } else {
+      void send(text)
+    }
   }
 
   const statusLabel =
@@ -401,6 +416,8 @@ interface EventHandlers {
   onToolStart: (name: string, args: unknown) => void
   onToolEnd: (name: string, isError: boolean) => void
   onUsage: (totalTokens: number) => void
+  onDone: (finishReason: string) => void
+  onAborted: () => void
   onError: (message: string) => void
 }
 
@@ -420,6 +437,12 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
       break
     case 'usage':
       handlers.onUsage(event.inputTokens + event.outputTokens)
+      break
+    case 'done':
+      handlers.onDone(event.finishReason)
+      break
+    case 'aborted':
+      handlers.onAborted()
       break
     case 'error':
       handlers.onError(event.message)

@@ -55,10 +55,12 @@ export function formatSessionList(
 
 export function formatStats(stats: SessionStats): string {
   const name = stats.title ? `${stats.id} — ${stats.title}` : stats.id
+  const system =
+    stats.systemTokens === undefined ? '' : ` · ~${stats.systemTokens} tokens of system prompt`
   const lines = [
     `Session ${name}`,
     `started ${formatWhen(stats.createdAt)} · last activity ${formatWhen(stats.updatedAt)}`,
-    `${stats.messages} messages · ${stats.turns} turns · ~${stats.tokens} tokens in context`,
+    `${stats.messages} messages · ${stats.turns} turns · ~${stats.tokens} tokens in context${system}`,
   ]
   if (stats.compacted) {
     const amount = stats.droppedTokens ? ` (~${stats.droppedTokens} tokens summarized)` : ''

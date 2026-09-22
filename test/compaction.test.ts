@@ -191,4 +191,35 @@ describe('Session compaction', () => {
     expect(provider.systems.some((system) => system.includes('compress a conversation'))).toBe(false)
     expect(session.stats().compacted).toBe(false)
   })
+
+  it('counts the system prompt against the budget, not just the transcript', async () => {
+    // A transcript of almost nothing, and a budget far above it — but the tool
+    // list and environment that ride along with every request do not fit, which
+    // is the part the old count ignored.
+    const seed = [text('user', 'first'), text('assistant', 'ok'), text('user', 'second')]
+    const store = new MemorySessionStore()
+    const record = await store.create()
+    record.messages = seed
+    const provider = new ScriptedProvider()
+
+    const session = new Session({
+      scope: { gateway: 'cli', conversationId: 'c' },
+      provider,
+      model: 'm',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new FileMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
+      cwd: process.cwd(),
+      record,
+      store,
+      sessions: { maxInputTokens: 500, keepTurns: 1, compaction: true },
+    })
+
+    for await (const _event of session.send('another one')) {
+      // drain
+    }
+
+    expect(estimateTokens(seed)).toBeLessThan(100)
+    expect(provider.systems.some((system) => system.includes('compress a conversation'))).toBe(true)
+  })
 })

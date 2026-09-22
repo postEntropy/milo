@@ -128,6 +128,15 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
           // A failure is always reported: hiding it is worse than the noise.
           if (event.isError) await appendLine(`❌ ${event.name} failed`, toolStyle(event.name))
           break
+        case 'done':
+          // A capped answer otherwise looks like a complete one.
+          if (event.finishReason === 'length') {
+            await appendLine('⚠ hit the output limit — the answer was cut off', 'prose')
+          }
+          break
+        case 'aborted':
+          await appendLine('🛑 stopped', 'prose')
+          break
         case 'error':
           await appendLine(`[error] ${event.message}`)
           break
@@ -155,7 +164,21 @@ function firstLine(text: string): string {
   return ''
 }
 
+/**
+ * Trims a turn that outgrew the surface's message limit.
+ *
+ * Keeps the head *and* the tail. The answer comes after the tool log, so
+ * trimming only the end is precisely how a limit eats the conclusion and leaves
+ * the running commentary — the part nobody needed.
+ */
 function clamp(text: string, maxLength: number): string {
   if (!text) return '…'
-  return text.length > maxLength ? `${text.slice(0, maxLength - 1)}…` : text
+  if (text.length <= maxLength) return text
+
+  const marker = '… (trimmed to fit) …'
+  const room = maxLength - marker.length
+  if (room <= 20) return `${text.slice(0, maxLength - 1)}…`
+
+  const head = Math.floor(room * 0.4)
+  return `${text.slice(0, head)}${marker}${text.slice(text.length - (room - head))}`
 }

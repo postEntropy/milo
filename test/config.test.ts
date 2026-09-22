@@ -76,4 +76,13 @@ describe('display settings', () => {
     expect(() => readDisplay()).not.toThrow()
     expect(readDisplay()).toEqual({ tools: 'full', thinking: true })
   })
+
+  it('does not throw away a change just because the file is unreadable', () => {
+    writeFileSync(configFile, '{ not json')
+
+    // The turn in progress must not end because one setting could not be saved.
+    expect(() => setDisplay({ tools: 'off' })).not.toThrow()
+    expect(() => setPermissionMode('yolo')).not.toThrow()
+    expect(readDisplay()).toEqual({ tools: 'full', thinking: true })
+  })
 })

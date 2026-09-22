@@ -12,6 +12,7 @@ import {
   handleCommand,
   modeLockMessage,
   sessionLockMessage,
+  displayLockMessage,
   type CommandResult,
 } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
@@ -103,19 +104,27 @@ export class TelegramGateway implements Gateway {
     const session = await this.options.runtime.getSession(scope)
 
     const display = readDisplay()
-    const command = await handleCommand(text, {
-      policy: this.options.runtime.permissions,
-      resetSession: () => session.clear(),
-      persistMode: setPermissionMode,
-      modeLocked: modeLockMessage(this.options.allowlist),
-      sessionLocked: sessionLockMessage(this.options.allowlist),
-      display,
-      persistDisplay: setDisplay,
-      newSession: (title) => this.options.runtime.newSession(scope, title),
-      resumeSession: async (id) => (await this.options.runtime.resumeSession(scope, id)) !== null,
-      listSessions: () => this.options.runtime.listSessions(),
-      sessionStats: () => session.stats(),
-    })
+    let command: Awaited<ReturnType<typeof handleCommand>>
+    try {
+      command = await handleCommand(text, {
+        policy: this.options.runtime.permissions,
+        resetSession: () => session.clear(),
+        persistMode: setPermissionMode,
+        modeLocked: modeLockMessage(this.options.allowlist),
+        sessionLocked: sessionLockMessage(this.options.allowlist),
+        display,
+        persistDisplay: setDisplay,
+        displayLocked: displayLockMessage(this.options.allowlist),
+        newSession: (title) => this.options.runtime.newSession(scope, title),
+        resumeSession: async (id) => (await this.options.runtime.resumeSession(scope, id)) !== null,
+        listSessions: () => this.options.runtime.listSessions(),
+        sessionStats: () => session.stats(),
+      })
+    } catch (error) {
+      // A command that throws must not swallow the message it was answering.
+      await ctx.reply(`⚠ ${errorMessage(error)}`).catch(() => undefined)
+      return
+    }
     if (command.handled) {
       await this.reply(bot, ctx, chatId, command)
       return

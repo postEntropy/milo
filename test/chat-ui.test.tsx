@@ -242,6 +242,21 @@ describe('ChatScreen', () => {
     expect(lastFrame()).toContain('shell_command')
   })
 
+  it('shows a stopped turn as stopped, not as an error', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'text-delta', delta: 'half an ans' }
+      yield { type: 'aborted' }
+    }
+
+    const { lastFrame, stdin } = renderChat(makeRuntime(stream))
+    await submit(stdin, 'roda isso')
+
+    const frame = lastFrame() ?? ''
+    expect(frame).toContain('stopped.')
+    expect(frame).not.toContain('error:')
+    expect(frame).toContain('half an ans')
+  })
+
   it('starts, lists and switches sessions via the slash commands', async () => {
     const changes: string[] = []
     async function* stream(): AsyncGenerator<AgentEvent> {

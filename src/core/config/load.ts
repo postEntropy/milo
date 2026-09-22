@@ -75,18 +75,31 @@ export function saveAuth(auth: Auth): void {
 }
 
 /**
+ * The config as it is on disk, or null when it is missing or unreadable. The
+ * readers that only want one setting use this: a corrupt file should not turn
+ * `/mode` or `/tools` into an error in the middle of a conversation.
+ */
+function readConfigOrNull(): Config | null {
+  try {
+    return readConfig()
+  } catch {
+    return null
+  }
+}
+
+/**
  * Writes the permission mode to disk. Without this a `/mode` set from a chat
  * lives only in the running process and dies with it.
  */
 export function setPermissionMode(mode: PermissionMode): void {
-  const config = readConfig()
+  const config = readConfigOrNull()
   if (!config) return
   saveConfig({ ...config, permissions: { ...config.permissions, mode } })
 }
 
 /** Applies a display change and writes it down, for the same reason as `/mode`. */
 export function setDisplay(patch: Partial<DisplayConfig>): void {
-  const config = readConfig()
+  const config = readConfigOrNull()
   if (!config) return
   saveConfig({ ...config, display: { ...config.display, ...patch } })
 }
@@ -97,11 +110,7 @@ export function setDisplay(patch: Partial<DisplayConfig>): void {
  * A corrupt file falls back to the defaults rather than failing the turn.
  */
 export function readDisplay(): DisplayConfig {
-  try {
-    return readConfig()?.display ?? DEFAULT_DISPLAY
-  } catch {
-    return DEFAULT_DISPLAY
-  }
+  return readConfigOrNull()?.display ?? DEFAULT_DISPLAY
 }
 
 export function resolveApiKey(id: string, entry: ProviderEntry, auth: Auth): string | false | undefined {
