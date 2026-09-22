@@ -15,50 +15,16 @@ import { enterAltScreen, exitAltScreen } from '../gateways/cli/ansi.js'
 import { Shell } from '../gateways/cli/index.js'
 import type { PermissionMode } from '../core/tools/permission.js'
 
+import { parseArgs, type Args } from './args.js'
+
 const VERSION = '0.1.0'
-
-interface Args {
-  command: string
-  provider?: string
-  model?: string
-  mode?: string
-  yolo: boolean
-  version: boolean
-  help: boolean
-  resume?: string
-  continueSession: boolean
-}
-
-function parseArgs(argv: string[]): Args {
-  const args: Args = {
-    command: 'chat',
-    version: false,
-    help: false,
-    yolo: false,
-    continueSession: false,
-  }
-  if (argv[0] && !argv[0].startsWith('-')) args.command = argv[0]
-
-  for (let i = 0; i < argv.length; i += 1) {
-    const flag = argv[i]
-    if (flag === '--version' || flag === '-v') args.version = true
-    else if (flag === '--help' || flag === '-h') args.help = true
-    else if (flag === '--yolo') args.yolo = true
-    else if (flag === '--mode') args.mode = argv[++i]
-    else if (flag === '--provider') args.provider = argv[++i]
-    else if (flag === '--model' || flag === '-m') args.model = argv[++i]
-    else if (flag === '--resume') args.resume = argv[++i]
-    else if (flag === '--continue' || flag === '-c') args.continueSession = true
-  }
-  return args
-}
 
 function printHelp(): void {
   console.log(`milo ${VERSION} — a multi-surface agent
 
 Usage:
   milo                       Start the TUI chat
-  milo setup                 Configure providers, keys, tools, gateways, memory
+  milo setup                 Configure providers, keys, tools, display, gateways, memory
   milo model                 Choose the provider/model (setup wizard)
   milo serve                 Run the enabled bot gateways (Telegram, Discord)
   milo --continue            Continue the last session in this terminal
@@ -68,7 +34,8 @@ Usage:
   milo --mode <mode>         Permission mode: ask | auto | yolo
   milo --yolo                Shorthand for --mode yolo
 
-In the chat: /model · /setup · /mode ask|auto|yolo · /yolo · /new · /sessions · /resume · /stats · /clear · /help · /exit
+In the chat: /model · /setup · /mode ask|auto|yolo · /yolo · /tools full|name|off · /thinking on|off ·
+/new · /sessions · /resume · /stats · /clear · /help · /exit
 
 Config:  ~/.milo/config.json
 Sessions: ~/.milo/sessions/

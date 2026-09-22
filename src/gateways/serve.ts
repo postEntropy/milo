@@ -1,7 +1,6 @@
 import process from 'node:process'
 import { createRuntime } from '../core/bootstrap.js'
 import { loadConfig, readAuth, resolveGatewayToken } from '../core/config/load.js'
-import { errorMessage } from '../util/errors.js'
 import type { Gateway } from './types.js'
 
 export async function runServe(): Promise<void> {

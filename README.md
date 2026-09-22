@@ -4,6 +4,8 @@
 
 # Milo
 
+[![CI](https://github.com/postEntropy/milo/actions/workflows/ci.yml/badge.svg)](https://github.com/postEntropy/milo/actions/workflows/ci.yml)
+
 A multi-surface agent — one transport-agnostic **core** with pluggable **gateways** (CLI, Telegram,
 Discord), pluggable **LLM providers**, a pluggable **memory** layer and durable **sessions**.
 Hand-rolled LLM layer (no provider SDKs), built for a fast boot and immediate token streaming.
@@ -34,11 +36,21 @@ npm run dev -- --model deepseek/deepseek-v4-flash   # override the model for one
 On the first run, an onboarding wizard asks for a provider, API key, and model, and saves them to
 `~/.milo/`.
 
+`Ctrl+C` stops the turn in flight — the partial answer stays in the transcript and the turn is
+reported as *stopped*, not as an error, because a stop is the user's own doing. Pressed with nothing
+running, it exits.
+
 ## Configuration
 
-- `~/.milo/config.json` — provider, model, memory backend, session settings, enabled gateways.
+- `~/.milo/config.json` — provider, model, `maxTokens`, memory backend, session settings, display,
+  permissions and enabled gateways.
 - `~/.milo/auth.json` — API keys and bot tokens (written `0600`).
-- `~/.milo/sessions/` — one JSON file per session, plus the address bindings (see below).
+- `~/.milo/sessions/` — one JSON file per session, plus one binding file per address (see below).
+- `~/.milo/memory/` — one JSON file per conversation scope.
+
+A corrupt `config.json` is reported at startup rather than swallowed, but the settings a running
+conversation changes (`/mode`, `/tools`, `/thinking`) read it defensively: a file that cannot be
+parsed leaves the current values alone instead of failing the turn.
 
 Environment variables override stored secrets: `COMMANDCODE_API_KEY`, `OPENROUTER_API_KEY`,
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`.
@@ -119,7 +131,7 @@ denied tool. The queue also stops two turns from mutating the same session at on
 
 | Tool | Read-only | Notes |
 | --- | --- | --- |
-| `read_file` | yes | Line-numbered file contents. |
+| `read_file` | yes | Line-numbered file contents; a long file comes back in pages. |
 | `list_dir` | yes | One directory, not recursive. |
 | `glob` | yes | Files matching a pattern, most recently modified first. |
 | `grep` | yes | Regex over file contents, returning `path:line: text`. |
@@ -136,10 +148,22 @@ prompt. `glob` and `grep` skip build output and dependency directories (`node_mo
 one of them as `path` to search inside it. `grep` skips binary or oversized files and says how many
 it skipped, and both tools report when they truncated their own results.
 
+`read_file` cuts **between lines** and names what is left (`… 812 more line(s); continue with
+offset=413`), so a big file is paged through instead of being silently halved; a single line longer
+than the whole budget — a minified bundle — is clipped and says so. Reading past the end says the
+file has that many lines, rather than reporting it as empty.
+
+`write_file` and `edit_file` write through a temporary file and a rename, and copy the target's
+permissions over first: a crash mid-write leaves the previous contents, not half a function, and an
+edit does not quietly drop an executable bit.
+
 `edit_file` replaces an exact string and **fails rather than guess**: a string that is absent, or
 that appears more than once without `replace_all`, is an error instead of an edit in the wrong
 place. It returns where it landed (`at line 12`), not the file, so a long file does not come back
 into the context. A leading `~` in any path is expanded, in every tool.
+
+`shell_command` keeps the **head and the tail** of a long output, not just the head: stderr comes
+last, so trimming only the end is how an error message gets thrown away.
 
 Anything with side effects goes through the permission policy in the core:
 
@@ -166,12 +190,23 @@ side effect is on Milo's own state (`remember`). On a surface that cannot ask (a
 confirmation UI yet) an `ask` decision **fails closed**.
 
 The deterministic rules cover two shapes, and only in `auto`: a shell command that is catastrophic
-(`rm -rf /`, `mkfs`, a `curl … | sh`), and a file write into a path that is never a legitimate
+(`rm -rf /`, `mkfs`, a `curl … | sh`), and anything writing into a path that is never a legitimate
 target — a system directory (`/etc`, `/usr`, `/bin`, `/boot`, …, including one reached by
 traversal) or a credential store (`~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.netrc`). Both are refused
-outright rather than reviewed. Everything else with side effects — including an ordinary file
-write — goes to the reviewer. Note that the rules are an `auto`-only backstop: in `ask` a write to
-`/etc` is a prompt the user answers, not a refusal.
+outright rather than reviewed. The second one follows the *path*, not the tool: `write_file` into
+`~/.ssh/authorized_keys` and `rm -rf ~/.ssh` or `echo key > ~/.ssh/authorized_keys` through the
+shell are refused the same way, because it is the same act. It reads the command as text —
+redirections, and the commands that take a path to write (`rm`, `mv`, `cp`, `tee`, `truncate`,
+`sed -i`, `dd of=`, `chmod`, `curl -o`) — which makes it a backstop, not a sandbox; reading a system
+file stays fine, and `> /dev/null` is not a write. Everything else with side effects — including an
+ordinary file write — goes to the reviewer. Note that the rules are an `auto`-only backstop: in
+`ask` a write to `/etc` is a prompt the user answers, not a refusal.
+
+**What the prompt shows.** A confirmation is only worth asking if it says what it is asking about,
+so a write shows the target *and* the content — `- old` / `+ new` for an edit — and a command shows
+the directory it will run in (`cd /etc && …`) when the call sets one. Long content is trimmed to a
+screenful. An `allow` entry is checked before the rules, so `allow: ["shell_command"]` is a blanket
+"never ask about this tool" and turns the backstop off for it.
 
 Switch at runtime with `/mode ask|auto|yolo` or `/yolo` — from the terminal or from a bot. The mode
 is **saved** whenever a command changes it, and it is one value for every surface: a `/mode` typed in
@@ -181,7 +216,8 @@ is not `ask`.
 
 A bot refuses `/mode` and `/yolo` unless exactly one id is allowed. With several people — or with an
 open bot, where anyone who finds it can talk — one of them must not be able to turn off confirmation
-for the others; the reply says so and points at `milo setup`.
+for the others; the reply says so and points at `milo setup`. `/tools` and `/thinking` are locked by
+the same rule, since the display is one value for the whole install too.
 
 The `auto` reviewer only exists where the decision model does — a Command Code provider. Anywhere
 else, `auto` degrades to `ask`.
@@ -214,6 +250,30 @@ of the thought` — since it edits a single message and the whole reasoning woul
 of it.
 
 The active settings are visible in the CLI header (`[tools name]`, `[no thinking]`) and in `/status`.
+They are also the **Display** section of `milo setup`, which is where a bot that answers several
+people has to change them.
+
+A bot trims a turn that outgrows the message limit in the **middle**, keeping the beginning and the
+end: the answer comes after the tool log, so trimming only the end is how a long turn loses exactly
+the part that was worth reading.
+
+### Output limit
+
+The Anthropic wire has a hard default of 4096 output tokens. That is low enough to cut a long answer
+in half — and to cut a `write_file` of a large file mid-JSON, which then looks like an invalid tool
+call. OpenAI gets the provider's own default.
+
+```json
+{ "maxTokens": 16384 }
+```
+
+Set `maxTokens` (or the **Output limit** row in `milo setup` → Display) to whatever the model really
+supports; leave it out and each wire uses its own default. The default is deliberately conservative,
+because asking for more than a model allows is a 400 on every request — worse than a trimmed answer.
+
+A turn that ends because of the limit now says so, on both surfaces: the CLI prints `⚠ hit the output
+limit — the answer was cut off` and a bot appends the same, instead of an answer that looks
+complete.
 
 ### Measuring jev latency
 
@@ -254,8 +314,12 @@ tool it cannot use.
 
 A conversation is a **session** with its own name (`calm-otter-7`), stored as one JSON file under
 `~/.milo/sessions/`. The transport address — a Telegram chat, a Discord channel, the CLI — is only
-a **binding** to the session currently attached to it (`bindings.json`), so the same session can be
-picked up from any gateway.
+a **binding** to the session currently attached to it, so the same session can be picked up from any
+gateway. Bindings live in `sessions/bindings/<scope>.json`, one file per address: a single shared
+map meant a read-modify-write of the whole thing on every turn, which drifts the moment `milo` and
+`milo serve` run at the same time. (A `bindings.json` written by an older version is still read, and
+each scope moves to its own file the next time it is bound.) Ids are claimed by creating the record
+file exclusively, so two processes cannot hand out the same nickname.
 
 | Command | What it does |
 | --- | --- |
@@ -288,6 +352,10 @@ request that fits beats one the provider rejects.
 { "sessions": { "maxInputTokens": 12000, "keepTurns": 8, "compaction": true } }
 ```
 
+That budget counts the **system prompt too** — the persona, the tool list, the recalled memories and
+the running summary ride along with every request. Counting only the transcript let the real request
+go over while the estimate said it was fine. `/stats` reports both numbers for the same reason.
+
 ## Memory
 
 Memory sits behind a thin, vendor-agnostic interface (`remember` / `recall`). The MVP ships a
@@ -301,6 +369,18 @@ decision — tagged `assistant` to tell it apart from a stored user message. Rec
 overlap, so the tool is told to write short standalone sentences and not to save what is already in
 the code or the transcript. It takes a batch, so one call can save several facts.
 
+The recency term only ever **reorders** what the overlap found: it can add at most 0.5 to a score
+that has to pass 0.5, so a memory that shares no word with the question does not come back. Recall
+that answers every question with whatever was said most recently is worse than one that answers
+nothing. Two-character words count (`rm`, `go`, `db`) — they used to be dropped from the index, which
+meant a note could never be found by the exact term the user asks about.
+
+Recall is not the only thing that reaches the model, and the rest is untrusted by construction: a
+remembered line comes from something the user typed earlier, a compaction summary comes from the
+transcript, and `web_search` snippets come from the open web. All three are fenced in the prompt
+(`<memories>`, `<summary>`) with a line saying they are data and not instructions, and the reviewer
+prompt says the same about the action it is judging.
+
 ## Skills / development
 
 ```bash
@@ -310,6 +390,11 @@ npm run typecheck   # tsc --noEmit
 npm test            # vitest
 npm run build       # bundle to dist/ (tsup)
 ```
+
+CI (`.github/workflows/ci.yml`) runs those four checks on every push and pull request. One trap
+worth knowing: with `NODE_ENV=production` exported in your shell, npm treats every install as
+`--omit=dev` and **prunes the toolchain** — `tsc`, `vitest` and `tsup` disappear. Recover with
+`npm ci --include=dev`.
 
 ### Source layout
 
@@ -334,10 +419,13 @@ Known open work, roughly in order:
    against fakes, so a real token is still needed to confirm the permission buttons, the rich
    messages and the turn queue against the live APIs.
 2. **A real memory backend** (mem0 / Honcho / Zep / Letta / Hindsight) behind the same
-   `remember` / `recall` interface. Today: keyword overlap plus a recency bonus, over what the user
-   said only.
+   `remember` / `recall` interface. Today: keyword overlap plus a recency bonus, over the user's
+   messages and whatever the model chose to save with the `remember` tool.
 3. **Memory across gateways.** Facts are keyed by the conversation address, so something told in
    Telegram is not visible in the CLI. Sharing them needs a per-person identity map.
 4. **Web search needs a key.** `config.json` has no `search` section, so `web_search` is not even
    registered right now. The Exa and Parallel adapters exist but have never been called for real.
 5. Markdown rendering in the Ink UI (the terminal shows plain text; only the bots get rich messages).
+6. **No linter.** CI checks types, tests and the build, but nothing enforces style or catches a
+   floating promise. Adding ESLint means reformatting its way through the source in a commit of its
+   own, which is why it has not happened yet.
