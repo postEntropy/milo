@@ -3,10 +3,22 @@ import { toolIcon } from '../tool-line.js'
 
 export type LineColor = ThemeColor
 
+/** A run of text with its own weight, for a line that has to mix them. */
+export interface LineSegment {
+  text: string
+  bold?: boolean
+}
+
 export interface Line {
   text: string
   color?: LineColor
   dim?: boolean
+  /**
+   * Inline runs, when one line needs more than one weight — the tool name inside
+   * its call, so the name reads as a name and not as the start of the arguments.
+   * `text` stays the plain string the window and the tests work with.
+   */
+  segments?: LineSegment[]
 }
 
 export type Item =
@@ -68,7 +80,10 @@ export function buildLines(items: Item[], width: number): Line[] {
         const call = item.detail ? `${item.name}(${item.detail})` : item.name
         const head = item.ok ? toolIcon(item.name) : '✗'
         for (const text of wrapText(`${head} ${call}`, width)) {
-          push(text, { color: item.ok ? theme.muted : theme.danger })
+          push(text, {
+            color: item.ok ? theme.muted : theme.danger,
+            segments: boldName(text, item.name),
+          })
         }
         break
       }
@@ -82,6 +97,21 @@ export function buildLines(items: Item[], width: number): Line[] {
   })
 
   return lines
+}
+
+/**
+ * The tool name in bold, so it reads as the name rather than as the start of the
+ * arguments. Split from the wrapped line, so the name stays bold even when a
+ * long call wraps.
+ */
+function boldName(text: string, name: string): LineSegment[] {
+  const at = text.indexOf(name)
+  if (at === -1) return [{ text }]
+  return [
+    { text: text.slice(0, at) },
+    { text: name, bold: true },
+    { text: text.slice(at + name.length) },
+  ].filter((segment) => segment.text !== '')
 }
 
 export interface WindowResult {

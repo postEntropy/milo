@@ -41,10 +41,24 @@ export function toolStyle(name: string): ToolLineStyle {
   return (TOOLS[name] ?? FALLBACK).style
 }
 
-export function toolLine(name: string, args?: unknown): ToolLine {
+export function toolLine(
+  name: string,
+  args?: unknown,
+  options: { markdown?: boolean } = {},
+): ToolLine {
   const { icon, style } = TOOLS[name] ?? FALLBACK
   const summary = gist(args)
-  return { text: summary ? `${icon} ${name} ${summary}` : `${icon} ${name}`, style }
+  const label = toolLabel(name, style, options.markdown ?? false)
+  return { text: summary ? `${icon} ${label} ${summary}` : `${icon} ${label}`, style }
+}
+
+/**
+ * The tool name, emphasised so it reads as a name and not as the first word of
+ * the arguments — but only on a line the surface renders as Markdown. Inside a
+ * code fence Markdown is literal, so the asterisks would simply show up.
+ */
+export function toolLabel(name: string, style: ToolLineStyle, markdown: boolean): string {
+  return markdown && style === 'quote' ? `**${name}**` : name
 }
 
 const GIST_LIMIT = 120

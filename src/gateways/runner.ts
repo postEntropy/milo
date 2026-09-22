@@ -2,7 +2,7 @@ import type { Session } from '../core/session.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
 import { errorMessage } from '../util/errors.js'
 import type { ChatSurface } from './surface.js'
-import { toolLine, toolStyle, type ToolLineStyle } from './tool-line.js'
+import { toolLabel, toolLine, toolStyle, type ToolLineStyle } from './tool-line.js'
 
 export interface RunTurnOptions {
   session: Session
@@ -55,10 +55,16 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   }
 
   /**
-   * One line of prose, or one line inside a tool block.
+   * One line of prose, or one line of its own inside a tool block.
    *
    * Only the line that *opens* a quote block carries `>`; repeating it on the
-   * lines inside makes Telegram show the marker as literal text.
+   * lines inside makes Telegram show the marker as literal text. A block is also
+   * a single paragraph, and a newline inside a paragraph is a soft break: two
+   * tool lines in one quote reflow into a single sentence, which is how a search
+   * followed by a search read as "… preços web_search OpenAI new model release
+   * …". Every quote line therefore opens its own block. A code fence is not
+   * affected — it keeps both the breaks and the literals — so consecutive shell
+   * commands still share one.
    */
   const appendLine = async (
     line: string,
@@ -67,7 +73,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
     if (style === 'prose') {
       closeBlock()
       output += output === '' ? line : `\n\n${line}`
-    } else if (openBlock === style) {
+    } else if (style === 'code' && openBlock === 'code') {
       output += `\n${line}`
     } else {
       const wasEmpty = output === ''
@@ -120,13 +126,18 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
           if (display.tools === 'off') break
           // `name` shows which tool it is without the arguments beside it.
           const line =
-            display.tools === 'name' ? toolLine(event.name) : toolLine(event.name, event.args)
+            display.tools === 'name'
+              ? toolLine(event.name, undefined, { markdown: true })
+              : toolLine(event.name, event.args, { markdown: true })
           await appendLine(line.text, line.style)
           break
         }
         case 'tool-end':
           // A failure is always reported: hiding it is worse than the noise.
-          if (event.isError) await appendLine(`❌ ${event.name} failed`, toolStyle(event.name))
+          if (event.isError) {
+            const style = toolStyle(event.name)
+            await appendLine(`❌ ${toolLabel(event.name, style, true)} failed`, style)
+          }
           break
         case 'done':
           // A capped answer otherwise looks like a complete one.

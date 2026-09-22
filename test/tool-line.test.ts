@@ -71,6 +71,20 @@ describe('toolLine', () => {
     expect(toolLine('read_file', 'nonsense').text).toBe('📄 read_file')
   })
 
+  it('emphasises the name only where Markdown is rendered', () => {
+    expect(toolLine('read_file', { path: 'a.txt' }, { markdown: true }).text).toBe(
+      '📄 **read_file** a.txt',
+    )
+    expect(toolLine('web_search', { query: 'x' }, { markdown: true }).text).toBe(
+      '🌐 **web_search** x',
+    )
+    // Inside a code fence Markdown is literal, so the asterisks would show.
+    expect(toolLine('shell_command', { command: 'ls' }, { markdown: true }).text).toBe(
+      '⚡ shell_command ls',
+    )
+    expect(toolLine('read_file', { path: 'a.txt' }).text).toBe('📄 read_file a.txt')
+  })
+
   it('flattens and shortens a long command', () => {
     const line = toolLine('shell_command', { command: `echo ${'x'.repeat(200)}\nnext line` })
     expect(line.text).not.toContain('\n')

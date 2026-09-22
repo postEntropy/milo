@@ -55,6 +55,33 @@ describe('buildLines', () => {
 
     expect(lines.map((line) => line.text)).toEqual(['📄 read_file'])
   })
+
+  it('bolds the tool name so it does not read as the start of the call', () => {
+    const lines = buildLines([{ kind: 'tool', name: 'read_file', detail: 'a.txt', ok: true }], 40)
+    const line = lines.find((entry) => entry.text.includes('read_file'))!
+
+    expect(line.segments).toEqual([
+      { text: '📄 ' },
+      { text: 'read_file', bold: true },
+      { text: '(a.txt)' },
+    ])
+    // The plain text stays intact for the window and the tests around it.
+    expect(line.text).toBe('📄 read_file(a.txt)')
+  })
+
+  it('keeps the name bold in a failure line', () => {
+    const lines = buildLines(
+      [{ kind: 'tool', name: 'web_search', detail: 'x', ok: false }],
+      40,
+    )
+    const line = lines.find((entry) => entry.text.includes('web_search'))!
+    expect(line.segments?.find((segment) => segment.bold)?.text).toBe('web_search')
+  })
+
+  it('leaves lines without a tool name unstyled', () => {
+    const lines = buildLines([{ kind: 'assistant', text: 'hello' }], 40)
+    expect(lines[0]?.segments).toBeUndefined()
+  })
 })
 
 describe('visibleWindow', () => {

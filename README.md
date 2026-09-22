@@ -89,9 +89,20 @@ Each conversation maps to its own session and memory scope (`telegram:<chatId>`,
 `discord:<channelId>`). Replies stream by editing one message; tool activity is grouped into blocks —
 a **code block** for shell commands, with the command itself, and a **quote box** for searches and
 file reads. Every tool line opens with an emoji, never a typographic glyph (these are read in chat
-clients), and a tool that fails adds `❌ <name> failed` to the same block. On Telegram the answer
-goes out as a **rich message** (Bot API 10.1+), so Markdown renders — headings, lists, tables, code
-blocks — falling back to plain text if the API refuses it.
+clients), the tool **name is bold** so it does not read as the first word of its own arguments, and a
+tool that fails adds `❌ <name> failed` to the same block. Names stay unemphasised inside the code
+blocks, where Markdown is literal and the asterisks would simply show.
+
+**Why each line gets its own block.** A quote block is a single paragraph, and a newline inside a
+paragraph is a *soft break* — so two tool lines in one quote reflow into a single sentence, which is
+how a search followed by a search read as "… preços web_search OpenAI new model release …". Every
+quote line therefore opens its own block, and a thought (`💭 …`) is one of them: the thought is the
+model talking, the arguments are data, and they are not the same thing. A code fence is not affected
+— it keeps both the line breaks and the literals — so consecutive shell commands still share one
+fence.
+
+On Telegram the answer goes out as a **rich message** (Bot API 10.1+), so Markdown renders —
+headings, lists, tables, code blocks — falling back to plain text if the API refuses it.
 For Discord, enable the **Message Content** privileged intent in the Developer Portal.
 
 Tool confirmations arrive as **inline buttons** (Telegram) or **buttons** (Discord) — the turn

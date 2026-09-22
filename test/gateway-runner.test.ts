@@ -57,10 +57,12 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('> 📄 read_file\n\ndone')
+    // The names are bold on a chat surface, so a name does not read as the
+    // first word of the arguments beside it.
+    expect(harness.edits.at(-1)).toBe('> 📄 **read_file**\n\ndone')
   })
 
-  it('keeps consecutive tool calls inside one quote block', async () => {
+  it('gives each tool line its own block, so none is swallowed by the last', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'tool-start', id: '1', name: 'read_file', args: {} }
       yield { type: 'tool-end', id: '1', name: 'read_file', result: 'ok', isError: false }
@@ -72,9 +74,10 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    // Only the first line carries `>`: repeating it inside the block makes
-    // Telegram render the marker as literal text.
-    expect(harness.edits.at(-1)).toBe('> 📄 read_file\n🌐 web_search\n\nanswer')
+    // A block of its own rather than a continuation line: a quote is one
+    // paragraph and a newline in a paragraph is a soft break, so a second tool
+    // line reflowed into the first sentence.
+    expect(harness.edits.at(-1)).toBe('> 📄 **read_file**\n\n> 🌐 **web_search**\n\nanswer')
   })
 
   it('opens a new block for tools after the prose', async () => {
@@ -90,7 +93,9 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('> 📄 read_file\n\nachei\n\n```\n⚡ shell_command\n```\n\npronto')
+    expect(harness.edits.at(-1)).toBe(
+      '> 📄 **read_file**\n\nachei\n\n```\n⚡ shell_command\n```\n\npronto',
+    )
   })
 
   it('shows a shell command as a code block with the command itself', async () => {
@@ -157,7 +162,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('> 🌐 web_search\n\nfound')
+    expect(harness.edits.at(-1)).toBe('> 🌐 **web_search**\n\nfound')
   })
 
   it('marks a failed tool', async () => {
@@ -292,6 +297,59 @@ describe('runTurn — display settings', () => {
     expect(last.startsWith('> 💭 ')).toBe(true)
     expect(last).toContain('…')
     expect(last.split('\n')).toHaveLength(1)
+  })
+
+  it('does not let a thought merge into the tool block around it', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'reasoning-delta', delta: 'first thought\n' }
+      yield { type: 'tool-start', id: '1', name: 'web_search', args: { query: 'preços' } }
+      yield { type: 'tool-end', id: '1', name: 'web_search', result: 'ok', isError: false }
+      yield { type: 'reasoning-delta', delta: 'second thought\n' }
+      yield { type: 'tool-start', id: '2', name: 'web_search', args: { query: 'modelos' } }
+      yield { type: 'tool-end', id: '2', name: 'web_search', result: 'ok', isError: false }
+      yield { type: 'text-delta', delta: 'pronto' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+
+    // Each thought is its own quote block. Merged into the tool block, a thought
+    // reads as the tail of the previous call's arguments — the screenshot that
+    // started this.
+    expect(harness.edits.at(-1)).toBe(
+      [
+        '> 💭 first thought',
+        '',
+        '> 🌐 **web_search** preços',
+        '',
+        '> 💭 second thought',
+        '',
+        '> 🌐 **web_search** modelos',
+        '',
+        'pronto',
+      ].join('\n'),
+    )
+  })
+
+  it('still gathers consecutive shell commands into one code block', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'tool-start', id: '1', name: 'web_search', args: { query: 'a' } }
+      yield { type: 'tool-end', id: '1', name: 'web_search', result: 'ok', isError: false }
+      yield { type: 'tool-start', id: '2', name: 'shell_command', args: { command: 'ls' } }
+      yield { type: 'tool-end', id: '2', name: 'shell_command', result: 'ok', isError: false }
+      yield { type: 'tool-start', id: '3', name: 'shell_command', args: { command: 'pwd' } }
+      yield { type: 'tool-end', id: '3', name: 'shell_command', result: 'ok', isError: false }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+    // A fence keeps both the line breaks and the literals, so unlike a quote it
+    // is worth merging.
+    expect(harness.edits.at(-1)).toBe(
+      '> 🌐 **web_search** a\n\n```\n⚡ shell_command ls\n⚡ shell_command pwd\n```',
+    )
   })
 
   it('says a stopped turn was stopped rather than reporting an error', async () => {

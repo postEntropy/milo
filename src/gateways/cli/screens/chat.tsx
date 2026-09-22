@@ -353,7 +353,13 @@ export function ChatScreen({
       <Box flexDirection="column" flexGrow={1} paddingX={1} overflow="hidden">
         {bodyLines.map((line, index) => (
           <Text key={index} color={line.color} dimColor={line.dim}>
-            {line.text || ' '}
+            {line.segments
+              ? line.segments.map((segment, segmentIndex) => (
+                  <Text key={segmentIndex} bold={segment.bold}>
+                    {segment.text}
+                  </Text>
+                ))
+              : line.text || ' '}
           </Text>
         ))}
       </Box>
