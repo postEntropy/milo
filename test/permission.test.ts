@@ -121,6 +121,32 @@ describe('DefaultPermissionPolicy — auto mode', () => {
     }
     expect(await policy.decide(other, {})).toBe('ask')
   })
+
+  it('refuses a shell command writing into a protected path, without asking', async () => {
+    const policy = new DefaultPermissionPolicy({
+      mode: 'auto',
+      cwd: '/home/dev/project',
+      // A reviewer that would wave anything through: the rule has to decide.
+      reviewer: reviewerReturning(0),
+    })
+
+    expect(await policy.decide(writeTool, { command: 'rm -rf ~/.ssh' })).toBe('deny')
+    expect(await policy.decide(writeTool, { command: 'echo x > /etc/hosts' })).toBe('deny')
+    expect(
+      await policy.decide(writeTool, { command: 'cp ./evil /usr/local/bin/milo' }),
+    ).toBe('deny')
+  })
+
+  it('leaves an ordinary command with a harmless redirect alone', async () => {
+    const policy = new DefaultPermissionPolicy({
+      mode: 'auto',
+      cwd: '/home/dev/project',
+      reviewer: reviewerReturning(0.1),
+    })
+
+    expect(await policy.decide(writeTool, { command: 'npm test > /dev/null' })).toBe('allow')
+    expect(await policy.decide(writeTool, { command: 'cat /etc/hosts' })).toBe('allow')
+  })
 })
 
 describe('DefaultPermissionPolicy — auto mode and file writes', () => {
@@ -227,5 +253,32 @@ describe('summarizeToolCall', () => {
     expect(summarizeToolCall('shell_command', { command: 'ls -la' })).toBe('ls -la')
     expect(summarizeToolCall('web_search', { query: 'the news' })).toBe('the news')
     expect(summarizeToolCall('read_file', { path: 'a.txt' })).toBe('a.txt')
+  })
+
+  it('shows what a write would put in the file', () => {
+    const summary = summarizeToolCall('write_file', { path: 'src/a.ts', content: 'export const a = 1' })
+    expect(summary).toContain('src/a.ts')
+    expect(summary).toContain('export const a = 1')
+  })
+
+  it('shows both sides of an edit as a diff', () => {
+    const summary = summarizeToolCall('edit_file', {
+      path: 'src/auth.ts',
+      old_string: 'return allow',
+      new_string: 'return allowAll',
+    })
+    expect(summary).toContain('src/auth.ts')
+    expect(summary).toContain('- return allow')
+    expect(summary).toContain('+ return allowAll')
+  })
+
+  it('keeps a long file short enough to read in a prompt', () => {
+    const summary = summarizeToolCall('write_file', { path: 'a.ts', content: 'x'.repeat(5000) })
+    expect(summary.length).toBeLessThan(600)
+    expect(summary).toContain('a.ts')
+  })
+
+  it('says which directory a command runs in', () => {
+    expect(summarizeToolCall('shell_command', { command: 'ls', cwd: '/etc' })).toBe('cd /etc && ls')
   })
 })

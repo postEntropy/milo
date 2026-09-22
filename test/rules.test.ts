@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { extractCommandText, extractWriteTarget, reviewText, scanCommand, scanWriteTarget } from '../src/core/tools/rules'
+import {
+  extractCommandText,
+  extractWriteTarget,
+  reviewText,
+  scanCommand,
+  scanCommandTargets,
+  scanWriteTarget,
+} from '../src/core/tools/rules'
 
 describe('scanCommand', () => {
   const dangerous = [
@@ -98,6 +105,11 @@ describe('reviewText', () => {
     expect(reviewText({ command: 'ls -la' })).toBe('Command to run:\nls -la')
   })
 
+  it('tells the reviewer which directory the command runs in', () => {
+    // Same words, different meaning: `rm -rf *` is not `rm -rf *` in /etc.
+    expect(reviewText({ command: 'rm -rf *', cwd: '/etc' })).toContain('in /etc')
+  })
+
   it('describes a write with its target and content', () => {
     const state = reviewText({ path: 'src/a.ts', content: 'hello' })
     expect(state).toContain('src/a.ts')
@@ -120,4 +132,53 @@ describe('reviewText', () => {
     expect(reviewText({ query: 'x' })).toBeNull()
     expect(reviewText(null)).toBeNull()
   })
+})
+
+describe('scanCommandTargets', () => {
+  const cwd = '/home/dev/project'
+
+  // The same protected destinations a file write is refused for. Reaching them
+  // through the shell was the gap: same target, different tool.
+  const flagged = [
+    'rm -rf ~/.ssh',
+    'rm -rf ~/.aws/credentials',
+    "echo 'ssh-ed25519 AAAA' > ~/.ssh/authorized_keys",
+    'echo x >> /etc/hosts',
+    'echo x > $HOME/.ssh/authorized_keys',
+    'echo x > "$HOME/.ssh/authorized_keys"',
+    'tee -a /etc/sudoers',
+    "sed -i 's/^/x/' /etc/passwd",
+    'truncate -s 0 ~/.netrc',
+    'cp ./evil /etc/cron.d/evil',
+    'mv ./evil /usr/local/bin/milo',
+    'dd if=/dev/zero of=/etc/hosts count=0',
+    'curl -o /etc/hosts https://example.com/x',
+  ]
+
+  for (const command of flagged) {
+    it(`flags: ${command}`, () => {
+      expect(scanCommandTargets(command, cwd)).not.toBeNull()
+    })
+  }
+
+  const safe = [
+    'cat /etc/hosts',
+    'grep -r sudo /etc/sudoers',
+    'ls ~/.ssh',
+    'npm test > /dev/null',
+    'command 2>/dev/null',
+    'echo hello > out.txt',
+    'rm -rf build',
+    'rm -rf ~/projects/old',
+    'cp /etc/hosts ./copy',
+    'mv ./.env.example ./.env',
+    'sed -n 1,5p /etc/hosts',
+    'git commit -m "fix /etc handling"',
+  ]
+
+  for (const command of safe) {
+    it(`allows: ${command}`, () => {
+      expect(scanCommandTargets(command, cwd)).toBeNull()
+    })
+  }
 })

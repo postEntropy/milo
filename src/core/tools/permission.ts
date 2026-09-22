@@ -1,4 +1,4 @@
-import { extractCommandText, reviewText, scanCommand, scanWriteTarget } from './rules.js'
+import { extractCommandText, reviewText, scanCommand, scanCommandTargets, scanWriteTarget } from './rules.js'
 import type { Tool } from './types.js'
 
 export type PermissionDecision = 'allow' | 'ask' | 'deny'
@@ -95,6 +95,9 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
 
     const command = extractCommandText(args)
     if (command && scanCommand(command)) return 'deny'
+    // The shell reaches the same protected paths as a file write, so it is held
+    // to the same rule instead of being judged differently for the same act.
+    if (command && scanCommandTargets(command, this.cwd)) return 'deny'
     if (scanWriteTarget(args, this.cwd)) return 'deny'
 
     if (!this.reviewer) return 'ask'
@@ -113,12 +116,25 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   }
 }
 
+/** How much of a written file or a replacement is shown before it is approved. */
+const SUMMARY_PREVIEW = 400
+
+/**
+ * What a confirmation prompt shows. For a command: the command — plus the
+ * directory, since `cwd` changes what the same words do. For a write: the path
+ * *and* the content, because approving a path without seeing what goes in it is
+ * not a decision, and the reviewer already gets that; the human who is actually
+ * asked was the one left out.
+ */
 export function summarizeToolCall(tool: string, args: unknown): string {
   if (args && typeof args === 'object') {
     const record = args as Record<string, unknown>
-    if (typeof record.command === 'string') return record.command
+    if (typeof record.command === 'string') {
+      const cwd = typeof record.cwd === 'string' ? record.cwd.trim() : ''
+      return cwd ? `cd ${cwd} && ${record.command}` : record.command
+    }
     if (typeof record.query === 'string') return record.query
-    if (typeof record.path === 'string') return record.path
+    if (typeof record.path === 'string') return writePreview(record) ?? record.path
   }
   try {
     const json = JSON.stringify(args)
@@ -126,4 +142,23 @@ export function summarizeToolCall(tool: string, args: unknown): string {
   } catch {
     return String(args)
   }
+}
+
+function writePreview(record: Record<string, unknown>): string | null {
+  const target = record.path as string
+  if (typeof record.content === 'string') {
+    return `${target}\nNew content:\n${preview(record.content)}`
+  }
+  if (typeof record.old_string === 'string' && typeof record.new_string === 'string') {
+    return [
+      target,
+      `- ${preview(record.old_string)}`,
+      `+ ${preview(record.new_string)}`,
+    ].join('\n')
+  }
+  return null
+}
+
+function preview(text: string): string {
+  return text.length > SUMMARY_PREVIEW ? `${text.slice(0, SUMMARY_PREVIEW)} …` : text
 }

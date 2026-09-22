@@ -109,10 +109,97 @@ const SYSTEM_ROOTS = ['/etc', '/usr', '/bin', '/sbin', '/lib', '/lib64', '/boot'
 /** Credential stores. Rewriting one is how a helpful agent leaks your keys. */
 const SECRET_ROOTS = ['.ssh', '.gnupg', '.aws', '.netrc', '.docker/config.json', '.kube/config']
 
+/**
+ * Inside `/dev`, but not somewhere a command writes anything that survives.
+ * `> /dev/null` is how half of shell one-liners are written, and refusing it
+ * would be the kind of false positive that gets a rule turned off.
+ */
+const HARMLESS_DEVICES = new Set([
+  '/dev/null',
+  '/dev/stdout',
+  '/dev/stderr',
+  '/dev/zero',
+  '/dev/random',
+  '/dev/urandom',
+  '/dev/tty',
+])
+
 export function scanWriteTarget(args: unknown, cwd: string): RuleHit | null {
   const target = extractWriteTarget(args)
   if (!target) return null
-  const resolved = resolveToolPath(cwd, target)
+  return protectedPath(resolveToolPath(cwd, target))
+}
+
+/**
+ * The same protection for the shell. A file write was refused outright while
+ * `rm -rf ~/.ssh` or `echo key > ~/.ssh/authorized_keys` merely went to the
+ * reviewer — the same target, judged by which tool happened to reach it.
+ *
+ * This reads the command as text, so it is a backstop, not a sandbox: it knows
+ * redirections and the handful of commands that take a path to write, and it
+ * deliberately ignores everything else. Reading a system file stays fine
+ * (`grep … /etc/hosts` is not a write), which is why only these are looked at.
+ */
+export function scanCommandTargets(command: string, cwd: string): RuleHit | null {
+  for (const target of commandWriteTargets(command)) {
+    const hit = protectedPath(resolveToolPath(cwd, target))
+    if (hit) return hit
+  }
+  return null
+}
+
+/** Commands whose arguments name something to write, and which side of them. */
+const WRITE_VERBS: { pattern: RegExp; operands: 'all' | 'last' }[] = [
+  { pattern: /\brm\b/, operands: 'all' },
+  { pattern: /\btruncate\b/, operands: 'all' },
+  { pattern: /\bshred\b/, operands: 'all' },
+  { pattern: /\btee\b/, operands: 'all' },
+  { pattern: /\bsed\b[^\n;&|]*\s(?:-i|--in-place)\b/, operands: 'all' },
+  // Only the last argument is written to, so `cp /etc/hosts ./copy` stays legal.
+  { pattern: /\bmv\b/, operands: 'last' },
+  { pattern: /\bcp\b/, operands: 'last' },
+  { pattern: /\bln\b/, operands: 'last' },
+  { pattern: /\binstall\b/, operands: 'last' },
+]
+
+function commandWriteTargets(command: string): string[] {
+  const targets: string[] = []
+  const add = (value: string | undefined): void => {
+    const clean = value ? unquote(value) : ''
+    if (clean) targets.push(clean)
+  }
+
+  // `> file`, `>> file` — but not `2>&1`, whose target is a file descriptor.
+  for (const match of command.matchAll(/>>?\s*([^\s;&|<>]+)/g)) add(match[1])
+
+  for (const verb of WRITE_VERBS) {
+    const match = verb.pattern.exec(command)
+    if (!match) continue
+    const rest = command.slice(match.index + match[0].length)
+    const segment = rest.split(/[;&|\n]/)[0] ?? ''
+    const operands = segment
+      .split(/\s+/)
+      .filter((token) => token.length > 0 && !token.startsWith('-'))
+    for (const token of verb.operands === 'all' ? operands : operands.slice(-1)) add(token)
+  }
+
+  for (const match of command.matchAll(/\bdd\b[^\n;&|]*?\bof=([^\s;&|]+)/g)) add(match[1])
+  for (const match of command.matchAll(/\b(?:curl|wget)\b[^\n;&|]*?\s(?:-o|--output|-O)\s*([^\s;&|]+)/g)) {
+    add(match[1])
+  }
+
+  return targets
+}
+
+/** The shell would have expanded these; the scan has to as well, or it misses. */
+function unquote(token: string): string {
+  return token
+    .replace(/^["']|["']$/g, '')
+    .replace(/\$\{?HOME\}?/g, homedir())
+}
+
+function protectedPath(resolved: string): RuleHit | null {
+  if (HARMLESS_DEVICES.has(resolved)) return null
 
   for (const root of SYSTEM_ROOTS) {
     if (isInside(resolved, root)) return { rule: 'write-system-path', reason: `writes inside ${root}` }
@@ -139,7 +226,15 @@ const REVIEW_PREVIEW = 500
  */
 export function reviewText(args: unknown): string | null {
   const command = extractCommandText(args)
-  if (command) return `Command to run:\n${command}`
+  if (command) {
+    // The directory is part of the action: `rm -rf *` means something else in
+    // /etc, and the reviewer has to see which one it is judging.
+    const cwd =
+      args && typeof args === 'object' && typeof (args as Record<string, unknown>).cwd === 'string'
+        ? ((args as Record<string, unknown>).cwd as string).trim()
+        : ''
+    return cwd ? `Command to run (in ${cwd}):\n${command}` : `Command to run:\n${command}`
+  }
 
   const target = extractWriteTarget(args)
   if (!target) return null
