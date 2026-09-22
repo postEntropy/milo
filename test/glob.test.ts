@@ -130,4 +130,19 @@ describe('glob', () => {
   it('is read-only (never asks for confirmation)', () => {
     expect(globTool.readOnly).toBe(true)
   })
+
+  it('says a cancelled walk was cancelled', async () => {
+    tree = makeTree({ 'a.ts': 'x\n' })
+    const controller = new AbortController()
+    controller.abort()
+
+    const result = await globTool.execute(
+      { pattern: '*.ts' },
+      { cwd: tree.root, signal: controller.signal },
+    )
+
+    // An aborted walk is not the same as a finished one, and the answer says
+    // which it was rather than reporting an empty result as a fact.
+    expect(result.content).toContain('cancelled')
+  })
 })

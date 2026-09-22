@@ -35,4 +35,23 @@ describe('FileMemory', () => {
     const hits = await memory.recall(scope, 'kubernetes ingress controller', { limit: 3 })
     expect(hits).toEqual([])
   })
+
+  it('matches on a short technical term', async () => {
+    const memory = new FileMemory({ dir: tempDir() })
+    const scope = { gateway: 'cli', conversationId: 't3' }
+    await memory.remember(scope, [{ text: 'the deploy script ends with rm of the cache dir' }])
+
+    // Two-character words used to be dropped from the index, so the question
+    // could never match the note.
+    const hits = await memory.recall(scope, 'why does the rm run?', { limit: 3 })
+    expect(hits.some((hit) => hit.text.includes('deploy script'))).toBe(true)
+  })
+
+  it('does not surface a memory just for being recent', async () => {
+    const memory = new FileMemory({ dir: tempDir() })
+    const scope = { gateway: 'cli', conversationId: 't4' }
+    await memory.remember(scope, [{ text: 'the staging database password rotates on mondays' }])
+
+    expect(await memory.recall(scope, 'zzz qqq', { limit: 3 })).toEqual([])
+  })
 })

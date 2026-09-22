@@ -45,6 +45,8 @@ export interface WalkResult {
   entries: WalkEntry[]
   /** The file cap was hit, so the tree was only partly walked. */
   truncated: boolean
+  /** The caller cancelled, so the tree was only partly walked. */
+  aborted?: boolean
 }
 
 export interface WalkOptions {
@@ -65,14 +67,15 @@ export async function walk(options: WalkOptions): Promise<WalkResult> {
   const queue = [options.root]
 
   for (let index = 0; index < queue.length; index += 1) {
-    if (options.signal?.aborted) return { entries, truncated: false }
+    // A cancelled walk is reported as cancelled, never as a complete one.
+    if (options.signal?.aborted) return { entries, truncated: false, aborted: true }
     if (entries.length >= maxEntries) return { entries, truncated: true }
 
     const dir = queue[index]!
     const dirents = await readdir(dir, { withFileTypes: true }).catch(() => [])
 
     for (const dirent of dirents) {
-      if (options.signal?.aborted) return { entries, truncated: false }
+      if (options.signal?.aborted) return { entries, truncated: false, aborted: true }
       if (entries.length >= maxEntries) return { entries, truncated: true }
 
       const full = path.join(dir, dirent.name)

@@ -71,6 +71,10 @@ export class FileMemory implements Memory {
         const recency = 1 / (1 + ageDays)
         return { ...item, score: overlap + recency * 0.5 }
       })
+      // The bonus only ever reorders: at most 0.5, so a memory has to share a
+      // word with the question to come back at all. Recall that answers every
+      // question with whatever was said most recently is worse than one that
+      // answers nothing.
       .filter((item) => (item.score ?? 0) > 0.5)
       .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
       .slice(0, limit)
@@ -108,6 +112,9 @@ function tokenize(text: string): Set<string> {
   const tokens = text
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)
-    .filter((token) => token.length > 2 && !STOPWORDS.has(token))
+    // Two characters, not three: `rm`, `go`, `io` and `db` are exactly the kind
+    // of term a question about a project turns on, and dropping them meant a
+    // memory could never be recalled by the word the user actually used.
+    .filter((token) => token.length > 1 && !STOPWORDS.has(token))
   return new Set(tokens)
 }

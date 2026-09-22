@@ -41,13 +41,14 @@ export const globTool: Tool<GlobArgs> = {
     if (!info.isDirectory()) return { content: `${label} is not a directory.`, isError: true }
 
     const limit = Math.min(args.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
-    const { entries, truncated } = await walk({ root, signal: ctx.signal })
+    const { entries, truncated, aborted } = await walk({ root, signal: ctx.signal })
+    const partial = aborted ? '(the walk was cancelled)' : truncated ? '(the tree was only partly walked)' : null
     const matches = entries
       .filter((entry) => matcher.test(entry.rel))
       .sort((a, b) => b.mtimeMs - a.mtimeMs || a.rel.localeCompare(b.rel))
 
     if (matches.length === 0) {
-      const note = truncated ? ' (the tree was only partly walked)' : ''
+      const note = partial ? ` ${partial}` : ''
       return { content: `No files match "${args.pattern}" in ${label}.${note}` }
     }
 
@@ -55,7 +56,7 @@ export const globTool: Tool<GlobArgs> = {
     if (matches.length > lines.length) {
       lines.push(`… ${matches.length} matched, showing the ${lines.length} most recent`)
     }
-    if (truncated) lines.push('… (the tree was only partly walked)')
+    if (partial) lines.push(`… ${partial}`)
 
     return { content: lines.join('\n') }
   },

@@ -67,10 +67,12 @@ export const grepTool: Tool<GrepArgs> = {
 
     const files: { path: string; rel: string }[] = []
     let truncated = false
+    let aborted = false
 
     if (info.isDirectory()) {
       const result = await walk({ root: target, signal: ctx.signal })
       truncated = result.truncated
+      aborted = result.aborted === true
       for (const entry of result.entries) {
         if (fileFilter && !fileFilter.test(entry.rel)) continue
         files.push({ path: entry.path, rel: entry.rel })
@@ -138,7 +140,8 @@ export const grepTool: Tool<GrepArgs> = {
 
     const notes: string[] = []
     if (stopped) notes.push(`stopped at ${limit} matches`)
-    if (truncated) notes.push('the tree was only partly walked')
+    if (aborted) notes.push('the search was cancelled')
+    else if (truncated) notes.push('the tree was only partly walked')
     if (skipped > 0) notes.push(`${skipped} binary or large file(s) skipped`)
     const trailer = notes.length > 0 ? `… (${notes.join('; ')})` : null
 
