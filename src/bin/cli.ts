@@ -1,0 +1,157 @@
+#!/usr/bin/env node
+import process from 'node:process'
+import { createElement } from 'react'
+import { render } from 'ink'
+import {
+  configExists,
+  loadConfig,
+  readAuth,
+  resolveApiKey,
+  type LoadedConfig,
+} from '../core/config/load.js'
+import { errorMessage } from '../util/errors.js'
+import { enterAltScreen, exitAltScreen } from '../gateways/cli/ansi.js'
+import { Shell } from '../gateways/cli/index.js'
+import type { PermissionMode } from '../core/tools/permission.js'
+
+const VERSION = '0.1.0'
+
+interface Args {
+  command: string
+  provider?: string
+  model?: string
+  mode?: string
+  yolo: boolean
+  version: boolean
+  help: boolean
+}
+
+function parseArgs(argv: string[]): Args {
+  const args: Args = { command: 'chat', version: false, help: false, yolo: false }
+  if (argv[0] && !argv[0].startsWith('-')) args.command = argv[0]
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const flag = argv[i]
+    if (flag === '--version' || flag === '-v') args.version = true
+    else if (flag === '--help' || flag === '-h') args.help = true
+    else if (flag === '--yolo') args.yolo = true
+    else if (flag === '--mode') args.mode = argv[++i]
+    else if (flag === '--provider') args.provider = argv[++i]
+    else if (flag === '--model' || flag === '-m') args.model = argv[++i]
+  }
+  return args
+}
+
+function printHelp(): void {
+  console.log(`milo ${VERSION} — a multi-surface agent
+
+Usage:
+  milo                       Start the TUI chat
+  milo setup                 Configure providers, keys, tools, gateways, memory
+  milo model                 Choose the provider/model (setup wizard)
+  milo serve                 Run the enabled bot gateways (Telegram, Discord)
+  milo --model <id>          Override the model for this session
+  milo --provider <id>       Use another configured provider
+  milo --mode <mode>         Permission mode: ask | auto | yolo
+  milo --yolo                Shorthand for --mode yolo
+
+In the chat: /model · /setup · /mode ask|auto|yolo · /yolo · /clear · /help · /exit
+
+Config:  ~/.milo/config.json
+Keys:    ~/.milo/auth.json (or env: COMMANDCODE_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY, …)`)
+}
+
+function applyOverrides(loaded: LoadedConfig, args: Args): void {
+  if (args.provider) {
+    const entry = loaded.config.providers[args.provider]
+    if (!entry) throw new Error(`Provider "${args.provider}" is not configured.`)
+    loaded.provider = {
+      id: args.provider,
+      name: entry.name,
+      baseURL: entry.baseURL,
+      wire: entry.wire,
+      headers: entry.headers,
+      apiKey: resolveApiKey(args.provider, entry, readAuth()),
+    }
+  }
+  if (args.model) loaded.model = args.model
+}
+
+async function runTui(
+  startScreen: 'chat' | 'model' | 'settings',
+  standalone: boolean,
+  args: Args,
+  initialMode?: PermissionMode,
+): Promise<void> {
+  let loaded: LoadedConfig | null = null
+  if (configExists()) {
+    loaded = loadConfig()
+    if (loaded) applyOverrides(loaded, args)
+  }
+
+  const missingKey = loaded !== null && loaded.provider.apiKey === undefined
+  const screen = missingKey ? 'model' : startScreen
+
+  enterAltScreen()
+  try {
+    const app = render(
+      createElement(Shell, {
+        initial: loaded,
+        cwd: process.cwd(),
+        startScreen: screen,
+        standalone,
+        initialMode,
+      }),
+      { exitOnCtrlC: false },
+    )
+    await app.waitUntilExit()
+  } finally {
+    exitAltScreen()
+  }
+}
+
+async function main(): Promise<void> {
+  const args = parseArgs(process.argv.slice(2))
+
+  if (args.version) {
+    console.log(VERSION)
+    return
+  }
+  if (args.help) {
+    printHelp()
+    return
+  }
+
+  if (args.mode && !['ask', 'auto', 'yolo'].includes(args.mode)) {
+    console.error(`Invalid --mode "${args.mode}". Use ask, auto or yolo.`)
+    process.exitCode = 1
+    return
+  }
+  const initialMode = args.yolo ? 'yolo' : (args.mode as PermissionMode | undefined)
+
+  switch (args.command) {
+    case 'serve': {
+      const { runServe } = await import('../gateways/serve.js')
+      await runServe()
+      return
+    }
+    case 'model':
+      await runTui('model', true, args, initialMode)
+      return
+    case 'setup':
+      await runTui('settings', true, args, initialMode)
+      return
+    case 'chat':
+      await runTui('chat', false, args, initialMode)
+      return
+    default:
+      console.error(`Unknown command: ${args.command}\n`)
+      printHelp()
+      process.exitCode = 1
+  }
+}
+
+main().catch((error) => {
+  console.error(errorMessage(error))
+  process.exitCode = 1
+})
