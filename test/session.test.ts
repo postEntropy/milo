@@ -6,6 +6,7 @@ import type { AgentEvent } from '../src/core/agent/events.js'
 import { FileMemory } from '../src/core/memory/local.js'
 import type { MemoryScope } from '../src/core/memory/index.js'
 import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
+import type { HistoryEntry } from '../src/core/history.js'
 import { Session, type SessionOptions } from '../src/core/session.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
@@ -260,5 +261,68 @@ describe('Session', () => {
     }
 
     expect(provider.lastMaxTokens).toBeUndefined()
+  })
+
+  it('keeps the reasoning in the transcript, and logs the turn', async () => {
+    const entries: HistoryEntry[] = []
+    const provider: Provider = {
+      id: 'thinking',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        yield { type: 'reasoning', delta: 'weighing the options' }
+        yield { type: 'text', delta: 'done' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+
+    const { session } = await sessionWith(provider, {
+      history: { append: (batch) => entries.push(...batch) },
+    })
+    for await (const _event of session.send('think about it')) {
+      // drain
+    }
+
+    const parts = session.messages.flatMap((message) => message.content)
+    expect(parts.filter((part) => part.type === 'reasoning')).toEqual([
+      { type: 'reasoning', text: 'weighing the options' },
+    ])
+
+    expect(entries.map((entry) => entry.kind)).toEqual(['user', 'assistant'])
+    expect(entries[0]).toMatchObject({ text: 'think about it', session: session.id })
+    expect(entries[1]).toMatchObject({
+      text: 'done',
+      reasoning: 'weighing the options',
+      session: session.id,
+    })
+  })
+
+  it('logs the tools a turn ran, with what they returned', async () => {
+    const entries: HistoryEntry[] = []
+    let step = 0
+    const provider: Provider = {
+      id: 'tooling',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        step += 1
+        if (step === 1) {
+          yield { type: 'tool-call', id: 'c1', name: 'read_file', args: { path: 'package.json' } }
+          yield { type: 'done', finishReason: 'tool_calls' }
+          return
+        }
+        yield { type: 'text', delta: 'it is milo' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+
+    const { session } = await sessionWith(provider, {
+      history: { append: (batch) => entries.push(...batch) },
+    })
+    for await (const _event of session.send('what is this project?')) {
+      // drain
+    }
+
+    expect(entries.map((entry) => entry.kind)).toEqual(['user', 'tool', 'assistant'])
+    expect(entries[1]).toMatchObject({
+      tool: { name: 'read_file', args: { path: 'package.json' }, isError: false },
+    })
+    expect(entries[1]?.tool?.result).toContain('milo')
   })
 })

@@ -1,6 +1,7 @@
 import { errorMessage } from '../util/errors.js'
 import type { SessionsConfig } from './config/schema.js'
-import type { Memory, MemoryScope } from './memory/index.js'
+import type { HistoryEntry, HistoryWriter } from './history.js'
+import { scopeKey, type Memory, type MemoryScope } from './memory/index.js'
 import type { Message, Provider } from './providers/types.js'
 import type { PermissionAsker, PermissionPolicy, ToolRegistry } from './tools/index.js'
 import type { AgentEvent } from './agent/events.js'
@@ -50,6 +51,8 @@ export interface SessionOptions {
   record: SessionRecord
   store: SessionStore
   sessions?: SessionsConfig
+  /** Where a turn is written down for later recall. Absent: nothing is logged. */
+  history?: HistoryWriter
 }
 
 export interface SendOptions {
@@ -100,6 +103,21 @@ export class Session {
     } = this.options
     const signal = opts?.signal
 
+    // What this turn leaves in the log: the question, every tool it ran, and
+    // what it answered — with the reasoning that got there.
+    const entries: HistoryEntry[] = []
+    const note = (entry: Omit<HistoryEntry, 'at' | 'session' | 'scope'>) => {
+      entries.push({
+        at: new Date().toISOString(),
+        session: this.id,
+        scope: scopeKey(this.scope),
+        ...entry,
+      })
+    }
+    let answer = ''
+    let reasoning = ''
+    let running: { name: string; args: unknown } | null = null
+
     const tools = registry.specs()
     const recalled = await memory.recall(this.scope, input, {
       limit: this.options.recallLimit ?? 5,
@@ -123,6 +141,7 @@ export class Session {
     this.lastSystemTokens = estimateText(systemPrompt)
 
     this.messages.push({ role: 'user', content: [{ type: 'text', text: input }] })
+    note({ kind: 'user', text: input })
     // Persist the user's message now, so a crash mid-answer does not lose it.
     await this.persist()
 
@@ -150,6 +169,21 @@ export class Session {
         permission: permissionPolicy ? { policy: permissionPolicy, ask: opts?.ask } : undefined,
       })) {
         if (event.type === 'error') errored = true
+        else if (event.type === 'text-delta') answer += event.delta
+        else if (event.type === 'reasoning-delta') reasoning += event.delta
+        else if (event.type === 'tool-start') running = { name: event.name, args: event.args }
+        else if (event.type === 'tool-end') {
+          note({
+            kind: 'tool',
+            tool: {
+              name: event.name,
+              args: running?.args ?? {},
+              result: event.result,
+              isError: event.isError,
+            },
+          })
+          running = null
+        }
         yield event
       }
     } catch (error) {
@@ -166,6 +200,9 @@ export class Session {
     } finally {
       // Runs even when the consumer aborts, so the partial turn is on disk.
       await this.persist()
+      // A turn that was stopped still said something worth finding later.
+      if (answer || reasoning) note({ kind: 'assistant', text: answer, reasoning })
+      this.options.history?.append(entries)
     }
 
     // Remember only what the user said — the assistant's own replies are not

@@ -151,6 +151,7 @@ denied tool. The queue also stops two turns from mutating the same session at on
 | `write_file` | no | Creates or replaces a file; asks for confirmation. |
 | `edit_file` | no | Exact string replacement; asks for confirmation. |
 | `remember` | — | Saves a durable fact; only touches Milo's own memory, so it never asks. |
+| `search_history` | yes | Term search over Milo's own past turns, reasoning and tool calls included. |
 | `web_search` | yes | Registered only when a search provider is configured. |
 | `shell_command` | no | Runs with `/bin/sh`; asks for confirmation first. |
 
@@ -390,6 +391,32 @@ That budget counts the **system prompt too** — the persona, the tool list, the
 the running summary ride along with every request. Counting only the transcript let the real request
 go over while the estimate said it was fine. `/stats` reports both numbers for the same reason.
 
+## History
+
+Sessions are the working state: they get cleared, compacted, deleted. The **history log** is the
+record that outlives them — one append-only JSONL file per day under `~/.milo/history/`, written
+`0600`, a line per event: every question, every answer, every tool call with its arguments and its
+result, and the model's reasoning, each tagged with the session's name and the address it came from.
+A turn writes its lines in one `append`, so the worst a kill can leave behind is a torn last line —
+and the reader skips that instead of failing.
+
+The reasoning is the part that had nowhere to go before: it was streamed to the screen and died with
+the turn. It is now kept in the transcript — and deliberately never sent back. It is not part of the
+conversation, so replaying it would pay for the same tokens twice; neither wire forwards it, and
+`estimateTokens` does not count it, because a transcript is measured by what the provider receives,
+not by what is on disk.
+
+`search_history` is the read side: give it terms (all of them have to appear, any case) and it returns
+the newest matches from the last 30 days, reading the reasoning, the tool arguments and the tool
+results as well — which is what makes "what did we try for X?" answerable. The reply is capped and
+says when there were more matches than it showed.
+
+Plain text on disk is what keeps everything else working: `grep`, `jq`, `tail -f`, and Milo's own
+`read_file` and `grep`. There is no index — the search walks day files, newest first, and stops at the
+limit — which is the honest trade for a log this size, and the reason the format is JSONL rather than
+SQLite: a database here would be a *derived* index, rebuildable from these files, for the day the
+questions get heavier than "find that thing from last week".
+
 ## Memory
 
 Memory sits behind a thin, vendor-agnostic interface (`remember` / `recall`). The MVP ships a
@@ -456,7 +483,8 @@ Known open work, roughly in order:
    messages and the turn queue against the live APIs.
 2. **A real memory backend** (mem0 / Honcho / Zep / Letta / Hindsight) behind the same
    `remember` / `recall` interface. Today: keyword overlap plus a recency bonus, over the user's
-   messages and whatever the model chose to save with the `remember` tool.
+   messages and whatever the model chose to save with the `remember` tool. The history log is already
+   searchable by term (`search_history`); ranked or vector recall over it is the open part.
 3. **Memory across gateways.** Facts are keyed by the conversation address, so something told in
    Telegram is not visible in the CLI. Sharing them needs a per-person identity map.
 4. **Web search needs a key.** `config.json` has no `search` section, so `web_search` is not even

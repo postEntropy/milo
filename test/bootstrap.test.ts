@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -89,5 +89,37 @@ describe('createRuntime', () => {
     )
     expect(await runtime.permissions?.decide(writeTool, { command: 'npm test' })).toBe('ask')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('writes a turn to the history log of the home it was built for', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async (_input: string | URL, _init?: RequestInit) =>
+          new Response(
+            'data: {"choices":[{"delta":{"content":"hi there"}}]}\n\ndata: [DONE]\n\n',
+            { status: 200, headers: { 'content-type': 'text/event-stream' } },
+          ),
+      ),
+    )
+
+    const runtime = createRuntime(loadedConfig('https://x.test/v1'), process.cwd())
+    const session = await runtime.getSession({ gateway: 'cli', conversationId: 'history' })
+    for await (const _event of session.send('write this down')) {
+      // drain
+    }
+
+    const dir = path.join(home, 'history')
+    const [file] = readdirSync(dir).sort()
+    const log = readFileSync(path.join(dir, file!), 'utf8').trim().split('\n')
+
+    expect(file).toMatch(/^\d{4}-\d{2}-\d{2}\.jsonl$/)
+    expect(log).toHaveLength(2)
+    expect(JSON.parse(log[0]!)).toMatchObject({
+      kind: 'user',
+      text: 'write this down',
+      session: session.id,
+    })
+    expect(JSON.parse(log[1]!)).toMatchObject({ kind: 'assistant', text: 'hi there' })
   })
 })

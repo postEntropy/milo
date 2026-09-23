@@ -1,4 +1,5 @@
 import type { SessionsConfig } from './config/schema.js'
+import type { HistoryWriter } from './history.js'
 import type { Memory, MemoryScope } from './memory/index.js'
 import { scopeKey } from './memory/index.js'
 import type { Provider } from './providers/types.js'
@@ -27,6 +28,8 @@ export interface RuntimeOptions {
   /** Defaults to an in-memory store, which keeps tests off the disk. */
   store?: SessionStore
   sessions?: SessionsConfig
+  /** Where turns are logged for later recall; absent means nothing is logged. */
+  history?: HistoryWriter
 }
 
 /**
@@ -129,6 +132,7 @@ export class AgentRuntime {
       record,
       store: this.store,
       sessions: this.options.sessions,
+      history: this.options.history,
     })
     this.cache.set(record.id, session)
     return session

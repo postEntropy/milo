@@ -69,6 +69,7 @@ describe('tool permission gating', () => {
       write_file: false,
       edit_file: false,
       remember: false,
+      search_history: true,
       shell_command: false,
     })
   })

@@ -6,6 +6,7 @@ import { grepTool } from './grep.js'
 import { listDirTool } from './list-dir.js'
 import { readFileTool } from './read-file.js'
 import { rememberTool } from './remember.js'
+import { searchHistoryTool } from './search-history.js'
 import { ToolRegistry } from './registry.js'
 import { shellTool } from './shell.js'
 import type { Tool } from './types.js'
@@ -24,6 +25,7 @@ export { fetchUrlTool } from './fetch-url.js'
 export { writeFileTool } from './write-file.js'
 export { editFileTool } from './edit-file.js'
 export { rememberTool } from './remember.js'
+export { searchHistoryTool } from './search-history.js'
 export { shellTool } from './shell.js'
 export { createWebSearchTool } from './web-search.js'
 export { JevReviewer, createJevReviewer } from './jev.js'
@@ -37,6 +39,7 @@ export const builtinTools = [
   writeFileTool,
   editFileTool,
   rememberTool,
+  searchHistoryTool,
   shellTool,
 ]
 

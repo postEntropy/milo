@@ -1,6 +1,7 @@
 import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
 import { memoryDir, sessionsDir } from './config/paths.js'
 import { readAuth, resolveSearchKey, type LoadedConfig } from './config/load.js'
+import { fileHistory } from './history.js'
 import { createMemory } from './memory/index.js'
 import { createProvider } from './providers/create.js'
 import { AgentRuntime } from './runtime.js'
@@ -27,6 +28,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     registry: createToolRegistry({ search }),
     memory: createMemory(loaded.config.memory, memoryDir()),
     store: new FileSessionStore({ dir: sessionsDir() }),
+    history: fileHistory,
     sessions: loaded.config.sessions,
     cwd,
     maxSteps: loaded.config.maxSteps,
