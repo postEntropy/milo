@@ -56,25 +56,54 @@ describe('setPermissionMode', () => {
   })
 })
 
+describe('reasoning effort', () => {
+  it('asks for medium when the file says nothing about it', () => {
+    // Every request carries an explicit effort now: "let the provider and model
+    // decide" was a value nobody could name, and `effort default` a label nobody
+    // could read.
+    expect(readConfig()?.reasoningEffort).toBe('medium')
+  })
+})
+
 describe('display settings', () => {
   it('defaults to showing everything when the file predates them', () => {
-    expect(readDisplay()).toEqual({ tools: 'full', thinking: true })
+    expect(readDisplay()).toEqual({ tools: 'full', thinking: 'on' })
+  })
+
+  it('reads the forms the setting used to have, so an old file still loads', () => {
+    // A config written before the current form says `true`, `false`, `brief` or
+    // `full`, and refusing one would fail the whole file and take every other
+    // setting with it.
+    writeFileSync(
+      configFile,
+      JSON.stringify({ ...base, display: { tools: 'name', thinking: false } }, null, 2),
+    )
+    expect(readDisplay()).toEqual({ tools: 'name', thinking: 'off' })
+
+    for (const before of [true, 'brief', 'full']) {
+      writeFileSync(
+        configFile,
+        JSON.stringify({ ...base, display: { tools: 'full', thinking: before } }, null, 2),
+      )
+      // Every one of them showed the reasoning, which is `on`.
+      expect(readDisplay()).toEqual({ tools: 'full', thinking: 'on' })
+    }
   })
 
   it('writes one setting and leaves the other alone', () => {
     setDisplay({ tools: 'off' })
-    expect(readDisplay()).toEqual({ tools: 'off', thinking: true })
+    expect(readDisplay()).toEqual({ tools: 'off', thinking: 'on' })
 
-    setDisplay({ thinking: false })
-    expect(readDisplay()).toEqual({ tools: 'off', thinking: false })
-    expect(readConfig()?.display).toEqual({ tools: 'off', thinking: false })
+    setDisplay({ thinking: 'off' })
+    expect(readDisplay()).toEqual({ tools: 'off', thinking: 'off' })
+    expect(readConfig()?.display).toEqual({ tools: 'off', thinking: 'off' })
   })
 
   it('falls back to the defaults on an unreadable file rather than throwing', () => {
     writeFileSync(configFile, '{ not json')
 
     expect(() => readDisplay()).not.toThrow()
-    expect(readDisplay()).toEqual({ tools: 'full', thinking: true })
+    expect(readDisplay()).toEqual({ tools: 'full', thinking: 'on' })
   })
 
   it('does not throw away a change just because the file is unreadable', () => {
@@ -83,6 +112,6 @@ describe('display settings', () => {
     // The turn in progress must not end because one setting could not be saved.
     expect(() => setDisplay({ tools: 'off' })).not.toThrow()
     expect(() => setPermissionMode('yolo')).not.toThrow()
-    expect(readDisplay()).toEqual({ tools: 'full', thinking: true })
+    expect(readDisplay()).toEqual({ tools: 'full', thinking: 'on' })
   })
 })

@@ -2,7 +2,7 @@ import type { SessionsConfig } from './config/schema.js'
 import type { HistoryWriter } from './history.js'
 import type { Memory, MemoryScope } from './memory/index.js'
 import { scopeKey } from './memory/index.js'
-import type { Provider } from './providers/types.js'
+import { DEFAULT_REASONING_EFFORT, type Provider, type ReasoningEffort } from './providers/types.js'
 import type { PermissionPolicy } from './tools/index.js'
 import type { ToolRegistry } from './tools/index.js'
 import { Session } from './session.js'
@@ -37,6 +37,10 @@ export interface RuntimeOptions {
   sessions?: SessionsConfig
   /** Where turns are logged for later recall; absent means nothing is logged. */
   history?: HistoryWriter
+  /** Where a model's context window comes from, for the compaction ceiling. */
+  lookupContextWindow?: (model: string) => Promise<number | undefined>
+  /** How hard the model should think; `medium` unless the config was changed. */
+  reasoningEffort?: ReasoningEffort
 }
 
 /**
@@ -120,6 +124,16 @@ export class AgentRuntime {
     return this.options.permissionPolicy
   }
 
+  /** How hard the model thinks, from the turn after this one. */
+  setReasoningEffort(effort: ReasoningEffort): void {
+    this.options.reasoningEffort = effort
+  }
+
+  /** The effort that will be sent: never absent, because Milo has a default. */
+  get reasoningEffort(): ReasoningEffort {
+    return this.options.reasoningEffort ?? DEFAULT_REASONING_EFFORT
+  }
+
   reset(): void {
     this.cache.clear()
   }
@@ -180,6 +194,10 @@ export class AgentRuntime {
       recaps: this.recaps,
       sessions: this.options.sessions,
       history: this.options.history,
+      lookupContextWindow: this.options.lookupContextWindow,
+      // A getter, not the value: `/effort` changes what the next turn sends
+      // without the runtime having to be rebuilt around it.
+      reasoningEffort: () => this.reasoningEffort,
     })
     this.cache.set(record.id, session)
     return session

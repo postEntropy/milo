@@ -39,7 +39,7 @@ const configWith = (gateways: Record<string, { enabled: boolean; allowlist: stri
       model: 'test-model',
       providers: { test: { baseURL: 'https://x.test/v1', wire: 'openai' } },
       memory: { backend: 'file' },
-      display: { tools: 'full', thinking: true },
+      display: { tools: 'full', thinking: 'on' },
       gateways,
       permissions: { mode: 'ask', allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
     },

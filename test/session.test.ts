@@ -5,10 +5,16 @@ import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../src/core/agent/events.js'
 import { FileMemory } from '../src/core/memory/local.js'
 import type { MemoryScope } from '../src/core/memory/index.js'
-import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
+import type {
+  ChatRequest,
+  Provider,
+  ReasoningEffort,
+  StreamEvent,
+} from '../src/core/providers/types.js'
 import type { HistoryEntry } from '../src/core/history.js'
 import { Session, type SessionOptions } from '../src/core/session.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
+import { FileSessionStore } from '../src/core/sessions/file-store.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
 
 type Extra = Omit<SessionOptions, 'record' | 'scope' | 'store' | 'provider' | 'memory'>
@@ -17,10 +23,12 @@ class CapturingProvider implements Provider {
   readonly id = 'capturing'
   lastSystem?: string
   lastMaxTokens?: number
+  lastEffort?: ReasoningEffort
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     this.lastSystem = req.system
     this.lastMaxTokens = req.maxTokens
+    this.lastEffort = req.reasoningEffort
     yield { type: 'text', delta: 'SECRET_ASSISTANT_REPLY' }
     yield { type: 'done', finishReason: 'stop' }
   }
@@ -94,6 +102,73 @@ describe('Session', () => {
 
     const assistantHits = await memory.recall(scope, 'SECRET_ASSISTANT_REPLY', { limit: 5 })
     expect(assistantHits).toEqual([])
+  })
+
+  it('takes up a message sent mid-turn, and writes it down as it arrives', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+    const memory = new FileMemory({ dir })
+    // A file store, not the in-memory one: it hands back a copy, so reading it
+    // mid-turn says what is really on disk.
+    const store = new FileSessionStore({ dir: path.join(dir, 'sessions') })
+    const scope: MemoryScope = { gateway: 'cli', conversationId: 'steer' }
+    const record = await store.create()
+    const logged: HistoryEntry[] = []
+
+    const steering: string[] = []
+    let step = 0
+    let onDiskWhenAnswered: string[] | undefined
+
+    const provider: Provider = {
+      id: 'steering',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        step += 1
+        if (step === 1) {
+          yield { type: 'text', delta: 'let me look' }
+          // The user corrects the answer while it is still coming in.
+          steering.push('the config lives in ~/.milo')
+          yield { type: 'done', finishReason: 'stop' }
+          return
+        }
+        // Answering the correction, it has to be on disk already: a crash here
+        // must not lose what the user said.
+        onDiskWhenAnswered = (await store.load(record.id))?.messages.map((message) => message.role)
+        yield { type: 'text', delta: 'checking there' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory,
+      store,
+      scope,
+      record,
+      cwd: process.cwd(),
+      provider,
+      maxSteps: 4,
+      history: { append: (entries) => logged.push(...entries) },
+    })
+
+    const events = []
+    for await (const event of session.send('where does the config live?', { steering })) {
+      events.push(event)
+    }
+
+    expect(events.filter((event) => event.type === 'steer')).toEqual([
+      { type: 'steer', text: 'the config lives in ~/.milo' },
+    ])
+    // One turn, two steps — not a second turn.
+    expect(step).toBe(2)
+    expect(onDiskWhenAnswered).toEqual(['user', 'assistant', 'user'])
+    expect(
+      logged.filter((entry) => entry.kind === 'user').map((entry) => entry.text),
+    ).toEqual(['where does the config live?', 'the config lives in ~/.milo'])
+
+    // What the user said is a durable fact whether it opened a turn or corrected one.
+    const hits = await memory.recall(scope, 'config', { limit: 5 })
+    expect(hits.some((hit) => hit.text.includes('~/.milo'))).toBe(true)
   })
 
   it('lets the model save a fact with the remember tool', async () => {
@@ -261,6 +336,35 @@ describe('Session', () => {
     }
 
     expect(provider.lastMaxTokens).toBeUndefined()
+  })
+
+  it('asks for medium when nothing set the effort', async () => {
+    const provider = new CapturingProvider()
+    const { session } = await sessionWith(provider)
+    for await (const _event of session.send('hello')) {
+      // drain
+    }
+
+    // Never absent: an absent field left the choice to whatever each provider
+    // and model made of it — the value nobody could name.
+    expect(provider.lastEffort).toBe('medium')
+  })
+
+  it('reads the effort per turn, so a change lands on the next one', async () => {
+    const provider = new CapturingProvider()
+    let effort: ReasoningEffort = 'low'
+    const { session } = await sessionWith(provider, { reasoningEffort: () => effort })
+    for await (const _event of session.send('hello')) {
+      // drain
+    }
+    expect(provider.lastEffort).toBe('low')
+
+    // `/effort high` changes what the session reads, not the session itself.
+    effort = 'high'
+    for await (const _event of session.send('again')) {
+      // drain
+    }
+    expect(provider.lastEffort).toBe('high')
   })
 
   it('keeps the reasoning in the transcript, and logs the turn', async () => {

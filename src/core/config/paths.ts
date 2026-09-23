@@ -11,3 +11,5 @@ export const sessionsDir = (): string => path.join(MILO_HOME, 'sessions')
 export const recapsDir = (): string => path.join(sessionsDir(), 'recaps')
 /** One append-only JSONL per day: what was asked, answered and run. */
 export const historyDir = (): string => path.join(MILO_HOME, 'history')
+/** What was typed at the CLI's prompt, for the arrow keys to walk back through. */
+export const inputHistoryFile = (): string => path.join(MILO_HOME, 'input-history.json')

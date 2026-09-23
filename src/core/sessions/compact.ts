@@ -1,4 +1,4 @@
-import type { Message, Provider } from '../providers/types.js'
+import type { Message, Provider, ReasoningEffort } from '../providers/types.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 
@@ -74,36 +74,77 @@ in the language of the conversation. No preamble.`
 /**
  * One model call that turns the dropped turns into a summary. Returns `null` on
  * any failure (or timeout), so the caller can fall back to dropping them plain.
+ *
+ * Summarizing is mechanical, and a reasoning model asked in its own default
+ * voice will think about it: that thinking is seconds added to a turn, whose
+ * result nobody ever reads. So the call asks for a low effort — and, because the
+ * field is one the provider may not know, asks again without it if that is what
+ * failed. Losing every summary to an unknown field is not worth the saving.
  */
 export async function summarize(options: SummarizeOptions): Promise<string | null> {
   const transcript = renderTranscript(options.dropped)
   if (!transcript.trim()) return null
 
+  const request = {
+    provider: options.provider,
+    model: options.model,
+    system: options.system ?? SUMMARY_SYSTEM,
+    messages: [
+      {
+        role: 'user' as const,
+        content: [{ type: 'text' as const, text: promptFor(options.previous, transcript) }],
+      },
+    ],
+    timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+    signal: options.signal,
+  }
+
+  const asked = await call({ ...request, reasoningEffort: 'low' })
+  if (asked.ok) return asked.text || null
+  logWarn(`summary failed with the effort hint, asking again without it: ${asked.error}`)
+
+  const plain = await call(request)
+  if (plain.ok) return plain.text || null
+  logWarn(`summary failed, dropping the turns plain: ${plain.error}`)
+  return null
+}
+
+interface CallOptions {
+  provider: Provider
+  model: string
+  system: string
+  messages: Message[]
+  reasoningEffort?: ReasoningEffort
+  timeoutMs: number
+  signal?: AbortSignal
+}
+
+async function call(
+  options: CallOptions,
+): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
   const controller = new AbortController()
   const abort = () => controller.abort()
-  const timer = setTimeout(abort, options.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+  const timer = setTimeout(abort, options.timeoutMs)
   options.signal?.addEventListener('abort', abort, { once: true })
 
   let text = ''
   try {
     for await (const event of options.provider.stream({
       model: options.model,
-      system: options.system ?? SUMMARY_SYSTEM,
-      messages: [{ role: 'user', content: [{ type: 'text', text: promptFor(options.previous, transcript) }] }],
+      system: options.system,
+      messages: options.messages,
+      reasoningEffort: options.reasoningEffort,
       signal: controller.signal,
     })) {
       if (event.type === 'text') text += event.delta
     }
+    return { ok: true, text }
   } catch (error) {
-    logWarn(`summary failed, dropping the turns plain: ${errorMessage(error)}`)
-    return null
+    return { ok: false, error: errorMessage(error) }
   } finally {
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', abort)
   }
-
-  const trimmed = text.trim()
-  return trimmed.length > 0 ? trimmed : null
 }
 
 const DIGEST_SYSTEM = `You write a short recap of a conversation so it can be found again later.

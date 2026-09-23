@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { FileMemory } from '../src/core/memory/local.js'
-import type { ChatRequest, Message, Provider, StreamEvent } from '../src/core/providers/types.js'
+import type { ChatRequest, Message, Provider, ReasoningEffort, StreamEvent } from '../src/core/providers/types.js'
 import { Session } from '../src/core/session.js'
 import { digest, estimateTokens, planCut, summarize } from '../src/core/sessions/compact.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
@@ -32,12 +32,18 @@ function toolTurn(id: string): Message[] {
 class ScriptedProvider implements Provider {
   readonly id = 'scripted'
   readonly systems: string[] = []
+  /** The effort each summary call asked for, in order. */
+  readonly efforts: (ReasoningEffort | undefined)[] = []
   failing = false
+  /** Refuses any request that names an effort, the way a provider without the field would. */
+  rejectsEffort = false
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     this.systems.push(req.system ?? '')
     if (!req.tools) {
+      this.efforts.push(req.reasoningEffort)
       if (this.failing) throw new Error('summary failed')
+      if (this.rejectsEffort && req.reasoningEffort) throw new Error('unknown field: reasoning_effort')
       yield { type: 'text', delta: 'OLD_TURNS_SUMMARY' }
       yield { type: 'done', finishReason: 'stop' }
       return
@@ -47,7 +53,14 @@ class ScriptedProvider implements Provider {
   }
 }
 
-async function compactingSession(seed: Message[], options: { failing?: boolean } = {}) {
+async function compactingSession(
+  seed: Message[],
+  options: {
+    failing?: boolean
+    contextWindow?: number
+    lookup?: (model: string) => Promise<number | undefined>
+  } = {},
+) {
   const provider = new ScriptedProvider()
   provider.failing = options.failing ?? false
   const store = new MemorySessionStore()
@@ -64,7 +77,14 @@ async function compactingSession(seed: Message[], options: { failing?: boolean }
     cwd: process.cwd(),
     record,
     store,
-    sessions: { maxInputTokens: 40, keepTurns: 1, compaction: true },
+    sessions: {
+      compactAt: 0.7,
+      maxInputTokens: 40,
+      keepTurns: 1,
+      compaction: true,
+      contextWindow: options.contextWindow,
+    },
+    lookupContextWindow: options.lookup,
   })
 
   const events = []
@@ -133,6 +153,26 @@ describe('summarize', () => {
     const provider = new ScriptedProvider()
     expect(await summarize({ provider, model: 'm', dropped: [] })).toBeNull()
   })
+
+  it('asks the mechanical call for a low effort', async () => {
+    // Nobody reads a summary's reasoning; it is only seconds added to a turn.
+    const provider = new ScriptedProvider()
+    await summarize({ provider, model: 'm', dropped: longSeed() })
+
+    expect(provider.efforts).toEqual(['low'])
+  })
+
+  it('asks again without the hint when the provider does not know the field', async () => {
+    const provider = new ScriptedProvider()
+    provider.rejectsEffort = true
+
+    const result = await summarize({ provider, model: 'm', dropped: longSeed() })
+
+    // The summary is worth a second try: losing every one of them to a field the
+    // provider has never heard of is the worse failure.
+    expect(result).toBe('OLD_TURNS_SUMMARY')
+    expect(provider.efforts).toEqual(['low', undefined])
+  })
 })
 
 describe('digest', () => {
@@ -180,6 +220,55 @@ describe('Session compaction', () => {
     expect(events.at(-1)).toMatchObject({ type: 'done' })
   })
 
+  it('reports what the summary cost, before the turn produces anything', async () => {
+    const { events } = await compactingSession(longSeed())
+
+    const at = events.findIndex((event) => event.type === 'compacted')
+    expect(at).toBeGreaterThanOrEqual(0)
+    // It has to arrive before the turn's own output: a surface only has the
+    // number in time to name the wait if the compaction is reported first.
+    expect(at).toBeLessThan(events.findIndex((event) => event.type === 'done'))
+    expect(events[at]).toMatchObject({ type: 'compacted' })
+    expect((events[at] as { ms: number }).ms).toBeGreaterThanOrEqual(0)
+  })
+
+  it('says nothing when there was nothing to compact', async () => {
+    // Already over budget, but there is no user turn to cut on — so no summary
+    // call is made and there is no cost to report.
+    const { events } = await compactingSession([])
+
+    expect(events.some((event) => event.type === 'compacted')).toBe(false)
+    expect(events.at(-1)).toMatchObject({ type: 'done' })
+  })
+
+  it('measures against the model window, not the fallback, when one is known', async () => {
+    // A 100k window at 70% is 70k: this transcript is nowhere near it, where the
+    // 40-token fallback would have summarized it. The fallback is what a fixed
+    // 12000 against a million-token model was doing every turn.
+    const { provider, session, events } = await compactingSession(longSeed(), {
+      lookup: async () => 100_000,
+    })
+
+    expect(events.some((event) => event.type === 'compacted')).toBe(false)
+    expect(provider.systems.every((system) => !system.includes('compress a conversation'))).toBe(true)
+    expect(session.stats().maxInputTokens).toBe(70_000)
+  })
+
+  it('takes a configured window over what the lookup says', async () => {
+    const { session } = await compactingSession(longSeed(), {
+      contextWindow: 2000,
+      lookup: async () => 1_000_000,
+    })
+
+    expect(session.stats().maxInputTokens).toBe(1400)
+  })
+
+  it('reports the fallback when nothing knows the window', async () => {
+    const { session } = await compactingSession(longSeed(), { lookup: async () => undefined })
+
+    expect(session.stats().maxInputTokens).toBe(40)
+  })
+
   it('does nothing when compaction is off', async () => {
     const store = new MemorySessionStore()
     const record = await store.create()
@@ -196,7 +285,7 @@ describe('Session compaction', () => {
       cwd: process.cwd(),
       record,
       store,
-      sessions: { maxInputTokens: 40, keepTurns: 1, compaction: false },
+      sessions: { compactAt: 0.7, maxInputTokens: 40, keepTurns: 1, compaction: false },
     })
 
     for await (const _event of session.send('another one')) {
@@ -227,7 +316,7 @@ describe('Session compaction', () => {
       cwd: process.cwd(),
       record,
       store,
-      sessions: { maxInputTokens: 500, keepTurns: 1, compaction: true },
+      sessions: { compactAt: 0.7, maxInputTokens: 500, keepTurns: 1, compaction: true },
     })
 
     for await (const _event of session.send('another one')) {

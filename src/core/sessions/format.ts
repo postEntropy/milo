@@ -67,12 +67,15 @@ function quote(text: string, markdown: boolean): string {
 
 export function formatStats(stats: SessionStats): string {
   const name = stats.title ? `${stats.id} — ${stats.title}` : stats.id
-  const system =
-    stats.systemTokens === undefined ? '' : ` · ~${stats.systemTokens} tokens of system prompt`
+  // The ceiling the request is measured against, so the count means something:
+  // the CLI shows the same pair, and a token number with no ceiling says nothing
+  // about whether the session is anywhere near compaction.
+  const used = stats.tokens + (stats.systemTokens ?? 0)
+  const ceiling = stats.maxInputTokens ? ` of ${stats.maxInputTokens}` : ''
   const lines = [
     `Session ${name}`,
     `started ${formatWhen(stats.createdAt)} · last activity ${formatWhen(stats.updatedAt)}`,
-    `${stats.messages} messages · ${stats.turns} turns · ~${stats.tokens} tokens in context${system}`,
+    `${stats.messages} messages · ${stats.turns} turns · ~${used}${ceiling} tokens`,
   ]
   if (stats.compacted) {
     const amount = stats.droppedTokens ? ` (~${stats.droppedTokens} tokens summarized)` : ''

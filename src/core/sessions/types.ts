@@ -38,6 +38,12 @@ export interface SessionStats {
   tokens: number
   /** Estimated size of the system prompt, which `tokens` does not include. */
   systemTokens?: number
+  /**
+   * The context budget `tokens` and `systemTokens` are measured against — the
+   * point where the oldest turns get summarized. Without it a token count says
+   * nothing about whether the session is anywhere near that.
+   */
+  maxInputTokens?: number
   compacted: boolean
   droppedTokens?: number
 }

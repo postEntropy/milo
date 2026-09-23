@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { REASONING_EFFORTS, DEFAULT_REASONING_EFFORT } from '../providers/types.js'
 
 export const WireSchema = z.enum(['openai', 'anthropic', 'auto'])
 export type WireInput = z.infer<typeof WireSchema>
@@ -54,7 +55,16 @@ export const SearchSchema = z.object({
 export type SearchConfig = z.infer<typeof SearchSchema>
 
 export const SessionsSchema = z.object({
-  /** Compact the transcript once it grows past this many estimated tokens. */
+  /**
+   * Compact once the request passes this share of the model's context window.
+   * The window is looked up from public model metadata; a flat token ceiling is
+   * meaningless without it — the same 12000 is a third of a small window and 1%
+   * of a large one, and the second case compacts on every turn for nothing.
+   */
+  compactAt: z.number().gt(0).max(0.95).default(0.7),
+  /** The model's window in tokens, for when the lookup is wrong or knows nothing. */
+  contextWindow: z.number().int().positive().optional(),
+  /** The ceiling used when the model's window is unknown. */
   maxInputTokens: z.number().int().positive().default(12000),
   /** Turns kept verbatim when compacting; the older ones get summarized. */
   keepTurns: z.number().int().positive().default(8),
@@ -63,10 +73,31 @@ export const SessionsSchema = z.object({
 export type SessionsConfig = z.infer<typeof SessionsSchema>
 
 export const DEFAULT_SESSIONS: SessionsConfig = {
+  compactAt: 0.7,
   maxInputTokens: 12000,
   keepTurns: 8,
   compaction: true,
 }
+
+/**
+ * Whether a surface shows the model's reasoning. `on` keeps the text under the
+ * question it belongs to, `off` shows none of it. The model reasons either way —
+ * this is display only. Deliberately not a "level": how much thinking happens
+ * (and costs) is `reasoningEffort`, a different question from how much of it is
+ * shown, and one word for both is how the two get confused.
+ */
+export const ThinkingDisplaySchema = z.enum(['off', 'on'])
+export type ThinkingDisplay = z.infer<typeof ThinkingDisplaySchema>
+
+/**
+ * The setting has been a boolean and then a three-value level, and a config on
+ * disk may still say `true`, `false`, `brief` or `full`. Refusing one would fail
+ * the whole file and take every other setting with it, so the old forms are
+ * translated: anything that showed the reasoning is `on`.
+ */
+const ThinkingDisplayValue = z
+  .union([z.boolean(), z.enum(['off', 'on', 'brief', 'full'])])
+  .transform((value): ThinkingDisplay => (value === false || value === 'off' ? 'off' : 'on'))
 
 export const DisplaySchema = z.object({
   /**
@@ -75,15 +106,11 @@ export const DisplaySchema = z.object({
    * shown — hiding that it went wrong is worse than the noise.
    */
   tools: z.enum(['full', 'name', 'off']).default('full'),
-  /**
-   * Show the model's reasoning: a live pane in the CLI, one line on a chat
-   * surface (the whole thing would crowd out the answer in a single message).
-   */
-  thinking: z.boolean().default(true),
+  thinking: ThinkingDisplayValue.default('on'),
 })
 export type DisplayConfig = z.infer<typeof DisplaySchema>
 
-export const DEFAULT_DISPLAY: DisplayConfig = { tools: 'full', thinking: true }
+export const DEFAULT_DISPLAY: DisplayConfig = { tools: 'full', thinking: 'on' }
 
 export const ConfigSchema = z.object({
   provider: z.string(),
@@ -104,6 +131,13 @@ export const ConfigSchema = z.object({
    * model actually supports.
    */
   maxTokens: z.number().int().positive().optional(),
+  /**
+   * How hard the model thinks before answering. Defaults to `medium`, so every
+   * request carries an explicit effort instead of leaving the choice to whatever
+   * each provider and model makes of an absent field. Anthropic's `thinking`
+   * budget is a different shape and is not covered by this yet.
+   */
+  reasoningEffort: z.enum(REASONING_EFFORTS).default(DEFAULT_REASONING_EFFORT),
 })
 export type Config = z.infer<typeof ConfigSchema>
 

@@ -63,6 +63,7 @@ export class OpenAIProvider implements Provider {
     }
     if (typeof req.temperature === 'number') body.temperature = req.temperature
     if (typeof req.maxTokens === 'number') body.max_tokens = req.maxTokens
+    if (req.reasoningEffort) body.reasoning_effort = req.reasoningEffort
 
     const response = await fetch(`${this.baseURL}/chat/completions`, {
       method: 'POST',
@@ -81,6 +82,8 @@ export class OpenAIProvider implements Provider {
 
     const pending = new Map<number, PendingToolCall>()
     let finish: FinishReason = 'stop'
+    let contentChars = 0
+    let reasoningChars = 0
 
     for await (const message of parseSSE(response.body)) {
       if (message.data === '[DONE]') break
@@ -107,16 +110,24 @@ export class OpenAIProvider implements Provider {
       const delta = choice.delta ?? {}
 
       if (typeof delta.content === 'string' && delta.content) {
+        contentChars += delta.content.length
         yield { type: 'text', delta: delta.content }
       }
 
+      // An empty `reasoning_content` is a provider filling the field in, not a
+      // thought: taking it would mask a sibling `reasoning` that carries one —
+      // which is how a thought goes missing on the wire that looks like it
+      // never arrived.
       const reasoning =
-        typeof delta.reasoning_content === 'string'
+        typeof delta.reasoning_content === 'string' && delta.reasoning_content !== ''
           ? delta.reasoning_content
           : typeof delta.reasoning === 'string'
             ? delta.reasoning
             : ''
-      if (reasoning) yield { type: 'reasoning', delta: reasoning }
+      if (reasoning) {
+        reasoningChars += reasoning.length
+        yield { type: 'reasoning', delta: reasoning }
+      }
 
       if (Array.isArray(delta.tool_calls)) {
         for (const call of delta.tool_calls) {
@@ -144,6 +155,13 @@ export class OpenAIProvider implements Provider {
       }
       if (finish === 'stop') finish = 'tool_calls'
     }
+
+    // A provider that puts both channels in one field is indistinguishable from a
+    // model that answered in its thinking, unless the counts are written down:
+    // content 0 with reasoning full is that quirk, not a model that said nothing.
+    logDebug(
+      `openai: ${contentChars} chars of content, ${reasoningChars} chars of reasoning, finished ${finish}`,
+    )
 
     yield { type: 'done', finishReason: finish }
   }

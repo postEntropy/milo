@@ -4,6 +4,7 @@ import { readAuth, resolveSearchKey, type LoadedConfig } from './config/load.js'
 import { fileHistory } from './history.js'
 import { createMemory } from './memory/index.js'
 import { createProvider } from './providers/create.js'
+import { lookupContextWindow } from './providers/context.js'
 import { AgentRuntime } from './runtime.js'
 import { FileRecapStore, FileSessionStore } from './sessions/index.js'
 import { createSearchProvider } from './search/index.js'
@@ -31,6 +32,10 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     recaps: new FileRecapStore({ dir: recapsDir() }),
     history: fileHistory,
     sessions: loaded.config.sessions,
+    // Where the compaction ceiling comes from: a model's window is not in the
+    // config and not in the request, so it is looked up once and cached.
+    lookupContextWindow,
+    reasoningEffort: loaded.config.reasoningEffort,
     cwd,
     maxSteps: loaded.config.maxSteps,
     maxTokens: loaded.config.maxTokens,

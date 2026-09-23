@@ -2,7 +2,7 @@ import { errorMessage } from '../util/errors.js'
 import type { SessionsConfig } from './config/schema.js'
 import type { HistoryEntry, HistoryWriter } from './history.js'
 import { scopeKey, type Memory, type MemoryScope } from './memory/index.js'
-import type { Message, Provider } from './providers/types.js'
+import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
 import type { PermissionAsker, PermissionPolicy, ToolRegistry } from './tools/index.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent } from './agent/loop.js'
@@ -61,12 +61,29 @@ export interface SessionOptions {
   sessions?: SessionsConfig
   /** Where a turn is written down for later recall. Absent: nothing is logged. */
   history?: HistoryWriter
+  /**
+   * Where a model's context window comes from. Swapped in tests, so a test never
+   * has to reach the network to know how big a model is.
+   */
+  lookupContextWindow?: (model: string) => Promise<number | undefined>
+  /**
+   * How hard the model should think, read per turn. A function rather than a
+   * value so a surface can change it without the session being rebuilt.
+   */
+  reasoningEffort?: () => ReasoningEffort
 }
 
 export interface SendOptions {
   signal?: AbortSignal
   /** The surface's inline confirmation prompt for tools that need it. */
   ask?: PermissionAsker
+  /**
+   * Where the surface hands in a message sent while this turn is already
+   * running. The array belongs to the caller and is emptied as the messages are
+   * taken up, so whatever is still in it when the turn ends was never seen — the
+   * caller runs it as its own turn instead of losing it.
+   */
+  steering?: string[]
 }
 
 export class Session {
@@ -82,6 +99,10 @@ export class Session {
   private summary: string | undefined
   /** Size of the last system prompt sent, which the transcript count omits. */
   private lastSystemTokens: number | undefined
+  /** The ceiling the transcript is measured against, once the window is known. */
+  private ceiling: number | undefined
+  /** The lookup in flight: a turn waits on it only if it has not finished. */
+  private readonly resolving: Promise<void>
 
   constructor(options: SessionOptions) {
     this.options = options
@@ -92,6 +113,31 @@ export class Session {
     this.scope = options.scope
     this.messages = options.record.messages
     this.summary = options.record.summary
+    // Asked for now, while the user is still typing, so the first turn does not
+    // wait on a lookup that is only about how big the model is.
+    this.resolving = this.computeCeiling()
+      .then((ceiling) => {
+        this.ceiling = ceiling
+      })
+      .catch(() => {
+        // No window, no ceiling: the configured one stands.
+      })
+  }
+
+  /**
+   * The ceiling a request is measured against: the model's context window times
+   * `compactAt`, or `maxInputTokens` when nothing knows the window.
+   */
+  private async computeCeiling(): Promise<number | undefined> {
+    const config = this.options.sessions
+    if (!config?.compaction) return undefined
+    // Nothing is asked for unless a caller wired a lookup in: a session that
+    // reached the network on its own would make every test a network test.
+    const window = config.contextWindow ?? (await this.options.lookupContextWindow?.(this.options.model))
+    if (!window) return config.maxInputTokens
+    // Never below a floor: a share of a window that turns out tiny would
+    // otherwise compact down to a request with no room to answer in.
+    return Math.max(1024, Math.floor(window * config.compactAt))
   }
 
   get title(): string | undefined {
@@ -112,6 +158,7 @@ export class Session {
       permissionPolicy,
     } = this.options
     const signal = opts?.signal
+    const steering = opts?.steering
 
     // What this turn leaves in the log: the question, every tool it ran, and
     // what it answered — with the reasoning that got there.
@@ -126,6 +173,8 @@ export class Session {
     }
     let answer = ''
     let reasoning = ''
+    /** Corrections handed in mid-turn. What the user said is not lost with the turn. */
+    const corrections: string[] = []
     let running: { name: string; args: unknown } | null = null
 
     const tools = registry.specs()
@@ -145,7 +194,8 @@ export class Session {
     // Measured against the request that will actually be sent: the tool list,
     // the recalled memories and the running summary ride along with every turn,
     // and leaving them out of the count let the request go over budget.
-    await this.compactIfNeeded(prompt, signal)
+    const compaction = await this.compactIfNeeded(prompt, signal)
+    if (compaction) yield { type: 'compacted', ms: compaction.ms }
 
     const systemPrompt = buildSystemPrompt({ ...prompt, summary: this.summary })
     this.lastSystemTokens = estimateText(systemPrompt)
@@ -177,13 +227,24 @@ export class Session {
         maxTokens,
         temperature,
         signal,
+        steering,
+        // Read at call time, so `/effort` takes effect on the next turn instead
+        // of needing the runtime rebuilt. Never absent: a session built without
+        // one still asks for Milo's default.
+        reasoningEffort: this.options.reasoningEffort?.() ?? DEFAULT_REASONING_EFFORT,
         permission: permissionPolicy ? { policy: permissionPolicy, ask: opts?.ask } : undefined,
       })) {
         if (event.type === 'error') errored = true
         else if (event.type === 'text-delta') answer += event.delta
         else if (event.type === 'reasoning-delta') reasoning += event.delta
         else if (event.type === 'tool-start') running = { name: event.name, args: event.args }
-        else if (event.type === 'tool-end') {
+        else if (event.type === 'steer') {
+          corrections.push(event.text)
+          note({ kind: 'user', text: event.text })
+          // For the same reason the opening message is written down before the
+          // answer comes: a crash mid-turn must not lose what the user said.
+          await this.persist()
+        } else if (event.type === 'tool-end') {
           note({
             kind: 'tool',
             tool: {
@@ -219,8 +280,9 @@ export class Session {
     // Remember only what the user said — the assistant's own replies are not
     // durable facts and would pollute recall. A turn that failed or was stopped
     // is skipped as well: it never got as far as an answer.
-    if (!errored && input.trim()) {
-      await memory.remember(this.scope, [{ text: input, tags: ['user'] }])
+    const said = [input, ...corrections].filter((text) => text.trim())
+    if (!errored && said.length > 0) {
+      await memory.remember(this.scope, said.map((text) => ({ text, tags: ['user'] })))
     }
   }
 
@@ -278,6 +340,13 @@ export class Session {
       turns: countTurns(this.messages),
       tokens: estimateTokens(this.messages),
       systemTokens: this.lastSystemTokens,
+      // Absent when compaction is off, in which case there is no budget to
+      // report rather than an infinite one. The resolved ceiling, not the
+      // fallback: `/stats` showing 12k for a model that holds a million would be
+      // the number that started all this.
+      maxInputTokens: this.options.sessions?.compaction
+        ? (this.ceiling ?? this.options.sessions.maxInputTokens)
+        : undefined,
       compacted: this.summary !== undefined,
       droppedTokens: this.record.droppedTokens,
     }
@@ -296,23 +365,33 @@ export class Session {
    * Over the budget: summarize the oldest turns into `summary` and drop them.
    * If the summary call fails, the turns are dropped anyway — a request that
    * fits beats one that is rejected by the provider.
+   *
+   * Reports what the summary cost when it ran, because it is a model call of its
+   * own standing between the question and the answer: without the number, its
+   * time is attributed to the model thinking.
    */
   private async compactIfNeeded(
     prompt: Omit<SystemPromptInput, 'summary'>,
     signal?: AbortSignal,
-  ): Promise<void> {
+  ): Promise<{ ms: number } | null> {
     const config = this.options.sessions
-    if (!config?.compaction) return
+    if (!config?.compaction) return null
+
+    // The window is a fact about the model, not about this turn: wait for the
+    // lookup only if it has not finished already.
+    await this.resolving
+    const ceiling = this.ceiling ?? config.maxInputTokens
 
     const used = () =>
       estimateTokens(this.messages) +
       estimateText(buildSystemPrompt({ ...prompt, summary: this.summary }))
-    if (used() <= config.maxInputTokens) return
+    if (used() <= ceiling) return null
 
     const cut = planCut(this.messages, config.keepTurns)
-    if (cut <= 0) return
+    if (cut <= 0) return null
 
     const dropped = this.messages.slice(0, cut)
+    const startedAt = Date.now()
     let summary: string | null = null
     try {
       summary = await summarize({
@@ -329,5 +408,6 @@ export class Session {
     if (summary) this.summary = summary
     this.record.droppedTokens = (this.record.droppedTokens ?? 0) + estimateTokens(dropped)
     this.messages.splice(0, cut)
+    return { ms: Date.now() - startedAt }
   }
 }

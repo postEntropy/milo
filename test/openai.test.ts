@@ -93,6 +93,24 @@ describe('OpenAIProvider', () => {
     expect(events.at(-1)).toMatchObject({ type: 'done', finishReason: 'tool_calls' })
   })
 
+  it('takes the thought from `reasoning` when `reasoning_content` is empty', async () => {
+    stubFetch([
+      // A router that fills both fields, one of them blank. The blank one used
+      // to win, and the thought vanished without a sign on the wire.
+      frame({ choices: [{ delta: { reasoning_content: '', reasoning: 'pondering' } }] }),
+      frame({ choices: [{ delta: { content: 'done' } }] }),
+      'data: [DONE]\n\n',
+    ])
+
+    const provider = new OpenAIProvider({
+      id: 'test',
+      baseURL: 'https://example.test/v1',
+    })
+
+    const events = await collect(provider)
+    expect(events.find((event) => event.type === 'reasoning')).toMatchObject({ delta: 'pondering' })
+  })
+
   it('keeps the reasoning out of the request it sends back', async () => {
     const fetchMock = stubFetch([
       frame({ choices: [{ delta: { content: 'ok' } }] }),
@@ -123,6 +141,35 @@ describe('OpenAIProvider', () => {
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { messages: unknown[] }
     expect(JSON.stringify(body)).not.toContain('a private thought')
     expect(JSON.stringify(body.messages)).toContain('the answer')
+  })
+
+  it('asks for the effort it was given, and for nothing when it was not', async () => {
+    // A fresh body per call: this test makes two requests, and a Response body
+    // can only be read once.
+    const fetchMock = vi.fn(
+      async (_url: string | URL, _init?: RequestInit) =>
+        new Response(streamOf([frame({ choices: [{ delta: { content: 'ok' } }] }), 'data: [DONE]\n\n']), {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    const provider = new OpenAIProvider({ id: 'test', baseURL: 'https://example.test/v1' })
+
+    const drain = async (reasoningEffort?: 'low' | 'medium' | 'high') => {
+      for await (const _event of provider.stream({
+        model: 'm',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+        reasoningEffort,
+      })) {
+        // drain
+      }
+      return JSON.parse(String(fetchMock.mock.calls.at(-1)?.[1]?.body)) as Record<string, unknown>
+    }
+
+    expect((await drain('low')).reasoning_effort).toBe('low')
+    // Absent means the provider's default: the request says nothing about it.
+    expect(await drain()).not.toHaveProperty('reasoning_effort')
   })
 
   it('throws a clear error on a non-ok response', async () => {

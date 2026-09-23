@@ -1,4 +1,4 @@
-import type { ContentPart, FinishReason, Message, Provider, ToolSpec } from '../providers/types.js'
+import type { ContentPart, FinishReason, Message, Provider, ReasoningEffort, ToolSpec } from '../providers/types.js'
 import type { ToolContext, ToolRegistry } from '../tools/index.js'
 import {
   summarizeToolCall,
@@ -23,8 +23,20 @@ export interface RunAgentOptions {
   maxSteps?: number
   maxTokens?: number
   temperature?: number
+  reasoningEffort?: ReasoningEffort
   signal?: AbortSignal
   permission?: ToolPermission
+  /**
+   * Messages handed in while this turn is already running. Taken up as user
+   * turns at a step boundary — the one point where the transcript is not
+   * between a tool call and its result — so a correction reaches the model
+   * without a second turn racing the first over the same transcript.
+   *
+   * The array belongs to the caller, which is what makes it safe to empty: the
+   * turn drains it in place, and whatever is still in it when the turn ends was
+   * never seen and can be run as its own turn.
+   */
+  steering?: string[]
 }
 
 const DEFAULT_MAX_STEPS = 25
@@ -38,6 +50,13 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
   const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS
 
   for (let step = 0; step < maxSteps; step += 1) {
+    // A message sent while this turn was running joins it here, at the one point
+    // where the transcript is not halfway through a tool call.
+    for (const steer of take(options.steering)) {
+      messages.push({ role: 'user', content: [{ type: 'text', text: steer }] })
+      yield { type: 'steer', text: steer }
+    }
+
     const parts: ContentPart[] = []
     const toolCalls: { id: string; name: string; args: unknown }[] = []
     let text = ''
@@ -51,6 +70,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       tools: options.tools.length > 0 ? options.tools : undefined,
       temperature: options.temperature,
       maxTokens: options.maxTokens,
+      reasoningEffort: options.reasoningEffort,
       signal: options.signal,
     })) {
       if (event.type === 'text') {
@@ -77,7 +97,10 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     }
     messages.push({ role: 'assistant', content: parts.length > 0 ? parts : [{ type: 'text', text: '' }] })
 
-    if (toolCalls.length === 0) {
+    // No tool calls and nothing new to answer means the turn is over. A
+    // correction that landed while this step was streaming keeps it going
+    // instead: it is picked up at the top of the next step.
+    if (toolCalls.length === 0 && (options.steering?.length ?? 0) === 0) {
       yield { type: 'done', finishReason: finish }
       return
     }
@@ -111,6 +134,11 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
   }
 
   yield { type: 'error', message: `Stopped after ${maxSteps} steps without a final answer.` }
+}
+
+/** Empties the queue and hands back what was in it. */
+function take(queue: string[] | undefined): string[] {
+  return queue ? queue.splice(0, queue.length) : []
 }
 
 /** Returns a block reason when the call must not run, or null when it may. */

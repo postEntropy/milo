@@ -46,6 +46,23 @@ export interface ToolSpec {
 
 export type FinishReason = 'stop' | 'tool_calls' | 'length' | 'error'
 
+/**
+ * How hard a model is asked to think before answering. The values are the ones
+ * the OpenAI wire names; a provider that does not know the field ignores it, and
+ * one that rejects it fails loudly on the turn that asked for it.
+ */
+export const REASONING_EFFORTS = ['low', 'medium', 'high'] as const
+
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
+
+/**
+ * What Milo asks for when the config says nothing. It used to send nothing at
+ * all and let each provider and model pick — a value nobody could name, which
+ * made "default" a label you could not read. Medium is the one the OpenAI wire
+ * itself documents, so it is the one every request carries now.
+ */
+export const DEFAULT_REASONING_EFFORT: ReasoningEffort = 'medium'
+
 export interface ChatRequest {
   model: string
   messages: Message[]
@@ -54,6 +71,12 @@ export interface ChatRequest {
   temperature?: number
   maxTokens?: number
   signal?: AbortSignal
+  /**
+   * Absent means the provider's own default — what every request sent before
+   * this existed. A mechanical call (summarizing, recapping) has no reason to
+   * think hard, and a reasoning model's default will.
+   */
+  reasoningEffort?: ReasoningEffort
 }
 
 export type StreamEvent =

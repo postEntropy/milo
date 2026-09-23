@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import { DEFAULT_SEARCH_KEY_ENV } from '../search/types.js'
+import type { ReasoningEffort } from '../providers/types.js'
 import type { PermissionMode } from '../tools/permission.js'
 import { MILO_HOME, authFile, configFile } from './paths.js'
 import {
@@ -106,6 +107,13 @@ export function setDisplay(patch: Partial<DisplayConfig>): void {
   const config = readConfigOrNull()
   if (!config) return
   saveConfig({ ...config, display: { ...config.display, ...patch } })
+}
+
+/** Writes down how hard the model should think. */
+export function setReasoningEffort(effort: ReasoningEffort): void {
+  const config = readConfigOrNull()
+  if (!config) return
+  saveConfig({ ...config, reasoningEffort: effort })
 }
 
 /**

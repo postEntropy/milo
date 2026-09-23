@@ -86,6 +86,8 @@ export class AnthropicProvider implements Provider {
 
     const blocks = new Map<number, Block>()
     let finish: FinishReason = 'stop'
+    let contentChars = 0
+    let reasoningChars = 0
     let inputTokens = 0
 
     for await (const message of parseSSE(response.body)) {
@@ -114,8 +116,10 @@ export class AnthropicProvider implements Provider {
         case 'content_block_delta': {
           const delta = event.delta
           if (delta?.type === 'text_delta' && delta.text) {
+            contentChars += delta.text.length
             yield { type: 'text', delta: delta.text }
           } else if (delta?.type === 'thinking_delta' && delta.thinking) {
+            reasoningChars += delta.thinking.length
             yield { type: 'reasoning', delta: delta.thinking }
           } else if (delta?.type === 'input_json_delta') {
             const block = blocks.get(event.index)
@@ -151,6 +155,13 @@ export class AnthropicProvider implements Provider {
           break
       }
     }
+
+    // A provider that puts both channels in one field is indistinguishable from a
+    // model that answered in its thinking, unless the counts are written down:
+    // content 0 with reasoning full is that quirk, not a model that said nothing.
+    logDebug(
+      `anthropic: ${contentChars} chars of content, ${reasoningChars} chars of reasoning, finished ${finish}`,
+    )
 
     yield { type: 'done', finishReason: finish }
   }
