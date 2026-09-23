@@ -505,6 +505,77 @@ describe('recapping a session another writer moved on', () => {
   })
 })
 
+describe('a reader that stops at the wait', () => {
+  function deferred() {
+    let resolve!: () => void
+    const promise = new Promise<void>((done) => {
+      resolve = done
+    })
+    return { promise, resolve }
+  }
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 5))
+
+  it('gives the lease back rather than holding the session for good', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+    const store = new FileSessionStore({ dir: path.join(dir, 'sessions') })
+    const record = await store.create()
+    const gate = deferred()
+    let held = 0
+    const provider: Provider = {
+      id: 'gated',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        held += 1
+        await gate.promise
+        yield { type: 'text', delta: 'done' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+    const build = async (conversationId: string) =>
+      new Session({
+        model: 'test-model',
+        system: 'BASE',
+        registry: createToolRegistry(),
+        memory: new FileMemory({ dir }),
+        store,
+        scope: { gateway: 'cli', conversationId },
+        record: (await store.load(record.id))!,
+        cwd: process.cwd(),
+        provider,
+        maxSteps: 4,
+      })
+
+    const first = await build('first')
+    const firstTurn = (async () => {
+      for await (const _event of first.send('one')) {
+        // drain
+      }
+    })()
+    while (held < 1) await settle()
+
+    // The reader stops the moment the wait is over — before the turn it was
+    // waiting for has been handed over.
+    const second = await build('second')
+    const stopped = (async () => {
+      for await (const event of second.send('two')) {
+        if (event.type === 'waited') break
+      }
+    })()
+    // It is sitting on the wait; letting the first turn finish is what ends it.
+    await settle()
+    gate.resolve()
+    await stopped
+    await firstTurn
+    await settle()
+
+    // The session is free again: the lease was not left behind by the frame that
+    // took it and never handed it over.
+    const lease = await store.tryAcquire(record.id)
+    expect(lease).not.toBeNull()
+    await lease!.release()
+  })
+})
+
 describe('a session another writer summarized away', () => {
   it('reports the compaction, which adds no message and still takes turns off the screen', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
@@ -643,6 +714,11 @@ describe('one turn per session', () => {
     expect(started).toBe(2)
     // The second turn picked up what the first wrote before answering.
     expect(secondEvents).toContainEqual({ type: 'rebased', added: 2, compacted: false })
+    // It waited, and the wait is bounded: announced before it started, over
+    // before the turn was handed anything written elsewhere.
+    const kinds = secondEvents.map((event) => event.type)
+    expect(kinds.indexOf('waiting')).toBeLessThan(kinds.indexOf('waited'))
+    expect(kinds.indexOf('waited')).toBeLessThan(kinds.indexOf('rebased'))
     const onDisk = (await store.load(record.id))!
     expect(onDisk.messages.map((message) => message.content[0])).toEqual([
       { type: 'text', text: 'one' },

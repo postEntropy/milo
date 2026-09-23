@@ -191,11 +191,21 @@ export class Session {
     yield { type: 'waiting' }
     const began = Date.now()
     const lease = await this.store.acquire(this.id, { signal })
-    // And said to be over as soon as it is. The turn starts at this line, not at
-    // the first token: everything after is the model, and a surface timing the
-    // turn must not charge the model for the queue it waited in.
-    yield { type: 'waited', ms: Date.now() - began }
-    return lease
+    let handedOver = false
+    try {
+      // Said to be over as soon as it is. The turn starts at this line, not at
+      // the first token: everything after is the model, and a surface timing the
+      // turn must not charge the model for the queue it waited in.
+      yield { type: 'waited', ms: Date.now() - began }
+      handedOver = true
+      return lease
+    } finally {
+      // Closed between taking the lease and handing it over — a reader that
+      // stopped at the event above. Nobody else can release it: it belongs to
+      // this frame, and leaving it would hold the session for the life of the
+      // process.
+      if (!handedOver) await lease.release()
+    }
   }
 
   private async *turn(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
