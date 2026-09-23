@@ -120,6 +120,25 @@ describe('ChatScreen', () => {
     expect(frame).toContain('Type a message')
   })
 
+  it('shows the answer without the markdown markers it rendered', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield {
+        type: 'text-delta',
+        delta: 'Aqui:\n\n```json\n{ "ok": true }\n```\n\nUse `npm test` e **cuidado**.\n',
+      }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const { lastFrame, stdin } = renderChat(makeRuntime(stream))
+    await submit(stdin, 'como testo?')
+
+    const frame = lastFrame() ?? ''
+    expect(frame).toContain('{ "ok": true }')
+    expect(frame).toContain('Use npm test e cuidado.')
+    expect(frame).not.toContain('```')
+    expect(frame).not.toContain('**')
+  })
+
   it('anchors short content to the bottom of the pane', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'text-delta', delta: 'hi' }

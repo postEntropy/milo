@@ -357,7 +357,7 @@ export function ChatScreen({
             {line.segments
               ? line.segments.map((segment, segmentIndex) => (
                   // biome-ignore lint/suspicious/noArrayIndexKey: segments are re-wrapped every frame and never reorder
-                  <Text key={segmentIndex} bold={segment.bold}>
+                  <Text key={segmentIndex} bold={segment.bold} color={segment.color}>
                     {segment.text}
                   </Text>
                 ))

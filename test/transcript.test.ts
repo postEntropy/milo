@@ -42,7 +42,7 @@ describe('buildLines', () => {
       40,
     )
 
-    // buildLines puts a blank line between items; the icons are what matters.
+    // Consecutive tool lines sit together; the icons are what matters.
     expect(lines.filter((line) => line.text !== '').map((line) => line.text)).toEqual([
       '🌐 web_search(bun 1.2)',
       '📄 read_file(a.txt)',
@@ -81,6 +81,98 @@ describe('buildLines', () => {
   it('leaves lines without a tool name unstyled', () => {
     const lines = buildLines([{ kind: 'assistant', text: 'hello' }], 40)
     expect(lines[0]?.segments).toBeUndefined()
+  })
+
+  it('keeps consecutive tool calls together, with no blank line between', () => {
+    const lines = buildLines(
+      [
+        { kind: 'tool', name: 'fetch_url', detail: 'one', ok: true },
+        { kind: 'tool', name: 'fetch_url', detail: 'two', ok: true },
+      ],
+      40,
+    )
+
+    expect(lines.map((line) => line.text)).toEqual(['🔧 fetch_url(one)', '🔧 fetch_url(two)'])
+  })
+
+  it('still separates a tool call from the prose around it', () => {
+    const lines = buildLines(
+      [
+        { kind: 'assistant', text: 'let me look' },
+        { kind: 'tool', name: 'read_file', detail: 'a.txt', ok: true },
+      ],
+      40,
+    )
+
+    expect(lines.map((line) => line.text)).toEqual(['let me look', '', '📄 read_file(a.txt)'])
+  })
+})
+
+describe('markdown in the terminal', () => {
+  const assistant = (text: string, width = 40) =>
+    buildLines([{ kind: 'assistant', text }], width)
+
+  it('hides the fence markers and shows the code as it was written', () => {
+    const lines = assistant('Here:\n\n```ts\nconst a = 1\n  indented()\n```\n')
+
+    expect(lines.map((line) => line.text)).toEqual([
+      'Here:',
+      '',
+      'const a = 1',
+      '  indented()',
+      '',
+    ])
+    expect(lines.find((line) => line.text === 'const a = 1')).toMatchObject({
+      color: theme.muted,
+    })
+  })
+
+  it('does not read markdown inside a fence as markdown', () => {
+    const lines = assistant('```\n**not bold** and `not code`\n```')
+
+    expect(lines[0]).toMatchObject({ text: '**not bold** and `not code`', color: theme.muted })
+  })
+
+  it('drops the markers of inline code and bold', () => {
+    const lines = assistant('Use `npm test` and **careful** here')
+
+    expect(lines[0]?.text).toBe('Use npm test and careful here')
+    // The space between runs rides with the run that follows it, which is what
+    // lets a wrap drop it.
+    expect(lines[0]?.segments).toEqual([
+      { text: 'Use' },
+      { text: ' npm test', color: theme.success },
+      { text: ' and' },
+      { text: ' careful', bold: true },
+      { text: ' here' },
+    ])
+  })
+
+  it('does not add a space before punctuation that followed a span', () => {
+    const lines = assistant('Use `npm test`.')
+
+    expect(lines[0]?.text).toBe('Use npm test.')
+  })
+
+  it('keeps a span bold when it wraps', () => {
+    const lines = assistant(`**${'boldword '.repeat(8).trim()}**`, 20)
+
+    expect(lines.length).toBeGreaterThan(1)
+    expect(lines.every((line) => line.segments?.every((segment) => segment.bold))).toBe(true)
+  })
+
+  it('renders a heading without its hashes', () => {
+    const lines = assistant('## Notes\nbody')
+
+    expect(lines[0]?.text).toBe('Notes')
+    expect(lines[0]?.segments?.[0]).toMatchObject({ bold: true })
+    expect(lines[1]?.text).toBe('body')
+  })
+
+  it('cuts a line of code at the width instead of overflowing', () => {
+    const lines = assistant(`\`\`\`\n${'x'.repeat(50)}\n\`\`\``, 20)
+
+    expect(lines.map((line) => line.text)).toEqual(['x'.repeat(20), 'x'.repeat(20), 'x'.repeat(10)])
   })
 })
 

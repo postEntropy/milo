@@ -279,6 +279,13 @@ The active settings are visible in the CLI header (`[tools name]`, `[no thinking
 They are also the **Display** section of `milo setup`, which is where a bot that answers several
 people has to change them.
 
+The terminal renders the answer as **light markdown**: a fenced code block keeps its code (the fence
+lines go, the code is not reflowed as prose, and a long line is cut at the width instead of wrapping
+mid-token), inline code and bold are styled, headings lose their hashes, and consecutive tool calls
+stack with **no blank line between them** — a burst of calls is one activity, not a paragraph each.
+Tables and nested lists are left as the plain text they are: the CLI is asked not to reach for them,
+and half-rendering them reads worse than not trying.
+
 A bot trims a turn that outgrows the message limit in the **middle**, keeping the beginning and the
 end: the answer comes after the tool log, so trimming only the end is how a long turn loses exactly
 the part that was worth reading.
@@ -453,4 +460,5 @@ Known open work, roughly in order:
    Telegram is not visible in the CLI. Sharing them needs a per-person identity map.
 4. **Web search needs a key.** `config.json` has no `search` section, so `web_search` is not even
    registered right now. The Exa and Parallel adapters exist but have never been called for real.
-5. Markdown rendering in the Ink UI (the terminal shows plain text; only the bots get rich messages).
+5. **More markdown in the Ink UI.** The terminal renders fences, inline code, bold and headings;
+   tables, nested lists and links still arrive as plain text.
