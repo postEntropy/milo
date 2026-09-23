@@ -30,3 +30,23 @@ jobs:
       - run: npm run test:coverage
       - run: npm run build
       - run: node dist/bin/cli.js --version
+
+  # The lease is a lock on the filesystem, so "one turn per session" is a claim
+  # about the platform as much as about the code: mkdir semantics, mtime
+  # resolution and path handling all differ. Only the store's tests run here —
+  # they are the ones that exercise the lease, including two real processes —
+  # rather than the whole suite, so a POSIX-only test elsewhere cannot turn this
+  # red and hide the answer it exists to give.
+  leases:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test -- test/session-store.test.ts
