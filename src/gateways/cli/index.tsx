@@ -206,12 +206,6 @@ export function Shell({
               [tools {display.tools}]
             </Text>
           )}
-          {!display.thinking && (
-            <Text bold color={theme.warning}>
-              {' '}
-              [no thinking]
-            </Text>
-          )}
         </Box>
         <Text dimColor>{headerRight}</Text>
       </Box>

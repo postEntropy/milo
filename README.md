@@ -275,9 +275,10 @@ last few lines of the thought above the input, while a bot appends **one** line 
 of the thought` — since it edits a single message and the whole reasoning would crowd the answer out
 of it.
 
-The active settings are visible in the CLI header (`[tools name]`, `[no thinking]`) and in `/status`.
-They are also the **Display** section of `milo setup`, which is where a bot that answers several
-people has to change them.
+A tool level is visible in the CLI header (`[tools name]`) because it takes away something that
+would otherwise be there; a hidden thought gets no badge — the reasoning pane is simply not there —
+and both settings are spelled out in `/status`. They are also the **Display** section of
+`milo setup`, which is where a bot that answers several people has to change them.
 
 The terminal renders the answer as **light markdown**: a fenced code block keeps its code (the fence
 lines go, the code is not reflowed as prose, and a long line is cut at the width instead of wrapping
