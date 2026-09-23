@@ -4,11 +4,12 @@ import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
-import { readDisplay, setDisplay, setPermissionMode } from '../../core/config/load.js'
+import { readDisplay, setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
 import {
   decodePermission,
   encodePermission,
+  effortLockMessage,
   handleCommand,
   modeLockMessage,
   sessionLockMessage,
@@ -86,11 +87,17 @@ export class TelegramGateway implements Gateway {
         return
       }
 
+      // A message sent while a turn is running is a correction: it joins that
+      // turn at its next step boundary — after the tool call in flight — rather
+      // than starting a second turn to race it over the same session. Commands
+      // are never steered: they are not something to say to the model.
+      if (!text.startsWith('/') && this.turns.steer(chatId, text)) return
+
       // Deliberately not awaited. The turn blocks on the permission button
       // below, and simple long polling handles updates one at a time, so
       // awaiting it here would keep the button press queued behind the very
       // turn waiting for it.
-      this.turns.run(chatId, () => this.handleTurn(bot, ctx, chatId, text))
+      this.turns.run(chatId, (steering) => this.handleTurn(bot, ctx, chatId, text, steering))
     })
 
     this.bot = bot
@@ -99,7 +106,13 @@ export class TelegramGateway implements Gateway {
       .catch((error: unknown) => console.error(`Telegram gateway stopped: ${errorMessage(error)}`))
   }
 
-  private async handleTurn(bot: Bot, ctx: Context, chatId: string, text: string): Promise<void> {
+  private async handleTurn(
+    bot: Bot,
+    ctx: Context,
+    chatId: string,
+    text: string,
+    steering: string[],
+  ): Promise<void> {
     const scope: MemoryScope = { gateway: 'telegram', conversationId: chatId }
     const session = await this.options.runtime.getSession(scope)
 
@@ -115,6 +128,13 @@ export class TelegramGateway implements Gateway {
         display,
         persistDisplay: setDisplay,
         displayLocked: displayLockMessage(this.options.allowlist),
+        effort: this.options.runtime.reasoningEffort,
+        persistEffort: (effort) => {
+          // The running runtime first, so the next turn sends it, then the disk.
+          this.options.runtime.setReasoningEffort(effort)
+          setReasoningEffort(effort)
+        },
+        effortLocked: effortLockMessage(this.options.allowlist),
         newSession: (title) => this.options.runtime.newSession(scope, title),
         resumeSession: async (id) => (await this.options.runtime.resumeSession(scope, id)) !== null,
         listSessions: () => this.options.runtime.listSessions(),
@@ -156,14 +176,21 @@ export class TelegramGateway implements Gateway {
     }
 
     try {
-      await runTurn({
-        session,
-        conversationId: chatId,
-        text,
-        surface,
-        maxLength: MAX_LENGTH,
-        display,
-      })
+      let pending = text
+      do {
+        await runTurn({
+          session,
+          conversationId: chatId,
+          text: pending,
+          surface,
+          maxLength: MAX_LENGTH,
+          display,
+          steering,
+        })
+        // A correction that arrived too late to be taken up was never seen by
+        // the model: it becomes the next turn instead of being dropped.
+        pending = steering.splice(0).join('\n\n')
+      } while (pending)
     } catch (error) {
       await ctx.reply(`[error] ${errorMessage(error)}`).catch(() => undefined)
     }

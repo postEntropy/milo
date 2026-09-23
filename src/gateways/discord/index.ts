@@ -3,9 +3,15 @@ import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
-import { readDisplay, setDisplay, setPermissionMode } from '../../core/config/load.js'
+import { readDisplay, setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
-import { displayLockMessage, handleCommand, modeLockMessage, sessionLockMessage } from '../commands.js'
+import {
+  displayLockMessage,
+  effortLockMessage,
+  handleCommand,
+  modeLockMessage,
+  sessionLockMessage,
+} from '../commands.js'
 import { runTurn } from '../runner.js'
 import { TurnQueue } from '../turns.js'
 import type { ChatSurface } from '../surface.js'
@@ -80,9 +86,17 @@ export class DiscordGateway implements Gateway {
         return
       }
 
+      // A message sent while a turn is running is a correction: it joins that
+      // turn at its next step boundary — after the tool call in flight — rather
+      // than starting a second turn to race it over the same session. Commands
+      // are never steered: they are not something to say to the model.
+      if (!text.startsWith('/') && this.turns.steer(message.channelId, text)) return
+
       // Not awaited: discord.js dispatches events concurrently, and the queue is
       // what keeps two turns from mutating the same session at once.
-      this.turns.run(message.channelId, () => this.handleTurn(message, text, ask))
+      this.turns.run(message.channelId, (steering) =>
+        this.handleTurn(message, text, ask, steering),
+      )
     })
 
     client.once(Events.ClientReady, () => console.error('Discord gateway running'))
@@ -94,6 +108,7 @@ export class DiscordGateway implements Gateway {
     message: Message,
     text: string,
     ask: (target: Message, request: PermissionRequest) => Promise<boolean>,
+    steering: string[],
   ): Promise<void> {
     const scope: MemoryScope = { gateway: 'discord', conversationId: message.channelId }
     const session = await this.options.runtime.getSession(scope)
@@ -110,6 +125,13 @@ export class DiscordGateway implements Gateway {
         display,
         persistDisplay: setDisplay,
         displayLocked: displayLockMessage(this.options.allowlist),
+        effort: this.options.runtime.reasoningEffort,
+        persistEffort: (effort) => {
+          // The running runtime first, so the next turn sends it, then the disk.
+          this.options.runtime.setReasoningEffort(effort)
+          setReasoningEffort(effort)
+        },
+        effortLocked: effortLockMessage(this.options.allowlist),
         newSession: (title) => this.options.runtime.newSession(scope, title),
         resumeSession: async (id) => (await this.options.runtime.resumeSession(scope, id)) !== null,
         listSessions: () => this.options.runtime.listSessions(),
@@ -136,14 +158,21 @@ export class DiscordGateway implements Gateway {
     }
 
     try {
-      await runTurn({
-        session,
-        conversationId: message.channelId,
-        text,
-        surface,
-        maxLength: MAX_LENGTH,
-        display,
-      })
+      let pending = text
+      do {
+        await runTurn({
+          session,
+          conversationId: message.channelId,
+          text: pending,
+          surface,
+          maxLength: MAX_LENGTH,
+          display,
+          steering,
+        })
+        // A correction that arrived too late to be taken up was never seen by
+        // the model: it becomes the next turn instead of being dropped.
+        pending = steering.splice(0).join('\n\n')
+      } while (pending)
     } catch (error) {
       await message.reply(`[error] ${errorMessage(error)}`).catch(() => undefined)
     }

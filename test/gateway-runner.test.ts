@@ -28,8 +28,8 @@ function makeHarness(stream: StreamFn, askAnswer = true, display?: DisplayConfig
     send: (_text: string, options?: SendOptions) => stream(options),
   } as unknown as Session
 
-  const run = (maxLength = 1000) =>
-    runTurn({ session, conversationId: 'c1', text: 'hi', surface, maxLength, display, flushMs: 0 })
+  const run = (maxLength = 1000, steering?: string[]) =>
+    runTurn({ session, conversationId: 'c1', text: 'hi', surface, maxLength, display, flushMs: 0, steering })
 
   return { edits, asks, run }
 }
@@ -196,6 +196,22 @@ describe('runTurn', () => {
     expect(harness.edits.at(-1)).toBe('denied')
   })
 
+  it('hands the steering inbox to the session, for the next step boundary', async () => {
+    let seen: string[] | undefined
+    async function* stream(options?: SendOptions): AsyncGenerator<AgentEvent> {
+      seen = options?.steering
+      yield { type: 'text-delta', delta: 'ok' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const steering = ['wait, use b.txt']
+    await makeHarness(stream).run(1000, steering)
+
+    // The very array, not a copy: what is left in it when the turn ends is what
+    // the caller runs as the next turn.
+    expect(seen).toBe(steering)
+  })
+
   it('surfaces errors from the stream', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'error', message: 'boom' }
@@ -217,7 +233,38 @@ describe('runTurn', () => {
     expect(last.endsWith('…')).toBe(true)
   })
 
-  it('says (no response) when nothing was produced', async () => {
+  it('says why a turn showed nothing when the level hid it all', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      // The answer arrives as reasoning — a provider filling one field with both
+      // channels — and `off` keeps none of it.
+      yield { type: 'reasoning-delta', delta: 'Oi! Em que posso ajudar?' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream, true, { tools: 'full', thinking: 'off' })
+    await harness.run()
+
+    const last = harness.edits.at(-1) ?? ''
+    expect(last).toContain('no answer came back')
+    expect(last).not.toContain('Em que posso ajudar')
+  })
+
+  it('does not count a bare newline as the answer', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'reasoning-delta', delta: 'Oi! Em que posso ajudar?' }
+      yield { type: 'text-delta', delta: '\n' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream, true, { tools: 'full', thinking: 'off' })
+    await harness.run()
+
+    // With the level hiding the thinking, a newline would otherwise be the whole
+    // turn and the note would never be written.
+    expect(harness.edits.at(-1)).toContain('no answer came back')
+  })
+
+  it('says (no response) when the model produced nothing at all', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'done', finishReason: 'stop' }
     }
@@ -236,13 +283,13 @@ describe('runTurn — display settings', () => {
   }
 
   it('shows only the tool name when asked for names', async () => {
-    const harness = makeHarness(withCommand, true, { tools: 'name', thinking: true })
+    const harness = makeHarness(withCommand, true, { tools: 'name', thinking: 'on' })
     await harness.run()
     expect(harness.edits.at(-1)).toBe('```\n⚡ shell_command\n```\n\npronto')
   })
 
   it('keeps tool activity out entirely when off', async () => {
-    const harness = makeHarness(withCommand, true, { tools: 'off', thinking: true })
+    const harness = makeHarness(withCommand, true, { tools: 'off', thinking: 'on' })
     await harness.run()
     expect(harness.edits.at(-1)).toBe('pronto')
   })
@@ -254,7 +301,7 @@ describe('runTurn — display settings', () => {
       yield { type: 'done', finishReason: 'stop' }
     }
 
-    const harness = makeHarness(stream, true, { tools: 'off', thinking: true })
+    const harness = makeHarness(stream, true, { tools: 'off', thinking: 'on' })
     await harness.run()
     expect(harness.edits.at(-1)).toBe('```\n❌ shell_command failed\n```')
   })
@@ -279,7 +326,7 @@ describe('runTurn — display settings', () => {
       yield { type: 'done', finishReason: 'stop' }
     }
 
-    const harness = makeHarness(stream, true, { tools: 'full', thinking: false })
+    const harness = makeHarness(stream, true, { tools: 'full', thinking: 'off' })
     await harness.run()
     expect(harness.edits.at(-1)).toBe('pronto')
   })

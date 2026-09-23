@@ -62,4 +62,45 @@ describe('TurnQueue', () => {
 
     expect(queue.size).toBe(0)
   })
+
+  it('hands a message to the turn that is running', async () => {
+    const queue = new TurnQueue()
+    const seen: string[][] = []
+
+    queue.run('chat-1', async (inbox) => {
+      await tick(20)
+      seen.push([...inbox])
+    })
+    await tick(5) // the turn has started; the inbox belongs to a running turn
+
+    expect(queue.steer('chat-1', 'actually, use b.txt')).toBe(true)
+    await tick(40)
+
+    expect(seen).toEqual([['actually, use b.txt']])
+  })
+
+  it('says no when there is no turn to hand a message to', async () => {
+    const queue = new TurnQueue()
+    // Nothing running: the caller starts a turn instead, which is why this has
+    // to be false rather than a message dropped on the floor.
+    expect(queue.steer('chat-1', 'hello')).toBe(false)
+
+    queue.run('chat-1', async () => undefined)
+    await tick(30)
+    expect(queue.steer('chat-1', 'hello')).toBe(false)
+  })
+
+  it('is busy while a turn runs, and not once it is over', async () => {
+    const queue = new TurnQueue()
+    expect(queue.busy('chat-1')).toBe(false)
+
+    queue.run('chat-1', async () => {
+      await tick(20)
+    })
+    await tick(5)
+    expect(queue.busy('chat-1')).toBe(true)
+
+    await tick(40)
+    expect(queue.busy('chat-1')).toBe(false)
+  })
 })

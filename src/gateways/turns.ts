@@ -13,13 +13,46 @@ import { logWarn } from '../util/log.js'
  */
 export class TurnQueue {
   private readonly tails = new Map<string, Promise<unknown>>()
+  /** The inbox of the turn running right now, if any, per conversation. */
+  private readonly inboxes = new Map<string, string[]>()
+
+  /**
+   * Hands `text` to the turn already running for `key`, instead of starting a
+   * second one. It is taken up at the next step boundary — after the tool call
+   * in flight — so it reads as a correction rather than as a race.
+   *
+   * Returns false when no turn is running: there is nobody to give it to, and
+   * the caller starts one. A message that lands in the moment between two turns
+   * therefore becomes its own turn; losing it would be the worse answer.
+   */
+  steer(key: string, text: string): boolean {
+    const inbox = this.inboxes.get(key)
+    if (!inbox) return false
+    inbox.push(text)
+    return true
+  }
+
+  /** True while a turn is running for `key` — queued is not running. */
+  busy(key: string): boolean {
+    return this.inboxes.has(key)
+  }
 
   /** Queues `work` behind whatever is already running for `key`. */
-  run(key: string, work: () => Promise<void>): void {
+  run(key: string, work: (inbox: string[]) => Promise<void>): void {
     const previous = this.tails.get(key) ?? Promise.resolve()
-    // Never rejects: a failed turn must not poison the queue for the next one.
     const next = previous
-      .then(work)
+      .then(async () => {
+        // Registered before the first await inside `work`, so a message arriving
+        // as the turn starts is steered into it rather than missed.
+        const inbox: string[] = []
+        this.inboxes.set(key, inbox)
+        try {
+          await work(inbox)
+        } finally {
+          this.inboxes.delete(key)
+        }
+      })
+      // Never rejects: a failed turn must not poison the queue for the next one.
       .catch((error: unknown) => logWarn(`turn failed: ${errorMessage(error)}`))
     this.tails.set(key, next)
     void next.then(() => {

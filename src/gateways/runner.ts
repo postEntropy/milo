@@ -14,6 +14,12 @@ export interface RunTurnOptions {
   display?: DisplayConfig
   flushMs?: number
   signal?: AbortSignal
+  /**
+   * Where a message sent while this turn is running is handed in. Taken up at
+   * the next step boundary; whatever is left when the turn ends was never seen,
+   * and the caller runs it as its own turn.
+   */
+  steering?: string[]
 }
 
 const DEFAULT_FLUSH_MS = 900
@@ -34,6 +40,11 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   const messageId = await surface.post(conversationId, '…')
   let output = ''
   let lastFlush = 0
+  // Whether anything arrived in the answer channel, and how much came through
+  // the thinking one: a provider may fill only the second, and then the display
+  // decides whether the turn shows anything at all.
+  let answered = false
+  let reasoningChars = 0
   // Tool/error lines end the current line, so the next text starts on its own.
   // A blank line is what separates blocks in Markdown, where a single newline is
   // a soft break and gets collapsed into the same paragraph.
@@ -96,22 +107,29 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   const flushReasoning = async (): Promise<void> => {
     const line = firstLine(reasoning)
     reasoning = ''
-    if (!display.thinking || !line) return
+    // One message, so one line is all the thought can have without crowding out
+    // the answer.
+    if (display.thinking === 'off' || !line) return
     await appendLine(`💭 ${line}`, 'quote')
   }
 
   try {
     for await (const event of session.send(text, {
       signal: options.signal,
+      steering: options.steering,
       ask: async (request) => ({
         allowed: await surface.ask(conversationId, messageId, request),
       }),
     })) {
       switch (event.type) {
         case 'reasoning-delta':
-          if (display.thinking) reasoning += event.delta
+          reasoningChars += event.delta.length
+          if (display.thinking !== 'off') reasoning += event.delta
           break
         case 'text-delta':
+          // Only text someone can read counts as an answer: a bare newline is not
+          // one, and counting it would switch off the note below.
+          if (event.delta.trim()) answered = true
           await flushReasoning()
           if (atLineEnd) {
             closeBlock()
@@ -161,6 +179,13 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
 
   await flushReasoning()
   closeBlock()
+  // Nothing came back in the answer channel while the thinking channel had
+  // content, and the display hid it: a chat that says nothing reads as the bot
+  // being broken, when it is the provider putting both channels in one field.
+  // The CLI says the same thing, for the same reason.
+  if (!answered && reasoningChars > 0 && display.thinking === 'off') {
+    output += `${output === '' ? '' : '\n\n'}⚠ no answer came back: this model sends everything it says as reasoning, and /thinking off hides it.`
+  }
   await surface.edit(conversationId, messageId, clamp(output.trim() || '(no response)', maxLength))
 }
 
