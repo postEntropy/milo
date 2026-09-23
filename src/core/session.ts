@@ -407,11 +407,11 @@ export class Session {
     if (this.messages.length === 0) return
     const seenAt = this.record.updatedAt
     const existing = await this.recaps.read(this.id)
-    // Current, or written from a transcript newer than this copy knows about.
-    // Either way there is nothing to add — and two processes writing one session
-    // must not let the slower one, describing an older transcript, replace the
-    // newer recap just because it finished last. Checked before the model call,
-    // so a recap that would be discarded is never paid for.
+    // Current, or written from a transcript newer than this copy knows about:
+    // nothing to write. This check is here only to skip the model call — the
+    // digest below takes seconds, which is exactly the window in which another
+    // process can leave a fresher recap, so the store checks again immediately
+    // before it writes.
     if (existing && existing.sourceUpdatedAt >= seenAt) return
 
     const text = await digest({

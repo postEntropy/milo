@@ -74,6 +74,26 @@ describe('FileRecapStore', () => {
     const store = new FileRecapStore({ dir: mkdtempSync(path.join(tmpdir(), 'milo-recaps-')) })
     expect(await store.read('calm-otter-7')).toBeNull()
   })
+
+  it('keeps the newer recap when an older one finishes last', async () => {
+    const store = new FileRecapStore({ dir: mkdtempSync(path.join(tmpdir(), 'milo-recaps-')) })
+    await store.write({ session: 'calm-otter-7', text: 'from the newer', sourceUpdatedAt: 20, at: 21 })
+
+    // What a slower writer, digesting an older transcript, would land afterwards.
+    await store.write({ session: 'calm-otter-7', text: 'from the older', sourceUpdatedAt: 10, at: 22 })
+
+    expect((await store.read('calm-otter-7'))?.text).toBe('from the newer')
+  })
+})
+
+describe('MemoryRecapStore', () => {
+  it('keeps the newer recap when an older one finishes last', async () => {
+    const store = new MemoryRecapStore()
+    await store.write({ session: 'calm-otter-7', text: 'from the newer', sourceUpdatedAt: 20, at: 21 })
+    await store.write({ session: 'calm-otter-7', text: 'from the older', sourceUpdatedAt: 10, at: 22 })
+
+    expect((await store.read('calm-otter-7'))?.text).toBe('from the newer')
+  })
 })
 
 describe('recall', () => {

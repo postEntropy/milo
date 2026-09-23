@@ -25,6 +25,14 @@ export interface SessionRecap {
 
 export interface RecapStore {
   read(id: string): Promise<SessionRecap | null>
+  /**
+   * Writes the recap unless one describing a transcript at least as new is
+   * already stored. Producing a recap takes a model call, so by the time one
+   * lands another process may have left a fresher one; replacing that would take
+   * bullets out of `/sessions` until the next switch rewrites them. The store
+   * decides, right before the write, so no caller can get it wrong. A recap only
+   * moves forward.
+   */
   write(recap: SessionRecap): Promise<void>
   remove(id: string): Promise<void>
 }
@@ -56,6 +64,8 @@ export class FileRecapStore implements RecapStore {
 
   async write(recap: SessionRecap): Promise<void> {
     if (!isValidSessionId(recap.session)) return
+    const existing = await this.read(recap.session)
+    if (existing && existing.sourceUpdatedAt >= recap.sourceUpdatedAt) return
     mkdirSync(this.dir, { recursive: true })
     await writeFileAtomic(this.fileFor(recap.session), `${JSON.stringify(recap, null, 2)}\n`)
   }
@@ -79,6 +89,9 @@ export class MemoryRecapStore implements RecapStore {
   }
 
   async write(recap: SessionRecap): Promise<void> {
+    // The same rule the file store enforces: a recap never replaces a newer one.
+    const existing = this.recaps.get(recap.session)
+    if (existing && existing.sourceUpdatedAt >= recap.sourceUpdatedAt) return
     this.recaps.set(recap.session, recap)
   }
 

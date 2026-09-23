@@ -492,7 +492,9 @@ file is written a turn at a time and a recap in there would be a second writer t
 session winning and the recap vanishing, or the recap winning and a turn being lost. Apart, neither
 can damage the other. Each recap names the transcript version it was written from, so a turn landing
 while it is being written needs no fixing up: the recap stops matching, drops out of the listing, and
-the next one written describes the whole thing. The model call runs in the **background**, so a switch
+the next one written describes the whole thing. A recap only ever moves forward: a slower writer that
+finishes last, describing an older transcript, cannot replace one that is already newer and take its
+bullets out of the listing. The model call runs in the **background**, so a switch
 never waits on it; it is skipped when the session is empty or its recap is still current, and a recap
 that fails is simply not written — leaving a session never fails because its recap did.
 
