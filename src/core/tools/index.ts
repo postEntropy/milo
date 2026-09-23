@@ -1,5 +1,6 @@
 import type { SearchProvider } from '../search/index.js'
 import { editFileTool } from './edit-file.js'
+import { fetchUrlTool } from './fetch-url.js'
 import { globTool } from './glob.js'
 import { grepTool } from './grep.js'
 import { listDirTool } from './list-dir.js'
@@ -19,6 +20,7 @@ export { readFileTool } from './read-file.js'
 export { listDirTool } from './list-dir.js'
 export { globTool } from './glob.js'
 export { grepTool } from './grep.js'
+export { fetchUrlTool } from './fetch-url.js'
 export { writeFileTool } from './write-file.js'
 export { editFileTool } from './edit-file.js'
 export { rememberTool } from './remember.js'
@@ -31,6 +33,7 @@ export const builtinTools = [
   listDirTool,
   globTool,
   grepTool,
+  fetchUrlTool,
   writeFileTool,
   editFileTool,
   rememberTool,

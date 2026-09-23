@@ -147,6 +147,7 @@ denied tool. The queue also stops two turns from mutating the same session at on
 | `list_dir` | yes | One directory, not recursive. |
 | `glob` | yes | Files matching a pattern, most recently modified first. |
 | `grep` | yes | Regex over file contents, returning `path:line: text`. |
+| `fetch_url` | yes | One http(s) URL, served back as text; a long page comes back in pages. |
 | `write_file` | no | Creates or replaces a file; asks for confirmation. |
 | `edit_file` | no | Exact string replacement; asks for confirmation. |
 | `remember` | — | Saves a durable fact; only touches Milo's own memory, so it never asks. |
@@ -164,6 +165,19 @@ it skipped, and both tools report when they truncated their own results.
 offset=413`), so a big file is paged through instead of being silently halved; a single line longer
 than the whole budget — a minified bundle — is clipped and says so. Reading past the end says the
 file has that many lines, rather than reporting it as empty.
+
+`fetch_url` reads one URL and hands the page back as text: scripts, styles and tags are dropped,
+block elements become line breaks, and entities are decoded. A page longer than the budget (40k
+characters) is cut and names the offset that continues, the same way `read_file` pages a file — and
+the window after it is served from the copy just read, so paging a document costs one download
+instead of one per page. A fresh read (`offset` unset) always goes to the network, because "what
+does this URL say now?" deserves a fresh answer.
+
+The body is read in chunks under a 5 MB ceiling: a response that lies about its size, or grows past
+it, is cut off and says so — and the rest of the download is dropped rather than drained. A size
+the server declares over that ceiling is refused before the body is fetched at all. Anything that
+is not text — an image, a PDF — is refused with the content type it saw. Like a search result, what
+comes back is untrusted data: the tool description tells the model to read it, not to obey it.
 
 `write_file` and `edit_file` write through a temporary file and a rename, and copy the target's
 permissions over first: a crash mid-write leaves the previous contents, not half a function, and an

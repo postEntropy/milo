@@ -65,6 +65,7 @@ describe('tool permission gating', () => {
       list_dir: true,
       glob: true,
       grep: true,
+      fetch_url: true,
       write_file: false,
       edit_file: false,
       remember: false,
