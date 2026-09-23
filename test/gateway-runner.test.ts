@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import type { AgentEvent } from '../src/core/agent/events'
-import type { DisplayConfig } from '../src/core/config/schema'
-import type { Session, SendOptions } from '../src/core/session'
-import type { PermissionRequest } from '../src/core/tools/permission'
-import { runTurn } from '../src/gateways/runner'
-import type { ChatSurface } from '../src/gateways/surface'
+import type { AgentEvent } from '../src/core/agent/events.js'
+import type { DisplayConfig } from '../src/core/config/schema.js'
+import type { Session, SendOptions } from '../src/core/session.js'
+import type { PermissionRequest } from '../src/core/tools/permission.js'
+import { runTurn } from '../src/gateways/runner.js'
+import type { ChatSurface } from '../src/gateways/surface.js'
 
 type StreamFn = (options?: SendOptions) => AsyncGenerator<AgentEvent>
 

@@ -1,3 +1,6 @@
+import { errorMessage } from '../util/errors.js'
+import { logWarn } from '../util/log.js'
+
 /**
  * Runs one turn at a time per conversation.
  *
@@ -15,7 +18,9 @@ export class TurnQueue {
   run(key: string, work: () => Promise<void>): void {
     const previous = this.tails.get(key) ?? Promise.resolve()
     // Never rejects: a failed turn must not poison the queue for the next one.
-    const next = previous.then(work).catch(() => undefined)
+    const next = previous
+      .then(work)
+      .catch((error: unknown) => logWarn(`turn failed: ${errorMessage(error)}`))
     this.tails.set(key, next)
     void next.then(() => {
       if (this.tails.get(key) === next) this.tails.delete(key)

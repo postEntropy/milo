@@ -1,4 +1,6 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { errorMessage } from '../../util/errors.js'
+import { logWarn } from '../../util/log.js'
 import { DEFAULT_SEARCH_KEY_ENV } from '../search/types.js'
 import type { PermissionMode } from '../tools/permission.js'
 import { MILO_HOME, authFile, configFile } from './paths.js'
@@ -59,7 +61,8 @@ export function readAuth(): Auth {
   if (!existsSync(authFile())) return emptyAuth()
   try {
     return AuthSchema.parse(JSON.parse(readFileSync(authFile(), 'utf8')))
-  } catch {
+  } catch (error) {
+    logWarn(`could not read ${authFile()} (starting with no keys): ${errorMessage(error)}`)
     return emptyAuth()
   }
 }
@@ -82,7 +85,8 @@ export function saveAuth(auth: Auth): void {
 function readConfigOrNull(): Config | null {
   try {
     return readConfig()
-  } catch {
+  } catch (error) {
+    logWarn(`could not read ${configFile()}: ${errorMessage(error)}`)
     return null
   }
 }
@@ -119,10 +123,10 @@ export function resolveApiKey(id: string, entry: ProviderEntry, auth: Auth): str
   )
   for (const name of envNames) {
     const value = process.env[name]
-    if (value && value.trim()) return value.trim()
+    if (value?.trim()) return value.trim()
   }
   const stored = auth.providers[id]
-  if (stored && stored.trim()) return stored.trim()
+  if (stored?.trim()) return stored.trim()
   if (entry.keyless) return false
   return undefined
 }
@@ -131,7 +135,7 @@ export function resolveGatewayToken(id: string, auth: Auth): string | undefined 
   const envName = GATEWAY_ENV[id]
   if (envName && process.env[envName]?.trim()) return process.env[envName]!.trim()
   const stored = auth.gateways[id]
-  if (stored && stored.trim()) return stored.trim()
+  if (stored?.trim()) return stored.trim()
   return undefined
 }
 
@@ -142,9 +146,9 @@ export function resolveSearchKey(
   if (!search) return undefined
   const envName = search.keyEnv ?? DEFAULT_SEARCH_KEY_ENV[search.provider]
   const fromEnv = process.env[envName]
-  if (fromEnv && fromEnv.trim()) return fromEnv.trim()
+  if (fromEnv?.trim()) return fromEnv.trim()
   const stored = auth.search[search.provider]
-  if (stored && stored.trim()) return stored.trim()
+  if (stored?.trim()) return stored.trim()
   return undefined
 }
 

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { listDirTool } from '../src/core/tools/list-dir'
-import { ctxFor, makeDir, makeTree, type Tree } from './tree'
+import { listDirTool } from '../src/core/tools/list-dir.js'
+import { ctxFor, makeDir, makeTree, type Tree } from './tree.js'
 
 let tree: Tree
 

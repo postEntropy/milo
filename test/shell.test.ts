@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { shellTool } from '../src/core/tools/shell'
+import { shellTool } from '../src/core/tools/shell.js'
 
 const ctx = { cwd: process.cwd(), signal: new AbortController().signal }
 

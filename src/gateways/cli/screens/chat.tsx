@@ -262,11 +262,11 @@ export function ChatScreen({
 
     const controller = new AbortController()
     abortRef.current = controller
-    const session = await runtime.getSession(scope)
     const startedAtMs = Date.now()
 
     let assistant = ''
     try {
+      const session = await runtime.getSession(scope)
       for await (const event of session.send(text, { signal: controller.signal, ask })) {
         applyEvent(event, {
           onText: (delta) => {
@@ -335,7 +335,7 @@ export function ChatScreen({
     if (text.startsWith('/')) {
       void runCommand(text).catch((error) => push({ kind: 'error', text: errorMessage(error) }))
     } else {
-      void send(text)
+      void send(text).catch((error) => push({ kind: 'error', text: errorMessage(error) }))
     }
   }
 
@@ -352,9 +352,11 @@ export function ChatScreen({
     <Box flexDirection="column" height={rows - HEADER_ROWS} width={columns}>
       <Box flexDirection="column" flexGrow={1} paddingX={1} overflow="hidden">
         {bodyLines.map((line, index) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: the window is rebuilt every frame and never reorders
           <Text key={index} color={line.color} dimColor={line.dim}>
             {line.segments
               ? line.segments.map((segment, segmentIndex) => (
+                  // biome-ignore lint/suspicious/noArrayIndexKey: segments are re-wrapped every frame and never reorder
                   <Text key={segmentIndex} bold={segment.bold}>
                     {segment.text}
                   </Text>
@@ -367,6 +369,7 @@ export function ChatScreen({
       {reasoningRows > 0 && (
         <Box flexDirection="column" paddingX={1}>
           {reasonPreview.map((line, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: the preview is rebuilt every frame and never reorders
             <Text key={index} dimColor italic>
               {line || ' '}
             </Text>

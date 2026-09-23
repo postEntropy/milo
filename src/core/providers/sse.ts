@@ -39,12 +39,13 @@ export async function* parseSSE(
       const { done, value } = await reader.read()
       if (done) break
       buffer += decoder.decode(value, { stream: true })
-      let index: number
-      while ((index = buffer.indexOf('\n')) !== -1) {
+      let index = buffer.indexOf('\n')
+      while (index !== -1) {
         const line = buffer.slice(0, index)
         buffer = buffer.slice(index + 1)
         const message = flushLine(line)
         if (message) yield message
+        index = buffer.indexOf('\n')
       }
     }
     buffer += decoder.decode()

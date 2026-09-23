@@ -1,8 +1,8 @@
 import { chmodSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { editFileTool } from '../src/core/tools/edit-file'
-import { ctxFor, makeTree, type Tree } from './tree'
+import { editFileTool } from '../src/core/tools/edit-file.js'
+import { ctxFor, makeTree, type Tree } from './tree.js'
 
 let tree: Tree
 

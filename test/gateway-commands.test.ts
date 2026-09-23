@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import type { DisplayConfig } from '../src/core/config/schema'
-import { DefaultPermissionPolicy } from '../src/core/tools/permission'
+import type { DisplayConfig } from '../src/core/config/schema.js'
+import { DefaultPermissionPolicy } from '../src/core/tools/permission.js'
 import {
   decodePermission,
   displayLockMessage,
@@ -8,8 +8,8 @@ import {
   handleCommand,
   modeLockMessage,
   sessionLockMessage,
-} from '../src/gateways/commands'
-import { PendingDecisions } from '../src/gateways/pending'
+} from '../src/gateways/commands.js'
+import { PendingDecisions } from '../src/gateways/pending.js'
 
 describe('handleCommand', () => {
   it('ignores normal messages', async () => {

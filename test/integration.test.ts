@@ -3,11 +3,11 @@ import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import type { AgentEvent } from '../src/core/agent/events'
-import { FileMemory } from '../src/core/memory/local'
-import { createProvider } from '../src/core/providers/create'
-import { AgentRuntime } from '../src/core/runtime'
-import { createToolRegistry } from '../src/core/tools'
+import type { AgentEvent } from '../src/core/agent/events.js'
+import { FileMemory } from '../src/core/memory/local.js'
+import { createProvider } from '../src/core/providers/create.js'
+import { AgentRuntime } from '../src/core/runtime.js'
+import { createToolRegistry } from '../src/core/tools/index.js'
 
 let server: Server
 let baseURL: string

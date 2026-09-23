@@ -96,6 +96,7 @@ export function SettingsScreen({
   const [text, setText] = useState('')
   const [notice, setNotice] = useState<string | null>(null)
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-read triggers, not closure values — auth is re-read from disk on navigation and after a save refreshes the config
   const auth = useMemo(() => readAuth(), [view, config])
 
   const go = (next: View, initial = '') => {

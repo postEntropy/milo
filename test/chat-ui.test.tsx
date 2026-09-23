@@ -1,13 +1,13 @@
 import { useState } from 'react'
 import { afterEach, describe, expect, it } from 'vitest'
 import { cleanup, render } from 'ink-testing-library'
-import type { AgentEvent } from '../src/core/agent/events'
-import type { DisplayConfig } from '../src/core/config/schema'
-import type { AgentRuntime } from '../src/core/runtime'
-import type { PermissionMode } from '../src/core/tools/permission'
-import { ChatScreen } from '../src/gateways/cli/screens/chat'
-import { ModelPicker } from '../src/gateways/cli/screens/model-picker'
-import type { Item } from '../src/gateways/cli/transcript'
+import type { AgentEvent } from '../src/core/agent/events.js'
+import type { DisplayConfig } from '../src/core/config/schema.js'
+import type { AgentRuntime } from '../src/core/runtime.js'
+import type { PermissionMode } from '../src/core/tools/permission.js'
+import { ChatScreen } from '../src/gateways/cli/screens/chat.js'
+import { ModelPicker } from '../src/gateways/cli/screens/model-picker.js'
+import type { Item } from '../src/gateways/cli/transcript.js'
 
 const tick = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms))
 const scope = { gateway: 'cli', conversationId: 'test' }
@@ -101,6 +101,23 @@ describe('ChatScreen', () => {
     const frame = lastFrame() ?? ''
     expect(frame).toContain('read_file')
     expect(frame).toContain('all done')
+  })
+
+  it('reports a session that fails to load instead of dropping the turn', async () => {
+    const runtime = {
+      getSession: async () => {
+        throw new Error('disk on fire')
+      },
+    } as unknown as AgentRuntime
+
+    const { lastFrame, stdin } = renderChat(runtime)
+    await submit(stdin, 'hello')
+    await tick()
+
+    const frame = lastFrame() ?? ''
+    expect(frame).toContain('disk on fire')
+    // The prompt comes back: the failure ended the turn, not the session.
+    expect(frame).toContain('Type a message')
   })
 
   it('anchors short content to the bottom of the pane', async () => {

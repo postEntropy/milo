@@ -2,13 +2,13 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { AgentEvent } from '../src/core/agent/events'
-import { FileMemory } from '../src/core/memory/local'
-import type { MemoryScope } from '../src/core/memory/index'
-import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types'
-import { Session, type SessionOptions } from '../src/core/session'
-import { MemorySessionStore } from '../src/core/sessions/memory-store'
-import { createToolRegistry } from '../src/core/tools'
+import type { AgentEvent } from '../src/core/agent/events.js'
+import { FileMemory } from '../src/core/memory/local.js'
+import type { MemoryScope } from '../src/core/memory/index.js'
+import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
+import { Session, type SessionOptions } from '../src/core/session.js'
+import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
+import { createToolRegistry } from '../src/core/tools/index.js'
 
 type Extra = Omit<SessionOptions, 'record' | 'scope' | 'store' | 'provider' | 'memory'>
 
@@ -226,6 +226,7 @@ describe('Session', () => {
   it('still reports a genuine failure as an error', async () => {
     const provider: Provider = {
       id: 'failing',
+      // biome-ignore lint/correctness/useYield: a provider that fails right away yields nothing
       async *stream(): AsyncGenerator<StreamEvent> {
         throw new Error('provider exploded')
       },

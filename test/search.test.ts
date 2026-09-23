@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { resolveSearchKey } from '../src/core/config/load'
-import { createSearchProvider } from '../src/core/search'
-import { ExaSearchProvider } from '../src/core/search/exa'
-import { keyWords, ParallelSearchProvider } from '../src/core/search/parallel'
-import { TavilySearchProvider } from '../src/core/search/tavily'
-import { createWebSearchTool } from '../src/core/tools/web-search'
+import { resolveSearchKey } from '../src/core/config/load.js'
+import { createSearchProvider } from '../src/core/search/index.js'
+import { ExaSearchProvider } from '../src/core/search/exa.js'
+import { keyWords, ParallelSearchProvider } from '../src/core/search/parallel.js'
+import { TavilySearchProvider } from '../src/core/search/tavily.js'
+import { createWebSearchTool } from '../src/core/tools/web-search.js'
 
 afterEach(() => {
   vi.unstubAllGlobals()

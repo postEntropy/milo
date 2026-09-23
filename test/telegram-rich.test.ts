@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { RichMessenger, isNotModified, type RichSender } from '../src/gateways/telegram/rich'
+import { RichMessenger, isNotModified, type RichSender } from '../src/gateways/telegram/rich.js'
 
 interface Behaviour {
   richFails?: boolean

@@ -33,7 +33,7 @@ export interface PermissionPolicy {
   readonly mode: PermissionMode
   setMode(mode: PermissionMode): void
   update(options: PermissionPolicyUpdate): void
-  decide(tool: Tool<any>, args: unknown): PermissionDecision | Promise<PermissionDecision>
+  decide(tool: Tool<unknown>, args: unknown): PermissionDecision | Promise<PermissionDecision>
 }
 
 export interface PermissionPolicyOptions {
@@ -86,7 +86,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     if (typeof options.threshold === 'number') this.threshold = options.threshold
   }
 
-  decide(tool: Tool<any>, args: unknown): PermissionDecision | Promise<PermissionDecision> {
+  decide(tool: Tool<unknown>, args: unknown): PermissionDecision | Promise<PermissionDecision> {
     if (this.mode === 'yolo') return 'allow'
     if (this.deny.has(tool.name)) return 'deny'
     if (tool.readOnly || tool.internal) return 'allow'
@@ -126,7 +126,7 @@ const SUMMARY_PREVIEW = 400
  * not a decision, and the reviewer already gets that; the human who is actually
  * asked was the one left out.
  */
-export function summarizeToolCall(tool: string, args: unknown): string {
+export function summarizeToolCall(args: unknown): string {
   if (args && typeof args === 'object') {
     const record = args as Record<string, unknown>
     if (typeof record.command === 'string') {

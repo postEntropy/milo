@@ -2,12 +2,12 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { FileMemory } from '../src/core/memory/local'
-import type { ChatRequest, Message, Provider, StreamEvent } from '../src/core/providers/types'
-import { Session } from '../src/core/session'
-import { estimateTokens, planCut, summarize } from '../src/core/sessions/compact'
-import { MemorySessionStore } from '../src/core/sessions/memory-store'
-import { createToolRegistry } from '../src/core/tools'
+import { FileMemory } from '../src/core/memory/local.js'
+import type { ChatRequest, Message, Provider, StreamEvent } from '../src/core/providers/types.js'
+import { Session } from '../src/core/session.js'
+import { estimateTokens, planCut, summarize } from '../src/core/sessions/compact.js'
+import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
+import { createToolRegistry } from '../src/core/tools/index.js'
 
 const text = (role: 'user' | 'assistant' | 'tool', value: string): Message => ({
   role,

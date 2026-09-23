@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { buildLines, padToBottom, visibleWindow, wrapText, type Line } from '../src/gateways/cli/transcript'
-import { theme } from '../src/gateways/cli/theme'
+import { buildLines, padToBottom, visibleWindow, wrapText, type Line } from '../src/gateways/cli/transcript.js'
+import { theme } from '../src/gateways/cli/theme.js'
 
 describe('wrapText', () => {
   it('wraps on word boundaries', () => {

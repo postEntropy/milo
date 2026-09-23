@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { readFileTool } from '../src/core/tools/read-file'
-import { ctxFor, makeTree } from './tree'
+import { readFileTool } from '../src/core/tools/read-file.js'
+import { ctxFor, makeTree } from './tree.js'
 
 describe('read_file', () => {
   it('numbers lines and stops counting the trailing newline as a line', async () => {

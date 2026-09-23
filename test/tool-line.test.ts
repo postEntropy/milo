@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toolIcon, toolLine, toolStyle } from '../src/gateways/tool-line'
+import { toolIcon, toolLine, toolStyle } from '../src/gateways/tool-line.js'
 
 describe('toolLine', () => {
   it('gives a shell command a code block and shows the command', () => {

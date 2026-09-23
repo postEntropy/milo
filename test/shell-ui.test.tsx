@@ -1,4 +1,4 @@
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -49,7 +49,7 @@ vi.mock('../src/gateways/cli/screens/model-picker', async () => {
   }
 })
 
-const { Shell } = await import('../src/gateways/cli/index')
+const { Shell } = await import('../src/gateways/cli/index.js')
 
 const tick = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms))
 

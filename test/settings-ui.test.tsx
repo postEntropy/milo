@@ -20,7 +20,8 @@ const config = {
 }
 writeFileSync(path.join(home, 'config.json'), JSON.stringify(config, null, 2))
 
-const { SettingsScreen } = await import('../src/gateways/cli/screens/settings')
+const { SettingsScreen } = await import('../src/gateways/cli/screens/settings.js')
+type PermissionMode = import('../src/core/tools/permission.js').PermissionMode
 
 const tick = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms))
 const DOWN = '\u001b[B'
@@ -69,7 +70,9 @@ function renderSettings(overrides: Record<string, unknown> = {}) {
       <SettingsScreen
         config={current}
         mode="ask"
-        onModeChange={(overrides.onModeChange as (mode: 'auto') => void) ?? (() => {})}
+        onModeChange={
+          (overrides.onModeChange as ((mode: PermissionMode) => void) | undefined) ?? (() => {})
+        }
         onOpenModel={() => {}}
         onSaved={() => setCurrent(readJson('config.json'))}
         onClose={(overrides.onClose as () => void) ?? (() => {})}

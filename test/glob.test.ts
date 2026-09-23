@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { globTool } from '../src/core/tools/glob'
-import { compileFilePattern, globToRegExp } from '../src/core/tools/walk'
-import { ctxFor, makeTree, setMtime, type Tree } from './tree'
+import { globTool } from '../src/core/tools/glob.js'
+import { compileFilePattern, globToRegExp } from '../src/core/tools/walk.js'
+import { ctxFor, makeTree, setMtime, type Tree } from './tree.js'
 
 let tree: Tree
 

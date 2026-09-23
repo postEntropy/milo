@@ -2,8 +2,8 @@ import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { FileSessionStore } from '../src/core/sessions/file-store'
-import { isValidSessionId, type SessionRecord } from '../src/core/sessions/types'
+import { FileSessionStore } from '../src/core/sessions/file-store.js'
+import { isValidSessionId, type SessionRecord } from '../src/core/sessions/types.js'
 
 const tempDir = () => mkdtempSync(path.join(tmpdir(), 'milo-store-'))
 

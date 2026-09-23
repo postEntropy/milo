@@ -1,4 +1,6 @@
 import type { Message, Provider } from '../providers/types.js'
+import { errorMessage } from '../../util/errors.js'
+import { logWarn } from '../../util/log.js'
 
 /** Rough token estimate. Cheap on purpose: no tokenizer, ~4 chars per token. */
 export function estimateTokens(messages: Message[]): number {
@@ -87,7 +89,8 @@ export async function summarize(options: SummarizeOptions): Promise<string | nul
     })) {
       if (event.type === 'text') text += event.delta
     }
-  } catch {
+  } catch (error) {
+    logWarn(`summary failed, dropping the turns plain: ${errorMessage(error)}`)
     return null
   } finally {
     clearTimeout(timer)

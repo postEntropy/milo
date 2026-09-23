@@ -73,8 +73,7 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
       cancelled = true
       controller.abort()
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step])
+  }, [step, preset.baseURL, preset.wire, preset.models[0], apiKeyValue, current?.model])
 
   const filtered = models.filter((model) => {
     const haystack = `${model.id} ${model.name ?? ''}`.toLowerCase()

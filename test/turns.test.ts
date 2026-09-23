@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { TurnQueue } from '../src/gateways/turns'
+import { TurnQueue } from '../src/gateways/turns.js'
 
 const tick = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms))
 

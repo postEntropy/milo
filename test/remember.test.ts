@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import type { MemoryInput } from '../src/core/memory/types'
-import { DefaultPermissionPolicy } from '../src/core/tools/permission'
-import { rememberTool } from '../src/core/tools/remember'
-import type { ToolContext } from '../src/core/tools/types'
+import type { MemoryInput } from '../src/core/memory/types.js'
+import { DefaultPermissionPolicy } from '../src/core/tools/permission.js'
+import { rememberTool } from '../src/core/tools/remember.js'
+import type { ToolContext } from '../src/core/tools/types.js'
 
 function contextWithSink(): { ctx: ToolContext; saved: MemoryInput[] } {
   const saved: MemoryInput[] = []

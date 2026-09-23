@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { writeFileAtomic } from '../../util/fs.js'
+import { errorMessage } from '../../util/errors.js'
+import { logWarn } from '../../util/log.js'
 import type { Message } from '../providers/types.js'
 import { generateNickname } from './nickname.js'
 import {
@@ -80,7 +82,8 @@ export class FileSessionStore implements SessionStore {
     if (!existsSync(file)) return null
     try {
       return parseRecord(JSON.parse(readFileSync(file, 'utf8')))
-    } catch {
+    } catch (error) {
+      logWarn(`dropping unreadable session ${id}: ${errorMessage(error)}`)
       return null
     }
   }
@@ -135,7 +138,8 @@ export class FileSessionStore implements SessionStore {
     try {
       const value: unknown = JSON.parse(readFileSync(file, 'utf8'))
       return typeof value === 'string' && isValidSessionId(value) ? value : undefined
-    } catch {
+    } catch (error) {
+      logWarn(`dropping unreadable binding ${file}: ${errorMessage(error)}`)
       return undefined
     }
   }
@@ -155,7 +159,8 @@ export class FileSessionStore implements SessionStore {
         if (typeof value === 'string' && isValidSessionId(value)) out[key] = value
       }
       return out
-    } catch {
+    } catch (error) {
+      logWarn(`dropping unreadable legacy bindings: ${errorMessage(error)}`)
       return {}
     }
   }

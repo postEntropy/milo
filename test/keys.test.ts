@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isCtrlC } from '../src/gateways/cli/keys'
+import { isCtrlC } from '../src/gateways/cli/keys.js'
 
 describe('isCtrlC', () => {
   it('recognises the raw control character', () => {

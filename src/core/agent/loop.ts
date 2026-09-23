@@ -129,7 +129,7 @@ async function checkPermission(
   const { allowed } = await permission.ask({
     tool: name,
     args,
-    summary: summarizeToolCall(name, args),
+    summary: summarizeToolCall(args),
   })
   return allowed ? null : `The user denied running "${name}".`
 }

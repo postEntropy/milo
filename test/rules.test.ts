@@ -6,7 +6,7 @@ import {
   scanCommand,
   scanCommandTargets,
   scanWriteTarget,
-} from '../src/core/tools/rules'
+} from '../src/core/tools/rules.js'
 
 describe('scanCommand', () => {
   const dangerous = [

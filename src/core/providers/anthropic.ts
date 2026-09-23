@@ -1,4 +1,6 @@
 import { parseSSE } from './sse.js'
+import { errorMessage } from '../../util/errors.js'
+import { logDebug } from '../../util/log.js'
 import {
   parseToolArgs,
   type ChatRequest,
@@ -21,6 +23,22 @@ interface Block {
   id?: string
   name?: string
   json: string
+}
+
+interface AnthropicStreamEvent {
+  type?: string
+  index: number
+  message?: { usage?: { input_tokens?: number } }
+  content_block?: { type?: string; id?: string; name?: string }
+  delta?: {
+    type?: string
+    text?: string
+    thinking?: string
+    partial_json?: string
+    stop_reason?: string
+  }
+  usage?: { output_tokens?: number }
+  error?: { message?: string }
 }
 
 const DEFAULT_MAX_TOKENS = 4096
@@ -71,10 +89,11 @@ export class AnthropicProvider implements Provider {
     let inputTokens = 0
 
     for await (const message of parseSSE(response.body)) {
-      let event: any
+      let event: AnthropicStreamEvent
       try {
-        event = JSON.parse(message.data)
-      } catch {
+        event = JSON.parse(message.data) as AnthropicStreamEvent
+      } catch (error) {
+        logDebug(`anthropic: skipped an unparseable stream chunk: ${errorMessage(error)}`)
         continue
       }
 
@@ -84,8 +103,8 @@ export class AnthropicProvider implements Provider {
           break
         }
         case 'content_block_start': {
-          const block = event.content_block ?? {}
-          if (block.type === 'tool_use') {
+          const block = event.content_block
+          if (block?.type === 'tool_use') {
             blocks.set(event.index, { kind: 'tool', id: block.id, name: block.name, json: '' })
           } else {
             blocks.set(event.index, { kind: 'text', json: '' })
@@ -93,12 +112,12 @@ export class AnthropicProvider implements Provider {
           break
         }
         case 'content_block_delta': {
-          const delta = event.delta ?? {}
-          if (delta.type === 'text_delta' && delta.text) {
+          const delta = event.delta
+          if (delta?.type === 'text_delta' && delta.text) {
             yield { type: 'text', delta: delta.text }
-          } else if (delta.type === 'thinking_delta' && delta.thinking) {
+          } else if (delta?.type === 'thinking_delta' && delta.thinking) {
             yield { type: 'reasoning', delta: delta.thinking }
-          } else if (delta.type === 'input_json_delta') {
+          } else if (delta?.type === 'input_json_delta') {
             const block = blocks.get(event.index)
             if (block) block.json += delta.partial_json ?? ''
           }
@@ -117,9 +136,11 @@ export class AnthropicProvider implements Provider {
           break
         }
         case 'message_delta': {
-          if (event.delta?.stop_reason) finish = mapStopReason(event.delta.stop_reason)
-          if (typeof event.usage?.output_tokens === 'number') {
-            yield { type: 'usage', inputTokens, outputTokens: event.usage.output_tokens }
+          const stop = event.delta?.stop_reason
+          if (stop) finish = mapStopReason(stop)
+          const outputTokens = event.usage?.output_tokens
+          if (typeof outputTokens === 'number') {
+            yield { type: 'usage', inputTokens, outputTokens }
           }
           break
         }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { denialMessage, describeAccess, isAllowed, normalize } from '../src/gateways/access'
+import { denialMessage, describeAccess, isAllowed, normalize } from '../src/gateways/access.js'
 
 describe('isAllowed', () => {
   it('allows anyone when the list is empty or missing', () => {

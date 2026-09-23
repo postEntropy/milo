@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { JevReviewer } from '../src/core/tools/jev'
+import { JevReviewer } from '../src/core/tools/jev.js'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -7,7 +7,7 @@ afterEach(() => {
 
 const answering = (noul: number) =>
   vi.fn(
-    async () =>
+    async (_input: string | URL, _init?: RequestInit) =>
       new Response(JSON.stringify({ answers: { dangerous: { noul } } }), { status: 200 }),
   )
 

@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { DefaultPermissionPolicy, summarizeToolCall } from '../src/core/tools/permission'
-import type { DangerReviewer } from '../src/core/tools/permission'
-import type { Tool } from '../src/core/tools/types'
+import { DefaultPermissionPolicy, summarizeToolCall } from '../src/core/tools/permission.js'
+import type { DangerReviewer } from '../src/core/tools/permission.js'
+import type { Tool } from '../src/core/tools/types.js'
 
 const readTool: Tool = {
   name: 'read_file',
@@ -250,19 +250,19 @@ describe('DefaultPermissionPolicy — auto mode and file writes', () => {
 
 describe('summarizeToolCall', () => {
   it('prefers command, then query, then path', () => {
-    expect(summarizeToolCall('shell_command', { command: 'ls -la' })).toBe('ls -la')
-    expect(summarizeToolCall('web_search', { query: 'the news' })).toBe('the news')
-    expect(summarizeToolCall('read_file', { path: 'a.txt' })).toBe('a.txt')
+    expect(summarizeToolCall({ command: 'ls -la' })).toBe('ls -la')
+    expect(summarizeToolCall({ query: 'the news' })).toBe('the news')
+    expect(summarizeToolCall({ path: 'a.txt' })).toBe('a.txt')
   })
 
   it('shows what a write would put in the file', () => {
-    const summary = summarizeToolCall('write_file', { path: 'src/a.ts', content: 'export const a = 1' })
+    const summary = summarizeToolCall({ path: 'src/a.ts', content: 'export const a = 1' })
     expect(summary).toContain('src/a.ts')
     expect(summary).toContain('export const a = 1')
   })
 
   it('shows both sides of an edit as a diff', () => {
-    const summary = summarizeToolCall('edit_file', {
+    const summary = summarizeToolCall({
       path: 'src/auth.ts',
       old_string: 'return allow',
       new_string: 'return allowAll',
@@ -273,12 +273,12 @@ describe('summarizeToolCall', () => {
   })
 
   it('keeps a long file short enough to read in a prompt', () => {
-    const summary = summarizeToolCall('write_file', { path: 'a.ts', content: 'x'.repeat(5000) })
+    const summary = summarizeToolCall({ path: 'a.ts', content: 'x'.repeat(5000) })
     expect(summary.length).toBeLessThan(600)
     expect(summary).toContain('a.ts')
   })
 
   it('says which directory a command runs in', () => {
-    expect(summarizeToolCall('shell_command', { command: 'ls', cwd: '/etc' })).toBe('cd /etc && ls')
+    expect(summarizeToolCall({ command: 'ls', cwd: '/etc' })).toBe('cd /etc && ls')
   })
 })

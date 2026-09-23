@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { grepTool } from '../src/core/tools/grep'
-import { ctxFor, makeTree, type Tree } from './tree'
+import { grepTool } from '../src/core/tools/grep.js'
+import { ctxFor, makeTree, type Tree } from './tree.js'
 
 let tree: Tree
 

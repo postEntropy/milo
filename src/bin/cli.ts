@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import process from 'node:process'
+import { createRequire } from 'node:module'
 import { createElement } from 'react'
 import { render } from 'ink'
 import {
@@ -10,14 +11,16 @@ import {
   type LoadedConfig,
 } from '../core/config/load.js'
 import { errorMessage } from '../util/errors.js'
-import { isValidSessionId } from '../core/sessions/index.js'
 import { enterAltScreen, exitAltScreen } from '../gateways/cli/ansi.js'
 import { Shell } from '../gateways/cli/index.js'
 import type { PermissionMode } from '../core/tools/permission.js'
 
 import { parseArgs, type Args } from './args.js'
+import { resolveCommand, resolveInitialMode, validateArgs } from './dispatch.js'
 
-const VERSION = '0.1.0'
+const { version: VERSION } = createRequire(import.meta.url)('../../package.json') as {
+  version: string
+}
 
 function printHelp(): void {
   console.log(`milo ${VERSION} — a multi-surface agent
@@ -104,19 +107,15 @@ async function main(): Promise<void> {
     return
   }
 
-  if (args.mode && !['ask', 'auto', 'yolo'].includes(args.mode)) {
-    console.error(`Invalid --mode "${args.mode}". Use ask, auto or yolo.`)
+  const problem = validateArgs(args)
+  if (problem) {
+    console.error(problem)
     process.exitCode = 1
     return
   }
-  if (args.resume && !isValidSessionId(args.resume)) {
-    console.error(`Invalid session id "${args.resume}". Expected something like calm-otter-7.`)
-    process.exitCode = 1
-    return
-  }
-  const initialMode = args.yolo ? 'yolo' : (args.mode as PermissionMode | undefined)
+  const initialMode = resolveInitialMode(args)
 
-  switch (args.command) {
+  switch (resolveCommand(args.command)) {
     case 'serve': {
       const { runServe } = await import('../gateways/serve.js')
       await runServe()

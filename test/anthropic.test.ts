@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { AnthropicProvider } from '../src/core/providers/anthropic'
-import type { StreamEvent } from '../src/core/providers/types'
+import { AnthropicProvider } from '../src/core/providers/anthropic.js'
+import type { StreamEvent } from '../src/core/providers/types.js'
 
 const frame = (obj: unknown): string => `data: ${JSON.stringify(obj)}\n\n`
 

@@ -43,7 +43,7 @@ export interface ToolRegistryOptions {
 
 /** `web_search` is only registered when a search provider is configured. */
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
-  const tools: Tool<any>[] = [...builtinTools]
+  const tools: Tool<unknown>[] = [...builtinTools]
   if (options.search) tools.push(createWebSearchTool(options.search))
   return new ToolRegistry(tools)
 }

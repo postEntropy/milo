@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseArgs } from '../src/bin/args'
+import { parseArgs } from '../src/bin/args.js'
 
 describe('parseArgs', () => {
   it('defaults to the chat with nothing set', () => {

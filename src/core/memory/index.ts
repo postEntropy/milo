@@ -8,7 +8,6 @@ export { FileMemory } from './local.js'
 export function createMemory(config: MemoryConfig, dir: string): Memory {
   switch (config.backend) {
     case 'file':
-    default:
       return new FileMemory({ dir })
   }
 }

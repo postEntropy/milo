@@ -1,4 +1,5 @@
 import { readdir, stat } from 'node:fs/promises'
+import type { Dirent } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
@@ -32,7 +33,7 @@ export const listDirTool: Tool<ListDirArgs> = {
     const target = resolveToolPath(ctx.cwd, args.path)
     const label = args.path?.trim() || target
 
-    let dirents
+    let dirents: Dirent[]
     try {
       dirents = await readdir(target, { withFileTypes: true })
     } catch (error) {

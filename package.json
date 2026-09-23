@@ -16,7 +16,9 @@
     "build": "tsup",
     "start": "node dist/bin/cli.js",
     "typecheck": "tsc --noEmit",
+    "lint": "biome lint .",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "bench:jev": "tsx scripts/bench-jev.ts"
   },
   "dependencies": {
@@ -29,8 +31,10 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
-    "@types/node": "^20.19.43",
+    "@biomejs/biome": "^2.5.14",
+    "@types/node": "^22.20.4",
     "@types/react": "^19.3.0",
+    "@vitest/coverage-v8": "^5.0.1",
     "ink-testing-library": "^4.0.0",
     "tsup": "^8.5.1",
     "tsx": "^4.23.15",

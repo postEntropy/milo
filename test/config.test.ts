@@ -8,7 +8,7 @@ const home = mkdtempSync(path.join(tmpdir(), 'milo-config-'))
 process.env.MILO_HOME = home
 
 const { readConfig, readDisplay, setDisplay, setPermissionMode } = await import(
-  '../src/core/config/load'
+  '../src/core/config/load.js'
 )
 
 const configFile = path.join(home, 'config.json')

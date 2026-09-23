@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { OpenAIProvider } from '../src/core/providers/openai'
-import type { StreamEvent } from '../src/core/providers/types'
+import { OpenAIProvider } from '../src/core/providers/openai.js'
+import type { StreamEvent } from '../src/core/providers/types.js'
 
 const frame = (obj: unknown): string => `data: ${JSON.stringify(obj)}\n\n`
 

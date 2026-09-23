@@ -1,4 +1,6 @@
 import { parseSSE } from './sse.js'
+import { errorMessage } from '../../util/errors.js'
+import { logDebug } from '../../util/log.js'
 import {
   parseToolArgs,
   type ChatRequest,
@@ -20,6 +22,19 @@ interface PendingToolCall {
   id: string
   name: string
   args: string
+}
+
+interface OpenAIDelta {
+  content?: string
+  reasoning?: string
+  reasoning_content?: string
+  tool_calls?: { index?: number; id?: string; function?: { name?: string; arguments?: string } }[]
+}
+
+interface OpenAIStreamChunk {
+  error?: { message?: string }
+  usage?: { prompt_tokens?: number; completion_tokens?: number }
+  choices?: { delta?: OpenAIDelta; finish_reason?: string }[]
 }
 
 export class OpenAIProvider implements Provider {
@@ -70,10 +85,11 @@ export class OpenAIProvider implements Provider {
     for await (const message of parseSSE(response.body)) {
       if (message.data === '[DONE]') break
 
-      let chunk: any
+      let chunk: OpenAIStreamChunk
       try {
-        chunk = JSON.parse(message.data)
-      } catch {
+        chunk = JSON.parse(message.data) as OpenAIStreamChunk
+      } catch (error) {
+        logDebug(`openai: skipped an unparseable stream chunk: ${errorMessage(error)}`)
         continue
       }
 

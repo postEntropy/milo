@@ -47,9 +47,9 @@ export function Shell({
   // Rebuild the runtime only when the provider/model changes, so editing
   // settings keeps the current conversation and its context.
   const runtimeKey = loaded ? `${loaded.provider.id}:${loaded.model}` : null
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the key is the dependency — the runtime must survive settings edits; `loaded` is only its latest snapshot
   const runtime = useMemo(
     () => (loaded ? createRuntime(loaded, cwd) : null),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [runtimeKey, cwd],
   )
 

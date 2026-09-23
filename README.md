@@ -54,7 +54,8 @@ parsed leaves the current values alone instead of failing the turn.
 
 Environment variables override stored secrets: `COMMANDCODE_API_KEY`, `OPENROUTER_API_KEY`,
 `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`.
-Set `MILO_HOME` to relocate `~/.milo`; set `MILO_DEBUG=1` to log memory `remember`/`recall` calls.
+Set `MILO_HOME` to relocate `~/.milo`; set `MILO_DEBUG=1` for debug logs (memory `remember`/`recall`
+calls, skipped stream chunks).
 
 ### Providers
 
@@ -398,11 +399,13 @@ prompt says the same about the action it is judging.
 npm run dev         # run the CLI from source (tsx)
 npm run serve       # run the bot gateways from source
 npm run typecheck   # tsc --noEmit
+npm run lint        # biome lint
 npm test            # vitest
 npm run build       # bundle to dist/ (tsup)
 ```
 
-CI (`.github/workflows/ci.yml`) runs those four checks on every push and pull request. One trap
+CI (`.github/workflows/ci.yml`) runs lint, types, tests with coverage and the build on every push
+and pull request, on Node 20 and 22, plus a smoke run of the bundled binary. One trap
 worth knowing: with `NODE_ENV=production` exported in your shell, npm treats every install as
 `--omit=dev` and **prunes the toolchain** — `tsc`, `vitest` and `tsup` disappear. Recover with
 `npm ci --include=dev`.
@@ -437,6 +440,3 @@ Known open work, roughly in order:
 4. **Web search needs a key.** `config.json` has no `search` section, so `web_search` is not even
    registered right now. The Exa and Parallel adapters exist but have never been called for real.
 5. Markdown rendering in the Ink UI (the terminal shows plain text; only the bots get rich messages).
-6. **No linter.** CI checks types, tests and the build, but nothing enforces style or catches a
-   floating promise. Adding ESLint means reformatting its way through the source in a commit of its
-   own, which is why it has not happened yet.

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import type { AgentEvent } from '../src/core/agent/events'
-import { runAgent } from '../src/core/agent/loop'
-import type { ChatRequest, Message, Provider, StreamEvent } from '../src/core/providers/types'
-import { ToolRegistry } from '../src/core/tools/registry'
-import type { Tool } from '../src/core/tools/types'
+import type { AgentEvent } from '../src/core/agent/events.js'
+import { runAgent } from '../src/core/agent/loop.js'
+import type { ChatRequest, Message, Provider, StreamEvent } from '../src/core/providers/types.js'
+import { ToolRegistry } from '../src/core/tools/registry.js'
+import type { Tool } from '../src/core/tools/types.js'
 
 class ScriptedProvider implements Provider {
   readonly id = 'scripted'

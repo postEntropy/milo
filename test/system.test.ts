@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SYSTEM_PROMPT, buildSystemPrompt, formatToolSignature } from '../src/core/agent/system'
-import type { ToolSpec } from '../src/core/providers/types'
+import { DEFAULT_SYSTEM_PROMPT, buildSystemPrompt, formatToolSignature } from '../src/core/agent/system.js'
+import type { ToolSpec } from '../src/core/providers/types.js'
 
 const tool: ToolSpec = {
   name: 'read_file',

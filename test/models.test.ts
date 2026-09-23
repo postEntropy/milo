@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { listModels, normalizeModels } from '../src/core/providers/models'
+import { listModels, normalizeModels } from '../src/core/providers/models.js'
 
 afterEach(() => vi.unstubAllGlobals())
 

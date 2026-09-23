@@ -4,17 +4,17 @@ import type { ToolSpec } from '../providers/types.js'
 import type { Tool, ToolContext, ToolResult } from './types.js'
 
 export class ToolRegistry {
-  private readonly tools = new Map<string, Tool<any>>()
+  private readonly tools = new Map<string, Tool<unknown>>()
 
-  constructor(tools: Tool<any>[] = []) {
+  constructor(tools: Tool<unknown>[] = []) {
     for (const tool of tools) this.register(tool)
   }
 
-  register(tool: Tool<any>): void {
+  register(tool: Tool<unknown>): void {
     this.tools.set(tool.name, tool)
   }
 
-  get(name: string): Tool<any> | undefined {
+  get(name: string): Tool<unknown> | undefined {
     return this.tools.get(name)
   }
 
@@ -22,7 +22,7 @@ export class ToolRegistry {
     return this.tools.has(name)
   }
 
-  list(): Tool<any>[] {
+  list(): Tool<unknown>[] {
     return [...this.tools.values()]
   }
 
