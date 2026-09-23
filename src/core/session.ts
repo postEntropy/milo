@@ -148,63 +148,57 @@ export class Session {
     return this.record.title
   }
 
+  /**
+   * A conversation turn. The session is taken exclusively for as long as it runs
+   * — two terminals both bind `cli:main`, and a daemon may hold a session a
+   * terminal resumes — so this is what keeps one turn from being folded into the
+   * middle of another.
+   *
+   * The lease is taken, and released in the one `finally` below, in this frame.
+   * Nothing may take it on another frame's behalf: a reader that stops at any of
+   * the yields in between closes this generator, and whatever frame holds the
+   * lease then is the one that has to let it go.
+   */
   async *send(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
     const signal = opts?.signal
-    let lease: SessionLease
+    let lease: SessionLease | null = null
     try {
-      lease = yield* this.acquireLease(signal)
-    } catch (error) {
-      // A stop is not a failure here either: the wait for the session is as
-      // interruptible as the turn itself.
-      if (isAbort(error, signal)) yield { type: 'aborted' }
-      else yield { type: 'error', message: errorMessage(error) }
-      return
-    }
-    const latest = lease.latest
-    try {
+      const free = await this.store.tryAcquire(this.id)
+      if (free) {
+        lease = free
+      } else {
+        // Another Milo is mid-turn on this conversation. Said before waiting: a
+        // silent wait is indistinguishable from a model that is thinking.
+        yield { type: 'waiting' }
+        const began = Date.now()
+        try {
+          lease = await this.store.acquire(this.id, { signal })
+        } catch (error) {
+          // A stop is not a failure here either: the wait for the session is as
+          // interruptible as the turn itself.
+          if (isAbort(error, signal)) yield { type: 'aborted' }
+          else yield { type: 'error', message: errorMessage(error) }
+          return
+        }
+        // Said to be over as soon as it is. The turn starts at this line, not at
+        // the first token: everything after is the model, and a surface timing
+        // the turn must not charge the model for the queue it waited in.
+        yield { type: 'waited', ms: Date.now() - began }
+      }
+
       // The record was deleted while this copy was open — by a `/rm` elsewhere,
       // or by hand. Saying so beats running a turn whose transcript can never be
       // written back, which would come out as a version conflict and read as if
       // somebody else had merely changed the session.
-      if (!latest) {
+      if (!lease.latest) {
         yield { type: 'error', message: `session ${this.id} no longer exists` }
         return
       }
-      const rebound = this.adoptLatest(latest)
+      const rebound = this.adoptLatest(lease.latest)
       if (rebound) yield { type: 'rebased', ...rebound }
       yield* this.turn(input, opts)
     } finally {
-      await lease.release()
-    }
-  }
-
-  /**
-   * The session, exclusively, for as long as the turn runs. Two terminals both
-   * bind `cli:main`, and a daemon may hold a session a terminal resumes, so this
-   * is what keeps one turn from being folded into the middle of another.
-   */
-  private async *acquireLease(signal?: AbortSignal): AsyncGenerator<AgentEvent, SessionLease> {
-    const free = await this.store.tryAcquire(this.id)
-    if (free) return free
-    // Another Milo is mid-turn on this conversation. Said before waiting: a
-    // silent wait is indistinguishable from a model that is thinking.
-    yield { type: 'waiting' }
-    const began = Date.now()
-    const lease = await this.store.acquire(this.id, { signal })
-    let handedOver = false
-    try {
-      // Said to be over as soon as it is. The turn starts at this line, not at
-      // the first token: everything after is the model, and a surface timing the
-      // turn must not charge the model for the queue it waited in.
-      yield { type: 'waited', ms: Date.now() - began }
-      handedOver = true
-      return lease
-    } finally {
-      // Closed between taking the lease and handing it over — a reader that
-      // stopped at the event above. Nobody else can release it: it belongs to
-      // this frame, and leaving it would hold the session for the life of the
-      // process.
-      if (!handedOver) await lease.release()
+      await lease?.release()
     }
   }
 
