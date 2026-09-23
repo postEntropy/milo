@@ -326,3 +326,19 @@ describe('Session', () => {
     expect(entries[1]?.tool?.result).toContain('milo')
   })
 })
+
+describe('transcript version', () => {
+  it('never repeats, even for writes that land in the same millisecond', async () => {
+    const { session, record } = await run('hello')
+
+    const versions = [record.updatedAt]
+    await session.persist()
+    versions.push(record.updatedAt)
+    await session.persist()
+    versions.push(record.updatedAt)
+
+    for (let i = 1; i < versions.length; i += 1) {
+      expect(versions[i]!).toBeGreaterThan(versions[i - 1]!)
+    }
+  })
+})

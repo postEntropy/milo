@@ -108,7 +108,7 @@ export class FileMemory implements Memory {
   }
 }
 
-function tokenize(text: string): Set<string> {
+export function tokenize(text: string): Set<string> {
   const tokens = text
     .toLowerCase()
     .split(/[^\p{L}\p{N}]+/u)

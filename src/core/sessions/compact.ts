@@ -52,6 +52,8 @@ export function planCut(messages: Message[], keepTurns: number): number {
 export interface SummarizeOptions {
   provider: Provider
   model: string
+  /** Overrides the compaction prompt, for a caller that wants another shape. */
+  system?: string
   /** Summary of the turns dropped before these, to fold in. */
   previous?: string
   dropped: Message[]
@@ -86,7 +88,7 @@ export async function summarize(options: SummarizeOptions): Promise<string | nul
   try {
     for await (const event of options.provider.stream({
       model: options.model,
-      system: SUMMARY_SYSTEM,
+      system: options.system ?? SUMMARY_SYSTEM,
       messages: [{ role: 'user', content: [{ type: 'text', text: promptFor(options.previous, transcript) }] }],
       signal: controller.signal,
     })) {
@@ -102,6 +104,43 @@ export async function summarize(options: SummarizeOptions): Promise<string | nul
 
   const trimmed = text.trim()
   return trimmed.length > 0 ? trimmed : null
+}
+
+const DIGEST_SYSTEM = `You write a short recap of a conversation so it can be found again later.
+Answer with 3 to 5 terse bullet points covering:
+- what the conversation was about;
+- the decisions, preferences or conventions it settled;
+- the paths, commands, names and numbers that came up;
+- anything left open.
+Write in the language of the conversation, in the third person. Bullets only, no preamble.`
+
+const DEFAULT_DIGEST_TIMEOUT_MS = 8_000
+
+export interface DigestOptions {
+  provider: Provider
+  model: string
+  messages: Message[]
+  /** The turns compaction already folded away, when there are any. */
+  summary?: string
+  signal?: AbortSignal
+  timeoutMs?: number
+}
+
+/**
+ * A short recap of a whole session, for the `/sessions` list and for finding it
+ * again. The same model call as compaction, with a prompt that asks for bullets
+ * instead of prose — null on any failure, so the caller can skip it quietly.
+ */
+export async function digest(options: DigestOptions): Promise<string | null> {
+  return summarize({
+    provider: options.provider,
+    model: options.model,
+    system: DIGEST_SYSTEM,
+    previous: options.summary,
+    dropped: options.messages,
+    signal: options.signal,
+    timeoutMs: options.timeoutMs ?? DEFAULT_DIGEST_TIMEOUT_MS,
+  })
 }
 
 function promptFor(previous: string | undefined, transcript: string): string {

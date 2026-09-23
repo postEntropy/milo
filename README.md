@@ -45,7 +45,8 @@ running, it exits.
 - `~/.milo/config.json` — provider, model, `maxTokens`, memory backend, session settings, display,
   permissions and enabled gateways.
 - `~/.milo/auth.json` — API keys and bot tokens (written `0600`).
-- `~/.milo/sessions/` — one JSON file per session, plus one binding file per address (see below).
+- `~/.milo/sessions/` — one JSON file per session, plus one binding file per address and one recap
+  per session that has been left behind (see below).
 - `~/.milo/memory/` — one JSON file per conversation scope.
 
 A corrupt `config.json` is reported at startup rather than swallowed, but the settings a running
@@ -151,6 +152,7 @@ denied tool. The queue also stops two turns from mutating the same session at on
 | `write_file` | no | Creates or replaces a file; asks for confirmation. |
 | `edit_file` | no | Exact string replacement; asks for confirmation. |
 | `remember` | — | Saves a durable fact; only touches Milo's own memory, so it never asks. |
+| `recall` | yes | Which past session a question is about, and what it was about. |
 | `search_history` | yes | Term search over Milo's own past turns, reasoning and tool calls included. |
 | `web_search` | yes | Registered only when a search provider is configured. |
 | `shell_command` | no | Runs with `/bin/sh`; asks for confirmation first. |
@@ -370,6 +372,21 @@ a specific one (`milo --continue` is the explicit form of the default).
 Memory is keyed by the conversation, not the session, so facts you told Milo before a `/new` are
 still available afterwards.
 
+Leaving a session — a `/new`, or a `/resume` away from it — writes a short **recap** of it, in the
+model's own words: a few bullets on what it was about and what it settled. `/sessions` shows the
+recap where it used to show the first line of the conversation, so the list reads as a list of
+subjects rather than a list of opening questions, and `recall` ranks them to answer "which
+conversation was that?".
+
+The recap is kept **out of the session file**, in `sessions/recaps/<id>.json`, because a session's own
+file is written a turn at a time and a recap in there would be a second writer to it — with the
+session winning and the recap vanishing, or the recap winning and a turn being lost. Apart, neither
+can damage the other. Each recap names the transcript version it was written from, so a turn landing
+while it is being written needs no fixing up: the recap stops matching, drops out of the listing, and
+the next one written describes the whole thing. The model call runs in the **background**, so a switch
+never waits on it; it is skipped when the session is empty or its recap is still current, and a recap
+that fails is simply not written — leaving a session never fails because its recap did.
+
 On Telegram and Discord, `/new`, `/sessions` and `/resume` only work on a single-person bot (exactly
 one id in the allowlist). On a shared or open bot they are locked, so nobody can switch into someone
 else's sessions.
@@ -408,8 +425,14 @@ not by what is on disk.
 
 `search_history` is the read side: give it terms (all of them have to appear, any case) and it returns
 the newest matches from the last 30 days, reading the reasoning, the tool arguments and the tool
-results as well — which is what makes "what did we try for X?" answerable. The reply is capped and
-says when there were more matches than it showed.
+results as well — which is what makes "what did we try for X?" answerable. Pass `session` to stay
+inside one conversation; `recall` is what names it. The reply is capped and says when there were more
+matches than it showed.
+
+`recall` answers the other half of the same question — not *what* was said but *which conversation*.
+It ranks the saved sessions by how well their recap, title and first words match the query, with a
+recency bonus allowed to reorder but never to qualify: a session that shares no word with the
+question does not come back for being recent. It is the map; `search_history` is the territory.
 
 Plain text on disk is what keeps everything else working: `grep`, `jq`, `tail -f`, and Milo's own
 `read_file` and `grep`. There is no index — the search walks day files, newest first, and stops at the
@@ -467,7 +490,8 @@ worth knowing: with `NODE_ENV=production` exported in your shell, npm treats eve
   - `tools/` — `Tool` interface, registry (zod → JSON Schema), built-in tools.
   - `search/` — `SearchProvider` plus the Tavily, Exa and Parallel adapters.
   - `memory/` — `Memory` interface + `FileMemory`.
-  - `sessions/` — `SessionStore` interface + `FileSessionStore` / `MemorySessionStore`, nickname
+  - `sessions/` — `SessionStore` interface + `FileSessionStore` / `MemorySessionStore`, the recaps
+    kept out of a transcript (`RecapStore`) and their ranking (`rankSessions`), nickname
     generation, compaction (`estimateTokens` / `planCut` / `summarize`) and `/stats` formatting.
   - `config/` — paths, zod schema, presets, load/save, onboarding wizard.
   - `runtime.ts` / `session.ts` / `bootstrap.ts`.

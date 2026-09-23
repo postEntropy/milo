@@ -24,6 +24,7 @@ export interface SessionSummary {
   updatedAt: number
   messageCount: number
   preview: string
+  recap?: string
 }
 
 /** The numbers behind `/stats`. */

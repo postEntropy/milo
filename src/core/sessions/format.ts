@@ -33,8 +33,10 @@ export function formatSessionList(
     const name = markdown ? `**${label}**` : label
     const meta = `${session.messageCount} msgs · ${formatWhen(session.updatedAt)}`
     const detail = markdown ? meta : `  ${meta}`
-    const preview = session.preview ? (markdown ? `> ${session.preview}` : `  ${session.preview}`) : ''
-    return [name, detail, preview].filter(Boolean).join('\n')
+    // The recap says what the session was about; the preview is the fallback for
+    // one that was never switched away from, so it never got one.
+    const body = quote(session.recap ?? session.preview, markdown)
+    return [name, detail, body].filter(Boolean).join('\n')
   })
 
   const more =
@@ -51,6 +53,16 @@ export function formatSessionList(
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+/** A block of lines as a Markdown quote, or indented for a plain-text surface. */
+function quote(text: string, markdown: boolean): string {
+  return text
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .filter((line) => line !== '')
+    .map((line) => (markdown ? `> ${line}` : `  ${line}`))
+    .join('\n')
 }
 
 export function formatStats(stats: SessionStats): string {

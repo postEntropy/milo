@@ -9,13 +9,19 @@ import { runAgent } from './agent/loop.js'
 import { buildSystemPrompt, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import {
   countTurns,
+  digest,
   estimateText,
   estimateTokens,
+  MemoryRecapStore,
   planCut,
+  rankSessions,
   summarize,
+  withRecaps,
+  type RecapStore,
   type SessionRecord,
   type SessionStats,
   type SessionStore,
+  type SessionSummary,
 } from './sessions/index.js'
 
 const SURFACES: SurfaceKind[] = ['cli', 'telegram', 'discord']
@@ -50,6 +56,8 @@ export interface SessionOptions {
   /** The record this session reads from and writes back to. */
   record: SessionRecord
   store: SessionStore
+  /** Where this session's recap is kept, out of its transcript. */
+  recaps?: RecapStore
   sessions?: SessionsConfig
   /** Where a turn is written down for later recall. Absent: nothing is logged. */
   history?: HistoryWriter
@@ -69,6 +77,7 @@ export class Session {
   scope: MemoryScope
   private readonly record: SessionRecord
   private readonly store: SessionStore
+  private readonly recaps: RecapStore
   private readonly options: SessionOptions
   private summary: string | undefined
   /** Size of the last system prompt sent, which the transcript count omits. */
@@ -78,6 +87,7 @@ export class Session {
     this.options = options
     this.record = options.record
     this.store = options.store
+    this.recaps = options.recaps ?? new MemoryRecapStore()
     this.id = options.record.id
     this.scope = options.scope
     this.messages = options.record.messages
@@ -161,6 +171,7 @@ export class Session {
           // Read through `this.scope` at call time: a gateway can rebind the
           // session to another conversation while it is running.
           remember: (items) => memory.remember(this.scope, items),
+          recall: (query, options) => this.recallSessions(query, options),
         },
         maxSteps,
         maxTokens,
@@ -218,14 +229,42 @@ export class Session {
     this.messages.length = 0
     this.summary = undefined
     this.record.droppedTokens = undefined
+    await this.recaps.remove(this.id) // the recap describes what just went away
     await this.persist()
+  }
+
+  /**
+   * A short recap of the whole session, written when it is switched away from,
+   * and kept out of the transcript so it cannot be overwritten by a turn — nor
+   * overwrite one. It records which version of the transcript it describes, so a
+   * turn landing while it is being written needs no reconciliation: the recap is
+   * simply no longer a match, and the next one will be.
+   */
+  async recap(): Promise<void> {
+    if (this.messages.length === 0) return
+    const seenAt = this.record.updatedAt
+    const existing = await this.recaps.read(this.id)
+    if (existing?.sourceUpdatedAt === seenAt) return
+
+    const text = await digest({
+      provider: this.options.provider,
+      model: this.options.model,
+      messages: this.messages,
+      summary: this.summary,
+    })
+    if (!text) return
+
+    await this.recaps.write({ session: this.id, text, sourceUpdatedAt: seenAt, at: Date.now() })
   }
 
   /** Rewrites the timestamp and writes the record back to the store. */
   async persist(): Promise<void> {
     this.record.messages = this.messages
     this.record.summary = this.summary
-    this.record.updatedAt = Date.now()
+    // Strictly increasing: a recap names the transcript version it was written
+    // from, and two writes inside the same millisecond would otherwise look
+    // like one — leaving a recap that misses a turn forever marked current.
+    this.record.updatedAt = Math.max(Date.now(), this.record.updatedAt + 1)
     await this.store.save(this.record)
   }
 
@@ -242,6 +281,15 @@ export class Session {
       compacted: this.summary !== undefined,
       droppedTokens: this.record.droppedTokens,
     }
+  }
+
+  /**
+   * The sessions a question is about, best first. This is the map — which
+   * conversation — while `search_history` is the territory: the exact turns.
+   */
+  async recallSessions(query: string, opts?: { limit?: number }): Promise<SessionSummary[]> {
+    const sessions = await withRecaps(await this.store.list(), this.recaps)
+    return rankSessions(sessions, query, opts?.limit ?? 5)
   }
 
   /**

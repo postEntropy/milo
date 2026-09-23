@@ -4,6 +4,10 @@ import type { Tool } from './types.js'
 
 const schema = z.object({
   query: z.string().describe('Words to look for; every one of them has to appear.'),
+  session: z
+    .string()
+    .optional()
+    .describe('Only this session (see /sessions or recall for the ids).'),
   days: z
     .number()
     .int()
@@ -28,13 +32,17 @@ const DEFAULT_LIMIT = 20
 export const searchHistoryTool: Tool<SearchHistoryArgs> = {
   name: 'search_history',
   description:
-    'Search your own past conversations: what was asked, what you answered, and which tools ran, across sessions and days. Use it when the user refers to something from an earlier conversation, or when you need to know what you already tried. It reads the log on this machine — the raw files are `~/.milo/history/*.jsonl` — in plain text; it does not search the web.',
+    'Search your own past conversations: what was asked, what you answered, and which tools ran, across sessions and days. Use it when the user refers to something from an earlier conversation, or when you need to know what you already tried. Pass `session` to stay inside one conversation — `recall` tells you which one. It reads the log on this machine — the raw files are `~/.milo/history/*.jsonl` — in plain text; it does not search the web.',
   schema,
   readOnly: true,
   async execute(args) {
     const limit = args.limit ?? DEFAULT_LIMIT
     // One extra, so we can say whether there is more than we are showing.
-    const found = searchHistory(args.query, { days: args.days, limit: limit + 1 })
+    const found = searchHistory(args.query, {
+      days: args.days,
+      limit: limit + 1,
+      session: args.session,
+    })
     const hits = found.slice(0, limit)
     if (hits.length === 0) {
       return { content: `Nothing in the history matches "${args.query}".` }

@@ -10,7 +10,9 @@ import { createToolRegistry } from '../src/core/tools/index.js'
 
 class StubProvider implements Provider {
   readonly id = 'stub'
+  calls = 0
   async *stream(_req: ChatRequest): AsyncGenerator<StreamEvent> {
+    this.calls += 1
     yield { type: 'text', delta: 'ok' }
     yield { type: 'done', finishReason: 'stop' }
   }
@@ -114,5 +116,119 @@ describe('AgentRuntime sessions', () => {
     const discord = await runtime.getSession({ gateway: 'discord', conversationId: '99' })
     expect(discord.id).toBe(telegram.id)
     expect(discord.messages.length).toBeGreaterThan(0)
+  })
+})
+
+describe('AgentRuntime recaps', () => {
+  it('recaps the session it leaves, so /sessions can say what it was about', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const runtime = new AgentRuntime(runtimeOptions(dir))
+
+    const first = await runtime.getSession(cli)
+    await drain(first.send('a question worth remembering later'))
+    await runtime.newSession(cli)
+    await runtime.flush()
+
+    const list = await runtime.listSessions()
+    expect(list.find((entry) => entry.id === first.id)?.recap).toBe('ok')
+  })
+
+  it('does not hold up the new session while it recaps the old one', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    let releaseDigest: () => void = () => {}
+    const digestGate = new Promise<void>((resolve) => {
+      releaseDigest = resolve
+    })
+    const provider: Provider = {
+      id: 'gated',
+      async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+        // The recap's own call is the one that carries no tool list; hold it open.
+        if (!req.tools) await digestGate
+        yield { type: 'text', delta: 'ok' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+    const runtime = new AgentRuntime({ ...runtimeOptions(dir), provider })
+
+    const first = await runtime.getSession(cli)
+    await drain(first.send('hello'))
+
+    // The switch comes back while the recap is still in flight.
+    const second = await runtime.newSession(cli)
+    expect(second.id).not.toBe(first.id)
+    const whileRecapping = await runtime.listSessions()
+    expect(whileRecapping.find((entry) => entry.id === first.id)?.recap).toBeUndefined()
+
+    releaseDigest()
+    await runtime.flush()
+
+    const after = await runtime.listSessions()
+    expect(after.find((entry) => entry.id === first.id)?.recap).toBe('ok')
+  })
+
+  it('does not show a recap whose transcript moved on while it was being written', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    let releaseDigest: () => void = () => {}
+    const digestGate = new Promise<void>((resolve) => {
+      releaseDigest = resolve
+    })
+    const provider: Provider = {
+      id: 'gated',
+      async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+        if (!req.tools) await digestGate
+        yield { type: 'text', delta: 'ok' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+    const runtime = new AgentRuntime({ ...runtimeOptions(dir), provider })
+
+    const first = await runtime.getSession(cli)
+    await drain(first.send('hello'))
+
+    await runtime.newSession(cli) // the recap of `first` is now held at the gate
+    const back = await runtime.resumeSession(cli, first.id)
+    expect(back).not.toBeNull()
+    await drain(back!.send('a second turn')) // the transcript moved on
+
+    releaseDigest()
+    await runtime.flush()
+
+    const entry = (await runtime.listSessions()).find((item) => item.id === first.id)
+    // The second turn is still there — a recap never touches the transcript —
+    // and the recap of the older one is not shown as if it described this one.
+    expect(entry?.messageCount).toBe(4)
+    expect(entry?.recap).toBeUndefined()
+  })
+
+  it('leaves a session that was never used without a recap', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const runtime = new AgentRuntime(runtimeOptions(dir))
+
+    const first = await runtime.getSession(cli)
+    await runtime.newSession(cli)
+    await runtime.flush()
+
+    const list = await runtime.listSessions()
+    expect(list.find((entry) => entry.id === first.id)?.recap).toBeUndefined()
+  })
+
+  it('does not redo a recap that is still fresh', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const provider = new StubProvider()
+    const runtime = new AgentRuntime({ ...runtimeOptions(dir), provider })
+
+    const first = await runtime.getSession(cli)
+    await drain(first.send('hello'))
+    await runtime.newSession(cli) // leaves `first`: it gets a recap
+    await runtime.flush()
+    await runtime.resumeSession(cli, first.id) // leaves the empty new session behind
+    await runtime.flush()
+
+    // Back on `first`, whose recap is still newer than its last turn.
+    provider.calls = 0
+    await runtime.newSession(cli)
+    await runtime.flush()
+
+    expect(provider.calls).toBe(0)
   })
 })

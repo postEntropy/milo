@@ -57,6 +57,8 @@ export interface HistorySearchOptions {
   days?: number
   /** Most entries to return. */
   limit?: number
+  /** Only entries from this session (`calm-otter-7`). */
+  session?: string
   /** Where the log lives; the app's data directory by default. */
   dir?: string
 }
@@ -71,6 +73,7 @@ export function searchHistory(query: string, options: HistorySearchOptions = {})
 
   for (const file of historyFiles(options.dir ?? historyDir(), options.days ?? DEFAULT_DAYS)) {
     for (const entry of readEntries(file)) {
+      if (options.session && entry.session !== options.session) continue
       if (!matches(entry, terms)) continue
       hits.push(entry)
       if (hits.length >= limit) return hits

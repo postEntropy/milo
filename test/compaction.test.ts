@@ -5,7 +5,7 @@ import { describe, expect, it } from 'vitest'
 import { FileMemory } from '../src/core/memory/local.js'
 import type { ChatRequest, Message, Provider, StreamEvent } from '../src/core/providers/types.js'
 import { Session } from '../src/core/session.js'
-import { estimateTokens, planCut, summarize } from '../src/core/sessions/compact.js'
+import { digest, estimateTokens, planCut, summarize } from '../src/core/sessions/compact.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
 
@@ -132,6 +132,21 @@ describe('summarize', () => {
   it('returns null for an empty transcript', async () => {
     const provider = new ScriptedProvider()
     expect(await summarize({ provider, model: 'm', dropped: [] })).toBeNull()
+  })
+})
+
+describe('digest', () => {
+  it('asks for bullets and returns the recap', async () => {
+    const provider = new ScriptedProvider()
+    const result = await digest({ provider, model: 'm', messages: longSeed() })
+
+    expect(result).toBe('OLD_TURNS_SUMMARY')
+    expect(provider.systems.at(-1)).toContain('short recap')
+  })
+
+  it('returns null for an empty transcript', async () => {
+    const provider = new ScriptedProvider()
+    expect(await digest({ provider, model: 'm', messages: [] })).toBeNull()
   })
 })
 
