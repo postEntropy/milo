@@ -2,11 +2,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Text, useApp } from 'ink'
 import Spinner from 'ink-spinner'
 import { createRuntime } from '../../core/bootstrap.js'
-import { loadConfig, setDisplay, setPermissionMode, type LoadedConfig } from '../../core/config/load.js'
+import {
+  loadConfig,
+  setDisplay,
+  setPermissionMode,
+  setReasoningEffort,
+  type LoadedConfig,
+} from '../../core/config/load.js'
 import { MILO_HOME } from '../../core/config/paths.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../../core/config/schema.js'
 import type { MemoryScope } from '../../core/memory/index.js'
 import type { PermissionMode } from '../../core/tools/permission.js'
+import { DEFAULT_REASONING_EFFORT, type ReasoningEffort } from '../../core/providers/types.js'
 import { ChatScreen } from './screens/chat.js'
 import { ModelPicker } from './screens/model-picker.js'
 import { SettingsScreen } from './screens/settings.js'
@@ -135,6 +142,16 @@ export function Shell({
     setLoaded(loadConfig())
   }
 
+  const changeEffort = (effort: ReasoningEffort) => {
+    // The running session first, so the very next turn sends it, then the disk.
+    runtime?.setReasoningEffort(effort)
+    setReasoningEffort(effort)
+    wroteSettings.current = true
+    setLoaded((current) =>
+      current ? { ...current, config: { ...current.config, reasoningEffort: effort } } : current,
+    )
+  }
+
   const changeDisplay = (patch: Partial<DisplayConfig>) => {
     setDisplay(patch)
     wroteSettings.current = true
@@ -176,11 +193,29 @@ export function Shell({
     setScreen('model')
   }
 
-  const headerRight = loaded
-    ? `${sessionId ? `${sessionId} · ` : ''}${loaded.provider.id} · ${loaded.model}`
-    : 'setup'
   const display = loaded?.config.display ?? DEFAULT_DISPLAY
+  const effort = loaded?.config.reasoningEffort
   const accent = busy ? theme.warning : theme.accent
+
+  // Every screen below budgets for a three-row header — borders around exactly
+  // one row of text — so both sides are cut to fit before rendering: text that
+  // wraps up here is what pushes the composer out of the frame down there.
+  const leftText =
+    `${busy ? '⠋ ' : ''}Milo` +
+    (mode !== 'ask' ? ` [${mode}]` : '') +
+    (display.tools !== 'full' ? ` [tools ${display.tools}]` : '') +
+    (display.thinking === 'off' ? ' [thinking off]' : '')
+  const headerRight = fitHeaderRight(
+    loaded
+      ? [
+          ...(sessionId ? [sessionId] : []),
+          loaded.provider.id,
+          shortModel(loaded.model),
+          `effort ${effort ?? DEFAULT_REASONING_EFFORT}`,
+        ]
+      : ['setup'],
+    columns - leftText.length - 5,
+  )
 
   return (
     <Box flexDirection="column" height={rows} width={columns}>
@@ -206,8 +241,14 @@ export function Shell({
               [tools {display.tools}]
             </Text>
           )}
+          {display.thinking === 'off' && (
+            <Text bold color={theme.warning}>
+              {' '}
+              [thinking off]
+            </Text>
+          )}
         </Box>
-        <Text dimColor>{headerRight}</Text>
+        <Text color={theme.muted}>{headerRight}</Text>
       </Box>
 
       {screen === 'chat' && runtime ? (
@@ -216,6 +257,7 @@ export function Shell({
           scope={CLI_SCOPE}
           mode={mode}
           onModeChange={changeMode}
+          onEffortChange={changeEffort}
           display={display}
           onDisplayChange={changeDisplay}
           items={items}
@@ -244,4 +286,31 @@ export function Shell({
       )}
     </Box>
   )
+}
+
+/**
+ * The model without its vendor prefix: `deepseek/deepseek-v4.1-flash` reads as
+ * `deepseek-v4.1-flash`, since the provider beside it already says where the
+ * request goes and the header has one row to spend.
+ */
+function shortModel(model: string): string {
+  const slash = model.lastIndexOf('/')
+  return slash === -1 ? model : model.slice(slash + 1)
+}
+
+/**
+ * The right side of the header, cut to fit one line. The chunks before the
+ * model — the session id, the provider — are conveniences and drop first; what
+ * is left (the model, and the effort beside it) is cut rather than dropped.
+ */
+function fitHeaderRight(chunks: string[], width: number): string {
+  const room = Math.max(4, width)
+  const kept = [...chunks]
+  while (kept.length > 2 && kept.join(' · ').length > room) kept.shift()
+  const text = kept.join(' · ')
+  if (text.length <= room) return text
+  const last = kept[kept.length - 1] as string
+  const head = kept.slice(0, -1).join(' · ')
+  const cut = Math.max(1, room - last.length - 4)
+  return `${head.slice(0, cut)}… · ${last}`
 }

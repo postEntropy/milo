@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import type { DisplayConfig } from '../src/core/config/schema.js'
+import type { ReasoningEffort } from '../src/core/providers/types.js'
 import { DefaultPermissionPolicy } from '../src/core/tools/permission.js'
 import {
   decodePermission,
   displayLockMessage,
+  effortLockMessage,
   encodePermission,
   handleCommand,
   modeLockMessage,
@@ -154,12 +156,16 @@ describe('handleCommand', () => {
         messages: 4,
         turns: 2,
         tokens: 100,
+        systemTokens: 20,
+        // The ceiling the compaction is measured against, resolved from the
+        // model's window: the count is only worth reading beside it.
+        maxInputTokens: 70_000,
         compacted: false,
       }),
     })
     expect(result.reply).toContain('calm-otter-7')
     expect(result.reply).toContain('2 turns')
-    expect(result.reply).toContain('~100 tokens')
+    expect(result.reply).toContain('~120 of 70000 tokens')
     expect(result.reply).not.toContain('compacted')
   })
 
@@ -184,7 +190,7 @@ describe('handleCommand', () => {
   it('sets how much of a tool call to show, and writes it down', async () => {
     const saved: Partial<DisplayConfig>[] = []
     const result = await handleCommand('/tools name', {
-      display: { tools: 'full', thinking: true },
+      display: { tools: 'full', thinking: 'on' },
       persistDisplay: (patch) => saved.push(patch),
     })
 
@@ -194,7 +200,7 @@ describe('handleCommand', () => {
 
   it('says a failure is still reported when tools are off', async () => {
     const result = await handleCommand('/tools off', {
-      display: { tools: 'full', thinking: true },
+      display: { tools: 'full', thinking: 'on' },
       persistDisplay: () => {},
     })
 
@@ -204,7 +210,7 @@ describe('handleCommand', () => {
   it('reports the current level for a bad argument', async () => {
     const saved: Partial<DisplayConfig>[] = []
     const result = await handleCommand('/tools nonsense', {
-      display: { tools: 'name', thinking: false },
+      display: { tools: 'name', thinking: 'off' },
       persistDisplay: (patch) => saved.push(patch),
     })
 
@@ -213,18 +219,63 @@ describe('handleCommand', () => {
     expect(saved).toEqual([])
   })
 
-  it('toggles thinking with no argument and takes on/off', async () => {
+  it('shows and hides the reasoning, and reports it when asked for nothing', async () => {
     const saved: Partial<DisplayConfig>[] = []
     const context = {
-      display: { tools: 'full' as const, thinking: true },
+      display: { tools: 'full' as const, thinking: 'on' as const },
       persistDisplay: (patch: Partial<DisplayConfig>) => saved.push(patch),
     }
 
-    await handleCommand('/thinking', context)
-    await handleCommand('/thinking on', { ...context, display: { tools: 'full', thinking: false } })
-    await handleCommand('/thinking off', context)
+    // No argument reports the state — and says what the command controls: the
+    // showing of the reasoning, not the reasoning itself.
+    const reply = (await handleCommand('/thinking', context)).reply ?? ''
+    expect(reply).toContain('Thinking display: on')
+    expect(reply).toContain('the model thinks either way')
+    expect(saved).toEqual([])
 
-    expect(saved).toEqual([{ thinking: false }, { thinking: true }, { thinking: false }])
+    await handleCommand('/thinking off', context)
+    await handleCommand('/thinking on', context)
+    // `brief` and `full` are what this command used to take: both showed it.
+    await handleCommand('/thinking full', context)
+
+    expect(saved).toEqual([{ thinking: 'off' }, { thinking: 'on' }, { thinking: 'on' }])
+  })
+
+  it('takes the reasoning-effort levels, and reports them when asked for nothing', async () => {
+    const saved: ReasoningEffort[] = []
+    const context = {
+      effort: 'low' as const,
+      persistEffort: (effort: ReasoningEffort) => saved.push(effort),
+    }
+
+    expect((await handleCommand('/effort', context)).reply).toContain('Reasoning effort: low')
+    expect(saved).toEqual([])
+
+    // A surface that reports no effort still names Milo's own, which is medium.
+    expect(
+      (await handleCommand('/effort', { persistEffort: () => {} })).reply,
+    ).toContain('Reasoning effort: medium')
+
+    await handleCommand('/effort high', context)
+    // `default` and `off` are both ways of saying "back to Milo's value".
+    await handleCommand('/effort default', context)
+    await handleCommand('/effort off', context)
+
+    expect(saved).toEqual(['high', 'medium', 'medium'])
+  })
+
+  it('refuses an effort change on a bot that answers several people', async () => {
+    const saved: ReasoningEffort[] = []
+    const locked = effortLockMessage(['1', '2'])!
+    const context = {
+      effort: 'low' as const,
+      persistEffort: (effort: ReasoningEffort) => saved.push(effort),
+      effortLocked: locked,
+    }
+
+    // What an answer costs is not one person's to change for everyone.
+    expect((await handleCommand('/effort high', context)).reply).toBe(locked)
+    expect(saved).toEqual([])
   })
 
   it('refuses display changes on a surface without them', async () => {
@@ -236,7 +287,7 @@ describe('handleCommand', () => {
     const saved: Partial<DisplayConfig>[] = []
     const locked = displayLockMessage(['1', '2'])!
     const context = {
-      display: { tools: 'full' as const, thinking: true },
+      display: { tools: 'full' as const, thinking: 'on' as const },
       persistDisplay: (patch: Partial<DisplayConfig>) => saved.push(patch),
       displayLocked: locked,
     }
@@ -254,10 +305,11 @@ describe('handleCommand', () => {
   })
 
   it('reports display settings in /status', async () => {
-    const reply = (await handleCommand('/status', { display: { tools: 'off', thinking: false } }))
+    const reply = (await handleCommand('/status', { display: { tools: 'off', thinking: 'off' } }))
       .reply
     expect(reply).toContain('Tools: off')
-    expect(reply).toContain('thinking: off')
+    expect(reply).toContain('thinking display: off')
+    expect(reply).toContain('effort: medium')
   })
 
   it('rejects unknown commands', async () => {

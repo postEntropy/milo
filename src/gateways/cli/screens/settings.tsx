@@ -3,6 +3,7 @@ import { Box, Text, useInput } from 'ink'
 import TextInput from 'ink-text-input'
 import { readAuth, readConfig, saveAuth, saveConfig } from '../../../core/config/load.js'
 import type { Auth, Config, GatewayConfig } from '../../../core/config/schema.js'
+import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS } from '../../../core/providers/types.js'
 import type { PermissionMode } from '../../../core/tools/permission.js'
 import { describeAccess } from '../../access.js'
 import { isCtrlC } from '../keys.js'
@@ -32,6 +33,8 @@ const KEY_SLOTS: KeySlot[] = [
 const SEARCH_CHOICES = ['off', 'tavily', 'exa', 'parallel'] as const
 const MODES: PermissionMode[] = ['ask', 'auto', 'yolo']
 const TOOL_LEVELS = ['full', 'name', 'off'] as const
+/** Cycled in order, starting wherever the current value is. */
+const EFFORT_LEVELS = REASONING_EFFORTS
 const GATEWAYS: GatewayId[] = ['telegram', 'discord']
 
 interface MenuItem {
@@ -146,7 +149,7 @@ export function SettingsScreen({
     },
     {
       label: 'Display',
-      hint: `${config.display.tools} · thinking ${config.display.thinking ? 'on' : 'off'}`,
+      hint: `${config.display.tools} · thinking display ${config.display.thinking}`,
     },
     {
       label: 'Gateways',
@@ -164,8 +167,13 @@ export function SettingsScreen({
       hintColor: theme.accent,
     },
     {
-      label: 'Thinking',
-      hint: config.display.thinking ? 'on' : 'off',
+      label: 'Thinking display',
+      hint: `${config.display.thinking} (Enter toggles on/off)`,
+      hintColor: theme.accent,
+    },
+    {
+      label: 'Reasoning effort',
+      hint: `${config.reasoningEffort ?? DEFAULT_REASONING_EFFORT} (Enter cycles low → medium → high)`,
       hintColor: theme.accent,
     },
     {
@@ -312,9 +320,14 @@ export function SettingsScreen({
             const next = TOOL_LEVELS[(TOOL_LEVELS.indexOf(config.display.tools) + 1) % TOOL_LEVELS.length]!
             patchConfig({ display: { ...config.display, tools: next } })
           } else if (index === 1) {
-            const thinking = !config.display.thinking
+            const thinking = config.display.thinking === 'on' ? 'off' : 'on'
             patchConfig({ display: { ...config.display, thinking } })
-            setNotice(`Thinking: ${thinking ? 'on' : 'off'} — applies to every surface`)
+            setNotice(`Thinking display: ${thinking} — applies to every surface`)
+          } else if (index === 2) {
+            const effort =
+              EFFORT_LEVELS[(EFFORT_LEVELS.indexOf(config.reasoningEffort) + 1) % EFFORT_LEVELS.length]
+            patchConfig({ reasoningEffort: effort })
+            setNotice(`Reasoning effort: ${effort} — applies to every surface`)
           } else {
             go({ kind: 'displayEdit' }, config.maxTokens ? String(config.maxTokens) : '')
           }
@@ -464,7 +477,7 @@ export function SettingsScreen({
         <Text bold color={theme.accent}>
           Milo
         </Text>
-        <Text dimColor>
+        <Text color={theme.muted}>
           {' · '}
           {view.kind === 'gatewayFlow' ? `Setup · ${view.id}` : (TITLE[view.kind] ?? 'Setup')}
         </Text>
@@ -503,7 +516,7 @@ export function SettingsScreen({
           <Box flexDirection="column">
             <Menu items={displayItems} index={index} />
             <Box marginTop={1}>
-              <Text dimColor>
+              <Text color={theme.muted}>
                 One setting for every surface: the terminal and the bots read the same values.
               </Text>
             </Box>
@@ -530,7 +543,7 @@ export function SettingsScreen({
             <Text color={theme.accent}>
               Step {view.steps.indexOf(view.step) + 1} of {view.steps.length} — {view.id} bot token
             </Text>
-            <Text dimColor>({GATEWAY_HINTS[view.id]})</Text>
+            <Text color={theme.muted}>({GATEWAY_HINTS[view.id]})</Text>
             <Box>
               <Text color={theme.accent}>❯ </Text>
               <TextInput key={view.step} value={text} onChange={setText} onSubmit={saveText} mask="*" />
@@ -544,7 +557,7 @@ export function SettingsScreen({
               Step {view.steps.indexOf(view.step) + 1} of {view.steps.length} — who can talk to{' '}
               {view.id}?
             </Text>
-            <Text dimColor>
+            <Text color={theme.muted}>
               User or chat ids, comma-separated. Empty means anyone. Message the bot to see your id.
             </Text>
             <Box>
@@ -568,7 +581,7 @@ export function SettingsScreen({
             <Text>
               Backend: <Text color={theme.accent}>{config.memory.backend}</Text>
             </Text>
-            <Text dimColor>
+            <Text color={theme.muted}>
               Local JSON, one file per conversation scope. Third-party backends are pluggable.
             </Text>
           </Box>
@@ -598,7 +611,7 @@ export function SettingsScreen({
         {view.kind === 'displayEdit' && (
           <Box flexDirection="column">
             <Text color={theme.accent}>Output token ceiling (empty leaves it to the wire)</Text>
-            <Text dimColor>
+            <Text color={theme.muted}>
               The Anthropic wire defaults to 4096, which cuts a long answer or a big file in half.
             </Text>
             <Box>
@@ -610,7 +623,7 @@ export function SettingsScreen({
       </Box>
 
       <Box marginTop={1}>
-        <Text dimColor>{footer}</Text>
+        <Text color={theme.muted}>{footer}</Text>
       </Box>
     </Box>
   )

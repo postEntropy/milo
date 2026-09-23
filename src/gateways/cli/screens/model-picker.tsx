@@ -7,6 +7,7 @@ import { readAuth, readConfig, resolveApiKey, saveAuth, saveConfig } from '../..
 import { PRESETS, type Preset } from '../../../core/config/presets.js'
 import type { Config, ProviderEntry } from '../../../core/config/schema.js'
 import { DEFAULT_PERMISSIONS, DEFAULT_SESSIONS, DEFAULT_DISPLAY } from '../../../core/config/schema.js'
+import { DEFAULT_REASONING_EFFORT } from '../../../core/providers/types.js'
 import { listModels, type ModelInfo } from '../../../core/providers/models.js'
 import { isCtrlC } from '../keys.js'
 import { theme } from '../theme.js'
@@ -130,6 +131,7 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
       memory: existing?.memory ?? { backend: 'file' },
       sessions: existing?.sessions ?? DEFAULT_SESSIONS,
       display: existing?.display ?? DEFAULT_DISPLAY,
+      reasoningEffort: existing?.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
       gateways: existing?.gateways ?? {},
       permissions: existing?.permissions ?? DEFAULT_PERMISSIONS,
       ...(existing?.search ? { search: existing.search } : {}),
@@ -147,7 +149,7 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
         <Text bold color={theme.accent}>
           {current ? 'Change provider / model' : 'Milo — first-run setup'}
         </Text>
-        <Text dimColor>
+        <Text color={theme.muted}>
           {current
             ? 'Esc to cancel and go back to the chat.'
             : 'Configure your model provider. You can change it later with /model.'}
@@ -204,7 +206,7 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
             />
           </Box>
           {renderModelList(filtered, safeSelected)}
-          <Text dimColor>{filtered.length} model(s)</Text>
+          <Text color={theme.muted}>{filtered.length} model(s)</Text>
         </Box>
       )}
 
@@ -223,7 +225,7 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
 }
 
 function renderModelList(filtered: ModelInfo[], selected: number): ReactNode {
-  if (filtered.length === 0) return <Text dimColor>No models match the filter.</Text>
+  if (filtered.length === 0) return <Text color={theme.muted}>No models match the filter.</Text>
 
   const start = Math.max(
     0,

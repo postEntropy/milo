@@ -36,15 +36,44 @@ npm run dev -- --model deepseek/deepseek-v4-flash   # override the model for one
 On the first run, an onboarding wizard asks for a provider, API key, and model, and saves them to
 `~/.milo/`.
 
-`Ctrl+C` stops the turn in flight — the partial answer stays in the transcript and the turn is
-reported as *stopped*, not as an error, because a stop is the user's own doing. Pressed with nothing
-running, it exits.
+The composer stays live while a turn is running — that is exactly when a correction is worth typing.
+`Enter` **queues** the message behind the turn in flight and runs it as its own turn once that one
+ends; `Ctrl+Enter` **steers** it instead, into the running turn, at the next step boundary — the one
+point where the transcript is not halfway through a tool call. A steer is a correction, so the turn
+carries on with it rather than starting a second one, and a message typed too late to be taken up
+becomes the next turn rather than being dropped. A terminal only reports the Ctrl modifier on Enter
+when it speaks the kitty keyboard protocol, which Milo switches on outright — asking the terminal
+whether it does was tried and reverted: Ink sends that query before the tty is in raw mode, so the
+reply cannot be read, and it later arrives on stdin as if it had been typed. A terminal that does not
+know the protocol ignores the switch, so `Alt+Enter` steers there — that one is distinguishable
+everywhere.
+
+`Ctrl+C` stops the turn in flight and drops whatever was queued behind it, saying how many. The
+partial answer stays in the transcript and the turn is reported as *stopped*, not as an error,
+because a stop is the user's own doing. Pressed with nothing running, it exits.
+
+`↑` walks back through what was sent — each press one line further back — and `↓` comes forward again,
+handing back whatever was being typed when the walk started. The list is written to
+`~/.milo/input-history.json`, so a command from yesterday is still one arrow away; it is the input
+line history, and a different thing from the turn log the model can search (`## History`).
+
+`/new`, `/resume`, `/clear`, `/model` and `/setup` are refused while a turn is running: they rebind
+the session, empty the transcript it is writing into, or take over the screen its output is going
+to. Stop it first with `Ctrl+C`.
+
+A turn that takes a second or more to produce anything leaves a line saying how long it took to get
+going: `✻ Thought for 8.2s`, or `✻ Thought for 12s (4.2s compacting)` when a summary call ran first.
+It is measured from the question to the model's first visible output — text or a tool call — and
+reasoning deltas deliberately do not count, since they *are* the thinking. Without it, "that was
+slow" has no answer beyond a guess; with it, the wait says what it was spent on.
 
 ## Configuration
 
-- `~/.milo/config.json` — provider, model, `maxTokens`, memory backend, session settings, display,
+- `~/.milo/config.json` — provider, model, `maxTokens`, reasoning effort, memory backend, session
+  settings, display,
   permissions and enabled gateways.
 - `~/.milo/auth.json` — API keys and bot tokens (written `0600`).
+- `~/.milo/input-history.json` — what was typed at the CLI's prompt, for `↑`/`↓`.
 - `~/.milo/sessions/` — one JSON file per session, plus one binding file per address and one recap
   per session that has been left behind (see below).
 - `~/.milo/memory/` — one JSON file per conversation scope.
@@ -125,7 +154,8 @@ fails closed for everyone else, and a blocked sender is told their own id so you
 `milo serve` starts, so restart it after changing it.
 
 Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/stats`, `/mode ask|auto|yolo`,
-`/yolo`, `/tools full|name|off`, `/thinking on|off`, `/clear`, `/status`. A mode change from a chat is written to `config.json` like any other,
+`/yolo`, `/tools full|name|off`, `/thinking on|off`, `/effort low|medium|high`, `/clear`,
+`/status`. A mode change from a chat is written to `config.json` like any other,
 so it survives a restart of `milo serve`; sessions are written to `~/.milo/sessions/` and survive it
 too. Provider and key changes happen in `milo setup` on the terminal side.
 
@@ -139,6 +169,14 @@ turn blocks until the user answers a permission prompt, and Telegram's simple lo
 updates one at a time (`handleUpdates` awaits each one), so awaiting a turn there would leave the
 button press queued behind the very turn waiting for it — a deadlock that ends in a timeout and a
 denied tool. The queue also stops two turns from mutating the same session at once.
+
+A message sent while a turn is **running** is handed to that turn instead of starting a second one:
+it is taken up at the next step boundary, after the tool call in flight, so a correction reaches the
+model without a second turn racing the first over the same session. A chat surface has no
+`Ctrl+Enter`, so this is what a bot does with both — the CLI asks, because there it can. Commands are
+never steered: `/new` is not something to say to the model, so it waits its turn like a message
+would. A message that lands in the gap between two turns becomes a turn of its own rather than being
+dropped, and so does a correction the model never got to see.
 
 ## Tools
 
@@ -258,30 +296,90 @@ in Telegram applies to the terminal too — and the other way round. The bot gat
 disk on every turn, so a change takes effect without restarting `milo serve`.
 
 ```json
-{ "display": { "tools": "full", "thinking": true } }
+{ "display": { "tools": "full", "thinking": "on" } }
 ```
+
+A config that still says `true`, `false`, `brief` or `full` loads fine: anything that showed the
+reasoning reads as `on`.
 
 | Setting | Values | What it does |
 | --- | --- | --- |
 | `tools` | `full` (default) | The tool call with its arguments: `⚡ shell_command npm test`. |
 | | `name` | Just which tool ran: `⚡ shell_command` — the answer to "what is it doing?" without the argument dump. |
 | | `off` | No tool lines at all. |
-| `thinking` | `true` (default) | Show the model's reasoning. |
-| | `false` | Hide it. |
+| `thinking` | `on` (default) | The reasoning is shown under the question it belongs to, and stays in the transcript. |
+| | `off` | No reasoning at all. Display only — the model reasons either way. |
 
 A tool that **fails** is reported whichever level is set (`❌ shell_command failed`), and the CLI
 stops naming the tool in its status line when `tools` is `off`: hiding that something went wrong is
 worse than the noise it saves.
 
-The two surfaces show reasoning differently, because they can: the CLI keeps a live pane with the
-last few lines of the thought above the input, while a bot appends **one** line — `💭 the first line
-of the thought` — since it edits a single message and the whole reasoning would crowd the answer out
-of it.
+The reasoning lives **in the transcript**, under the question it belongs to: the line saying how long
+the model took to start (`✻ Thought for 8.2s`), and the reasoning itself beneath it when it is being
+shown. It used to be a pane of its own above the input, which existed only while a turn ran, took
+rows away from the transcript, and — sitting outside the transcript's order — read as mixed in with
+the tool lines it sat beside.
 
-A tool level is visible in the CLI header (`[tools name]`) because it takes away something that
-would otherwise be there; a hidden thought gets no badge — the reasoning pane is simply not there —
-and both settings are spelled out in `/status`. They are also the **Display** section of
-`milo setup`, which is where a bot that answers several people has to change them.
+A bot appends **one** line instead — `💭 the first line of the thought` — because it edits a single
+message and the whole reasoning would crowd the answer out of it. So a chat surface differs from the
+terminal only in how much of the thought fits: the one line when `on`, nothing when `off`.
+
+Thinking and answering are **two fields** on the wire: `content` for the answer, `reasoning_content`
+(or `thinking`) for the thought. Milo keeps them apart the whole way to the screen — but a provider is
+free to fill one field with both, and then no surface can tell a model that answers in its thinking
+from one that is thinking and has not answered yet. Two rules follow, and both exist because that
+case is not hypothetical:
+
+- A turn that says **nothing in the answer channel** keeps all of its thinking: that is the thought
+  the turn ends on, the one a tool call followed, and the one too fast to be worth a line. It is the
+  answer, whatever channel it arrived in. Without it, a mixing provider's answer vanished the moment
+  the turn ended — a second after it had been on screen.
+- `/thinking off` on such a model hides the answer with the thinking, so the turn **says so** instead
+  of going quiet.
+
+`MILO_DEBUG=1` prints what each response actually carried — `0 chars of content, 31 chars of
+reasoning, finished tool_calls` — which is how the two cases are told apart.
+
+Each level that takes something away is visible in the CLI header (`[tools name]`, `[thinking off]`),
+and the effort sits beside the model name — `effort medium` unless it was changed. A state you cannot
+see is a state you blame on something else, and the missing badge cost exactly that: a hidden
+reasoning pane is indistinguishable from a command that did nothing. All three are also spelled out
+in `/status`, and `/thinking` says which way it went and that it only changes what is shown — the
+question "so does the model think less now?" is the one it exists to answer.
+
+`/tools`, `/thinking` and `/effort` are also the **Display** section of `milo setup`, which is where a
+bot that answers several people has to change them: all three are locked from a chat there.
+
+The CLI's palette is chosen for contrast rather than for looks: every colour clears 4.4:1 against a
+light background and 4:1 against a dark one, which is as much as a single tone can do against both.
+Faint greys and the terminal's own `dim` attribute were tried and dropped — a theme is free to map
+`gray` to something 2:1 from its own background, and this one did.
+
+### Reasoning effort
+
+`/thinking` decides what you *see*; this decides what the model *does* — and it is the one that costs.
+`reasoningEffort` (`low`, `medium` or `high`, set from `/effort` on any surface, from the Display
+section of `milo setup`, or in the config) is put on the request as `reasoning_effort` on the OpenAI
+wire. It **defaults to `medium`**: every request carries an explicit effort, because "whatever each
+provider and model makes of an absent field" was a value nobody could name and a label — `effort
+default` — nobody could read. A provider that does not know the field ignores it; one that rejects it
+fails loudly on the turn.
+
+On a bot that answers more than one person `/effort` is **locked**, for the same reason `/mode` is:
+what an answer costs is not one person's to change for everybody.
+
+```json
+{ "reasoningEffort": "low" }
+```
+
+The **internal calls do not follow it**: summarizing a transcript and writing a session recap are
+mechanical, and asking a reasoning model in its own voice means it thinks about them — a quarter of a
+minute of a turn, whose result nobody reads. Those two ask for `low` regardless, and if a provider
+does not know the field at all the call is made again without it, because losing every summary to an
+unknown field is the worse failure.
+
+Anthropic's equivalent is a `thinking` budget rather than a level, and is not wired up yet — see the
+roadmap.
 
 The terminal renders the answer as **light markdown**: a fenced code block keeps its code (the fence
 lines go, the code is not reflowed as prose, and a long line is cut at the width instead of wrapping
@@ -393,20 +491,42 @@ else's sessions.
 
 ### Compaction
 
-A long session would otherwise hit the model's context limit. Once the transcript passes
-`sessions.maxInputTokens` (estimated at ~4 characters per token), the oldest turns are summarized in
-one model call and replaced by an `## Earlier in this conversation` section of the system prompt; the
-last `sessions.keepTurns` turns are kept verbatim. The cut always lands on a user turn, so a tool
-call is never separated from its result. If the summary call fails, the turns are dropped anyway — a
-request that fits beats one the provider rejects.
+A long session would otherwise hit the model's context limit. Once a request passes
+`sessions.compactAt` **of the model's context window** (estimated at ~4 characters per token), the oldest
+turns are summarized in one model call and replaced by an `## Earlier in this conversation` section of
+the system prompt; the last `sessions.keepTurns` turns are kept verbatim. The cut always lands on a
+user turn, so a tool call is never separated from its result. If the summary call fails, the turns are
+dropped anyway — a request that fits beats one the provider rejects.
 
 ```json
-{ "sessions": { "maxInputTokens": 12000, "keepTurns": 8, "compaction": true } }
+{ "sessions": { "compactAt": 0.7, "keepTurns": 8, "compaction": true } }
 ```
+
+The window itself comes from public model metadata — the OpenRouter catalog, which needs no key and
+lists `context_length` per model — looked up once per model and cached in `~/.milo/context-windows.json`
+for a week. `sessions.contextWindow` overrides it for a model the catalog gets wrong or does not know.
+
+A flat ceiling was the wrong shape for this and the reason the setting exists: the same 12000 is a
+third of a small window and **1.1%** of a million-token one, so a session would summarize on every
+turn for nothing — a model call per turn whose answer nobody sees, and about eleven seconds of a
+fourteen-second wait. `maxInputTokens` is now only the fallback for when nothing knows the window.
 
 That budget counts the **system prompt too** — the persona, the tool list, the recalled memories and
 the running summary ride along with every request. Counting only the transcript let the real request
-go over while the estimate said it was fine. `/stats` reports both numbers for the same reason.
+go over while the estimate said it was fine. `/stats` reports both numbers for the same reason, and
+shows them against the budget (`~9.5k of 12k tokens`) — a token count with no ceiling says nothing
+about whether the session is anywhere near one.
+
+`keepTurns` is a floor, not a target, so a session can still pay on every turn: if the turns it
+protects are themselves bigger than the ceiling — eight long turns against a 12k fallback, say — the
+summary can never bring the request under; the next turn finds it over the ceiling again and
+summarizes again, forever. That is a model call per turn whose answer is never shown to anyone, and
+it is the part of a slow turn that looks like the model. The CLI names it in the wait so it stops
+looking like one:
+
+```
+✻ Thought for 12s (4.2s compacting)
+```
 
 ## History
 
@@ -515,3 +635,17 @@ Known open work, roughly in order:
    registered right now. The Exa and Parallel adapters exist but have never been called for real.
 5. **More markdown in the Ink UI.** The terminal renders fences, inline code, bold and headings;
    tables, nested lists and links still arrive as plain text.
+6. **Compaction that cannot reach the budget.** `keepTurns` is a floor, so when the turns it protects
+   are themselves bigger than the ceiling the summary runs on every turn and never gets under.
+   Either cut past the floor until it fits, or stop paying for a summary that cannot help — and that
+   second one needs a criterion, which is the decision nobody has made yet.
+7. **Reasoning effort on the Anthropic wire.** Not a rename. OpenAI takes a level
+   (`reasoning_effort`); Anthropic takes a `thinking` budget in tokens, and turning thinking on means
+   the thinking blocks must be sent back with every follow-up request — precisely what the transcript
+   does not do today, since reasoning is kept and deliberately never forwarded. Enabling it on a turn
+   with tools would break the loop until that echo exists. The internal calls need nothing: on that
+   wire thinking is off unless it is asked for, so they already pay no reasoning tax.
+8. **A window for models no catalog knows.** The lookup covers what OpenRouter lists, and
+   `sessions.contextWindow` covers the rest by hand. A local model served by Ollama or llama.cpp
+   could answer for itself — `/api/show`, `/props` — which would beat asking the user to type the
+   number.

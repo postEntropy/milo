@@ -5,8 +5,13 @@ import Spinner from 'ink-spinner'
 import type { AgentEvent } from '../../../core/agent/events.js'
 import type { DisplayConfig } from '../../../core/config/schema.js'
 import type { MemoryScope } from '../../../core/memory/index.js'
+import {
+  DEFAULT_REASONING_EFFORT,
+  REASONING_EFFORTS,
+  type ReasoningEffort,
+} from '../../../core/providers/types.js'
 import type { AgentRuntime } from '../../../core/runtime.js'
-import { formatSessionList, formatStats } from '../../../core/sessions/index.js'
+import { formatSessionList, formatWhen, type SessionStats } from '../../../core/sessions/index.js'
 import type {
   PermissionAsker,
   PermissionMode,
@@ -14,17 +19,19 @@ import type {
   PermissionResult,
 } from '../../../core/tools/permission.js'
 import { errorMessage } from '../../../util/errors.js'
-import { isCtrlC } from '../keys.js'
+import { isCtrlC, isSteerKey } from '../keys.js'
+import { readInputHistory, saveInputHistory } from '../input-history.js'
 import { theme } from '../theme.js'
-import { buildLines, padToBottom, visibleWindow, wrapText, type Item, type Line } from '../transcript.js'
+import { buildLines, padToBottom, visibleWindow, type Item, type Line } from '../transcript.js'
 import { useElapsed } from '../use-elapsed.js'
 import { useTerminalSize } from '../use-terminal-size.js'
 
 type Phase = 'idle' | 'thinking' | 'writing' | 'tool' | 'asking'
 
 const HEADER_ROWS = 3
-const CHROME_ROWS = 2
-const MAX_REASONING_ROWS = 5
+/** The bordered composer: its top border, the line being typed, its bottom border. */
+const COMPOSER_ROWS = 3
+/** The permission prompt: the question and the key it is waiting on. */
 const PERMISSION_ROWS = 2
 
 export interface ChatScreenProps {
@@ -32,6 +39,8 @@ export interface ChatScreenProps {
   scope: MemoryScope
   mode: PermissionMode
   onModeChange: (mode: PermissionMode) => void
+  /** How hard the model should think; written down, and applied to the next turn. */
+  onEffortChange: (effort: ReasoningEffort) => void
   /** How much of a tool call to show, and whether to show thinking. */
   display: DisplayConfig
   onDisplayChange: (patch: Partial<DisplayConfig>) => void
@@ -46,15 +55,48 @@ export interface ChatScreenProps {
   onSessionChange?: (id: string) => void
 }
 
-const HELP_TEXT =
-  'Commands: /model · /setup · /mode ask|auto|yolo · /yolo · /tools full|name|off · ' +
-  '/thinking on|off · /new [title] · /sessions · /resume <id> · /stats · /clear · /help · /exit'
+/** Described one per line: a bare list of names leaves the reader to guess. */
+const HELP_TEXT = [
+  'Commands:',
+  '/model — change the provider and model',
+  '/setup — the settings hub (keys, display, gateways)',
+  '/mode ask|auto|yolo — when a tool needs confirming',
+  '/yolo — toggle yolo mode',
+  '/tools full|name|off — how much of each tool call to show',
+  '/thinking on|off — show or hide the model\'s reasoning in the transcript',
+  '  Display only: the model thinks either way; /effort is what changes that.',
+  "/effort low|medium|high — how hard the model thinks",
+  "  The other axis, and the one that costs: /effort default goes back to the provider's own.",
+  '/new [title] — start a new session',
+  '/sessions — list saved sessions',
+  '/resume <id> — switch to another session',
+  '/stats — numbers for the current session',
+  '/clear — forget this conversation',
+  '/exit — quit',
+  '',
+  '↑ walks back through what you sent; ↓ comes forward again.',
+].join('\n')
+
+/**
+ * The commands a running turn rules out. They rebind the session, empty the
+ * transcript it is writing into, or take over the screen its output goes to —
+ * so they would fight the turn rather than wait behind it.
+ */
+const BLOCKED_WHILE_BUSY = new Set(['new', 'resume', 'clear', 'model', 'setup'])
+
+/**
+ * How many sent lines the arrows walk back through. Kept in memory, for this
+ * run: enough to get back to anything said in a sitting, and nothing left on
+ * disk to explain afterwards.
+ */
+const HISTORY_LIMIT = 200
 
 export function ChatScreen({
   runtime,
   scope,
   mode,
   onModeChange,
+  onEffortChange,
   display,
   onDisplayChange,
   items,
@@ -73,11 +115,15 @@ export function ChatScreen({
   const [phase, setPhase] = useState<Phase>('idle')
   const [toolName, setToolName] = useState('')
   const [input, setInput] = useState('')
+  /** Messages typed while a turn was running, still waiting for it. */
+  const [queued, setQueued] = useState(0)
   const [tokens, setTokens] = useState(0)
   const [lastDuration, setLastDuration] = useState<number | null>(null)
   const [scrollOffset, setScrollOffset] = useState(0)
   const [startedAt, setStartedAt] = useState(0)
   const [permission, setPermission] = useState<PermissionRequest | null>(null)
+  /** Bumped on every recall, so the input remounts with its cursor at the end. */
+  const [recallEpoch, setRecallEpoch] = useState(0)
 
   const busy = phase !== 'idle'
   const elapsed = useElapsed(busy, startedAt)
@@ -85,10 +131,39 @@ export function ChatScreen({
   const abortRef = useRef<AbortController | null>(null)
   const toolArgsRef = useRef<unknown>({})
   const permissionResolverRef = useRef<((result: PermissionResult) => void) | null>(null)
+  /**
+   * The answer still streaming. In a ref as well as in state because a message
+   * typed mid-turn has to file what was already said *above* itself — the
+   * transcript is built from the finished items plus this live tail, so a new
+   * item would otherwise appear before the text that came first.
+   */
+  const liveRef = useRef('')
+  /** The thought being written, in a ref for the same reason: it is committed between renders. */
+  const reasoningRef = useRef('')
+  /** Messages typed behind the turn in flight, in the order they were typed. */
+  const queueRef = useRef<string[]>([])
+  /** The running turn's inbox: non-null for exactly as long as one is streaming. */
+  const steeringRef = useRef<string[] | null>(null)
+  /** True while the pump is working, which spans the gaps between turns. */
+  const runningRef = useRef(false)
+  /** How many messages Ctrl+C threw away, reported once the turn is over. */
+  const droppedRef = useRef(0)
+  /** What was sent this run, oldest first; the arrows walk up and down it. */
+  const inputHistoryRef = useRef<string[]>([])
+  /** Where the arrows are in that history; `null` is the line being typed. */
+  const historyIndexRef = useRef<number | null>(null)
+  /** What was in the composer before the first Up, handed back on the way down. */
+  const draftRef = useRef('')
 
   useEffect(() => {
     onBusyChange?.(busy)
   }, [busy, onBusyChange])
+
+  // What was sent on earlier runs is on disk: the arrows should still know the
+  // command from yesterday, not only the one from this sitting.
+  useEffect(() => {
+    inputHistoryRef.current = readInputHistory()
+  }, [])
 
   const ask = useCallback<PermissionAsker>((request) => {
     setPermission(request)
@@ -107,22 +182,23 @@ export function ChatScreen({
   }
 
   const width = Math.max(20, columns - 2)
-  const reasonLines = useMemo(
-    () => (display.thinking && reasoning ? wrapText(reasoning, width - 2) : []),
-    [display.thinking, reasoning, width],
-  )
-  const reasonPreview = busy ? reasonLines.slice(-MAX_REASONING_ROWS) : []
-  const reasoningRows = reasonPreview.length
 
-  const chatHeight = Math.max(
-    3,
-    rows - HEADER_ROWS - CHROME_ROWS - reasoningRows - (permission ? PERMISSION_ROWS : 0),
-  )
+  // Everything below the transcript: whichever of the two footers is showing,
+  // plus the status line under it. The thought is no longer a pane of its own
+  // above the input — it is part of the transcript, so it costs nothing here.
+  const footerRows = (permission ? PERMISSION_ROWS : COMPOSER_ROWS) + 1
+  // A floor of 1, not 3: on a short viewport the old floor made the frame one
+  // row taller than the screen, and the composer at the bottom is what it ate.
+  const chatHeight = Math.max(1, rows - HEADER_ROWS - footerRows)
 
-  const displayItems = useMemo<Item[]>(
-    () => (live !== '' ? [...items, { kind: 'assistant', text: live }] : items),
-    [items, live],
-  )
+  const displayItems = useMemo<Item[]>(() => {
+    const tail: Item[] = []
+    // The thought sits under the question it belongs to, which is where it is
+    // being written; the answer, once there is one, follows it.
+    if (reasoning !== '') tail.push({ kind: 'reasoning', header: '', text: reasoning })
+    if (live !== '') tail.push({ kind: 'assistant', text: live })
+    return tail.length > 0 ? [...items, ...tail] : items
+  }, [items, live, reasoning])
   const window = useMemo(
     () => visibleWindow(buildLines(displayItems, width), chatHeight, scrollOffset),
     [displayItems, width, chatHeight, scrollOffset],
@@ -138,17 +214,26 @@ export function ChatScreen({
 
   useInput((inputChar, key) => {
     if (permission) {
+      // A tool is waiting on y/n, and the composer is not on screen.
       if (isCtrlC(inputChar, key)) resolvePermission(false)
       else if (inputChar === 'y' || inputChar === 'Y') resolvePermission(true)
       else if (inputChar === 'n' || inputChar === 'N' || key.escape) resolvePermission(false)
       return
     }
     if (isCtrlC(inputChar, key)) {
-      if (busy) abortRef.current?.abort()
+      if (runningRef.current) stop()
       else exit()
       return
     }
-    if (key.pageUp) setScrollOffset((value) => value + Math.max(1, Math.floor(chatHeight / 2)))
+    if (key.return) {
+      // Enter is taken here rather than by `TextInput`, which would only ever
+      // see it as a return key: the modifier is what tells the two apart.
+      submit(input, isSteerKey(key))
+      return
+    }
+    if (key.upArrow) recallHistory(-1)
+    else if (key.downArrow) recallHistory(1)
+    else if (key.pageUp) setScrollOffset((value) => value + Math.max(1, Math.floor(chatHeight / 2)))
     else if (key.pageDown) {
       setScrollOffset((value) => Math.max(0, value - Math.max(1, Math.floor(chatHeight / 2))))
     }
@@ -157,6 +242,13 @@ export function ChatScreen({
   const runCommand = async (raw: string) => {
     const [command, ...rest] = raw.slice(1).trim().split(/\s+/)
     const argument = rest.join(' ')
+    if (runningRef.current && BLOCKED_WHILE_BUSY.has(command)) {
+      push({
+        kind: 'info',
+        text: `Can't /${command} while a turn is running — Ctrl+C to stop it first.`,
+      })
+      return
+    }
     switch (command) {
       case 'model':
         onOpenModel()
@@ -199,9 +291,57 @@ export function ChatScreen({
       }
       case 'thinking': {
         const asked = argument.trim().toLowerCase()
-        const next = asked === 'on' ? true : asked === 'off' ? false : !display.thinking
-        onDisplayChange({ thinking: next })
-        push({ kind: 'info', text: `Thinking: ${next ? 'on' : 'off'}` })
+        // `brief`/`full` and `true`/`false` are older spellings of the same two
+        // states: showing the reasoning, or not.
+        const level =
+          asked === 'off' || asked === 'false'
+            ? 'off'
+            : asked === 'on' || asked === 'true' || asked === 'brief' || asked === 'full'
+              ? 'on'
+              : undefined
+        if (!level) {
+          push({
+            kind: 'info',
+            text:
+              `Thinking display: ${display.thinking}. This turns the showing of the reasoning on ` +
+              'or off — the model thinks either way, and /effort is what changes that. ' +
+              'Use /thinking on|off',
+          })
+          break
+        }
+        onDisplayChange({ thinking: level })
+        push({
+          kind: 'info',
+          text:
+            level === 'off'
+              ? 'Thinking display: off. The model still reasons; this only stops showing it.'
+              : 'Thinking display: on — the reasoning stays under the question.',
+        })
+        break
+      }
+      case 'effort': {
+        const asked = argument.trim().toLowerCase()
+        // `default`/`off` are older spellings of "back to Milo's own value",
+        // which is medium.
+        const next = (REASONING_EFFORTS as readonly string[]).includes(asked)
+          ? (asked as ReasoningEffort)
+          : asked === 'default' || asked === 'off'
+            ? DEFAULT_REASONING_EFFORT
+            : undefined
+        if (!next) {
+          push({
+            kind: 'info',
+            text:
+              `Reasoning effort: ${runtime.reasoningEffort ?? DEFAULT_REASONING_EFFORT}. ` +
+              'Use /effort low|medium|high',
+          })
+          break
+        }
+        onEffortChange(next)
+        push({
+          kind: 'info',
+          text: `Reasoning effort: ${next} — affects how the model answers, and what it costs. Saved for every surface.`,
+        })
         break
       }
       case 'new': {
@@ -229,7 +369,7 @@ export function ChatScreen({
       }
       case 'stats': {
         const session = await runtime.getSession(scope)
-        push({ kind: 'info', text: formatStats(session.stats()) })
+        push({ kind: 'fields', rows: statsRows(session.stats()) })
         break
       }
       case 'clear': {
@@ -251,10 +391,18 @@ export function ChatScreen({
     }
   }
 
-  const send = async (text: string) => {
-    push({ kind: 'user', text })
+  /** Files what has been streamed so far as a finished item. */
+  const commitLive = () => {
+    const text = liveRef.current
+    liveRef.current = ''
+    setLive('')
+    if (text.trim()) push({ kind: 'assistant', text })
+  }
+
+  const runTurn = async (text: string) => {
     setScrollOffset(0)
     setLive('')
+    liveRef.current = ''
     setReasoning('')
     setToolName('')
     setPhase('thinking')
@@ -262,23 +410,83 @@ export function ChatScreen({
 
     const controller = new AbortController()
     abortRef.current = controller
+    // This turn's inbox. The surface writes into it, the loop empties it.
+    const steering: string[] = []
+    steeringRef.current = steering
     const startedAtMs = Date.now()
+    // The compaction call happens before the turn's own, so its time is part of
+    // the wait. Naming it is what stops the wait reading as the model being slow.
+    let compactedMs = 0
+    // Each wait is its own block: from the question to the model's first visible
+    // output, then from the last tool result to the next one. Reasoning deltas do
+    // not end it — they *are* the thinking; they are what fills the block.
+    let waitingSince = startedAtMs
+    let firstWait = true
+    /** Whether anything arrived in the answer channel at all. */
+    let answered = false
+    /** Reasoning seen this turn, counted even when it is not kept. */
+    let reasoningChars = 0
+    /** Thinking too fast to be worth a line, kept in case it was the answer. */
+    const dropped: string[] = []
+    const stopWaiting = () => {
+      const seconds = (Date.now() - waitingSince) / 1000
+      waitingSince = Date.now()
+      const thought = reasoningRef.current.trim()
+      const compacting =
+        firstWait && compactedMs > 0 ? ` (${formatSeconds(compactedMs / 1000)} compacting)` : ''
+      firstWait = false
+      reasoningRef.current = ''
+      setReasoning('')
+      // Under a second with nothing to account for there is nothing worth saying
+      // — unless the thought is all the turn has said, which is only known at the
+      // end. A summary call is never quiet, however fast the answer after it was.
+      if (seconds < 1 && compacting === '') {
+        if (thought) dropped.push(thought)
+        return
+      }
+      const header = `✻ Thought for ${formatSeconds(seconds)}${compacting}`
+      push({ kind: 'reasoning', header, text: thought })
+    }
 
-    let assistant = ''
     try {
       const session = await runtime.getSession(scope)
-      for await (const event of session.send(text, { signal: controller.signal, ask })) {
+      for await (const event of session.send(text, {
+        signal: controller.signal,
+        ask,
+        steering,
+      })) {
         applyEvent(event, {
           onText: (delta) => {
-            assistant += delta
-            setLive(assistant)
+            stopWaiting()
+            // Only text someone can read counts as an answer: a bare newline is
+            // not one, and counting it switched off the rules that keep a turn's
+            // thinking visible — leaving a ✻ line and nothing else on screen.
+            if (delta.trim()) answered = true
+            liveRef.current += delta
+            setLive(liveRef.current)
             setPhase('writing')
           },
           onReasoning: (delta) => {
-            if (display.thinking) setReasoning((value) => value + delta)
+            // Counted whatever the level: a turn that says nothing in the answer
+            // channel is worth explaining, and that is all that is left to go on.
+            reasoningChars += delta.length
+            // `off` keeps none of it: nothing is going to display it, and the
+            // transcript has no use for it either.
+            if (display.thinking === 'off') return
+            reasoningRef.current += delta
+            setReasoning(reasoningRef.current)
           },
           onToolStart: (name, args) => {
             toolArgsRef.current = args
+            // A tool call with no prose before it is still the thinking ending.
+            stopWaiting()
+            // The step's text ends here. A turn's answer arrives one message per
+            // step, and left as one blob the preamble before a tool call runs
+            // straight into what follows it — "interage com a confirmação." +
+            // "Não. Em yolo…" reads as one sentence. Filed now, the preamble
+            // also lands above the tool line rather than after it, which is
+            // where it was actually said.
+            commitLive()
             // `off` keeps tool activity out of the transcript and out of the
             // status line, so the turn reads as plain thinking.
             if (display.tools === 'off') return
@@ -297,8 +505,14 @@ export function ChatScreen({
             }
             setToolName('')
             setPhase('thinking')
+            // The next wait starts when the tool is done, not when it was asked
+            // for: running the tool is not the model thinking.
+            waitingSince = Date.now()
           },
           onUsage: (total) => setTokens((value) => value + total),
+          onCompacted: (ms) => {
+            compactedMs = ms
+          },
           onDone: (finishReason) => {
             // A capped answer otherwise looks like a complete one.
             if (finishReason === 'length') {
@@ -316,27 +530,174 @@ export function ChatScreen({
       push({ kind: 'error', text: errorMessage(error) })
     }
 
-    if (assistant.trim()) push({ kind: 'assistant', text: assistant })
-    setLive('')
+    // A correction the model never got to see is not dropped: it becomes the
+    // next turn, in the order it was typed. After Ctrl+C there is nothing here
+    // — the mailbox was emptied on purpose.
+    if (steering.length > 0) {
+      queueRef.current.push(...steering)
+      setQueued(queueRef.current.length)
+    }
+
+    // Reasoning that nothing followed: no line under it, no tool after it. That
+    // is not a thought on the way to an answer, it is what the model said — one
+    // that answers in the thinking channel says everything there — so it is
+    // kept. What the earlier waits said but never reported rides along, before
+    // it, so a turn keeps its own order. Dropping any of this made a turn look
+    // like it produced nothing, moments after the text had scrolled past the
+    // screen.
+    const trailing = [...dropped, reasoningRef.current.trim()].filter(Boolean)
+    if (trailing.length > 0) {
+      const seconds = (Date.now() - waitingSince) / 1000
+      push({
+        kind: 'reasoning',
+        // Same rule as any other wait: under a second there is nothing to say.
+        header: seconds < 1 ? '' : `✻ Thought for ${formatSeconds(seconds)}`,
+        text: trailing.join('\n\n'),
+      })
+      reasoningRef.current = ''
+      setReasoning('')
+    }
+
+    // Nothing came back in the answer channel, and the display hid what did: a turn
+    // that shows a user nothing at all has to at least say why, or the provider
+    // putting both channels in one field looks like Milo having gone quiet.
+    if (!answered && reasoningChars > 0 && display.thinking === 'off') {
+      push({
+        kind: 'info',
+        text:
+          '⚠ no answer came back: this model sends everything it says as reasoning, and ' +
+          '/thinking off hides it. MILO_DEBUG=1 prints what the wire carried.',
+      })
+    }
+
+    commitLive()
     setReasoning('')
     setToolName('')
     setPermission(null)
-    setPhase('idle')
     setLastDuration((Date.now() - startedAtMs) / 1000)
+    steeringRef.current = null
     abortRef.current = null
   }
 
-  const onSubmit = (raw: string) => {
+  /**
+   * Runs the queued messages one turn at a time. The turn state stays open
+   * across them, so a message typed during a turn reads as part of the same
+   * stretch of work rather than as an unrelated turn.
+   */
+  const pump = () => {
+    if (runningRef.current) return
+    runningRef.current = true
+    void (async () => {
+      try {
+        while (queueRef.current.length > 0) {
+          const text = queueRef.current.shift() as string
+          setQueued(queueRef.current.length)
+          try {
+            await runTurn(text)
+          } catch (error) {
+            // A turn that blows up must not take the rest of the queue with it.
+            push({ kind: 'error', text: errorMessage(error) })
+          }
+        }
+      } finally {
+        runningRef.current = false
+        steeringRef.current = null
+        setPhase('idle')
+        setQueued(queueRef.current.length)
+        const dropped = droppedRef.current
+        droppedRef.current = 0
+        if (dropped > 0) {
+          push({
+            kind: 'info',
+            text: `${dropped} queued message${dropped === 1 ? '' : 's'} dropped.`,
+          })
+        }
+      }
+    })()
+  }
+
+  /** Ctrl+C during a turn: stop it, and drop whatever was waiting behind it. */
+  const stop = () => {
+    droppedRef.current = queueRef.current.length + (steeringRef.current?.length ?? 0)
+    queueRef.current = []
+    // Emptied in place, not reassigned: the running turn holds this very array,
+    // and anything left in it would be run as the next turn.
+    steeringRef.current?.splice(0)
+    setQueued(0)
+    abortRef.current?.abort()
+  }
+
+  /** Records a line that was sent, and puts the arrows back at the live end. */
+  const remember = (text: string) => {
+    const history = inputHistoryRef.current
+    // The same line twice in a row is one entry: recalling it twice is noise.
+    if (history[history.length - 1] !== text) history.push(text)
+    if (history.length > HISTORY_LIMIT) history.shift()
+    historyIndexRef.current = null
+    draftRef.current = ''
+    void saveInputHistory(history)
+  }
+
+  /**
+   * Up walks back through what was sent, Down walks forward again — and past
+   * the newest line it hands back whatever was being typed when the walk
+   * started, so reaching for an old line never costs the one in the composer.
+   */
+  const recallHistory = (direction: -1 | 1) => {
+    const history = inputHistoryRef.current
+    if (history.length === 0) return
+    const current = historyIndexRef.current
+    if (current === null) {
+      if (direction === 1) return
+      draftRef.current = input
+    }
+    const next = current === null ? history.length - 1 : current + direction
+    if (next < 0) return
+    // A fresh mount is what puts the cursor at the end of the recalled line,
+    // where the next keystroke belongs; the input keeps its old offset otherwise.
+    setRecallEpoch((epoch) => epoch + 1)
+    if (next >= history.length) {
+      historyIndexRef.current = null
+      setInput(draftRef.current)
+      return
+    }
+    historyIndexRef.current = next
+    setInput(history[next] as string)
+  }
+
+  /**
+   * Enter sends — or queues, when a turn is already running. Ctrl+Enter steers:
+   * the message joins the turn in flight instead of waiting for it.
+   */
+  const submit = (raw: string, steer: boolean) => {
     const text = raw.trim()
-    if (!text || busy) return
+    if (!text) return
     setInput('')
+    remember(text)
+
+    // Whatever was typed lands in the transcript, commands included: it is one
+    // line of the conversation being read back, and a command that left no
+    // trace read as if it had never been sent. Filing the answer still
+    // streaming first is what keeps the order.
+    commitLive()
+    push({ kind: 'user', text })
+    setScrollOffset(0)
+
     // A command that throws must not become an unhandled rejection: say what
     // broke instead of appearing to ignore the line.
     if (text.startsWith('/')) {
       void runCommand(text).catch((error) => push({ kind: 'error', text: errorMessage(error) }))
-    } else {
-      void send(text).catch((error) => push({ kind: 'error', text: errorMessage(error) }))
+      return
     }
+
+    const steering = steeringRef.current
+    if (steer && steering) {
+      steering.push(text)
+      return
+    }
+    queueRef.current.push(text)
+    setQueued(queueRef.current.length)
+    pump()
   }
 
   const statusLabel =
@@ -347,6 +708,31 @@ export function ChatScreen({
         : phase === 'writing'
           ? 'writing…'
           : 'thinking…'
+
+  // The hint and the counters share one line, and a frame of fixed height cannot
+  // afford a wrap: the overflow pushes everything below it down, and Ink redraws
+  // the rest of the screen into whatever is left — two frames on top of each
+  // other, the composer showing its placeholder and the typed text at once. So
+  // the pieces drop in order of what they are worth — the steer hint, then the
+  // scroll marker, then the counters — before any of them is allowed to wrap.
+  const statusText = `${statusLabel} ${formatSeconds(elapsed)}${queued > 0 ? ` · ${queued} queued` : ''}`
+  const steerHint = ' · Ctrl+Enter steers'
+  const idleHint =
+    columns >= 60
+      ? 'PgUp/PgDn scroll · Enter send · /help · Ctrl+C quits'
+      : 'Enter send · /help · Ctrl+C'
+  const scrolled = window.offset > 0 ? `▲ scrolled (${window.offset})` : ''
+  const idleFull = scrolled ? `${scrolled} · ${idleHint}` : idleHint
+  const hint = statusText.length + steerHint.length + 2 <= columns ? steerHint : ''
+  const idleText = idleFull.length + 2 <= columns ? idleFull : scrolled || idleHint
+  const counters = [
+    !busy && lastDuration !== null ? `last ${formatSeconds(lastDuration)}` : '',
+    tokens > 0 ? `${formatTokens(tokens)} tok` : '',
+  ]
+    .filter(Boolean)
+    .join(' · ')
+  const leftWidth = (busy ? statusText.length + hint.length : idleText.length) + 2
+  const showCounters = counters !== '' && leftWidth + counters.length <= columns
 
   return (
     <Box flexDirection="column" height={rows - HEADER_ROWS} width={columns}>
@@ -366,54 +752,49 @@ export function ChatScreen({
         ))}
       </Box>
 
-      {reasoningRows > 0 && (
-        <Box flexDirection="column" paddingX={1}>
-          {reasonPreview.map((line, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: the preview is rebuilt every frame and never reorders
-            <Text key={index} dimColor italic>
-              {line || ' '}
-            </Text>
-          ))}
-        </Box>
-      )}
-
       {permission ? (
         <Box flexDirection="column" paddingX={1}>
           <Text color={theme.warning}>⚠ Milo wants to run {permission.tool}:</Text>
           <Text color={theme.warning}>  {permission.summary}</Text>
-          <Text dimColor>[y] allow · [n] deny</Text>
+          <Text color={theme.muted}>[y] allow · [n] deny</Text>
         </Box>
       ) : (
-        <Box paddingX={1}>
+        // A panel of its own, so where the answer ends and the next message
+        // begins is never in doubt — the border turns warning-coloured while a
+        // turn is running, which is also when the placeholder changes.
+        <Box
+          borderStyle="round"
+          borderColor={busy ? theme.warning : theme.accent}
+          marginX={1}
+          paddingX={1}
+          width={width}
+          height={COMPOSER_ROWS}
+          overflow="hidden"
+        >
           <Text color={mode === 'yolo' ? theme.danger : theme.accent}>› </Text>
-          {busy ? (
-            <Text dimColor>(working — Ctrl+C to stop)</Text>
-          ) : (
-            <TextInput
-              value={input}
-              onChange={setInput}
-              onSubmit={onSubmit}
-              placeholder="Type a message…"
-            />
-          )}
+          {/* Always mounted, and without an `onSubmit`: a turn running is no
+              reason to take the composer away — it is exactly when a correction
+              is worth typing — and Enter is read one level up, where the
+              modifier that tells queue and steer apart is still visible. */}
+          <TextInput
+            key={recallEpoch}
+            value={input}
+            onChange={setInput}
+            placeholder={busy ? 'Queue a message — Ctrl+Enter to steer…' : 'Type a message…'}
+          />
         </Box>
       )}
 
       <Box paddingX={1} justifyContent="space-between">
         {busy ? (
           <Text color={theme.warning}>
-            <Spinner type="dots" /> {statusLabel} {elapsed.toFixed(1)}s
+            <Spinner type="dots" /> {statusText}
+            {hint ? <Text color={theme.muted}>{hint}</Text> : null}
           </Text>
         ) : (
-          <Text dimColor>
-            {window.offset > 0 ? `▲ scrolled (${window.offset}) · ` : ''}
-            PgUp/PgDn scroll · Enter send · /new · /sessions · /help · Ctrl+C quit
-          </Text>
+          <Text color={theme.muted}>{idleText}</Text>
         )}
-        <Text dimColor>
-          {!busy && lastDuration !== null ? `last ${lastDuration.toFixed(1)}s · ` : ''}
-          {tokens > 0 ? `${formatTokens(tokens)} tok` : ''}
-        </Text>
+        {showCounters ? <Text color={theme.muted}>{counters}</Text> : null}
       </Box>
     </Box>
   )
@@ -425,6 +806,8 @@ interface EventHandlers {
   onToolStart: (name: string, args: unknown) => void
   onToolEnd: (name: string, isError: boolean) => void
   onUsage: (totalTokens: number) => void
+  /** How long the compaction's own model call took, in ms. */
+  onCompacted: (ms: number) => void
   onDone: (finishReason: string) => void
   onAborted: () => void
   onError: (message: string) => void
@@ -447,6 +830,9 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
     case 'usage':
       handlers.onUsage(event.inputTokens + event.outputTokens)
       break
+    case 'compacted':
+      handlers.onCompacted(event.ms)
+      break
     case 'done':
       handlers.onDone(event.finishReason)
       break
@@ -462,7 +848,56 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
 }
 
 function formatTokens(value: number): string {
-  return value >= 1000 ? `${(value / 1000).toFixed(1)}k` : String(value)
+  if (value < 1000) return String(value)
+  const thousands = value / 1000
+  // A tenth is worth showing at 8.3k; at 22.0k it is noise. Rounding to one
+  // decimal first is what drops the trailing zero.
+  const rounded = thousands < 10 ? Math.round(thousands * 10) / 10 : Math.round(thousands)
+  return `${rounded}k`
+}
+
+/** `1 turn`, `2 turns` — "1 turns" is the kind of thing that makes a block look unfinished. */
+function count(value: number, noun: string): string {
+  return `${value} ${noun}${value === 1 ? '' : 's'}`
+}
+
+/** A tenth of a second matters at 6.4s; at 51s it is noise. */
+function formatSeconds(value: number): string {
+  return `${value < 10 ? Math.round(value * 10) / 10 : Math.round(value)}s`
+}
+
+/**
+ * `/stats`, as rows. The token lines matter because the oldest turns are
+ * summarized away once the context passes the budget, so the budget is what
+ * turns a token count into something worth reading. Whatever the session does
+ * not have — no prompt measured yet, no compaction — is left out rather than
+ * shown as a zero.
+ */
+function statsRows(stats: SessionStats): { label: string; value: string }[] {
+  const used = stats.tokens + (stats.systemTokens ?? 0)
+  const budget = stats.maxInputTokens ? ` of ${formatTokens(stats.maxInputTokens)}` : ''
+  const rows = [
+    { label: 'session', value: stats.title ? `${stats.id} — ${stats.title}` : stats.id },
+    {
+      label: 'started',
+      value: `${formatWhen(stats.createdAt)} · last turn ${formatWhen(stats.updatedAt)}`,
+    },
+    {
+      label: 'context',
+      value:
+        `${count(stats.messages, 'message')} · ${count(stats.turns, 'turn')} · ` +
+        `~${formatTokens(used)}${budget} tokens`,
+    },
+  ]
+  if (stats.compacted) {
+    rows.push({
+      label: 'compacted',
+      value: stats.droppedTokens
+        ? `~${formatTokens(stats.droppedTokens)} tokens summarized`
+        : 'yes',
+    })
+  }
+  return rows
 }
 
 function formatArgs(args: unknown): string {

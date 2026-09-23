@@ -176,6 +176,51 @@ describe('markdown in the terminal', () => {
   })
 })
 
+describe('fields', () => {
+  it('lines the values up in a column, with the labels receding', () => {
+    const lines = buildLines(
+      [
+        {
+          kind: 'fields',
+          rows: [
+            { label: 'session', value: 'calm-otter-7' },
+            { label: 'context', value: '42 messages · 12 turns' },
+          ],
+        },
+      ],
+      40,
+    )
+
+    expect(lines.map((line) => line.text)).toEqual([
+      'session  calm-otter-7',
+      'context  42 messages · 12 turns',
+    ])
+    expect(lines[0]?.segments).toEqual([
+      { text: 'session', color: theme.muted },
+      { text: '  calm-otter-7' },
+    ])
+  })
+
+  it('hangs a wrapped value under itself, not under the next label', () => {
+    const lines = buildLines(
+      [
+        {
+          kind: 'fields',
+          rows: [{ label: 'session', value: 'a fairly long title that has to wrap somewhere' }],
+        },
+      ],
+      30,
+    )
+
+    expect(lines.length).toBeGreaterThan(1)
+    const hang = ' '.repeat('session'.length + 2)
+    for (const line of lines.slice(1)) {
+      expect(line.text.startsWith(hang)).toBe(true)
+      expect(line.text.length).toBeLessThanOrEqual(30)
+    }
+  })
+})
+
 describe('visibleWindow', () => {
   const lines: Line[] = Array.from({ length: 10 }, (_, index) => ({ text: `L${index}` }))
 

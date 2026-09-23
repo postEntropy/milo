@@ -14,7 +14,8 @@ const config = {
   model: 'some-model',
   providers: { commandcode: { baseURL: 'https://api.commandcode.ai/provider/v1' } },
   memory: { backend: 'file' as const },
-  display: { tools: 'full' as const, thinking: true },
+  display: { tools: 'full' as const, thinking: 'on' },
+  reasoningEffort: 'medium' as const,
   gateways: {},
   permissions: { mode: 'ask' as const, allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
 }
@@ -252,16 +253,32 @@ describe('SettingsScreen', () => {
     expect(app.lastFrame()).toContain('off')
   })
 
-  it('toggles thinking and says it applies everywhere', async () => {
+  it('toggles the thinking display and says it applies everywhere', async () => {
     const app = renderSettings()
     for (let index = 0; index < 4; index += 1) await press(app, DOWN)
     await press(app, '\r')
-    await waitFor(app, 'Thinking')
+    await waitFor(app, 'Thinking display')
 
     await press(app, DOWN)
     await press(app, '\r')
 
-    await waitUntil(() => readJson('config.json').display?.thinking === false)
+    // on → off
+    await waitUntil(() => readJson('config.json').display?.thinking === 'off')
+    expect(app.lastFrame()).toContain('applies to every surface')
+  })
+
+  it('cycles the reasoning effort', async () => {
+    const app = renderSettings()
+    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    await press(app, '\r')
+    await waitFor(app, 'Reasoning effort')
+
+    await press(app, DOWN)
+    await press(app, DOWN)
+    await press(app, '\r')
+
+    // medium → high
+    await waitUntil(() => readJson('config.json').reasoningEffort === 'high')
     expect(app.lastFrame()).toContain('applies to every surface')
   })
 
@@ -271,6 +288,7 @@ describe('SettingsScreen', () => {
     await press(app, '\r')
     await waitFor(app, 'Output limit')
 
+    await press(app, DOWN)
     await press(app, DOWN)
     await press(app, DOWN)
     await press(app, '\r')
@@ -283,6 +301,7 @@ describe('SettingsScreen', () => {
 
     // Reopening shows what is stored; empty means "leave it to the wire", and an
     // empty field is how that is asked for.
+    await press(app, DOWN)
     await press(app, DOWN)
     await press(app, DOWN)
     await press(app, '\r')
@@ -305,6 +324,7 @@ describe('SettingsScreen', () => {
     for (let index = 0; index < 4; index += 1) await press(app, DOWN)
     await press(app, '\r')
     await waitFor(app, 'Output limit')
+    await press(app, DOWN)
     await press(app, DOWN)
     await press(app, DOWN)
     await press(app, '\r')

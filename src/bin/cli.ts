@@ -38,7 +38,7 @@ Usage:
   milo --yolo                Shorthand for --mode yolo
 
 In the chat: /model · /setup · /mode ask|auto|yolo · /yolo · /tools full|name|off · /thinking on|off ·
-/new · /sessions · /resume · /stats · /clear · /help · /exit
+/effort low|medium|high · /new · /sessions · /resume · /stats · /clear · /help · /exit
 
 Config:  ~/.milo/config.json
 Sessions: ~/.milo/sessions/
@@ -87,7 +87,22 @@ async function runTui(
         initialMode,
         resumeId: args.resume,
       }),
-      { exitOnCtrlC: false },
+      {
+        exitOnCtrlC: false,
+        // Without this, Ctrl+Enter arrives as a plain Enter and a message typed
+        // mid-turn can only be queued behind it — never steered into it.
+        //
+        // `enabled`, not `auto`: auto mode asks the terminal with `CSI ? u`, but
+        // Ink sends that query from its constructor, while the tty is still in
+        // canonical mode — so the reply cannot be read. The detection times out
+        // having heard nothing, and the answer then sits in the tty buffer until
+        // the first `useInput` turns raw mode on, at which point it reaches the
+        // input pipeline and is typed into the composer as `[?0u`. Enabling the
+        // protocol outright asks nothing, so there is nothing to leak; a
+        // terminal that does not know the sequence ignores it, and Alt+Enter
+        // steers there anyway.
+        kittyKeyboard: { mode: 'enabled' },
+      },
     )
     await app.waitUntilExit()
   } finally {

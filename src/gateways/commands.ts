@@ -1,6 +1,11 @@
 import { formatSessionList, formatStats } from '../core/sessions/index.js'
 import type { SessionStats, SessionSummary } from '../core/sessions/index.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
+import {
+  DEFAULT_REASONING_EFFORT,
+  REASONING_EFFORTS,
+  type ReasoningEffort,
+} from '../core/providers/types.js'
 import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.js'
 
 export interface CommandContext {
@@ -17,6 +22,12 @@ export interface CommandContext {
   persistDisplay?: (patch: Partial<DisplayConfig>) => void
   /** Set when this surface may not change the display settings; used as the reply. */
   displayLocked?: string
+  /** How hard the model thinks right now. */
+  effort?: ReasoningEffort
+  /** Applies a reasoning-effort change to the running session and writes it down. */
+  persistEffort?: (effort: ReasoningEffort) => void
+  /** Set when this surface may not change how hard the model thinks; used as the reply. */
+  effortLocked?: string
   /** Starts a fresh session and binds it to this conversation. */
   newSession?: (title?: string) => Promise<{ id: string }>
   /** Binds this conversation to an existing session. */
@@ -39,7 +50,8 @@ const HELP = [
   '/mode ask|auto|yolo — permission mode, saved for every surface',
   '/yolo — toggle yolo mode',
   '/tools full|name|off — how much of each tool call to show',
-  '/thinking on|off — show what the model is thinking',
+  '/thinking on|off — show the model\'s reasoning (display only; /effort is what changes how it thinks)',
+  "/effort low|medium|high — how hard the model thinks (the one that costs)",
   '/new [title] — start a new session',
   '/sessions — list saved sessions',
   '/resume <id> — switch to another session',
@@ -54,7 +66,7 @@ const TOOL_LEVELS = ['full', 'name', 'off'] as const
 
 function describeDisplay(display: DisplayConfig | undefined): string {
   const settings = display ?? DEFAULT_DISPLAY
-  return `Tools: ${settings.tools} · thinking: ${settings.thinking ? 'on' : 'off'}`
+  return `Tools: ${settings.tools} · thinking display: ${settings.thinking}`
 }
 
 /**
@@ -81,6 +93,19 @@ export function displayLockMessage(allowlist: string[] | undefined): string | un
   return count === 0
     ? '🔒 /tools and /thinking are locked while this bot answers anyone. Set them in `milo setup` → Display.'
     : `🔒 /tools and /thinking are locked while this bot answers ${count} ids. Set them in \`milo setup\` → Display.`
+}
+
+/**
+ * How hard the model thinks is one value for the whole install, and it is what
+ * an answer costs — a bill one person raises for everybody. Locked by the same
+ * rule as `/mode`: only a bot that answers one person may change it.
+ */
+export function effortLockMessage(allowlist: string[] | undefined): string | undefined {
+  const count = allowlist?.length ?? 0
+  if (count === 1) return undefined
+  return count === 0
+    ? '🔒 /effort is locked while this bot answers anyone. Set it in `milo setup` → Display, on the terminal.'
+    : `🔒 /effort is locked while this bot answers ${count} ids. Set it in \`milo setup\` → Display on the terminal.`
 }
 
 /**
@@ -175,19 +200,54 @@ export async function handleCommand(
         return { handled: true, reply: 'Display settings are not available on this surface.' }
       }
       const asked = argument.trim().toLowerCase()
-      const current = context.display?.thinking ?? true
-      const next =
-        asked === 'on' || asked === 'true'
-          ? true
-          : asked === 'off' || asked === 'false'
-            ? false
-            : !current
-      context.persistDisplay({ thinking: next })
+      const current = context.display?.thinking ?? 'on'
+      // `brief`/`full` are what this command used to take, and `true`/`false`
+      // what the config used to hold: all four mean showing the reasoning or not.
+      const level =
+        asked === 'off' || asked === 'false'
+          ? 'off'
+          : asked === 'on' || asked === 'true' || asked === 'brief' || asked === 'full'
+            ? 'on'
+            : undefined
+      if (!level) {
+        return {
+          handled: true,
+          reply:
+            `Thinking display: ${current}. This turns the showing of the reasoning on or off — ` +
+            `the model thinks either way, and /effort is what changes that. Use /thinking on|off`,
+        }
+      }
+      context.persistDisplay({ thinking: level })
       return {
         handled: true,
-        reply: next
-          ? 'Thinking: on — the model\'s reasoning is shown. Saved for every surface.'
-          : "Thinking: off — the model's reasoning is hidden. Saved for every surface.",
+        reply:
+          level === 'off'
+            ? "Thinking display: off — none of the model's reasoning is shown. Saved for every surface. The model still thinks."
+            : "Thinking display: on — the reasoning is shown under the question. Saved for every surface.",
+      }
+    }
+
+    case 'effort': {
+      if (context.effortLocked) return { handled: true, reply: context.effortLocked }
+      if (!context.persistEffort) {
+        return { handled: true, reply: 'Reasoning effort is not available on this surface.' }
+      }
+      const asked = argument.trim().toLowerCase()
+      const level = (REASONING_EFFORTS as readonly string[]).includes(asked)
+        ? (asked as ReasoningEffort)
+        : asked === 'default' || asked === 'off'
+          ? DEFAULT_REASONING_EFFORT
+          : null
+      if (level === null) {
+        return {
+          handled: true,
+          reply: `Reasoning effort: ${context.effort ?? DEFAULT_REASONING_EFFORT}. Use /effort low|medium|high`,
+        }
+      }
+      context.persistEffort(level)
+      return {
+        handled: true,
+        reply: `Reasoning effort: ${level} — this one changes how the model answers, and what it costs. Saved for every surface.`,
       }
     }
 
@@ -247,7 +307,8 @@ export async function handleCommand(
         handled: true,
         reply:
           context.status ??
-          `Permission mode: ${context.policy?.mode ?? 'ask'}. ${describeDisplay(context.display)}`,
+          `Permission mode: ${context.policy?.mode ?? 'ask'}. ${describeDisplay(context.display)}` +
+            ` · effort: ${context.effort ?? DEFAULT_REASONING_EFFORT}`,
       }
 
     case 'model':

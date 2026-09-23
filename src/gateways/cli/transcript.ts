@@ -28,6 +28,18 @@ export type Item =
   | { kind: 'tool'; name: string; detail: string; ok: boolean }
   | { kind: 'error'; text: string }
   | { kind: 'info'; text: string }
+  /**
+   * The model's thinking, sitting under the question it belongs to: the line
+   * saying how long it took, plus the reasoning itself when it is shown.
+   * `header` is empty while the thought is still being written — there is nothing
+   * to say about its length yet — and `text` is empty when only the line survives.
+   */
+  | { kind: 'reasoning'; header: string; text: string }
+  /**
+   * Labelled values, one per row. A block of them reads at a glance where the
+   * same words run together as prose — `/stats` is the case that asked for it.
+   */
+  | { kind: 'fields'; rows: { label: string; value: string }[] }
 
 export function wrapText(text: string, width: number): string[] {
   const limit = Math.max(1, width)
@@ -69,8 +81,7 @@ export function buildLines(items: Item[], width: number): Line[] {
       case 'user': {
         wrapText(item.text, width - 2).forEach((text, lineIndex) => {
           push(lineIndex === 0 ? `› ${text}` : `  ${text}`, {
-            color: lineIndex === 0 ? theme.accent : undefined,
-            dim: lineIndex > 0,
+            color: lineIndex === 0 ? theme.accent : theme.muted,
           })
         })
         break
@@ -94,8 +105,44 @@ export function buildLines(items: Item[], width: number): Line[] {
         for (const text of wrapText(`error: ${item.text}`, width)) push(text, { color: theme.danger })
         break
       case 'info':
-        for (const text of wrapText(item.text, width)) push(text, { dim: true })
+        // Legible, not dim: this is what a command answered, and on a light
+        // theme the faint variants of a palette are the first thing to vanish.
+        for (const text of wrapText(item.text, width)) push(text, { color: theme.muted })
         break
+      case 'reasoning': {
+        for (const text of wrapText(item.header, width)) {
+          if (item.header.trim()) push(text, { dim: true })
+        }
+        if (item.text.trim()) {
+          // Indented, so the thinking reads as a note under the question rather
+          // than as the start of the answer.
+          for (const text of wrapText(item.text, width - 2)) {
+            push(`  ${text}`, { color: theme.muted })
+          }
+        }
+        break
+      }
+      case 'fields': {
+        // The labels are one column, so the eye lands on the values; and a value
+        // long enough to wrap hangs under itself rather than under the next
+        // label, where it would read as that label's.
+        const labelWidth = Math.max(0, ...item.rows.map((row) => row.label.length))
+        const indent = ' '.repeat(labelWidth + 2)
+        for (const row of item.rows) {
+          const label = row.label.padEnd(labelWidth)
+          wrapText(row.value, Math.max(8, width - labelWidth - 2)).forEach((text, lineIndex) => {
+            if (lineIndex > 0) {
+              lines.push({ text: `${indent}${text}`, color: theme.muted })
+              return
+            }
+            lines.push({
+              text: `${label}  ${text}`,
+              segments: [{ text: label, color: theme.muted }, { text: `  ${text}` }],
+            })
+          })
+        }
+        break
+      }
     }
   })
 
