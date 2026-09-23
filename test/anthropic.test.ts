@@ -16,13 +16,12 @@ function streamOf(chunks: string[]): ReadableStream<Uint8Array> {
 
 function stubFetch(chunks: string[]) {
   const body = streamOf(chunks)
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(
-      async () =>
-        new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
-    ),
+  const fetchMock = vi.fn(
+    async (_url: string | URL, _init?: RequestInit) =>
+      new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
   )
+  vi.stubGlobal('fetch', fetchMock)
+  return fetchMock
 }
 
 afterEach(() => {
@@ -91,5 +90,30 @@ describe('AnthropicProvider', () => {
       outputTokens: 3,
     })
     expect(events.at(-1)).toMatchObject({ type: 'done', finishReason: 'tool_calls' })
+  })
+
+  it('keeps the reasoning out of the request it sends back', async () => {
+    const fetchMock = stubFetch([frame({ type: 'message_delta', delta: { stop_reason: 'end_turn' } })])
+
+    const provider = new AnthropicProvider({ id: 'test', baseURL: 'https://a.test/v1' })
+    for await (const _event of provider.stream({
+      model: 'claude-test',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'reasoning', text: 'a private thought' },
+            { type: 'text', text: 'the answer' },
+          ],
+        },
+      ],
+    })) {
+      // drain
+    }
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { messages: unknown[] }
+    expect(JSON.stringify(body)).not.toContain('a private thought')
+    expect(JSON.stringify(body.messages)).toContain('the answer')
   })
 })

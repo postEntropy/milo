@@ -17,7 +17,7 @@ function streamOf(chunks: string[]): ReadableStream<Uint8Array> {
 function stubFetch(chunks: string[]) {
   const body = streamOf(chunks)
   const fetchMock = vi.fn(
-    async () =>
+    async (_url: string | URL, _init?: RequestInit) =>
       new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } }),
   )
   vi.stubGlobal('fetch', fetchMock)
@@ -91,6 +91,38 @@ describe('OpenAIProvider', () => {
       outputTokens: 5,
     })
     expect(events.at(-1)).toMatchObject({ type: 'done', finishReason: 'tool_calls' })
+  })
+
+  it('keeps the reasoning out of the request it sends back', async () => {
+    const fetchMock = stubFetch([
+      frame({ choices: [{ delta: { content: 'ok' } }] }),
+      'data: [DONE]\n\n',
+    ])
+
+    const provider = new OpenAIProvider({
+      id: 'test',
+      baseURL: 'https://example.test/v1',
+      apiKey: 'k',
+    })
+    for await (const _event of provider.stream({
+      model: 'test-model',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'reasoning', text: 'a private thought' },
+            { type: 'text', text: 'the answer' },
+          ],
+        },
+      ],
+    })) {
+      // drain
+    }
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as { messages: unknown[] }
+    expect(JSON.stringify(body)).not.toContain('a private thought')
+    expect(JSON.stringify(body.messages)).toContain('the answer')
   })
 
   it('throws a clear error on a non-ok response', async () => {

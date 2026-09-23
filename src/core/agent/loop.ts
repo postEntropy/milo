@@ -41,6 +41,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     const parts: ContentPart[] = []
     const toolCalls: { id: string; name: string; args: unknown }[] = []
     let text = ''
+    let reasoning = ''
     let finish: FinishReason = 'stop'
 
     for await (const event of provider.stream({
@@ -56,6 +57,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         text += event.delta
         yield { type: 'text-delta', delta: event.delta }
       } else if (event.type === 'reasoning') {
+        reasoning += event.delta
         yield { type: 'reasoning-delta', delta: event.delta }
       } else if (event.type === 'tool-call') {
         toolCalls.push({ id: event.id, name: event.name, args: event.args })
@@ -66,6 +68,9 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       }
     }
 
+    // The thought comes first because that is how it arrived; it stays in the
+    // transcript for whoever reads it, and no wire sends it back.
+    if (reasoning) parts.push({ type: 'reasoning', text: reasoning })
     if (text) parts.push({ type: 'text', text })
     for (const call of toolCalls) {
       parts.push({ type: 'tool-call', id: call.id, name: call.name, args: call.args })

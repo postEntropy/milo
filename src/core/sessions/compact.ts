@@ -17,6 +17,9 @@ export function estimateTokens(messages: Message[]): number {
         case 'tool-call':
           chars += part.name.length + safeJson(part.args).length
           break
+        case 'reasoning':
+          // Kept in the transcript but never sent, so it costs no input tokens.
+          break
       }
     }
   }

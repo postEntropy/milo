@@ -5,6 +5,17 @@ export interface TextPart {
   text: string
 }
 
+/**
+ * What the model thought before answering. It is kept with the transcript so a
+ * session read back later still shows how the answer was reached — and it is
+ * deliberately never sent to a provider: it is not part of the conversation,
+ * and replaying it would pay for the same tokens twice.
+ */
+export interface ReasoningPart {
+  type: 'reasoning'
+  text: string
+}
+
 export interface ToolCallPart {
   type: 'tool-call'
   id: string
@@ -20,7 +31,7 @@ export interface ToolResultPart {
   isError?: boolean
 }
 
-export type ContentPart = TextPart | ToolCallPart | ToolResultPart
+export type ContentPart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart
 
 export interface Message {
   role: Role
