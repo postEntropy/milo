@@ -456,6 +456,17 @@ map meant a read-modify-write of the whole thing on every turn, which drifts the
 each scope moves to its own file the next time it is bound.) Ids are claimed by creating the record
 file exclusively, so two processes cannot hand out the same nickname.
 
+Two turns never run on one session at once. A turn takes a **lease** for as long as it runs — a lock
+beside the record for another process, a mutex in memory for another conversation in this one — so
+two terminals, which both bind `cli:main`, take turns instead of folding into each other. A turn that
+has to wait says so rather than looking like a model that is thinking, and Ctrl+C gives the wait up.
+The record also carries a **revision**: a save names the revision it was built from and is refused if
+the file has moved past it, so a writer that stepped outside a lease is told about it instead of
+quietly erasing what landed in between. A session is reread under its lease before a turn starts, so
+turns another Milo wrote in the meantime become the base of the transcript — and the surface says
+what changed: the turns it added, and any it summarized away, since the answer then draws on more
+(or less) than the screen has shown.
+
 | Command | What it does |
 | --- | --- |
 | `/new [title]` | Starts a fresh session and binds this conversation to it. |

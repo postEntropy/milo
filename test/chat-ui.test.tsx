@@ -130,6 +130,38 @@ describe('ChatScreen', () => {
     expect(lastFrame()).not.toContain('thinking…')
   })
 
+  it('names the wait for another Milo, and what that Milo wrote', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'waiting' }
+      await gate
+      yield { type: 'waited', ms: 1200 }
+      yield { type: 'rebased', added: 2, compacted: false }
+      yield { type: 'text-delta', delta: 'carrying on' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const { lastFrame, stdin } = renderChat(makeRuntime(stream))
+    await submit(stdin, 'hello')
+    // The wait is named while it lasts, not after: the quiet has to be
+    // attributed to the other Milo rather than to the model.
+    expect(lastFrame()).toContain('waiting for another Milo')
+
+    release()
+    await tick(80)
+
+    const frame = lastFrame() ?? ''
+    // Then once, in the transcript, with what it actually cost.
+    expect(frame).toContain('waited 1.2s for another Milo')
+    // And turns taken elsewhere are on screen, since the answer draws on them.
+    expect(frame).toContain('2 new messages')
+    expect(frame).toContain('carrying on')
+  })
+
   it('renders a tool line and the final answer', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'reasoning-delta', delta: 'pondering the request' }

@@ -27,12 +27,14 @@
     "ink": "^7.1.1",
     "ink-spinner": "^5.0.0",
     "ink-text-input": "^6.0.0",
+    "proper-lockfile": "^4.1.2",
     "react": "^19.3.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14",
     "@types/node": "^22.20.4",
+    "@types/proper-lockfile": "^4.1.4",
     "@types/react": "^19.3.0",
     "@vitest/coverage-v8": "^5.0.1",
     "ink-testing-library": "^4.0.0",

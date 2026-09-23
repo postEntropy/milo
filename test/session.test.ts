@@ -14,6 +14,7 @@ import type {
 import type { HistoryEntry } from '../src/core/history.js'
 import { Session, type SessionOptions } from '../src/core/session.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
+import { MemoryRecapStore } from '../src/core/sessions/recap.js'
 import { FileSessionStore } from '../src/core/sessions/file-store.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
 
@@ -428,6 +429,227 @@ describe('Session', () => {
       tool: { name: 'read_file', args: { path: 'package.json' }, isError: false },
     })
     expect(entries[1]?.tool?.result).toContain('milo')
+  })
+})
+
+describe('a session another writer has moved on from', () => {
+  it('adopts what was written elsewhere and says the transcript is wider than the screen', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+    const store = new FileSessionStore({ dir: path.join(dir, 'sessions') })
+    const record = await store.create()
+    const provider = new CapturingProvider()
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new FileMemory({ dir }),
+      store,
+      scope: { gateway: 'cli', conversationId: 'elsewhere' },
+      record,
+      cwd: process.cwd(),
+      provider,
+      maxSteps: 4,
+    })
+
+    // The other writer appends to the same session while this one holds its copy.
+    const other = (await store.load(record.id))!
+    other.messages.push({ role: 'user', content: [{ type: 'text', text: 'from elsewhere' }] })
+    await store.save(other, other.version)
+
+    const events: AgentEvent[] = []
+    for await (const event of session.send('hello there')) events.push(event)
+
+    // Not refused: the stored transcript was taken as the base, and the surface
+    // is told it answers from more than it has shown.
+    expect(events).toContainEqual({ type: 'rebased', added: 1, compacted: false })
+    expect(events.some((event) => event.type === 'error')).toBe(false)
+    // And the turn it wrote builds on top of that, rather than replacing it.
+    expect((await store.load(record.id))!.messages).toEqual([
+      { role: 'user', content: [{ type: 'text', text: 'from elsewhere' }] },
+      { role: 'user', content: [{ type: 'text', text: 'hello there' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'SECRET_ASSISTANT_REPLY' }] },
+    ])
+  })
+})
+
+describe('recapping a session another writer moved on', () => {
+  it('leaves a recap that describes a newer transcript than this copy has', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+    const store = new MemorySessionStore({ now: () => 100 })
+    const record = await store.create()
+    record.messages.push({ role: 'user', content: [{ type: 'text', text: 'earlier' }] })
+
+    const recaps = new MemoryRecapStore()
+    // Written by somebody that had already seen more of the transcript.
+    await recaps.write({ session: record.id, text: 'newer', sourceUpdatedAt: 200, at: 200 })
+
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new FileMemory({ dir }),
+      store,
+      recaps,
+      scope: { gateway: 'cli', conversationId: 'recap' },
+      record,
+      cwd: process.cwd(),
+      provider: new CapturingProvider(),
+      maxSteps: 4,
+    })
+
+    await session.recap()
+
+    // Not replaced by one describing less, and not paid for: the model call is
+    // skipped rather than made and thrown away.
+    expect((await recaps.read(record.id))?.text).toBe('newer')
+  })
+})
+
+describe('a session another writer summarized away', () => {
+  it('reports the compaction, which adds no message and still takes turns off the screen', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+    const store = new FileSessionStore({ dir: path.join(dir, 'sessions') })
+    const record = await store.create()
+    const provider = new CapturingProvider()
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new FileMemory({ dir }),
+      store,
+      scope: { gateway: 'cli', conversationId: 'summarized' },
+      record,
+      cwd: process.cwd(),
+      provider,
+      maxSteps: 4,
+    })
+
+    // The other writer summarized the older turns away.
+    const other = (await store.load(record.id))!
+    other.summary = 'the earlier turns, in short'
+    other.droppedTokens = 120
+    await store.save(other, other.version)
+
+    const events: AgentEvent[] = []
+    for await (const event of session.send('hello there')) events.push(event)
+
+    // Nothing was added, and the context is still not what the screen shows.
+    expect(events).toContainEqual({ type: 'rebased', added: 0, compacted: true })
+  })
+})
+
+describe('a session deleted while it was open', () => {
+  it('says it is gone instead of running a turn it could never save', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+    const store = new FileSessionStore({ dir: path.join(dir, 'sessions') })
+    const record = await store.create()
+    const provider = new CapturingProvider()
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new FileMemory({ dir }),
+      store,
+      scope: { gateway: 'cli', conversationId: 'gone' },
+      record,
+      cwd: process.cwd(),
+      provider,
+      maxSteps: 4,
+    })
+
+    await store.remove(record.id)
+
+    const events: AgentEvent[] = []
+    for await (const event of session.send('hello there')) events.push(event)
+
+    // Not a version conflict, which would read as somebody merely having changed
+    // it, and not a turn whose transcript can never be written back.
+    expect(events).toEqual([{ type: 'error', message: `session ${record.id} no longer exists` }])
+    expect(await store.load(record.id)).toBeNull()
+  })
+})
+
+describe('one turn per session', () => {
+  function deferred() {
+    let resolve!: () => void
+    const promise = new Promise<void>((done) => {
+      resolve = done
+    })
+    return { promise, resolve }
+  }
+
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 5))
+
+  it('makes a second turn wait, then run on top of the first', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+    const store = new FileSessionStore({ dir: path.join(dir, 'sessions') })
+    const record = await store.create()
+    const gate = deferred()
+    let started = 0
+    const provider: Provider = {
+      id: 'gated',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        started += 1
+        if (started === 1) {
+          yield { type: 'text', delta: 'the first answer' }
+          // Held open, so the second turn has to wait for this one to end.
+          await gate.promise
+          yield { type: 'done', finishReason: 'stop' }
+          return
+        }
+        yield { type: 'text', delta: 'the second answer' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+
+    const build = async (conversationId: string) =>
+      new Session({
+        model: 'test-model',
+        system: 'BASE',
+        registry: createToolRegistry(),
+        memory: new FileMemory({ dir }),
+        store,
+        scope: { gateway: 'cli', conversationId },
+        // Two turns over one store: a second terminal, or a daemon and a CLI.
+        record: (await store.load(record.id))!,
+        cwd: process.cwd(),
+        provider,
+        maxSteps: 4,
+      })
+
+    // Both open the session before either writes, as two terminals would.
+    const first = await build('first')
+    const second = await build('second')
+    const events: AgentEvent[] = []
+    const firstTurn = (async () => {
+      for await (const event of first.send('one')) events.push(event)
+    })()
+    while (started < 1) await settle()
+
+    const secondEvents: AgentEvent[] = []
+    const secondTurn = (async () => {
+      for await (const event of second.send('two')) secondEvents.push(event)
+    })()
+    await settle()
+
+    // The second turn said it was waiting, and never reached the model.
+    expect(secondEvents).toContainEqual({ type: 'waiting' })
+    expect(started).toBe(1)
+
+    gate.resolve()
+    await firstTurn
+    await secondTurn
+
+    expect(started).toBe(2)
+    // The second turn picked up what the first wrote before answering.
+    expect(secondEvents).toContainEqual({ type: 'rebased', added: 2, compacted: false })
+    const onDisk = (await store.load(record.id))!
+    expect(onDisk.messages.map((message) => message.content[0])).toEqual([
+      { type: 'text', text: 'one' },
+      { type: 'text', text: 'the first answer' },
+      { type: 'text', text: 'two' },
+      { type: 'text', text: 'the second answer' },
+    ])
   })
 })
 

@@ -26,7 +26,7 @@ import { buildLines, padToBottom, visibleWindow, type Item, type Line } from '..
 import { useElapsed } from '../use-elapsed.js'
 import { useTerminalSize } from '../use-terminal-size.js'
 
-type Phase = 'idle' | 'thinking' | 'writing' | 'tool' | 'asking'
+type Phase = 'idle' | 'thinking' | 'writing' | 'tool' | 'asking' | 'waiting'
 
 const HEADER_ROWS = 3
 /** The bordered composer: its top border, the line being typed, its bottom border. */
@@ -513,6 +513,17 @@ export function ChatScreen({
           onCompacted: (ms) => {
             compactedMs = ms
           },
+          // The status line carries the wait while it lasts; the transcript gets
+          // it once it is over, with what it actually cost.
+          onWaiting: () => setPhase('waiting'),
+          onWaited: (ms) => {
+            waitingSince = Date.now()
+            setPhase('thinking')
+            push({ kind: 'info', text: `⏳ waited ${formatSeconds(ms / 1000)} for another Milo.` })
+          },
+          onRebased: (added, compacted) => {
+            push({ kind: 'info', text: `↺ another Milo has used this session: ${rebased(added, compacted)}.` })
+          },
           onDone: (finishReason) => {
             // A capped answer otherwise looks like a complete one.
             if (finishReason === 'length') {
@@ -703,11 +714,13 @@ export function ChatScreen({
   const statusLabel =
     phase === 'asking'
       ? 'waiting for confirmation'
-      : phase === 'tool'
-        ? `${toolName}…`
-        : phase === 'writing'
-          ? 'writing…'
-          : 'thinking…'
+      : phase === 'waiting'
+        ? 'waiting for another Milo on this session…'
+        : phase === 'tool'
+          ? `${toolName}…`
+          : phase === 'writing'
+            ? 'writing…'
+            : 'thinking…'
 
   // The hint and the counters share one line, and a frame of fixed height cannot
   // afford a wrap: the overflow pushes everything below it down, and Ink redraws
@@ -808,6 +821,12 @@ interface EventHandlers {
   onUsage: (totalTokens: number) => void
   /** How long the compaction's own model call took, in ms. */
   onCompacted: (ms: number) => void
+  /** Another Milo holds this session; the turn has not started yet. */
+  onWaiting: () => void
+  /** The wait is over, and how long it was. The turn starts here. */
+  onWaited: (ms: number) => void
+  /** Turns written elsewhere were loaded into the transcript being answered from. */
+  onRebased: (added: number, compacted: boolean) => void
   onDone: (finishReason: string) => void
   onAborted: () => void
   onError: (message: string) => void
@@ -833,6 +852,15 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
     case 'compacted':
       handlers.onCompacted(event.ms)
       break
+    case 'waiting':
+      handlers.onWaiting()
+      break
+    case 'waited':
+      handlers.onWaited(event.ms)
+      break
+    case 'rebased':
+      handlers.onRebased(event.added, event.compacted)
+      break
     case 'done':
       handlers.onDone(event.finishReason)
       break
@@ -845,6 +873,14 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
     default:
       break
   }
+}
+
+/** What another Milo left in this session, as one clause. */
+function rebased(added: number, compacted: boolean): string {
+  const says: string[] = []
+  if (added > 0) says.push(`${added} new message${added === 1 ? '' : 's'}`)
+  if (compacted) says.push('the earlier turns are summarized')
+  return says.join(' and ')
 }
 
 function formatTokens(value: number): string {

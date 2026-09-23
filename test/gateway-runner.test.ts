@@ -47,6 +47,44 @@ describe('runTurn', () => {
     expect(harness.edits.at(-1)).toBe('Hello world')
   })
 
+  it('says when it waited for another Milo, and what that Milo wrote', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'waiting' }
+      yield { type: 'waited', ms: 1200 }
+      yield { type: 'rebased', added: 1, compacted: false }
+      yield { type: 'text-delta', delta: 'answer' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+    // Both on screen: the wait, so the quiet is attributed to the other Milo,
+    // and the turns it wrote, since the answer draws on them. The end of the
+    // wait adds nothing — a chat surface has no status line, and the line it
+    // already has says where the time went.
+    expect(harness.edits.at(-1)).toBe(
+      '⏳ another Milo is using this session — waiting for it to finish\n\n' +
+        '↺ another Milo has used this session: 1 new message\n\n' +
+        'answer',
+    )
+  })
+
+  it('says when the turns it cannot see were summarized away, not only added to', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'rebased', added: 0, compacted: true }
+      yield { type: 'text-delta', delta: 'answer' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+    // Nothing was added and there is still something to say: turns the screen
+    // showed are gone from the context, and that is not something to hide.
+    expect(harness.edits.at(-1)).toBe(
+      '↺ another Milo has used this session: the earlier turns are summarized\n\nanswer',
+    )
+  })
+
   it('appends tool activity as lines', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'tool-start', id: '1', name: 'read_file', args: {} }

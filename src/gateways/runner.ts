@@ -157,6 +157,15 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
             await appendLine(`❌ ${toolLabel(event.name, style, true)} failed`, style)
           }
           break
+        case 'waiting':
+          await appendLine('⏳ another Milo is using this session — waiting for it to finish', 'prose')
+          break
+        // Turns taken elsewhere are in the model's context but not on this
+        // screen — and turns summarized there are in neither. Saying which is
+        // what keeps the answer from reading as if it knew what nobody here saw.
+        case 'rebased':
+          await appendLine(`↺ another Milo has used this session: ${rebased(event)}`, 'prose')
+          break
         case 'done':
           // A capped answer otherwise looks like a complete one.
           if (event.finishReason === 'length') {
@@ -187,6 +196,14 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
     output += `${output === '' ? '' : '\n\n'}⚠ no answer came back: this model sends everything it says as reasoning, and /thinking off hides it.`
   }
   await surface.edit(conversationId, messageId, clamp(output.trim() || '(no response)', maxLength))
+}
+
+/** What another Milo left in this session, as one clause. */
+function rebased(event: { added: number; compacted: boolean }): string {
+  const says: string[] = []
+  if (event.added > 0) says.push(`${event.added} new message${event.added === 1 ? '' : 's'}`)
+  if (event.compacted) says.push('the earlier turns are summarized')
+  return says.join(' and ')
 }
 
 /** The first non-empty line of a thought, flattened. */

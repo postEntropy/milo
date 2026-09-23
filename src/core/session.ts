@@ -18,6 +18,7 @@ import {
   summarize,
   withRecaps,
   type RecapStore,
+  type SessionLease,
   type SessionRecord,
   type SessionStats,
   type SessionStore,
@@ -97,6 +98,8 @@ export class Session {
   private readonly recaps: RecapStore
   private readonly options: SessionOptions
   private summary: string | undefined
+  /** The revision this session's copy of the transcript was built from. */
+  private baseVersion: number
   /** Size of the last system prompt sent, which the transcript count omits. */
   private lastSystemTokens: number | undefined
   /** The ceiling the transcript is measured against, once the window is known. */
@@ -113,6 +116,7 @@ export class Session {
     this.scope = options.scope
     this.messages = options.record.messages
     this.summary = options.record.summary
+    this.baseVersion = options.record.version
     // Asked for now, while the user is still typing, so the first turn does not
     // wait on a lookup that is only about how big the model is.
     this.resolving = this.computeCeiling()
@@ -145,6 +149,56 @@ export class Session {
   }
 
   async *send(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
+    const signal = opts?.signal
+    let lease: SessionLease
+    try {
+      lease = yield* this.acquireLease(signal)
+    } catch (error) {
+      // A stop is not a failure here either: the wait for the session is as
+      // interruptible as the turn itself.
+      if (isAbort(error, signal)) yield { type: 'aborted' }
+      else yield { type: 'error', message: errorMessage(error) }
+      return
+    }
+    const latest = lease.latest
+    try {
+      // The record was deleted while this copy was open — by a `/rm` elsewhere,
+      // or by hand. Saying so beats running a turn whose transcript can never be
+      // written back, which would come out as a version conflict and read as if
+      // somebody else had merely changed the session.
+      if (!latest) {
+        yield { type: 'error', message: `session ${this.id} no longer exists` }
+        return
+      }
+      const rebound = this.adoptLatest(latest)
+      if (rebound) yield { type: 'rebased', ...rebound }
+      yield* this.turn(input, opts)
+    } finally {
+      await lease.release()
+    }
+  }
+
+  /**
+   * The session, exclusively, for as long as the turn runs. Two terminals both
+   * bind `cli:main`, and a daemon may hold a session a terminal resumes, so this
+   * is what keeps one turn from being folded into the middle of another.
+   */
+  private async *acquireLease(signal?: AbortSignal): AsyncGenerator<AgentEvent, SessionLease> {
+    const free = await this.store.tryAcquire(this.id)
+    if (free) return free
+    // Another Milo is mid-turn on this conversation. Said before waiting: a
+    // silent wait is indistinguishable from a model that is thinking.
+    yield { type: 'waiting' }
+    const began = Date.now()
+    const lease = await this.store.acquire(this.id, { signal })
+    // And said to be over as soon as it is. The turn starts at this line, not at
+    // the first token: everything after is the model, and a surface timing the
+    // turn must not charge the model for the queue it waited in.
+    yield { type: 'waited', ms: Date.now() - began }
+    return lease
+  }
+
+  private async *turn(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
     const {
       provider,
       model,
@@ -202,12 +256,15 @@ export class Session {
 
     this.messages.push({ role: 'user', content: [{ type: 'text', text: input }] })
     note({ kind: 'user', text: input })
-    // Persist the user's message now, so a crash mid-answer does not lose it.
-    await this.persist()
 
     let errored = false
 
     try {
+      // Persist the user's message now, so a crash mid-answer does not lose it.
+      // Inside the try because a store that refuses the write — another process
+      // having moved the session on — has to be reported, not thrown past the
+      // caller's event loop.
+      await this.persist()
       for await (const event of runAgent({
         provider,
         model,
@@ -270,8 +327,17 @@ export class Session {
         yield { type: 'error', message: errorMessage(error) }
       }
     } finally {
-      // Runs even when the consumer aborts, so the partial turn is on disk.
-      await this.persist()
+      try {
+        // Runs even when the consumer aborts, so the partial turn is on disk.
+        await this.persist()
+      } catch (error) {
+        // Another process moved this session on and the transcript here cannot
+        // be written without erasing its turns. The turn ends saying so rather
+        // than being passed off as saved; an error already reported above is not
+        // repeated.
+        if (!errored) yield { type: 'error', message: errorMessage(error) }
+        errored = true
+      }
       // A turn that was stopped still said something worth finding later.
       if (answer || reasoning) note({ kind: 'assistant', text: answer, reasoning })
       this.options.history?.append(entries)
@@ -286,13 +352,48 @@ export class Session {
     }
   }
 
+  /**
+   * Takes the record read under the lease as the transcript to build on, and
+   * reports how the screen's copy differs: messages it has not shown, and
+   * whether the turns that are gone were summarized away rather than only added
+   * to. Null when nothing visible changed — the ordinary case of one process on
+   * one session, and the reason a turn does not work to reload against itself.
+   */
+  private adoptLatest(latest: SessionRecord): { added: number; compacted: boolean } | null {
+    if (latest.version === this.baseVersion) return null
+    const before = this.messages.length
+    // Compared before `summary` is replaced: a summary that was not there, or
+    // reads differently, is the other Milo having summarized the older turns.
+    const compacted = latest.summary !== this.summary
+    // In place, not reassigned: this is the same array a running turn reads from
+    // and the record writes back.
+    this.messages.splice(0, this.messages.length, ...latest.messages)
+    this.summary = latest.summary
+    this.record.title = latest.title ?? this.record.title
+    this.record.droppedTokens = latest.droppedTokens
+    this.record.updatedAt = Math.max(this.record.updatedAt, latest.updatedAt)
+    this.baseVersion = latest.version
+    this.record.version = latest.version
+    const added = Math.max(0, this.messages.length - before)
+    return added > 0 || compacted ? { added, compacted } : null
+  }
+
   /** Forgets the transcript (and any summary) but keeps the session's identity. */
   async clear(): Promise<void> {
-    this.messages.length = 0
-    this.summary = undefined
-    this.record.droppedTokens = undefined
-    await this.recaps.remove(this.id) // the recap describes what just went away
-    await this.persist()
+    // Under the lease for the same reason a turn is: clearing from a stale copy
+    // would either be refused or would drop turns written since. Adopting first
+    // is what makes this the session as it actually stands.
+    const lease = await this.store.acquire(this.id)
+    try {
+      if (lease.latest) this.adoptLatest(lease.latest)
+      this.messages.length = 0
+      this.summary = undefined
+      this.record.droppedTokens = undefined
+      await this.recaps.remove(this.id) // the recap describes what just went away
+      await this.persist()
+    } finally {
+      await lease.release()
+    }
   }
 
   /**
@@ -306,7 +407,12 @@ export class Session {
     if (this.messages.length === 0) return
     const seenAt = this.record.updatedAt
     const existing = await this.recaps.read(this.id)
-    if (existing?.sourceUpdatedAt === seenAt) return
+    // Current, or written from a transcript newer than this copy knows about.
+    // Either way there is nothing to add — and two processes writing one session
+    // must not let the slower one, describing an older transcript, replace the
+    // newer recap just because it finished last. Checked before the model call,
+    // so a recap that would be discarded is never paid for.
+    if (existing && existing.sourceUpdatedAt >= seenAt) return
 
     const text = await digest({
       provider: this.options.provider,
@@ -319,7 +425,12 @@ export class Session {
     await this.recaps.write({ session: this.id, text, sourceUpdatedAt: seenAt, at: Date.now() })
   }
 
-  /** Rewrites the timestamp and writes the record back to the store. */
+  /**
+   * Rewrites the timestamp and writes the record back to the store, naming the
+   * revision it is based on. A store that has moved past it rejects the write
+   * with `SessionConflictError` — the transcript here is stale and writing it
+   * would erase the turns the other writer added.
+   */
   async persist(): Promise<void> {
     this.record.messages = this.messages
     this.record.summary = this.summary
@@ -327,7 +438,9 @@ export class Session {
     // from, and two writes inside the same millisecond would otherwise look
     // like one — leaving a recap that misses a turn forever marked current.
     this.record.updatedAt = Math.max(Date.now(), this.record.updatedAt + 1)
-    await this.store.save(this.record)
+    this.record.version = this.baseVersion + 1
+    await this.store.save(this.record, this.baseVersion)
+    this.baseVersion = this.record.version
   }
 
   stats(): SessionStats {

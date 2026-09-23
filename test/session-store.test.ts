@@ -1,9 +1,18 @@
+import { spawn } from 'node:child_process'
 import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import lockfile from 'proper-lockfile'
 import { FileSessionStore } from '../src/core/sessions/file-store.js'
-import { isValidSessionId, type SessionRecord } from '../src/core/sessions/types.js'
+import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
+import {
+  INITIAL_SESSION_VERSION,
+  isValidSessionId,
+  SessionConflictError,
+  type SessionRecord,
+} from '../src/core/sessions/types.js'
 
 const tempDir = () => mkdtempSync(path.join(tmpdir(), 'milo-store-'))
 
@@ -13,6 +22,7 @@ function record(id: string, updatedAt = Date.now()): SessionRecord {
     createdAt: updatedAt,
     updatedAt,
     messages: [{ role: 'user', content: [{ type: 'text', text: `hello from ${id}` }] }],
+    version: INITIAL_SESSION_VERSION,
   }
 }
 
@@ -26,7 +36,7 @@ describe('FileSessionStore', () => {
 
     created.messages.push({ role: 'user', content: [{ type: 'text', text: 'hello there' }] })
     created.messages.push({ role: 'assistant', content: [{ type: 'text', text: 'hi' }] })
-    await store.save(created)
+    await store.save(created, created.version)
 
     const loaded = await store.load(created.id)
     expect(loaded?.messages).toHaveLength(2)
@@ -46,8 +56,8 @@ describe('FileSessionStore', () => {
 
   it('lists the most recently updated session first', async () => {
     const store = new FileSessionStore({ dir: tempDir() })
-    await store.save(record('calm-otter-1', 100))
-    await store.save(record('brave-wolf-2', 200))
+    await store.save(record('calm-otter-1', 100), INITIAL_SESSION_VERSION)
+    await store.save(record('brave-wolf-2', 200), INITIAL_SESSION_VERSION)
 
     expect((await store.list()).map((entry) => entry.id)).toEqual(['brave-wolf-2', 'calm-otter-1'])
   })
@@ -55,7 +65,7 @@ describe('FileSessionStore', () => {
   it('writes atomically, leaving no temp files behind', async () => {
     const dir = tempDir()
     const store = new FileSessionStore({ dir })
-    await store.save(record('calm-otter-1'))
+    await store.save(record('calm-otter-1'), INITIAL_SESSION_VERSION)
     await store.setBinding('cli:main', 'calm-otter-1')
 
     const files = readdirSync(dir)
@@ -114,7 +124,9 @@ describe('FileSessionStore', () => {
 
     expect(await store.load('../../etc/passwd')).toBeNull()
     expect(await store.load('..%2fetc')).toBeNull()
-    await expect(store.save({ ...record('ok'), id: '../evil' })).rejects.toThrow(/Invalid session id/)
+    await expect(store.save({ ...record('ok'), id: '../evil' }, INITIAL_SESSION_VERSION)).rejects.toThrow(
+      /Invalid session id/,
+    )
     expect(await store.remove('../../etc/passwd')).toBeUndefined()
   })
 
@@ -128,9 +140,270 @@ describe('FileSessionStore', () => {
   it('forgets a session on remove', async () => {
     const store = new FileSessionStore({ dir: tempDir() })
     const created = await store.create()
-    await store.save(created)
+    await store.save(created, created.version)
     await store.remove(created.id)
     expect(await store.load(created.id)).toBeNull()
     expect(await store.list()).toEqual([])
   })
+})
+
+// Two store instances over one directory stand in for two processes.
+describe('concurrent writers', () => {
+  function message(text: string) {
+    return { role: 'user' as const, content: [{ type: 'text' as const, text }] }
+  }
+
+  it('refuses a save built from a revision another writer has moved past', async () => {
+    const dir = tempDir()
+    const first = new FileSessionStore({ dir })
+    const second = new FileSessionStore({ dir })
+    const created = await first.create()
+
+    // Both processes open the same session and hold their own copy.
+    const one = (await first.load(created.id))!
+    const two = (await second.load(created.id))!
+
+    one.messages.push(message('from the first'))
+    await first.save(one, created.version)
+
+    two.messages.push(message('from the second'))
+    await expect(second.save(two, created.version)).rejects.toBeInstanceOf(SessionConflictError)
+
+    // The stale copy did not erase the turn that landed in between.
+    const onDisk = (await first.load(created.id))!
+    expect(onDisk.messages).toEqual([message('from the first')])
+    expect(onDisk.version).toBe(created.version + 1)
+  })
+
+  it('accepts the stale writer once it rereads the record', async () => {
+    const dir = tempDir()
+    const first = new FileSessionStore({ dir })
+    const second = new FileSessionStore({ dir })
+    const created = await first.create()
+
+    const one = (await first.load(created.id))!
+    one.messages.push(message('from the first'))
+    await first.save(one, created.version)
+
+    // Retrying against the revision actually on disk is the whole recovery path.
+    const two = (await second.load(created.id))!
+    two.messages.push(message('from the second'))
+    await second.save(two, two.version)
+
+    expect((await first.load(created.id))!.messages).toEqual([
+      message('from the first'),
+      message('from the second'),
+    ])
+  })
+
+  it('waits for a lock another process is holding', async () => {
+    const dir = tempDir()
+    const store = new FileSessionStore({ dir })
+    const created = await store.create()
+    const file = path.join(dir, `${created.id}.json`)
+
+    // A foreign lock, as another process mid-save would hold it.
+    const release = await lockfile.lock(file, { realpath: false, stale: 10_000 })
+    let saved = false
+    const saving = store.save({ ...created, messages: [message('later')] }, created.version).then(() => {
+      saved = true
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(saved).toBe(false)
+
+    await release()
+    await saving
+    expect(saved).toBe(true)
+  })
+
+  it('does not let a stale save resurrect a session another writer removed', async () => {
+    const dir = tempDir()
+    const first = new FileSessionStore({ dir })
+    const second = new FileSessionStore({ dir })
+    const created = await first.create()
+    await first.save({ ...created, messages: [message('one')] }, created.version)
+
+    const stale = (await second.load(created.id))!
+    await first.remove(created.id)
+
+    // The revision is gone with the file, so the save built from it is refused
+    // rather than quietly bringing the session back.
+    await expect(second.save(stale, stale.version)).rejects.toBeInstanceOf(SessionConflictError)
+    expect(await second.load(created.id)).toBeNull()
+  })
+
+  it('leaves no lock directory behind', async () => {
+    const dir = tempDir()
+    const store = new FileSessionStore({ dir })
+    const created = await store.create()
+    const lease = (await store.tryAcquire(created.id))!
+    await store.save(created, created.version)
+    await lease.release()
+
+    expect(readdirSync(dir).some((entry) => entry.includes('.lock'))).toBe(false)
+  })
+
+  it('reads a record written before revisions and saves it', async () => {
+    const dir = tempDir()
+    writeFileSync(
+      path.join(dir, 'calm-otter-1.json'),
+      JSON.stringify({
+        id: 'calm-otter-1',
+        createdAt: 1,
+        updatedAt: 1,
+        messages: [message('from before')],
+      }),
+    )
+    const store = new FileSessionStore({ dir })
+
+    const loaded = (await store.load('calm-otter-1'))!
+    expect(loaded.version).toBe(INITIAL_SESSION_VERSION)
+
+    loaded.messages.push(message('since'))
+    await store.save(loaded, loaded.version)
+    expect((await store.load('calm-otter-1'))!.version).toBe(INITIAL_SESSION_VERSION + 1)
+  })
+})
+
+// The lease serializes whole turns. Two store instances over one directory
+// stand in for two processes reaching the same session.
+describe('session leases', () => {
+  const settle = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  it('hands a session to one holder at a time, and frees it on release', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    const created = await store.create()
+
+    const lease = (await store.tryAcquire(created.id))!
+    expect(lease.latest?.id).toBe(created.id)
+    expect(await store.tryAcquire(created.id)).toBeNull()
+
+    await lease.release()
+    const next = await store.tryAcquire(created.id)
+    expect(next).not.toBeNull()
+    await next!.release()
+  })
+
+  it('holds the session against another store over the same directory', async () => {
+    const dir = tempDir()
+    const first = new FileSessionStore({ dir })
+    const second = new FileSessionStore({ dir })
+    const created = await first.create()
+
+    const lease = (await first.tryAcquire(created.id))!
+    // A second process is a second store, so nothing in-process is holding it.
+    expect(await second.tryAcquire(created.id)).toBeNull()
+
+    await lease.release()
+    const next = await second.tryAcquire(created.id)
+    expect(next).not.toBeNull()
+    await next!.release()
+  })
+
+  it('gives the session to a waiter once the holder releases it', async () => {
+    const dir = tempDir()
+    const first = new FileSessionStore({ dir })
+    const second = new FileSessionStore({ dir })
+    const created = await first.create()
+    const lease = (await first.tryAcquire(created.id))!
+
+    let taken = false
+    const waiting = second.acquire(created.id).then(async (next) => {
+      taken = true
+      await next.release()
+    })
+    await settle()
+    expect(taken).toBe(false)
+
+    await lease.release()
+    await waiting
+    expect(taken).toBe(true)
+  })
+
+  it('gives up the wait when the turn is stopped, without keeping the lock', async () => {
+    const dir = tempDir()
+    const first = new FileSessionStore({ dir })
+    const second = new FileSessionStore({ dir })
+    const created = await first.create()
+    const lease = (await first.tryAcquire(created.id))!
+
+    const controller = new AbortController()
+    const waiting = second.acquire(created.id, { signal: controller.signal })
+    controller.abort()
+    await expect(waiting).rejects.toThrow(/aborted/)
+
+    await lease.release()
+    await settle()
+    // The abandoned wait let the lock go: the session is free again.
+    const next = await second.tryAcquire(created.id)
+    expect(next).not.toBeNull()
+    await next!.release()
+  })
+
+  it('holds a session in memory too, where there is no file to lock', async () => {
+    const store = new MemorySessionStore()
+    const created = await store.create()
+
+    const lease = (await store.tryAcquire(created.id))!
+    expect(await store.tryAcquire(created.id)).toBeNull()
+    await lease.release()
+    expect(await store.tryAcquire(created.id)).not.toBeNull()
+  })
+
+  it('waits for a turn to end rather than deleting the record out from under it', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    const created = await store.create()
+    const lease = (await store.tryAcquire(created.id))!
+
+    let removed = false
+    const removal = store.remove(created.id).then(() => {
+      removed = true
+    })
+    await settle()
+    expect(removed).toBe(false)
+
+    await lease.release()
+    await removal
+    expect(await store.load(created.id)).toBeNull()
+  })
+
+  // The guarantee is about two processes, so this one runs two of them. The
+  // tests above hold two store instances instead, which is the same lock only
+  // because the lock is on the filesystem rather than in the process.
+  it(
+    'serializes two real processes on one session',
+    async () => {
+      const dir = tempDir()
+      const store = new FileSessionStore({ dir })
+      const created = await store.create()
+      const child = fileURLToPath(new URL('./fixtures/lease-child.ts', import.meta.url))
+
+      const run = (label: string) =>
+        new Promise<void>((resolve, reject) => {
+          const proc = spawn(process.execPath, ['--import', 'tsx', child, dir, created.id, label], {
+            stdio: ['ignore', 'ignore', 'pipe'],
+          })
+          let stderr = ''
+          proc.stderr.on('data', (chunk: Buffer) => {
+            stderr += chunk.toString()
+          })
+          proc.on('error', reject)
+          proc.on('exit', (code) =>
+            code === 0 ? resolve() : reject(new Error(`${label} exited ${code}: ${stderr}`)),
+          )
+        })
+
+      await Promise.all([run('A'), run('B')])
+
+      // Both turns are there — nobody's write was lost — and the revision moved
+      // exactly twice, which is what says the two saves were serialized instead
+      // of one being refused as stale.
+      const final = (await store.load(created.id))!
+      const texts = final.messages.map((message) => (message.content[0] as { text: string }).text)
+      expect([...texts].sort()).toEqual(['A', 'B'])
+      expect(final.version).toBe(created.version + 2)
+    },
+    60_000,
+  )
 })

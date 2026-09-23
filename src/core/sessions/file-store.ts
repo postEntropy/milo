@@ -1,14 +1,19 @@
 import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import lockfile, { type LockOptions } from 'proper-lockfile'
 import { writeFileAtomic } from '../../util/fs.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import type { Message } from '../providers/types.js'
+import { KeyedMutex, waitForLease } from './lease.js'
 import { generateNickname } from './nickname.js'
 import {
+  INITIAL_SESSION_VERSION,
   isValidSessionId,
+  SessionConflictError,
   toSummary,
+  type SessionLease,
   type SessionRecord,
   type SessionStore,
   type SessionSummary,
@@ -17,6 +22,37 @@ import {
 const BINDINGS_DIR = 'bindings'
 const LEGACY_BINDINGS_FILE = 'bindings.json'
 const RECORD_SUFFIX = '.json'
+
+/**
+ * How long a lock is believed after the process holding it stops refreshing it.
+ * A save holds its lock for milliseconds; the holder that dies is the one whose
+ * lock this breaks. A turn holds its lease far longer, so it is refreshed while
+ * it runs (proper-lockfile touches the lock every `stale / 2`).
+ */
+const LOCK_STALE_MS = 10_000
+/** Save windows are short and rare: waiting is cheaper than failing the turn. */
+const WRITE_LOCK_RETRIES = { retries: 15, factor: 1.5, minTimeout: 20, maxTimeout: 250, randomize: true }
+/**
+ * A turn holds its lease for as long as it runs — minutes, if the model is slow
+ * or a permission prompt is waiting on a person — so this is not a short retry
+ * budget but a poll that keeps going until the holder is done or the waiter is
+ * stopped.
+ */
+const TURN_LOCK_RETRIES = { forever: true, factor: 1.2, minTimeout: 200, maxTimeout: 1000, randomize: true }
+/**
+ * A turn's lease lives beside the record, never on the record's own lock: a turn
+ * writes while it holds the lease, so the two must not be the same lock.
+ */
+const TURN_LOCK_SUFFIX = '.turn.lock'
+
+function turnTarget(file: string): string {
+  return `${file}${TURN_LOCK_SUFFIX}`
+}
+
+/** proper-lockfile's "somebody else holds this" error. */
+function isLocked(error: unknown): boolean {
+  return (error as NodeJS.ErrnoException)?.code === 'ELOCKED'
+}
 
 export interface FileSessionStoreOptions {
   dir: string
@@ -30,11 +66,21 @@ export interface FileSessionStoreOptions {
  * Writes are atomic (temp file + rename) and serialized through an in-process
  * queue, because the `milo serve` daemon can have several conversations writing
  * at once and `bindings.json` is shared by all of them.
+ *
+ * The queue only orders writes within this process. Two processes — `milo` and
+ * `milo serve`, or two terminals, which both bind `cli:main` — can each hold a
+ * copy of the same record, so a turn takes a `SessionLease` for as long as it
+ * runs and `save` is a compare-and-save: under an interprocess lock it rereads
+ * the stored revision and writes only if it is the one the caller built from.
+ * The lease is what stops two turns from interleaving; the version check is the
+ * net under it, for a writer that stepped outside a lease.
  */
 export class FileSessionStore implements SessionStore {
   private readonly dir: string
   private readonly now: () => number
   private queue: Promise<unknown> = Promise.resolve()
+  /** Who holds a session in this process, so a turn waits on its own mutex. */
+  private readonly leases = new KeyedMutex()
 
   constructor(options: FileSessionStoreOptions) {
     this.dir = options.dir
@@ -53,6 +99,7 @@ export class FileSessionStore implements SessionStore {
           createdAt: timestamp,
           updatedAt: timestamp,
           messages: [],
+          version: INITIAL_SESSION_VERSION,
         } satisfies SessionRecord
         // Creating the file exclusively is what makes the id ours: two `milo`
         // processes picking the same nickname is only a race if nothing claims
@@ -88,14 +135,128 @@ export class FileSessionStore implements SessionStore {
     }
   }
 
-  async save(record: SessionRecord): Promise<void> {
+  async save(record: SessionRecord, expectedVersion: number): Promise<void> {
     if (!isValidSessionId(record.id)) {
       throw new Error(`Invalid session id: ${record.id}`)
     }
     await this.run(async () => {
       mkdirSync(this.dir, { recursive: true })
-      await writeFileAtomic(this.fileFor(record.id), `${JSON.stringify(record, null, 2)}\n`)
+      const file = this.fileFor(record.id)
+      // The lock is what makes read-revision-then-rename one step across
+      // processes; without it both writers could read the same revision and
+      // both believe they were up to date.
+      await this.withLock(file, async () => {
+        const actual = this.storedVersion(file)
+        if (actual !== expectedVersion) {
+          throw new SessionConflictError(record.id, expectedVersion, actual)
+        }
+        await writeFileAtomic(
+          file,
+          `${JSON.stringify({ ...record, version: expectedVersion + 1 }, null, 2)}\n`,
+        )
+      })
     })
+  }
+
+  /** The revision on disk; a missing or unreadable file reads as the initial one. */
+  private storedVersion(file: string): number {
+    if (!existsSync(file)) return INITIAL_SESSION_VERSION
+    try {
+      return parseRecord(JSON.parse(readFileSync(file, 'utf8')))?.version ?? INITIAL_SESSION_VERSION
+    } catch (error) {
+      logWarn(`reading the version of ${file} failed: ${errorMessage(error)}`)
+      return INITIAL_SESSION_VERSION
+    }
+  }
+
+  /**
+   * Runs `work` while holding the write lock on `file`. A holder that dies
+   * without releasing is not a permanent block: `stale` is how long its lock is
+   * trusted.
+   */
+  private async withLock(file: string, work: () => Promise<void>): Promise<void> {
+    const release = await this.takeLock(file, WRITE_LOCK_RETRIES)
+    try {
+      await work()
+    } finally {
+      await release()
+    }
+  }
+
+  /**
+   * Takes the lock for `target`. `target` is the whole key: proper-lockfile
+   * keys its bookkeeping on the path it is given and keeps one entry per path,
+   * so a turn's lease must name something other than the record's own path — a
+   * turn writes while it holds the lease, and the two would trample each other's
+   * entry.
+   */
+  private async takeLock(
+    target: string,
+    retries: LockOptions['retries'],
+  ): Promise<() => Promise<void>> {
+    return lockfile.lock(target, {
+      // The path is used as given, so a lock can be held for a record the store
+      // is about to write as well as for one that already resolves.
+      realpath: false,
+      stale: LOCK_STALE_MS,
+      retries,
+      // Losing a lock is already handled by the version check; the default is to
+      // throw from a timer, which would take the process down.
+      onCompromised: (error) => logWarn(`lost the lock on ${target}: ${errorMessage(error)}`),
+    })
+  }
+
+  async tryAcquire(id: string): Promise<SessionLease | null> {
+    mkdirSync(this.dir, { recursive: true })
+    const file = this.fileFor(id)
+    // The in-process mutex first: two conversations in this process have no
+    // reason to go near the file lock, and taking both would only add latency.
+    const unlock = this.leases.tryAcquire(id)
+    if (!unlock) return null
+    const release = await this.tryTurnLock(file)
+    if (!release) {
+      unlock()
+      return null
+    }
+    return this.lease(id, release, unlock)
+  }
+
+  async acquire(id: string, options?: { signal?: AbortSignal }): Promise<SessionLease> {
+    mkdirSync(this.dir, { recursive: true })
+    const file = this.fileFor(id)
+    const unlock = await waitForLease(this.leases.acquire(id), options?.signal)
+    let release: () => Promise<void>
+    try {
+      release = await waitForLease(this.takeLock(turnTarget(file), TURN_LOCK_RETRIES), options?.signal)
+    } catch (error) {
+      unlock()
+      throw error
+    }
+    return this.lease(id, release, unlock)
+  }
+
+  private async lease(
+    id: string,
+    release: () => Promise<void>,
+    unlock: () => void,
+  ): Promise<SessionLease> {
+    return {
+      latest: await this.load(id),
+      release: async () => {
+        await release()
+        unlock()
+      },
+    }
+  }
+
+  /** The turn lock, taken once: null says somebody else holds it. */
+  private async tryTurnLock(file: string): Promise<(() => Promise<void>) | null> {
+    try {
+      return await this.takeLock(turnTarget(file), 0)
+    } catch (error) {
+      if (isLocked(error)) return null
+      throw error
+    }
   }
 
   async list(): Promise<SessionSummary[]> {
@@ -113,7 +274,24 @@ export class FileSessionStore implements SessionStore {
 
   async remove(id: string): Promise<void> {
     if (!isValidSessionId(id)) return
-    await this.run(() => rmSync(this.fileFor(id), { force: true }))
+    mkdirSync(this.dir, { recursive: true })
+    const file = this.fileFor(id)
+    if (!existsSync(file)) return
+    // Under the turn lease, like a turn: taking it means a removal waits for the
+    // turn in flight rather than unlinking the record out from under it, and a
+    // save that had already read the revision cannot put the file straight back
+    // and make the deletion look like it never happened.
+    const unlock = await this.leases.acquire(id)
+    try {
+      const release = await this.takeLock(turnTarget(file), TURN_LOCK_RETRIES)
+      try {
+        rmSync(file, { force: true })
+      } finally {
+        await release()
+      }
+    } finally {
+      unlock()
+    }
   }
 
   async getBinding(scopeKey: string): Promise<string | undefined> {
@@ -199,6 +377,9 @@ function parseRecord(value: unknown): SessionRecord | null {
     title: typeof raw.title === 'string' ? raw.title : undefined,
     createdAt,
     updatedAt: typeof raw.updatedAt === 'number' ? raw.updatedAt : createdAt,
+    // A record from before revisions reads as the initial one, so its next save
+    // is accepted rather than looking like a conflict with nothing.
+    version: typeof raw.version === 'number' ? raw.version : INITIAL_SESSION_VERSION,
     messages: raw.messages as Message[],
     summary: typeof raw.summary === 'string' ? raw.summary : undefined,
     droppedTokens: typeof raw.droppedTokens === 'number' ? raw.droppedTokens : undefined,
