@@ -167,6 +167,9 @@ describe('SettingsScreen', () => {
     await waitFor(app, dir)
     const frame = app.lastFrame() ?? ''
     expect(frame).toContain('skill-creator')
+    expect(frame).toContain('How to write a skill for Milo')
+    expect(frame).toContain('release-notes')
+    expect(frame).toContain('Turn the commits since the last tag')
     expect(frame).toContain('ships with Milo')
 
     // The directory's row, with what it prints: repository and install count.

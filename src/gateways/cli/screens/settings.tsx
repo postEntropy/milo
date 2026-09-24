@@ -340,8 +340,12 @@ export function SettingsScreen({
         id: here ? undefined : id,
         title: skill.name,
         label: `${here || picked.includes(id) ? '[x]' : '[ ]'} ${skill.name}`,
-        hint: here ? 'installed' : 'ships with Milo',
-        hintColor: here ? theme.success : theme.accent,
+        hint: here ? 'installed' : undefined,
+        hintColor: here ? theme.success : undefined,
+        hintParts: [
+          { text: skill.description, color: theme.secondary },
+          ...(!here ? [{ text: ' · ships with Milo', color: theme.muted }] : []),
+        ],
         install: here ? undefined : async () => [skill],
       }
     }),
