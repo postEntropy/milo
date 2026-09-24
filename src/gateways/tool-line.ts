@@ -23,10 +23,15 @@ const TOOLS: Record<string, { icon: string; style: ToolLineStyle }> = {
   list_dir: { icon: '📁', style: 'quote' },
   glob: { icon: '🔎', style: 'quote' },
   grep: { icon: '🔍', style: 'quote' },
+  fetch_url: { icon: '🔗', style: 'quote' },
   write_file: { icon: '📝', style: 'code' },
   edit_file: { icon: '✏️', style: 'code' },
   remember: { icon: '🧠', style: 'quote' },
+  recall: { icon: '🗂', style: 'quote' },
+  search_history: { icon: '🕘', style: 'quote' },
   web_search: { icon: '🌐', style: 'quote' },
+  skill: { icon: '📘', style: 'quote' },
+  task: { icon: '🤖', style: 'quote' },
   shell_command: { icon: '⚡', style: 'code' },
 }
 
@@ -47,7 +52,7 @@ export function toolLine(
   options: { markdown?: boolean } = {},
 ): ToolLine {
   const { icon, style } = TOOLS[name] ?? FALLBACK
-  const summary = gist(args)
+  const summary = toolDetail(args)
   const label = toolLabel(name, style, options.markdown ?? false)
   return { text: summary ? `${icon} ${label} ${summary}` : `${icon} ${label}`, style }
 }
@@ -69,11 +74,19 @@ const GIST_LIMIT = 120
  * Deliberately not `summarizeToolCall`: a permission prompt wants *something*
  * even when it has to dump JSON, while a tool line wants nothing rather than
  * `{}` beside the name.
+ *
+ * Exported because the CLI draws its own line and must not drift from the
+ * chat surfaces: both put this same string after the tool name, so a skill reads
+ * as `skill deploy` in the terminal and in Telegram alike, not as the argument
+ * dump on one and the useful value on the other.
  */
-function gist(args: unknown): string {
+export function toolDetail(args: unknown): string {
   if (!args || typeof args !== 'object') return ''
   const record = args as Record<string, unknown>
-  for (const key of ['command', 'query', 'pattern', 'path']) {
+  // `description` is the `task` tool's label for a subtask (its `prompt` is the
+  // whole instruction, and has no place on a one-line activity log); `url` and
+  // `name` are the one interesting value of `fetch_url` and `skill`.
+  for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name']) {
     const value = record[key]
     if (typeof value === 'string' && value.trim()) {
       const flat = value.trim().replace(/\s+/g, ' ')

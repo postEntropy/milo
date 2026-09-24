@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -59,6 +59,9 @@ describe('runServe', () => {
     delete process.env.DISCORD_BOT_TOKEN
     rmSync(path.join(home, 'config.json'), { force: true })
     rmSync(path.join(home, 'auth.json'), { force: true })
+    // Startup creates this one, so a skill left behind by a test would be read
+    // by the next.
+    rmSync(path.join(home, 'skills'), { recursive: true, force: true })
     vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
       messages.push(args.map(String).join(' '))
     })
@@ -92,6 +95,30 @@ describe('runServe', () => {
     expect(calls.started).toEqual(['telegram', 'discord'])
     expect(messages.join('\n')).toContain('Milo serving: telegram, discord')
     expect(process.exitCode).toBe(0)
+  })
+
+  it('says what it is running with, and how many skills it read', async () => {
+    writeFileSync(
+      path.join(home, 'config.json'),
+      configWith({ telegram: { enabled: true, allowlist: [] } }),
+    )
+    process.env.TELEGRAM_BOT_TOKEN = 'tg-token'
+    const dir = path.join(home, 'skills', 'deploy')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(
+      path.join(dir, 'SKILL.md'),
+      '---\nname: deploy\ndescription: How to deploy\n---\n\nRun it.\n',
+    )
+
+    await runServe()
+
+    // The count is the only way to tell whether the startup index saw the
+    // skills, since nothing else about them is printed.
+    const output = messages.join('\n')
+    expect(output).toContain('test-model (test)')
+    expect(output).toContain('mode ask')
+    expect(output).toContain('1 skill')
+    expect(output).toContain(home)
   })
 
   it('says the token is missing and starts nothing', async () => {

@@ -12,6 +12,13 @@ export type RememberFn = (items: MemoryInput[]) => Promise<void>
 /** The same, for looking a past conversation back up by what it was about. */
 export type RecallFn = (query: string, opts?: { limit?: number }) => Promise<SessionSummary[]>
 
+/**
+ * Runs a subtask in its own agent loop — its own transcript, its own tool
+ * calls — and returns only what it finally answers. Delegation is one level:
+ * the context handed to the subagent carries no `task` of its own.
+ */
+export type TaskFn = (input: { description: string; prompt: string }) => Promise<ToolResult>
+
 export interface ToolContext {
   cwd: string
   signal: AbortSignal
@@ -19,6 +26,8 @@ export interface ToolContext {
   remember?: RememberFn
   /** Absent on a context with no session store behind it, so `recall` does too. */
   recall?: RecallFn
+  /** Absent on a context that cannot delegate (a subagent's own, a bare test one). */
+  task?: TaskFn
 }
 
 export interface ToolResult {
@@ -38,5 +47,13 @@ export interface Tool<A = unknown> {
    * saving one not worth doing.
    */
   internal?: boolean
+  /**
+   * The tool's own effect is to hand work to a subagent, whose individual tool
+   * calls are each put to the same policy. So it needs no confirmation of its
+   * own: prompting for the delegation and then again for the write it leads to
+   * asks the same question twice, and the second prompt is the one that shows
+   * what is actually being done.
+   */
+  delegates?: boolean
   execute(args: A, ctx: ToolContext): Promise<ToolResult>
 }

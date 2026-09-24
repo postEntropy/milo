@@ -744,3 +744,88 @@ describe('transcript version', () => {
     }
   })
 })
+
+describe('delegation to a subagent', () => {
+  class ScriptedProvider implements Provider {
+    readonly id = 'scripted'
+    calls = 0
+    constructor(private readonly scripts: StreamEvent[][]) {}
+
+    async *stream(): AsyncGenerator<StreamEvent> {
+      const script = this.scripts[this.calls] ?? [{ type: 'done', finishReason: 'stop' }]
+      this.calls += 1
+      for (const event of script) yield event
+    }
+  }
+
+  async function delegate(provider: Provider) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+    const store = new MemorySessionStore()
+    const scope: MemoryScope = { gateway: 'cli', conversationId: 'task' }
+    const record = await store.create()
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new FileMemory({ dir }),
+      store,
+      scope,
+      record,
+      cwd: process.cwd(),
+      provider,
+      maxSteps: 4,
+    })
+
+    const events: AgentEvent[] = []
+    for await (const event of session.send('go')) events.push(event)
+    return { events, onDisk: (await store.load(record.id))! }
+  }
+
+  it('runs the subtask in its own context and brings back only its report', async () => {
+    const provider = new ScriptedProvider([
+      // The parent delegates.
+      [
+        {
+          type: 'tool-call',
+          id: 'c1',
+          name: 'task',
+          args: { description: 'survey deps', prompt: 'read a and b, report the versions' },
+        },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      // The subagent answers.
+      [
+        { type: 'text', delta: 'SUBAGENT REPORT' },
+        { type: 'done', finishReason: 'stop' },
+      ],
+      // The parent answers.
+      [
+        { type: 'text', delta: 'FINAL' },
+        { type: 'done', finishReason: 'stop' },
+      ],
+    ])
+
+    const { events, onDisk } = await delegate(provider)
+
+    // One call for the parent's tool call, one for the subagent, one for the
+    // parent's answer — the subtask is a separate loop, not a second turn.
+    expect(provider.calls).toBe(3)
+
+    const end = events.find(
+      (event): event is Extract<AgentEvent, { type: 'tool-end' }> =>
+        event.type === 'tool-end' && event.name === 'task',
+    )
+    expect(end?.result).toBe('SUBAGENT REPORT')
+
+    // The parent's transcript carries the report and nothing else: whatever the
+    // subagent read on the way never entered this conversation.
+    expect(onDisk.messages.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'tool',
+      'assistant',
+    ])
+    const toolMessage = onDisk.messages.find((message) => message.role === 'tool')
+    expect(toolMessage?.content[0]).toMatchObject({ content: 'SUBAGENT REPORT' })
+  })
+})

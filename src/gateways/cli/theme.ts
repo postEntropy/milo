@@ -16,6 +16,7 @@
  */
 export const theme = {
   accent: '#C4541C',
+  secondary: '#508080',
   success: '#587E20',
   warning: '#976C0C',
   danger: '#DA392F',

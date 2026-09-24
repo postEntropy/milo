@@ -12,6 +12,7 @@ import {
 } from '../../../core/providers/types.js'
 import type { AgentRuntime } from '../../../core/runtime.js'
 import { formatSessionList, formatWhen, type SessionStats } from '../../../core/sessions/index.js'
+import { formatSkillList } from '../../../core/skills/index.js'
 import type {
   PermissionAsker,
   PermissionMode,
@@ -22,6 +23,7 @@ import { errorMessage } from '../../../util/errors.js'
 import { isCtrlC, isSteerKey } from '../keys.js'
 import { readInputHistory, saveInputHistory } from '../input-history.js'
 import { theme } from '../theme.js'
+import { toolDetail } from '../../tool-line.js'
 import { buildLines, padToBottom, visibleWindow, type Item, type Line } from '../transcript.js'
 import { useElapsed } from '../use-elapsed.js'
 import { useTerminalSize } from '../use-terminal-size.js'
@@ -71,6 +73,7 @@ const HELP_TEXT = [
   '/sessions — list saved sessions',
   '/resume <id> — switch to another session',
   '/stats — numbers for the current session',
+  '/skills — the skills installed, and where they live',
   '/clear — forget this conversation',
   '/exit — quit',
   '',
@@ -353,6 +356,9 @@ export function ChatScreen({
       case 'sessions':
         push({ kind: 'info', text: formatSessionList(await runtime.listSessions()) })
         break
+      case 'skills':
+        push({ kind: 'info', text: formatSkillList(runtime.skills) })
+        break
       case 'resume': {
         if (!argument) {
           push({ kind: 'info', text: 'Usage: /resume <id>. See /sessions for the ids.' })
@@ -499,7 +505,7 @@ export function ChatScreen({
               push({
                 kind: 'tool',
                 name,
-                detail: display.tools === 'name' ? '' : formatArgs(toolArgsRef.current),
+                detail: display.tools === 'name' ? '' : toolDetail(toolArgsRef.current),
                 ok: !isError,
               })
             }
@@ -934,15 +940,4 @@ function statsRows(stats: SessionStats): { label: string; value: string }[] {
     })
   }
   return rows
-}
-
-function formatArgs(args: unknown): string {
-  if (args === null || args === undefined) return ''
-  if (typeof args === 'string') return args
-  try {
-    const json = JSON.stringify(args)
-    return json.length > 80 ? `${json.slice(0, 77)}…` : json
-  } catch {
-    return String(args)
-  }
 }

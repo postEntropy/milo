@@ -53,9 +53,27 @@ describe('toolLine', () => {
     })
   })
 
+  it('shows a subtask by its label, never by its prompt', () => {
+    expect(toolLine('task', { description: 'survey deps', prompt: 'a long instruction' })).toEqual({
+      text: '🤖 task survey deps',
+      style: 'quote',
+    })
+  })
+
+  it('names the skill being loaded and the URL being fetched', () => {
+    expect(toolLine('skill', { name: 'deploy' })).toEqual({
+      text: '📘 skill deploy',
+      style: 'quote',
+    })
+    expect(toolLine('fetch_url', { url: 'https://example.com/a' })).toEqual({
+      text: '🔗 fetch_url https://example.com/a',
+      style: 'quote',
+    })
+  })
+
   it('starts every line with an emoji, never a typographic glyph', () => {
     const emoji = /\p{Extended_Pictographic}/u
-    const names = ['read_file', 'list_dir', 'glob', 'grep', 'write_file', 'edit_file', 'remember', 'web_search', 'shell_command', 'unknown_tool']
+    const names = ['read_file', 'list_dir', 'glob', 'grep', 'fetch_url', 'write_file', 'edit_file', 'remember', 'recall', 'search_history', 'web_search', 'skill', 'task', 'shell_command', 'unknown_tool']
 
     for (const name of names) {
       const [icon] = toolLine(name, { path: 'a' }).text.split(' ')

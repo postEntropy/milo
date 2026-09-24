@@ -90,8 +90,10 @@ export function buildLines(items: Item[], width: number): Line[] {
         lines.push(...markdownLines(item.text, width))
         break
       case 'tool': {
-        // No parentheses when there is no detail to show (`/tools name`).
-        const call = item.detail ? `${item.name}(${item.detail})` : item.name
+        // The same shape as the chat surfaces: icon, name, and the one value
+        // worth showing — no JSON dump, and nothing when there is nothing
+        // (`/tools name`).
+        const call = item.detail ? `${item.name} ${item.detail}` : item.name
         const head = item.ok ? toolIcon(item.name) : '✗'
         for (const text of wrapText(`${head} ${call}`, width)) {
           push(text, {

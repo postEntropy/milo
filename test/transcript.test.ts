@@ -42,31 +42,32 @@ describe('buildLines', () => {
       40,
     )
 
-    // Consecutive tool lines sit together; the icons are what matters.
+    // Consecutive tool lines sit together; the icons are what matters, and the
+    // line carries the same shape a chat surface shows: icon, name, value.
     expect(lines.filter((line) => line.text !== '').map((line) => line.text)).toEqual([
-      '🌐 web_search(bun 1.2)',
-      '📄 read_file(a.txt)',
-      '✗ web_search(bun 1.2)',
+      '🌐 web_search bun 1.2',
+      '📄 read_file a.txt',
+      '✗ web_search bun 1.2',
     ])
   })
 
-  it('omits the parentheses when there is no detail to show', () => {
+  it('shows only the name when there is no detail to show', () => {
     const lines = buildLines([{ kind: 'tool', name: 'read_file', detail: '', ok: true }], 40)
 
     expect(lines.map((line) => line.text)).toEqual(['📄 read_file'])
   })
 
-  it('bolds the tool name so it does not read as the start of the call', () => {
+  it('bolds the tool name so it does not read as the start of the arguments', () => {
     const lines = buildLines([{ kind: 'tool', name: 'read_file', detail: 'a.txt', ok: true }], 40)
     const line = lines.find((entry) => entry.text.includes('read_file'))!
 
     expect(line.segments).toEqual([
       { text: '📄 ' },
       { text: 'read_file', bold: true },
-      { text: '(a.txt)' },
+      { text: ' a.txt' },
     ])
     // The plain text stays intact for the window and the tests around it.
-    expect(line.text).toBe('📄 read_file(a.txt)')
+    expect(line.text).toBe('📄 read_file a.txt')
   })
 
   it('keeps the name bold in a failure line', () => {
@@ -92,7 +93,7 @@ describe('buildLines', () => {
       40,
     )
 
-    expect(lines.map((line) => line.text)).toEqual(['🔧 fetch_url(one)', '🔧 fetch_url(two)'])
+    expect(lines.map((line) => line.text)).toEqual(['🔗 fetch_url one', '🔗 fetch_url two'])
   })
 
   it('still separates a tool call from the prose around it', () => {
@@ -104,7 +105,7 @@ describe('buildLines', () => {
       40,
     )
 
-    expect(lines.map((line) => line.text)).toEqual(['let me look', '', '📄 read_file(a.txt)'])
+    expect(lines.map((line) => line.text)).toEqual(['let me look', '', '📄 read_file a.txt'])
   })
 })
 

@@ -1,10 +1,18 @@
 import { useMemo, useState } from 'react'
 import { Box, Text, useInput } from 'ink'
 import TextInput from 'ink-text-input'
+import Spinner from 'ink-spinner'
 import { readAuth, readConfig, saveAuth, saveConfig } from '../../../core/config/load.js'
+import { skillsDir } from '../../../core/config/paths.js'
 import type { Auth, Config, GatewayConfig } from '../../../core/config/schema.js'
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS } from '../../../core/providers/types.js'
+import { BUILTIN_SKILLS } from '../../../core/skills/builtin.js'
+import { SKILLS_DIRECTORY, fetchPopular, type PopularSkill } from '../../../core/skills/catalog.js'
+import { ensureSkillsDir } from '../../../core/skills/index.js'
+import { installSkill, installedSkillNames, skillsDirFor } from '../../../core/skills/install.js'
+import { resolveSource, type ResolvedSkill } from '../../../core/skills/sources.js'
 import type { PermissionMode } from '../../../core/tools/permission.js'
+import { errorMessage } from '../../../util/errors.js'
 import { describeAccess } from '../../access.js'
 import { isCtrlC } from '../keys.js'
 import { theme } from '../theme.js'
@@ -37,10 +45,32 @@ const TOOL_LEVELS = ['full', 'name', 'off'] as const
 const EFFORT_LEVELS = REASONING_EFFORTS
 const GATEWAYS: GatewayId[] = ['telegram', 'discord']
 
+/** One run of a hint, when a hint is more than one kind of thing. */
+interface MenuHintPart {
+  text: string
+  color?: string
+  bold?: boolean
+}
+
 interface MenuItem {
   label: string
   hint?: string
   hintColor?: string
+  /**
+   * A hint in parts, each with its own weight and colour. An uncoloured part
+   * renders in the terminal's own text colour — the most contrast a theme can
+   * offer, and the reason `dimColor` is not used on these.
+   */
+  hintParts?: MenuHintPart[]
+}
+
+/** A menu row that can be picked with Space, and installed with Enter. */
+interface SkillRow extends MenuItem {
+  /** What Space toggles. Rows without one cannot be picked — nothing to install. */
+  id?: string
+  /** The name to say in the notice. */
+  title: string
+  install?: () => Promise<ResolvedSkill[]>
 }
 
 type FlowStep = 'token' | 'access' | 'enable'
@@ -57,6 +87,7 @@ type View =
   | { kind: 'gateways' }
   | { kind: 'gatewayFlow'; id: GatewayId; steps: FlowStep[]; step: FlowStep }
   | { kind: 'memory' }
+  | { kind: 'skills' }
 
 export interface SettingsScreenProps {
   config: Config
@@ -78,6 +109,7 @@ const TITLE: Record<string, string> = {
   displayEdit: 'Setup · Display',
   gateways: 'Setup · Gateways',
   memory: 'Setup · Memory',
+  skills: 'Setup · Skills',
 }
 
 /** Where to get each bot token, shown in the token step. */
@@ -101,6 +133,62 @@ export function SettingsScreen({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-read triggers, not closure values — auth is re-read from disk on navigation and after a save refreshes the config
   const auth = useMemo(() => readAuth(), [view, config])
+
+  /**
+   * Setup is where the layout is made: opening it creates the skills directory —
+   * the place a `SKILL.md` goes — and reads back what is already there, since an
+   * empty directory nobody is told about is the same as no feature.
+   */
+  const [installed, setInstalled] = useState<string[]>(() => {
+    ensureSkillsDir()
+    return installedSkillNames(process.cwd())
+  })
+
+  /** Writes one row's skills out, and says what happened. */
+  const installPicked = async (rows: SkillRow[]): Promise<void> => {
+    const done: string[] = []
+    const failed: string[] = []
+
+    for (const row of rows) {
+      try {
+        for (const skill of await row.install!()) {
+          await installSkill(skill, skillsDirFor('global', process.cwd()))
+        }
+        done.push(row.title)
+      } catch (error) {
+        failed.push(`${row.title}: ${errorMessage(error)}`)
+      }
+    }
+
+    setInstalled(installedSkillNames(process.cwd()))
+    setPicked([])
+    setNotice(
+      [
+        done.length > 0 ? `${done.join(', ')} installed — restart milo to load it.` : '',
+        failed.length > 0 ? `Could not install ${failed.join('; ')}` : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
+    )
+  }
+
+  /**
+   * The directory's ranking, read when the section is opened. `null` is "still
+   * reading", `[]` is "could not read" — the two say different things, and the
+   * bundled skills are offered either way.
+   */
+  const [popular, setPopular] = useState<PopularSkill[] | null>(null)
+
+  /** The rows picked with Space, by row id. */
+  const [picked, setPicked] = useState<string[]>([])
+
+  const loadPopular = async (): Promise<void> => {
+    try {
+      setPopular(await fetchPopular(5))
+    } catch {
+      setPopular([])
+    }
+  }
 
   const go = (next: View, initial = '') => {
     setView(next)
@@ -157,6 +245,11 @@ export function SettingsScreen({
       hintColor: enabledGateways.length > 0 ? theme.success : undefined,
     },
     { label: 'Memory', hint: config.memory.backend },
+    {
+      label: 'Skills',
+      hint: `${installed.length} installed`,
+      hintColor: installed.length > 0 ? theme.success : undefined,
+    },
     { label: 'Save & exit', hint: 'everything is already saved', hintColor: theme.accent },
   ]
 
@@ -237,6 +330,44 @@ export function SettingsScreen({
     { label: 'Change access', hint: describeAccess(gatewayBase(id).allowlist) },
   ]
 
+  /** The bundled skills, then the directory's most-installed, all one list. */
+  const skillRows: SkillRow[] = [
+    ...BUILTIN_SKILLS.map((skill) => {
+      const here = installed.includes(skill.name)
+      const id = `builtin:${skill.name}`
+      return {
+        // Nothing to pick on one that is already written out; `[x]` says so.
+        id: here ? undefined : id,
+        title: skill.name,
+        label: `${here || picked.includes(id) ? '[x]' : '[ ]'} ${skill.name}`,
+        hint: here ? 'installed' : 'ships with Milo',
+        hintColor: here ? theme.success : theme.accent,
+        install: here ? undefined : async () => [skill],
+      }
+    }),
+    ...(popular ?? []).map((entry) => {
+      // The count is the thing to scan for, so it carries the colour and the
+      // weight; the summary is prose and renders in the terminal's own text
+      // colour, which is the only way to be darker than a palette that is
+      // already at the contrast floor on both a light and a dark background.
+      const parts: MenuHintPart[] = []
+      if (entry.installs) parts.push({ text: entry.installs, color: theme.accent, bold: true })
+      if (entry.installs && entry.description) parts.push({ text: ' · ' })
+      if (entry.description) {
+        parts.push({ text: entry.description, color: theme.secondary })
+      }
+
+      return {
+        id: entry.source,
+        title: `${entry.repo}/${entry.name}`,
+        label: `${picked.includes(entry.source) ? '[x]' : '[ ]'} ${entry.repo}/${entry.name}`,
+        hint: parts.length > 0 ? undefined : 'most installed',
+        hintParts: parts.length > 0 ? parts : undefined,
+        install: () => resolveSource(entry.source, { cwd: process.cwd() }),
+      }
+    }),
+  ]
+
   useInput((input, key) => {
     if (isCtrlC(input, key)) {
       onClose()
@@ -255,7 +386,10 @@ export function SettingsScreen({
           else if (index === 4) go({ kind: 'display' })
           else if (index === 5) go({ kind: 'gateways' })
           else if (index === 6) go({ kind: 'memory' })
-          else onClose()
+          else if (index === 7) {
+            go({ kind: 'skills' })
+            void loadPopular()
+          } else onClose()
         } else if (key.escape) onClose()
         break
 
@@ -378,6 +512,32 @@ export function SettingsScreen({
         if (key.escape) go({ kind: 'menu' })
         break
 
+      case 'skills': {
+        if (key.upArrow) setIndex((value) => Math.max(0, value - 1))
+        else if (key.downArrow) setIndex((value) => Math.min(skillRows.length - 1, value + 1))
+        else if (input === ' ') {
+          const row = skillRows[index]
+          if (row?.id) {
+            const id = row.id
+            setPicked((current) =>
+              current.includes(id) ? current.filter((entry) => entry !== id) : [...current, id],
+            )
+          }
+        } else if (key.return) {
+          // Enter installs what was picked, not what the cursor is on: picking is
+          // the decision, and Enter is the one place it is acted on.
+          const chosen = skillRows.filter(
+            (row) => row.id && picked.includes(row.id) && row.install,
+          )
+          if (chosen.length === 0) {
+            setNotice('Nothing picked — Space picks a row, Enter installs the picked ones.')
+          } else {
+            void installPicked(chosen)
+          }
+        } else if (key.escape) go({ kind: 'menu' })
+        break
+      }
+
       default:
         break
     }
@@ -467,9 +627,11 @@ export function SettingsScreen({
       ? 'Enter save (empty clears) · Esc back'
       : view.kind === 'gatewayFlow' && view.step !== 'enable'
         ? 'Enter save · Esc back'
-        : view.kind === 'menu'
-          ? '↑/↓ move · Enter open · Esc exit · changes save as you make them'
-          : '↑/↓ move · Enter open · Esc back · changes save as you make them'
+        : view.kind === 'skills'
+          ? '↑/↓ move · Space pick · Enter install what is picked · Esc back'
+          : view.kind === 'menu'
+            ? '↑/↓ move · Enter open · Esc exit · changes save as you make them'
+            : '↑/↓ move · Enter open · Esc back · changes save as you make them'
 
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
@@ -587,6 +749,41 @@ export function SettingsScreen({
           </Box>
         )}
 
+        {view.kind === 'skills' && (
+          <Box flexDirection="column">
+            <Menu items={skillRows} index={index} />
+            <Box marginTop={1} flexDirection="column">
+              <Text color={theme.muted}>{skillsDir()}</Text>
+              {popular === null ? (
+                // Same shape as the chat's busy line: waiting on a round trip is
+                // named where the wait is, or it reads as the screen being stuck.
+                <Text color={theme.warning}>
+                  <Spinner type="dots" /> Reading {SKILLS_DIRECTORY}…
+                </Text>
+              ) : popular.length === 0 ? (
+                <Text color={theme.muted}>
+                  Could not read {SKILLS_DIRECTORY} — only the ones that ship with Milo are listed.
+                </Text>
+              ) : null}
+              <Text color={theme.muted}>
+                A skill here applies everywhere; .milo/skills inside a project applies to that project
+                alone. Milo indexes the names now and reads the instructions only when a task matches,
+                so a new one needs a restart.
+              </Text>
+              <Text color={theme.muted}>
+                Third-party skills are instructions, not data — Milo cannot fence them, so read one
+                before you install it. The rows below the bundled pair are the directory's ranking,
+                not an endorsement: Space picks, Enter installs what is picked.
+              </Text>
+            </Box>
+            {notice && (
+              <Box marginTop={1}>
+                <Text color={theme.warning}>{notice}</Text>
+              </Box>
+            )}
+          </Box>
+        )}
+
         {(view.kind === 'keyEdit' || view.kind === 'permissionEdit') && (
           <Box flexDirection="column">
             <Text color={theme.accent}>
@@ -636,11 +833,28 @@ function Menu({ items, index }: { items: MenuItem[]; index: number }) {
     <Box flexDirection="column">
       {items.map((item, itemIndex) => {
         const selected = itemIndex === index
+        // One flow of text — so a long hint wraps the way it always did — with
+        // the weight and colour set per part. The outer element carries neither:
+        // a colour there would be inherited by the hint, which is how the
+        // summary used to turn orange on the very row being read.
         return (
-          <Text key={item.label} bold={selected} color={selected ? theme.accent : undefined}>
+          <Text key={item.label}>
             <Text color={selected ? theme.accent : theme.muted}>{selected ? '❯ ' : '  '}</Text>
-            {item.label.padEnd(labelWidth)}
-            {item.hint ? (
+            <Text bold={selected} color={selected ? theme.accent : undefined}>
+              {item.label.padEnd(labelWidth)}
+            </Text>
+            {item.hintParts ? (
+              <Text>
+                {'  '}
+                {item.hintParts.map((part) => (
+                  // The parts of one hint are distinct by construction — a count,
+                  // a separator and a sentence — so the text is a stable key.
+                  <Text key={part.text} bold={part.bold} color={part.color}>
+                    {part.text}
+                  </Text>
+                ))}
+              </Text>
+            ) : item.hint ? (
               <Text dimColor={!item.hintColor} color={item.hintColor}>{`  ${item.hint}`}</Text>
             ) : null}
           </Text>

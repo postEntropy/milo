@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from 'ink-testing-library'
 
 // Point the app at a throwaway home *before* the config modules load.
@@ -59,6 +59,19 @@ async function waitUntil(check: () => boolean, timeoutMs = 1500): Promise<void> 
 
 const readJson = (name: string) => JSON.parse(readFileSync(path.join(home, name), 'utf8'))
 
+/** A leaderboard row the way the page prints it: a heading, a repository, a count. */
+const LEADERBOARD_ROW =
+  '<a href="/acme/thing/thing">' +
+  '<div><span>1</span></div>' +
+  '<div><h3>thing</h3><p>acme/thing</p></div>' +
+  '<div><span class="font-mono text-sm text-foreground">9.1K</span></div>' +
+  '</a>'
+
+/** A skill's own page, where the one-line summary lives. */
+const SKILL_PAGE =
+  '<h2>Summary</h2><p><strong>Relentless interviewing that stress-tests plans and designs ' +
+  'through systematic questioning of every assumption.</strong></p>'
+
 function renderSettings(overrides: Record<string, unknown> = {}) {
   /**
    * Mirrors the shell: it re-reads the config after every save and hands the
@@ -84,7 +97,10 @@ function renderSettings(overrides: Record<string, unknown> = {}) {
   return render(<Live />)
 }
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 // Each test starts from a clean config + auth, so flows do not inherit the
 // previous test's token or allowlist.
@@ -102,6 +118,7 @@ describe('SettingsScreen', () => {
     expect(frame).toContain('API keys / tokens')
     expect(frame).toContain('Gateways')
     expect(frame).toContain('Memory')
+    expect(frame).toContain('Skills')
   })
 
   it('offers an explicit exit and says nothing is pending', () => {
@@ -120,11 +137,144 @@ describe('SettingsScreen', () => {
       },
     })
 
-    // Provider & model, API keys, Web search, permissions, display, gateways, memory
-    for (let index = 0; index < 7; index += 1) await press(app, DOWN)
+    // Provider & model, API keys, Web search, permissions, display, gateways,
+    // memory, skills
+    for (let index = 0; index < 8; index += 1) await press(app, DOWN)
     await press(app, '\r')
 
     expect(closed).toBe(true)
+  })
+
+  it('creates the skills directory and offers the bundled ones and the ranking', async () => {
+    const dir = path.join(home, 'skills')
+    rmSync(dir, { recursive: true, force: true })
+    // The section reads the directory's ranking when it opens, and a test is not
+    // the place to reach the network.
+    vi.stubGlobal('fetch', async () => new Response(LEADERBOARD_ROW, { status: 200 }))
+
+    const app = renderSettings()
+    await waitFor(app, 'Skills')
+
+    // Opening setup makes the place a SKILL.md belongs, before anything is
+    // typed into it: an empty directory nobody is told about is not a feature.
+    expect(existsSync(dir)).toBe(true)
+
+    // Provider & model, API keys, Web search, permissions, display, gateways,
+    // memory
+    for (let index = 0; index < 7; index += 1) await press(app, DOWN)
+    await press(app, '\r')
+
+    await waitFor(app, dir)
+    const frame = app.lastFrame() ?? ''
+    expect(frame).toContain('skill-creator')
+    expect(frame).toContain('ships with Milo')
+
+    // The directory's row, with what it prints: repository and install count.
+    await waitFor(app, 'acme/thing/thing')
+    expect(app.lastFrame() ?? '').toContain('9.1K')
+  })
+
+  it('keeps the label and the count when a long summary wraps', async () => {
+    const dir = path.join(home, 'skills')
+    rmSync(dir, { recursive: true, force: true })
+    // The listing carries the count; the summary comes from the skill's page,
+    // and a real one is a full sentence.
+    vi.stubGlobal('fetch', async (input: string | URL) => {
+      const url = String(input)
+      return new Response(url.includes('/acme/thing/thing') ? SKILL_PAGE : LEADERBOARD_ROW, {
+        status: 200,
+      })
+    })
+
+    const app = renderSettings()
+    await waitFor(app, 'Skills')
+    for (let index = 0; index < 7; index += 1) await press(app, DOWN)
+    await press(app, '\r')
+
+    await waitFor(app, '9.1K')
+    const frame = app.lastFrame() ?? ''
+    // The row is a layout, not one run of text: wrapping the summary must not
+    // push the label or the count off the line.
+    expect(frame).toContain('acme/thing/thing')
+    expect(frame).toContain('9.1K')
+    expect(frame).toContain('Relentless interviewing')
+  })
+
+  it('installs what Space picked, and only on Enter', async () => {
+    const dir = path.join(home, 'skills')
+    rmSync(dir, { recursive: true, force: true })
+    vi.stubGlobal('fetch', async () => new Response('<html></html>', { status: 200 }))
+
+    const app = renderSettings()
+    await waitFor(app, 'Skills')
+    for (let index = 0; index < 7; index += 1) await press(app, DOWN)
+    await press(app, '\r')
+    await waitFor(app, 'skill-creator')
+
+    // Enter on its own installs nothing: picking is the decision, and guessing
+    // at the row under the cursor would install what was never chosen.
+    await press(app, '\r')
+    await waitFor(app, 'Nothing picked')
+    expect(existsSync(path.join(dir, 'skill-creator'))).toBe(false)
+
+    // The cursor starts on the first row, which is the first bundled skill.
+    await press(app, ' ')
+    await press(app, '\r')
+    await waitFor(app, 'restart milo')
+    expect(existsSync(path.join(dir, 'skill-creator', 'SKILL.md'))).toBe(true)
+  })
+
+  it('spins while it is reading the directory', async () => {
+    // Never answers, so the waiting state is the one left on screen.
+    vi.stubGlobal('fetch', () => new Promise(() => {}))
+
+    const app = renderSettings()
+    await waitFor(app, 'Skills')
+    for (let index = 0; index < 7; index += 1) await press(app, DOWN)
+    await press(app, '\r')
+
+    await waitFor(app, 'Reading')
+    // The spinner itself, not just the words: a frozen line reads as a hang.
+    expect(app.lastFrame() ?? '').toMatch(/[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] Reading https:\/\/skills\.sh/)
+  })
+
+  it('installs a picked row from the directory, page to file', async () => {
+    const dir = path.join(home, 'skills')
+    rmSync(dir, { recursive: true, force: true })
+    // The whole path a popular row takes: the skills.sh page resolves to a
+    // repository, which resolves to the one SKILL.md.
+    vi.stubGlobal('fetch', async (input: string | URL) => {
+      const url = String(input)
+      if (url.includes('api.github.com')) {
+        return new Response(
+          JSON.stringify({ tree: [{ path: 'skills/thing/SKILL.md', type: 'blob' }] }),
+          { status: 200 },
+        )
+      }
+      if (url.includes('raw.githubusercontent.com')) {
+        return new Response('---\nname: thing\ndescription: The thing\n---\n\nDo it.\n', {
+          status: 200,
+        })
+      }
+      return new Response(LEADERBOARD_ROW, { status: 200 })
+    })
+
+    const app = renderSettings()
+    await waitFor(app, 'Skills')
+    for (let index = 0; index < 7; index += 1) await press(app, DOWN)
+    await press(app, '\r')
+    await waitFor(app, 'acme/thing/thing')
+
+    // The two bundled rows come first, so the directory row is two down.
+    await press(app, DOWN)
+    await press(app, DOWN)
+    await press(app, ' ')
+    await press(app, '\r')
+
+    await waitFor(app, 'restart milo')
+    const file = path.join(dir, 'thing', 'SKILL.md')
+    expect(existsSync(file)).toBe(true)
+    expect(readFileSync(file, 'utf8')).toContain('The thing')
   })
 
   it('says Esc goes back inside a section', async () => {

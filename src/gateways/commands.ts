@@ -1,5 +1,6 @@
 import { formatSessionList, formatStats } from '../core/sessions/index.js'
 import type { SessionStats, SessionSummary } from '../core/sessions/index.js'
+import { formatSkillList, type SkillSummary } from '../core/skills/index.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
 import {
   DEFAULT_REASONING_EFFORT,
@@ -34,6 +35,8 @@ export interface CommandContext {
   resumeSession?: (id: string) => Promise<boolean>
   listSessions?: () => Promise<SessionSummary[]>
   sessionStats?: () => SessionStats | Promise<SessionStats>
+  /** The skills installed on this machine, for `/skills`. */
+  skills?: () => SkillSummary[]
   /** Set when this surface may not create or switch sessions; used as the reply. */
   sessionLocked?: string
 }
@@ -56,6 +59,7 @@ const HELP = [
   '/sessions — list saved sessions',
   '/resume <id> — switch to another session',
   '/stats — numbers for the current session',
+  '/skills — the skills installed, and where they live',
   '/clear — forget this conversation',
   '/status — permission mode and display settings',
   '/help — this message',
@@ -301,6 +305,9 @@ export async function handleCommand(
     case 'clear':
       await context.resetSession?.()
       return { handled: true, reply: 'Conversation cleared.' }
+
+    case 'skills':
+      return { handled: true, reply: formatSkillList(context.skills?.() ?? []) }
 
     case 'status':
       return {

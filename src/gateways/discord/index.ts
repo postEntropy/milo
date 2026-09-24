@@ -135,6 +135,7 @@ export class DiscordGateway implements Gateway {
         newSession: (title) => this.options.runtime.newSession(scope, title),
         resumeSession: async (id) => (await this.options.runtime.resumeSession(scope, id)) !== null,
         listSessions: () => this.options.runtime.listSessions(),
+        skills: () => this.options.runtime.skills,
         sessionStats: () => session.stats(),
       })
     } catch (error) {

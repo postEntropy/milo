@@ -1,5 +1,6 @@
 import type { MemoryItem } from '../memory/index.js'
 import type { ToolSpec } from '../providers/types.js'
+import type { SkillSummary } from '../skills/index.js'
 
 export type SurfaceKind = 'cli' | 'telegram' | 'discord'
 
@@ -46,6 +47,16 @@ export const DEFAULT_SYSTEM_PROMPT = `You are Milo, an assistant that helps with
   Otherwise pick the sensible reading and proceed.
 - Say when you do not know rather than filling the gap.`
 
+/**
+ * The base persona for a delegated subtask. It has no surface section and no
+ * memories: a subagent is not talking to the user and is not drawing on the
+ * conversation — it is handed one instruction and reports back.
+ */
+export const SUBAGENT_SYSTEM_PROMPT = `You are a subagent working on one delegated task. You have your own context: the instruction you were given is all you get — the conversation it came from, its earlier turns and any reasoning are not visible to you, and nobody can answer a question mid-task.
+- Do the task with the tools you have; do not ask for clarification. If the instruction is ambiguous, take the most reasonable reading and say so in your report.
+- Investigate rather than guess: every claim in your report must rest on what a tool actually returned. Cite paths, names and commands exactly.
+- Your final message *is* the report and the only thing that goes back. Put nothing you want known in a preamble or a tool call. Say what you found or did, what matters, and what is left unresolved — concisely.`
+
 export interface SystemPromptInput {
   base: string
   surface?: SurfaceKind
@@ -53,6 +64,8 @@ export interface SystemPromptInput {
   provider: string
   model: string
   tools: ToolSpec[]
+  /** Index of the skills on disk; the bodies are loaded on demand, not here. */
+  skills?: SkillSummary[]
   memories: MemoryItem[]
   /** Compaction summary of the turns already dropped from the transcript. */
   summary?: string
@@ -79,6 +92,19 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   if (input.tools.length > 0) {
     const list = input.tools.map((tool) => `- ${formatToolSignature(tool)} — ${tool.description}`)
     sections.push(`## Available tools\n${list.join('\n')}`)
+  }
+
+  if (input.skills && input.skills.length > 0) {
+    const list = input.skills.map((skill) => `- ${skill.name}: ${skill.description}`)
+    // Only the index: the instructions themselves stay on disk until a task
+    // matches, which is what keeps every skill's body out of every request.
+    sections.push(
+      [
+        '## Skills',
+        'Procedures you can load on demand with the `skill` tool. This list is the index only — when a task matches one, load it before you start.',
+        ...list,
+      ].join('\n'),
+    )
   }
 
   if (input.memories.length > 0) {

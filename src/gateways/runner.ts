@@ -52,11 +52,23 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   let openBlock: ToolLineStyle | null = null
   let reasoning = ''
 
+  /**
+   * What has been written, with any open code fence closed.
+   *
+   * Each edit is parsed as a message of its own, so one that ends inside an open
+   * fence is malformed Markdown — and a client that refuses it drops the whole
+   * message to plain text, after which even the finished answer shows its `**`
+   * and `>` as literals. A shell command streams well before its closing fence
+   * exists, which is exactly when that happens. Only what is *sent* is closed:
+   * the accumulator stays open, so the next line continues the same block.
+   */
+  const balanced = (): string => (openBlock === 'code' ? `${output}\n\`\`\`` : output)
+
   const flush = async (force = false): Promise<void> => {
     const now = Date.now()
     if (!force && now - lastFlush < flushMs) return
     lastFlush = now
-    await surface.edit(conversationId, messageId, clamp(output, maxLength))
+    await surface.edit(conversationId, messageId, clamp(balanced(), maxLength))
   }
 
   /** Closes a code fence, so the prose after it is never swallowed by the block. */

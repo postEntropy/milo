@@ -29,6 +29,7 @@ Usage:
   milo                       Start the TUI chat
   milo setup                 Configure providers, keys, tools, display, gateways, memory
   milo model                 Choose the provider/model (setup wizard)
+  milo skills                Install, list and remove skills (list | available | find | add | remove)
   milo serve                 Run the enabled bot gateways (Telegram, Discord)
   milo --continue            Continue the last session in this terminal
   milo --resume <id>         Open a specific session (see /sessions)
@@ -38,7 +39,7 @@ Usage:
   milo --yolo                Shorthand for --mode yolo
 
 In the chat: /model · /setup · /mode ask|auto|yolo · /yolo · /tools full|name|off · /thinking on|off ·
-/effort low|medium|high · /new · /sessions · /resume · /stats · /clear · /help · /exit
+/effort low|medium|high · /new · /sessions · /resume · /stats · /skills · /clear · /help · /exit
 
 Config:  ~/.milo/config.json
 Sessions: ~/.milo/sessions/
@@ -139,6 +140,11 @@ async function main(): Promise<void> {
     case 'model':
       await runTui('model', true, args, initialMode)
       return
+    case 'skills': {
+      const { runSkills } = await import('./skills.js')
+      process.exitCode = await runSkills(process.argv.slice(2))
+      return
+    }
     case 'setup':
       await runTui('settings', true, args, initialMode)
       return

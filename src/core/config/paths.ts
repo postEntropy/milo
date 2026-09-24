@@ -9,6 +9,8 @@ export const memoryDir = (): string => path.join(MILO_HOME, 'memory')
 export const sessionsDir = (): string => path.join(MILO_HOME, 'sessions')
 /** One JSON per session: what that conversation was about, kept out of it. */
 export const recapsDir = (): string => path.join(sessionsDir(), 'recaps')
+/** Procedures the model loads on demand, one `<name>/SKILL.md` per skill. */
+export const skillsDir = (): string => path.join(MILO_HOME, 'skills')
 /** One append-only JSONL per day: what was asked, answered and run. */
 export const historyDir = (): string => path.join(MILO_HOME, 'history')
 /** What was typed at the CLI's prompt, for the arrow keys to walk back through. */

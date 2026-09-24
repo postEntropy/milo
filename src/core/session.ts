@@ -1,11 +1,13 @@
 import { errorMessage } from '../util/errors.js'
 import type { SessionsConfig } from './config/schema.js'
 import type { HistoryEntry, HistoryWriter } from './history.js'
-import { scopeKey, type Memory, type MemoryScope } from './memory/index.js'
+import { scopeKey, type Memory, type MemoryInput, type MemoryScope } from './memory/index.js'
+import type { SkillSummary } from './skills/index.js'
 import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
 import type { PermissionAsker, PermissionPolicy, ToolRegistry } from './tools/index.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent } from './agent/loop.js'
+import { runSubagent } from './agent/subagent.js'
 import { buildSystemPrompt, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import {
   countTurns,
@@ -49,6 +51,8 @@ export interface SessionOptions {
   registry: ToolRegistry
   memory: Memory
   cwd: string
+  /** The skills to index in the system prompt; the bodies load on demand. */
+  skills?: SkillSummary[]
   maxSteps?: number
   maxTokens?: number
   temperature?: number
@@ -246,6 +250,7 @@ export class Session {
       provider: provider.id,
       model,
       tools,
+      skills: this.options.skills,
       memories: recalled,
     }
 
@@ -260,6 +265,19 @@ export class Session {
 
     this.messages.push({ role: 'user', content: [{ type: 'text', text: input }] })
     note({ kind: 'user', text: input })
+
+    // The turn's one signal, one permission decision and one effort, shared by
+    // the turn and by any subagent it delegates to.
+    const abort = signal ?? new AbortController().signal
+    const effort = this.options.reasoningEffort?.() ?? DEFAULT_REASONING_EFFORT
+    const permission = permissionPolicy
+      ? { policy: permissionPolicy, ask: opts?.ask }
+      : undefined
+    // Read through `this.scope` at call time: a gateway can rebind the session
+    // to another conversation while it is running.
+    const remember = (items: MemoryInput[]) => memory.remember(this.scope, items)
+    const recall = (query: string, options?: { limit?: number }) =>
+      this.recallSessions(query, options)
 
     let errored = false
 
@@ -278,11 +296,28 @@ export class Session {
         messages: this.messages,
         context: {
           cwd,
-          signal: signal ?? new AbortController().signal,
-          // Read through `this.scope` at call time: a gateway can rebind the
-          // session to another conversation while it is running.
-          remember: (items) => memory.remember(this.scope, items),
-          recall: (query, options) => this.recallSessions(query, options),
+          signal: abort,
+          remember,
+          recall,
+          // A subtask runs in its own context, but under this turn's model,
+          // tools, permissions and stop: the same `ask` puts the subagent's
+          // confirmations to the user, and the same signal stops both.
+          task: (input) =>
+            runSubagent({
+              provider,
+              model,
+              registry,
+              cwd,
+              skills: this.options.skills,
+              signal: abort,
+              permission,
+              maxSteps,
+              maxTokens,
+              temperature,
+              reasoningEffort: effort,
+              input,
+              context: { remember, recall },
+            }),
         },
         maxSteps,
         maxTokens,
@@ -292,8 +327,8 @@ export class Session {
         // Read at call time, so `/effort` takes effect on the next turn instead
         // of needing the runtime rebuilt. Never absent: a session built without
         // one still asks for Milo's default.
-        reasoningEffort: this.options.reasoningEffort?.() ?? DEFAULT_REASONING_EFFORT,
-        permission: permissionPolicy ? { policy: permissionPolicy, ask: opts?.ask } : undefined,
+        reasoningEffort: effort,
+        permission,
       })) {
         if (event.type === 'error') errored = true
         else if (event.type === 'text-delta') answer += event.delta

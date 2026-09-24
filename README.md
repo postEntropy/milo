@@ -77,6 +77,7 @@ slow" has no answer beyond a guess; with it, the wait says what it was spent on.
 - `~/.milo/sessions/` — one JSON file per session, plus one binding file per address and one recap
   per session that has been left behind (see below).
 - `~/.milo/memory/` — one JSON file per conversation scope.
+- `~/.milo/skills/` — one `<name>/SKILL.md` per skill (see [Skills](#skills)).
 
 A corrupt `config.json` is reported at startup rather than swallowed, but the settings a running
 conversation changes (`/mode`, `/tools`, `/thinking`) read it defensively: a file that cannot be
@@ -153,9 +154,9 @@ fails closed for everyone else, and a blocked sender is told their own id so you
 `milo setup` → Gateways walks through token → access → enable. The allowlist is read when
 `milo serve` starts, so restart it after changing it.
 
-Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/stats`, `/mode ask|auto|yolo`,
-`/yolo`, `/tools full|name|off`, `/thinking on|off`, `/effort low|medium|high`, `/clear`,
-`/status`. A mode change from a chat is written to `config.json` like any other,
+Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/stats`, `/skills`,
+`/mode ask|auto|yolo`, `/yolo`, `/tools full|name|off`, `/thinking on|off`, `/effort low|medium|high`,
+`/clear`, `/status`. A mode change from a chat is written to `config.json` like any other,
 so it survives a restart of `milo serve`; sessions are written to `~/.milo/sessions/` and survive it
 too. Provider and key changes happen in `milo setup` on the terminal side.
 
@@ -193,6 +194,8 @@ dropped, and so does a correction the model never got to see.
 | `recall` | yes | Which past session a question is about, and what it was about. |
 | `search_history` | yes | Term search over Milo's own past turns, reasoning and tool calls included. |
 | `web_search` | yes | Registered only when a search provider is configured. |
+| `skill` | yes | Loads a skill's instructions on demand; registered only when a skill is installed. |
+| `task` | — | Runs a subtask in its own context; only the report comes back. Only on request; never asks itself. |
 | `shell_command` | no | Runs with `/bin/sh`; asks for confirmation first. |
 
 Read-only tools never ask for confirmation, so exploring is free: `list_dir`, `glob` and `grep`
@@ -445,6 +448,34 @@ title.
 Without a configured provider, `web_search` is simply not registered — the model never sees a
 tool it cannot use.
 
+### Subagents
+
+`task` hands a self-contained piece of work to a subagent: it runs the same loop with a **fresh
+transcript** and returns only its final report. A broad search, a read through twenty files, a long
+investigation — the tool calls on the way stay in the subagent and never enter this conversation, so
+what the parent pays for is the answer, not the search.
+
+**It is on request only.** Milo does not delegate on its own initiative: the tool's description tells
+the model to reach for `task` only when the user has asked for a subagent or for the work to be
+delegated, and to do the work itself otherwise. The direction is deliberately conservative for now —
+the isolation is worth having, but not at the price of a model that quietly hands its work to
+something the user cannot see.
+
+The subagent does not see the conversation and cannot ask anything, so the `task` prompt has to carry
+everything the subtask needs. It runs the same tools the parent has, **except `task` itself**: a
+subagent cannot delegate again, so a delegation is one level deep rather than a chain that only
+`maxSteps` would end.
+
+Nothing about permissions changes underneath. `task` never asks on its own — it has no side effect of
+its own to confirm — while every write or command the subagent attempts is put to the user the same
+way the parent's would be, one at a time. A `deny` entry for `task` still blocks the delegation
+outright.
+
+What is *not* live is the subagent's own activity: the turn shows the `🤖 task <description>` line and
+whatever confirmations it asks for, but the reads and searches it runs in between are not streamed —
+they exist only inside the subagent, and only the report comes back. That is the cost of the
+isolation, and streaming them would mean reworking the loop to carry a second stream.
+
 ## Sessions
 
 A conversation is a **session** with its own name (`calm-otter-7`), stored as one JSON file under
@@ -598,7 +629,96 @@ transcript, and `web_search` snippets come from the open web. All three are fenc
 (`<memories>`, `<summary>`) with a line saying they are data and not instructions, and the reviewer
 prompt says the same about the action it is judging.
 
-## Skills / development
+## Skills
+
+A skill is a **procedure** the model can pick up on demand: a `SKILL.md` that says how to do
+something — a release process, a convention of this repo, a house style. Two places are searched,
+and a name in the second overrides the same name in the first:
+
+```
+~/.milo/skills/<name>/SKILL.md            # every project
+<project>/.milo/skills/<name>/SKILL.md    # this project only
+```
+
+The file opens with a small frontmatter block and then the instructions:
+
+```markdown
+---
+name: deploy
+description: How to cut and ship a release in this repo
+---
+
+1. Run `npm run build`.
+2. …
+```
+
+`name` is optional — the directory name is used when it is absent — but `description` is not: it is
+what the model sees, so a skill without one is skipped rather than indexed under a name nothing can
+judge.
+
+Only the **index** — each skill's name and its one-line description — rides along with every
+request; the instructions are loaded by the `skill` tool **only when a task matches**, and that tool
+is not registered at all when no skill is installed. Inlining every skill's body into the system
+prompt instead would be a tax on every turn for procedures most turns never use, which is the whole
+reason for the split.
+
+Skills are read once, at startup, so adding one means restarting `milo` — the rule the bot allowlist
+already follows. Editing the body of one that already exists does not: the tool re-reads it from
+disk on each call. `/skills` lists what was found and where each one came from.
+
+The directory is made for you: `~/.milo/skills/` is created at startup and when `milo setup` opens
+its **Skills** section, because an empty directory nobody is told about is the same as no feature. A
+project's `.milo/skills/` is not — Milo never makes one, or it would leave a stray `.milo/` in every
+repository it was pointed at. The directory is Milo's own (`~/.milo/skills`); it does not read
+`~/.commandcode/skills`, though a symlink across is all it takes to share them.
+
+### Installing skills
+
+`milo skills` is what fills those directories:
+
+```bash
+milo skills                 # what is installed, in both scopes
+milo skills available       # the skills that ship with Milo
+milo skills find [query]    # the most-installed in the directory
+milo skills add <source>    # a local path, an http(s) URL, or owner/repo
+milo skills remove <name>   # delete one
+```
+
+A `<source>` is anything the ecosystem hands out: a local directory holding a `SKILL.md`, a direct URL
+to one, `owner/repo` on GitHub, or a **`skills.sh` page** — the directory's pages encode the same
+`owner/repo` in their address, so a link copied from there installs, no scraping involved. A repository
+holding several skills makes you pick with `--skill <name>` rather than guessing, and `--project`
+installs into `<cwd>/.milo/skills` instead of `~/.milo/skills`. The same `SKILL.md` format is what
+every other agent reads, so a skill from `npx skills` works here unchanged.
+
+`milo skills find` reads the directory's ranking live, with each row's install count. `skills.sh` is
+a website, not an API, so it reads the page — but only the shape it is built on: every skill is an
+`/owner/repo/name` link, which is the address `add` already resolves, and the ranking *is* the order
+of those links, so nothing has to be re-sorted and markup that moves around them does not break it.
+
+`milo setup` → **Skills** shows the same top five next to the bundled pair. Each directory row carries
+what the page prints — the repository and the install count — plus the one-line summary, which is only
+on the skill's own page and so costs one more request each. `Space` **picks** a row (several at once)
+and `Enter` installs what was picked: picking is the decision, and Enter is the only place it is acted
+on, so nothing installs because the cursor happened to be somewhere. If the page cannot be read the
+section says so and offers only what shipped with Milo. Being on that list is popularity, not a
+review.
+
+A few skills ship bundled (`milo skills available`), and they are not written anywhere until you
+install one — which is what "off by default" means here: there is no enable flag, because *not
+installed* is what off looks like everywhere else in Milo.
+
+**What installing a third-party skill actually is.** A skill is instructions, not data. Milo fences
+what it knows is untrusted — memories, a compaction summary and a search snippet arrive inside
+`<memories>` and `<summary>` with a line saying they are data, not orders — but a skill *cannot* be
+fenced, because being obeyed is the entire point of it. Installing one from the open registry is
+therefore closer to installing code than to saving a note, and it is treated that way: the command
+shows the name, the description, where it came from and how big it is, and asks before writing.
+Nothing installs on its own, and **the model has no tool that installs anything** — a thing that can
+install instructions is a thing that can be talked into installing more of them. The registry says as
+much itself: it audits, and still cannot guarantee what a listed skill does. Read it first.
+
+## Development
 
 ```bash
 npm run dev         # run the CLI from source (tsx)
@@ -623,6 +743,7 @@ worth knowing: with `NODE_ENV=production` exported in your shell, npm treats eve
   - `tools/` — `Tool` interface, registry (zod → JSON Schema), built-in tools.
   - `search/` — `SearchProvider` plus the Tavily, Exa and Parallel adapters.
   - `memory/` — `Memory` interface + `FileMemory`.
+  - `skills/` — `SKILL.md` discovery, frontmatter parsing, and the loader behind the `skill` tool.
   - `sessions/` — `SessionStore` interface + `FileSessionStore` / `MemorySessionStore`, the recaps
     kept out of a transcript (`RecapStore`) and their ranking (`rankSessions`), nickname
     generation, compaction (`estimateTokens` / `planCut` / `summarize`) and `/stats` formatting.

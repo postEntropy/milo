@@ -1,5 +1,6 @@
+import path from 'node:path'
 import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
-import { memoryDir, recapsDir, sessionsDir } from './config/paths.js'
+import { memoryDir, recapsDir, sessionsDir, skillsDir } from './config/paths.js'
 import { readAuth, resolveSearchKey, type LoadedConfig } from './config/load.js'
 import { fileHistory } from './history.js'
 import { createMemory } from './memory/index.js'
@@ -8,6 +9,7 @@ import { lookupContextWindow } from './providers/context.js'
 import { AgentRuntime } from './runtime.js'
 import { FileRecapStore, FileSessionStore } from './sessions/index.js'
 import { createSearchProvider } from './search/index.js'
+import { discoverSkills, ensureSkillsDir } from './skills/index.js'
 import { createJevReviewer } from './tools/jev.js'
 import {
   DefaultPermissionPolicy,
@@ -21,16 +23,26 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     resolveSearchKey(loaded.config.search, readAuth()),
   )
   const permissions = loaded.config.permissions
+  // Somewhere to put a skill, made from the first run: the directory is Milo's
+  // to create, and nothing else ever would. A project skill overrides a global
+  // one of the same name, and the index of all of them rides along with every
+  // request — the bodies stay on disk.
+  ensureSkillsDir()
+  const skills = discoverSkills([
+    { dir: skillsDir(), source: 'global' },
+    { dir: path.join(cwd, '.milo', 'skills'), source: 'project' },
+  ])
 
   return new AgentRuntime({
     provider: createProvider(loaded.provider, loaded.model),
     model: loaded.model,
     system: loaded.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
-    registry: createToolRegistry({ search }),
+    registry: createToolRegistry({ search, skills }),
     memory: createMemory(loaded.config.memory, memoryDir()),
     store: new FileSessionStore({ dir: sessionsDir() }),
     recaps: new FileRecapStore({ dir: recapsDir() }),
     history: fileHistory,
+    skills,
     sessions: loaded.config.sessions,
     // Where the compaction ceiling comes from: a model's window is not in the
     // config and not in the request, so it is looked up once and cached.

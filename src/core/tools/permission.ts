@@ -89,7 +89,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   decide(tool: Tool<unknown>, args: unknown): PermissionDecision | Promise<PermissionDecision> {
     if (this.mode === 'yolo') return 'allow'
     if (this.deny.has(tool.name)) return 'deny'
-    if (tool.readOnly || tool.internal) return 'allow'
+    if (tool.readOnly || tool.internal || tool.delegates) return 'allow'
     if (this.allow.has(tool.name)) return 'allow'
     if (this.mode === 'ask') return 'ask'
 

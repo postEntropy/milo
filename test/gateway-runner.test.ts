@@ -149,6 +149,27 @@ describe('runTurn', () => {
     expect(harness.edits.at(-1)).toBe('```\n⚡ shell_command echo hi\n```\n\npronto')
   })
 
+  it('sends balanced Markdown on every edit, not only the last', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'tool-start', id: '1', name: 'shell_command', args: { command: 'echo hi' } }
+      yield { type: 'tool-end', id: '1', name: 'shell_command', result: 'hi', isError: false }
+      yield { type: 'text-delta', delta: 'pronto' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+
+    // Every edit is parsed as a message of its own, so one that ends inside an
+    // open fence is malformed — and a client that refuses it drops the whole
+    // message to plain text, which is how a finished shell block ends up on
+    // screen with its markers showing.
+    for (const edit of harness.edits) {
+      expect((edit.match(/```/g) ?? []).length % 2, `unbalanced: ${edit}`).toBe(0)
+    }
+    expect(harness.edits.at(-1)).toBe('```\n⚡ shell_command echo hi\n```\n\npronto')
+  })
+
   it('keeps consecutive shell commands in one code block', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'tool-start', id: '1', name: 'shell_command', args: { command: 'ls' } }

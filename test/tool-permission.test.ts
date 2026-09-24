@@ -71,8 +71,15 @@ describe('tool permission gating', () => {
       remember: false,
       recall: true,
       search_history: true,
+      task: false,
       shell_command: false,
     })
+  })
+
+  it('marks the delegating tool, which speaks for the subagent rather than itself', () => {
+    const delegates = builtinTools.filter((tool) => tool.delegates).map((tool) => tool.name)
+
+    expect(delegates).toEqual(['task'])
   })
 
   it('never asks for a tool whose side effect is Milo\'s own state', () => {

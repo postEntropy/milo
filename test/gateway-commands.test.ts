@@ -169,6 +169,23 @@ describe('handleCommand', () => {
     expect(result.reply).not.toContain('compacted')
   })
 
+  it('lists the skills installed, and where a skill goes when there are none', async () => {
+    const listed = await handleCommand('/skills', {
+      skills: () => [{ name: 'deploy', description: 'How to deploy' }],
+    })
+    expect(listed.reply).toContain('deploy — How to deploy')
+
+    // A surface with none still says where one goes: the answer to `/skills` on
+    // a fresh install is the instruction, not an empty list.
+    const none = await handleCommand('/skills', { skills: () => [] })
+    expect(none.reply).toContain('No skills found')
+    expect(none.reply).toContain('SKILL.md')
+  })
+
+  it('names /skills in help', async () => {
+    expect((await handleCommand('/help', {})).reply).toContain('/skills')
+  })
+
   it('locks session commands on a shared or open bot', async () => {
     const context = { sessionLocked: '🔒 locked' }
     expect((await handleCommand('/new', context)).reply).toBe('🔒 locked')

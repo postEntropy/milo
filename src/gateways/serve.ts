@@ -1,6 +1,7 @@
 import process from 'node:process'
 import { createRuntime } from '../core/bootstrap.js'
 import { loadConfig, readAuth, resolveGatewayToken } from '../core/config/load.js'
+import { MILO_HOME } from '../core/config/paths.js'
 import type { Gateway } from './types.js'
 
 export async function runServe(): Promise<void> {
@@ -49,6 +50,19 @@ export async function runServe(): Promise<void> {
 
   for (const gateway of gateways) await gateway.start()
   console.error(`Milo serving: ${gateways.map((gateway) => gateway.id).join(', ')}`)
+  // One line at the boundary, not one per turn: a daemon that logs every turn is
+  // noise, and the turns are the users', not the operator's. The skill count is
+  // here because it is otherwise invisible — the index is built once at startup,
+  // so "is it reading my skills?" is a question only this line can answer.
+  console.error(
+    [
+      `${loaded.model} (${loaded.provider.id})`,
+      `mode ${runtime.permissions?.mode ?? 'ask'}`,
+      `effort ${runtime.reasoningEffort}`,
+      `${runtime.skills.length} skill${runtime.skills.length === 1 ? '' : 's'}`,
+      MILO_HOME,
+    ].join(' · '),
+  )
 
   const shutdown = async (): Promise<void> => {
     for (const gateway of gateways) {
