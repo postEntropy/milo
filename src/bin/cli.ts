@@ -87,6 +87,7 @@ async function runTui(
         standalone,
         initialMode,
         resumeId: args.resume,
+        continueSession: args.continueSession,
       }),
       {
         exitOnCtrlC: false,

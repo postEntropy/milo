@@ -125,6 +125,26 @@ describe('createRuntime', () => {
     await expect(on.close()).resolves.toBeUndefined()
   })
 
+  it('begins a new conversation on a new run, and keeps the one it left', async () => {
+    const cli = { gateway: 'cli', conversationId: 'restart' }
+
+    const run = createRuntime(loadedConfig('https://x.test/v1'), process.cwd())
+    const opened = await run.sessionFor(cli)
+    // The same run keeps talking in the conversation it opened.
+    expect((await run.sessionFor(cli)).id).toBe(opened.id)
+
+    // A restart is a second run over the same home, and it opens its own.
+    await run.close()
+    const restarted = createRuntime(loadedConfig('https://x.test/v1'), process.cwd())
+    const afterRestart = await restarted.sessionFor(cli)
+
+    expect(afterRestart.id).not.toBe(opened.id)
+    // What the closed run left behind is still on disk, to be resumed.
+    const listed = await restarted.listSessions()
+    expect(listed.some((entry) => entry.id === opened.id)).toBe(true)
+    await restarted.close()
+  })
+
   it('writes a turn to the history log of the home it was built for', async () => {
     vi.stubGlobal(
       'fetch',

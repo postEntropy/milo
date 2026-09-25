@@ -94,4 +94,43 @@ describe('Shell', () => {
 
     expect(app.lastFrame() ?? '').not.toContain('Save & exit')
   })
+
+  /**
+   * One `milo` launch, far enough to know which conversation it is in: the
+   * wizard hands over, and the header's first right-hand field is the session.
+   */
+  async function launch(continueSession: boolean): Promise<string> {
+    const app = render(
+      <Shell
+        initial={null}
+        cwd={home}
+        startScreen="chat"
+        continueSession={continueSession}
+        resumeId={undefined}
+      />,
+    )
+    app.stdin.write('\r')
+
+    const started = Date.now()
+    while (Date.now() - started < 2000) {
+      const match = /([a-z]+-[a-z]+-\d{1,3})/.exec(app.lastFrame() ?? '')
+      if (match) {
+        app.unmount()
+        // The runtime closes on unmount, and the next launch reads what it wrote.
+        await tick(40)
+        return match[1]!
+      }
+      await tick(20)
+    }
+    throw new Error('no session id in the header')
+  }
+
+  it('opens a new conversation on each run, and `--continue` picks the last one up', async () => {
+    const first = await launch(false)
+    const second = await launch(false)
+    expect(second).not.toBe(first)
+
+    // The way back to the conversation this terminal left, without `/resume`.
+    expect(await launch(true)).toBe(second)
+  })
 })

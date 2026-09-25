@@ -12,6 +12,7 @@ import {
   effortLockMessage,
   handleCommand,
   handleTurnControl,
+  memoryLockMessage,
   modeLockMessage,
   parseTurnControl,
   sessionLockMessage,
@@ -149,7 +150,7 @@ export class TelegramGateway implements Gateway {
     signal: AbortSignal,
   ): Promise<void> {
     const scope: MemoryScope = { gateway: 'telegram', conversationId: chatId }
-    const session = await this.options.runtime.getSession(scope)
+    const session = await this.options.runtime.sessionFor(scope)
 
     const display = readDisplay()
     let command: Awaited<ReturnType<typeof handleCommand>>
@@ -176,6 +177,9 @@ export class TelegramGateway implements Gateway {
         skills: () => this.options.runtime.skills,
         sessionStats: () => session.stats(),
         compactSession: () => session.compact(signal),
+        memories: (limit) => session.memories(limit),
+        forgetMemory: (id) => session.forget(id),
+        memoryLocked: memoryLockMessage(this.options.allowlist),
       })
     } catch (error) {
       // A command that throws must not swallow the message it was answering.

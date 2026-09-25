@@ -50,6 +50,22 @@ describe('AgentRuntime sessions', () => {
     expect(runtime.sessionCount).toBe(1)
   })
 
+  it('opens a conversation once per run, and a restart begins a new one', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+
+    // One run: the first message opens a conversation and the rest stay in it.
+    const run = new AgentRuntime(runtimeOptions(dir))
+    const opened = await run.sessionFor(cli)
+    expect((await run.sessionFor(cli)).id).toBe(opened.id)
+
+    // A restart is a second run over the same store: a new conversation, with the
+    // one left behind still there to resume.
+    const restarted = new AgentRuntime(runtimeOptions(dir))
+    const afterRestart = await restarted.sessionFor(cli)
+    expect(afterRestart.id).not.toBe(opened.id)
+    expect((await restarted.listSessions()).some((entry) => entry.id === opened.id)).toBe(true)
+  })
+
   it('starts a new session without losing the old one', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
     const runtime = new AgentRuntime(runtimeOptions(dir))

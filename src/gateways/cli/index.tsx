@@ -31,8 +31,13 @@ export interface ShellProps {
   startScreen?: 'chat' | 'model' | 'settings'
   standalone?: boolean
   initialMode?: PermissionMode
-  /** `milo --resume <id>`: open this session instead of the last one bound here. */
+  /** `milo --resume <id>`: open this session instead of starting a new one. */
   resumeId?: string
+  /**
+   * `milo --continue`: pick up the session this terminal last used. Without it
+   * the terminal begins a new one, and the last is still there in `/sessions`.
+   */
+  continueSession?: boolean
 }
 
 export function Shell({
@@ -42,6 +47,7 @@ export function Shell({
   standalone = false,
   initialMode,
   resumeId,
+  continueSession = false,
 }: ShellProps) {
   const { exit } = useApp()
   const { rows, columns } = useTerminalSize()
@@ -93,18 +99,25 @@ export function Shell({
         if (!cancelled) {
           setItems((previous) => [
             ...previous,
-            { kind: 'info', text: `No session "${resumeId}" — continuing the last one.` },
+            {
+              kind: 'info',
+              text: `No session "${resumeId}" — ${continueSession ? 'continuing the last one.' : 'starting a new one.'}`,
+            },
           ])
         }
       }
-      const session = await runtime.getSession(CLI_SCOPE)
+      // Opening the terminal begins a new conversation: the last one is on disk
+      // and `/sessions` still lists it. `--continue` is the way back to it.
+      const session = continueSession
+        ? await runtime.getSession(CLI_SCOPE)
+        : await runtime.sessionFor(CLI_SCOPE)
       if (!cancelled) setSessionId(session.id)
     }
     void resolve()
     return () => {
       cancelled = true
     }
-  }, [runtime, resumeId])
+  }, [runtime, resumeId, continueSession])
 
   // Push live settings edits into the existing policy.
   useEffect(() => {

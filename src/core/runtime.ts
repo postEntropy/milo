@@ -69,6 +69,8 @@ export class AgentRuntime {
   private readonly options: RuntimeOptions
   /** Recaps being written in the background; a switch never waits for them. */
   private readonly pendingRecaps = new Set<Promise<void>>()
+  /** Scopes this process has opened a session for; see `sessionFor`. */
+  private readonly opened = new Set<string>()
 
   constructor(options: RuntimeOptions) {
     this.options = options
@@ -96,6 +98,25 @@ export class AgentRuntime {
   /** Starts a fresh session and rebinds `scope` to it. */
   async newSession(scope: MemoryScope, title?: string): Promise<Session> {
     return this.createSession(scope, title)
+  }
+
+  /**
+   * The session for a conversation, opened fresh the first time this process
+   * sees it and reused after that.
+   *
+   * This is what a surface talks to. "Opening the CLI or restarting the daemon
+   * begins a new conversation" is a rule about a *run*, not about a scope, so it
+   * lives here rather than in each gateway — no caller can get it wrong, and the
+   * ones that mean "the conversation I am already in" keep using `getSession`.
+   *
+   * Nothing is lost by it: the session left behind stays on disk, is still
+   * listed by `/sessions` and is still `/resume`-able.
+   */
+  async sessionFor(scope: MemoryScope): Promise<Session> {
+    const key = scopeKey(scope)
+    if (this.opened.has(key)) return this.getSession(scope)
+    this.opened.add(key)
+    return this.newSession(scope)
   }
 
   /** Rebinds `scope` to an existing session; null when the id is unknown. */
