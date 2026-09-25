@@ -11,13 +11,16 @@ import {
   encodePermission,
   effortLockMessage,
   handleCommand,
+  handleTurnControl,
   modeLockMessage,
+  parseTurnControl,
   sessionLockMessage,
+  turnOf,
   displayLockMessage,
   type CommandResult,
 } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
-import { runTurn } from '../runner.js'
+import { runTurns } from '../runner.js'
 import { TurnQueue } from '../turns.js'
 import type { ChatSurface } from '../surface.js'
 import type { Gateway } from '../types.js'
@@ -32,6 +35,12 @@ export interface TelegramGatewayOptions {
 
 const ASK_TIMEOUT_MS = 5 * 60 * 1000
 const MAX_LENGTH = 4000
+
+/**
+ * Telegram's chat action expires after about five seconds and nothing renews it,
+ * so the indicator is refreshed just inside that window while a turn runs.
+ */
+const TYPING_REFRESH_MS = 4_000
 
 export class TelegramGateway implements Gateway {
   readonly id = 'telegram' as const
@@ -57,6 +66,10 @@ export class TelegramGateway implements Gateway {
         { command: 'yolo', description: 'Toggle yolo mode' },
         { command: 'clear', description: 'Forget this conversation' },
         { command: 'status', description: 'Show the current permission mode' },
+        { command: 'compact', description: 'Fold the oldest turns into the summary now' },
+        { command: 'stop', description: 'Stop the turn running now' },
+        { command: 'steer', description: 'Add to the turn running now: /steer <text>' },
+        { command: 'queue', description: 'Say it after this turn: /queue <text>' },
       ])
       .catch(() => undefined)
 
@@ -87,17 +100,26 @@ export class TelegramGateway implements Gateway {
         return
       }
 
+      // `/stop`, `/steer` and `/queue` are about the turn itself, so they are
+      // answered here rather than inside one: a `/stop` that waited for the turn
+      // it is meant to stop would arrive after it. Not awaited — the reply is one
+      // API call, and the turn it starts goes through the queue like any message.
+      if (parseTurnControl(text)) {
+        const result = handleTurnControl(text, {
+          turn: turnOf(this.turns, chatId),
+          start: (pending) => this.startTurn(bot, ctx, chatId, pending),
+        })
+        void this.reply(bot, ctx, chatId, result).catch(() => undefined)
+        return
+      }
+
       // A message sent while a turn is running is a correction: it joins that
       // turn at its next step boundary — after the tool call in flight — rather
       // than starting a second turn to race it over the same session. Commands
       // are never steered: they are not something to say to the model.
       if (!text.startsWith('/') && this.turns.steer(chatId, text)) return
 
-      // Deliberately not awaited. The turn blocks on the permission button
-      // below, and simple long polling handles updates one at a time, so
-      // awaiting it here would keep the button press queued behind the very
-      // turn waiting for it.
-      this.turns.run(chatId, (steering) => this.handleTurn(bot, ctx, chatId, text, steering))
+      this.startTurn(bot, ctx, chatId, text)
     })
 
     this.bot = bot
@@ -106,12 +128,25 @@ export class TelegramGateway implements Gateway {
       .catch((error: unknown) => console.error(`Telegram gateway stopped: ${errorMessage(error)}`))
   }
 
+  /**
+   * Puts `text` through the queue as a turn. Deliberately not awaited: the turn
+   * blocks on the permission button, and simple long polling handles updates one
+   * at a time, so awaiting it here would keep the button press queued behind the
+   * very turn waiting for it.
+   */
+  private startTurn(bot: Bot, ctx: Context, chatId: string, text: string): void {
+    this.turns.run(chatId, (steering, signal) =>
+      this.handleTurn(bot, ctx, chatId, text, steering, signal),
+    )
+  }
+
   private async handleTurn(
     bot: Bot,
     ctx: Context,
     chatId: string,
     text: string,
     steering: string[],
+    signal: AbortSignal,
   ): Promise<void> {
     const scope: MemoryScope = { gateway: 'telegram', conversationId: chatId }
     const session = await this.options.runtime.getSession(scope)
@@ -140,6 +175,7 @@ export class TelegramGateway implements Gateway {
         listSessions: () => this.options.runtime.listSessions(),
         skills: () => this.options.runtime.skills,
         sessionStats: () => session.stats(),
+        compactSession: () => session.compact(signal),
       })
     } catch (error) {
       // A command that throws must not swallow the message it was answering.
@@ -173,28 +209,22 @@ export class TelegramGateway implements Gateway {
       edit: async (_conversationId, messageId, value) => {
         await messenger.edit(chatId, Number(messageId), value).catch(() => undefined)
       },
-      ask: (_conversationId, _messageId, request) => this.ask(bot, chatId, request),
+      ask: (_conversationId, _messageId, request) => this.ask(bot, chatId, request, signal),
+      typing: () => this.typing(bot, chatId),
     }
 
-    try {
-      let pending = text
-      do {
-        await runTurn({
-          session,
-          conversationId: chatId,
-          text: pending,
-          surface,
-          maxLength: MAX_LENGTH,
-          display,
-          steering,
-        })
-        // A correction that arrived too late to be taken up was never seen by
-        // the model: it becomes the next turn instead of being dropped.
-        pending = steering.splice(0).join('\n\n')
-      } while (pending)
-    } catch (error) {
-      await ctx.reply(`[error] ${errorMessage(error)}`).catch(() => undefined)
-    }
+    const failure = await runTurns({
+      session,
+      conversationId: chatId,
+      text,
+      surface,
+      maxLength: MAX_LENGTH,
+      display,
+      steering,
+      signal,
+    })
+    // A stop is not a failure, and it is already on screen as "🛑 stopped".
+    if (failure) await ctx.reply(`[error] ${failure}`).catch(() => undefined)
   }
 
   /**
@@ -219,10 +249,30 @@ export class TelegramGateway implements Gateway {
     await ctx.reply(command.reply ?? '')
   }
 
-  private async ask(bot: Bot, chatId: string, request: PermissionRequest): Promise<boolean> {
+  /**
+   * The chat action that says Milo is working, kept alive until the returned
+   * function is called. Sent and forgotten: a turn must not fail, or slow down,
+   * because a status update did.
+   */
+  private typing(bot: Bot, chatId: string): () => void {
+    const keepAlive = (): void => {
+      void bot.api.sendChatAction(chatId, 'typing').catch(() => undefined)
+    }
+    keepAlive()
+    const timer = setInterval(keepAlive, TYPING_REFRESH_MS)
+    return () => clearInterval(timer)
+  }
+
+  private async ask(
+    bot: Bot,
+    chatId: string,
+    request: PermissionRequest,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
     const id = randomUUID()
+    let promptId: number | undefined
     try {
-      await bot.api.sendMessage(chatId, `⚠ Allow ${request.tool}?\n\n${request.summary}`, {
+      const prompt = await bot.api.sendMessage(chatId, `⚠ Allow ${request.tool}?\n\n${request.summary}`, {
         reply_markup: {
           inline_keyboard: [
             [
@@ -232,10 +282,20 @@ export class TelegramGateway implements Gateway {
           ],
         },
       })
+      promptId = prompt.message_id
     } catch {
       return false
     }
-    return this.pending.wait(id, ASK_TIMEOUT_MS)
+
+    const allowed = await this.pending.wait(id, ASK_TIMEOUT_MS, signal)
+    if (signal?.aborted && promptId !== undefined) {
+      // The id is spent, so a tap answers "Expired" — but the buttons should not
+      // be left there inviting a tap that a stopped turn must not honour.
+      await bot.api
+        .editMessageReplyMarkup(chatId, promptId, { reply_markup: { inline_keyboard: [] } })
+        .catch(() => undefined)
+    }
+    return allowed
   }
 
   async stop(): Promise<void> {

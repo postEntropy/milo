@@ -1,4 +1,5 @@
 import type { SessionsConfig } from './config/schema.js'
+import type { BrowserSession } from './browser/index.js'
 import type { HistoryWriter } from './history.js'
 import type { Memory, MemoryScope } from './memory/index.js'
 import { scopeKey } from './memory/index.js'
@@ -44,6 +45,14 @@ export interface RuntimeOptions {
   lookupContextWindow?: (model: string) => Promise<number | undefined>
   /** How hard the model should think; `medium` unless the config was changed. */
   reasoningEffort?: ReasoningEffort
+  /**
+   * The browser Milo drives, when one is configured. It is a process and a
+   * socket with a lifetime, so it is closed on the way out rather than left for
+   * the machine to reap.
+   */
+  browser?: BrowserSession | null
+  /** How many page snapshots a request may carry; from the browser's config. */
+  keepSnapshots?: number
 }
 
 /**
@@ -121,6 +130,21 @@ export class AgentRuntime {
 
   get sessionCount(): number {
     return this.cache.size
+  }
+
+  /**
+   * The way out: the recaps still being written, and the browser, if one was
+   * started. Safe to call more than once, and safe to call when a caller only
+   * ever wanted the recaps — `flush()` remains the seam for that.
+   */
+  async close(): Promise<void> {
+    await this.flush()
+    await this.options.browser?.close()
+  }
+
+  /** The browser Milo drives, when one is configured. */
+  get browser(): BrowserSession | null {
+    return this.options.browser ?? null
   }
 
   /** The skills on this install, for `/skills`. */
@@ -204,6 +228,10 @@ export class AgentRuntime {
       sessions: this.options.sessions,
       history: this.options.history,
       lookupContextWindow: this.options.lookupContextWindow,
+      keepSnapshots: this.options.keepSnapshots,
+      // A getter, so the prompt says what the browser is now rather than what it
+      // was when the runtime was built.
+      browser: () => this.browser?.facts() ?? null,
       // A getter, not the value: `/effort` changes what the next turn sends
       // without the runtime having to be rebuilt around it.
       reasoningEffort: () => this.reasoningEffort,

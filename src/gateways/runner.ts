@@ -2,7 +2,7 @@ import type { Session } from '../core/session.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
 import { errorMessage } from '../util/errors.js'
 import type { ChatSurface } from './surface.js'
-import { toolLabel, toolLine, toolStyle, type ToolLineStyle } from './tool-line.js'
+import { toolLabel, toolLine } from './tool-line.js'
 
 export interface RunTurnOptions {
   session: Session
@@ -28,6 +28,29 @@ const DEFAULT_FLUSH_MS = 900
 const REASONING_LIMIT = 200
 
 /**
+ * Runs a turn, and then whatever arrived too late to be read inside it: a
+ * correction the model never saw becomes the next turn rather than being dropped.
+ *
+ * After a stop there is nothing left to take up — the stop was the answer to
+ * everything sent by then — so the leftovers go with it. A stop is not a failure
+ * either, and is not returned; a turn that died of anything else is, for the
+ * surface to report in its own words and in its own place.
+ */
+export async function runTurns(options: RunTurnOptions): Promise<string | null> {
+  const { steering, signal, ...turn } = options
+  let pending = turn.text
+  try {
+    do {
+      await runTurn({ ...turn, text: pending, steering, signal })
+      pending = signal?.aborted ? '' : (steering?.splice(0).join('\n\n') ?? '')
+    } while (pending)
+  } catch (error) {
+    return signal?.aborted ? null : errorMessage(error)
+  }
+  return null
+}
+
+/**
  * Runs one turn against a chat surface: posts a placeholder, streams the answer
  * by editing it (throttled), surfaces tool activity on its own lines, and routes
  * permission requests to the surface's inline prompt.
@@ -38,6 +61,11 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   const display = options.display ?? DEFAULT_DISPLAY
 
   const messageId = await surface.post(conversationId, '…')
+  // The transport's own working indicator, kept on for as long as the turn runs.
+  // The wait before the first token is the longest part of a turn and a bare '…'
+  // does not say whether anything is happening. Stopped in the `finally` below,
+  // the failing turn included.
+  const stopTyping = surface.typing(conversationId)
   let output = ''
   let lastFlush = 0
   // Whether anything arrived in the answer channel, and how much came through
@@ -49,64 +77,40 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   // A blank line is what separates blocks in Markdown, where a single newline is
   // a soft break and gets collapsed into the same paragraph.
   let atLineEnd = false
-  let openBlock: ToolLineStyle | null = null
+  /** The kind of quote left open, so a run of tool lines can join it. */
+  let openQuote: 'tool' | 'quote' | null = null
   let reasoning = ''
-
-  /**
-   * What has been written, with any open code fence closed.
-   *
-   * Each edit is parsed as a message of its own, so one that ends inside an open
-   * fence is malformed Markdown — and a client that refuses it drops the whole
-   * message to plain text, after which even the finished answer shows its `**`
-   * and `>` as literals. A shell command streams well before its closing fence
-   * exists, which is exactly when that happens. Only what is *sent* is closed:
-   * the accumulator stays open, so the next line continues the same block.
-   */
-  const balanced = (): string => (openBlock === 'code' ? `${output}\n\`\`\`` : output)
 
   const flush = async (force = false): Promise<void> => {
     const now = Date.now()
     if (!force && now - lastFlush < flushMs) return
     lastFlush = now
-    await surface.edit(conversationId, messageId, clamp(balanced(), maxLength))
-  }
-
-  /** Closes a code fence, so the prose after it is never swallowed by the block. */
-  const closeBlock = (): void => {
-    if (openBlock === 'code') output += '\n```'
-    openBlock = null
+    await surface.edit(conversationId, messageId, clamp(output, maxLength))
   }
 
   /**
-   * One line of prose, or one line of its own inside a tool block.
+   * What a line is, and whether it joins the run of tool activity.
    *
-   * Only the line that *opens* a quote block carries `>`; repeating it on the
-   * lines inside makes Telegram show the marker as literal text. A block is also
-   * a single paragraph, and a newline inside a paragraph is a soft break: two
-   * tool lines in one quote reflow into a single sentence, which is how a search
-   * followed by a search read as "… preços web_search OpenAI new model release
-   * …". Every quote line therefore opens its own block. A code fence is not
-   * affected — it keeps both the breaks and the literals — so consecutive shell
-   * commands still share one.
+   * `tool` lines are one burst of work, so consecutive ones share the same quote
+   * — the model reading its own activity wants them together. A plain newline
+   * inside a quote is a *soft break* and the engine reflows the lines into one
+   * sentence ("… preços web_search OpenAI new model release …"), so the lines
+   * inside a shared quote are separated by a hard break instead. `quote` is a
+   * quoted line that is not part of that burst — a thought is the model talking,
+   * and folding it into the arguments of the call that followed it is how the two
+   * get read as one line.
    */
-  const appendLine = async (
-    line: string,
-    style: 'prose' | ToolLineStyle = 'prose',
-  ): Promise<void> => {
-    if (style === 'prose') {
-      closeBlock()
-      output += output === '' ? line : `\n\n${line}`
-    } else if (style === 'code' && openBlock === 'code') {
-      output += `\n${line}`
-    } else {
-      const wasEmpty = output === ''
-      closeBlock()
-      output += wasEmpty ? '' : '\n\n'
-      output += style === 'code' ? '```\n' : '> '
-      output += line
-      openBlock = style
-    }
+  type LineStyle = 'prose' | 'tool' | 'quote'
 
+  const appendLine = async (line: string, style: LineStyle = 'prose'): Promise<void> => {
+    if (style === 'prose') {
+      output += output === '' ? line : `\n\n${line}`
+    } else if (style === 'tool' && openQuote === 'tool') {
+      output += `  \n> ${line}`
+    } else {
+      output += output === '' ? `> ${line}` : `\n\n> ${line}`
+    }
+    openQuote = style === 'prose' ? null : style
     atLineEnd = true
     await flush(true)
   }
@@ -144,10 +148,12 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
           if (event.delta.trim()) answered = true
           await flushReasoning()
           if (atLineEnd) {
-            closeBlock()
             output += '\n\n'
             atLineEnd = false
           }
+          // The answer's own words end the run of tool activity: what follows is
+          // prose, and the next tool line starts a quote of its own.
+          openQuote = null
           output += event.delta
           await flush()
           break
@@ -155,18 +161,18 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
           await flushReasoning()
           if (display.tools === 'off') break
           // `name` shows which tool it is without the arguments beside it.
-          const line =
+          await appendLine(
             display.tools === 'name'
               ? toolLine(event.name, undefined, { markdown: true })
-              : toolLine(event.name, event.args, { markdown: true })
-          await appendLine(line.text, line.style)
+              : toolLine(event.name, event.args, { markdown: true }),
+            'tool',
+          )
           break
         }
         case 'tool-end':
           // A failure is always reported: hiding it is worse than the noise.
           if (event.isError) {
-            const style = toolStyle(event.name)
-            await appendLine(`❌ ${toolLabel(event.name, style, true)} failed`, style)
+            await appendLine(`❌ ${toolLabel(event.name, true)} failed`, 'tool')
           }
           break
         case 'waiting':
@@ -196,10 +202,11 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
     }
   } catch (error) {
     await appendLine(`[error] ${errorMessage(error)}`)
+  } finally {
+    stopTyping()
   }
 
   await flushReasoning()
-  closeBlock()
   // Nothing came back in the answer channel while the thinking channel had
   // content, and the display hid it: a chat that says nothing reads as the bot
   // being broken, when it is the provider putting both channels in one field.

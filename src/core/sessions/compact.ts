@@ -1,10 +1,12 @@
-import type { Message, Provider, ReasoningEffort } from '../providers/types.js'
+import type { Message, Provider, ReasoningEffort, ToolResultPart } from '../providers/types.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
+import { IMAGE_TOKENS } from '../images.js'
 
 /** Rough token estimate. Cheap on purpose: no tokenizer, ~4 chars per token. */
 export function estimateTokens(messages: Message[]): number {
   let chars = 0
+  let images = 0
   for (const message of messages) {
     for (const part of message.content) {
       switch (part.type) {
@@ -13,6 +15,7 @@ export function estimateTokens(messages: Message[]): number {
           break
         case 'tool-result':
           chars += part.content.length
+          images += part.images?.length ?? 0
           break
         case 'tool-call':
           chars += part.name.length + safeJson(part.args).length
@@ -23,7 +26,9 @@ export function estimateTokens(messages: Message[]): number {
       }
     }
   }
-  return Math.ceil(chars / 4)
+  // Pictures are priced by the pixel, not by their base64 length, and they are
+  // the one part of a transcript that can be megabytes without any text in it.
+  return Math.ceil(chars / 4) + images * IMAGE_TOKENS
 }
 
 /** The same rough estimate for a plain string — a system prompt, say. */
@@ -47,6 +52,85 @@ export function planCut(messages: Message[], keepTurns: number): number {
   })
   if (userIndexes.length <= keepTurns) return 0
   return userIndexes[userIndexes.length - keepTurns]!
+}
+
+/**
+ * How many pictures stay in the transcript. Each one is ~1500 tokens and rides
+ * every later request until it is dropped, so a long session of them would
+ * otherwise carry every picture to the end — which is exactly the prefill that
+ * makes a loop like that slow.
+ */
+export const KEEP_IMAGES_IN_CONTEXT = 4
+
+/**
+ * Forgets the pictures in tool results older than the last `keep`. The tool
+ * result keeps saying what happened; only the picture goes, replaced by a line
+ * saying it was dropped — a transcript that silently lost a screenshot would
+ * read as a tool that returned nothing.
+ *
+ * Idempotent: the images are removed, so a second pass finds nothing to drop and
+ * appends nothing.
+ */
+export function dropOldImages(messages: Message[], keep = KEEP_IMAGES_IN_CONTEXT): void {
+  let seen = 0
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (!message) continue
+    for (const part of message.content) {
+      if (part.type !== 'tool-result' || !part.images?.length) continue
+      seen += part.images.length
+      if (seen <= keep) continue
+      delete part.images
+      part.content = `${part.content}\n[screenshot dropped to keep the request small]`
+    }
+  }
+}
+
+/**
+ * How many page snapshots stay in the transcript, verbatim. A snapshot is the
+ * page as a list of elements — a few hundred to a few thousand tokens of it —
+ * and a browser task looks at the page after every action. Kept, they would ride
+ * every later request of the turn: ten clicks, one page's worth of prefill ten
+ * times over. That is the dominant cost of the whole feature.
+ */
+export const KEEP_SNAPSHOTS_IN_CONTEXT = 2
+
+/**
+ * Only a result this long is worth trimming. A tool result that is a line —
+ * "clicked r7", or an action taken without looking afterwards — says everything
+ * it has to say in the line, and rewriting it would lose information to save
+ * nothing.
+ */
+const SNAPSHOT_CHARS = 500
+
+/**
+ * Forgets the body of page snapshots older than the last `keep`, keeping the
+ * line that says what happened and where. The transcript stops carrying ten
+ * copies of the same page's element list while still reading as a sequence of
+ * actions someone could follow.
+ *
+ * Idempotent, in the same way as `dropOldImages`: the first line is still the
+ * first line, so a second pass writes what the first one wrote.
+ */
+export function dropOldSnapshots(messages: Message[], keep = KEEP_SNAPSHOTS_IN_CONTEXT): void {
+  if (keep < 0) return
+  const snapshots: ToolResultPart[] = []
+  for (const message of messages) {
+    for (const part of message.content) {
+      if (part.type !== 'tool-result' || !isSnapshot(part.name)) continue
+      if (part.content.length <= SNAPSHOT_CHARS) continue
+      snapshots.push(part)
+    }
+  }
+  for (const part of snapshots.slice(0, Math.max(0, snapshots.length - keep))) {
+    const headline = part.content.split('\n', 1)[0] ?? ''
+    part.content = `${headline}\n[page snapshot dropped to keep the request small — take a fresh look if you need it]`
+  }
+}
+
+/** The tools that answer with the page as it is, and whose answers are big. */
+function isSnapshot(name: string): boolean {
+  return name === 'browser_open' || name === 'browser_snapshot' || name === 'browser_act'
 }
 
 export interface SummarizeOptions {
@@ -210,7 +294,8 @@ function renderTranscript(messages: Message[]): string {
       if (part.type === 'tool-call') {
         lines.push(`Tool call: ${part.name}(${safeJson(part.args)})`)
       } else if (part.type === 'tool-result') {
-        lines.push(`Tool result (${part.name}): ${truncate(part.content, 600)}`)
+        const pictures = part.images?.length ? ` [+${part.images.length} screenshot]` : ''
+        lines.push(`Tool result (${part.name}): ${truncate(part.content, 600)}${pictures}`)
       }
     }
   }

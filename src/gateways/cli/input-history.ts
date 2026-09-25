@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { MILO_HOME, inputHistoryFile } from '../../core/config/paths.js'
 import { errorMessage } from '../../util/errors.js'
-import { writeFileAtomic } from '../../util/fs.js'
+import { ensurePrivateDir, writePrivateFile } from '../../util/fs.js'
 import { logWarn } from '../../util/log.js'
 
 /**
@@ -35,8 +35,8 @@ export function readInputHistory(): string[] {
  */
 export async function saveInputHistory(entries: string[]): Promise<void> {
   try {
-    mkdirSync(MILO_HOME, { recursive: true })
-    await writeFileAtomic(inputHistoryFile(), `${JSON.stringify(entries, null, 2)}\n`)
+    ensurePrivateDir(MILO_HOME)
+    await writePrivateFile(inputHistoryFile(), `${JSON.stringify(entries, null, 2)}\n`)
   } catch (error) {
     logWarn(`could not write ${inputHistoryFile()}: ${errorMessage(error)}`)
   }

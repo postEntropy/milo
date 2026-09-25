@@ -1,6 +1,7 @@
 import path from 'node:path'
 import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
-import { memoryDir, recapsDir, sessionsDir, skillsDir } from './config/paths.js'
+import { BrowserSession } from './browser/index.js'
+import { browserProfileDir, memoryDir, recapsDir, sessionsDir, skillsDir } from './config/paths.js'
 import { readAuth, resolveSearchKey, type LoadedConfig } from './config/load.js'
 import { fileHistory } from './history.js'
 import { createMemory } from './memory/index.js'
@@ -11,6 +12,7 @@ import { FileRecapStore, FileSessionStore } from './sessions/index.js'
 import { createSearchProvider } from './search/index.js'
 import { discoverSkills, ensureSkillsDir } from './skills/index.js'
 import { createJevReviewer } from './tools/jev.js'
+import { resolveToolPath } from './tools/walk.js'
 import {
   DefaultPermissionPolicy,
   createToolRegistry,
@@ -33,11 +35,29 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     { dir: path.join(cwd, '.milo', 'skills'), source: 'project' },
   ])
 
+  // Only built when the feature is on: the browser is a process with a lifetime
+  // and three tools in the catalog, and neither should exist for an install that
+  // never asked for one. Nothing is started here — the first browser call does.
+  const browser = loaded.config.browser.enabled
+    ? new BrowserSession({
+        chromePath: loaded.config.browser.chromePath,
+        // Its own unless one was named — and a named one is expanded like every
+        // other path Milo takes, so `~/profiles/chrome-copy` means what it says.
+        profileDir: loaded.config.browser.profileDir
+          ? resolveToolPath(cwd, loaded.config.browser.profileDir)
+          : browserProfileDir(),
+        headless: loaded.config.browser.headless,
+        cdpUrl: loaded.config.browser.cdpUrl,
+      })
+    : null
+
   return new AgentRuntime({
     provider: createProvider(loaded.provider, loaded.model),
     model: loaded.model,
     system: loaded.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
-    registry: createToolRegistry({ search, skills }),
+    registry: createToolRegistry({ search, skills, browser }),
+    browser,
+    keepSnapshots: loaded.config.browser.keepSnapshots,
     memory: createMemory(loaded.config.memory, memoryDir()),
     store: new FileSessionStore({ dir: sessionsDir() }),
     recaps: new FileRecapStore({ dir: recapsDir() }),

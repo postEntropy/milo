@@ -23,12 +23,28 @@ export interface ToolCallPart {
   args: unknown
 }
 
+/** What every provider here accepts inline; anything else has to be converted first. */
+export type ImageMime = 'image/png' | 'image/jpeg'
+
+/**
+ * A picture kept beside the transcript instead of inside it: the bytes live in
+ * `~/.milo/images/` and the part carries the path. A screenshot is megabytes of
+ * base64, and the session file is rewritten on every turn — inlining it would
+ * make saving a session cost more than the model call that produced it.
+ */
+export interface ImageRef {
+  mimeType: ImageMime
+  path: string
+}
+
 export interface ToolResultPart {
   type: 'tool-result'
   id: string
   name: string
   content: string
   isError?: boolean
+  /** Pictures to show the model with this result. The wires inline them from disk. */
+  images?: ImageRef[]
 }
 
 export type ContentPart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart

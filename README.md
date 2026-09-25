@@ -70,14 +70,17 @@ slow" has no answer beyond a guess; with it, the wait says what it was spent on.
 ## Configuration
 
 - `~/.milo/config.json` — provider, model, `maxTokens`, reasoning effort, memory backend, session
-  settings, display,
-  permissions and enabled gateways.
+  settings, display, permissions, browser and enabled gateways.
 - `~/.milo/auth.json` — API keys and bot tokens (written `0600`).
 - `~/.milo/input-history.json` — what was typed at the CLI's prompt, for `↑`/`↓`.
 - `~/.milo/sessions/` — one JSON file per session, plus one binding file per address and one recap
   per session that has been left behind (see below).
 - `~/.milo/memory/` — one JSON file per conversation scope.
 - `~/.milo/skills/` — one `<name>/SKILL.md` per skill (see [Skills](#skills)).
+- `~/.milo/browser/` — the browser's own profile (`profile/`), a downloaded Chrome (`chrome/`) when
+  one was, and profiles copied out of a browser you use (`profiles/`). Not the browser you use (see
+  [Browser](#browser)).
+- `~/.milo/exports/` — conversations written out by `/export`, one file each (`0600`).
 
 A corrupt `config.json` is reported at startup rather than swallowed, but the settings a running
 conversation changes (`/mode`, `/tools`, `/thinking`) read it defensively: a file that cannot be
@@ -118,20 +121,23 @@ npm run serve
 ```
 
 Each conversation maps to its own session and memory scope (`telegram:<chatId>`,
-`discord:<channelId>`). Replies stream by editing one message; tool activity is grouped into blocks —
-a **code block** for shell commands, with the command itself, and a **quote box** for searches and
-file reads. Every tool line opens with an emoji, never a typographic glyph (these are read in chat
-clients), the tool **name is bold** so it does not read as the first word of its own arguments, and a
-tool that fails adds `❌ <name> failed` to the same block. Names stay unemphasised inside the code
-blocks, where Markdown is literal and the asterisks would simply show.
+`discord:<channelId>`). Replies stream by editing one message; tool activity becomes one line per
+call — a **quote box** with the tool's icon, its name and the one value worth showing, whether that
+is a search query, a file path or a shell command. Every tool line opens with an emoji, never a
+typographic glyph (these are read in chat clients), and the tool **name is bold** so it does not read
+as the first word of its own arguments; a tool that fails adds `❌ <name> failed` as another line of
+the same shape. The command used to go in a fenced code block of its own, and that block was the odd
+one out: the name inside it could not be emphasised, and the command in it is truncated to 120
+characters like every other detail, so copying it out copied something incomplete.
 
-**Why each line gets its own block.** A quote block is a single paragraph, and a newline inside a
-paragraph is a *soft break* — so two tool lines in one quote reflow into a single sentence, which is
-how a search followed by a search read as "… preços web_search OpenAI new model release …". Every
-quote line therefore opens its own block, and a thought (`💭 …`) is one of them: the thought is the
-model talking, the arguments are data, and they are not the same thing. A code fence is not affected
-— it keeps both the line breaks and the literals — so consecutive shell commands still share one
-fence.
+**Why a run of tool lines shares one quote.** A tool call is one burst of work, and the model's own
+activity reads better together. A quote is a single paragraph, though, and a newline inside a
+paragraph is a *soft break* — so the lines inside the shared quote are separated by a **hard break**
+(two spaces before the newline), which is what keeps two calls from reflowing into one sentence
+("… preços web_search OpenAI new model release …"). A thought (`💭 …`) is quoted too, but never joins
+that run: the thought is the model talking, the arguments are data, and they are not the same thing.
+The terminal draws the same lines — same icons, same one-value gist, and no box of its own for the
+shell.
 
 On Telegram the answer goes out as a **rich message** (Bot API 10.1+), so Markdown renders —
 headings, lists, tables, code blocks — falling back to plain text if the API refuses it.
@@ -154,11 +160,41 @@ fails closed for everyone else, and a blocked sender is told their own id so you
 `milo setup` → Gateways walks through token → access → enable. The allowlist is read when
 `milo serve` starts, so restart it after changing it.
 
-Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/stats`, `/skills`,
+Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/stats`, `/compact`, `/export`,
+`/skills`,
 `/mode ask|auto|yolo`, `/yolo`, `/tools full|name|off`, `/thinking on|off`, `/effort low|medium|high`,
 `/clear`, `/status`. A mode change from a chat is written to `config.json` like any other,
 so it survives a restart of `milo serve`; sessions are written to `~/.milo/sessions/` and survive it
 too. Provider and key changes happen in `milo setup` on the terminal side.
+
+Three of them are about the turn rather than about the session, so they are answered **outside** the
+queue — a `/stop` that waited for the turn it is meant to stop would arrive after it:
+
+| Command | What it does |
+| --- | --- |
+| `/stop` | Aborts the turn running now, and drops anything queued behind it. A message sent after that runs normally, so this is "that was not what I wanted" rather than a kill switch. |
+| `/steer <text>` | Hands the text to the turn running now; it is read at its next step. Same thing a plain message does — the explicit form, for when you want to be sure. |
+| `/queue <text>` | Says it as its own turn, after the one running now. The one way to say something *after* the answer instead of into it. |
+
+`/compact` is a session command, so it does queue like one: it folds the oldest turns into the
+summary on demand, keeping the same `keepTurns` the automatic pass keeps, and says how many turns it
+folded and what they held — or that there was nothing old enough to fold, which is the common answer
+and not the same one as a compaction that worked. If the summary call fails the turns go anyway (a
+request that fits beats one the provider rejects) and the reply says so rather than pretending a
+summary exists.
+
+The terminal has the same four commands, because they are the names for what it already does with
+modifier keys: `/stop` is Ctrl+C, `/steer` is Ctrl+Enter, `/queue` is Enter-during-a-turn — same
+rules, same wording, and `/stop` throws away exactly what Ctrl+C throws away, down to the count it
+reports when the turn is over. What is shared is the vocabulary and the decision of *where a text
+goes* (`src/gateways/commands.ts`); each surface binds it to its own machinery — a `TurnQueue` in the
+bots, refs in the CLI — so the two cannot drift into different meanings for the same word.
+
+`/stop` is immediate and asks nothing: a control command is not a tool, so no confirmation gate
+applies to it in any mode, and it is answered **outside** the queue. It also takes a pending
+permission prompt down with it — the wait resolves as a **denial**, because the alternative is a turn
+parked on a button for five minutes with a ✅ still able to allow the tool the stop was meant to
+prevent.
 
 Both bots are thin shells over one transport-agnostic runner (`src/gateways/runner.ts`) plus a
 `ChatSurface` interface, so the turn logic — streaming, tool lines, permission routing, truncation
@@ -174,10 +210,18 @@ denied tool. The queue also stops two turns from mutating the same session at on
 A message sent while a turn is **running** is handed to that turn instead of starting a second one:
 it is taken up at the next step boundary, after the tool call in flight, so a correction reaches the
 model without a second turn racing the first over the same session. A chat surface has no
-`Ctrl+Enter`, so this is what a bot does with both — the CLI asks, because there it can. Commands are
-never steered: `/new` is not something to say to the model, so it waits its turn like a message
-would. A message that lands in the gap between two turns becomes a turn of its own rather than being
-dropped, and so does a correction the model never got to see.
+`Ctrl+Enter`, so this is what a bot does with both — the CLI asks, because there it can; `/steer` and
+`/queue` are how a chat says which of the two it means. Commands are never steered: `/new` is not
+something to say to the model, so it waits its turn like a message would. A message that lands in the
+gap between two turns becomes a turn of its own rather than being dropped, and so does a correction
+the model never got to see — except after a `/stop`, where the stop was the answer to everything sent
+by then.
+
+The queue is also what can stop a turn, which is why it owns the abort handle: an `AbortController`
+per conversation, aborted by `/stop`, with the signal threaded through `runTurn` → `session.send` →
+provider and tools, and its epoch bumped so the turns queued before the stop are skipped when their
+turn comes. A stop is not a failure: `session.send` turns a cancelled stream into an `aborted` event,
+so the message ends with `🛑 stopped` instead of a red `AbortError`.
 
 ## Tools
 
@@ -194,8 +238,12 @@ dropped, and so does a correction the model never got to see.
 | `recall` | yes | Which past session a question is about, and what it was about. |
 | `search_history` | yes | Term search over Milo's own past turns, reasoning and tool calls included. |
 | `web_search` | yes | Registered only when a search provider is configured. |
-| `skill` | yes | Loads a skill's instructions on demand; registered only when a skill is installed. |
+| `read_skill` | yes | Loads a skill's instructions on demand; registered only when a skill is installed. |
 | `task` | — | Runs a subtask in its own context; only the report comes back. Only on request; never asks itself. |
+| `browser_open` | yes | Opens an http(s) URL and returns the page as numbered elements. Only when the browser is on. |
+| `browser_snapshot` | yes | The current page again: its elements, its text, or a picture of the viewport for the model to look at. |
+| `browser_screenshot` | no | A picture of the viewport written to a file, so the person can open it. Asks, because it writes. |
+| `browser_act` | no | Click, double-click, type, press, hover, scroll, choose, upload — and the page afterwards, in the same call. |
 | `shell_command` | no | Runs with `/bin/sh`; asks for confirmation first. |
 
 Read-only tools never ask for confirmation, so exploring is free: `list_dir`, `glob` and `grep`
@@ -291,6 +339,151 @@ the same rule, since the display is one value for the whole install too.
 
 The `auto` reviewer only exists where the decision model does — a Command Code provider. Anywhere
 else, `auto` degrades to `ask`.
+
+### Browser
+
+A real Chromium over the DevTools protocol, driven through the page's own DOM. Not a picture of a
+browser and not a desktop: no screen session is involved, and the ordinary path pays for no pixels
+at all.
+
+It is **off until it is turned on** — `milo setup` → **Tools** → **Browser**, or
+`"browser": { "enabled": true }` in the config. Off means the three tools are not in the catalog at
+all, so the model never sees a tool it has nothing to use on.
+
+**Any Chromium will do**, and the setup screen lists the ones it found. `milo setup` → Tools →
+Browser → **Browser to run** enumerates the favourites — Chromium, Chrome, Brave, Edge, Vivaldi,
+Opera, and forks like Helium — from `PATH`, from `/opt`, and from the places each platform keeps
+them, de-duplicated so `/usr/bin/chromium` and the binary it points at are one row rather than two.
+Firefox is not on that list and will not be: it speaks WebDriver BiDi, so it would need a driver of
+its own. `browser.chromePath` names one directly. When the machine has none, the same screen
+downloads a [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/) build into
+`~/.milo/browser/chrome/` — an archive, no installer, no sudo, and the same on every platform.
+`apt install chromium` works too.
+
+**Three tools, split by side effect.** `browser_open` (a URL) and `browser_snapshot` (the page again)
+are read-only, so looking around never asks. `browser_act` clicks, double-clicks, types, presses,
+hovers, scrolls, chooses and uploads, and it is the one that asks — because clicking is where the side effect actually
+happens. There is no `navigate` action inside it: two ways to change page would be two names for one
+thing.
+
+**What the model is shown** is what decides whether it picks the right element:
+
+```
+https://example.com/checkout — "Checkout — Example"
+h1: Your order
+(400 characters of the page's own words)
+
+r4   textbox   "Search"
+r5   link      "Item 0"
+r6   combobox  "Choose Small"
+r7   button    "Go"
+r8   textbox   "Password"             [required]  <password field — Milo does not fill this>
+(… 34 more — use mode "text" to see more of the page)
+```
+
+Not the HTML, which is mostly markup to read past, and not a screenshot, which costs ~1500 tokens of
+prefill on every step after it and carries no element identity — so acting on one is guessing at
+coordinates. A role, a name and a state per element, numbered, is enough for "click r7" to be a
+complete instruction.
+
+A picture is the one thing that has to be asked for by name, and there are **two** of them because
+they are two different acts:
+
+- `browser_snapshot` with `mode: "shot"` **reads** — the image comes back to the model, for the pages
+  whose content is only pixels. Read-only, so it never asks.
+- `browser_screenshot` **writes** a picture to a path, for the person: the terminal does not render an
+  image, so a file is the only way one reaches them. It asks, in the modes that ask, because writing
+  to a path is what asking is for.
+
+They were one tool for an afternoon, and that was wrong in a way worth writing down: the write was
+sitting inside a tool marked `readOnly`, so the permission policy — which reads exactly that flag —
+let a screenshot to `~/.bashrc` through without a word. Two acts with different consequences are two
+tools, which is why this codebase has `read_file` and `write_file` as well.
+
+**A ref is good for one look.** Acting on one from an earlier look is refused rather than guessed at,
+and every action already hands back the page as it is afterwards, so a fresh look is rarely a
+separate call. The numbers count **up across the session** instead of restarting at one: numbering
+from one each time would make `r2` always *some* element — the second one on whatever page is up now
+— and a ref held from two looks ago would quietly click something else. Counting on, an old ref is
+simply absent, and saying so is the only honest answer.
+
+**The action and the observation in one call.** This is the shape the whole feature is built around:
+an N-action task costs N tool calls plus one answer, not 2N. Measured with `npm run bench:browser`,
+which serves its own page so the numbers do not depend on the network:
+
+| | p50 | |
+| --- | --- | --- |
+| Chrome cold start | 317 ms | once per process, not per action |
+| `browser_open` | 310 ms | a page load |
+| `browser_snapshot` | **4 ms** | one CDP round trip, ~380 tokens of page |
+| `browser_act` | **10 ms** | the action alone |
+| `browser_act` + the look | 158 ms | the action, a 150 ms settle, and the observation |
+
+Those are *local* numbers; the model round trip is seconds and is the same whether this feature exists
+or not. The 150 ms settle is 94% of the second of those and is kept deliberately: looking at a page
+the instant it was clicked shows the state before the click, and the model pays a whole extra round
+trip — seconds — to find that out.
+
+**The look is also what costs.** A snapshot rides every request that follows it, so ten actions would
+otherwise carry ten copies of the same page's element list. `dropOldSnapshots` keeps the two most
+recent and trims the rest to the line that says what happened, in the same in-place way
+`dropOldImages` already did — and, unlike compaction, it runs **before every request inside a turn**,
+because a turn makes up to 25 of them. Measured on a five-action task, the last request is 1,650
+tokens unbounded and 740 with the rule. `browser.keepSnapshots` changes the two.
+
+**Guardrails.** Milo starts a browser **of its own**, on `~/.milo/browser/profile/`, so cookies and
+sign-ins survive a restart without the browser you are actually using ever having remote debugging
+switched on. Attaching to one that is already running is opt-in (`browser.cdpUrl`), and the result
+says which it used. Nothing on a page is an instruction: text telling the model to do something is a
+finding to report. And `browser_act` **refuses** to fill a password, card or one-time-code field,
+which is the one rule enforced at the point of the action rather than asked about — the person signs
+in, does 2FA and pays themselves.
+
+**Reaching logged-in accounts.** `milo setup` → Tools → Browser → **Profile** does this, and it is
+worth knowing what it is doing, because two things stop the obvious version from working:
+
+- **A profile cannot be shared with a browser that is already open on it.** Chrome refuses to start a
+  second time against a directory in use, so "use my profile while I browse" is not a thing. The
+  screen copies instead: pick the browser you are signed into, and the copy lands in
+  `~/.milo/browser/profiles/<browser>/` with `browser.profileDir` pointing at it. Pick it again to
+  refresh a copy that has gone stale.
+- **Chrome 136 and later ignore `--remote-debugging-port` when the data directory is the browser's
+  own default one**, and say nothing about it: the port file is simply never written, which looks
+  exactly like Milo being broken. The setup screen spots a default profile path and says so in red
+  rather than letting you find out at launch.
+
+The copy is **selective**, which is what makes it quick: on the machine this was written on, 334 MB
+of a 564 MB profile was `Service Worker` cache and the parts that carry a sign-in were 58 MB, copied
+in 169 ms. It takes `Cookies`, `Local State`, `Preferences`, and the `Local Storage` and `IndexedDB`
+that single-page apps keep their tokens in — because a session is not only cookies — and leaves every
+cache behind. It is also tightened to `0600` on the way in, whatever the source's modes were: these
+are session cookies.
+
+The route that needs no copy is `browser.cdpUrl`: start your browser with remote debugging reachable
+(the `chrome://inspect/#remote-debugging` checkbox is the sanctioned switch, and the only one that
+works on a real profile since 136), point `cdpUrl` at `host:port`, and Milo opens a tab of its own in
+the browser you are already signed into. Or simply sign in to Milo's own profile once with **Window**
+set to `visible` — it is kept, so tomorrow it is still signed in.
+
+```json
+{ "browser": { "enabled": true, "headless": true, "keepSnapshots": 2 } }
+```
+
+`chromePath` names a binary instead of searching `PATH`, `profileDir` a profile instead of its own,
+and `cdpUrl` attaches to a browser already running. The setup screen is where the state is visible:
+**Tools** says `web search exa · browser` once either is set up, and its two rows carry the real
+status. `milo serve` adds `browser headless` or `browser off` to its one boot line, because a
+capability that only exists in a daemon's tool catalog is otherwise invisible. Like `web_search`, it
+is deliberately not a badge in the CLI header: it is an install-wide capability, not a per-turn knob,
+and a badge for a feature most installs never turn on is noise.
+
+**Where the setup screen puts things.** `Tools` holds the optional *capabilities* — web search and
+the browser, one row each, off unless set up — because that is the question the section answers:
+which tools does this install have? `Permissions` holds the *policy* for running them (`ask`/`auto`/
+`yolo`, the allow and deny lists, the reviewer threshold). They were one screen called
+"Tools & permissions" and it was the wrong shape: the policy applies to every tool in the same way
+whichever capabilities are installed, while a capability is on or off by itself. Splitting them also
+gives the third and fourth capability somewhere to go.
 
 ### Display
 
@@ -426,13 +619,25 @@ It prints p50/p95 latency and P(dangerous) per sample command. Identical command
 an in-memory LRU, so a repeated command costs nothing; a request that exceeds `jevTimeoutMs` is
 aborted and falls back to asking.
 
+`npm run bench:browser` does the same job for the browser toolset — the measured numbers in
+[Browser](#browser) come from it. It serves its own page, so it needs no network and measures the
+same thing on every machine.
+
+`npm run check:browser` is its counterpart, and it checks the other thing: one run per verb in the
+toolset, each on a fresh page, asserting that the **page reacted** — the form submitted, the file
+arrived, the hover fired — rather than that the call returned without an error. It exists because
+`upload`, `hover` and `double_click` sat in the schema for days having never been run, and because
+`click` itself was missing from the first version of the check: a vocabulary of verbs nobody has
+exercised only looks closed. Both scripts need a browser and are not in CI.
+
 ### Web search
 
 ```json
 { "search": { "provider": "exa" } }
 ```
 
-Three providers behind one interface; `milo setup` → Web search picks one and asks for its key.
+Three providers behind one interface; `milo setup` → **Tools** → **Web search** picks one and asks for
+its key.
 
 | Provider | Free tier | Latency | What comes back |
 | --- | --- | --- | --- |
@@ -593,6 +798,22 @@ results as well — which is what makes "what did we try for X?" answerable. Pas
 inside one conversation; `recall` is what names it. The reply is capped and says when there were more
 matches than it showed.
 
+### Taking a conversation out
+
+`/export` writes the current conversation to `~/.milo/exports/` — Markdown by default, `/export json`
+for the entries themselves — and replies with the path, the counts and the size. It is the whole log:
+every message, every tool call with its arguments and its **full** result, and the reasoning, in the
+order it happened.
+
+It reads the **history log**, not the session's transcript, and that is the point. A transcript is
+compacted as it grows and its old screenshots are dropped, so exporting it would export what is left
+rather than what happened; the log is the complete record and it is what the export is for. A session
+that has not had a turn yet exports nothing, and says so rather than writing an empty file.
+
+This is also the answer to "what actually happened in that turn?" — the log has the tool arguments
+and the results verbatim, including the ones that failed, which is not something the transcript
+guarantees.
+
 `recall` answers the other half of the same question — not *what* was said but *which conversation*.
 It ranks the saved sessions by how well their recap, title and first words match the query, with a
 recency bonus allowed to reorder but never to qualify: a session that shares no word with the
@@ -657,8 +878,8 @@ what the model sees, so a skill without one is skipped rather than indexed under
 judge.
 
 Only the **index** — each skill's name and its one-line description — rides along with every
-request; the instructions are loaded by the `skill` tool **only when a task matches**, and that tool
-is not registered at all when no skill is installed. Inlining every skill's body into the system
+request; the instructions are loaded by the `read_skill` tool **only when a task matches**, and that
+tool is not registered at all when no skill is installed. Inlining every skill's body into the system
 prompt instead would be a tax on every turn for procedures most turns never use, which is the whole
 reason for the split.
 
@@ -727,6 +948,8 @@ npm run typecheck   # tsc --noEmit
 npm run lint        # biome lint
 npm test            # vitest
 npm run build       # bundle to dist/ (tsup)
+npm run bench:browser   # what the browser toolset costs (needs a browser)
+npm run check:browser   # that every verb in it works (needs a browser)
 ```
 
 CI (`.github/workflows/ci.yml`) runs lint, types, tests with coverage and the build on every push
@@ -743,7 +966,9 @@ worth knowing: with `NODE_ENV=production` exported in your shell, npm treats eve
   - `tools/` — `Tool` interface, registry (zod → JSON Schema), built-in tools.
   - `search/` — `SearchProvider` plus the Tavily, Exa and Parallel adapters.
   - `memory/` — `Memory` interface + `FileMemory`.
-  - `skills/` — `SKILL.md` discovery, frontmatter parsing, and the loader behind the `skill` tool.
+  - `skills/` — `SKILL.md` discovery, frontmatter parsing, and the loader behind the `read_skill` tool.
+  - `browser/` — the CDP client, finding and starting Chrome, copying a profile out of another
+    browser, the page observer, and the three tools.
   - `sessions/` — `SessionStore` interface + `FileSessionStore` / `MemorySessionStore`, the recaps
     kept out of a transcript (`RecapStore`) and their ranking (`rankSessions`), nickname
     generation, compaction (`estimateTokens` / `planCut` / `summarize`) and `/stats` formatting.
@@ -783,3 +1008,10 @@ Known open work, roughly in order:
    `sessions.contextWindow` covers the rest by hand. A local model served by Ollama or llama.cpp
    could answer for itself — `/api/show`, `/props` — which would beat asking the user to type the
    number.
+9. **A fast step-decider for the browser.** Every action costs one model round trip today, and the
+   tool is the single point where that decision is made — which is exactly where a decider that picks
+   the next step in ~0.4 s instead (the `typesafe/jev` idea) would go, without redrawing anything.
+   The closed shadow root is not on this list: it cannot be reached from outside a page at all, so it
+   is a limitation of the browser rather than work Milo has left.
+10. **Remote desktops.** A cloud machine or a local VM, driven instead of this machine, so anything
+    a browser cannot reach still has somewhere to run.

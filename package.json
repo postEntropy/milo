@@ -19,7 +19,9 @@
     "lint": "biome lint .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "bench:jev": "tsx scripts/bench-jev.ts"
+    "bench:jev": "tsx scripts/bench-jev.ts",
+    "bench:browser": "tsx scripts/bench-browser.ts",
+    "check:browser": "tsx scripts/check-browser.ts"
   },
   "dependencies": {
     "discord.js": "^14.27.0",
@@ -29,6 +31,7 @@
     "ink-text-input": "^6.0.0",
     "proper-lockfile": "^4.1.2",
     "react": "^19.3.0",
+    "ws": "^8.21.3",
     "zod": "^4.6.5"
   },
   "devDependencies": {
@@ -36,6 +39,7 @@
     "@types/node": "^22.20.4",
     "@types/proper-lockfile": "^4.1.4",
     "@types/react": "^19.3.0",
+    "@types/ws": "^8.18.1",
     "@vitest/coverage-v8": "^5.0.1",
     "ink-testing-library": "^4.0.0",
     "tsup": "^8.5.1",

@@ -55,6 +55,25 @@ export interface SessionStats {
 }
 
 /**
+ * What asking for a compaction did — or why there was nothing to do. The two
+ * are not the same answer and must not read as one: a session of two turns has
+ * nothing to fold, and replying "compacted" there is a claim the next request's
+ * size immediately contradicts.
+ */
+export interface CompactResult {
+  /** Turns folded into the summary. */
+  folded: number
+  /** What those turns held, in estimated tokens. */
+  tokens: number
+  /** How long the summary call took. */
+  ms: number
+  /** False when the model gave no summary and the turns were dropped plain. */
+  summarized: boolean
+  /** Set when nothing was folded, saying why. */
+  reason?: string
+}
+
+/**
  * Persistence for sessions. `create` generates the id, so the store is the only
  * thing that has to guarantee it is unique. The binding maps a transport
  * address (`scopeKey`) to the session currently bound to it.

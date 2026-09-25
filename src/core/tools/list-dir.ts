@@ -3,6 +3,7 @@ import type { Dirent } from 'node:fs'
 import path from 'node:path'
 import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
+import { humanSize } from '../../util/format.js'
 import type { Tool } from './types.js'
 import { DEFAULT_IGNORES, resolveToolPath } from './walk.js'
 
@@ -81,8 +82,3 @@ function collapseNote(names: string[]): string {
   return `(${names.length} not expanded: ${names.sort().join(', ')})`
 }
 
-function humanSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}

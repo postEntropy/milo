@@ -1,6 +1,7 @@
 import { parseSSE } from './sse.js'
 import { errorMessage } from '../../util/errors.js'
 import { logDebug } from '../../util/log.js'
+import { toolImages } from '../images.js'
 import {
   parseToolArgs,
   type ChatRequest,
@@ -8,6 +9,7 @@ import {
   type Message,
   type Provider,
   type StreamEvent,
+  type ToolResultPart,
   type ToolSpec,
 } from './types.js'
 
@@ -55,7 +57,7 @@ export class OpenAIProvider implements Provider {
       model: req.model,
       stream: true,
       stream_options: { include_usage: true },
-      messages: toOpenAIMessages(req.system, req.messages),
+      messages: await toOpenAIMessages(req.system, req.messages),
     }
     if (req.tools?.length) {
       body.tools = req.tools.map(toOpenAITool)
@@ -167,6 +169,24 @@ export class OpenAIProvider implements Provider {
   }
 }
 
+/**
+ * A tool result carrying pictures sends them as `image_url` parts; one without
+ * stays the plain string it always was. The array shape is used only when there
+ * is a picture to send: a great many OpenAI-compatible servers reject it, and
+ * none of them need it to read text.
+ */
+function toolContent(part: ToolResultPart): unknown {
+  const { text, images } = toolImages(part)
+  if (images.length === 0) return text
+  return [
+    { type: 'text', text },
+    ...images.map((image) => ({
+      type: 'image_url',
+      image_url: { url: `data:${image.mimeType};base64,${image.data}` },
+    })),
+  ]
+}
+
 function toOpenAITool(spec: ToolSpec): Record<string, unknown> {
   return {
     type: 'function',
@@ -178,7 +198,7 @@ function toOpenAITool(spec: ToolSpec): Record<string, unknown> {
   }
 }
 
-function toOpenAIMessages(system: string | undefined, messages: Message[]): unknown[] {
+async function toOpenAIMessages(system: string | undefined, messages: Message[]): Promise<unknown[]> {
   const out: unknown[] = []
   if (system) out.push({ role: 'system', content: system })
 
@@ -186,7 +206,7 @@ function toOpenAIMessages(system: string | undefined, messages: Message[]): unkn
     if (message.role === 'tool') {
       for (const part of message.content) {
         if (part.type === 'tool-result') {
-          out.push({ role: 'tool', tool_call_id: part.id, content: part.content })
+          out.push({ role: 'tool', tool_call_id: part.id, content: toolContent(part) })
         }
       }
       continue

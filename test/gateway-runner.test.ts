@@ -11,6 +11,8 @@ type StreamFn = (options?: SendOptions) => AsyncGenerator<AgentEvent>
 function makeHarness(stream: StreamFn, askAnswer = true, display?: DisplayConfig) {
   const edits: string[] = []
   const asks: PermissionRequest[] = []
+  /** The transport's working indicator: started how often, stopped how often. */
+  const typing = { starts: [] as string[], stops: 0 }
 
   const surface: ChatSurface = {
     post: async () => 'm1',
@@ -20,6 +22,12 @@ function makeHarness(stream: StreamFn, askAnswer = true, display?: DisplayConfig
     ask: async (_conversationId, _messageId, request) => {
       asks.push(request)
       return askAnswer
+    },
+    typing: (conversationId) => {
+      typing.starts.push(conversationId)
+      return () => {
+        typing.stops += 1
+      }
     },
   }
 
@@ -31,7 +39,7 @@ function makeHarness(stream: StreamFn, askAnswer = true, display?: DisplayConfig
   const run = (maxLength = 1000, steering?: string[]) =>
     runTurn({ session, conversationId: 'c1', text: 'hi', surface, maxLength, display, flushMs: 0, steering })
 
-  return { edits, asks, run }
+  return { edits, asks, typing, run }
 }
 
 describe('runTurn', () => {
@@ -45,6 +53,37 @@ describe('runTurn', () => {
     const harness = makeHarness(stream)
     await harness.run()
     expect(harness.edits.at(-1)).toBe('Hello world')
+  })
+
+  it('keeps the transport’s working indicator on for the turn, and off after it', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'text-delta', delta: 'Hello' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+
+    // The wait before the first token is the longest part of a turn: a bare '…'
+    // says nothing about whether anything is happening.
+    expect(harness.typing.starts).toEqual(['c1'])
+    expect(harness.typing.stops).toBe(1)
+  })
+
+  it('stops the indicator even when the turn fails', async () => {
+    // biome-ignore lint/correctness/useYield: a turn that dies before yielding anything is the case being tested
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      throw new Error('provider died')
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+
+    // A turn that ended badly is still a turn that ended: an indicator left
+    // running says the bot is working at something long over.
+    expect(harness.typing.starts).toEqual(['c1'])
+    expect(harness.typing.stops).toBe(1)
+    expect(harness.edits.at(-1)).toContain('[error] provider died')
   })
 
   it('says when it waited for another Milo, and what that Milo wrote', async () => {
@@ -100,7 +139,7 @@ describe('runTurn', () => {
     expect(harness.edits.at(-1)).toBe('> 📄 **read_file**\n\ndone')
   })
 
-  it('gives each tool line its own block, so none is swallowed by the last', async () => {
+  it('keeps a run of tool lines in one quote, without letting them reflow', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'tool-start', id: '1', name: 'read_file', args: {} }
       yield { type: 'tool-end', id: '1', name: 'read_file', result: 'ok', isError: false }
@@ -112,10 +151,10 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    // A block of its own rather than a continuation line: a quote is one
-    // paragraph and a newline in a paragraph is a soft break, so a second tool
-    // line reflowed into the first sentence.
-    expect(harness.edits.at(-1)).toBe('> 📄 **read_file**\n\n> 🌐 **web_search**\n\nanswer')
+    // One quote for the burst, and the lines kept apart inside it by a hard
+    // break (two spaces before the newline): a plain newline in a paragraph is a
+    // soft break, and the second tool line would reflow into the first sentence.
+    expect(harness.edits.at(-1)).toBe('> 📄 **read_file**  \n> 🌐 **web_search**\n\nanswer')
   })
 
   it('opens a new block for tools after the prose', async () => {
@@ -132,11 +171,11 @@ describe('runTurn', () => {
     const harness = makeHarness(stream)
     await harness.run()
     expect(harness.edits.at(-1)).toBe(
-      '> 📄 **read_file**\n\nachei\n\n```\n⚡ shell_command\n```\n\npronto',
+      '> 📄 **read_file**\n\nachei\n\n> ⚡ **shell_command**\n\npronto',
     )
   })
 
-  it('shows a shell command as a code block with the command itself', async () => {
+  it('shows a shell command the same way as every other tool', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'tool-start', id: '1', name: 'shell_command', args: { command: 'echo hi' } }
       yield { type: 'tool-end', id: '1', name: 'shell_command', result: 'hi', isError: false }
@@ -146,31 +185,10 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('```\n⚡ shell_command echo hi\n```\n\npronto')
+    expect(harness.edits.at(-1)).toBe('> ⚡ **shell_command** echo hi\n\npronto')
   })
 
-  it('sends balanced Markdown on every edit, not only the last', async () => {
-    async function* stream(): AsyncGenerator<AgentEvent> {
-      yield { type: 'tool-start', id: '1', name: 'shell_command', args: { command: 'echo hi' } }
-      yield { type: 'tool-end', id: '1', name: 'shell_command', result: 'hi', isError: false }
-      yield { type: 'text-delta', delta: 'pronto' }
-      yield { type: 'done', finishReason: 'stop' }
-    }
-
-    const harness = makeHarness(stream)
-    await harness.run()
-
-    // Every edit is parsed as a message of its own, so one that ends inside an
-    // open fence is malformed — and a client that refuses it drops the whole
-    // message to plain text, which is how a finished shell block ends up on
-    // screen with its markers showing.
-    for (const edit of harness.edits) {
-      expect((edit.match(/```/g) ?? []).length % 2, `unbalanced: ${edit}`).toBe(0)
-    }
-    expect(harness.edits.at(-1)).toBe('```\n⚡ shell_command echo hi\n```\n\npronto')
-  })
-
-  it('keeps consecutive shell commands in one code block', async () => {
+  it('keeps consecutive shell commands in one quote, one line each', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'tool-start', id: '1', name: 'shell_command', args: { command: 'ls' } }
       yield { type: 'tool-end', id: '1', name: 'shell_command', result: 'ok', isError: false }
@@ -182,10 +200,12 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('```\n⚡ shell_command ls\n⚡ shell_command pwd\n```\n\npronto')
+    expect(harness.edits.at(-1)).toBe(
+      '> ⚡ **shell_command** ls  \n> ⚡ **shell_command** pwd\n\npronto',
+    )
   })
 
-  it('closes an open code block even when the turn ends right after it', async () => {
+  it('ends on the tool line itself when the turn ends right after it', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'tool-start', id: '1', name: 'shell_command', args: { command: 'ls' } }
       yield { type: 'tool-end', id: '1', name: 'shell_command', result: 'ok', isError: false }
@@ -194,7 +214,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('```\n⚡ shell_command ls\n```')
+    expect(harness.edits.at(-1)).toBe('> ⚡ **shell_command** ls')
   })
 
   it('separates tool lines from prose with a blank line, not a soft break', async () => {
@@ -208,7 +228,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('Vou rodar\n\n```\n⚡ shell_command\n```\n\nRodou.')
+    expect(harness.edits.at(-1)).toBe('Vou rodar\n\n> ⚡ **shell_command**\n\nRodou.')
   })
 
   it('gives web_search the globe instead of the marker', async () => {
@@ -233,7 +253,9 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toContain('❌ shell_command failed')
+    // The name is emphasised here too: a failure line is one of these lines, and
+    // it is drawn the same way whichever tool failed.
+    expect(harness.edits.at(-1)).toContain('❌ **shell_command** failed')
   })
 
   it('routes permission requests to the surface and reflects the answer', async () => {
@@ -344,7 +366,7 @@ describe('runTurn — display settings', () => {
   it('shows only the tool name when asked for names', async () => {
     const harness = makeHarness(withCommand, true, { tools: 'name', thinking: 'on' })
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('```\n⚡ shell_command\n```\n\npronto')
+    expect(harness.edits.at(-1)).toBe('> ⚡ **shell_command**\n\npronto')
   })
 
   it('keeps tool activity out entirely when off', async () => {
@@ -362,7 +384,7 @@ describe('runTurn — display settings', () => {
 
     const harness = makeHarness(stream, true, { tools: 'off', thinking: 'on' })
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('```\n❌ shell_command failed\n```')
+    expect(harness.edits.at(-1)).toBe('> ❌ **shell_command** failed')
   })
 
   it('shows the first line of the reasoning as one line', async () => {
@@ -438,7 +460,7 @@ describe('runTurn — display settings', () => {
     )
   })
 
-  it('still gathers consecutive shell commands into one code block', async () => {
+  it('keeps a mixed run of tools in one quote, one line each', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'tool-start', id: '1', name: 'web_search', args: { query: 'a' } }
       yield { type: 'tool-end', id: '1', name: 'web_search', result: 'ok', isError: false }
@@ -451,10 +473,10 @@ describe('runTurn — display settings', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    // A fence keeps both the line breaks and the literals, so unlike a quote it
-    // is worth merging.
+    // One quote for the whole run, hard breaks inside it: a quote is one
+    // paragraph, and two lines in one paragraph reflow into a single sentence.
     expect(harness.edits.at(-1)).toBe(
-      '> 🌐 **web_search** a\n\n```\n⚡ shell_command ls\n⚡ shell_command pwd\n```',
+      '> 🌐 **web_search** a  \n> ⚡ **shell_command** ls  \n> ⚡ **shell_command** pwd',
     )
   })
 

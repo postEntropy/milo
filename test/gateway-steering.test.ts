@@ -7,7 +7,7 @@ import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/t
 import { Session } from '../src/core/session.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
-import { runTurn } from '../src/gateways/runner.js'
+import { runTurn, runTurns } from '../src/gateways/runner.js'
 import type { ChatSurface } from '../src/gateways/surface.js'
 import { TurnQueue } from '../src/gateways/turns.js'
 
@@ -23,6 +23,9 @@ class SlowProvider implements Provider {
     this.requests.push({ ...req, messages: [...req.messages] })
     yield { type: 'text', delta: `answer ${this.requests.length}` }
     await tick(60)
+    // A real provider rejects when its request is cancelled. A fake that ignored
+    // the signal would make a stop look like it worked while the turn ran on.
+    if (req.signal?.aborted) throw new Error('aborted')
     yield { type: 'done', finishReason: 'stop' }
   }
 }
@@ -35,7 +38,7 @@ function usersOf(request: ChatRequest): string[] {
     )
 }
 
-async function harness() {
+async function harness(options: { onEdit?: (value: string) => void } = {}) {
   const provider = new SlowProvider()
   const store = new MemorySessionStore()
   const record = await store.create()
@@ -52,14 +55,181 @@ async function harness() {
     maxSteps: 4,
   })
 
+  const edits: string[] = []
   const surface: ChatSurface = {
     post: async () => 'm1',
-    edit: async () => undefined,
+    edit: async (_conversationId, _messageId, value) => {
+      edits.push(value)
+      options.onEdit?.(value)
+    },
     ask: async () => true,
+    typing: () => () => undefined,
   }
 
-  return { provider, session, surface }
+  return { provider, session, surface, edits }
 }
+
+/** A turn against this session, as a gateway would run it. */
+function turnOn(
+  session: Session,
+  surface: ChatSurface,
+  text: string,
+): (steering: string[], signal: AbortSignal) => Promise<void> {
+  return (steering, signal) =>
+    runTurn({
+      session,
+      conversationId: 'chat-1',
+      text,
+      surface,
+      maxLength: 2000,
+      flushMs: 0,
+      steering,
+      signal,
+    })
+}
+
+describe('the turns a gateway runs behind one message', () => {
+  it('runs a correction that arrived too late as the next turn', async () => {
+    const steering: string[] = []
+    let injected = false
+    const { provider, session, surface } = await harness({
+      onEdit: () => {
+        // Once: the second turn ends with an edit too, and a message landing
+        // there is a third turn, not a reason for a fourth.
+        if (injected) return
+        injected = true
+        steering.push('one more thing')
+      },
+    })
+
+    await runTurns({
+      session,
+      conversationId: 'chat-1',
+      text: 'first',
+      surface,
+      maxLength: 2000,
+      flushMs: 60_000,
+      steering,
+    })
+
+    // Taken, not dropped: the model never saw it inside the first turn, so it
+    // gets a turn of its own rather than vanishing.
+    expect(steering).toEqual([])
+    expect(provider.requests).toHaveLength(2)
+    expect(usersOf(provider.requests[1]!)).toEqual(['first', 'one more thing'])
+  })
+
+  it('drops what arrived too late when the turn was stopped', async () => {
+    const controller = new AbortController()
+    const steering: string[] = []
+    let injected = false
+    const { provider, session, surface } = await harness({
+      onEdit: () => {
+        if (injected) return
+        injected = true
+        steering.push('one more thing')
+        // The stop lands in the same moment the message does.
+        controller.abort()
+      },
+    })
+
+    const failure = await runTurns({
+      session,
+      conversationId: 'chat-1',
+      text: 'first',
+      surface,
+      maxLength: 2000,
+      flushMs: 60_000,
+      steering,
+      signal: controller.signal,
+    })
+
+    // A stop is not a failure to report, and the leftover is not taken up: the
+    // stop was the answer to everything sent by then.
+    expect(failure).toBeNull()
+    expect(provider.requests).toHaveLength(1)
+  })
+
+  it('hands back what a turn died of, for the surface to say', async () => {
+    const { session, surface } = await harness()
+    const failing: ChatSurface = {
+      ...surface,
+      post: async () => {
+        throw new Error('posting failed')
+      },
+    }
+
+    const failure = await runTurns({
+      session,
+      conversationId: 'chat-1',
+      text: 'first',
+      surface: failing,
+      maxLength: 2000,
+    })
+
+    expect(failure).toContain('posting failed')
+  })
+})
+
+describe('stopping a turn from a chat gateway', () => {
+  it('ends the turn in flight as a stop, not as a failure', async () => {
+    const { session, surface, edits } = await harness()
+    const queue = new TurnQueue()
+
+    queue.run('chat-1', turnOn(session, surface, 'a long task'))
+    await tick(30)
+    expect(queue.stop('chat-1')).toEqual({ stopped: true, dropped: 0 })
+    await tick(250)
+
+    // The model call was cancelled mid-stream, and that reads as the end of the
+    // turn — not as an error the person has to interpret.
+    expect(edits.at(-1)).toContain('🛑 stopped')
+    expect(edits.at(-1)).not.toContain('[error]')
+    expect(queue.busy('chat-1')).toBe(false)
+  })
+
+  it('drops the turns queued behind the one it stopped', async () => {
+    const { provider, session, surface } = await harness()
+    const queue = new TurnQueue()
+    let ranSecond = false
+
+    queue.run('chat-1', turnOn(session, surface, 'first'))
+    queue.run('chat-1', async () => {
+      ranSecond = true
+      await turnOn(session, surface, 'second')([], new AbortController().signal)
+    })
+    await tick(30)
+
+    expect(queue.queued('chat-1')).toBe(1)
+    expect(queue.stop('chat-1')).toEqual({ stopped: true, dropped: 1 })
+    await tick(250)
+
+    // Stop means stop: not "stop this one, then start the next thing I sent".
+    expect(ranSecond).toBe(false)
+    expect(provider.requests).toHaveLength(1)
+  })
+
+  it('runs the next message normally, so a stop is not a dead end', async () => {
+    const { provider, session, surface } = await harness()
+    const queue = new TurnQueue()
+
+    queue.run('chat-1', turnOn(session, surface, 'first'))
+    await tick(30)
+    queue.stop('chat-1')
+    await tick(250)
+
+    queue.run('chat-1', turnOn(session, surface, 'second'))
+    await tick(250)
+
+    expect(usersOf(provider.requests.at(-1)!)).toEqual(['first', 'second'])
+    expect(queue.busy('chat-1')).toBe(false)
+  })
+
+  it('says there was nothing running when there was nothing to stop', async () => {
+    const queue = new TurnQueue()
+    expect(queue.stop('chat-1')).toEqual({ stopped: false, dropped: 0 })
+  })
+})
 
 describe('steering on a chat gateway', () => {
   it('takes up a message sent mid-turn, inside the same turn', async () => {

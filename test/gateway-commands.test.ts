@@ -3,15 +3,184 @@ import type { DisplayConfig } from '../src/core/config/schema.js'
 import type { ReasoningEffort } from '../src/core/providers/types.js'
 import { DefaultPermissionPolicy } from '../src/core/tools/permission.js'
 import {
+  compactReply,
   decodePermission,
   displayLockMessage,
   effortLockMessage,
   encodePermission,
   handleCommand,
+  handleTurnControl,
   modeLockMessage,
+  parseTurnControl,
   sessionLockMessage,
+  turnOf,
+  type TurnControlTarget,
 } from '../src/gateways/commands.js'
 import { PendingDecisions } from '../src/gateways/pending.js'
+import { TurnQueue } from '../src/gateways/turns.js'
+
+describe('the commands that steer the turn itself', () => {
+  /**
+   * A turn that stays running until `release`, so there is something to steer,
+   * queue behind and stop. Returns what it was handed, which is where `steer`
+   * puts a message.
+   */
+  async function stuckTurn(): Promise<{
+    turns: TurnQueue
+    handed: () => string[]
+    release: () => void
+  }> {
+    const turns = new TurnQueue()
+    let inbox: string[] = []
+    let release = (): void => undefined
+    const until = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    turns.run('chat-1', async (steering) => {
+      inbox = steering
+      await until
+    })
+    // The turn is registered on a microtask, so a command arriving in this same
+    // tick would otherwise find nothing running.
+    await tick(0)
+    return { turns, handed: () => [...inbox], release }
+  }
+
+  /**
+   * `start` as a gateway implements it: the text goes through the same queue a
+   * plain message would, which is what makes a command-asked turn countable.
+   */
+  function starter(turns: TurnQueue): { start: (text: string) => void; started: string[] } {
+    const started: string[] = []
+    return {
+      start: (text) => {
+        started.push(text)
+        turns.run('chat-1', async () => undefined)
+      },
+      started,
+    }
+  }
+
+  it('only claims the four commands it owns', () => {
+    expect(parseTurnControl('/mode ask')).toBeNull()
+    expect(parseTurnControl('hello')).toBeNull()
+    expect(parseTurnControl('/stop')).toEqual({ action: 'stop' })
+    expect(parseTurnControl('/queue read b.txt')).toEqual({ action: 'queue', text: 'read b.txt' })
+    expect(parseTurnControl('/steer read b.txt')).toEqual({ action: 'steer', text: 'read b.txt' })
+  })
+
+  it('hands /steer to the turn running now', async () => {
+    const { turns, handed, release } = await stuckTurn()
+    const { start, started } = starter(turns)
+    const result = handleTurnControl('/steer read b.txt', { turn: turnOf(turns, 'chat-1'), start })
+
+    expect(result.reply).toContain('running now')
+    expect(turns.busy('chat-1')).toBe(true)
+    // Handed in, not started: a second turn here is the race steering exists to
+    // avoid. The text reaches the model at the turn's next step boundary.
+    expect(started).toEqual([])
+    expect(handed()).toEqual(['read b.txt'])
+    release()
+  })
+
+  it('runs /steer as its own turn when nothing is running', () => {
+    const turns = new TurnQueue()
+    const { start, started } = starter(turns)
+    const result = handleTurnControl('/steer hello', { turn: turnOf(turns, 'chat-1'), start })
+
+    expect(result.reply).toContain('Nothing was running')
+    expect(started).toEqual(['hello'])
+  })
+
+  it('queues /queue behind the turn running now', async () => {
+    const { turns, release } = await stuckTurn()
+    const { start, started } = starter(turns)
+    const result = handleTurnControl('/queue read b.txt', { turn: turnOf(turns, 'chat-1'), start })
+
+    expect(result.reply).toContain('Queued behind')
+    expect(started).toEqual(['read b.txt'])
+    expect(turns.queued('chat-1')).toBe(1)
+    release()
+  })
+
+  it('says a command without its text is missing its text', () => {
+    const turns = new TurnQueue()
+    const context = { turn: turnOf(turns, 'chat-1'), start: (): void => undefined }
+    expect(handleTurnControl('/steer', context).reply).toContain('Usage: /steer')
+    expect(handleTurnControl('/queue', context).reply).toContain('Usage: /queue')
+  })
+
+  it('stops the running turn, and says what it dropped with it', async () => {
+    const { turns, release } = await stuckTurn()
+    // A second turn is waiting behind the one being stopped.
+    let ran = false
+    turns.run('chat-1', async () => {
+      ran = true
+    })
+    const result = handleTurnControl('/stop', {
+      turn: turnOf(turns, 'chat-1'),
+      start: (): void => undefined,
+    })
+
+    expect(result.reply).toBe('🛑 Stopped — and dropped 1 message that was waiting behind it.')
+    // Dropped, not started once the turn it waited for is gone.
+    await tick(20)
+    expect(ran).toBe(false)
+    release()
+  })
+
+  it('stops without dropping anything when nothing was waiting', async () => {
+    const { turns, release } = await stuckTurn()
+    const result = handleTurnControl('/stop', {
+      turn: turnOf(turns, 'chat-1'),
+      start: (): void => undefined,
+    })
+
+    expect(result.reply).toBe('🛑 Stopped.')
+    release()
+  })
+
+  it('says so when there is nothing running to stop', () => {
+    const turns = new TurnQueue()
+    const result = handleTurnControl('/stop', {
+      turn: turnOf(turns, 'chat-1'),
+      start: (): void => undefined,
+    })
+    expect(result.reply).toBe('Nothing is running to stop.')
+  })
+
+  it('reports a compaction', async () => {
+    const result = await handleCommand('/compact', {
+      compactSession: async () => ({ folded: 3, tokens: 4200, ms: 1500, summarized: true }),
+    })
+    expect(result.reply).toContain('3 turns')
+    expect(result.reply).toContain('~4200 tokens')
+    expect(result.reply).toContain('1.5s')
+  })
+
+  it('does not claim a compaction that wrote no summary', async () => {
+    const result = await handleCommand('/compact', {
+      compactSession: async () => ({ folded: 2, tokens: 900, ms: 12, summarized: false }),
+    })
+    expect(result.reply).toContain('summary call failed')
+  })
+
+  it('reports why there was nothing to compact', async () => {
+    const result = await handleCommand('/compact', {
+      compactSession: async () => ({
+        folded: 0,
+        tokens: 0,
+        ms: 0,
+        summarized: false,
+        reason: 'nothing is old enough to fold — the last 6 turns stay',
+      }),
+    })
+    expect(result.reply).toContain('Nothing to compact')
+    expect(result.reply).toContain('6 turns stay')
+  })
+})
+
+const tick = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 describe('handleCommand', () => {
   it('ignores normal messages', async () => {
@@ -396,5 +565,106 @@ describe('PendingDecisions', () => {
     const waiting = pending.wait('id2', 20)
     expect(await waiting).toBe(false)
     expect(pending.size).toBe(0)
+  })
+
+  it('denies the tool when the turn is stopped', async () => {
+    const pending = new PendingDecisions()
+    const controller = new AbortController()
+    const waiting = pending.wait('id3', 60_000, controller.signal)
+
+    controller.abort()
+
+    // Denied rather than left standing: waiting out the five minutes would keep
+    // the turn parked with a ✅ still able to allow the tool afterwards.
+    expect(await waiting).toBe(false)
+    expect(pending.size).toBe(0)
+    expect(pending.resolve('id3', true)).toBe(false)
+  })
+
+  it('takes the answer that came before the stop', async () => {
+    const pending = new PendingDecisions()
+    const controller = new AbortController()
+    const waiting = pending.wait('id4', 60_000, controller.signal)
+
+    expect(pending.resolve('id4', true)).toBe(true)
+    controller.abort()
+
+    expect(await waiting).toBe(true)
+  })
+
+  it('denies at once for a turn stopped before it asked', async () => {
+    const pending = new PendingDecisions()
+    const controller = new AbortController()
+    controller.abort()
+
+    expect(await pending.wait('id5', 60_000, controller.signal)).toBe(false)
+    expect(pending.size).toBe(0)
+  })
+})
+
+describe('a surface that steers with its own machinery', () => {
+  it('gets the same commands and the same answers as a bot', () => {
+    // The CLI's shape: refs instead of a TurnQueue. What is shared is the
+    // vocabulary, so the same commands have to answer the same way there.
+    let inbox: string[] | null = ['held']
+    const target: TurnControlTarget = {
+      steer: (text) => {
+        if (!inbox) return false
+        inbox.push(text)
+        return true
+      },
+      busy: () => inbox !== null,
+      queued: () => 0,
+      stop: () => {
+        const stopped = inbox !== null
+        inbox = null
+        return { stopped, dropped: 1 }
+      },
+    }
+    const context = { turn: target, start: (): void => undefined }
+
+    expect(handleTurnControl('/steer go', context).reply).toContain('running now')
+    expect(inbox).toEqual(['held', 'go'])
+
+    expect(handleTurnControl('/stop', context).reply).toBe(
+      '🛑 Stopped — and dropped 1 message that was waiting behind it.',
+    )
+    expect(inbox).toBeNull()
+    expect(handleTurnControl('/stop', context).reply).toBe('Nothing is running to stop.')
+  })
+
+  it('says the same thing about a compaction on every surface', () => {
+    expect(compactReply({ folded: 3, tokens: 4200, ms: 1500, summarized: true })).toContain(
+      '3 turns (~4200 tokens)',
+    )
+    expect(
+      compactReply({ folded: 2, tokens: 900, ms: 12, summarized: false }),
+    ).toContain('summary call failed')
+    expect(
+      compactReply({ folded: 0, tokens: 0, ms: 0, summarized: false, reason: 'nothing old' }),
+    ).toContain('Nothing to compact: nothing old.')
+  })
+})
+
+describe('/export', () => {
+  it('answers an argument it does not know, rather than picking a format', async () => {
+    const result = await handleCommand('/export xml', {
+      sessionStats: async () => ({
+        id: 'x',
+        createdAt: 0,
+        updatedAt: 0,
+        messages: 2,
+        turns: 1,
+        tokens: 0,
+        compacted: false,
+      }),
+    })
+    expect(result.handled).toBe(true)
+    expect(result.reply).toContain('/export json')
+  })
+
+  it('says so on a surface that has nothing to export from', async () => {
+    const result = await handleCommand('/export', {})
+    expect(result.reply).toContain('cannot export')
   })
 })

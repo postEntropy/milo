@@ -34,6 +34,18 @@ async function waitUntil(check: () => boolean, timeoutMs = 1500): Promise<void> 
   throw new Error('timed out waiting for condition')
 }
 
+/**
+ * The frame that carries `text`.
+ *
+ * A render lands a tick or more after the events that cause it, and a fixed
+ * `tick()` before reading the frame raced it: on Node 20 the frame was still the
+ * previous one, which looked like a failure in the code under test and was not.
+ */
+async function waitForFrame(lastFrame: () => string | undefined, text: string): Promise<string> {
+  await waitUntil(() => (lastFrame() ?? '').includes(text))
+  return lastFrame() ?? ''
+}
+
 function makeRuntime(stream: () => AsyncGenerator<AgentEvent>): AgentRuntime {
   return {
     getSession: () => ({ messages: [], send: () => stream() }),
@@ -191,7 +203,7 @@ describe('ChatScreen', () => {
     const { lastFrame, stdin } = renderChat(makeRuntime(stream))
     await submit(stdin, 'o yolo confirma?')
 
-    const frame = lastFrame() ?? ''
+    const frame = await waitForFrame(lastFrame, 'Não. Em yolo')
     // Two messages of the same turn, not one sentence glued at the seam.
     expect(frame).not.toContain('código.Não')
 
@@ -235,7 +247,7 @@ describe('ChatScreen', () => {
     const { lastFrame, stdin } = renderChat(makeRuntime(stream))
     await submit(stdin, 'como testo?')
 
-    const frame = lastFrame() ?? ''
+    const frame = await waitForFrame(lastFrame, 'Use npm test')
     expect(frame).toContain('{ "ok": true }')
     expect(frame).toContain('Use npm test e cuidado.')
     expect(frame).not.toContain('```')

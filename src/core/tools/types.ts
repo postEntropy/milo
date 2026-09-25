@@ -1,5 +1,6 @@
 import type { z } from 'zod'
 import type { MemoryInput } from '../memory/types.js'
+import type { ImageMime } from '../providers/types.js'
 import type { SessionSummary } from '../sessions/types.js'
 
 /**
@@ -30,9 +31,21 @@ export interface ToolContext {
   task?: TaskFn
 }
 
+/**
+ * A picture a tool wants the model to see — a screenshot, say. Handed over as
+ * base64 from wherever it came, and written to disk by the agent loop: that is
+ * what keeps a session file small and keeps old pictures out of later requests.
+ */
+export interface ToolImage {
+  mimeType: ImageMime
+  /** Base64, exactly as the source emitted it. */
+  data: string
+}
+
 export interface ToolResult {
   content: string
   isError?: boolean
+  images?: ToolImage[]
 }
 
 export interface Tool<A = unknown> {

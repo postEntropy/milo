@@ -1,4 +1,11 @@
-import { extractCommandText, reviewText, scanCommand, scanCommandTargets, scanWriteTarget } from './rules.js'
+import {
+  extractCommandText,
+  extractTypedText,
+  reviewText,
+  scanCommand,
+  scanCommandTargets,
+  scanWriteTarget,
+} from './rules.js'
 import type { Tool } from './types.js'
 
 export type PermissionDecision = 'allow' | 'ask' | 'deny'
@@ -95,6 +102,11 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
 
     const command = extractCommandText(args)
     if (command && scanCommand(command)) return 'deny'
+    // The same words typed onto a screen run the same way as they would in a
+    // shell, so they are refused by the same rule rather than only by the
+    // reviewer.
+    const typed = extractTypedText(args)
+    if (typed && scanCommand(typed)) return 'deny'
     // The shell reaches the same protected paths as a file write, so it is held
     // to the same rule instead of being judged differently for the same act.
     if (command && scanCommandTargets(command, this.cwd)) return 'deny'

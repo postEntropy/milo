@@ -27,7 +27,7 @@ function printHelp(): void {
 
 Usage:
   milo                       Start the TUI chat
-  milo setup                 Configure providers, keys, tools, display, gateways, memory
+  milo setup                 Configure providers, keys, tools, display, gateways, memory, skills
   milo model                 Choose the provider/model (setup wizard)
   milo skills                Install, list and remove skills (list | available | find | add | remove)
   milo serve                 Run the enabled bot gateways (Telegram, Discord)

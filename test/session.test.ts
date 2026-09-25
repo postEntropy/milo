@@ -368,6 +368,33 @@ describe('Session', () => {
     expect(provider.lastEffort).toBe('high')
   })
 
+  it('tells the model which browser it has, and whether it is up', async () => {
+    // The model asked, out loud, and went looking through `ps` and `ss` instead:
+    // the answer belongs in the prompt, where it costs a line.
+    const provider = new CapturingProvider()
+    const { session } = await sessionWith(provider, {
+      browser: () => ({
+        binary: '/usr/bin/chromium',
+        headless: true,
+        profile: 'its own',
+        running: true,
+        port: 38551,
+      }),
+    })
+    for await (const _event of session.send('qual navegador voce usa?')) {
+      // drain
+    }
+
+    expect(provider.lastSystem).toContain('Browser right now: /usr/bin/chromium, headless, its own profile, running on port 38551')
+    // And it is told where that came from, so a remembered note does not win.
+    expect(provider.lastSystem).toContain('These lines are the live state')
+  })
+
+  it('says nothing about a browser on an install that has none', async () => {
+    const { provider } = await run('hello')
+    expect(provider.lastSystem).not.toContain('Browser right now')
+  })
+
   it('keeps the reasoning in the transcript, and logs the turn', async () => {
     const entries: HistoryEntry[] = []
     const provider: Provider = {
@@ -429,6 +456,37 @@ describe('Session', () => {
       tool: { name: 'read_file', args: { path: 'package.json' }, isError: false },
     })
     expect(entries[1]?.tool?.result).toContain('milo')
+  })
+
+  it('keeps two steps of one answer from running into each other in the log', async () => {
+    const entries: HistoryEntry[] = []
+    let step = 0
+    const provider: Provider = {
+      id: 'two-steps',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        step += 1
+        if (step === 1) {
+          // What is said before reaching for a tool, and what is said after it,
+          // are two things — and the log holds the turn's answer as one string.
+          yield { type: 'text', delta: 'deixa eu ver o arquivo.' }
+          yield { type: 'tool-call', id: 'c1', name: 'read_file', args: { path: 'package.json' } }
+          yield { type: 'done', finishReason: 'tool_calls' }
+          return
+        }
+        yield { type: 'text', delta: 'e o milo.' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+
+    const { session } = await sessionWith(provider, {
+      history: { append: (batch) => entries.push(...batch) },
+    })
+    for await (const _event of session.send('o que e isso?')) {
+      // drain
+    }
+
+    const answer = entries.find((entry) => entry.kind === 'assistant')
+    expect(answer?.text).toBe('deixa eu ver o arquivo.\n\ne o milo.')
   })
 })
 

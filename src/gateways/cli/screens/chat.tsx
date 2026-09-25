@@ -20,6 +20,11 @@ import type {
   PermissionResult,
 } from '../../../core/tools/permission.js'
 import { errorMessage } from '../../../util/errors.js'
+import {
+  compactReply,
+  handleTurnControl,
+  type TurnControlTarget,
+} from '../../commands.js'
 import { isCtrlC, isSteerKey } from '../keys.js'
 import { readInputHistory, saveInputHistory } from '../input-history.js'
 import { theme } from '../theme.js'
@@ -75,6 +80,10 @@ const HELP_TEXT = [
   '/stats — numbers for the current session',
   '/skills — the skills installed, and where they live',
   '/clear — forget this conversation',
+  '/compact — fold the oldest turns into the summary now',
+  '/stop — stop the turn running now, and anything queued behind it',
+  '/steer <text> — hand text to the turn running now (Ctrl+Enter does the same)',
+  '/queue <text> — say it as its own turn, after the one running now (Enter does the same)',
   '/exit — quit',
   '',
   '↑ walks back through what you sent; ↓ comes forward again.',
@@ -85,7 +94,7 @@ const HELP_TEXT = [
  * transcript it is writing into, or take over the screen its output goes to —
  * so they would fight the turn rather than wait behind it.
  */
-const BLOCKED_WHILE_BUSY = new Set(['new', 'resume', 'clear', 'model', 'setup'])
+const BLOCKED_WHILE_BUSY = new Set(['new', 'resume', 'clear', 'model', 'setup', 'compact'])
 
 /**
  * How many sent lines the arrows walk back through. Kept in memory, for this
@@ -378,6 +387,24 @@ export function ChatScreen({
         push({ kind: 'fields', rows: statsRows(session.stats()) })
         break
       }
+      case 'compact': {
+        const session = await runtime.getSession(scope)
+        push({ kind: 'info', text: compactReply(await session.compact()) })
+        break
+      }
+      // The three that are about the turn rather than the session, carrying out
+      // the same rules the bots do: `/stop` right now and without asking, and
+      // `/steer` and `/queue` saying where a text goes.
+      case 'stop':
+      case 'steer':
+      case 'queue': {
+        const result = handleTurnControl(raw, {
+          turn: controlTarget(),
+          start: (pending) => submit(pending, false),
+        })
+        if (result.reply) push({ kind: 'info', text: result.reply })
+        break
+      }
       case 'clear': {
         const session = await runtime.getSession(scope)
         await session.clear()
@@ -643,6 +670,34 @@ export function ChatScreen({
     setQueued(0)
     abortRef.current?.abort()
   }
+
+  /**
+   * The turn running now, as the shared control commands see it. The terminal
+   * has its own machinery — an inbox ref for the turn, a queue ref for what waits
+   * behind it, an `AbortController` to stop it — and this is where the shared
+   * vocabulary meets it: the answers and the rules come from the same place the
+   * bots use, only the plumbing is local.
+   */
+  const controlTarget = (): TurnControlTarget => ({
+    steer: (text) => {
+      const inbox = steeringRef.current
+      if (!inbox) return false
+      inbox.push(text)
+      return true
+    },
+    // The inbox is the authority, not `runningRef`: the pump stays running across
+    // the gaps between turns, and a command typed in a gap has no turn to join.
+    busy: () => steeringRef.current !== null,
+    queued: () => queueRef.current.length,
+    stop: () => {
+      const stopped = steeringRef.current !== null
+      const dropped = queueRef.current.length + (steeringRef.current?.length ?? 0)
+      // The same stop Ctrl+C runs, down to the dropped count it reports when the
+      // turn is over — `/stop` and Ctrl+C must not differ in what they throw away.
+      stop()
+      return { stopped, dropped }
+    },
+  })
 
   /** Records a line that was sent, and puts the arrows back at the live end. */
   const remember = (text: string) => {

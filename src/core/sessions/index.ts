@@ -5,5 +5,13 @@ export { FileRecapStore, MemoryRecapStore } from './recap.js'
 export type { RecapStore, SessionRecap } from './recap.js'
 export { rankSessions, withRecaps } from './recall.js'
 export { generateNickname } from './nickname.js'
-export { digest, estimateText, estimateTokens, planCut, summarize } from './compact.js'
+export {
+  digest,
+  dropOldImages,
+  dropOldSnapshots,
+  estimateText,
+  estimateTokens,
+  planCut,
+  summarize,
+} from './compact.js'
 export { formatSessionList, formatStats, formatWhen } from './format.js'

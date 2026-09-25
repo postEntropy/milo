@@ -1,6 +1,7 @@
 import { parseSSE } from './sse.js'
 import { errorMessage } from '../../util/errors.js'
 import { logDebug } from '../../util/log.js'
+import { toolImages } from '../images.js'
 import {
   parseToolArgs,
   type ChatRequest,
@@ -8,6 +9,7 @@ import {
   type Message,
   type Provider,
   type StreamEvent,
+  type ToolResultPart,
   type ToolSpec,
 } from './types.js'
 
@@ -62,7 +64,7 @@ export class AnthropicProvider implements Provider {
       model: req.model,
       max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
       stream: true,
-      messages: toAnthropicMessages(req.messages),
+      messages: await toAnthropicMessages(req.messages),
     }
     if (req.system) body.system = req.system
     if (req.tools?.length) body.tools = req.tools.map(toAnthropicTool)
@@ -175,7 +177,7 @@ function toAnthropicTool(spec: ToolSpec): Record<string, unknown> {
   }
 }
 
-function toAnthropicMessages(messages: Message[]): unknown[] {
+async function toAnthropicMessages(messages: Message[]): Promise<unknown[]> {
   const out: { role: 'user' | 'assistant'; content: unknown[] }[] = []
 
   const push = (role: 'user' | 'assistant', blocks: unknown[]) => {
@@ -194,15 +196,7 @@ function toAnthropicMessages(messages: Message[]): unknown[] {
     if (message.role === 'tool') {
       const blocks = message.content
         .filter((part) => part.type === 'tool-result')
-        .map((part) => {
-          const p = part as { id: string; content: string; isError?: boolean }
-          return {
-            type: 'tool_result',
-            tool_use_id: p.id,
-            content: p.content,
-            ...(p.isError ? { is_error: true } : {}),
-          }
-        })
+        .map((part) => toolResultBlock(part as ToolResultPart))
       push('user', blocks)
       continue
     }
@@ -224,6 +218,32 @@ function toAnthropicMessages(messages: Message[]): unknown[] {
   }
 
   return out
+}
+
+/**
+ * A tool result carrying pictures becomes an array of blocks — the text, then
+ * one base64 image each — while a plain result stays the string it always was.
+ * Anthropic has no `image_url`; the bytes go inline as `source.type: base64`.
+ */
+function toolResultBlock(part: ToolResultPart): Record<string, unknown> {
+  const { text, images } = toolImages(part)
+  const content =
+    images.length === 0
+      ? text
+      : [
+          { type: 'text', text },
+          ...images.map((image) => ({
+            type: 'image',
+            source: { type: 'base64', media_type: image.mimeType, data: image.data },
+          })),
+        ]
+
+  return {
+    type: 'tool_result',
+    tool_use_id: part.id,
+    content,
+    ...(part.isError ? { is_error: true } : {}),
+  }
 }
 
 function mapStopReason(reason: string): FinishReason {

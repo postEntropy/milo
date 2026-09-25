@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import lockfile, { type LockOptions } from 'proper-lockfile'
-import { writeFileAtomic } from '../../util/fs.js'
+import { ensurePrivateDir, writePrivateFile, PRIVATE_FILE_MODE } from '../../util/fs.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import type { Message } from '../providers/types.js'
@@ -89,7 +89,7 @@ export class FileSessionStore implements SessionStore {
 
   async create(): Promise<SessionRecord> {
     return this.run(() => {
-      mkdirSync(this.dir, { recursive: true })
+      ensurePrivateDir(this.dir)
       const timestamp = this.now()
 
       for (let attempt = 0; attempt < 100; attempt += 1) {
@@ -115,6 +115,7 @@ export class FileSessionStore implements SessionStore {
     try {
       writeFileSync(this.fileFor(record.id), `${JSON.stringify(record, null, 2)}\n`, {
         flag: 'wx',
+        mode: PRIVATE_FILE_MODE,
       })
       return true
     } catch (error) {
@@ -140,7 +141,7 @@ export class FileSessionStore implements SessionStore {
       throw new Error(`Invalid session id: ${record.id}`)
     }
     await this.run(async () => {
-      mkdirSync(this.dir, { recursive: true })
+      ensurePrivateDir(this.dir)
       const file = this.fileFor(record.id)
       // The lock is what makes read-revision-then-rename one step across
       // processes; without it both writers could read the same revision and
@@ -150,10 +151,7 @@ export class FileSessionStore implements SessionStore {
         if (actual !== expectedVersion) {
           throw new SessionConflictError(record.id, expectedVersion, actual)
         }
-        await writeFileAtomic(
-          file,
-          `${JSON.stringify({ ...record, version: expectedVersion + 1 }, null, 2)}\n`,
-        )
+        await writePrivateFile(file, `${JSON.stringify({ ...record, version: expectedVersion + 1 }, null, 2)}\n`)
       })
     })
   }
@@ -207,7 +205,7 @@ export class FileSessionStore implements SessionStore {
   }
 
   async tryAcquire(id: string): Promise<SessionLease | null> {
-    mkdirSync(this.dir, { recursive: true })
+    ensurePrivateDir(this.dir)
     const file = this.fileFor(id)
     // The in-process mutex first: two conversations in this process have no
     // reason to go near the file lock, and taking both would only add latency.
@@ -222,7 +220,7 @@ export class FileSessionStore implements SessionStore {
   }
 
   async acquire(id: string, options?: { signal?: AbortSignal }): Promise<SessionLease> {
-    mkdirSync(this.dir, { recursive: true })
+    ensurePrivateDir(this.dir)
     const file = this.fileFor(id)
     const unlock = await waitForLease(this.leases.acquire(id), options?.signal)
     let release: () => Promise<void>
@@ -274,7 +272,7 @@ export class FileSessionStore implements SessionStore {
 
   async remove(id: string): Promise<void> {
     if (!isValidSessionId(id)) return
-    mkdirSync(this.dir, { recursive: true })
+    ensurePrivateDir(this.dir)
     const file = this.fileFor(id)
     if (!existsSync(file)) return
     // Under the turn lease, like a turn: taking it means a removal waits for the
@@ -306,8 +304,8 @@ export class FileSessionStore implements SessionStore {
     if (!isValidSessionId(id)) return
     await this.run(async () => {
       const file = this.bindingFile(scopeKey)
-      mkdirSync(path.dirname(file), { recursive: true })
-      await writeFileAtomic(file, `${JSON.stringify(id)}\n`)
+      ensurePrivateDir(path.dirname(file))
+      await writePrivateFile(file, `${JSON.stringify(id)}\n`)
     })
   }
 

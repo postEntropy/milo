@@ -101,6 +101,101 @@ const longSeed = (): Message[] => [
   text('assistant', 'third reply'),
 ]
 
+/** A session with a seed and a ceiling nothing reaches: `/compact` on demand. */
+async function manualSession(
+  seed: Message[],
+  overrides: { keepTurns?: number; compaction?: boolean } = {},
+) {
+  const provider = new ScriptedProvider()
+  const store = new MemorySessionStore()
+  const record = await store.create()
+  record.messages = seed
+
+  const session = new Session({
+    scope: { gateway: 'cli', conversationId: 'c' },
+    provider,
+    model: 'm',
+    system: 'BASE',
+    registry: createToolRegistry(),
+    memory: new FileMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
+    cwd: process.cwd(),
+    record,
+    store,
+    sessions: {
+      compactAt: 0.7,
+      maxInputTokens: 100_000,
+      keepTurns: overrides.keepTurns ?? 1,
+      compaction: overrides.compaction ?? true,
+    },
+  })
+  return { provider, session, store, record }
+}
+
+describe('session.compact', () => {
+  it('folds the oldest turns now, without waiting for the budget', async () => {
+    const { provider, session } = await manualSession(longSeed())
+
+    const result = await session.compact()
+    expect(result.reason).toBeUndefined()
+    expect(result.summarized).toBe(true)
+    // The first turn and the tool turn that followed it: the cut lands on a user
+    // turn, so a tool call never travels without its result.
+    expect(result.folded).toBe(2)
+    expect(result.tokens).toBeGreaterThan(0)
+
+    // In play, not just counted: the next request carries the summary and no
+    // longer carries the turns it replaced.
+    await drain(session)
+    const system = provider.systems.at(-1)!
+    expect(system).toContain('OLD_TURNS_SUMMARY')
+    expect(system).not.toContain('first xxx')
+  })
+
+  it('says there was nothing to fold rather than claiming a compaction', async () => {
+    const { session } = await manualSession([text('user', 'only'), text('assistant', 'turn')])
+
+    const result = await session.compact()
+    expect(result.folded).toBe(0)
+    expect(result.summarized).toBe(false)
+    expect(result.reason).toContain('nothing is old enough')
+  })
+
+  it('writes the fold down, so a restart does not take it back', async () => {
+    const { session, store, record } = await manualSession(longSeed())
+
+    await session.compact()
+    const saved = await store.load(record.id)
+    expect(saved?.droppedTokens).toBeGreaterThan(0)
+    expect(saved?.summary).toContain('OLD_TURNS_SUMMARY')
+  })
+
+  it('says compaction is off instead of folding anyway', async () => {
+    const { session } = await manualSession(longSeed(), { compaction: false })
+
+    const result = await session.compact()
+    expect(result.folded).toBe(0)
+    expect(result.reason).toContain('compaction is off')
+  })
+
+  it('keeps the turns it folded when the summary call fails', async () => {
+    const { provider, session } = await manualSession(longSeed())
+    provider.failing = true
+
+    const result = await session.compact()
+    // The turns go anyway — a request that fits beats one the provider rejects —
+    // and the result says no summary was written in their place.
+    expect(result.folded).toBe(2)
+    expect(result.summarized).toBe(false)
+  })
+})
+
+/** Runs a turn and throws the events away, for a session that must answer again. */
+async function drain(session: Session): Promise<void> {
+  for await (const _event of session.send('next')) {
+    // Nothing to look at: the assertion is on what the provider was sent.
+  }
+}
+
 describe('estimateTokens', () => {
   it('grows with the size of the transcript', () => {
     expect(estimateTokens([])).toBe(0)

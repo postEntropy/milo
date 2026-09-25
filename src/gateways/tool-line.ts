@@ -1,69 +1,66 @@
 /**
  * How a tool call is written into a message.
  *
- * Shell commands get a code block: monospace, with a copy button on mobile, and
- * separate from the quote box the other tools share with the search and read
- * activity.
+ * One line per call, in the same shape on every surface: an icon, the tool's
+ * name, and the one value worth showing. It used to be two shapes — a shell
+ * command got a fenced code block — and the block was the odd one out: the name
+ * inside it could not be emphasised, the command in it was truncated exactly like
+ * every other detail (so copying it out copied something incomplete), and the
+ * terminal drew both shapes the same way anyway. One shape, and it is the one the
+ * other tools already had.
  */
-export type ToolLineStyle = 'quote' | 'code'
-
-export interface ToolLine {
-  text: string
-  style: ToolLineStyle
-}
 
 /**
- * Every line starts with a real emoji, never a typographic glyph: these lines
- * are read in chat clients, where `▸` renders as a stray character next to the
- * emoji around it. The fallback is an emoji too, so an unknown tool cannot
- * reintroduce one.
+ * Every line starts with a real emoji, never a typographic glyph: these lines are
+ * read in chat clients, where `▸` renders as a stray character next to the emoji
+ * around it. The fallback is an emoji too, so an unknown tool cannot reintroduce
+ * one.
  */
-const TOOLS: Record<string, { icon: string; style: ToolLineStyle }> = {
-  read_file: { icon: '📄', style: 'quote' },
-  list_dir: { icon: '📁', style: 'quote' },
-  glob: { icon: '🔎', style: 'quote' },
-  grep: { icon: '🔍', style: 'quote' },
-  fetch_url: { icon: '🔗', style: 'quote' },
-  write_file: { icon: '📝', style: 'code' },
-  edit_file: { icon: '✏️', style: 'code' },
-  remember: { icon: '🧠', style: 'quote' },
-  recall: { icon: '🗂', style: 'quote' },
-  search_history: { icon: '🕘', style: 'quote' },
-  web_search: { icon: '🌐', style: 'quote' },
-  skill: { icon: '📘', style: 'quote' },
-  task: { icon: '🤖', style: 'quote' },
-  shell_command: { icon: '⚡', style: 'code' },
+const TOOLS: Record<string, string> = {
+  read_file: '📄',
+  list_dir: '📁',
+  glob: '🔎',
+  grep: '🔍',
+  fetch_url: '🔗',
+  write_file: '📝',
+  edit_file: '✏️',
+  remember: '🧠',
+  recall: '🗂',
+  search_history: '🕘',
+  web_search: '🌐',
+  read_skill: '📘',
+  task: '🤖',
+  shell_command: '⚡',
+  browser_open: '🧭',
+  browser_snapshot: '👁️',
+  browser_screenshot: '📸',
+  browser_act: '🖱️',
 }
 
-const FALLBACK: { icon: string; style: ToolLineStyle } = { icon: '🔧', style: 'quote' }
+const FALLBACK = '🔧'
 
 /** The icon alone, for surfaces that draw their own line (the CLI). */
 export function toolIcon(name: string): string {
-  return (TOOLS[name] ?? FALLBACK).icon
-}
-
-export function toolStyle(name: string): ToolLineStyle {
-  return (TOOLS[name] ?? FALLBACK).style
+  return TOOLS[name] ?? FALLBACK
 }
 
 export function toolLine(
   name: string,
   args?: unknown,
   options: { markdown?: boolean } = {},
-): ToolLine {
-  const { icon, style } = TOOLS[name] ?? FALLBACK
+): string {
   const summary = toolDetail(args)
-  const label = toolLabel(name, style, options.markdown ?? false)
-  return { text: summary ? `${icon} ${label} ${summary}` : `${icon} ${label}`, style }
+  const label = toolLabel(name, options.markdown ?? false)
+  return summary ? `${toolIcon(name)} ${label} ${summary}` : `${toolIcon(name)} ${label}`
 }
 
 /**
  * The tool name, emphasised so it reads as a name and not as the first word of
- * the arguments — but only on a line the surface renders as Markdown. Inside a
- * code fence Markdown is literal, so the asterisks would simply show up.
+ * the arguments — where the surface renders Markdown. The terminal emphasises
+ * with colour instead and asks for the plain name.
  */
-export function toolLabel(name: string, style: ToolLineStyle, markdown: boolean): string {
-  return markdown && style === 'quote' ? `**${name}**` : name
+export function toolLabel(name: string, markdown: boolean): string {
+  return markdown ? `**${name}**` : name
 }
 
 const GIST_LIMIT = 120
@@ -77,16 +74,16 @@ const GIST_LIMIT = 120
  *
  * Exported because the CLI draws its own line and must not drift from the
  * chat surfaces: both put this same string after the tool name, so a skill reads
- * as `skill deploy` in the terminal and in Telegram alike, not as the argument
- * dump on one and the useful value on the other.
+ * as `read_skill deploy` in the terminal and in Telegram alike, not as the
+ * argument dump on one and the useful value on the other.
  */
 export function toolDetail(args: unknown): string {
   if (!args || typeof args !== 'object') return ''
   const record = args as Record<string, unknown>
   // `description` is the `task` tool's label for a subtask (its `prompt` is the
   // whole instruction, and has no place on a one-line activity log); `url` and
-  // `name` are the one interesting value of `fetch_url` and `skill`.
-  for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name']) {
+  // `name` are the one interesting value of `fetch_url` and `read_skill`.
+  for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name', 'action', 'app']) {
     const value = record[key]
     if (typeof value === 'string' && value.trim()) {
       const flat = value.trim().replace(/\s+/g, ' ')

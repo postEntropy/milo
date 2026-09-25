@@ -64,6 +64,16 @@ export function Shell({
     () => initialMode ?? runtime?.permissions?.mode ?? 'ask',
   )
 
+  // A rebuilt runtime has recaps still to write, and the one it replaces is the
+  // only thing holding them: closed here rather than left for the exit path,
+  // which a long-lived terminal may not reach for hours.
+  useEffect(() => {
+    if (!runtime) return
+    return () => {
+      void runtime.close()
+    }
+  }, [runtime])
+
   // The session bound to this terminal, resolved once the runtime exists.
   const [sessionId, setSessionId] = useState<string | null>(null)
   // `--resume` applies once: rebuilding the runtime (a model change) must not

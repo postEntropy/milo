@@ -1,5 +1,6 @@
 import { errorMessage } from '../util/errors.js'
 import type { SessionsConfig } from './config/schema.js'
+import type { BrowserFacts } from './browser/index.js'
 import type { HistoryEntry, HistoryWriter } from './history.js'
 import { scopeKey, type Memory, type MemoryInput, type MemoryScope } from './memory/index.js'
 import type { SkillSummary } from './skills/index.js'
@@ -12,6 +13,8 @@ import { buildSystemPrompt, type SurfaceKind, type SystemPromptInput } from './a
 import {
   countTurns,
   digest,
+  dropOldImages,
+  dropOldSnapshots,
   estimateText,
   estimateTokens,
   MemoryRecapStore,
@@ -19,6 +22,7 @@ import {
   rankSessions,
   summarize,
   withRecaps,
+  type CompactResult,
   type RecapStore,
   type SessionLease,
   type SessionRecord,
@@ -76,6 +80,13 @@ export interface SessionOptions {
    * value so a surface can change it without the session being rebuilt.
    */
   reasoningEffort?: () => ReasoningEffort
+  /**
+   * How many page snapshots a request may carry once a turn is under way. The
+   * browser's own setting, threaded here because the transcript is what pays.
+   */
+  keepSnapshots?: number
+  /** What the browser is right now, read per turn. Absent when there is none. */
+  browser?: () => BrowserFacts | null
 }
 
 export interface SendOptions {
@@ -146,6 +157,15 @@ export class Session {
     // Never below a floor: a share of a window that turns out tiny would
     // otherwise compact down to a request with no room to answer in.
     return Math.max(1024, Math.floor(window * config.compactAt))
+  }
+
+  /**
+   * Read per prompt build, and by both callers that build one — the request, and
+   * the budget that measures it. Two different answers there would mean a budget
+   * saying a request fits while the request is bigger.
+   */
+  private browserFacts(): BrowserFacts | null {
+    return this.options.browser?.() ?? null
   }
 
   get title(): string | undefined {
@@ -260,7 +280,7 @@ export class Session {
     const compaction = await this.compactIfNeeded(prompt, signal)
     if (compaction) yield { type: 'compacted', ms: compaction.ms }
 
-    const systemPrompt = buildSystemPrompt({ ...prompt, summary: this.summary })
+    const systemPrompt = buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() })
     this.lastSystemTokens = estimateText(systemPrompt)
 
     this.messages.push({ role: 'user', content: [{ type: 'text', text: input }] })
@@ -329,11 +349,18 @@ export class Session {
         // one still asks for Milo's default.
         reasoningEffort: effort,
         permission,
+        keepSnapshots: this.options.keepSnapshots,
       })) {
         if (event.type === 'error') errored = true
         else if (event.type === 'text-delta') answer += event.delta
         else if (event.type === 'reasoning-delta') reasoning += event.delta
-        else if (event.type === 'tool-start') running = { name: event.name, args: event.args }
+        else if (event.type === 'tool-start') {
+          // The step that called a tool is finished being written. Without the
+          // break, the line before a tool call and the answer after it are one
+          // sentence in the log — and in an export, one paragraph.
+          if (answer && !answer.endsWith('\n')) answer += '\n\n'
+          running = { name: event.name, args: event.args }
+        }
         else if (event.type === 'steer') {
           corrections.push(event.text)
           note({ kind: 'user', text: event.text })
@@ -514,6 +541,71 @@ export class Session {
   }
 
   /**
+   * Folds the oldest turns into the summary now, whether or not the budget was
+   * reached — what `/compact` is for. The automatic pass does the same work on
+   * its own when the next request would not fit; this is that work asked for by
+   * hand, so it keeps the same rule about how much stays (the last `keepTurns`).
+   */
+  async compact(signal?: AbortSignal): Promise<CompactResult> {
+    const config = this.options.sessions
+    const nothing = (reason: string): CompactResult => ({
+      folded: 0,
+      tokens: 0,
+      ms: 0,
+      summarized: false,
+      reason,
+    })
+    if (!config?.compaction) return nothing('compaction is off in this install')
+
+    // The window is a fact about the model, not about this session: wait for the
+    // lookup only if it has not finished already.
+    await this.resolving
+
+    // Pictures and page snapshots first: both are the parts of a transcript that
+    // a handful of turns can push over the ceiling on their own, and the oldest
+    // of each is no longer what the next action is chosen from.
+    dropOldImages(this.messages)
+    dropOldSnapshots(this.messages, this.options.keepSnapshots)
+
+    const cut = planCut(this.messages, config.keepTurns)
+    if (cut <= 0) {
+      return nothing(`nothing is old enough to fold — the last ${config.keepTurns} turns stay`)
+    }
+
+    const dropped = this.messages.slice(0, cut)
+    const startedAt = Date.now()
+    let summary: string | null = null
+    try {
+      summary = await summarize({
+        provider: this.options.provider,
+        model: this.options.model,
+        previous: this.summary,
+        dropped,
+        signal,
+      })
+    } catch {
+      summary = null
+    }
+
+    if (summary) this.summary = summary
+    this.record.droppedTokens = (this.record.droppedTokens ?? 0) + estimateTokens(dropped)
+    this.messages.splice(0, cut)
+    // Written now rather than on the next turn: a fold that only exists in memory
+    // is a `/compact` that a restart takes back.
+    await this.persist()
+
+    return {
+      folded: countTurns(dropped),
+      tokens: estimateTokens(dropped),
+      ms: Date.now() - startedAt,
+      // False when the model gave nothing: the turns went anyway, because a
+      // request that fits beats one the provider rejects — and the caller is
+      // told, rather than reading a summary that is not there.
+      summarized: summary !== null,
+    }
+  }
+
+  /**
    * Over the budget: summarize the oldest turns into `summary` and drop them.
    * If the summary call fails, the turns are dropped anyway — a request that
    * fits beats one that is rejected by the provider.
@@ -534,9 +626,16 @@ export class Session {
     await this.resolving
     const ceiling = this.ceiling ?? config.maxInputTokens
 
+    // Before the budget is counted: pictures and page snapshots are the parts of
+    // a transcript that a handful of turns can push over the ceiling on their
+    // own, and the oldest of each is no longer what the next action is chosen
+    // from.
+    dropOldImages(this.messages)
+    dropOldSnapshots(this.messages, this.options.keepSnapshots)
+
     const used = () =>
       estimateTokens(this.messages) +
-      estimateText(buildSystemPrompt({ ...prompt, summary: this.summary }))
+      estimateText(buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() }))
     if (used() <= ceiling) return null
 
     const cut = planCut(this.messages, config.keepTurns)

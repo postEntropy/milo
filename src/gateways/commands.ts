@@ -1,5 +1,6 @@
+import { describeExport, writeSessionExport, type ExportFormat } from '../core/export.js'
 import { formatSessionList, formatStats } from '../core/sessions/index.js'
-import type { SessionStats, SessionSummary } from '../core/sessions/index.js'
+import type { CompactResult, SessionStats, SessionSummary } from '../core/sessions/index.js'
 import { formatSkillList, type SkillSummary } from '../core/skills/index.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
 import {
@@ -8,6 +9,7 @@ import {
   type ReasoningEffort,
 } from '../core/providers/types.js'
 import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.js'
+import type { TurnQueue } from './turns.js'
 
 export interface CommandContext {
   policy?: PermissionPolicy
@@ -35,6 +37,8 @@ export interface CommandContext {
   resumeSession?: (id: string) => Promise<boolean>
   listSessions?: () => Promise<SessionSummary[]>
   sessionStats?: () => SessionStats | Promise<SessionStats>
+  /** Folds the oldest turns into the summary now, rather than when the budget forces it. */
+  compactSession?: () => Promise<CompactResult>
   /** The skills installed on this machine, for `/skills`. */
   skills?: () => SkillSummary[]
   /** Set when this surface may not create or switch sessions; used as the reply. */
@@ -59,10 +63,16 @@ const HELP = [
   '/sessions — list saved sessions',
   '/resume <id> — switch to another session',
   '/stats — numbers for the current session',
+  '/compact — fold the oldest turns into the summary now, instead of when the context fills up',
+  '/export [md|json] — write this conversation out as a file, tool calls and reasoning included',
   '/skills — the skills installed, and where they live',
   '/clear — forget this conversation',
   '/status — permission mode and display settings',
+  '/stop — stop the turn running now, and anything queued behind it',
+  '/steer <text> — hand text to the turn running now, at its next step',
+  '/queue <text> — say it as its own turn, after the one running now',
   '/help — this message',
+  'A plain message sent while Milo is working is a correction: it joins that turn at its next step instead of starting a second one. /queue is how you ask for it to be said afterwards.',
   'Provider, model and keys: run `milo setup` in a terminal.',
 ].join('\n')
 
@@ -295,6 +305,13 @@ export async function handleCommand(
       }
     }
 
+    case 'compact': {
+      if (!context.compactSession) {
+        return { handled: true, reply: 'Compaction is not available on this surface.' }
+      }
+      return { handled: true, reply: compactReply(await context.compactSession()) }
+    }
+
     case 'stats': {
       if (!context.sessionStats) {
         return { handled: true, reply: 'Session stats are not available on this surface.' }
@@ -308,6 +325,28 @@ export async function handleCommand(
 
     case 'skills':
       return { handled: true, reply: formatSkillList(context.skills?.() ?? []) }
+
+    case 'export': {
+      // An argument it does not know is answered, not ignored: silently writing
+      // Markdown because someone typed `xml` is a command doing something other
+      // than what it was asked. Checked first, because it needs no session.
+      if (argument && argument !== 'md' && argument !== 'json') {
+        return {
+          handled: true,
+          reply: 'Export as what? `/export` for Markdown, `/export json` for the entries themselves.',
+        }
+      }
+      if (!context.sessionStats) return { handled: true, reply: 'This surface cannot export.' }
+      const format: ExportFormat = argument === 'json' ? 'json' : 'md'
+      const stats = await context.sessionStats()
+      const written = await writeSessionExport({ id: stats.id, title: stats.title, format })
+      return {
+        handled: true,
+        reply: written
+          ? describeExport(written)
+          : `Nothing to export for ${stats.id}: the log has nothing from it yet. A conversation is written out as it runs, so a session that has not had a turn has nothing.`,
+      }
+    }
 
     case 'status':
       return {
@@ -328,6 +367,137 @@ export async function handleCommand(
     default:
       return { handled: true, reply: `Unknown command: /${command}. Try /help` }
   }
+}
+
+/**
+ * The commands that act on the turn rather than on the session. They cannot go
+ * through `handleCommand`, which runs *inside* a queued turn: `/stop` waiting
+ * behind the turn it is meant to stop is no stop at all, and `/steer` and
+ * `/queue` say where a text goes, which is only decidable before it is queued.
+ */
+export type TurnControl =
+  | { action: 'stop' }
+  | { action: 'steer' | 'queue'; text: string }
+
+export function parseTurnControl(raw: string): TurnControl | null {
+  if (!raw.startsWith('/')) return null
+  const { command, argument } = parse(raw)
+  switch (command.toLowerCase()) {
+    case 'stop':
+      return { action: 'stop' }
+    case 'steer':
+    case 'queue':
+      // An empty argument is not "no command": it is the command without its
+      // text, and the reply has to say so rather than fall through to "unknown".
+      return { action: command.toLowerCase() as 'steer' | 'queue', text: argument }
+    default:
+      return null
+  }
+}
+
+/**
+ * What a surface has to be able to do with the turn running now, so that `/stop`,
+ * `/steer` and `/queue` mean the same thing in a terminal, on Telegram and on
+ * Discord. Each surface binds its own machinery behind this — the bots their
+ * `TurnQueue`, the CLI its refs. The vocabulary and the rules are what is shared;
+ * only the plumbing is local.
+ */
+export interface TurnControlTarget {
+  /** Hands text to the running turn; false when there is nobody to hand it to. */
+  steer(text: string): boolean
+  /** True while a turn is running — queued is not running. */
+  busy(): boolean
+  queued(): number
+  stop(): { stopped: boolean; dropped: number }
+}
+
+/** One conversation of a `TurnQueue`, as the control commands see it. */
+export function turnOf(turns: TurnQueue, key: string): TurnControlTarget {
+  return {
+    steer: (text) => turns.steer(key, text),
+    busy: () => turns.busy(key),
+    queued: () => turns.queued(key),
+    stop: () => turns.stop(key),
+  }
+}
+
+export interface TurnControlContext {
+  turn: TurnControlTarget
+  /**
+   * Starts a turn for `text` — the surface's own path, so that a command asking
+   * for a turn lands wherever a message asking for one would.
+   */
+  start: (text: string) => void
+}
+
+/** Carries out `/stop`, `/steer` and `/queue` against the turn running now. */
+export function handleTurnControl(raw: string, context: TurnControlContext): CommandResult {
+  const control = parseTurnControl(raw)
+  if (!control) return { handled: false }
+  const { turn, start } = context
+
+  switch (control.action) {
+    case 'stop': {
+      const { stopped, dropped } = turn.stop()
+      if (!stopped) return { handled: true, reply: 'Nothing is running to stop.' }
+      return {
+        handled: true,
+        reply:
+          dropped === 0
+            ? '🛑 Stopped.'
+            : `🛑 Stopped — and dropped ${dropped} message${dropped === 1 ? '' : 's'} that ${
+                dropped === 1 ? 'was' : 'were'
+              } waiting behind it.`,
+      }
+    }
+
+    case 'steer': {
+      if (!control.text) {
+        return {
+          handled: true,
+          reply: 'Usage: /steer <text> — it joins the turn running now, at its next step. Plain text does the same.',
+        }
+      }
+      if (turn.steer(control.text)) {
+        return { handled: true, reply: '↳ Handed to the turn running now; it reads it at the next step.' }
+      }
+      start(control.text)
+      return { handled: true, reply: 'Nothing was running, so this is its own turn.' }
+    }
+
+    case 'queue': {
+      if (!control.text) {
+        return {
+          handled: true,
+          reply: 'Usage: /queue <text> — a turn of its own, after the one running now.',
+        }
+      }
+      const behind = turn.busy()
+      start(control.text)
+      if (!behind) return { handled: true, reply: 'Nothing was running, so this is running now.' }
+      const waiting = turn.queued()
+      return {
+        handled: true,
+        reply: `⏳ Queued behind the turn running now${waiting > 1 ? ` (${waiting} waiting)` : ''}.`,
+      }
+    }
+  }
+}
+
+/**
+ * What to say about a compaction, in one place: the CLI and the bots must not
+ * disagree about whether "nothing to compact" or "dropped without a summary" is
+ * the answer the person gets.
+ */
+export function compactReply(result: CompactResult): string {
+  // "Nothing to compact" is an answer, not a failure, and it is the common one: a
+  // session younger than `keepTurns` turns has nothing worth folding.
+  if (result.reason) return `Nothing to compact: ${result.reason}.`
+  const turns = `${result.folded} turn${result.folded === 1 ? '' : 's'}`
+  const took = result.ms >= 1000 ? `${(result.ms / 1000).toFixed(1)}s` : `${result.ms}ms`
+  return result.summarized
+    ? `🗜 Compacted: ${turns} (~${result.tokens} tokens) folded into the summary, in ${took}. /stats for what is left.`
+    : `🗜 Compacted: ${turns} (~${result.tokens} tokens) dropped — the summary call failed, so nothing was written in its place. In ${took}.`
 }
 
 /** Inline-button payloads: `perm:<id>:allow|deny`. */

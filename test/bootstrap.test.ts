@@ -22,7 +22,11 @@ const writeTool = {
 } satisfies Tool<{ command: string }>
 
 /** One config, varying only where the provider lives and whether it has a key. */
-const loadedConfig = (baseURL: string, apiKey: string | false = 'k'): LoadedConfig => ({
+const loadedConfig = (
+  baseURL: string,
+  apiKey: string | false = 'k',
+  browser = false,
+): LoadedConfig => ({
   config: {
     provider: 'test',
     model: 'test-model',
@@ -33,6 +37,14 @@ const loadedConfig = (baseURL: string, apiKey: string | false = 'k'): LoadedConf
     reasoningEffort: 'medium',
     gateways: {},
     permissions: { mode: 'auto', allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
+    browser: {
+      enabled: browser,
+      chromePath: null,
+      headless: true,
+      profileDir: null,
+      cdpUrl: null,
+      keepSnapshots: 2,
+    },
   },
   provider: { id: 'test', baseURL, apiKey, wire: 'openai' },
   model: 'test-model',
@@ -90,6 +102,27 @@ describe('createRuntime', () => {
     )
     expect(await runtime.permissions?.decide(writeTool, { command: 'npm test' })).toBe('ask')
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('closes cleanly when nothing was ever used', async () => {
+    const runtime = createRuntime(loadedConfig('https://x.test/v1'), process.cwd())
+    const session = await runtime.getSession({ gateway: 'cli', conversationId: 'idle' })
+
+    expect(session.id).toMatch(/^[a-z]+-[a-z]+-\d{1,3}$/)
+    await expect(runtime.close()).resolves.toBeUndefined()
+  })
+
+  it('builds a browser only when the config turned one on', async () => {
+    const off = createRuntime(loadedConfig('https://x.test/v1'), process.cwd())
+    expect(off.browser).toBeNull()
+    // And closing an install that never started one is not a thing that hangs.
+    await expect(off.close()).resolves.toBeUndefined()
+
+    const on = createRuntime(loadedConfig('https://x.test/v1', 'k', true), process.cwd())
+    expect(on.browser).not.toBeNull()
+    // Nothing is launched until a tool is called, so this costs no process.
+    expect(on.browser?.isRunning).toBe(false)
+    await expect(on.close()).resolves.toBeUndefined()
   })
 
   it('writes a turn to the history log of the home it was built for', async () => {

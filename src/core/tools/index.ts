@@ -1,5 +1,7 @@
 import type { SearchProvider } from '../search/index.js'
 import type { Skill } from '../skills/index.js'
+import type { BrowserSession } from '../browser/index.js'
+import { createBrowserTools } from '../browser/index.js'
 import { editFileTool } from './edit-file.js'
 import { fetchUrlTool } from './fetch-url.js'
 import { globTool } from './glob.js'
@@ -11,7 +13,7 @@ import { rememberTool } from './remember.js'
 import { searchHistoryTool } from './search-history.js'
 import { ToolRegistry } from './registry.js'
 import { shellTool } from './shell.js'
-import { createSkillTool } from './skill.js'
+import { createReadSkillTool } from './read-skill.js'
 import { taskTool } from './task.js'
 import type { Tool } from './types.js'
 import { createWebSearchTool } from './web-search.js'
@@ -34,7 +36,7 @@ export { searchHistoryTool } from './search-history.js'
 export { shellTool } from './shell.js'
 export { taskTool } from './task.js'
 export { createWebSearchTool } from './web-search.js'
-export { createSkillTool } from './skill.js'
+export { createReadSkillTool } from './read-skill.js'
 export { JevReviewer, createJevReviewer } from './jev.js'
 
 export const builtinTools = [
@@ -56,16 +58,20 @@ export interface ToolRegistryOptions {
   search?: SearchProvider | null
   /** Skills found at startup; `skill` is only registered when there are any. */
   skills?: Skill[]
+  /** The browser, when one is configured — its three tools ride along with it. */
+  browser?: BrowserSession | null
 }
 
 /**
  * `web_search` is only registered when a search provider is configured, and
  * `skill` only when a skill was found — the model never sees a tool it has
- * nothing to use on.
+ * nothing to use on. The browser tools follow the same rule: off in the config
+ * means absent from the catalog, not present and failing.
  */
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
   const tools: Tool<unknown>[] = [...builtinTools]
   if (options.search) tools.push(createWebSearchTool(options.search))
-  if (options.skills && options.skills.length > 0) tools.push(createSkillTool(options.skills))
+  if (options.skills && options.skills.length > 0) tools.push(createReadSkillTool(options.skills))
+  if (options.browser) tools.push(...createBrowserTools(options.browser))
   return new ToolRegistry(tools)
 }

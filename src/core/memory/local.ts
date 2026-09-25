@@ -1,6 +1,7 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, readFileSync, writeFileSync } from 'node:fs'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
+import { ensurePrivateDir, PRIVATE_FILE_MODE } from '../../util/fs.js'
 import { scopeKey, type Memory, type MemoryInput, type MemoryItem, type MemoryScope } from './types.js'
 
 const MAX_ITEMS = 500
@@ -103,8 +104,10 @@ export class FileMemory implements Memory {
   }
 
   private persist(file: string, items: MemoryItem[]): void {
-    mkdirSync(this.dir, { recursive: true })
-    writeFileSync(file, `${JSON.stringify(items, null, 2)}\n`)
+    ensurePrivateDir(this.dir)
+    writeFileSync(file, `${JSON.stringify(items, null, 2)}\n`, { mode: PRIVATE_FILE_MODE })
+    // A memory file written before this was tightened is the one that needs it.
+    chmodSync(file, PRIVATE_FILE_MODE)
   }
 }
 

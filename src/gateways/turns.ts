@@ -10,11 +10,23 @@ import { logWarn } from '../util/log.js'
  * press would sit in the queue behind the very turn waiting for it — a deadlock
  * that ends in a timeout and a denied tool. The queue keeps the handler free
  * while still stopping two turns from mutating the same session at once.
+ *
+ * The queue is also what can stop a turn, which is why it owns the abort handle:
+ * the handle has to exist for as long as the turn does, and the queue is the one
+ * place that knows when a turn starts and when it is over.
  */
 export class TurnQueue {
   private readonly tails = new Map<string, Promise<unknown>>()
-  /** The inbox of the turn running right now, if any, per conversation. */
-  private readonly inboxes = new Map<string, string[]>()
+  /** The turn running right now: the inbox it reads, and its abort handle. */
+  private readonly running = new Map<string, { inbox: string[]; controller: AbortController }>()
+  /** Turns registered and not finished, the running one included. */
+  private readonly registered = new Map<string, number>()
+  /**
+   * Bumped by `stop`. A turn queued before the bump is skipped when its turn
+   * comes: `/stop` means stop, not "stop this one and start the next message of
+   * the queue you already sent".
+   */
+  private readonly epoch = new Map<string, number>()
 
   /**
    * Hands `text` to the turn already running for `key`, instead of starting a
@@ -26,34 +38,68 @@ export class TurnQueue {
    * therefore becomes its own turn; losing it would be the worse answer.
    */
   steer(key: string, text: string): boolean {
-    const inbox = this.inboxes.get(key)
-    if (!inbox) return false
-    inbox.push(text)
+    const turn = this.running.get(key)
+    if (!turn) return false
+    turn.inbox.push(text)
     return true
   }
 
   /** True while a turn is running for `key` — queued is not running. */
   busy(key: string): boolean {
-    return this.inboxes.has(key)
+    return this.running.has(key)
+  }
+
+  /** How many turns are waiting behind the running one. */
+  queued(key: string): number {
+    const registered = this.registered.get(key) ?? 0
+    return Math.max(0, registered - (this.running.has(key) ? 1 : 0))
+  }
+
+  /**
+   * Stops what is running for `key`, now: the model call in flight is aborted
+   * and the tool call with it. What was queued behind it goes too — stopping one
+   * turn only to start the next message of the queue is not what `/stop` means.
+   *
+   * A message sent after the stop runs normally, which is what makes this usable
+   * as "that was not what I wanted" rather than as a kill switch.
+   */
+  stop(key: string): { stopped: boolean; dropped: number } {
+    const turn = this.running.get(key)
+    if (!turn) return { stopped: false, dropped: 0 }
+    this.epoch.set(key, (this.epoch.get(key) ?? 0) + 1)
+    turn.controller.abort()
+    return { stopped: true, dropped: this.queued(key) }
   }
 
   /** Queues `work` behind whatever is already running for `key`. */
-  run(key: string, work: (inbox: string[]) => Promise<void>): void {
+  run(key: string, work: (inbox: string[], signal: AbortSignal) => Promise<void>): void {
     const previous = this.tails.get(key) ?? Promise.resolve()
+    const epoch = this.epoch.get(key) ?? 0
+    this.registered.set(key, (this.registered.get(key) ?? 0) + 1)
+
     const next = previous
       .then(async () => {
+        // Queued before a stop: that stop was the answer to these too.
+        if ((this.epoch.get(key) ?? 0) !== epoch) return
+        const controller = new AbortController()
+        const inbox: string[] = []
         // Registered before the first await inside `work`, so a message arriving
         // as the turn starts is steered into it rather than missed.
-        const inbox: string[] = []
-        this.inboxes.set(key, inbox)
+        this.running.set(key, { inbox, controller })
         try {
-          await work(inbox)
+          await work(inbox, controller.signal)
         } finally {
-          this.inboxes.delete(key)
+          this.running.delete(key)
         }
       })
       // Never rejects: a failed turn must not poison the queue for the next one.
       .catch((error: unknown) => logWarn(`turn failed: ${errorMessage(error)}`))
+      .finally(() => {
+        const left = (this.registered.get(key) ?? 1) - 1
+        if (left > 0) this.registered.set(key, left)
+        else this.registered.delete(key)
+      })
+
     this.tails.set(key, next)
     void next.then(() => {
       if (this.tails.get(key) === next) this.tails.delete(key)

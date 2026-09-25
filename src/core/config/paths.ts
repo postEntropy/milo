@@ -11,7 +11,21 @@ export const sessionsDir = (): string => path.join(MILO_HOME, 'sessions')
 export const recapsDir = (): string => path.join(sessionsDir(), 'recaps')
 /** Procedures the model loads on demand, one `<name>/SKILL.md` per skill. */
 export const skillsDir = (): string => path.join(MILO_HOME, 'skills')
+/** Pictures Milo's tools produced. The transcript points here instead of holding them. */
+export const imagesDir = (): string => path.join(MILO_HOME, 'images')
+/**
+ * Everything the browser owns: the profile its cookies and sign-ins live in,
+ * and a Chrome Milo downloaded for itself when the machine had none. It belongs
+ * to the browser Milo starts, never to the one the person is using.
+ */
+export const browserDir = (): string => path.join(MILO_HOME, 'browser')
+export const browserProfileDir = (): string => path.join(browserDir(), 'profile')
+export const browserChromeDir = (): string => path.join(browserDir(), 'chrome')
+/** Profiles copied out of a browser the person already uses, one directory each. */
+export const browserProfilesDir = (): string => path.join(browserDir(), 'profiles')
 /** One append-only JSONL per day: what was asked, answered and run. */
 export const historyDir = (): string => path.join(MILO_HOME, 'history')
+/** Sessions written out to be read or handed on, one file per export. */
+export const exportsDir = (): string => path.join(MILO_HOME, 'exports')
 /** What was typed at the CLI's prompt, for the arrow keys to walk back through. */
 export const inputHistoryFile = (): string => path.join(MILO_HOME, 'input-history.json')

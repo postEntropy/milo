@@ -1,6 +1,6 @@
-import { mkdirSync, readFileSync, rmSync } from 'node:fs'
+import { readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
-import { writeFileAtomic } from '../../util/fs.js'
+import { ensurePrivateDir, writePrivateFile } from '../../util/fs.js'
 import { isValidSessionId } from './types.js'
 
 /**
@@ -66,8 +66,8 @@ export class FileRecapStore implements RecapStore {
     if (!isValidSessionId(recap.session)) return
     const existing = await this.read(recap.session)
     if (existing && existing.sourceUpdatedAt >= recap.sourceUpdatedAt) return
-    mkdirSync(this.dir, { recursive: true })
-    await writeFileAtomic(this.fileFor(recap.session), `${JSON.stringify(recap, null, 2)}\n`)
+    ensurePrivateDir(this.dir)
+    await writePrivateFile(this.fileFor(recap.session), `${JSON.stringify(recap, null, 2)}\n`)
   }
 
   async remove(id: string): Promise<void> {

@@ -112,6 +112,43 @@ export type DisplayConfig = z.infer<typeof DisplaySchema>
 
 export const DEFAULT_DISPLAY: DisplayConfig = { tools: 'full', thinking: 'on' }
 
+/**
+ * The browser Milo drives. Off until it is turned on, like every other optional
+ * capability — and off also means the tools are not registered at all, so the
+ * model never sees three tools it has no browser for.
+ */
+export const BrowserSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** An explicit binary; otherwise `MILO_BROWSER_CHROME`, then the usual places. */
+  chromePath: z.string().nullable().default(null),
+  headless: z.boolean().default(true),
+  /**
+   * Which profile the browser runs on. Left unset, Milo keeps its own under
+   * `~/.milo/browser/profile/`. Point it at a copy of a real profile to reach
+   * logged-in accounts — never at the browser's default directory, which Chrome
+   * refuses to open for debugging without saying so.
+   */
+  profileDir: z.string().nullable().default(null),
+  /**
+   * Attach to a browser that is already running instead of starting one of our
+   * own. Opt-in, because it means asking the person to enable remote debugging
+   * in the browser they are actually using.
+   */
+  cdpUrl: z.string().nullable().default(null),
+  /** How many page snapshots stay in the transcript; older ones become a line. */
+  keepSnapshots: z.number().int().nonnegative().default(2),
+})
+export type BrowserConfig = z.infer<typeof BrowserSchema>
+
+export const DEFAULT_BROWSER: BrowserConfig = {
+  enabled: false,
+  chromePath: null,
+  headless: true,
+  profileDir: null,
+  cdpUrl: null,
+  keepSnapshots: 2,
+}
+
 export const ConfigSchema = z.object({
   provider: z.string(),
   model: z.string(),
@@ -121,6 +158,7 @@ export const ConfigSchema = z.object({
   display: DisplaySchema.default(DEFAULT_DISPLAY),
   gateways: z.record(z.string(), GatewaySchema).default({}),
   permissions: PermissionsSchema.default(DEFAULT_PERMISSIONS),
+  browser: BrowserSchema.default(DEFAULT_BROWSER),
   search: SearchSchema.optional(),
   systemPrompt: z.string().optional(),
   maxSteps: z.number().int().positive().optional(),

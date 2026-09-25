@@ -5,16 +5,30 @@
 export class PendingDecisions {
   private readonly waiters = new Map<string, (allowed: boolean) => void>()
 
-  wait(id: string, timeoutMs: number): Promise<boolean> {
+  /**
+   * Waits for the answer. A stopped turn resolves it too, as a **denial**: the
+   * wait would otherwise keep the turn parked for its full timeout — the typing
+   * indicator on, the queue blocked — and a ✅ pressed afterwards would run the
+   * very tool the stop was meant to prevent.
+   */
+  wait(id: string, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
-      const timer = setTimeout(() => {
-        this.waiters.delete(id)
-        resolve(false)
-      }, timeoutMs)
-      this.waiters.set(id, (allowed) => {
+      let timer: ReturnType<typeof setTimeout>
+      const finish = (allowed: boolean): void => {
         clearTimeout(timer)
+        this.waiters.delete(id)
+        signal?.removeEventListener('abort', stopped)
         resolve(allowed)
-      })
+      }
+      const stopped = (): void => finish(false)
+
+      timer = setTimeout(stopped, timeoutMs)
+      if (signal?.aborted) {
+        finish(false)
+        return
+      }
+      signal?.addEventListener('abort', stopped, { once: true })
+      this.waiters.set(id, finish)
     })
   }
 

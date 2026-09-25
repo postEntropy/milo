@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildSystemPrompt } from '../src/core/agent/system.js'
 import { discoverSkills, formatSkillList, parseSkill, type Skill } from '../src/core/skills/index.js'
-import { createSkillTool } from '../src/core/tools/skill.js'
+import { createReadSkillTool } from '../src/core/tools/read-skill.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
 import { makeTree, type Tree } from './tree.js'
 
@@ -121,14 +121,14 @@ describe('discoverSkills', () => {
   })
 })
 
-describe('skill tool', () => {
+describe('read_skill tool', () => {
   function oneSkill(): Skill {
     tree = makeTree({ 'global/deploy/SKILL.md': skillFile('deploy', 'How to deploy', 'Run the pipeline.') })
     return discoverSkills([{ dir: path.join(tree.root, 'global'), source: 'global' }])[0]!
   }
 
   it('returns the instructions by name', async () => {
-    const tool = createSkillTool([oneSkill()])
+    const tool = createReadSkillTool([oneSkill()])
 
     const result = await tool.execute({ name: 'deploy' }, { cwd: '.', signal: new AbortController().signal })
 
@@ -137,7 +137,7 @@ describe('skill tool', () => {
   })
 
   it('lists what is available when the name is unknown', async () => {
-    const tool = createSkillTool([oneSkill()])
+    const tool = createReadSkillTool([oneSkill()])
 
     const result = await tool.execute({ name: 'nope' }, { cwd: '.', signal: new AbortController().signal })
 
@@ -147,7 +147,7 @@ describe('skill tool', () => {
 
   it('re-reads the body from disk, so an edit lands without a restart', async () => {
     const skill = oneSkill()
-    const tool = createSkillTool([skill])
+    const tool = createReadSkillTool([skill])
     writeFileSync(skill.path, skillFile('deploy', 'How to deploy', 'A brand new body.'))
 
     const result = await tool.execute({ name: 'deploy' }, { cwd: '.', signal: new AbortController().signal })
@@ -156,7 +156,7 @@ describe('skill tool', () => {
   })
 
   it('is read-only, so it never asks for confirmation', () => {
-    expect(createSkillTool([oneSkill()]).readOnly).toBe(true)
+    expect(createReadSkillTool([oneSkill()]).readOnly).toBe(true)
   })
 })
 
@@ -178,6 +178,11 @@ describe('system prompt', () => {
 
     expect(prompt).toContain('## Skills')
     expect(prompt).toContain('- deploy: How to deploy')
+    // The index says it is the whole set, and where it was read from, so the
+    // model answers "what do you have?" from context instead of going to look.
+    expect(prompt).toContain('the whole inventory')
+    expect(prompt).toContain(path.join('/tmp', '.milo', 'skills'))
+    expect(prompt).toContain('other agents do not count')
   })
 
   it('omits the section when there are none', () => {
@@ -187,9 +192,9 @@ describe('system prompt', () => {
 })
 
 describe('createToolRegistry', () => {
-  it('registers `skill` only when skills are present', () => {
-    expect(createToolRegistry().has('skill')).toBe(false)
-    expect(createToolRegistry({ skills: [] }).has('skill')).toBe(false)
+  it('registers `read_skill` only when skills are present', () => {
+    expect(createToolRegistry().has('read_skill')).toBe(false)
+    expect(createToolRegistry({ skills: [] }).has('read_skill')).toBe(false)
 
     const skill: Skill = {
       name: 'deploy',
@@ -198,7 +203,7 @@ describe('createToolRegistry', () => {
       path: '/x/SKILL.md',
       source: 'global',
     }
-    expect(createToolRegistry({ skills: [skill] }).has('skill')).toBe(true)
+    expect(createToolRegistry({ skills: [skill] }).has('read_skill')).toBe(true)
   })
 })
 

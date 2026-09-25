@@ -83,6 +83,26 @@ export function searchHistory(query: string, options: HistorySearchOptions = {})
   return hits
 }
 
+/**
+ * Every entry of one session, oldest first, across however many days it spans.
+ *
+ * All of them, not the last 30 days `searchHistory` reads: an export is about
+ * the whole conversation, and a session picked up again after a month is still
+ * one conversation. Nothing is sorted here — the log is appended in the order
+ * things happened, and that order is the truthful one.
+ */
+export function readSession(id: string, options: { dir?: string } = {}): HistoryEntry[] {
+  const dir = options.dir ?? historyDir()
+  const files = historyFiles(dir, Number.POSITIVE_INFINITY).reverse()
+  const entries: HistoryEntry[] = []
+  for (const file of files) {
+    for (const entry of readEntries(file).reverse()) {
+      if (entry.session === id) entries.push(entry)
+    }
+  }
+  return entries
+}
+
 /** The day-files worth reading, newest first. A missing directory is no history. */
 function historyFiles(dir: string, days: number): string[] {
   try {

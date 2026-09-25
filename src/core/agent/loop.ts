@@ -1,5 +1,15 @@
-import type { ContentPart, FinishReason, Message, Provider, ReasoningEffort, ToolSpec } from '../providers/types.js'
-import type { ToolContext, ToolRegistry } from '../tools/index.js'
+import { saveImage } from '../images.js'
+import { dropOldSnapshots } from '../sessions/compact.js'
+import type {
+  ContentPart,
+  FinishReason,
+  ImageRef,
+  Message,
+  Provider,
+  ReasoningEffort,
+  ToolSpec,
+} from '../providers/types.js'
+import type { ToolContext, ToolImage, ToolRegistry } from '../tools/index.js'
 import {
   summarizeToolCall,
   type PermissionAsker,
@@ -37,6 +47,13 @@ export interface RunAgentOptions {
    * never seen and can be run as its own turn.
    */
   steering?: string[]
+  /**
+   * How many page snapshots a request may still carry. Compaction runs between
+   * turns, but a turn makes up to `maxSteps` requests, and a browser task looks
+   * at the page after every action — so without this the transcript grows a
+   * snapshot per step and every request after the first pays for all of them.
+   */
+  keepSnapshots?: number
 }
 
 const DEFAULT_MAX_STEPS = 25
@@ -62,6 +79,10 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     let text = ''
     let reasoning = ''
     let finish: FinishReason = 'stop'
+
+    // Before every request, not once a turn: what makes a page snapshot expensive
+    // is that it is sent again on every step that follows it.
+    dropOldSnapshots(messages, options.keepSnapshots)
 
     for await (const event of provider.stream({
       model: options.model,
@@ -118,6 +139,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         result: result.content,
         isError: Boolean(result.isError),
       }
+      const images = await persistImages(result.images)
       messages.push({
         role: 'tool',
         content: [
@@ -127,6 +149,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
             name: call.name,
             content: result.content,
             isError: result.isError,
+            ...(images.length > 0 ? { images } : {}),
           },
         ],
       })
@@ -139,6 +162,22 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
 /** Empties the queue and hands back what was in it. */
 function take(queue: string[] | undefined): string[] {
   return queue ? queue.splice(0, queue.length) : []
+}
+
+/**
+ * Puts the pictures a tool returned on disk and hands back references to them.
+ * A picture that cannot be written is dropped rather than referenced: a
+ * reference that resolves to nothing would be a result claiming to show
+ * something it does not have.
+ */
+async function persistImages(images: ToolImage[] | undefined): Promise<ImageRef[]> {
+  if (!images || images.length === 0) return []
+  const saved: ImageRef[] = []
+  for (const image of images) {
+    const ref = await saveImage(image)
+    if (ref) saved.push(ref)
+  }
+  return saved
 }
 
 /** Returns a block reason when the call must not run, or null when it may. */

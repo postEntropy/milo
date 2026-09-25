@@ -60,6 +60,9 @@ export async function runServe(): Promise<void> {
       `mode ${runtime.permissions?.mode ?? 'ask'}`,
       `effort ${runtime.reasoningEffort}`,
       `${runtime.skills.length} skill${runtime.skills.length === 1 ? '' : 's'}`,
+      // A capability that only exists in the catalog is invisible in a daemon:
+      // the TUI header is not there to show it, so the boot line says it.
+      runtime.browser ? `browser ${loaded.config.browser.headless ? 'headless' : 'visible'}` : 'browser off',
       MILO_HOME,
     ].join(' · '),
   )
@@ -68,6 +71,8 @@ export async function runServe(): Promise<void> {
     for (const gateway of gateways) {
       await gateway.stop().catch(() => undefined)
     }
+    // Whatever the runtime still owns goes with it — the recaps in flight.
+    await runtime.close().catch(() => undefined)
     process.exit(0)
   }
   process.on('SIGINT', () => void shutdown())

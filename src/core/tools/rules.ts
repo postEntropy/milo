@@ -88,6 +88,21 @@ export function extractCommandText(args: unknown): string | null {
 }
 
 /**
+ * Free text a call would type into whatever is in front of it — the screen, a
+ * form field. Keyed on the shape of the arguments, like `extractCommandText`:
+ * a call that types is a call that carries `text`, whichever tool it is. The
+ * same patterns the shell is held to apply, because `curl … | sh` typed into a
+ * terminal window runs exactly as it would from the shell tool.
+ */
+export function extractTypedText(args: unknown): string | null {
+  if (args && typeof args === 'object') {
+    const record = args as Record<string, unknown>
+    if (typeof record.text === 'string' && record.text.trim()) return record.text
+  }
+  return null
+}
+
+/**
  * The file a call would write, when the call carries content to write. Keyed on
  * the shape of the arguments rather than the tool name, like
  * `extractCommandText` — a tool that writes is a tool that passes `content`, or
