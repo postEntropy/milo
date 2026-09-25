@@ -57,7 +57,11 @@ describe('listBrowsers', () => {
     chmodSync(file, 0o644)
 
     const found = await listBrowsers({ pathEnv: bin, home: dir() })
-    expect(found.map((entry) => entry.id)).not.toContain('google-chrome')
+    // About *this* file, not about the browser: the discovery also looks in the
+    // places a distro installs one, and a machine that has a real Chrome there
+    // would answer `google-chrome` no matter what this directory holds. Asserting
+    // by id made the test pass here and fail on a CI runner that ships Chrome.
+    expect(found.map((entry) => entry.path)).not.toContain(file)
   })
 
   it('counts one browser reached twice as one browser', async () => {
