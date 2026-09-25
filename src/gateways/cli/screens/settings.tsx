@@ -21,11 +21,19 @@ import {
   browserChromeDir,
   browserProfileDir,
   browserProfilesDir,
+  embedEngineDir,
   memoryDir,
   skillsDir,
 } from '../../../core/config/paths.js'
-import { DEFAULT_KEEP_SAID, memoryStatus } from '../../../core/memory/index.js'
-import type { Auth, Config, GatewayConfig } from '../../../core/config/schema.js'
+import { DEFAULT_RECALL_LIMIT, memoryStatus } from '../../../core/memory/index.js'
+import { provisionEmbedding } from '../../../core/memory/provision.js'
+import {
+  DEFAULT_CLOUD_EMBED_MODEL,
+  DEFAULT_LOCAL_EMBED_MODEL,
+  type Auth,
+  type Config,
+  type GatewayConfig,
+} from '../../../core/config/schema.js'
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS } from '../../../core/providers/types.js'
 import { BUILTIN_SKILLS } from '../../../core/skills/builtin.js'
 import { SKILLS_DIRECTORY, fetchPopular, type PopularSkill } from '../../../core/skills/catalog.js'
@@ -167,6 +175,8 @@ type View =
   | { kind: 'gateways' }
   | { kind: 'gatewayFlow'; id: GatewayId; steps: FlowStep[]; step: FlowStep }
   | { kind: 'memory' }
+  | { kind: 'memoryConfirm' }
+  | { kind: 'memoryKey' }
   | { kind: 'skills' }
 
 export interface SettingsScreenProps {
@@ -195,6 +205,8 @@ const TITLE: Record<string, string> = {
   browserEdit: 'Setup · Tools · Browser',
   gateways: 'Setup · Gateways',
   memory: 'Setup · Memory',
+  memoryConfirm: 'Setup · Memory',
+  memoryKey: 'Setup · Memory',
   skills: 'Setup · Skills',
 }
 
@@ -227,7 +239,7 @@ export function SettingsScreen({
    * with at all.
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: view is the re-read trigger, not a closure value
-  const memory = useMemo(() => memoryStatus(config.memory, memoryDir()), [view, config])
+  const memory = useMemo(() => memoryStatus(memoryDir()), [view])
 
   /** The key rows, grouped, plus the cursor map that skips the group headers. */
   const keys = keyLayout(auth)
@@ -482,6 +494,91 @@ export function SettingsScreen({
     updateConfig((current) => ({ ...current, ...patch }))
   }
 
+  /**
+   * Turning embeddings on fetches over two gigabytes and leaves a process on a
+   * port of its own, so it is put to the person before it happens — the size
+   * named, the reason given — the way copying a browser profile is.
+   */
+  const enableEmbeddings = async () => {
+    setNotices([])
+    setBusy('looking up the current engine release')
+    try {
+      const provisioned = await provisionEmbedding({
+        dir: embedEngineDir(),
+        model: DEFAULT_LOCAL_EMBED_MODEL,
+        onProgress: (line) => setBusy(line),
+      })
+      // Pulled, then let go: the engine is started again by whichever process
+      // serves the turns, on the port written down here.
+      provisioned.stop()
+      updateConfig((current) => ({
+        ...current,
+        memory: {
+          ...current.memory,
+          embedding: {
+            provider: 'ollama',
+            model: provisioned.model,
+            url: provisioned.url,
+          },
+        },
+      }))
+      setNotices([
+        {
+          text: `Embeddings on: ${provisioned.model}, engine ${provisioned.version} — everything stays on this machine.`,
+          tone: 'success',
+        },
+      ])
+    } catch (error) {
+      setNotices([{ text: `Could not set up embeddings: ${errorMessage(error)}`, tone: 'danger' }])
+    } finally {
+      setBusy(null)
+      go({ kind: 'memory' })
+    }
+  }
+
+  /**
+   * Nothing is downloaded and no model runs here, because the vector is computed
+   * on the provider's machine. It needs the key that is already there for chat —
+   * the same one serves both — and when there is none yet it is asked for right
+   * here instead of sending the person to another screen and back.
+   */
+  const chooseOpenRouter = () => {
+    const hasKey = Boolean(
+      process.env.OPENROUTER_API_KEY?.trim() || auth.providers.openrouter?.trim(),
+    )
+    if (hasKey) turnOnOpenRouter()
+    else go({ kind: 'memoryKey' }, '')
+  }
+
+  /** Writes the hosted choice down. The key, if it had to be typed, is already in. */
+  const turnOnOpenRouter = () => {
+    updateConfig((current) => ({
+      ...current,
+      memory: {
+        ...current.memory,
+        embedding: { provider: 'openrouter', model: DEFAULT_CLOUD_EMBED_MODEL },
+      },
+    }))
+    setNotices([
+      {
+        text: `Embeddings on: ${DEFAULT_CLOUD_EMBED_MODEL} over OpenRouter — nothing to download, and the notes are sent there to be embedded.`,
+        tone: 'success',
+      },
+    ])
+    go({ kind: 'memory' })
+  }
+
+  /** Back to words alone. The notes stay; only how they are found changes. */
+  const disableEmbeddings = () => {
+    updateConfig((current) => {
+      const memory = { ...current.memory }
+      delete memory.embedding
+      return { ...current, memory }
+    })
+    setNotices([{ text: 'Embeddings off — recall matches by words only.', tone: 'success' }])
+    go({ kind: 'memory' })
+  }
+
   const patchAuth = (mutate: (auth: Auth) => void) => {
     const current = readAuth()
     mutate(current)
@@ -492,30 +589,31 @@ export function SettingsScreen({
   const home = process.env.HOME ?? ''
 
   /**
-   * What is in the store, with the effective cap spelled out rather than the
-   * setting as typed: `keepSaid` left unset still means a number, and a readout
-   * that says nothing is a readout nobody can act on.
+   * What is in the store, with the effective number spelled out rather than the
+   * setting as typed: `recallLimit` left unset still means a number, and a
+   * readout that says nothing is a readout nobody can act on.
    */
-  const keepSaid = config.memory.keepSaid ?? DEFAULT_KEEP_SAID
-  const memoryRows: [string, string][] = [
-    ['Backend', memory.backend],
-    ['Scopes', String(memory.scopes)],
-    ['Facts', String(memory.facts)],
-    ['Turns', String(memory.said)],
-    ['Size', humanSize(memory.bytes)],
+  const recallLimit = config.memory.recallLimit ?? DEFAULT_RECALL_LIMIT
+  const embedding = config.memory.embedding
+  const embeddingModel = embedding
+    ? (embedding.model ??
+      (embedding.provider === 'openrouter' ? DEFAULT_CLOUD_EMBED_MODEL : DEFAULT_LOCAL_EMBED_MODEL))
+    : undefined
+  const embeddingSource = embedding
+    ? embedding.provider === 'openrouter'
+      ? 'over OpenRouter'
+      : 'on this machine'
+    : undefined
+  /**
+   * Three short lines instead of the essay this used to be. The five sentences
+   * it replaced were policy repeated on a screen nobody reads twice, and they
+   * buried the one row there was anything to do with.
+   */
+  const memoryLines = [
+    `${memory.facts} facts · ${humanSize(memory.bytes)}`,
+    shortenPath(memory.location, home),
+    `Answers from the top ${recallLimit}: these facts, and what you said, out of the history.`,
   ]
-  const memoryLines =
-    memory.backend === 'sqlite'
-      ? [
-          'Facts are what Milo chose to keep: recall reads them first, and nothing drops one.',
-          `Turns are what you said, kept up to ${keepSaid} per conversation, oldest dropped first.`,
-          'One file on this machine. Nothing leaves it.',
-        ]
-      : [
-          'The JSON-per-scope store Milo replaced, still readable.',
-          'It keeps the newest 500 items per conversation, facts and turns alike, and tells',
-          'the two apart by tag — which is all this format carries.',
-        ]
 
   const enabledGateways = GATEWAYS.filter((id) => config.gateways[id]?.enabled)
 
@@ -586,7 +684,7 @@ export function SettingsScreen({
       hintColor: enabledGateways.length > 0 ? theme.success : undefined,
     },
     { icon: '🧠',
-      label: 'Memory', hint: config.memory.backend },
+      label: 'Memory', hint: memory.backend },
     {
       icon: '📘',
       label: 'Skills',
@@ -1148,7 +1246,30 @@ export function SettingsScreen({
       }
 
       case 'memory':
+        if (busy) break
         if (key.escape) go({ kind: 'menu' })
+        else if (key.return) go({ kind: 'memoryConfirm' })
+        break
+
+      case 'memoryConfirm': {
+        if (busy) break
+        // Three ways to turn it on, two to turn it off.
+        const last = config.memory.embedding ? 1 : 2
+        if (key.upArrow) setIndex((value) => Math.max(0, value - 1))
+        else if (key.downArrow) setIndex((value) => Math.min(last, value + 1))
+        else if (key.return) {
+          if (config.memory.embedding) {
+            if (index === 0) disableEmbeddings()
+            else go({ kind: 'memory' })
+          } else if (index === 0) void enableEmbeddings()
+          else if (index === 1) chooseOpenRouter()
+          else go({ kind: 'memory' })
+        } else if (key.escape) go({ kind: 'memory' })
+        break
+      }
+
+      case 'memoryKey':
+        if (key.escape) go({ kind: 'memoryConfirm' })
         break
 
       case 'skills': {
@@ -1242,6 +1363,17 @@ export function SettingsScreen({
       return
     }
 
+    if (view.kind === 'memoryKey') {
+      const trimmed = value.trim()
+      if (!trimmed) return
+      // The slot a chat provider's key lives in, so the one key serves both.
+      patchAuth((current) => {
+        current.providers.openrouter = trimmed
+      })
+      turnOnOpenRouter()
+      return
+    }
+
     if (view.kind === 'displayEdit') {
       const tokens = Number(value.trim())
       // Empty means "leave it to the wire"; anything else has to be a real
@@ -1284,7 +1416,7 @@ export function SettingsScreen({
   // always there and never written down, which is the same as not being there.
   const EXIT = 'Ctrl+C exit'
   const footer =
-    view.kind === 'keyEdit' || view.kind === 'permissionEdit'
+    view.kind === 'memoryKey' || view.kind === 'keyEdit' || view.kind === 'permissionEdit'
       ? `Enter save (empty clears) · Esc back · ${EXIT}`
       : view.kind === 'gatewayFlow' && view.step !== 'enable'
         ? `Enter save · Esc back · ${EXIT}`
@@ -1512,14 +1644,20 @@ export function SettingsScreen({
         )}
         {view.kind === 'memory' && (
           <Box flexDirection="column">
-            {memoryRows.map(([label, value]) => (
-              <Text key={label}>
-                {label.padEnd(8)} <Text color={theme.accent}>{value}</Text>
-              </Text>
-            ))}
-            <Box marginTop={1}>
-              <Text color={theme.muted}>{shortenPath(memory.location, home)}</Text>
-            </Box>
+            {/* One row, the way every other section has one: the thing to press
+                Enter on is a line with the cursor on it, not a sentence below. */}
+            <Menu
+              items={[
+                embedding
+                  ? {
+                      label: 'Recall by meaning',
+                      hint: `${embeddingModel} ${embeddingSource}`,
+                      hintColor: theme.success,
+                    }
+                  : { label: 'Recall by meaning', hint: 'off' },
+              ]}
+              index={index}
+            />
             <Box marginTop={1} flexDirection="column">
               {memoryLines.map((line) => (
                 <Text key={line} color={theme.muted}>
@@ -1527,6 +1665,76 @@ export function SettingsScreen({
                 </Text>
               ))}
             </Box>
+            {busy ? (
+              <Box>
+                <Spinner type="dots" />
+                <Text color={theme.warning}> {busy}</Text>
+              </Box>
+            ) : null}
+            <Notices notices={notices} />
+          </Box>
+        )}
+
+        {view.kind === 'memoryConfirm' && (
+          <Box flexDirection="column">
+            <Text color={theme.accent}>
+              {config.memory.embedding
+                ? 'Go back to matching by words alone?'
+                : 'Where should recall by meaning come from?'}
+            </Text>
+            <Box marginTop={1}>
+              {/* Each way carries its own price on its own row. A paragraph above
+                  naming both was the same thing twice, and less readable. */}
+              <Menu
+                items={
+                  config.memory.embedding
+                    ? [
+                        { label: 'Turn it off', hint: 'recall matches by words again' },
+                        { label: 'Cancel' },
+                      ]
+                    : [
+                        {
+                          label: 'Local engine',
+                          hint: 'about 1.9 GB once — nothing leaves this machine',
+                        },
+                        {
+                          label: 'OpenRouter',
+                          hint: 'no download, uses your key — the notes are sent out',
+                        },
+                        { label: 'Cancel' },
+                      ]
+                }
+                index={index}
+              />
+            </Box>
+            <Box marginTop={1}>
+              <Text color={theme.muted}>
+                {config.memory.embedding
+                  ? 'Notes are kept either way; recall goes back to words only.'
+                  : 'Reversible at any time. Changing the model writes the vectors again.'}
+              </Text>
+            </Box>
+            {busy ? (
+              <Box>
+                <Spinner type="dots" />
+                <Text color={theme.warning}> {busy}</Text>
+              </Box>
+            ) : null}
+            <Notices notices={notices} />
+          </Box>
+        )}
+
+        {view.kind === 'memoryKey' && (
+          <Box flexDirection="column">
+            <Text color={theme.accent}>OpenRouter key</Text>
+            <Text color={theme.muted}>
+              Paste it here — it is kept with your other keys, and chat models use the same one.
+            </Text>
+            <Box marginTop={1}>
+              <Text color={theme.accent}>❯ </Text>
+              <TextInput value={text} onChange={setText} onSubmit={saveText} mask="*" />
+            </Box>
+            <Notices notices={notices} />
           </Box>
         )}
 

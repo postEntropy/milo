@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { FileMemory } from '../src/core/memory/local.js'
+import { SqliteMemory } from '../src/core/memory/sqlite.js'
 import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
 import { Session } from '../src/core/session.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
@@ -48,7 +48,7 @@ async function harness(options: { onEdit?: (value: string) => void } = {}) {
     model: 'm',
     system: 'BASE',
     registry: createToolRegistry(),
-    memory: new FileMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-steer-')) }),
+    memory: new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-steer-')) }),
     cwd: process.cwd(),
     record,
     store,

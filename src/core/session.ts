@@ -1,8 +1,10 @@
 import { errorMessage } from '../util/errors.js'
+import { logWarn } from '../util/log.js'
 import type { SessionsConfig } from './config/schema.js'
 import type { BrowserFacts } from './browser/index.js'
 import type { HistoryEntry, HistoryWriter } from './history.js'
-import { scopeKey, type Memory, type MemoryInput, type MemoryScope } from './memory/index.js'
+import { deriveFacts } from './memory/derive.js'
+import { scopeKey, DEFAULT_RECALL_LIMIT, type Memory, type MemoryInput, type MemoryItem, type MemoryScope } from './memory/index.js'
 import type { SkillSummary } from './skills/index.js'
 import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
 import type { PermissionAsker, PermissionPolicy, ToolRegistry } from './tools/index.js'
@@ -61,6 +63,12 @@ export interface SessionOptions {
   maxTokens?: number
   temperature?: number
   recallLimit?: number
+  /**
+   * Whether a finished turn is read for facts worth keeping. Off unless a caller
+   * asks for it: it is a model call of its own on every turn, so a surface that
+   * builds a session directly — a test, a script — is not charged for it.
+   */
+  derive?: boolean
   permissionPolicy?: PermissionPolicy
   /** The record this session reads from and writes back to. */
   record: SessionRecord
@@ -121,6 +129,8 @@ export class Session {
   private ceiling: number | undefined
   /** The lookup in flight: a turn waits on it only if it has not finished. */
   private readonly resolving: Promise<void>
+  /** Turns being read for facts in the background. Nothing waits on them. */
+  private readonly deriving = new Set<Promise<void>>()
 
   constructor(options: SessionOptions) {
     this.options = options
@@ -255,13 +265,11 @@ export class Session {
     }
     let answer = ''
     let reasoning = ''
-    /** Corrections handed in mid-turn. What the user said is not lost with the turn. */
-    const corrections: string[] = []
     let running: { name: string; args: unknown } | null = null
 
     const tools = registry.specs()
     const recalled = await memory.recall(this.scope, input, {
-      limit: this.options.recallLimit ?? 5,
+      limit: this.options.recallLimit ?? DEFAULT_RECALL_LIMIT,
     })
     const prompt = {
       base: system,
@@ -362,7 +370,6 @@ export class Session {
           running = { name: event.name, args: event.args }
         }
         else if (event.type === 'steer') {
-          corrections.push(event.text)
           note({ kind: 'user', text: event.text })
           // For the same reason the opening message is written down before the
           // answer comes: a crash mid-turn must not lose what the user said.
@@ -409,18 +416,48 @@ export class Session {
       this.options.history?.append(entries)
     }
 
-    // Remember only what the user said — the assistant's own replies are not
-    // durable facts and would pollute recall. A turn that failed or was stopped
-    // is skipped as well: it never got as far as an answer. It goes in as
-    // `said`, the layer recall reads second and eviction is allowed to drop;
-    // what the `remember` tool saves is a `fact`, and nothing evicts those.
-    const said = [input, ...corrections].filter((text) => text.trim())
-    if (!errored && said.length > 0) {
-      await memory.remember(
-        this.scope,
-        said.map((text) => ({ text, tags: ['user'], kind: 'said' as const })),
-      )
+    // Reading the turn for facts worth keeping is a model call of its own, so it
+    // is started and left alone: the answer is already on screen. What the person
+    // said is in the history log either way — this only adds the tidier version of
+    // it, and nothing is lost if it never lands.
+    if (!errored && this.options.derive && answer.trim()) {
+      const work = this.extract(input, answer)
+      this.deriving.add(work)
+      void work.finally(() => {
+        this.deriving.delete(work)
+      })
     }
+  }
+
+  /**
+   * Reads a finished turn for durable facts and files them, as `fact`s — the
+   * layer nothing evicts. The store folds a reworded fact into the one it already
+   * has, so a note that comes back in other words does not multiply.
+   */
+  private async extract(input: string, answer: string): Promise<void> {
+    try {
+      const facts = await deriveFacts({
+        provider: this.options.provider,
+        model: this.options.model,
+        messages: [
+          { role: 'user', content: [{ type: 'text', text: input }] },
+          { role: 'assistant', content: [{ type: 'text', text: answer }] },
+        ],
+      })
+      if (facts.length === 0) return
+      await this.options.memory.remember(
+        this.scope,
+        facts.map((text) => ({ text, tags: ['derived'], kind: 'fact' as const })),
+      )
+    } catch (error) {
+      // Never the turn's problem: it answered already, and what it said is kept.
+      logWarn(`could not keep the facts of a turn: ${errorMessage(error)}`)
+    }
+  }
+
+  /** Waits for the fact extractions still in flight. No turn ever waits on one. */
+  async settle(): Promise<void> {
+    while (this.deriving.size > 0) await Promise.all([...this.deriving])
   }
 
   /**
@@ -543,6 +580,16 @@ export class Session {
   async recallSessions(query: string, opts?: { limit?: number }): Promise<SessionSummary[]> {
     const sessions = await withRecaps(await this.store.list(), this.recaps)
     return rankSessions(sessions, query, opts?.limit ?? 5)
+  }
+
+  /** What this install keeps, newest first with facts ahead of turns. */
+  async memories(limit?: number): Promise<MemoryItem[]> {
+    return this.options.memory.list(this.scope, { limit })
+  }
+
+  /** Drops one note by id, or by the front of one. False when nothing matched. */
+  async forget(id: string): Promise<boolean> {
+    return this.options.memory.forget(this.scope, id)
   }
 
   /**

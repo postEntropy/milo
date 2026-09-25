@@ -31,7 +31,7 @@ const loadedConfig = (
     provider: 'test',
     model: 'test-model',
     providers: { test: { baseURL, wire: 'openai' } },
-    memory: { backend: 'sqlite' },
+    memory: { derive: false },
     sessions: { compactAt: 0.7, maxInputTokens: 12000, keepTurns: 8, compaction: true },
     display: { tools: 'full', thinking: 'on' },
     reasoningEffort: 'medium',

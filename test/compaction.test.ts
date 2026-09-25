@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { FileMemory } from '../src/core/memory/local.js'
+import { SqliteMemory } from '../src/core/memory/sqlite.js'
 import type { ChatRequest, Message, Provider, ReasoningEffort, StreamEvent } from '../src/core/providers/types.js'
 import { Session } from '../src/core/session.js'
 import { digest, estimateTokens, planCut, summarize } from '../src/core/sessions/compact.js'
@@ -73,7 +73,7 @@ async function compactingSession(
     model: 'm',
     system: 'BASE',
     registry: createToolRegistry(),
-    memory: new FileMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
+    memory: new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
     cwd: process.cwd(),
     record,
     store,
@@ -117,7 +117,7 @@ async function manualSession(
     model: 'm',
     system: 'BASE',
     registry: createToolRegistry(),
-    memory: new FileMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
+    memory: new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
     cwd: process.cwd(),
     record,
     store,
@@ -376,7 +376,7 @@ describe('Session compaction', () => {
       model: 'm',
       system: 'BASE',
       registry: createToolRegistry(),
-      memory: new FileMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
+      memory: new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
       cwd: process.cwd(),
       record,
       store,
@@ -407,7 +407,7 @@ describe('Session compaction', () => {
       model: 'm',
       system: 'BASE',
       registry: createToolRegistry(),
-      memory: new FileMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
+      memory: new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
       cwd: process.cwd(),
       record,
       store,

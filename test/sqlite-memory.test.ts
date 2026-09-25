@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { loadSqlite } from '../src/core/memory/sql.js'
 import {
   RECALL_SQL,
   SqliteMemory,
@@ -11,8 +12,8 @@ import {
 
 const tempDir = () => mkdtempSync(path.join(tmpdir(), 'milo-sql-'))
 
-function open(dir = tempDir(), keepSaid?: number) {
-  return { dir, memory: new SqliteMemory({ dir, ...(keepSaid ? { keepSaid } : {}) }) }
+function open(dir = tempDir()) {
+  return { dir, memory: new SqliteMemory({ dir }) }
 }
 
 describe('SqliteMemory', () => {
@@ -107,58 +108,6 @@ describe('SqliteMemory', () => {
     expect(await memory.recall(scope, 'tabs', { limit: 5 })).toHaveLength(1)
   })
 
-  it('treats a missing layer as a durable fact', async () => {
-    const { memory, dir } = open()
-    await memory.remember({ gateway: 'cli', conversationId: 'kind' }, [{ text: 'sem camada' }])
-
-    expect(sqliteMemoryStatus(sqliteMemoryFile(dir)).facts).toBe(1)
-  })
-
-  it('never lets a raw turn demote a saved fact', async () => {
-    const { memory, dir } = open()
-    const scope = { gateway: 'cli', conversationId: 'sticky' }
-
-    await memory.remember(scope, [{ text: 'prefere bullet points', kind: 'fact' }])
-    // The person typing the fact back out is the same words, not a new layer.
-    await memory.remember(scope, [{ text: 'prefere bullet points', kind: 'said' }])
-
-    const status = sqliteMemoryStatus(sqliteMemoryFile(dir))
-    expect(status.facts).toBe(1)
-    expect(status.said).toBe(0)
-  })
-
-  it('never evicts a fact to make room for chatter', async () => {
-    const keepSaid = 5
-    const { memory, dir } = open(tempDir(), keepSaid)
-    const scope = { gateway: 'cli', conversationId: 'cap' }
-
-    await memory.remember(scope, [{ text: 'the release tag is always v0.1.0', kind: 'fact' }])
-    await memory.remember(
-      scope,
-      Array.from({ length: 50 }, (_, i) => ({ text: `small talk number ${i}`, kind: 'said' as const })),
-    )
-
-    // This is the measured defect, as a test: an undifferentiated list with one
-    // cap dropped the oldest 100 of 600 items, fact or not.
-    const status = sqliteMemoryStatus(sqliteMemoryFile(dir))
-    expect(status.facts).toBe(1)
-    expect(status.said).toBe(keepSaid)
-
-    const hits = await memory.recall(scope, 'what is the release tag?', { limit: 5 })
-    expect(hits.some((hit) => hit.text.includes('release tag'))).toBe(true)
-  })
-
-  it('reads a fact before a raw turn that matches just as well', async () => {
-    const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 'rank' }
-
-    await memory.remember(scope, [{ text: 'o deploy usa turbo mode hoje', kind: 'said' }])
-    await memory.remember(scope, [{ text: 'o deploy usa turbo mode sempre', kind: 'fact' }])
-
-    const hits = await memory.recall(scope, 'deploy turbo', { limit: 2 })
-    expect(hits[0]!.text).toBe('o deploy usa turbo mode sempre')
-  })
-
   it('returns no more than the limit asked for', async () => {
     const { memory } = open()
     const scope = { gateway: 'cli', conversationId: 'limit' }
@@ -172,22 +121,19 @@ describe('SqliteMemory', () => {
 
   it('reports size and counts for the setup screen', async () => {
     const { memory, dir } = open()
-    const scope = { gateway: 'cli', conversationId: 'status' }
-    await memory.remember(scope, [{ text: 'um fato', kind: 'fact' }])
-    await memory.remember(scope, [{ text: 'um turno', kind: 'said' }])
+    await memory.remember({ gateway: 'cli', conversationId: 'status' }, [{ text: 'um fato' }])
     await memory.remember({ gateway: 'telegram', conversationId: '9' }, [{ text: 'outro' }])
 
     const status = sqliteMemoryStatus(sqliteMemoryFile(dir))
     expect(status.backend).toBe('sqlite')
     expect(status.scopes).toBe(2)
     expect(status.facts).toBe(2)
-    expect(status.said).toBe(1)
     expect(status.bytes).toBeGreaterThan(0)
   })
 
   it('reports an empty store rather than throwing on a path with no database', () => {
     const status = sqliteMemoryStatus(path.join(tempDir(), 'memory.db'))
-    expect(status).toMatchObject({ scopes: 0, facts: 0, said: 0, bytes: 0 })
+    expect(status).toMatchObject({ scopes: 0, facts: 0, bytes: 0 })
   })
 
   it('drives recall from the FTS index instead of probing it once per row', async () => {
@@ -200,7 +146,6 @@ describe('SqliteMemory', () => {
       scope,
       Array.from({ length: 500 }, (_, i) => ({
         text: i % 50 === 0 ? `a tag de release e v0.${i}` : `nota ${i} sobre o deploy do servidor`,
-        kind: (i % 50 === 0 ? 'fact' : 'said') as 'fact' | 'said',
       })),
     )
 
@@ -217,10 +162,133 @@ describe('SqliteMemory', () => {
     }
     const plan = internals.db
       .prepare(`explain query plan ${RECALL_SQL}`)
-      .all('deploy', 'cli:plan', 'said', 5)
+      .all('deploy', 'cli:plan', 5)
       .map((row) => row.detail)
 
     expect(plan[0]).toContain('memories_fts')
-    expect(plan.join(' | ')).not.toContain('memories_scope_kind')
+    // The bad plan walks the table and probes the index once per row; the pinned
+    // `cross join` is what keeps the index in front.
+    expect(plan.join(' | ')).not.toMatch(/\bSCAN (m|memories)\b/)
+  })
+
+  it('lists what it keeps, newest first', async () => {
+    const { memory } = open()
+    const scope = { gateway: 'cli', conversationId: 'list' }
+    await memory.remember(scope, [{ text: 'um turno antigo' }])
+    await memory.remember(scope, [{ text: 'Renato prefere bullet points' }])
+
+    const notes = await memory.list(scope)
+    expect(notes.map((note) => note.text)).toEqual([
+      'Renato prefere bullet points',
+      'um turno antigo',
+    ])
+    expect(notes[0]!.id).toBeTruthy()
+  })
+
+  it('drops one note by the front of its id, and only then', async () => {
+    const { memory } = open()
+    const scope = { gateway: 'cli', conversationId: 'forget' }
+    await memory.remember(scope, [
+      { text: 'o deploy sai na sexta' },
+      { text: 'a senha gira na segunda' },
+    ])
+
+    const first = (await memory.list(scope))[0]!
+    expect(await memory.forget(scope, first.id.slice(0, 8))).toBe(true)
+    expect((await memory.list(scope)).map((note) => note.text)).toEqual(['o deploy sai na sexta'])
+
+    // An id-shaped id that matches nothing, and something that is not an id at
+    // all — which must not reach the LIKE it is built into.
+    expect(await memory.forget(scope, 'dead')).toBe(false)
+    expect(await memory.forget(scope, 'o deploy%')).toBe(false)
+  })
+
+  it('keeps one fact when the same words come back reworded', async () => {
+    const { memory } = open()
+    const scope = { gateway: 'cli', conversationId: 'same' }
+    await memory.remember(scope, [{ text: 'o deploy sai na sexta.' }])
+    await memory.remember(scope, [{ text: 'Deploy sai na sexta' }])
+
+    // Punctuation, case and filler differ; the words that carry the fact do not.
+    const notes = await memory.list(scope)
+    expect(notes).toHaveLength(1)
+    expect(notes[0]!.text).toBe('o deploy sai na sexta.')
+  })
+
+  it('never folds a fact that differs in a content word', async () => {
+    const { memory } = open()
+    const scope = { gateway: 'cli', conversationId: 'correction' }
+    await memory.remember(scope, [{ text: 'a senha gira na segunda' }])
+    await memory.remember(scope, [{ text: 'a senha gira na terça' }])
+
+    // A correction, not a duplicate: both stay, or the wrong one would be kept.
+    expect((await memory.list(scope)).map((note) => note.text).sort()).toEqual([
+      'a senha gira na segunda',
+      'a senha gira na terça',
+    ])
+  })
+
+  it('counts short words and numbers, so versão 1 is not versão 2', async () => {
+    const { memory } = open()
+    const scope = { gateway: 'cli', conversationId: 'digits' }
+    await memory.remember(scope, [
+      { text: 'a versao atual e a 1' },
+      { text: 'a versao atual e a 2' },
+    ])
+
+    // The recall vocabulary drops single characters; identity must not, or these
+    // would be the same words and one of them would vanish.
+    expect(await memory.list(scope)).toHaveLength(2)
+  })
+
+  it('drops the copied turns a store written before this one kept', async () => {
+    const dir = tempDir()
+    // The shape of the store when it kept a copy of what the person typed: a
+    // `kind` column, its index, and rows of both — FTS and triggers included,
+    // because that is what a real one had and a delete reaches them.
+    const { DatabaseSync } = loadSqlite()
+    const old = new DatabaseSync(sqliteMemoryFile(dir))
+    old.exec(`
+      create table memories (
+        id integer primary key,
+        uid text not null unique,
+        scope text not null,
+        text text not null,
+        kind text not null check (kind in ('fact','said')),
+        tags text not null default '[]',
+        created_at integer not null,
+        hash text not null,
+        vector blob
+      );
+      create unique index memories_scope_hash on memories(scope, hash);
+      create index memories_scope_kind on memories(scope, kind, created_at desc);
+      create virtual table memories_fts using fts5(
+        text, content='memories', content_rowid='id',
+        tokenize='unicode61 remove_diacritics 2'
+      );
+      create trigger memories_ai after insert on memories begin
+        insert into memories_fts(rowid, text) values (new.id, new.text);
+      end;
+      create trigger memories_ad after delete on memories begin
+        insert into memories_fts(memories_fts, rowid, text) values ('delete', old.id, old.text);
+      end;
+      insert into memories (uid, scope, text, kind, tags, created_at, hash)
+        values ('u1', 'local:install', 'prefere bullet points', 'fact', '["assistant"]', 1, 'h1'),
+               ('u2', 'local:install', 'bom dia', 'said', '["user"]', 2, 'h2');
+    `)
+    old.close()
+
+    const memory = new SqliteMemory({ dir })
+    const notes = await memory.list({ gateway: 'local', conversationId: 'install' })
+    expect(notes.map((note) => note.text)).toEqual(['prefere bullet points'])
+
+    // And the column is gone rather than left empty, so nothing can write one.
+    const db = new DatabaseSync(sqliteMemoryFile(dir))
+    const columns = db.prepare("select name from pragma_table_info('memories')").all() as {
+      name: string
+    }[]
+    db.close()
+    expect(columns.map((column) => column.name)).not.toContain('kind')
+    memory.close()
   })
 })

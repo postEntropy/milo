@@ -22,3 +22,19 @@ export function tokenize(text: string): Set<string> {
     .filter((token) => token.length > 1 && !STOPWORDS.has(token))
   return new Set(tokens)
 }
+
+/**
+ * The words a note is *about*, for deciding whether two notes are the same one.
+ *
+ * The same list as recall, minus the length filter: recall drops single
+ * characters because `1` or `a` in a query is noise, but identity must keep
+ * them, or "nota 0" and "nota 1" would be one note and a correction would be
+ * silently swallowed.
+ */
+export function contentWords(text: string): Set<string> {
+  const words = text
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((token) => token.length > 0 && !STOPWORDS.has(token))
+  return new Set(words)
+}

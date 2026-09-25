@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { FileMemory } from '../src/core/memory/local.js'
+import { SqliteMemory } from '../src/core/memory/sqlite.js'
 import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
 import { AgentRuntime, type RuntimeOptions } from '../src/core/runtime.js'
 import { FileSessionStore } from '../src/core/sessions/file-store.js'
@@ -24,7 +24,7 @@ function runtimeOptions(dir: string): RuntimeOptions {
     model: 'm',
     system: 'BASE',
     registry: createToolRegistry(),
-    memory: new FileMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-mem-')) }),
+    memory: new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-mem-')) }),
     cwd: process.cwd(),
     store: new FileSessionStore({ dir }),
   }

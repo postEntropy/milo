@@ -1,10 +1,11 @@
 import path from 'node:path'
 import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
 import { BrowserSession } from './browser/index.js'
-import { browserProfileDir, memoryDir, recapsDir, sessionsDir, skillsDir } from './config/paths.js'
+import { browserProfileDir, embedEngineDir, historyDir, memoryDir, recapsDir, sessionsDir, skillsDir } from './config/paths.js'
 import { readAuth, resolveSearchKey, type LoadedConfig } from './config/load.js'
 import { fileHistory } from './history.js'
-import { createMemory } from './memory/index.js'
+import { createMemory, embeddingKey, installMemory, TurnIndex } from './memory/index.js'
+import { engineOnDemand } from './memory/provision.js'
 import { createProvider } from './providers/create.js'
 import { lookupContextWindow } from './providers/context.js'
 import { AgentRuntime } from './runtime.js'
@@ -20,9 +21,10 @@ import {
 } from './tools/index.js'
 
 export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
+  const auth = readAuth()
   const search = createSearchProvider(
     loaded.config.search,
-    resolveSearchKey(loaded.config.search, readAuth()),
+    resolveSearchKey(loaded.config.search, auth),
   )
   const permissions = loaded.config.permissions
   // Somewhere to put a skill, made from the first run: the directory is Milo's
@@ -51,6 +53,15 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
       })
     : null
 
+  // The embedding engine is a process with a lifetime, so it is brought up here
+  // and taken down with this process. Not waited for: the first turn does not
+  // need embeddings to answer, and recall falls back to words until it answers.
+  engineOnDemand({ embedding: loaded.config.memory.embedding, dir: embedEngineDir() })
+
+  // What recall reads the person's own words from: an index over the history log
+  // beside it. Derived and rebuildable, so it is created rather than checked.
+  const turns = new TurnIndex({ dir: historyDir() })
+
   return new AgentRuntime({
     provider: createProvider(loaded.provider, loaded.model),
     model: loaded.model,
@@ -58,7 +69,19 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     registry: createToolRegistry({ search, skills, browser }),
     browser,
     keepSnapshots: loaded.config.browser.keepSnapshots,
-    memory: createMemory(loaded.config.memory, memoryDir()),
+    memory: installMemory(
+      createMemory(loaded.config.memory, memoryDir(), {
+        // Only resolved when it is wanted: a key Milo never needs is a file it
+        // does not have to read.
+        apiKey:
+          loaded.config.memory.embedding?.provider === 'openrouter'
+            ? embeddingKey(loaded.config, auth)
+            : undefined,
+      }),
+      turns,
+    ),
+    recallLimit: loaded.config.memory.recallLimit,
+    derive: loaded.config.memory.derive,
     store: new FileSessionStore({ dir: sessionsDir() }),
     recaps: new FileRecapStore({ dir: recapsDir() }),
     history: fileHistory,

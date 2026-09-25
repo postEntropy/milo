@@ -33,6 +33,8 @@ export interface RuntimeOptions {
   maxTokens?: number
   temperature?: number
   recallLimit?: number
+  /** Whether each finished turn is read for facts worth keeping. */
+  derive?: boolean
   permissionPolicy?: PermissionPolicy
   /** Defaults to an in-memory store, which keeps tests off the disk. */
   store?: SessionStore
@@ -221,6 +223,7 @@ export class AgentRuntime {
       maxTokens: this.options.maxTokens,
       temperature: this.options.temperature,
       recallLimit: this.options.recallLimit,
+      derive: this.options.derive,
       permissionPolicy: this.options.permissionPolicy,
       record,
       store: this.store,

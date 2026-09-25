@@ -43,16 +43,6 @@ describe('remember', () => {
     expect(saved[0]?.tags).toEqual(['project'])
   })
 
-  it('marks every fact as durable, so recall reads it before raw turns', async () => {
-    const { ctx, saved } = contextWithSink()
-
-    await rememberTool.execute({ facts: ['a', 'b'], tags: ['preference'] }, ctx)
-
-    // The layer is explicit rather than inferred from the tag: a fact saved
-    // under a custom label is still a fact, and eviction may never drop one.
-    expect(saved.map((item) => item.kind)).toEqual(['fact', 'fact'])
-  })
-
   it('trims each fact and drops the empty ones', async () => {
     const { ctx, saved } = contextWithSink()
 

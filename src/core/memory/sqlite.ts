@@ -1,33 +1,63 @@
-import { createHash, randomUUID } from 'node:crypto'
-import { chmodSync, existsSync, statSync } from 'node:fs'
-import { createRequire } from 'node:module'
+import { randomUUID } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
-import process from 'node:process'
 import type { DatabaseSync, StatementSync } from 'node:sqlite'
-import { ensurePrivateDir, PRIVATE_FILE_MODE } from '../../util/fs.js'
+import { errorMessage } from '../../util/errors.js'
+import { ensurePrivateDir } from '../../util/fs.js'
+import { logWarn } from '../../util/log.js'
+import { InputRefusedError, isNoise, type Embedder } from './embed.js'
 import { readLegacyMemory } from './migrate.js'
-import { tokenize } from './tokenize.js'
+import { hashOf, loadSqlite, sizeOnDisk, tightenDb, toMatchQuery } from './sql.js'
+import { contentWords } from './tokenize.js'
 import {
+  INSTALL_SCOPE,
   scopeKey,
   type Memory,
   type MemoryInput,
   type MemoryItem,
-  type MemoryLayer,
   type MemoryScope,
   type MemoryStatus,
 } from './types.js'
 
 const DB_FILE = 'memory.db'
 const MIGRATED_KEY = 'migrated_json_v1'
-
-/** Raw turns kept per conversation scope. Facts are never evicted. */
-export const DEFAULT_KEEP_SAID = 500
+const UNIFIED_KEY = 'unified_scope_v1'
+const EMBEDDED_KEY = 'embed_model'
 
 /**
- * One database for every conversation, `id` doubling as the FTS5 rowid. The
- * table is the source of truth; the FTS index is derived from it by trigger, so
- * a second index (embeddings, one day) can be added the same way without the
- * rows moving.
+ * Reciprocal-rank fusion's dampener. The two rankings are merged by position,
+ * not by score, because the two scores are not the same kind of number: bm25 is
+ * unbounded and negative, a cosine is between -1 and 1, and a weighted sum of
+ * them would be a constant nobody could justify. Position is comparable.
+ */
+const RRF_K = 60
+
+/** How many notes are embedded in one request while filling the store in. */
+const EMBED_BATCH = 64
+
+/**
+ * What is sent to be embedded. A note is a sentence; a turn can be a pasted log,
+ * and the smallest model around takes 512 tokens and refuses the whole request
+ * over it — measured live, 1,803 tokens for a 6,720-character turn, and 729 for a
+ * 1,500-character one, because text that reads as noise tokenizes worse than
+ * prose. At the worst rate seen, about two characters per token, this stays
+ * under that ceiling with room — and it costs the default hosted model nothing,
+ * which takes thirty-two thousand. The head is what a question refers to anyway.
+ */
+const EMBED_CHARS = 900
+
+/** How many notes `/memory` shows when the surface does not ask for a number. */
+export const DEFAULT_LIST_LIMIT = 50
+
+/**
+ * One database of facts, `id` doubling as the FTS5 rowid. The table is the source
+ * of truth; the FTS index is derived from it by trigger, so a second index
+ * (embeddings) was added the same way without the rows moving.
+ *
+ * What the person typed is *not* here. It is in the history log, which is the
+ * record of every turn this install ever took, and recall reads it from there
+ * (`turns.ts`). Keeping a copy in here as well meant the same sentence in two
+ * places, one of them capped and both able to drift.
  */
 const SCHEMA = `
 create table if not exists memories (
@@ -35,13 +65,14 @@ create table if not exists memories (
   uid        text not null unique,
   scope      text not null,
   text       text not null,
-  kind       text not null check (kind in ('fact','said')),
   tags       text not null default '[]',
   created_at integer not null,
-  hash       text not null
+  hash       text not null,
+  -- Unit-length, little-endian float32. Null until the embedder has seen it.
+  vector     blob
 );
 create unique index if not exists memories_scope_hash on memories(scope, hash);
-create index if not exists memories_scope_kind on memories(scope, kind, created_at desc);
+create index if not exists memories_scope_created on memories(scope, created_at desc);
 
 -- \`remove_diacritics 2\` is what makes "voce" find "você", which in Portuguese
 -- is most of the difference between a store that works and one that does not.
@@ -68,43 +99,16 @@ end;
 create table if not exists meta (key text primary key, value text not null);
 `
 
-type SqliteModule = typeof import('node:sqlite')
-
-let engine: SqliteModule | null = null
-
-/**
- * Loads the engine, and takes over warning printing on the way in.
- *
- * `node:sqlite` is still experimental on Node 22 and 24 and prints an
- * `ExperimentalWarning` the first time it is touched — which lands on stderr,
- * above the terminal UI. Node's own printer is replaced by one that stays quiet
- * about this single line and re-prints everything else, so a real deprecation
- * still reaches the person.
- *
- * That has to happen *before* the engine is loaded, which is why the module is
- * required here rather than imported at the top. The driver sits behind this one
- * function on purpose: if the warning ever stops being acceptable,
- * `better-sqlite3` is this function and no caller changes.
- */
-function loadSqlite(): SqliteModule {
-  if (engine) return engine
-
-  process.removeAllListeners('warning')
-  process.on('warning', (warning) => {
-    if (warning.name === 'ExperimentalWarning' && /sqlite/i.test(warning.message)) return
-    console.error(`${warning.name}: ${warning.message}`)
-  })
-
-  engine = createRequire(import.meta.url)('node:sqlite') as SqliteModule
-  return engine
-}
-
 export const sqliteMemoryFile = (dir: string): string => path.join(dir, DB_FILE)
 
 export interface SqliteMemoryOptions {
   dir: string
-  keepSaid?: number
   debug?: boolean
+  /**
+   * Turns text into vectors, so recall can also match by meaning. Absent — the
+   * usual case — is a store that works on words alone, exactly as it always has.
+   */
+  embedder?: Embedder
 }
 
 interface Row {
@@ -112,6 +116,10 @@ interface Row {
   text: string
   createdAt: number
   tags: string
+}
+
+interface VectorRow extends Row {
+  vector: Uint8Array | null
 }
 
 /**
@@ -134,7 +142,6 @@ export const RECALL_SQL = `
     cross join memories m on m.id = memories_fts.rowid
    where memories_fts match ?
      and m.scope = ?
-     and m.kind = ?
    order by bm25(memories_fts), m.created_at desc
    limit ?
 `
@@ -142,11 +149,20 @@ export const RECALL_SQL = `
 export class SqliteMemory implements Memory {
   private readonly db: DatabaseSync
   private readonly location: string
-  private readonly keepSaid: number
   private readonly debug: boolean
   private readonly insertStmt: StatementSync
-  private readonly evictStmt: StatementSync
   private readonly selectStmt: StatementSync
+  private readonly listStmt: StatementSync
+  private readonly forgetStmt: StatementSync
+  private readonly factTextStmt: StatementSync
+  private readonly touchStmt: StatementSync
+  private readonly vectorStmt: StatementSync
+  private readonly setVectorStmt: StatementSync
+  private readonly embedder?: Embedder
+  /** The fill-in, once per process. Nothing waits on it. */
+  private filling: Promise<void> | null = null
+  /** One line per process is enough for an engine that is simply not up. */
+  private warned = false
 
   constructor(options: SqliteMemoryOptions) {
     const { DatabaseSync } = loadSqlite()
@@ -154,38 +170,59 @@ export class SqliteMemory implements Memory {
     ensurePrivateDir(options.dir)
     this.location = sqliteMemoryFile(options.dir)
     this.db = new DatabaseSync(this.location)
-    this.keepSaid = options.keepSaid ?? DEFAULT_KEEP_SAID
     this.debug = options.debug ?? process.env.MILO_DEBUG === '1'
+    this.embedder = options.embedder
 
     // WAL, because the CLI and `milo serve` are two processes on one store and
     // the default rollback journal would make one of them wait on the other.
     this.db.exec('pragma journal_mode = WAL')
     this.db.exec(SCHEMA)
-    this.tighten()
+    this.addVectorColumn()
+    tightenDb(this.location)
 
     this.insertStmt = this.db.prepare(`
-      insert into memories (uid, scope, text, kind, tags, created_at, hash)
-      values (?, ?, ?, ?, ?, ?, ?)
+      insert into memories (uid, scope, text, tags, created_at, hash)
+      values (?, ?, ?, ?, ?, ?)
       on conflict(scope, hash) do update set
-        created_at = excluded.created_at,
-        kind = case when excluded.kind = 'fact' then 'fact' else memories.kind end
+        created_at = excluded.created_at
     `)
-    // The same fact said twice is then one memory. `created_at` is touched so
-    // recency still works; a later raw turn never demotes a saved fact, because
-    // the case above only ever promotes.
-    this.evictStmt = this.db.prepare(`
-      delete from memories
-       where scope = ? and kind = 'said'
-         and id not in (
-           select id from memories
-            where scope = ? and kind = 'said'
-            order by created_at desc, id desc
-            limit ?
-         )
-    `)
+    // The same fact said twice is then one memory, with `created_at` touched so
+    // recency still works.
     this.selectStmt = this.db.prepare(RECALL_SQL)
+    this.listStmt = this.db.prepare(`
+      select uid, text, created_at as createdAt, tags
+        from memories
+       where scope = ?
+       order by created_at desc, id desc
+       limit ?
+    `)
+    this.forgetStmt = this.db.prepare('delete from memories where uid = ? and scope = ?')
+    // Bounded: this is the comparison set for a fact about to be written, and a
+    // store cannot grow a fact layer big enough for a full scan to matter.
+    this.factTextStmt = this.db.prepare(
+      `select uid, text from memories
+        where scope = ?
+        order by created_at desc, id desc
+        limit 200`,
+    )
+    this.touchStmt = this.db.prepare('update memories set created_at = ? where uid = ? and scope = ?')
+    // Every vector of one layer, for the semantic side of a recall. A full scan
+    // is the right shape at this size — measured at 2.5 ms over 5,000 notes of
+    // 384 dimensions, against the milliseconds a vector index would add to every
+    // write. The day a store is big enough for that to be wrong, this is the one
+    // statement that changes.
+    this.vectorStmt = this.db.prepare(
+      `select uid, text, created_at as createdAt, tags, vector
+         from memories
+        where scope = ? and vector is not null`,
+    )
+    this.setVectorStmt = this.db.prepare('update memories set vector = ? where uid = ?')
 
     this.migrate()
+    this.unify()
+    // Started here and left: filling the store in is a model call per batch, and
+    // the first turn after enabling this must not wait for the whole history.
+    void this.ensureVectors()
   }
 
   async remember(scope: MemoryScope, items: MemoryInput[]): Promise<void> {
@@ -195,12 +232,12 @@ export class SqliteMemory implements Memory {
     if (entries.length === 0) return
 
     const key = scopeKey(scope)
-    this.transaction(() => {
-      this.write(key, entries)
-      this.evictStmt.run(key, key, this.keepSaid)
-    })
+    const written = this.transaction(() => this.write(key, entries))
 
     if (this.debug) console.error(`[memory] remember ${key}: +${entries.length}`)
+    // After the write, never inside it: an embedding is a request, and holding
+    // the transaction open across one would lock the other process out.
+    await this.embedRows(written)
   }
 
   async recall(
@@ -210,16 +247,15 @@ export class SqliteMemory implements Memory {
   ): Promise<MemoryItem[]> {
     const limit = opts?.limit ?? 5
     const match = toMatchQuery(query)
-    if (!match) return []
-
     const key = scopeKey(scope)
-    // Facts first, then raw turns filling what is left. Relevance orders each
-    // layer — `bm25` is the whole reason for the index — and recency breaks its
-    // ties, which is most of them on a small corpus.
-    const items = [
-      ...this.select(key, 'fact', match, limit),
-      ...this.select(key, 'said', match, limit),
-    ]
+    const vector = await this.queryVector(query)
+    // A question made only of filler is no keyword query at all — but it can
+    // still mean something, and the semantic side is the one that knows.
+    if (!match && !vector) return []
+
+    // Ordered by both signals at once: `bm25` is the index's own ranking, the
+    // vectors are the model's, and recency breaks what is left.
+    const items = this.rank(key, match, vector, limit)
       .slice(0, limit)
       .map((row, index) => ({
         id: row.uid,
@@ -235,14 +271,262 @@ export class SqliteMemory implements Memory {
     return items
   }
 
+  /**
+   * The store's candidates from both signals, merged by rank.
+   *
+   * The semantic side is allowed to bring in notes the words never matched —
+   * that is the whole point of it, and the case that made it necessary: a
+   * question sharing no word with the note that answers it returns nothing from
+   * keywords alone.
+   *
+   * There is deliberately no similarity cut-off. One was added, measured and
+   * removed: against two models, eight notes and thirty-two questions, the note
+   * a question was about scored 0.01 to 0.70 and the ones it was not scored 0.05
+   * to 0.31 — overlapping bands, so any floor either loses a correct answer or
+   * keeps an unrelated one. The first version looked right on nine questions and
+   * fell apart on thirty-two, which is the argument for measuring before
+   * trusting a threshold.
+   *
+   * The cost of that is real and worth naming: a question that has nothing to do
+   * with anything still brings the nearest notes in — measured live, "qual a
+   * capital da França?" came back with the editor note. They are framed as data
+   * the model may ignore, the list is short, and the fix for this is a reranking
+   * model rather than a number.
+   */
+  private rank(
+    key: string,
+    match: string | null,
+    query: Float32Array | null,
+    limit: number,
+  ): Row[] {
+    const lexical = match ? this.select(key, match, limit) : []
+    if (!query) return lexical
+
+    const semantic = this.nearest(key, query, limit)
+    if (semantic.length === 0) return lexical
+    if (lexical.length === 0) return semantic
+    return fuse(lexical, semantic, limit)
+  }
+
+  /** The notes closest to the query, by cosine. */
+  private nearest(key: string, query: Float32Array, limit: number): Row[] {
+    let rows: VectorRow[]
+    try {
+      rows = this.vectorStmt.all(key) as unknown as VectorRow[]
+    } catch {
+      return []
+    }
+    return rows
+      .filter((row) => row.vector && row.vector.byteLength === query.length * 4)
+      .map((row) => ({ row, score: dot(query, toVector(row.vector!)) }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map((entry) => entry.row)
+  }
+
+  /** The question's own vector, or null with no embedder or no answer from it. */
+  private async queryVector(query: string): Promise<Float32Array | null> {
+    const embedder = this.embedder
+    if (!embedder) return null
+    try {
+      return (await embedder.embed([truncate(query)]))[0] ?? null
+    } catch (error) {
+      this.warnOnce(`could not embed a question: ${errorMessage(error)}`)
+      return null
+    }
+  }
+
+  /** Attaches vectors to rows the write has already put in the store. */
+  private async embedRows(rows: { uid: string; text: string }[]): Promise<boolean> {
+    const embedder = this.embedder
+    if (!embedder || rows.length === 0) return true
+    try {
+      const vectors = await embedder.embed(rows.map((row) => truncate(row.text)))
+      this.transaction(() => {
+        rows.forEach((row, index) => {
+          const vector = vectors[index]
+          // A vector with nothing in it is left off entirely: stored, it would
+          // put the note in every ranking with a score of zero.
+          if (vector && !isNoise(vector)) this.setVectorStmt.run(toBlob(vector), row.uid)
+        })
+      })
+      return true
+    } catch (error) {
+      // The note is written and findable by its words; only its semantic side is
+      // missing, and the next process tries again.
+      this.warnOnce(`could not embed ${rows.length} note(s): ${errorMessage(error)}`)
+      // Only a text the provider itself refuses is written off. A connection that
+      // was not up yet, a key that is wrong or a rate limit all may pass next
+      // time, and losing a note to one of those is worse than waiting.
+      if (!(error instanceof InputRefusedError)) return false
+      // A model that refuses one text refuses the whole request, so the batch is
+      // tried again one note at a time: what it will not take is marked and left
+      // behind rather than blocking the rest of the store on every run.
+      if (rows.length === 1) {
+        this.markUnusable(rows[0]!.uid)
+        return true
+      }
+      for (const row of rows) await this.embedRows([row])
+      return true
+    }
+  }
+
+  /**
+   * Says a note was tried and cannot be embedded. A zero-length vector reads as
+   * "no vector" everywhere — the similarity query filters by width — so the
+   * fill-in stops offering this note and moves on to the rest of the store.
+   */
+  private markUnusable(uid: string): void {
+    this.setVectorStmt.run(new Uint8Array(0), uid)
+  }
+
+  /**
+   * Brings the store up to the embedder's model, once per process.
+   *
+   * A different model means every stored vector is in a space that cannot be
+   * compared with the new one, so they are cleared and rewritten rather than
+   * quietly measured against the wrong thing.
+   */
+  private ensureVectors(): Promise<void> {
+    const embedder = this.embedder
+    if (!embedder) return Promise.resolve()
+
+    this.filling ??= (async () => {
+      const stored = this.db.prepare('select value from meta where key = ?').get(EMBEDDED_KEY) as
+        | { value?: string }
+        | undefined
+      if (stored?.value !== embedder.model) {
+        this.transaction(() => {
+          this.db.exec('update memories set vector = null')
+          this.db
+            .prepare('insert or replace into meta (key, value) values (?, ?)')
+            .run(EMBEDDED_KEY, embedder.model)
+        })
+        if (this.debug) {
+          console.error(`[memory] vectors were of ${stored?.value ?? 'no model'}; re-embedding`)
+        }
+      }
+
+      const missing = this.db.prepare(
+        'select uid, text from memories where vector is null order by created_at desc limit ?',
+      )
+      // The engine is started in the background on purpose, so the first batch can
+      // land before it is listening. A batch that fails is tried again rather than
+      // giving up: giving up here would leave every note written so far without a
+      // vector until the next process, which is the whole store on the first run.
+      let failures = 0
+      while (failures < 3) {
+        const rows = missing.all(EMBED_BATCH) as unknown as { uid: string; text: string }[]
+        if (rows.length === 0) break
+        if (await this.embedRows(rows)) {
+          failures = 0
+          continue
+        }
+        failures += 1
+        await delay(1_000 * failures)
+      }
+    })().catch((error: unknown) => {
+      logWarn(`could not fill in the embeddings: ${errorMessage(error)}`)
+    })
+
+    return this.filling
+  }
+
+  /** Waits for the fill-in. For tests and shutdown; no turn ever waits on it. */
+  async whenEmbedded(): Promise<void> {
+    await this.ensureVectors()
+  }
+
+  private warnOnce(message: string): void {
+    if (this.warned) return
+    this.warned = true
+    logWarn(`${message} — recall keeps working on words alone`)
+  }
+
+  /**
+   * Adds the vector column to a store made before there were embeddings. Beside
+   * the schema rather than in it, so an older file is brought forward instead of
+   * being refused.
+   */
+  private addVectorColumn(): void {
+    const columns = this.db
+      .prepare("select name from pragma_table_info('memories')")
+      .all() as unknown as { name: string }[]
+    if (columns.some((column) => column.name === 'vector')) return
+    this.db.exec('alter table memories add column vector blob')
+  }
+
+  /**
+   * Drops the raw turns a store written before this one kept.
+   *
+   * They were a copy of what the person typed, held in here so recall could read
+   * their words and not only the facts the model chose to save. Recall reads the
+   * history log now — every turn this install ever took, no cap — so the copy is
+   * dead weight, and dropping it is what keeps this file small. Nothing is lost
+   * that was not a copy: the log is where those sentences came from.
+   */
+  private dropTurns(): void {
+    const columns = this.db.prepare("select name from pragma_table_info('memories')").all() as
+      | { name: string }[]
+    if (!columns.some((column) => column.name === 'kind')) return
+
+    this.transaction(() => {
+      this.db.exec("delete from memories where kind = 'said'")
+      // The column is indexed; SQLite refuses to drop one that is.
+      this.db.exec('drop index if exists memories_scope_kind')
+      this.db.exec('alter table memories drop column kind')
+    })
+    if (this.debug) console.error('[memory] dropped the copied turns; recall reads the history now')
+  }
+
+  async list(scope: MemoryScope, opts?: { limit?: number }): Promise<MemoryItem[]> {
+    try {
+      const rows = this.listStmt.all(
+        scopeKey(scope),
+        opts?.limit ?? DEFAULT_LIST_LIMIT,
+      ) as unknown as Row[]
+      return rows.map((row) => ({
+        id: row.uid,
+        text: row.text,
+        createdAt: row.createdAt,
+        tags: parseTags(row.tags),
+      }))
+    } catch {
+      // Same rule as recall: a store that cannot be read answers nothing rather
+      // than taking down the screen that asked.
+      return []
+    }
+  }
+
+  /**
+   * Drops one note. The id may be only the front of one — a whole uuid is a lot
+   * to type into a chat — and is accepted only while it names exactly one note,
+   * which is what the two-row limit below is for.
+   */
+  async forget(scope: MemoryScope, id: string): Promise<boolean> {
+    const key = scopeKey(scope)
+    const wanted = id.trim()
+    // The id goes into a LIKE, so it has to be an id and nothing else.
+    if (!/^[0-9a-f-]{4,36}$/i.test(wanted)) return false
+
+    const matches = this.db
+      .prepare('select uid from memories where scope = ? and uid like ? limit 2')
+      .all(key, `${wanted}%`) as unknown as { uid: string }[]
+    if (matches.length !== 1) return false
+
+    const removed = Number(this.forgetStmt.run(matches[0]!.uid, key).changes) > 0
+    if (this.debug && removed) console.error(`[memory] forgot ${matches[0]!.uid}`)
+    return removed
+  }
+
   /** For tests and shutdown: nothing else needs the handle. */
   close(): void {
     this.db.close()
   }
 
-  private select(scope: string, kind: MemoryLayer, match: string, limit: number): Row[] {
+  private select(scope: string, match: string, limit: number): Row[] {
     try {
-      return this.selectStmt.all(match, scope, kind, limit) as unknown as Row[]
+      return this.selectStmt.all(match, scope, limit) as unknown as Row[]
     } catch {
       // Recall is on the path of every turn, so it is allowed to answer nothing
       // and is never allowed to take the turn down: a store that cannot be read
@@ -251,53 +535,139 @@ export class SqliteMemory implements Memory {
     }
   }
 
-  private write(scope: string, items: (MemoryInput & { createdAt?: number })[]): void {
+  private write(
+    scope: string,
+    items: (MemoryInput & { createdAt?: number })[],
+  ): { uid: string; text: string }[] {
+    const written: { uid: string; text: string }[] = []
     for (const item of items) {
+      // A durable fact said again in other words is one fact, not two.
+      const kept = this.sameFact(scope, item.text)
+      if (kept) {
+        // Reinforced: it is the same fact, so recency follows the new telling
+        // and the row that stays is the one already held.
+        this.touchStmt.run(item.createdAt ?? Date.now(), kept, scope)
+        continue
+      }
+      const uid = randomUUID()
       this.insertStmt.run(
-        randomUUID(),
+        uid,
         scope,
         item.text,
-        item.kind ?? 'fact',
         JSON.stringify(item.tags ?? []),
         item.createdAt ?? Date.now(),
         hashOf(item.text),
       )
+      written.push({ uid, text: item.text })
     }
+    return written
   }
 
   /**
-   * Brings across what `FileMemory` left on disk, once per store. Guarded by a
-   * row in `meta`, and non-destructive: the JSON files stay where they are, so
-   * `backend: "file"` still reads them.
+   * The fact already kept that is the same words as this one, if any.
+   *
+   * Two notes are the same note when they are built from the same words —
+   * punctuation, word order and filler aside — and only then. A "mostly the
+   * same" score was tried and dropped: it cannot tell a rewording from a
+   * correction, and one word is what separates "… na segunda" from
+   * "… na terça", or a plain fact from the same fact negated. Nor is this
+   * semantic: it cannot tell that "meu editor" and "o que uso para codar" are
+   * about the same thing.
+   */
+  private sameFact(scope: string, text: string): string | null {
+    const wanted = contentWords(text)
+    if (wanted.size === 0) return null
+
+    const rows = this.factTextStmt.all(scope) as unknown as { uid: string; text: string }[]
+    for (const row of rows) {
+      const kept = contentWords(row.text)
+      if (kept.size !== wanted.size) continue
+      let same = true
+      for (const word of wanted) {
+        if (!kept.has(word)) {
+          same = false
+          break
+        }
+      }
+      if (same) return row.uid
+    }
+    return null
+  }
+
+  /**
+   * Brings across what the old JSON store left on disk, once per store. Guarded
+   * by a row in `meta`, and non-destructive: the JSON files stay where they are,
+   * so nothing is lost by the import.
    */
   private migrate(): void {
+    this.dropTurns()
     const done = this.db.prepare('select value from meta where key = ?').get(MIGRATED_KEY)
     if (done) return
 
     const legacy = readLegacyMemory(path.dirname(this.location))
-    const total = legacy.reduce((sum, entry) => sum + entry.items.length, 0)
 
     this.transaction(() => {
-      for (const entry of legacy) this.write(entry.scope, entry.items)
+      this.write(scopeKey(INSTALL_SCOPE), legacy)
       this.db
         .prepare('insert or replace into meta (key, value) values (?, ?)')
         .run(MIGRATED_KEY, new Date().toISOString())
     })
 
-    if (this.debug && total > 0) {
+    if (this.debug && legacy.length > 0) {
       console.error(
-        `[memory] migrated ${total} item(s) from ${legacy.length} JSON file(s); they are left in place`,
+        `[memory] migrated ${legacy.length} note(s) from the JSON store; the files are left in place`,
       )
     }
   }
 
-  private tighten(): void {
-    // The directory is 0700, which is what covers the `-wal` and `-shm`
-    // siblings; the database is tightened too, because a file left to the umask
-    // is readable by every account on the machine.
-    for (const suffix of ['', '-wal', '-shm']) {
-      const file = `${this.location}${suffix}`
-      if (existsSync(file)) chmodSync(file, PRIVATE_FILE_MODE)
+  /**
+   * Moves what was filed per conversation into the one scope an install uses,
+   * once per store.
+   *
+   * Memory used to be filed per chat, so a store older than that has its notes
+   * under `cli:main`, `telegram:<id>` and so on — and recall reads one scope now,
+   * so without this they would never be found again. A store with nothing to
+   * move still settles.
+   */
+  private unify(): void {
+    const done = this.db.prepare('select value from meta where key = ?').get(UNIFIED_KEY)
+    if (done) return
+
+    const key = scopeKey(INSTALL_SCOPE)
+    const moved = this.transaction(() => {
+      // A row is unique per note inside a scope, so two conversations that carry
+      // the same sentence collide the moment they share one — and the collapse
+      // would fail on the unique index rather than lose a note. One row survives
+      // each note: the install scope's if it has one already, then the oldest.
+      this.db
+        .prepare(
+          `delete from memories
+            where scope <> ?
+              and id in (
+                select id from (
+                  select id,
+                         row_number() over (
+                           partition by hash
+                           order by (scope = ?) desc, id asc
+                         ) as rank
+                     from memories
+                )
+                where rank > 1
+              )`,
+        )
+        .run(key, key)
+
+      const changes = Number(
+        this.db.prepare('update memories set scope = ? where scope <> ?').run(key, key).changes,
+      )
+      this.db
+        .prepare('insert or replace into meta (key, value) values (?, ?)')
+        .run(UNIFIED_KEY, new Date().toISOString())
+      return changes
+    })
+
+    if (this.debug && moved > 0) {
+      console.error(`[memory] moved ${moved} item(s) into the install scope`)
     }
   }
 
@@ -321,7 +691,6 @@ export function sqliteMemoryStatus(location: string): MemoryStatus {
     location,
     scopes: 0,
     facts: 0,
-    said: 0,
     bytes: 0,
   }
   if (!existsSync(location)) return empty
@@ -332,16 +701,14 @@ export function sqliteMemoryStatus(location: string): MemoryStatus {
     const counts = db
       .prepare(
         `select count(distinct scope) as scopes,
-                sum(kind = 'fact') as facts,
-                sum(kind = 'said') as said
+                count(*) as facts
            from memories`,
       )
-      .get() as { scopes: number; facts: number | null; said: number | null }
+      .get() as { scopes: number; facts: number | null }
     return {
       ...empty,
       scopes: Number(counts.scopes ?? 0),
       facts: Number(counts.facts ?? 0),
-      said: Number(counts.said ?? 0),
       bytes: sizeOnDisk(location),
     }
   } catch {
@@ -353,37 +720,54 @@ export function sqliteMemoryStatus(location: string): MemoryStatus {
   }
 }
 
-function sizeOnDisk(location: string): number {
-  return ['', '-wal'].reduce((sum, suffix) => {
-    try {
-      return sum + statSync(`${location}${suffix}`).size
-    } catch {
-      return sum
-    }
-  }, 0)
-}
-
 /**
- * A person's sentence is not an FTS5 query — but by this point it is: `tokenize`
- * splits on everything that is not a letter or a digit, so what arrives here is
- * plain words, and the `OR` between them means none of them is ever in the
- * infix position where `NEAR` or `NOT` would become an operator. Verified against
- * the engine rather than assumed: `alpha NEAR omega`, `omega NOT alpha` and a
- * query made only of `not` all behave as ordinary terms.
+ * Merges two rankings of the same notes by position.
  *
- * The words are OR-ed, so the answer stays "anything sharing a word", which is
- * the same promise `FileMemory` made. An empty query is no query at all.
+ * By position and not by score, because the two scores are not the same kind of
+ * number and a weighted sum of them would be a constant nobody could defend.
+ * A note that only one side found keeps its place: that is how a question with
+ * no shared word reaches the note that answers it.
  */
-function toMatchQuery(query: string): string | null {
-  const tokens = [...tokenize(query)]
-  if (tokens.length === 0) return null
-  return tokens.join(' OR ')
+function fuse(lexical: Row[], semantic: Row[], limit: number): Row[] {
+  const merged = new Map<string, { row: Row; score: number }>()
+  const add = (rows: Row[]) => {
+    rows.forEach((row, index) => {
+      const gain = 1 / (RRF_K + index + 1)
+      const found = merged.get(row.uid)
+      if (found) found.score += gain
+      else merged.set(row.uid, { row, score: gain })
+    })
+  }
+  add(lexical)
+  add(semantic)
+
+  return [...merged.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map((entry) => entry.row)
 }
 
-/** Case and spacing are not a difference: the same note saved twice is one row. */
-function hashOf(text: string): string {
-  return createHash('sha1').update(text.trim().replace(/\s+/g, ' ').toLowerCase()).digest('hex')
+/** Stored vectors are unit length, so closeness is the plain dot product. */
+function dot(a: Float32Array, b: Float32Array): number {
+  let sum = 0
+  for (let i = 0; i < a.length; i += 1) sum += a[i]! * b[i]!
+  return sum
 }
+
+function toBlob(vector: Float32Array): Uint8Array {
+  return new Uint8Array(vector.buffer.slice(vector.byteOffset, vector.byteOffset + vector.byteLength))
+}
+
+function toVector(blob: Uint8Array): Float32Array {
+  // Copied, not a view: those bytes belong to the driver's own buffer.
+  return new Float32Array(new Uint8Array(blob).buffer)
+}
+
+/** The head of a note: what fits, and what a question refers to anyway. */
+const truncate = (text: string): string =>
+  text.length > EMBED_CHARS ? text.slice(0, EMBED_CHARS) : text
+
+const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 function parseTags(tags: string): string[] {
   try {

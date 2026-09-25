@@ -11,7 +11,7 @@ process.env.MILO_HOME = home
 
 const { fileHistory } = await import('../src/core/history.js')
 const { searchHistoryTool } = await import('../src/core/tools/search-history.js')
-const { FileMemory } = await import('../src/core/memory/local.js')
+const { SqliteMemory } = await import('../src/core/memory/sqlite.js')
 const { Session } = await import('../src/core/session.js')
 const { MemorySessionStore } = await import('../src/core/sessions/memory-store.js')
 const { createToolRegistry } = await import('../src/core/tools/index.js')
@@ -108,7 +108,7 @@ describe('search_history', () => {
       model: 'test-model',
       system: 'BASE',
       registry: createToolRegistry(),
-      memory: new FileMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-e2e-')) }),
+      memory: new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-e2e-')) }),
       cwd: process.cwd(),
       record,
       store,

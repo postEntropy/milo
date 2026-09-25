@@ -15,7 +15,6 @@ writeFileSync(
       provider: 'commandcode',
       model: 'deepseek/deepseek-v4.1-flash',
       providers: { commandcode: { baseURL: 'https://api.commandcode.ai/provider/v1' } },
-      memory: { backend: 'file' },
       gateways: {},
       permissions: { mode: 'ask', allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
     },

@@ -25,6 +25,12 @@ export const browserChromeDir = (): string => path.join(browserDir(), 'chrome')
 export const browserProfilesDir = (): string => path.join(browserDir(), 'profiles')
 /** One append-only JSONL per day: what was asked, answered and run. */
 export const historyDir = (): string => path.join(MILO_HOME, 'history')
+/**
+ * The embedding engine Milo downloaded for itself, and the models it pulls.
+ * Its own copy and its own port, so an Ollama someone already runs is neither
+ * disturbed nor depended on.
+ */
+export const embedEngineDir = (): string => path.join(MILO_HOME, 'embed')
 /** Sessions written out to be read or handed on, one file per export. */
 export const exportsDir = (): string => path.join(MILO_HOME, 'exports')
 /** What was typed at the CLI's prompt, for the arrow keys to walk back through. */

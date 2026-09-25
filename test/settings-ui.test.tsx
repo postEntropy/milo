@@ -13,7 +13,7 @@ const config = {
   provider: 'commandcode',
   model: 'some-model',
   providers: { commandcode: { baseURL: 'https://api.commandcode.ai/provider/v1' } },
-  memory: { backend: 'file' as const },
+  memory: {},
   display: { tools: 'full' as const, thinking: 'on' },
   reasoningEffort: 'medium' as const,
   gateways: {},
@@ -150,6 +150,73 @@ beforeEach(() => {
 })
 
 describe('SettingsScreen', () => {
+  it('offers both ways to match by meaning, with each cost said first', async () => {
+    const app = renderSettings()
+    await moveTo(app, 'Memory')
+    await press(app, '\r')
+    // The section has a row to move to and press, like every other section —
+    // and it reads like one: a label and a state, not a sentence.
+    expect(flatFrame(app)).toMatch(/Recall by meaning\s+off/)
+
+    await press(app, '\r')
+    const confirm = flatFrame(app)
+    expect(confirm).toContain('Where should recall by meaning come from?')
+    // Each way carries its own price on its own row, before either is chosen.
+    expect(confirm).toContain('about 1.9 GB once — nothing leaves this machine')
+    expect(confirm).toContain('the notes are sent out')
+
+    // Escaped rather than accepted: accepting fetches over a gigabyte.
+    await press(app, '\u001b')
+    expect(flatFrame(app)).toMatch(/Recall by meaning\s+off/)
+  })
+
+  it('asks for the OpenRouter key in the flow instead of sending you elsewhere', async () => {
+    const app = renderSettings()
+    await moveTo(app, 'Memory')
+    await press(app, '\r')
+    await press(app, '\r')
+    await press(app, DOWN)
+    await press(app, '\r')
+
+    // Asked for right here, the way a gateway token is.
+    expect(flatFrame(app)).toContain('OpenRouter key')
+    // And nothing is written yet: a config naming a key that is not there would
+    // silently do nothing.
+    expect(readJson('config.json').memory.embedding).toBeUndefined()
+
+    app.stdin.write('sk-or-typed')
+    await tick(20)
+    app.stdin.write('\r')
+    await waitFor(app, 'Recall by meaning')
+
+    expect(readJson('auth.json').providers.openrouter).toBe('sk-or-typed')
+    expect(readJson('config.json').memory.embedding).toEqual({
+      provider: 'openrouter',
+      model: 'nvidia/nemotron-3-embed-1b:free',
+    })
+  })
+
+  it('writes the hosted choice when the key is already there', async () => {
+    // The same key that serves chat models: one entry, both uses.
+    writeFileSync(
+      path.join(home, 'auth.json'),
+      JSON.stringify({ providers: { openrouter: 'sk-or-test' }, gateways: {}, search: {} }),
+    )
+    const app = renderSettings()
+
+    await moveTo(app, 'Memory')
+    await press(app, '\r')
+    await press(app, '\r')
+    await press(app, DOWN)
+    await press(app, '\r')
+
+    expect(readJson('config.json').memory.embedding).toEqual({
+      provider: 'openrouter',
+      model: 'nvidia/nemotron-3-embed-1b:free',
+    })
+    expect(flatFrame(app)).toContain('over OpenRouter')
+  })
+
   it('shows the section hub', () => {
     const { lastFrame } = renderSettings()
     const frame = lastFrame() ?? ''

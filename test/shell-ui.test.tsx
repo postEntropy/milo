@@ -13,7 +13,7 @@ const { CONFIG } = vi.hoisted(() => ({
     provider: 'commandcode',
     model: 'some-model',
     providers: { commandcode: { baseURL: 'https://api.commandcode.ai/provider/v1' } },
-    memory: { backend: 'file' as const },
+    memory: {},
     gateways: {},
     permissions: {
       mode: 'ask' as const,

@@ -43,7 +43,7 @@ const config = {
   provider: 'commandcode',
   model: 'some-model',
   providers: { commandcode: { baseURL: 'https://api.commandcode.ai/provider/v1' } },
-  memory: { backend: 'file' as const },
+  memory: {},
   display: { tools: 'full' as const, thinking: 'on' },
   reasoningEffort: 'medium' as const,
   gateways: {},

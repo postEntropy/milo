@@ -1,10 +1,13 @@
-import { mkdtempSync } from 'node:fs'
+import { appendFileSync, mkdirSync, mkdtempSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../src/core/agent/events.js'
-import { FileMemory } from '../src/core/memory/local.js'
+import type { HistoryEntry, HistoryWriter } from '../src/core/history.js'
+import { installMemory } from '../src/core/memory/index.js'
+import { SqliteMemory } from '../src/core/memory/sqlite.js'
+import { TurnIndex } from '../src/core/memory/turns.js'
 import { createProvider } from '../src/core/providers/create.js'
 import { AgentRuntime } from '../src/core/runtime.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
@@ -66,13 +69,27 @@ afterAll(async () => {
 describe('end-to-end turn', () => {
   it('streams, runs a tool, continues, and remembers the exchange', async () => {
     calls = 0
-    const memory = new FileMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-it-')) })
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-it-'))
+    const log = path.join(dir, 'history')
+    mkdirSync(log, { recursive: true })
+    const file = path.join(log, `${new Date().toISOString().slice(0, 10)}.jsonl`)
+    const history: HistoryWriter = {
+      append(entries: HistoryEntry[]) {
+        appendFileSync(file, entries.map((entry) => `${JSON.stringify(entry)}\n`).join(''))
+      },
+    }
+
+    const memory = installMemory(
+      new SqliteMemory({ dir: path.join(dir, 'memory') }),
+      new TurnIndex({ dir: log }),
+    )
     const runtime = new AgentRuntime({
       provider: createProvider({ id: 'local', baseURL, apiKey: false, wire: 'openai' }, 'test-model'),
       model: 'test-model',
       system: 'You are a test agent.',
       registry: createToolRegistry(),
       memory,
+      history,
       cwd: process.cwd(),
     })
 
@@ -97,7 +114,9 @@ describe('end-to-end turn', () => {
     expect(calls).toBe(2)
     expect(events.at(-1)).toMatchObject({ type: 'done' })
 
+    // What was asked is in the log, and the index reads it back: a later question
+    // is answered from the person's own words, not from a copy of them.
     const recalled = await memory.recall(scope, 'what is the package called?', { limit: 5 })
-    expect(recalled.length).toBeGreaterThan(0)
+    expect(recalled.some((note) => note.text.includes('package called'))).toBe(true)
   })
 })

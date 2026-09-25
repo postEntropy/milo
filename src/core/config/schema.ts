@@ -14,16 +14,51 @@ export const ProviderEntrySchema = z.object({
 })
 export type ProviderEntry = z.infer<typeof ProviderEntrySchema>
 
+/** Where a vector can come from: a model on this machine, or one on theirs. */
+export const EMBED_PROVIDERS = ['ollama', 'openrouter'] as const
+export type EmbedProvider = (typeof EMBED_PROVIDERS)[number]
+
+/**
+ * The local default: multilingual and 593 MB, against bge-m3's 1.08 GB for a
+ * little more quality. Recall by meaning is worth a small model; the heavier one
+ * is a config edit away.
+ */
+export const DEFAULT_LOCAL_EMBED_MODEL = 'embeddinggemma'
+
+/**
+ * The hosted default: free, roomy, and the better of the two free routes when
+ * measured — 8 notes, 32 questions: it answered 20 of 24 matching questions
+ * against 18 for the 350M one, and its 32,768-token context takes a pasted turn
+ * whole where the other refuses past 512.
+ */
+export const DEFAULT_CLOUD_EMBED_MODEL = 'nvidia/nemotron-3-embed-1b:free'
+
+export const OLLAMA_URL = 'http://127.0.0.1:11434'
+export const OPENROUTER_URL = 'https://openrouter.ai/api/v1'
+
 export const MemorySchema = z.object({
+  /** How many notes a question is answered from. Absent means Milo's default. */
+  recallLimit: z.number().int().positive().optional(),
   /**
-   * `sqlite` is the store: one file, BM25 recall, and durable facts held apart
-   * from raw turns. `file` is the JSON-per-scope store it replaced — kept
-   * because it is what the migration reads, and because going back has to stay
-   * possible for a store this personal.
+   * Whether a finished turn is read for facts worth keeping. On by default: it
+   * is what makes memory work without being asked, and it costs one model call
+   * per turn, off the answer.
    */
-  backend: z.enum(['sqlite', 'file']).default('sqlite'),
-  /** Raw turns kept per conversation. Facts are never evicted to make room. */
-  keepSaid: z.number().int().positive().optional(),
+  derive: z.boolean().default(true),
+  /**
+   * Recall by meaning. Absent means words only — the default, because it needs
+   * an engine somewhere and nothing else in Milo does. `milo setup` → Memory
+   * offers both ways: a model fetched onto this machine, or a keyed one that
+   * runs on the provider's.
+   */
+  embedding: z
+    .object({
+      provider: z.enum(EMBED_PROVIDERS).default('ollama'),
+      /** Absent means whichever model is the default for that provider. */
+      model: z.string().optional(),
+      url: z.string().optional(),
+    })
+    .optional(),
 })
 export type MemoryConfig = z.infer<typeof MemorySchema>
 

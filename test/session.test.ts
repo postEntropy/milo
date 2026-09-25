@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../src/core/agent/events.js'
-import { FileMemory } from '../src/core/memory/local.js'
-import type { MemoryScope } from '../src/core/memory/index.js'
+import { SqliteMemory } from '../src/core/memory/sqlite.js'
+import { DEFAULT_RECALL_LIMIT, type Memory, type MemoryScope } from '../src/core/memory/index.js'
 import type {
   ChatRequest,
   Provider,
@@ -38,7 +38,7 @@ class CapturingProvider implements Provider {
 async function run(input: string) {
   const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
   const provider = new CapturingProvider()
-  const memory = new FileMemory({ dir })
+  const memory = new SqliteMemory({ dir })
   const store = new MemorySessionStore()
   const scope: MemoryScope = { gateway: 'cli', conversationId: 't' }
   const base: Extra = {
@@ -60,7 +60,7 @@ async function run(input: string) {
 /** A session on a throwaway store, for testing the provider's behaviour. */
 async function sessionWith(provider: Provider, extra: Partial<SessionOptions> = {}) {
   const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
-  const memory = new FileMemory({ dir })
+  const memory = new SqliteMemory({ dir })
   const store = new MemorySessionStore()
   const scope: MemoryScope = { gateway: 'cli', conversationId: 'abort' }
   const record = await store.create()
@@ -95,19 +95,20 @@ describe('Session', () => {
     expect(provider.lastSystem).toContain('read_file(path, offset?, limit?)')
   })
 
-  it('remembers the user message but not the assistant reply', async () => {
+  it('leaves the store of facts alone and keeps the turn in the log', async () => {
     const { memory, scope } = await run('my editor is Neovim')
 
-    const userHits = await memory.recall(scope, 'which editor do I like?', { limit: 5 })
-    expect(userHits.some((hit) => hit.text.includes('Neovim'))).toBe(true)
-
-    const assistantHits = await memory.recall(scope, 'SECRET_ASSISTANT_REPLY', { limit: 5 })
-    expect(assistantHits).toEqual([])
+    // What was typed is in the history log, and recall reads it from there. The
+    // store is for what the model decided was worth keeping: a session writing
+    // the turn into it as well is the copy this design removed. The reply is not
+    // in either — a reply is not a fact.
+    expect(await memory.recall(scope, 'which editor do I like?', { limit: 5 })).toEqual([])
+    expect(await memory.recall(scope, 'SECRET_ASSISTANT_REPLY', { limit: 5 })).toEqual([])
   })
 
   it('takes up a message sent mid-turn, and writes it down as it arrives', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
-    const memory = new FileMemory({ dir })
+    const memory = new SqliteMemory({ dir })
     // A file store, not the in-memory one: it hands back a copy, so reading it
     // mid-turn says what is really on disk.
     const store = new FileSessionStore({ dir: path.join(dir, 'sessions') })
@@ -166,15 +167,11 @@ describe('Session', () => {
     expect(
       logged.filter((entry) => entry.kind === 'user').map((entry) => entry.text),
     ).toEqual(['where does the config live?', 'the config lives in ~/.milo'])
-
-    // What the user said is a durable fact whether it opened a turn or corrected one.
-    const hits = await memory.recall(scope, 'config', { limit: 5 })
-    expect(hits.some((hit) => hit.text.includes('~/.milo'))).toBe(true)
   })
 
   it('lets the model save a fact with the remember tool', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
-    const memory = new FileMemory({ dir })
+    const memory = new SqliteMemory({ dir })
     const store = new MemorySessionStore()
     const scope: MemoryScope = { gateway: 'cli', conversationId: 'remember' }
     const record = await store.create()
@@ -261,9 +258,10 @@ describe('Session', () => {
 
   it('keeps remembered facts when a new session starts on the same scope', async () => {
     const { store, scope, base, provider, memory } = await run('my editor is Neovim')
+    // A fact, the way the model saves one. The turn itself only lives in the log,
+    // which is why this asks the store directly.
+    await memory.remember(scope, [{ text: 'Meu editor e o Neovim' }])
 
-    // A brand-new session for the same conversation is a /new: its transcript is
-    // empty, but the scope — and therefore the memory — is the same.
     const record = await store.create()
     const fresh = new Session({ ...base, provider, memory, store, scope, record })
     for await (const _event of fresh.send('which editor do I use?')) {
@@ -286,7 +284,10 @@ describe('Session', () => {
       },
     }
 
-    const { session, memory, scope } = await sessionWith(provider)
+    const entries: HistoryEntry[] = []
+    const { session } = await sessionWith(provider, {
+      history: { append: (next) => entries.push(...next) },
+    })
     controller.abort()
 
     const events: AgentEvent[] = []
@@ -296,8 +297,9 @@ describe('Session', () => {
 
     expect(events.some((event) => event.type === 'aborted')).toBe(true)
     expect(events.some((event) => event.type === 'error')).toBe(false)
-    // Nothing was answered, so nothing is kept.
-    expect(await memory.recall(scope, 'remember this', { limit: 5 })).toEqual([])
+    // What was asked is in the log even though the turn was stopped: a stop is
+    // the end of a turn, not a reason for it to leave no trace.
+    expect(entries.some((entry) => entry.kind === 'user')).toBe(true)
   })
 
   it('still reports a genuine failure as an error', async () => {
@@ -337,6 +339,32 @@ describe('Session', () => {
     }
 
     expect(provider.lastMaxTokens).toBeUndefined()
+  })
+
+  it('answers from as many notes as the install asks for', async () => {
+    const limits: (number | undefined)[] = []
+    const memory: Memory = {
+      remember: async () => {},
+      recall: async (_scope, _query, opts) => {
+        limits.push(opts?.limit)
+        return []
+      },
+      list: async () => [],
+      forget: async () => false,
+    }
+    const provider = new CapturingProvider()
+
+    const defaults = await sessionWith(provider, { memory })
+    for await (const _event of defaults.session.send('one')) {
+      // drain
+    }
+    expect(limits.at(-1)).toBe(DEFAULT_RECALL_LIMIT)
+
+    const configured = await sessionWith(provider, { memory, recallLimit: 2 })
+    for await (const _event of configured.session.send('two')) {
+      // drain
+    }
+    expect(limits.at(-1)).toBe(2)
   })
 
   it('asks for medium when nothing set the effort', async () => {
@@ -500,7 +528,7 @@ describe('a session another writer has moved on from', () => {
       model: 'test-model',
       system: 'BASE',
       registry: createToolRegistry(),
-      memory: new FileMemory({ dir }),
+      memory: new SqliteMemory({ dir }),
       store,
       scope: { gateway: 'cli', conversationId: 'elsewhere' },
       record,
@@ -545,7 +573,7 @@ describe('recapping a session another writer moved on', () => {
       model: 'test-model',
       system: 'BASE',
       registry: createToolRegistry(),
-      memory: new FileMemory({ dir }),
+      memory: new SqliteMemory({ dir }),
       store,
       recaps,
       scope: { gateway: 'cli', conversationId: 'recap' },
@@ -594,7 +622,7 @@ describe('a reader that stops at the wait', () => {
         model: 'test-model',
         system: 'BASE',
         registry: createToolRegistry(),
-        memory: new FileMemory({ dir }),
+        memory: new SqliteMemory({ dir }),
         store,
         scope: { gateway: 'cli', conversationId },
         record: (await store.load(record.id))!,
@@ -644,7 +672,7 @@ describe('a session another writer summarized away', () => {
       model: 'test-model',
       system: 'BASE',
       registry: createToolRegistry(),
-      memory: new FileMemory({ dir }),
+      memory: new SqliteMemory({ dir }),
       store,
       scope: { gateway: 'cli', conversationId: 'summarized' },
       record,
@@ -677,7 +705,7 @@ describe('a session deleted while it was open', () => {
       model: 'test-model',
       system: 'BASE',
       registry: createToolRegistry(),
-      memory: new FileMemory({ dir }),
+      memory: new SqliteMemory({ dir }),
       store,
       scope: { gateway: 'cli', conversationId: 'gone' },
       record,
@@ -736,7 +764,7 @@ describe('one turn per session', () => {
         model: 'test-model',
         system: 'BASE',
         registry: createToolRegistry(),
-        memory: new FileMemory({ dir }),
+        memory: new SqliteMemory({ dir }),
         store,
         scope: { gateway: 'cli', conversationId },
         // Two turns over one store: a second terminal, or a daemon and a CLI.
@@ -825,7 +853,7 @@ describe('delegation to a subagent', () => {
       model: 'test-model',
       system: 'BASE',
       registry: createToolRegistry(),
-      memory: new FileMemory({ dir }),
+      memory: new SqliteMemory({ dir }),
       store,
       scope,
       record,

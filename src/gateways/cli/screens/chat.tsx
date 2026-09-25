@@ -22,6 +22,7 @@ import type {
 import { errorMessage } from '../../../util/errors.js'
 import {
   compactReply,
+  formatMemoryList,
   handleTurnControl,
   type TurnControlTarget,
 } from '../../commands.js'
@@ -79,6 +80,7 @@ const HELP_TEXT = [
   '/resume <id> — switch to another session',
   '/stats — numbers for the current session',
   '/skills — the skills installed, and where they live',
+  '/memory [forget <id>] — what Milo keeps, and how to drop one of them',
   '/clear — forget this conversation',
   '/compact — fold the oldest turns into the summary now',
   '/stop — stop the turn running now, and anything queued behind it',
@@ -368,6 +370,26 @@ export function ChatScreen({
       case 'skills':
         push({ kind: 'info', text: formatSkillList(runtime.skills) })
         break
+      case 'memory': {
+        const session = await runtime.getSession(scope)
+        const asked = argument.trim()
+        if (/^forget\b/i.test(asked)) {
+          const id = asked.replace(/^forget\b/i, '').trim()
+          if (!id) {
+            push({ kind: 'info', text: 'Usage: /memory forget <id>. The ids come from /memory.' })
+            break
+          }
+          push({
+            kind: 'info',
+            text: (await session.forget(id))
+              ? `Forgotten: ${id} — it is out of recall from the next question on.`
+              : `Nothing matches "${id}". Run /memory for the ids.`,
+          })
+          break
+        }
+        push({ kind: 'info', text: formatMemoryList(await session.memories(20)) })
+        break
+      }
       case 'resume': {
         if (!argument) {
           push({ kind: 'info', text: 'Usage: /resume <id>. See /sessions for the ids.' })

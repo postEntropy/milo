@@ -1,5 +1,5 @@
 import { describeExport, writeSessionExport, type ExportFormat } from '../core/export.js'
-import { formatSessionList, formatStats } from '../core/sessions/index.js'
+import { formatSessionList, formatStats, formatWhen } from '../core/sessions/index.js'
 import type { CompactResult, SessionStats, SessionSummary } from '../core/sessions/index.js'
 import { formatSkillList, type SkillSummary } from '../core/skills/index.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
@@ -9,6 +9,7 @@ import {
   type ReasoningEffort,
 } from '../core/providers/types.js'
 import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.js'
+import type { MemoryItem } from '../core/memory/index.js'
 import type { TurnQueue } from './turns.js'
 
 export interface CommandContext {
@@ -41,6 +42,12 @@ export interface CommandContext {
   compactSession?: () => Promise<CompactResult>
   /** The skills installed on this machine, for `/skills`. */
   skills?: () => SkillSummary[]
+  /** What this install remembers, for `/memory`. */
+  memories?: (limit?: number) => Promise<MemoryItem[]>
+  /** Drops one remembered note, by id or the front of one. */
+  forgetMemory?: (id: string) => Promise<boolean>
+  /** Set when this surface may not read or drop memories; used as the reply. */
+  memoryLocked?: string
   /** Set when this surface may not create or switch sessions; used as the reply. */
   sessionLocked?: string
 }
@@ -66,6 +73,7 @@ const HELP = [
   '/compact — fold the oldest turns into the summary now, instead of when the context fills up',
   '/export [md|json] — write this conversation out as a file, tool calls and reasoning included',
   '/skills — the skills installed, and where they live',
+  '/memory [forget <id>] — what Milo keeps, and how to drop one of them',
   '/clear — forget this conversation',
   '/status — permission mode and display settings',
   '/stop — stop the turn running now, and anything queued behind it',
@@ -132,6 +140,40 @@ export function sessionLockMessage(allowlist: string[] | undefined): string | un
   return count === 0
     ? '🔒 /new, /sessions and /resume are locked while this bot answers anyone. Add your id in `milo setup` → Gateways.'
     : `🔒 /new, /sessions and /resume are locked while this bot answers ${count} ids. Manage sessions from the CLI.`
+}
+
+/**
+ * Memory is one store for the whole install, so on a bot that answers several
+ * people one of them could read — or delete — what the owner told Milo
+ * elsewhere. Same rule as `/sessions`: one person, or the terminal.
+ */
+export function memoryLockMessage(allowlist: string[] | undefined): string | undefined {
+  const count = allowlist?.length ?? 0
+  if (count === 1) return undefined
+  return count === 0
+    ? '🔒 /memory is locked while this bot answers anyone. Run it in the terminal.'
+    : `🔒 /memory is locked while this bot answers ${count} ids. Run it in the terminal.`
+}
+
+/** Enough of a note's id to name it without pasting a whole uuid into a chat. */
+const MEMORY_ID_CHARS = 8
+
+/** One note per line: what `/memory` shows on every surface. */
+export function formatMemoryList(notes: MemoryItem[]): string {
+  if (notes.length === 0) {
+    return 'Nothing is remembered yet. Say something worth keeping, or ask me to remember it.'
+  }
+  return [
+    `What Milo keeps (${notes.length}${notes.length === 1 ? ' note' : ' notes'}):`,
+    // When, not just what: a note is something said at a moment, and without the
+    // moment there is no telling a stale one from one from this morning. It is
+    // when the note was last said, which is also what recall orders by.
+    ...notes.map(
+      (note) => `${note.id.slice(0, MEMORY_ID_CHARS)}  ${formatWhen(note.createdAt)}  ${note.text}`,
+    ),
+    '',
+    `Dropping one: /memory forget <id> — the first ${MEMORY_ID_CHARS} characters are enough.`,
+  ].join('\n')
 }
 
 /** Applies a mode change to the running policy and to disk. */
@@ -325,6 +367,30 @@ export async function handleCommand(
 
     case 'skills':
       return { handled: true, reply: formatSkillList(context.skills?.() ?? []) }
+
+    case 'memory': {
+      if (context.memoryLocked) return { handled: true, reply: context.memoryLocked }
+      if (!context.memories) {
+        return { handled: true, reply: 'Memory is not available on this surface.' }
+      }
+      const asked = argument.trim()
+      if (/^forget\b/i.test(asked)) {
+        const id = asked.replace(/^forget\b/i, '').trim()
+        if (!id) {
+          return { handled: true, reply: 'Usage: /memory forget <id>. The ids come from /memory.' }
+        }
+        const removed = (await context.forgetMemory?.(id)) ?? false
+        return {
+          handled: true,
+          reply: removed
+            ? `Forgotten: ${id} — it is out of recall from the next question on.`
+            : `Nothing matches "${id}". Run /memory for the ids.`,
+        }
+      }
+      // Twelve, not the whole store: a chat is read on a phone, and the rest is
+      // reachable by forgetting a few first.
+      return { handled: true, reply: formatMemoryList(await context.memories(12)) }
+    }
 
     case 'export': {
       // An argument it does not know is answered, not ignored: silently writing

@@ -10,6 +10,7 @@ import {
   encodePermission,
   handleCommand,
   handleTurnControl,
+  memoryLockMessage,
   modeLockMessage,
   parseTurnControl,
   sessionLockMessage,
@@ -18,6 +19,79 @@ import {
 } from '../src/gateways/commands.js'
 import { PendingDecisions } from '../src/gateways/pending.js'
 import { TurnQueue } from '../src/gateways/turns.js'
+import type { MemoryItem } from '../src/core/memory/index.js'
+
+describe('/memory', () => {
+  const notes: MemoryItem[] = [
+    {
+      id: 'aaaa1111-2222-3333-4444-555566667777',
+      text: 'Renato prefere bullet points',
+      createdAt: Date.parse('2026-07-15T12:00:00Z'),
+    },
+    {
+      id: 'bbbb2222-3333-4444-5555-666677778888',
+      text: 'o deploy sai na sexta',
+      createdAt: Date.parse('2026-07-14T12:00:00Z'),
+    },
+  ]
+
+  it('lists what is kept, with an id short enough to type', async () => {
+    const result = await handleCommand('/memory', { memories: async () => notes })
+
+    expect(result.handled).toBe(true)
+    expect(result.reply).toContain('Renato prefere bullet points')
+    expect(result.reply).toContain('aaaa1111')
+    expect(result.reply).not.toContain('aaaa1111-2222')
+    // When it was said, so a stale note is tellable from a fresh one. The day
+    // itself is left out: which one it lands on depends on the machine's zone.
+    expect(result.reply).toMatch(/2026-07-\d{2}/)
+  })
+
+  it('says so plainly when nothing was kept', async () => {
+    const result = await handleCommand('/memory', { memories: async () => [] })
+    expect(result.reply).toContain('Nothing is remembered yet')
+  })
+
+  it('drops the note it was given', async () => {
+    const forgotten: string[] = []
+    const result = await handleCommand('/memory forget aaaa1111', {
+      memories: async () => notes,
+      forgetMemory: async (id) => {
+        forgotten.push(id)
+        return true
+      },
+    })
+
+    expect(forgotten).toEqual(['aaaa1111'])
+    expect(result.reply).toContain('Forgotten')
+  })
+
+  it('does not pretend a note that matches nothing was dropped', async () => {
+    const result = await handleCommand('/memory forget zzzz', {
+      memories: async () => notes,
+      forgetMemory: async () => false,
+    })
+    expect(result.reply).toContain('Nothing matches')
+  })
+
+  it('asks for an id when the argument is bare', async () => {
+    const result = await handleCommand('/memory forget', { memories: async () => notes })
+    expect(result.reply).toContain('Usage: /memory forget <id>')
+  })
+
+  it('is locked on a bot that answers more than one person', async () => {
+    const result = await handleCommand('/memory', {
+      memories: async () => notes,
+      memoryLocked: memoryLockMessage(['1', '2']),
+    })
+    expect(result.reply).toContain('locked')
+  })
+
+  it('says it is unavailable on a surface that never wired it', async () => {
+    const result = await handleCommand('/memory', {})
+    expect(result.reply).toBe('Memory is not available on this surface.')
+  })
+})
 
 describe('the commands that steer the turn itself', () => {
   /**

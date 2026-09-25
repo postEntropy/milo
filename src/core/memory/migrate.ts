@@ -1,26 +1,27 @@
 import { existsSync, readFileSync, readdirSync } from 'node:fs'
 import path from 'node:path'
-import type { MemoryInput, MemoryItem, MemoryLayer } from './types.js'
+import type { MemoryInput, MemoryItem } from './types.js'
 
-/** One conversation's worth of what `FileMemory` left behind. */
-export interface LegacyScope {
-  scope: string
-  items: (MemoryInput & { createdAt: number })[]
-}
+/** One note out of the old store, with the time it was written. */
+export type LegacyItem = MemoryInput & { createdAt: number }
 
 /**
- * Reads what `FileMemory` wrote: one `<scope>.json` per conversation, an array
- * of items. Deliberately read-only — the JSON files stay where they are, so
- * going back to `backend: "file"` still works and a migration that goes wrong
- * has cost nothing.
+ * Reads the JSON-per-scope store Milo replaced: one `<scope>.json` per
+ * conversation, an array of items.
+ *
+ * The file name said which conversation a note came from, and that is no longer
+ * read back: an install's memory is one scope, so where a note was filed stops
+ * mattering the moment it is imported. Deliberately read-only — the JSON files
+ * stay where they are, so a migration that goes wrong has cost nothing and the
+ * notes can still be read by hand.
  *
  * A file a kill left half-written is skipped rather than fatal: this is memory,
  * and losing one conversation's notes beats refusing to open the store at all.
  */
-export function readLegacyMemory(dir: string): LegacyScope[] {
+export function readLegacyMemory(dir: string): LegacyItem[] {
   if (!existsSync(dir)) return []
 
-  const scopes: LegacyScope[] = []
+  const items: LegacyItem[] = []
   for (const name of readdirSync(dir)) {
     if (!name.endsWith('.json')) continue
 
@@ -32,45 +33,21 @@ export function readLegacyMemory(dir: string): LegacyScope[] {
     }
     if (!Array.isArray(parsed)) continue
 
-    const items = parsed
-      .filter(isItem)
-      .map((item) => ({
-        text: item.text.trim(),
-        tags: item.tags,
-        kind: layerOf(item.tags),
-        // The original time is kept: a recency tie-break over notes imported at
-        // one instant would otherwise rank them by nothing at all.
-        createdAt: item.createdAt,
-      }))
-      .filter((item) => item.text.length > 0)
-
-    if (items.length === 0) continue
-    scopes.push({ scope: scopeFromFile(name), items })
+    for (const item of parsed.filter(isItem)) {
+      const text = item.text.trim()
+      if (text.length === 0) continue
+      // What the end of a turn wrote to the old store was tagged `user`: those
+      // were turns, not facts, and the history log is where turns live now. They
+      // are left for it rather than imported, which is the whole point of the
+      // split — this store holds what the model chose to keep.
+      if (item.tags?.includes('user')) continue
+      // The original time is kept: a recency tie-break over notes imported at
+      // one instant would otherwise rank them by nothing at all.
+      items.push({ text, tags: item.tags, createdAt: item.createdAt })
+    }
   }
 
-  return scopes
-}
-
-/**
- * `FileMemory` named each file after the scope with everything outside
- * `[a-zA-Z0-9._-]` flattened to `_`, so `cli:main` was stored as `cli_main.json`.
- * A scope key is `gateway:conversationId` — the gateway is one of a known set of
- * words and a conversation id is an id, so putting the first separator back
- * recovers the key exactly. `userId` is never set today, and if it ever is this
- * is the one place that has to learn about it.
- */
-function scopeFromFile(name: string): string {
-  const bare = name.slice(0, -'.json'.length)
-  const cut = bare.indexOf('_')
-  return cut === -1 ? bare : `${bare.slice(0, cut)}:${bare.slice(cut + 1)}`
-}
-
-/**
- * The old store only had tags to go on, and its two writers are distinct: the
- * `remember` tool writes `assistant`, the end of a turn writes `user`.
- */
-function layerOf(tags: string[] | undefined): MemoryLayer {
-  return tags?.includes('user') ? 'said' : 'fact'
+  return items
 }
 
 function isItem(value: unknown): value is MemoryItem {

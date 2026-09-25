@@ -122,3 +122,18 @@ describe('searchHistory', () => {
     expect(searchHistory('  ')).toEqual([])
   })
 })
+
+describe('the turn index over the log', () => {
+  it('reads back what the writer wrote', async () => {
+    const { TurnIndex } = await import('../src/core/memory/turns.js')
+    fileHistory.append([entry({ text: 'meu editor e o neovim' })])
+
+    // The two halves have to agree on one format, and this is the only test that
+    // would catch them drifting apart: the writer writes JSONL, the index reads
+    // it, and recall answers from what came out.
+    const index = new TurnIndex({ dir: historyDir })
+    const hits = await index.recall({ gateway: 'cli', conversationId: 'main' }, 'neovim')
+    expect(hits.map((hit) => hit.text)).toEqual(['meu editor e o neovim'])
+    index.close()
+  })
+})
