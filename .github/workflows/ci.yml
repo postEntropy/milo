@@ -17,7 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        node-version: [20, 22]
+        # 20 is gone: it is EOL and has no `node:sqlite` at all, which the memory
+        # backend now runs on. 22.13 is the floor (`loadExtension`), and the
+        # matrix starts there rather than at 22.0 so the promise in `engines` is
+        # the one actually exercised.
+        node-version: [22, 24]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -8,7 +8,7 @@
     "milo": "dist/bin/cli.js"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.13.0"
   },
   "scripts": {
     "dev": "tsx src/bin/cli.ts",

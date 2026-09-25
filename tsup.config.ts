@@ -6,7 +6,7 @@ export default defineConfig({
     'bin/serve': 'src/bin/serve.ts',
   },
   format: ['esm'],
-  target: 'node20',
+  target: 'node22',
   outDir: 'dist',
   splitting: false,
   sourcemap: true,
