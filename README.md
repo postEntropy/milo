@@ -1172,6 +1172,45 @@ against a fake: the code is right about the shape of the API and unproven about 
 
 **Not started.**
 
+- **Plugins — the extension point that does not exist.** There are two today: `~/.milo/skills/`, which
+  is prose and cannot add capability, and the tool registry, which is code and in-tree. A plugin is the
+  missing middle: `~/.milo/plugins/<name>/` with a manifest declaring the tools it adds (name,
+  description, argument schema) and an entry that is either an ESM module imported in-process or a
+  command spawned per call. Its tools go through `permission.ts` unchanged, so a plugin's tool asks for
+  confirmation exactly the way a built-in does, and installing one stays explicit — the person picks it
+  from something, nothing auto-installs, the rule skills already follow. Two things to settle before
+  code: in-process (fast, shares the process, and a bad plugin can take the turn down with it) against a
+  subprocess (isolatable and language-agnostic, at the cost of a wire format and a start per call), and
+  whether a plugin may ship skills and personas as well as tools.
+- **Scheduled prompts.** Nothing in Milo runs on a timer — the only `setInterval`s in the tree are typing
+  indicators. Everything else needed is here: sessions, gateways, recaps, and a turn that can start
+  without a person. "Every weekday at 8, look at the repo and send me what moved on Telegram" is a cron
+  entry that opens a session and delivers to a gateway. Decide: where a schedule lives, what a job does
+  when a turn is already running on that conversation, and how its failures reach someone when nobody is
+  watching.
+- **`milo doctor`.** One command that answers "is this install healthy": the config parses, the keys are
+  there, both databases open and pass `integrity_check`, the index agrees with the log it is derived
+  from, `~/.milo` has the private permissions it is supposed to, and the legacy files are listed rather
+  than silently ignored. Every piece of it exists as a function already; nothing assembles it, and today
+  a broken install surfaces as a confusing turn instead of a diagnosis.
+- **A usage ledger.** Providers already emit `usage` per call and `/stats` reports the session in front
+  of you, but nothing is written down: no per-day, per-surface or per-model totals, and no cost estimate.
+  A JSONL beside the history, or a table in the store, would make "what has this cost me" answerable —
+  and one line at the `usage` event is where it starts.
+- **A recall eval set.** The precision questions — the reranker, whether a similarity cut-off earns its
+  keep — have no number behind them today; the measurements in this README were run by hand, once, on 8
+  notes. A checked-in set of questions with the notes they should reach, scored as precision@5, turns
+  every future recall change into a number instead of an opinion. It is the prerequisite for the
+  reranker, not a nice-to-have.
+- **Provider fallback.** One provider is configured, so a rate limit, a revoked key or a retired model
+  ends the turn. A second entry to fall back to — with the surface saying which one answered — is small
+  in `providers/create.ts` and one more row in setup.
+- **Correcting a fact.** `/memory` lists notes and `forget` drops one, so a fact that has gone stale can
+  only be deleted, never fixed — and now that facts are the only thing in the store, that is the whole
+  editing story. Superseding a note in place is the gap.
+- **Input other than text.** Pictures already arrive from the CLI and Telegram and go through one
+  pipeline; a voice note is the same shape — fetch the file, hand it to a transcription model, put the
+  text in the turn — and is worth doing only if that is how the person would actually talk to it.
 - **More markdown in the Ink UI.** The terminal renders fences, inline code, bold and headings; tables,
   nested lists and links still arrive as plain text.
 - **A window for models no catalog knows.** The lookup covers what OpenRouter lists, and
