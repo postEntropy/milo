@@ -22,7 +22,8 @@ The core never knows about Ink, Telegram or Discord. It hands each gateway a str
 
 ## Requirements
 
-- Node.js >= 20 (developed on 26)
+- Node.js >= 22.13 (developed on 26). The floor is where `node:sqlite` stops being
+  behind a flag, because the memory store runs on it and Node 20 has no such module at all.
 - An API key for one provider (or a local Ollama), for conversational use
 
 ## Install & run
@@ -75,7 +76,8 @@ slow" has no answer beyond a guess; with it, the wait says what it was spent on.
 - `~/.milo/input-history.json` — what was typed at the CLI's prompt, for `↑`/`↓`.
 - `~/.milo/sessions/` — one JSON file per session, plus one binding file per address and one recap
   per session that has been left behind (see below).
-- `~/.milo/memory/` — one JSON file per conversation scope.
+- `~/.milo/memory/` — the memory store: `memory.db`, one SQLite file for every conversation scope
+  (see [Memory](#memory)). A `backend: "file"` store keeps one JSON file per scope here instead.
 - `~/.milo/skills/` — one `<name>/SKILL.md` per skill (see [Skills](#skills)).
 - `~/.milo/browser/` — the browser's own profile (`profile/`), a downloaded Chrome (`chrome/`) when
   one was, and profiles copied out of a browser you use (`profiles/`). Not the browser you use (see
@@ -827,28 +829,89 @@ questions get heavier than "find that thing from last week".
 
 ## Memory
 
-Memory sits behind a thin, vendor-agnostic interface (`remember` / `recall`). The MVP ships a
-local `FileMemory` (JSON per conversation scope, keyword + recency retrieval). Third-party backends
-(mem0, Honcho, Zep/Graphiti, Letta, MemPalace, Hindsight) plug in behind the same interface later —
-nothing in the agent calls a vendor SDK directly.
+Memory sits behind a thin, vendor-agnostic interface (`remember` / `recall`). The store is Milo's
+own: **one SQLite file** at `~/.milo/memory/memory.db`, written `0600`, searched with FTS5/BM25. No
+account, no key, no service, no network — nothing you said leaves the machine. Third-party backends
+(mem0, Honcho, Zep/Graphiti, Letta, Hindsight) plug in behind the same interface through one
+`backend` switch; nothing in the agent calls a vendor SDK directly.
 
-Both halves of the interface are used. At the end of every turn Milo stores what the user said, and
-the `remember` tool lets the model save a durable fact deliberately — a preference, a convention, a
-decision — tagged `assistant` to tell it apart from a stored user message. Recall is keyword
-overlap, so the tool is told to write short standalone sentences and not to save what is already in
-the code or the transcript. It takes a batch, so one call can save several facts.
+**Why not one of them now.** Recall runs *before every turn* — `session.ts` awaits it ahead of the
+model request — so whatever answers it sits in front of every message. Those backends are Python or
+Docker services, or HTTP clients to one, and most want a graph database and an LLM on the write path:
+a round trip per turn, a hard failure when offline, and the transcript on somebody else's machine.
+mem0 is the exception worth naming, because its Node build does run in-process — but `add()` is an
+LLM call by default (it throws without one), its telemetry is on by default, and it pulls a native
+SQLite peer. The evidence points the same way for a store this small: in BEIR's out-of-domain results
+a tuned lexical baseline matches or beats dense retrieval, which is the regime a few hundred private
+notes live in, and Honcho's own benchmark notes that below roughly 50k tokens its machinery is not
+worth the overhead. Embeddings are the obvious next layer, and an **opt-in** one fused on top of what
+is here — not where this starts.
 
-The recency term only ever **reorders** what the overlap found: it can add at most 0.5 to a score
-that has to pass 0.5, so a memory that shares no word with the question does not come back. Recall
-that answers every question with whatever was said most recently is worse than one that answers
-nothing. Two-character words count (`rm`, `go`, `db`) — they used to be dropped from the index, which
-meant a note could never be found by the exact term the user asks about.
+### Two layers, and only one of them is droppable
+
+- `fact` — something worth keeping past the conversation: what the `remember` tool saves.
+- `said` — a raw turn the person typed, kept because it is what a question gets answered *from*.
+
+Recall reads facts first and fills the rest of the reply with turns. Eviction only ever removes the
+oldest turns, `keepSaid` per conversation (500 by default) — **a fact is never dropped to make room
+for small talk.** A single list with a single cap did exactly that, measured rather than suspected:
+600 items in, the 100 oldest out, fact or not.
+
+The same note saved twice is one row (a hash of the case- and space-normalised text), so re-saving a
+fact does not dilate recall, and a raw turn that repeats a saved fact cannot demote it.
+
+Both halves of the interface are used. At the end of every turn Milo stores what the user said as
+`said`, and the `remember` tool lets the model save a durable `fact` deliberately — a preference, a
+convention, a decision. Recall is lexical, so the tool is told to write short standalone sentences in
+the user's own terms and not to save what is already in the code or the transcript; it takes a batch,
+so one call can save several facts.
+
+### The query, and the 90× that came out of the plan
+
+`recall` turns the question into an FTS5 `MATCH`: the words are OR-ed, so the answer is still
+"anything sharing a word" — the promise the keyword store made. The tokenizer is what keeps a whole
+sentence safe to hand to the engine, and `remove_diacritics 2` is what makes `voce` find `você`,
+which in Portuguese is most of the difference between a store that works and one that does not.
+
+The join in that query is written `cross join`, and it is load-bearing rather than style. With a
+plain join and no `sqlite_stat1` — the state of a store that has only ever been written to — Node 22's
+SQLite drives from `memories` and probes the virtual table **once per row**: measured on 500 entries,
+**53 ms per recall against 0.6 ms** when the FTS index drives. Pinning the order makes the plan right
+without depending on statistics, which would have to be refreshed and would be wrong again the week
+they went stale. It is also version-dependent — Node 26's SQLite picks the good plan on its own —
+which is precisely why it is pinned rather than left to the planner, and why a test reads that
+query's own query plan: both plans return the same rows, so no behavioural test can tell them apart.
+
+### What it costs
+
+`npm run bench:memory`, same numbers on Node 22 and 26 (p50, 300 runs):
+
+| | recall | p95 | remember |
+| --- | --- | --- | --- |
+| `sqlite`, 500 items in a scope | **0.18 ms** | 0.80 ms | 0.40 ms |
+| `sqlite`, 5,000 items in a scope | **0.29 ms** | 0.84 ms | 0.40 ms |
+| `file`, 500 items (its cap) | 1.04 ms | 1.43 ms | 0.63 ms |
+
+Recall is the hot path and lands in the hundreds of microseconds; the model round trip that follows
+is seconds and is the same either way. Those are local numbers only.
+
+### The old store, and the way back
+
+`backend: "file"` is the JSON-per-scope store this replaced, and it is still selectable. The first
+open of the SQLite store **imports** whatever is in `~/.milo/memory/*.json` — once, recorded in the
+store's own `meta` table, keeping each item's original timestamp and taking its layer from the tag
+it already carried — and then **leaves the JSON files where they are**. Going back is a config edit,
+and a migration that goes wrong has cost nothing.
 
 Recall is not the only thing that reaches the model, and the rest is untrusted by construction: a
 remembered line comes from something the user typed earlier, a compaction summary comes from the
 transcript, and `web_search` snippets come from the open web. All three are fenced in the prompt
 (`<memories>`, `<summary>`) with a line saying they are data and not instructions, and the reviewer
 prompt says the same about the action it is judging.
+
+`milo setup` → **Memory** shows what is actually in the store — backend, scopes, facts, turns, size
+and where it lives — read off disk on navigation, since the store is written by turns and not by that
+screen.
 
 ## Skills
 
@@ -949,11 +1012,12 @@ npm run lint        # biome lint
 npm test            # vitest
 npm run build       # bundle to dist/ (tsup)
 npm run bench:browser   # what the browser toolset costs (needs a browser)
+npm run bench:memory    # what recall costs, against the JSON store it replaced
 npm run check:browser   # that every verb in it works (needs a browser)
 ```
 
 CI (`.github/workflows/ci.yml`) runs lint, types, tests with coverage and the build on every push
-and pull request, on Node 20 and 22, plus a smoke run of the bundled binary. One trap
+and pull request, on Node 22 and 24, plus a smoke run of the bundled binary. One trap
 worth knowing: with `NODE_ENV=production` exported in your shell, npm treats every install as
 `--omit=dev` and **prunes the toolchain** — `tsc`, `vitest` and `tsup` disappear. Recover with
 `npm ci --include=dev`.
@@ -965,7 +1029,8 @@ worth knowing: with `NODE_ENV=production` exported in your shell, npm treats eve
   - `agent/` — the loop (`runAgent`), events, system prompt.
   - `tools/` — `Tool` interface, registry (zod → JSON Schema), built-in tools.
   - `search/` — `SearchProvider` plus the Tavily, Exa and Parallel adapters.
-  - `memory/` — `Memory` interface + `FileMemory`.
+  - `memory/` — the `Memory` interface, the SQLite store behind it (`sqlite.ts`), the JSON store it
+    replaced (`local.ts`) and the one-time import between them (`migrate.ts`).
   - `skills/` — `SKILL.md` discovery, frontmatter parsing, and the loader behind the `read_skill` tool.
   - `browser/` — the CDP client, finding and starting Chrome, copying a profile out of another
     browser, the page observer, and the three tools.
@@ -984,10 +1049,13 @@ Known open work, roughly in order:
 1. **Live verification of the bot gateways.** The Telegram and Discord glue is only exercised
    against fakes, so a real token is still needed to confirm the permission buttons, the rich
    messages and the turn queue against the live APIs.
-2. **A real memory backend** (mem0 / Honcho / Zep / Letta / Hindsight) behind the same
-   `remember` / `recall` interface. Today: keyword overlap plus a recency bonus, over the user's
-   messages and whatever the model chose to save with the `remember` tool. The history log is already
-   searchable by term (`search_history`); ranked or vector recall over it is the open part.
+2. **Semantic recall on top of the store.** The lexical half is done — one SQLite file, BM25, facts
+   held apart from raw turns, and a plan pinned so it stays sub-millisecond (see [Memory](#memory)).
+   What is open is buying back paraphrases: embeddings as an **opt-in** layer fused with the lexical
+   result — `sqlite-vec` over the same rows, so the index is derived and the table never moves — with
+   a hard timeout and a fallback to the lexical answer, so a slow or failed embed can never delay a
+   turn. Off by default, because it costs either a model download or a network call and neither
+   belongs in an install that has to work out of the box.
 3. **Memory across gateways.** Facts are keyed by the conversation address, so something told in
    Telegram is not visible in the CLI. Sharing them needs a per-person identity map.
 4. **Web search needs a key.** `config.json` has no `search` section, so `web_search` is not even

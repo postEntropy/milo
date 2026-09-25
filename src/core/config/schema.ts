@@ -15,9 +15,24 @@ export const ProviderEntrySchema = z.object({
 export type ProviderEntry = z.infer<typeof ProviderEntrySchema>
 
 export const MemorySchema = z.object({
-  backend: z.literal('file').default('file'),
+  /**
+   * `sqlite` is the store: one file, BM25 recall, and durable facts held apart
+   * from raw turns. `file` is the JSON-per-scope store it replaced — kept
+   * because it is what the migration reads, and because going back has to stay
+   * possible for a store this personal.
+   */
+  backend: z.enum(['sqlite', 'file']).default('sqlite'),
+  /** Raw turns kept per conversation. Facts are never evicted to make room. */
+  keepSaid: z.number().int().positive().optional(),
 })
 export type MemoryConfig = z.infer<typeof MemorySchema>
+
+/**
+ * A config that says nothing about memory at all: what a first run writes, and
+ * what a file predating the setting loads as. Derived from the schema so the
+ * defaults are declared in exactly one place.
+ */
+export const DEFAULT_MEMORY: MemoryConfig = MemorySchema.parse({})
 
 export const GatewaySchema = z.object({
   enabled: z.boolean().default(false),
@@ -153,7 +168,7 @@ export const ConfigSchema = z.object({
   provider: z.string(),
   model: z.string(),
   providers: z.record(z.string(), ProviderEntrySchema),
-  memory: MemorySchema.default({ backend: 'file' }),
+  memory: MemorySchema.default(DEFAULT_MEMORY),
   sessions: SessionsSchema.default(DEFAULT_SESSIONS),
   display: DisplaySchema.default(DEFAULT_DISPLAY),
   gateways: z.record(z.string(), GatewaySchema).default({}),

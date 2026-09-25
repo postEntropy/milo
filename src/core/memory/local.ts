@@ -1,16 +1,18 @@
-import { chmodSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { ensurePrivateDir, PRIVATE_FILE_MODE } from '../../util/fs.js'
-import { scopeKey, type Memory, type MemoryInput, type MemoryItem, type MemoryScope } from './types.js'
+import {
+  scopeKey,
+  type Memory,
+  type MemoryInput,
+  type MemoryItem,
+  type MemoryScope,
+  type MemoryStatus,
+} from './types.js'
+import { tokenize } from './tokenize.js'
 
 const MAX_ITEMS = 500
-const STOPWORDS = new Set([
-  'the', 'a', 'an', 'and', 'or', 'but', 'to', 'of', 'in', 'on', 'for', 'is', 'are', 'was',
-  'were', 'be', 'been', 'it', 'this', 'that', 'with', 'as', 'at', 'by', 'from', 'i', 'you',
-  'o', 'a', 'os', 'as', 'um', 'uma', 'de', 'do', 'da', 'e', 'ou', 'que', 'em', 'no', 'na',
-  'para', 'por', 'com', 'se', 'meu', 'minha', 'eu', 'voce', 'você', 'é',
-])
 
 export interface FileMemoryOptions {
   dir: string
@@ -111,13 +113,37 @@ export class FileMemory implements Memory {
   }
 }
 
-export function tokenize(text: string): Set<string> {
-  const tokens = text
-    .toLowerCase()
-    .split(/[^\p{L}\p{N}]+/u)
-    // Two characters, not three: `rm`, `go`, `io` and `db` are exactly the kind
-    // of term a question about a project turns on, and dropping them meant a
-    // memory could never be recalled by the word the user actually used.
-    .filter((token) => token.length > 1 && !STOPWORDS.has(token))
-  return new Set(tokens)
+/**
+ * What the setup screen shows when this backend is the live one: read off the
+ * directory, without building an instance. The layers are recovered from the tag
+ * the same way the migration does, since this format never had a `kind`.
+ */
+export function fileMemoryStatus(dir: string): MemoryStatus {
+  const status: MemoryStatus = {
+    backend: 'file',
+    location: dir,
+    scopes: 0,
+    facts: 0,
+    said: 0,
+    bytes: 0,
+  }
+  if (!existsSync(dir)) return status
+
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith('.json')) continue
+    const file = path.join(dir, name)
+    status.scopes += 1
+    try {
+      status.bytes += statSync(file).size
+      const parsed: unknown = JSON.parse(readFileSync(file, 'utf8'))
+      if (!Array.isArray(parsed)) continue
+      for (const item of parsed as MemoryItem[]) {
+        if (item.tags?.includes('user')) status.said += 1
+        else status.facts += 1
+      }
+    } catch {
+      // A file a kill left half-written is still a scope and still bytes.
+    }
+  }
+  return status
 }

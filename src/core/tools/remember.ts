@@ -29,7 +29,13 @@ export const rememberTool: Tool<RememberArgs> = {
     const facts = args.facts
       .map((text) => text.trim())
       .filter((text) => text.length > 0)
-      .map((text) => ({ text, tags: args.tags?.length ? args.tags : ['assistant'] }))
+      .map((text) => ({
+        text,
+        tags: args.tags?.length ? args.tags : ['assistant'],
+        // A durable fact, not a raw turn: recall reads these first, and eviction
+        // never drops one to make room for chatter.
+        kind: 'fact' as const,
+      }))
 
     if (facts.length === 0) return { content: 'Nothing to remember.', isError: true }
 

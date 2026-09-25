@@ -1,4 +1,4 @@
-import { tokenize } from '../memory/local.js'
+import { tokenize } from '../memory/tokenize.js'
 import type { RecapStore } from './recap.js'
 import type { SessionSummary } from './types.js'
 

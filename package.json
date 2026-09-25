@@ -21,6 +21,7 @@
     "test:coverage": "vitest run --coverage",
     "bench:jev": "tsx scripts/bench-jev.ts",
     "bench:browser": "tsx scripts/bench-browser.ts",
+    "bench:memory": "tsx scripts/bench-memory.ts",
     "check:browser": "tsx scripts/check-browser.ts"
   },
   "dependencies": {

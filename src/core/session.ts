@@ -411,10 +411,15 @@ export class Session {
 
     // Remember only what the user said — the assistant's own replies are not
     // durable facts and would pollute recall. A turn that failed or was stopped
-    // is skipped as well: it never got as far as an answer.
+    // is skipped as well: it never got as far as an answer. It goes in as
+    // `said`, the layer recall reads second and eviction is allowed to drop;
+    // what the `remember` tool saves is a `fact`, and nothing evicts those.
     const said = [input, ...corrections].filter((text) => text.trim())
     if (!errored && said.length > 0) {
-      await memory.remember(this.scope, said.map((text) => ({ text, tags: ['user'] })))
+      await memory.remember(
+        this.scope,
+        said.map((text) => ({ text, tags: ['user'], kind: 'said' as const })),
+      )
     }
   }
 

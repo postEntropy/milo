@@ -21,8 +21,10 @@ import {
   browserChromeDir,
   browserProfileDir,
   browserProfilesDir,
+  memoryDir,
   skillsDir,
 } from '../../../core/config/paths.js'
+import { DEFAULT_KEEP_SAID, memoryStatus } from '../../../core/memory/index.js'
 import type { Auth, Config, GatewayConfig } from '../../../core/config/schema.js'
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORTS } from '../../../core/providers/types.js'
 import { BUILTIN_SKILLS } from '../../../core/skills/builtin.js'
@@ -217,6 +219,15 @@ export function SettingsScreen({
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-read triggers, not closure values — auth is re-read from disk on navigation and after a save refreshes the config
   const auth = useMemo(() => readAuth(), [view, config])
+
+  /**
+   * Same idea as `auth`: read off disk on navigation. The store is written by
+   * turns, not by this screen, so what is on disk is the only honest answer —
+   * and the counts are what tells a person whether recall has anything to work
+   * with at all.
+   */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: view is the re-read trigger, not a closure value
+  const memory = useMemo(() => memoryStatus(config.memory, memoryDir()), [view, config])
 
   /** The key rows, grouped, plus the cursor map that skips the group headers. */
   const keys = keyLayout(auth)
@@ -479,6 +490,32 @@ export function SettingsScreen({
   }
 
   const home = process.env.HOME ?? ''
+
+  /**
+   * What is in the store, with the effective cap spelled out rather than the
+   * setting as typed: `keepSaid` left unset still means a number, and a readout
+   * that says nothing is a readout nobody can act on.
+   */
+  const keepSaid = config.memory.keepSaid ?? DEFAULT_KEEP_SAID
+  const memoryRows: [string, string][] = [
+    ['Backend', memory.backend],
+    ['Scopes', String(memory.scopes)],
+    ['Facts', String(memory.facts)],
+    ['Turns', String(memory.said)],
+    ['Size', humanSize(memory.bytes)],
+  ]
+  const memoryLines =
+    memory.backend === 'sqlite'
+      ? [
+          'Facts are what Milo chose to keep: recall reads them first, and nothing drops one.',
+          `Turns are what you said, kept up to ${keepSaid} per conversation, oldest dropped first.`,
+          'One file on this machine. Nothing leaves it.',
+        ]
+      : [
+          'The JSON-per-scope store Milo replaced, still readable.',
+          'It keeps the newest 500 items per conversation, facts and turns alike, and tells',
+          'the two apart by tag — which is all this format carries.',
+        ]
 
   const enabledGateways = GATEWAYS.filter((id) => config.gateways[id]?.enabled)
 
@@ -1475,12 +1512,21 @@ export function SettingsScreen({
         )}
         {view.kind === 'memory' && (
           <Box flexDirection="column">
-            <Text>
-              Backend: <Text color={theme.accent}>{config.memory.backend}</Text>
-            </Text>
-            <Text color={theme.muted}>
-              Local JSON, one file per conversation scope. Third-party backends are pluggable.
-            </Text>
+            {memoryRows.map(([label, value]) => (
+              <Text key={label}>
+                {label.padEnd(8)} <Text color={theme.accent}>{value}</Text>
+              </Text>
+            ))}
+            <Box marginTop={1}>
+              <Text color={theme.muted}>{shortenPath(memory.location, home)}</Text>
+            </Box>
+            <Box marginTop={1} flexDirection="column">
+              {memoryLines.map((line) => (
+                <Text key={line} color={theme.muted}>
+                  {line}
+                </Text>
+              ))}
+            </Box>
           </Box>
         )}
 
