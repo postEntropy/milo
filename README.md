@@ -70,14 +70,18 @@ slow" has no answer beyond a guess; with it, the wait says what it was spent on.
 
 ## Configuration
 
-- `~/.milo/config.json` — provider, model, `maxTokens`, reasoning effort, memory backend, session
+- `~/.milo/config.json` — provider, model, `maxTokens`, reasoning effort, memory settings, session
   settings, display, permissions, browser and enabled gateways.
 - `~/.milo/auth.json` — API keys and bot tokens (written `0600`).
 - `~/.milo/input-history.json` — what was typed at the CLI's prompt, for `↑`/`↓`.
 - `~/.milo/sessions/` — one JSON file per session, plus one binding file per address and one recap
   per session that has been left behind (see below).
-- `~/.milo/memory/` — the memory store: `memory.db`, one SQLite file for every conversation scope
-  (see [Memory](#memory)). A `backend: "file"` store keeps one JSON file per scope here instead.
+- `~/.milo/memory/` — the memory store: `memory.db`, one SQLite file of facts for the whole install
+  (see [Memory](#memory)). An install that predates it still has the `*.json` files here: they are read
+  once, when the database is first created, and left alone after that.
+- `~/.milo/history/` — the log: one JSONL per day, what was asked, answered and run. `turns.db` sits
+  beside them: an index of what you typed, derived from those files and rebuildable from them (see
+  [Memory](#memory)).
 - `~/.milo/skills/` — one `<name>/SKILL.md` per skill (see [Skills](#skills)).
 - `~/.milo/browser/` — the browser's own profile (`profile/`), a downloaded Chrome (`chrome/`) when
   one was, and profiles copied out of a browser you use (`profiles/`). Not the browser you use (see
@@ -122,8 +126,9 @@ export DISCORD_BOT_TOKEN=...
 npm run serve
 ```
 
-Each conversation maps to its own session and memory scope (`telegram:<chatId>`,
-`discord:<channelId>`). Replies stream by editing one message; tool activity becomes one line per
+Each conversation maps to its own session (`telegram:<chatId>`, `discord:<channelId>`), while what
+Milo remembers is one store for the whole install: what you told it in the terminal is there on
+Telegram. Replies stream by editing one message; tool activity becomes one line per
 call — a **quote box** with the tool's icon, its name and the one value worth showing, whether that
 is a search query, a file path or a shell command. Every tool line opens with an emoji, never a
 typographic glyph (these are read in chat clients), and the tool **name is bold** so it does not read
@@ -713,11 +718,12 @@ what changed: the turns it added, and any it summarized away, since the answer t
 | `/stats` | Name, timestamps, message/turn counts and context size for the current session. |
 | `/clear` | Forgets the current session's transcript (destructive). |
 
-In the terminal, `milo` continues the last session bound to the CLI, and `milo --resume <id>` opens
-a specific one (`milo --continue` is the explicit form of the default).
+In the terminal, `milo` begins a new conversation every time it opens, and the one you were in stays
+on disk, listed by `/sessions`. `milo --continue` picks that one back up, and `milo --resume <id>`
+opens a specific one.
 
-Memory is keyed by the conversation, not the session, so facts you told Milo before a `/new` are
-still available afterwards.
+Memory is keyed to the install, not to the session or the conversation: what you told Milo in the
+terminal is there on Telegram, and a `/new` never changes what it remembers.
 
 Leaving a session — a `/new`, or a `/resume` away from it — writes a short **recap** of it, in the
 model's own words: a few bullets on what it was about and what it settled. `/sessions` shows the
@@ -822,18 +828,21 @@ recency bonus allowed to reorder but never to qualify: a session that shares no 
 question does not come back for being recent. It is the map; `search_history` is the territory.
 
 Plain text on disk is what keeps everything else working: `grep`, `jq`, `tail -f`, and Milo's own
-`read_file` and `grep`. There is no index — the search walks day files, newest first, and stops at the
-limit — which is the honest trade for a log this size, and the reason the format is JSONL rather than
-SQLite: a database here would be a *derived* index, rebuildable from these files, for the day the
-questions get heavier than "find that thing from last week".
+`read_file` and `grep`. `search_history` still walks the day files, newest first, and stops at the
+limit — the honest trade for a tool that is called now and then. What does have an index is recall,
+which runs before *every* turn and cannot afford to walk anything: `~/.milo/history/turns.db`, derived
+from these files and rebuildable from them. The paragraph above used to end by calling that a thing for
+the future; it is the present, and it is still not the truth about the log — deleting it costs one
+rebuild (see [Memory](#memory)).
 
 ## Memory
 
-Memory sits behind a thin, vendor-agnostic interface (`remember` / `recall`). The store is Milo's
-own: **one SQLite file** at `~/.milo/memory/memory.db`, written `0600`, searched with FTS5/BM25. No
-account, no key, no service, no network — nothing you said leaves the machine. Third-party backends
-(mem0, Honcho, Zep/Graphiti, Letta, Hindsight) plug in behind the same interface through one
-`backend` switch; nothing in the agent calls a vendor SDK directly.
+Memory sits behind a thin, vendor-agnostic interface (`remember` / `recall`). Milo's own store is
+**one SQLite file** at `~/.milo/memory/memory.db`, written `0600`, searched with FTS5/BM25. No account,
+no key, no service, no network — with an embedder off, nothing you said leaves the machine. Third-party
+backends (mem0, Honcho, Zep/Graphiti, Letta, Hindsight) would plug in behind the same interface, and
+nothing in the agent calls a vendor SDK directly; the switch that chose between two Milo-owned stores
+is gone, because two stores meant two sets of behaviour to keep in step.
 
 **Why not one of them now.** Recall runs *before every turn* — `session.ts` awaits it ahead of the
 model request — so whatever answers it sits in front of every message. Those backends are Python or
@@ -844,27 +853,36 @@ LLM call by default (it throws without one), its telemetry is on by default, and
 SQLite peer. The evidence points the same way for a store this small: in BEIR's out-of-domain results
 a tuned lexical baseline matches or beats dense retrieval, which is the regime a few hundred private
 notes live in, and Honcho's own benchmark notes that below roughly 50k tokens its machinery is not
-worth the overhead. Embeddings are the obvious next layer, and an **opt-in** one fused on top of what
-is here — not where this starts.
+worth the overhead. Embeddings are an **opt-in** layer fused on top of what is here rather than where
+it starts — see [Recall by meaning](#recall-by-meaning-off-by-default).
 
-### Two layers, and only one of them is droppable
+### Facts in the store, turns in the log
 
-- `fact` — something worth keeping past the conversation: what the `remember` tool saves.
-- `said` — a raw turn the person typed, kept because it is what a question gets answered *from*.
+- **`fact`** — something worth keeping past the conversation: what the `remember` tool saves, and what
+  the end of a turn is read for. This is everything the store holds, and **nothing ever evicts one.**
+- **the turns themselves** — what the person typed, which is already in the history log, indexed from
+  there by `turns.db`. One copy, in the artifact that outlives every session, `/clear` and compaction.
 
-Recall reads facts first and fills the rest of the reply with turns. Eviction only ever removes the
-oldest turns, `keepSaid` per conversation (500 by default) — **a fact is never dropped to make room
-for small talk.** A single list with a single cap did exactly that, measured rather than suspected:
-600 items in, the 100 oldest out, fact or not.
+Recall reads facts first and fills the rest of the reply with turns. The split is what keeps a durable
+note from being drowned by chatter: an undifferentiated list with one cap dropped the oldest 100 of 600
+items, fact or not — measured, not suspected. Keeping the turns in the store as well was the previous
+version, and it meant the same sentence in two places, one of them capped at 2,000, both able to drift,
+and a `/memory` listing full of session small talk.
+
+Why the log rather than a second store: recall needs the person's own words, and the log already is
+them — every turn this install ever took, from every surface, for as far back as it goes. An earlier
+draft read the log directly and paid 2.6–4.7 ms per question for 309 entries, growing linearly with
+every turn ever taken. The index makes that 0.2–0.3 ms and flat, reaches further back than the cap it
+replaced, and can be deleted at any moment because nothing in it is the only copy of anything.
 
 The same note saved twice is one row (a hash of the case- and space-normalised text), so re-saving a
-fact does not dilate recall, and a raw turn that repeats a saved fact cannot demote it.
+fact does not dilate recall. A turn collapses the same way, to the newest telling — the verbatim
+history stays in the log, where `search_history` reads it.
 
-Both halves of the interface are used. At the end of every turn Milo stores what the user said as
-`said`, and the `remember` tool lets the model save a durable `fact` deliberately — a preference, a
-convention, a decision. Recall is lexical, so the tool is told to write short standalone sentences in
-the user's own terms and not to save what is already in the code or the transcript; it takes a batch,
-so one call can save several facts.
+The `remember` tool is the deliberate half, and the end of a turn is read for facts as well — a
+preference, a convention, a decision. Recall is lexical, so the tool is told to write short standalone
+sentences in the user's own terms and not to save what is already in the code or the transcript; it
+takes a batch, so one call can save several facts.
 
 ### The query, and the 90× that came out of the plan
 
@@ -882,26 +900,76 @@ they went stale. It is also version-dependent — Node 26's SQLite picks the goo
 which is precisely why it is pinned rather than left to the planner, and why a test reads that
 query's own query plan: both plans return the same rows, so no behavioural test can tell them apart.
 
+The turns are queried by a second copy of the same SQL, pinned for the same reason, and the two answers
+are merged in `installMemory`: the facts first, then the turns the facts did not already cover, cut to
+`recallLimit` and re-scored by position so `1` is still the best line the model is reading. When the
+facts already fill the reply the history is not asked at all.
+
+### Recall by meaning, off by default
+
+Words match words. A note that says "editor" is not found by a question that says "IDE", so there is a
+second, **opt-in** signal: an embedding model scores the same rows, and the two rankings are fused by
+rank (reciprocal rank fusion) and unioned. Union, not reorder — the vectors may **introduce** a note
+the words never matched, which is the whole point of having them.
+
+There is deliberately **no similarity cutoff**. Measured on 8 notes and 32 questions, across two
+models, the scores of a correct note (0.01–0.70) overlap the scores of a wrong one (0.05–0.31): no
+number separates them. An earlier 0.16 threshold looked right on nine questions and failed on 32, and
+there is a test that says so, so nobody re-adds one by reflex.
+
+Two ways to get a model, both offered by `milo setup` → **Memory**:
+
+- **On this machine.** Milo downloads its own Ollama build and unpacks it under `~/.milo/embed` — not
+  through the distribution's package manager, which needs sudo and is named differently everywhere.
+  The download is checked against the sha256 the release publishes, the engine is started on a private
+  port with the model it pulled (`embeddinggemma`, 593 MB, against bge-m3's 1.08 GB), and it dies with
+  the Milo process that started it. An engine Milo did not start is never touched.
+- **On OpenRouter.** `nvidia/nemotron-3-embed-1b:free` by default, with the key read from the same
+  `auth.json` slot the chat models use, so one key entered serves both. The free route means the notes
+  leave the machine and its 512-token context truncates a long pasted turn; the screen says both
+  before the choice is made.
+
+Off by default, and it degrades rather than fails. With no `memory.embedding` in the config, recall is
+BM25 exactly as before; an engine that is down, slow or refusing a note falls back to words with one
+log line. A note the model permanently rejects (400/413/422) is set aside rather than retried, so it
+cannot block the notes behind it, while a transient failure — network, 5xx, rate limit — is retried.
+
+What it does not fix is the order among notes that do match: a reranker is the real answer to "several
+notes fit and the best one is not first", and it is not here.
+
 ### What it costs
 
-`npm run bench:memory`, same numbers on Node 22 and 26 (p50, 300 runs):
+`npm run bench:memory`, p50 over 200 recall runs and 20 remember runs — the same range on Node 22 and
+26, which is the point of pinning the plan:
 
 | | recall | p95 | remember |
 | --- | --- | --- | --- |
-| `sqlite`, 500 items in a scope | **0.18 ms** | 0.80 ms | 0.40 ms |
-| `sqlite`, 5,000 items in a scope | **0.29 ms** | 0.84 ms | 0.40 ms |
-| `file`, 500 items (its cap) | 1.04 ms | 1.43 ms | 0.63 ms |
+| facts, 500 notes | **0.16 ms** | 0.90 ms | 0.94 ms |
+| facts, 5,000 notes | **0.35 ms** | 7.21 ms | 0.80 ms |
+| turns, 500 in the log | **0.19 ms** | 0.79 ms | — |
+| turns, 5,000 in the log | **0.31 ms** | 5.08 ms | — |
 
-Recall is the hot path and lands in the hundreds of microseconds; the model round trip that follows
-is seconds and is the same either way. Those are local numbers only.
+Indexing the log the first time is the one cost a question never sees: 15 ms for 500 turns, 126 ms for
+5,000, and then nothing — each later pass reads only what was appended since. The same question asked
+of the log without an index is 2.6–4.7 ms at 309 entries, and it grows with every turn ever taken.
 
-### The old store, and the way back
+Recall is the hot path and lands in the hundreds of microseconds; the model round trip that follows is
+seconds and is the same either way. Those are local numbers only.
 
-`backend: "file"` is the JSON-per-scope store this replaced, and it is still selectable. The first
-open of the SQLite store **imports** whatever is in `~/.milo/memory/*.json` — once, recorded in the
-store's own `meta` table, keeping each item's original timestamp and taking its layer from the tag
-it already carried — and then **leaves the JSON files where they are**. Going back is a config edit,
-and a migration that goes wrong has cost nothing.
+### The old store
+
+The JSON-per-scope store is gone: `memory.db` is the only backend, and the `backend` switch that chose
+between them is gone with it. The first open of the database **imports** whatever is in
+`~/.milo/memory/*.json` — once, recorded in the store's own `meta` table, keeping each item's original
+timestamp and taking its layer from the tag it already carried — and then **leaves the JSON files
+where they are**. They are the record of what was said before it, and nothing reads them again. Where
+the old store tagged an item `user` it was a turn, not a fact: those are skipped, because the log is
+where turns live and importing them would put the chatter back.
+
+The first open after that also **drops the copied turns** the store used to keep: any row still in it
+goes, and the `kind` column with them, since every one of those sentences came from the log in the
+first place. The file does not shrink for it — `DELETE` frees pages for reuse, and `VACUUM` is what
+returns them to the filesystem — so what changed on disk is the schema, not the size.
 
 Recall is not the only thing that reaches the model, and the rest is untrusted by construction: a
 remembered line comes from something the user typed earlier, a compaction summary comes from the
@@ -909,9 +977,9 @@ transcript, and `web_search` snippets come from the open web. All three are fenc
 (`<memories>`, `<summary>`) with a line saying they are data and not instructions, and the reviewer
 prompt says the same about the action it is judging.
 
-`milo setup` → **Memory** shows what is actually in the store — backend, scopes, facts, turns, size
-and where it lives — read off disk on navigation, since the store is written by turns and not by that
-screen.
+`milo setup` → **Memory** shows what is actually in the store — facts, turns, size and where it lives,
+with the recall-by-meaning line beside them — read off disk on navigation, since the store is written
+by turns and not by that screen.
 
 ## Skills
 
@@ -1044,42 +1112,78 @@ worth knowing: with `NODE_ENV=production` exported in your shell, npm treats eve
 
 ## Roadmap
 
-Known open work, roughly in order:
+Everything known to be open — not only the features nobody has built, but the code that has never run
+against the real thing, the debt this design is carrying, and the decisions nobody has made yet.
+Grouped by kind of work; inside a group, by what it costs to leave alone.
 
-1. **Live verification of the bot gateways.** The Telegram and Discord glue is only exercised
-   against fakes, so a real token is still needed to confirm the permission buttons, the rich
-   messages and the turn queue against the live APIs.
-2. **Semantic recall on top of the store.** The lexical half is done — one SQLite file, BM25, facts
-   held apart from raw turns, and a plan pinned so it stays sub-millisecond (see [Memory](#memory)).
-   What is open is buying back paraphrases: embeddings as an **opt-in** layer fused with the lexical
-   result — `sqlite-vec` over the same rows, so the index is derived and the table never moves — with
-   a hard timeout and a fallback to the lexical answer, so a slow or failed embed can never delay a
-   turn. Off by default, because it costs either a model download or a network call and neither
-   belongs in an install that has to work out of the box.
-3. **Memory across gateways.** Facts are keyed by the conversation address, so something told in
-   Telegram is not visible in the CLI. Sharing them needs a per-person identity map.
-4. **Web search needs a key.** `config.json` has no `search` section, so `web_search` is not even
-   registered right now. The Exa and Parallel adapters exist but have never been called for real.
-5. **More markdown in the Ink UI.** The terminal renders fences, inline code, bold and headings;
-   tables, nested lists and links still arrive as plain text.
-6. **Compaction that cannot reach the budget.** `keepTurns` is a floor, so when the turns it protects
-   are themselves bigger than the ceiling the summary runs on every turn and never gets under.
-   Either cut past the floor until it fits, or stop paying for a summary that cannot help — and that
-   second one needs a criterion, which is the decision nobody has made yet.
-7. **Reasoning effort on the Anthropic wire.** Not a rename. OpenAI takes a level
-   (`reasoning_effort`); Anthropic takes a `thinking` budget in tokens, and turning thinking on means
-   the thinking blocks must be sent back with every follow-up request — precisely what the transcript
-   does not do today, since reasoning is kept and deliberately never forwarded. Enabling it on a turn
-   with tools would break the loop until that echo exists. The internal calls need nothing: on that
-   wire thinking is off unless it is asked for, so they already pay no reasoning tax.
-8. **A window for models no catalog knows.** The lookup covers what OpenRouter lists, and
-   `sessions.contextWindow` covers the rest by hand. A local model served by Ollama or llama.cpp
-   could answer for itself — `/api/show`, `/props` — which would beat asking the user to type the
-   number.
-9. **A fast step-decider for the browser.** Every action costs one model round trip today, and the
-   tool is the single point where that decision is made — which is exactly where a decider that picks
-   the next step in ~0.4 s instead (the `typesafe/jev` idea) would go, without redrawing anything.
-   The closed shadow root is not on this list: it cannot be reached from outside a page at all, so it
-   is a limitation of the browser rather than work Milo has left.
-10. **Remote desktops.** A cloud machine or a local VM, driven instead of this machine, so anything
-    a browser cannot reach still has somewhere to run.
+**Built, never run against the real thing.** Each of these has tests, and every one of those tests runs
+against a fake: the code is right about the shape of the API and unproven about the world.
+
+- **The local embedding engine.** The release lookup, the archive download, its published sha256, the
+  unpack, the child process on a private port and the model pull (`ollama.ts`) have only ever run
+  against a fake release and a fake binary. One real run is the whole gap, and it is the path a person
+  takes the moment they pick "on this machine" in setup. Real numbers to expect: 1.33 GiB for the
+  engine archive, then 593 MB for `embeddinggemma`.
+- **The bot gateways.** Telegram and Discord are exercised against fakes, so a real token is still
+  needed to confirm the permission buttons, the rich messages and the turn queue against the live APIs.
+- **`web_search`.** `config.json` has no `search` section, so the tool is not even registered right
+  now, and the Exa and Parallel adapters have never been called for real.
+- **The web surface.** The newest gateway and the thinnest tests: `hub.ts` at 4 % and `studio.ts` at
+  11 %, with six tests over the whole surface (`web-http`, `web-protocol`, `web-studio`).
+- **Chrome for Testing.** The platform and URL mapping is covered; the download itself
+  (`browser/install.ts`) is 15 %, so what has been proven is the shape of the index it reads.
+- **`milo serve` assembled.** The pieces are tested and the daemon that wires them is at 78 %.
+
+**Unfinished, or wrong today.**
+
+- **Compaction that cannot reach the budget.** `keepTurns` is a floor, so when the turns it protects are
+  themselves bigger than the ceiling, the summary runs on every turn and never gets under. Either cut
+  past the floor until it fits, or stop paying for a summary that cannot help — and that second one
+  needs a criterion, which is the decision nobody has made yet.
+- **Reasoning effort on the Anthropic wire.** Not a rename. OpenAI takes a level
+  (`reasoning_effort`); Anthropic takes a `thinking` budget in tokens, and turning thinking on means the
+  thinking blocks must be sent back with every follow-up request — precisely what the transcript does
+  not do today, since reasoning is kept and deliberately never forwarded. Enabling it on a turn with
+  tools would break the loop until that echo exists. The internal calls need nothing: on that wire
+  thinking is off unless it is asked for, so they already pay no reasoning tax.
+- **The `remember` description still invites small talk.** A greeting became a durable fact once
+  ("Howdy! What can I help you with?"), which is the tool's description failing to say what is worth
+  keeping, not the model misbehaving.
+- **Sessions accumulate.** Nothing prunes `~/.milo/sessions/`, and every launch now leaves one behind —
+  that is the new-session-per-run rule working as intended, and it means the directory grows by a file
+  per run. Small files, and `FileSessionStore` can already delete one, so this is a policy nobody has
+  picked: age, count, or nothing.
+- **The history index has no window.** It holds every turn the log has, which is what makes recall reach
+  further back than the 2,000-row cap it replaced. It is 0.3 ms at 5,000 turns; the day a store is big
+  enough for that to be wrong, this is the item, and the answer is a recency window rather than a cap.
+- **The history log itself has no retention.** Plain JSONL that only ever grows, which is the honest
+  shape for a record — but nothing anywhere tells a person how big it is or offers to trim it.
+
+**Recall quality.**
+
+- **A reranker.** Recall fuses two rankings and unions them; what it does not do is re-score the
+  candidates that came back, which is the real answer to "several notes match and the best one is not
+  first" (see [Memory](#memory)).
+- **The assistant's side of the index.** Recall reads what the person typed; replies are reachable only
+  through `search_history`. Indexing them would roughly double the file to answer a question recall is
+  not asked — worth revisiting before it is worth doing.
+- **Nothing expires a fact, and nothing notices a stale one.** A fact contradicted by the live state is
+  caught only by the line in the system prompt saying the live lines win.
+
+**Not started.**
+
+- **More markdown in the Ink UI.** The terminal renders fences, inline code, bold and headings; tables,
+  nested lists and links still arrive as plain text.
+- **A window for models no catalog knows.** The lookup covers what OpenRouter lists, and
+  `sessions.contextWindow` covers the rest by hand. A local model served by Ollama or llama.cpp could
+  answer for itself — `/api/show`, `/props` — which would beat asking the user to type the number.
+- **A fast step-decider for the browser.** Every action costs one model round trip today, and the tool
+  is the single point where that decision is made — which is exactly where a decider that picks the next
+  step in ~0.4 s instead (the `typesafe/jev` idea) would go, without redrawing anything. The closed
+  shadow root is not on this list: it cannot be reached from outside a page at all, so it is a
+  limitation of the browser rather than work Milo has left.
+- **Remote desktops.** A cloud machine or a local VM, driven instead of this machine, so anything a
+  browser cannot reach still has somewhere to run.
+- **Per-person memory.** `MemoryScope.userId` exists and `installMemory` collapses everything into one
+  install-wide scope on purpose, because an install serves one person. The day that stops being true,
+  that one function is where the change goes.
