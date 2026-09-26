@@ -11,6 +11,7 @@ import {
   DEFAULT_PERMISSIONS,
   DEFAULT_SESSIONS,
   DEFAULT_DISPLAY,
+  DEFAULT_HISTORY,
   DEFAULT_MEMORY,
 } from '../../../core/config/schema.js'
 import { DEFAULT_REASONING_EFFORT } from '../../../core/providers/types.js'
@@ -136,6 +137,7 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
       providers: { ...(existing?.providers ?? {}), [preset.id]: presetEntry() },
       memory: existing?.memory ?? DEFAULT_MEMORY,
       sessions: existing?.sessions ?? DEFAULT_SESSIONS,
+      history: existing?.history ?? DEFAULT_HISTORY,
       display: existing?.display ?? DEFAULT_DISPLAY,
       reasoningEffort: existing?.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
       gateways: existing?.gateways ?? {},

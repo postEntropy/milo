@@ -104,6 +104,42 @@ describe('runAgent', () => {
     }
 
     expect(provider.last?.reasoningEffort).toBe('low')
+    // The same effort, in the shape the Anthropic wire takes: the OpenAI wire
+    // reads the level, this one reads a token budget.
+    expect(provider.last?.thinkingBudget).toBe(1024)
+  })
+
+  it('carries a thought signature onto the transcript', async () => {
+    const provider = new ScriptedProvider([
+      [
+        { type: 'reasoning', delta: 'pondering' },
+        { type: 'reasoning-signature', signature: 'sig-abc' },
+        { type: 'text', delta: 'ok' },
+        { type: 'done', finishReason: 'stop' },
+      ],
+    ])
+    const registry = new ToolRegistry([fakeTool])
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]
+
+    for await (const _event of runAgent({
+      provider,
+      model: 'm',
+      tools: [],
+      registry,
+      messages,
+      context: { cwd: process.cwd(), signal: new AbortController().signal },
+    })) {
+      // drain
+    }
+
+    // The signature stays with the thought, which is what lets the Anthropic
+    // wire replay it on the next request.
+    const assistant = messages.find((message) => message.role === 'assistant')
+    expect(assistant?.content[0]).toEqual({
+      type: 'reasoning',
+      text: 'pondering',
+      signature: 'sig-abc',
+    })
   })
 
   it('stops after maxSteps when the model keeps calling tools', async () => {

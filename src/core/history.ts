@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, readdirSync } from 'node:fs'
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { errorMessage } from '../util/errors.js'
 import { logWarn } from '../util/log.js'
@@ -103,6 +103,71 @@ export function readSession(id: string, options: { dir?: string } = {}): History
   return entries
 }
 
+/** Every day-file on disk, oldest first, as `YYYY-MM-DD`. Nothing when there is none. */
+export function historyDays(dir: string = historyDir()): string[] {
+  try {
+    return readdirSync(dir)
+      .filter((name) => FILE_NAME.test(name))
+      .sort()
+      .map((name) => name.slice(0, 10))
+  } catch {
+    return []
+  }
+}
+
+export interface HistoryStatus {
+  /** Where the log lives. */
+  dir: string
+  /** Day-files on disk. */
+  files: number
+  /** What they cost together, the way `du` would read them. */
+  bytes: number
+  /** The oldest and newest day-files, when there are any. */
+  oldest?: string
+  newest?: string
+}
+
+/**
+ * What the log costs. A readout, not a policy: Milo never trims the log on its
+ * own — it is the record — so this is the number a person trims from, by hand.
+ */
+export function historyStatus(dir: string = historyDir()): HistoryStatus {
+  const days = historyDays(dir)
+  let bytes = 0
+  for (const day of days) {
+    try {
+      bytes += statSync(path.join(dir, `${day}.jsonl`)).size
+    } catch {
+      // A file that vanished mid-count is simply not counted.
+    }
+  }
+  return {
+    dir,
+    files: days.length,
+    bytes,
+    ...(days.length > 0 ? { oldest: days[0], newest: days[days.length - 1] } : {}),
+  }
+}
+
+/**
+ * Deletes every day-file from before `before` (`YYYY-MM-DD`) and returns the days
+ * removed. The deliberate way to shrink the log: nothing calls it but
+ * `milo history trim`, which asks first.
+ */
+export function trimHistory(before: string, dir: string = historyDir()): string[] {
+  const removed: string[] = []
+  for (const day of historyDays(dir)) {
+    if (day >= before) continue
+    try {
+      rmSync(path.join(dir, `${day}.jsonl`), { force: true })
+      removed.push(day)
+    } catch {
+      // Left in place and left out of the report: it is not gone.
+    }
+  }
+  return removed
+}
+
 /** The day-files worth reading, newest first. A missing directory is no history. */
 function historyFiles(dir: string, days: number): string[] {
   try {
@@ -166,7 +231,7 @@ function safeJson(value: unknown): string {
 }
 
 /** The local day, so "today's file" is the day the person writing it is in. */
-function dayOf(date: Date): string {
+export function dayOf(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, '0')
   const day = String(date.getDate()).padStart(2, '0')
   return `${date.getFullYear()}-${month}-${day}`

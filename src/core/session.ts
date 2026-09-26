@@ -1,13 +1,15 @@
 import { errorMessage } from '../util/errors.js'
-import { logWarn } from '../util/log.js'
+import { logDebug, logWarn } from '../util/log.js'
 import type { SessionsConfig } from './config/schema.js'
 import type { BrowserFacts } from './browser/index.js'
 import type { HistoryEntry, HistoryWriter } from './history.js'
 import { deriveFacts } from './memory/derive.js'
 import { scopeKey, DEFAULT_RECALL_LIMIT, type Memory, type MemoryInput, type MemoryItem, type MemoryScope } from './memory/index.js'
 import type { SkillSummary } from './skills/index.js'
+import { ROUTINE_GATEWAY } from './routines.js'
 import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
-import type { PermissionAsker, PermissionPolicy, ToolRegistry } from './tools/index.js'
+import type { PermissionAsker, PermissionPolicy, RoutineFn, ToolRegistry } from './tools/index.js'
+import { withGrants } from './tools/index.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent } from './agent/loop.js'
 import { runSubagent } from './agent/subagent.js'
@@ -21,6 +23,7 @@ import {
   estimateTokens,
   MemoryRecapStore,
   planCut,
+  planCutUnderBudget,
   rankSessions,
   summarize,
   withRecaps,
@@ -78,6 +81,18 @@ export interface SessionOptions {
   sessions?: SessionsConfig
   /** Where a turn is written down for later recall. Absent: nothing is logged. */
   history?: HistoryWriter
+  /**
+   * Where a routine created in this conversation is filed. Absent on a caller
+   * that cannot make routines — and a routine's own run never gets one, so it
+   * cannot make more.
+   */
+  routine?: RoutineFn
+  /**
+   * Tools this run may use with nobody to ask — a routine's standing grants,
+   * decided by the person when it was created. Layered on the policy for this
+   * session only, and only where the rules do not bar the act anyway.
+   */
+  grantedTools?: string[]
   /**
    * Where a model's context window comes from. Swapped in tests, so a test never
    * has to reach the network to know how big a model is.
@@ -150,6 +165,27 @@ export class Session {
       })
       .catch(() => {
         // No window, no ceiling: the configured one stands.
+      })
+  }
+
+  /** The model the next turn runs on. Read per turn, so a switch needs no rebuild. */
+  get model(): string {
+    return this.options.model
+  }
+
+  /**
+   * Switches the model for the turns that follow. The context window is a fact
+   * about the model, so the ceiling derived from the old one is asked for again.
+   */
+  setModel(model: string): void {
+    if (model === this.options.model) return
+    this.options.model = model
+    void this.computeCeiling()
+      .then((ceiling) => {
+        this.ceiling = ceiling
+      })
+      .catch(() => {
+        // No window for the new model: the configured ceiling stands.
       })
   }
 
@@ -299,13 +335,16 @@ export class Session {
     const abort = signal ?? new AbortController().signal
     const effort = this.options.reasoningEffort?.() ?? DEFAULT_REASONING_EFFORT
     const permission = permissionPolicy
-      ? { policy: permissionPolicy, ask: opts?.ask }
+      ? { policy: withGrants(permissionPolicy, this.options.grantedTools ?? [], cwd), ask: opts?.ask }
       : undefined
     // Read through `this.scope` at call time: a gateway can rebind the session
     // to another conversation while it is running.
     const remember = (items: MemoryInput[]) => memory.remember(this.scope, items)
     const recall = (query: string, options?: { limit?: number }) =>
       this.recallSessions(query, options)
+    // A routine's own run is the one conversation that must not make routines:
+    // without this, a routine could add routines every time it fires.
+    const routine = this.scope.gateway === ROUTINE_GATEWAY ? undefined : this.options.routine
 
     let errored = false
 
@@ -327,6 +366,8 @@ export class Session {
           signal: abort,
           remember,
           recall,
+          origin: this.scope,
+          routine,
           // A subtask runs in its own context, but under this turn's model,
           // tools, permissions and stop: the same `ask` puts the subagent's
           // confirmations to the user, and the same signal stops both.
@@ -344,7 +385,7 @@ export class Session {
               temperature,
               reasoningEffort: effort,
               input,
-              context: { remember, recall },
+              context: { remember, recall, origin: this.scope, routine },
             }),
         },
         maxSteps,
@@ -646,6 +687,13 @@ export class Session {
     // is a `/compact` that a restart takes back.
     await this.persist()
 
+    // The last system prompt this session sent is the best cheap reading of what
+    // is not the transcript. When the fold still leaves the request over the
+    // ceiling — the turns it kept were too big to get under — the caller is told
+    // instead of reading a `/compact` that quietly did not do what it promised.
+    const ceiling = this.ceiling ?? config.maxInputTokens
+    const remaining = estimateTokens(this.messages) + (this.lastSystemTokens ?? 0)
+
     return {
       folded: countTurns(dropped),
       tokens: estimateTokens(dropped),
@@ -654,6 +702,9 @@ export class Session {
       // request that fits beats one the provider rejects — and the caller is
       // told, rather than reading a summary that is not there.
       summarized: summary !== null,
+      ...(remaining > ceiling
+        ? { reason: `still over the ceiling — ${remaining} of ${ceiling} tokens` }
+        : {}),
     }
   }
 
@@ -661,6 +712,11 @@ export class Session {
    * Over the budget: summarize the oldest turns into `summary` and drop them.
    * If the summary call fails, the turns are dropped anyway — a request that
    * fits beats one that is rejected by the provider.
+   *
+   * The cut may recuse past `keepTurns` to fit, and no summary is bought at all
+   * when even the last turn plus the prompt is over the ceiling: folding cannot
+   * make the request smaller than the turn it keeps, and paying for a summary
+   * that cannot help is the model call every turn the old rule made.
    *
    * Reports what the summary cost when it ran, because it is a model call of its
    * own standing between the question and the answer: without the number, its
@@ -685,13 +741,28 @@ export class Session {
     dropOldImages(this.messages)
     dropOldSnapshots(this.messages, this.options.keepSnapshots)
 
-    const used = () =>
-      estimateTokens(this.messages) +
-      estimateText(buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() }))
-    if (used() <= ceiling) return null
+    // Everything a request carries that is not the transcript: the system
+    // prompt, the tool list, the memories and the running summary. Read once and
+    // reused, because folding changes only the transcript and the summary's own
+    // length — and this reading already has the summary in it.
+    const fixed = estimateText(
+      buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() }),
+    )
+    if (estimateTokens(this.messages) + fixed <= ceiling) return null
 
-    const cut = planCut(this.messages, config.keepTurns)
-    if (cut <= 0) return null
+    // The floor is a preference, not a promise: when the turns it protects are
+    // themselves bigger than the ceiling, the cut recuses past them, and 0 comes
+    // back only when even the last turn plus the prompt is over — a summary
+    // cannot help there, so none is bought.
+    const cut = planCutUnderBudget(this.messages, {
+      keepTurns: config.keepTurns,
+      budget: ceiling,
+      fixed,
+    })
+    if (cut <= 0) {
+      logDebug('compaction skipped: nothing to fold that would fit')
+      return null
+    }
 
     const dropped = this.messages.slice(0, cut)
     const startedAt = Date.now()
@@ -711,6 +782,15 @@ export class Session {
     if (summary) this.summary = summary
     this.record.droppedTokens = (this.record.droppedTokens ?? 0) + estimateTokens(dropped)
     this.messages.splice(0, cut)
+
+    // Measured again, because the summary replaced part of the transcript: if
+    // the request is still over the ceiling the honest thing is to write it down.
+    // No second call — this is a report, not a retry.
+    const after =
+      estimateTokens(this.messages) +
+      estimateText(buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() }))
+    if (after > ceiling) logDebug(`compaction left the request over its ceiling (${after} > ${ceiling})`)
+
     return { ms: Date.now() - startedAt }
   }
 }

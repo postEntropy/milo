@@ -97,20 +97,15 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     if (this.mode === 'yolo') return 'allow'
     if (this.deny.has(tool.name)) return 'deny'
     if (tool.readOnly || tool.internal || tool.delegates) return 'allow'
+    // A tool whose danger lives in its arguments — scheduling a prompt that only
+    // reads is not the same act as scheduling one that may run a command. It says
+    // for itself whether *this* call is the side effect worth asking about.
+    if (tool.asksWhen && !tool.asksWhen(args)) return 'allow'
     if (this.allow.has(tool.name)) return 'allow'
     if (this.mode === 'ask') return 'ask'
 
-    const command = extractCommandText(args)
-    if (command && scanCommand(command)) return 'deny'
-    // The same words typed onto a screen run the same way as they would in a
-    // shell, so they are refused by the same rule rather than only by the
-    // reviewer.
-    const typed = extractTypedText(args)
-    if (typed && scanCommand(typed)) return 'deny'
-    // The shell reaches the same protected paths as a file write, so it is held
-    // to the same rule instead of being judged differently for the same act.
-    if (command && scanCommandTargets(command, this.cwd)) return 'deny'
-    if (scanWriteTarget(args, this.cwd)) return 'deny'
+    // The acts the rules bar outright, whatever the mode.
+    if (barredByRules(args, this.cwd)) return 'deny'
 
     if (!this.reviewer) return 'ask'
     const state = reviewText(args)
@@ -132,6 +127,58 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
 const SUMMARY_PREVIEW = 400
 
 /**
+ * The acts the deterministic rules bar whatever the mode: a destructive command,
+ * or a write into a protected path. Shared, so the same words are refused whether
+ * they are judged in `auto` or carried into an unattended run by a job's grant.
+ */
+export function barredByRules(args: unknown, cwd: string): boolean {
+  const command = extractCommandText(args)
+  // The shell reaches the same protected paths as a file write, so it is held to
+  // the same rule instead of being judged differently for the same act.
+  if (command && (scanCommand(command) || scanCommandTargets(command, cwd))) return true
+  // The same words typed onto a screen run the same way as they would in a shell.
+  const typed = extractTypedText(args)
+  if (typed && scanCommand(typed)) return true
+  return scanWriteTarget(args, cwd) !== null
+}
+
+/**
+ * The install's policy with a job's standing grants layered on, for a run with
+ * nobody to ask.
+ *
+ * A grant means "this tool may be used unattended" — decided by the person when
+ * the job was created, where they could see what they were approving. It is not
+ * "anything goes": an explicit deny still denies, and the rules above still bar a
+ * destructive command or a protected path, because granting a tool is not the
+ * same as granting every use of it. Anything not granted keeps the policy's own
+ * answer, which — with no asker on the other end — is a denial.
+ */
+export function withGrants(
+  policy: PermissionPolicy,
+  granted: string[],
+  cwd: string,
+): PermissionPolicy {
+  // Nothing to layer on under yolo: the install already answers "allow" to
+  // everything, and a job runs in the mode of the person who made it. Checking
+  // here rather than in `decide` is what keeps a grant from being *more*
+  // restrictive than no grant — under yolo, `barredByRules` is off for everyone.
+  if (granted.length === 0 || policy.mode === 'yolo') return policy
+  return {
+    get mode(): PermissionMode {
+      return policy.mode
+    },
+    setMode: (mode) => policy.setMode(mode),
+    update: (options) => policy.update(options),
+    decide: async (tool, args) => {
+      const decision = await policy.decide(tool, args)
+      if (decision === 'deny') return 'deny'
+      if (!granted.includes(tool.name)) return decision
+      return barredByRules(args, cwd) ? 'deny' : 'allow'
+    },
+  }
+}
+
+/**
  * What a confirmation prompt shows. For a command: the command — plus the
  * directory, since `cwd` changes what the same words do. For a write: the path
  * *and* the content, because approving a path without seeing what goes in it is
@@ -147,6 +194,16 @@ export function summarizeToolCall(args: unknown): string {
     }
     if (typeof record.query === 'string') return record.query
     if (typeof record.path === 'string') return writePreview(record) ?? record.path
+    // A routine: what will be run, and what it may touch with nobody there —
+    // approving one without seeing either is not a decision.
+    if (typeof record.prompt === 'string' && (record.every !== undefined || record.at !== undefined)) {
+      const when = typeof record.at === 'string' ? `at ${record.at}` : `every ${String(record.every)}`
+      const granted =
+        Array.isArray(record.allow) && record.allow.length > 0
+          ? `\nUnattended: ${record.allow.join(', ')}`
+          : ''
+      return `Routine ${when}: ${preview(record.prompt)}${granted}`
+    }
   }
   try {
     const json = JSON.stringify(args)

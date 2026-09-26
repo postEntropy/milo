@@ -6,7 +6,7 @@ import { scopeKey } from './memory/index.js'
 import { DEFAULT_REASONING_EFFORT, type Provider, type ReasoningEffort } from './providers/types.js'
 import type { Skill } from './skills/index.js'
 import type { PermissionPolicy } from './tools/index.js'
-import type { ToolRegistry } from './tools/index.js'
+import type { RoutineFn, ToolRegistry } from './tools/index.js'
 import { Session } from './session.js'
 import {
   MemoryRecapStore,
@@ -43,6 +43,11 @@ export interface RuntimeOptions {
   sessions?: SessionsConfig
   /** Where turns are logged for later recall; absent means nothing is logged. */
   history?: HistoryWriter
+  /**
+   * How a routine is filed when the model makes one. Absent on a runtime that
+   * cannot make routines, in which case the `routine` tool fails cleanly.
+   */
+  routine?: RoutineFn
   /** Where a model's context window comes from, for the compaction ceiling. */
   lookupContextWindow?: (model: string) => Promise<number | undefined>
   /** How hard the model should think; `medium` unless the config was changed. */
@@ -95,9 +100,16 @@ export class AgentRuntime {
     return this.createSession(scope)
   }
 
-  /** Starts a fresh session and rebinds `scope` to it. */
-  async newSession(scope: MemoryScope, title?: string): Promise<Session> {
-    return this.createSession(scope, title)
+  /**
+   * Starts a fresh session and rebinds `scope` to it. `grantedTools` is a
+   * routine's standing grants — tools it may use with nobody to ask.
+   */
+  async newSession(
+    scope: MemoryScope,
+    title?: string,
+    options?: { grantedTools?: string[] },
+  ): Promise<Session> {
+    return this.createSession(scope, title, options?.grantedTools)
   }
 
   /**
@@ -179,6 +191,17 @@ export class AgentRuntime {
     return this.options.permissionPolicy
   }
 
+  /** The model the next turn runs on, read per turn by every session. */
+  get model(): string {
+    return this.options.model
+  }
+
+  /** Switches the model for this install: the open sessions and the ones after. */
+  setModel(model: string): void {
+    this.options.model = model
+    for (const session of this.cache.values()) session.setModel(model)
+  }
+
   /** How hard the model thinks, from the turn after this one. */
   setReasoningEffort(effort: ReasoningEffort): void {
     this.options.reasoningEffort = effort
@@ -193,12 +216,16 @@ export class AgentRuntime {
     this.cache.clear()
   }
 
-  private async createSession(scope: MemoryScope, title?: string): Promise<Session> {
+  private async createSession(
+    scope: MemoryScope,
+    title?: string,
+    grantedTools?: string[],
+  ): Promise<Session> {
     await this.detach(scope)
     const record = await this.store.create()
     if (title?.trim()) record.title = title.trim()
     await this.store.setBinding(scopeKey(scope), record.id)
-    const session = this.adopt(record, scope)
+    const session = this.adopt(record, scope, grantedTools)
     // Write it out now, so it shows up in /sessions and is /resume-able right away.
     await session.persist()
     return session
@@ -225,7 +252,7 @@ export class AgentRuntime {
     void pending.finally(() => this.pendingRecaps.delete(pending))
   }
 
-  private adopt(record: SessionRecord, scope: MemoryScope): Session {
+  private adopt(record: SessionRecord, scope: MemoryScope, grantedTools?: string[]): Session {
     const cached = this.cache.get(record.id)
     if (cached) {
       cached.scope = scope
@@ -246,11 +273,13 @@ export class AgentRuntime {
       recallLimit: this.options.recallLimit,
       derive: this.options.derive,
       permissionPolicy: this.options.permissionPolicy,
+      grantedTools,
       record,
       store: this.store,
       recaps: this.recaps,
       sessions: this.options.sessions,
       history: this.options.history,
+      routine: this.options.routine,
       lookupContextWindow: this.options.lookupContextWindow,
       keepSnapshots: this.options.keepSnapshots,
       // A getter, so the prompt says what the browser is now rather than what it

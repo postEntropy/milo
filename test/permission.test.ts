@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { DefaultPermissionPolicy, summarizeToolCall } from '../src/core/tools/permission.js'
+import { DefaultPermissionPolicy, summarizeToolCall, withGrants } from '../src/core/tools/permission.js'
 import type { DangerReviewer } from '../src/core/tools/permission.js'
 import type { Tool } from '../src/core/tools/types.js'
 
@@ -280,5 +280,102 @@ describe('summarizeToolCall', () => {
 
   it('says which directory a command runs in', () => {
     expect(summarizeToolCall({ command: 'ls', cwd: '/etc' })).toBe('cd /etc && ls')
+  })
+
+  it('shows a routine and what it may touch unattended', () => {
+    const summary = summarizeToolCall({ prompt: 'look at the repo', at: '08:00', allow: ['shell_command'] })
+
+    expect(summary).toContain('Routine at 08:00')
+    expect(summary).toContain('look at the repo')
+    expect(summary).toContain('shell_command')
+  })
+})
+
+describe('a tool whose danger is in its arguments', () => {
+  const routine: Tool<{ prompt: string; allow?: string[] }> = {
+    name: 'routine',
+    description: '',
+    schema: z.object({ prompt: z.string(), allow: z.array(z.string()).optional() }),
+    // Making a routine that only reads is not the same act as making one that may
+    // run a command, so only the second one is worth a question.
+    asksWhen: (args) => (args.allow?.length ?? 0) > 0,
+    async execute() {
+      return { content: '' }
+    },
+  }
+
+  it('is allowed without a question when it grants nothing', async () => {
+    const policy = new DefaultPermissionPolicy()
+    expect(await policy.decide(routine, { prompt: 'read the repo' })).toBe('allow')
+  })
+
+  it('is asked about when it carries a standing grant', async () => {
+    const policy = new DefaultPermissionPolicy()
+    expect(await policy.decide(routine, { prompt: 'x', allow: ['shell_command'] })).toBe('ask')
+  })
+
+  it('is asked about even in auto, where the reviewer has nothing to judge', async () => {
+    const policy = new DefaultPermissionPolicy({ mode: 'auto', reviewer: reviewerReturning(0) })
+    expect(await policy.decide(routine, { prompt: 'x', allow: ['shell_command'] })).toBe('ask')
+  })
+})
+
+describe('withGrants — a routine running with nobody to ask', () => {
+  const cwd = '/home/dev/project'
+
+  const fileWriteTool: Tool<{ path: string; content: string }> = {
+    name: 'write_file',
+    description: '',
+    schema: z.object({ path: z.string(), content: z.string() }),
+    async execute() {
+      return { content: '' }
+    },
+  }
+
+  const editTool: Tool<{ path: string; old_string: string; new_string: string }> = {
+    name: 'edit_file',
+    description: '',
+    schema: z.object({ path: z.string(), old_string: z.string(), new_string: z.string() }),
+    async execute() {
+      return { content: '' }
+    },
+  }
+
+  const base = () => new DefaultPermissionPolicy({ mode: 'ask', cwd, deny: ['edit_file'] })
+
+  it('allows what was granted, and still refuses what the rules bar', async () => {
+    const policy = withGrants(base(), ['shell_command'], cwd)
+
+    expect(await policy.decide(writeTool, { command: 'echo tick >> test.csv' })).toBe('allow')
+    expect(await policy.decide(writeTool, { command: 'rm -rf /' })).toBe('deny')
+    expect(await policy.decide(writeTool, { command: 'echo x > /etc/hosts' })).toBe('deny')
+  })
+
+  it('leaves an ungranted tool at the policy answer — a question nobody can answer', async () => {
+    const policy = withGrants(base(), ['shell_command'], cwd)
+
+    expect(await policy.decide(fileWriteTool, { path: 'a.ts', content: 'x' })).toBe('ask')
+  })
+
+  it('lets an explicit deny beat a grant', async () => {
+    const policy = withGrants(base(), ['shell_command', 'edit_file'], cwd)
+
+    expect(await policy.decide(editTool, { path: 'a.ts', old_string: 'a', new_string: 'b' })).toBe(
+      'deny',
+    )
+  })
+
+  it('changes nothing when nothing was granted', () => {
+    const policy = base()
+    expect(withGrants(policy, [], cwd)).toBe(policy)
+  })
+
+  it('leaves a yolo install alone, so a job runs in the mode the person is in', async () => {
+    const policy = new DefaultPermissionPolicy({ mode: 'yolo', cwd })
+
+    // Not layered at all: under yolo everything is allowed anyway, and a grant
+    // must not become *more* restrictive than no grant.
+    expect(withGrants(policy, ['shell_command'], cwd)).toBe(policy)
+    expect(await policy.decide(writeTool, { command: 'rm -rf /' })).toBe('allow')
   })
 })

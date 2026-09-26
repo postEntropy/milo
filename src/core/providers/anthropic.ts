@@ -36,6 +36,8 @@ interface AnthropicStreamEvent {
     type?: string
     text?: string
     thinking?: string
+    /** The signature over a thinking block, sent after its deltas. */
+    signature?: string
     partial_json?: string
     stop_reason?: string
   }
@@ -60,15 +62,23 @@ export class AnthropicProvider implements Provider {
   }
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+    const thinking = thinkingBlock(req)
     const body: Record<string, unknown> = {
       model: req.model,
-      max_tokens: req.maxTokens ?? DEFAULT_MAX_TOKENS,
+      // A thinking budget has to sit strictly below `max_tokens`, so asking to
+      // think raises the ceiling enough to leave room to answer in.
+      max_tokens: thinking
+        ? Math.max(req.maxTokens ?? DEFAULT_MAX_TOKENS, thinking.budget_tokens + 1024)
+        : (req.maxTokens ?? DEFAULT_MAX_TOKENS),
       stream: true,
       messages: await toAnthropicMessages(req.messages),
     }
     if (req.system) body.system = req.system
     if (req.tools?.length) body.tools = req.tools.map(toAnthropicTool)
-    if (typeof req.temperature === 'number') body.temperature = req.temperature
+    // Thinking is only compatible with the default temperature, so a configured
+    // one is left off rather than sent to be rejected.
+    if (typeof req.temperature === 'number' && !thinking) body.temperature = req.temperature
+    if (thinking) body.thinking = thinking
 
     const response = await fetch(`${this.baseURL}/messages`, {
       method: 'POST',
@@ -123,6 +133,10 @@ export class AnthropicProvider implements Provider {
           } else if (delta?.type === 'thinking_delta' && delta.thinking) {
             reasoningChars += delta.thinking.length
             yield { type: 'reasoning', delta: delta.thinking }
+          } else if (delta?.type === 'signature_delta' && delta.signature) {
+            // The signature rides after the thought it signs, and is what makes
+            // the block replayable on the next request.
+            yield { type: 'reasoning-signature', signature: delta.signature }
           } else if (delta?.type === 'input_json_delta') {
             const block = blocks.get(event.index)
             if (block) block.json += delta.partial_json ?? ''
@@ -169,6 +183,18 @@ export class AnthropicProvider implements Provider {
   }
 }
 
+/**
+ * The thinking block to send, or null when this request did not ask to think.
+ * The budget is clamped into the range the wire accepts: at least 1024, and
+ * strictly below `max_tokens`.
+ */
+function thinkingBlock(req: ChatRequest): { type: 'enabled'; budget_tokens: number } | null {
+  if (!req.thinkingBudget) return null
+  const max = req.maxTokens ?? DEFAULT_MAX_TOKENS
+  const budget = Math.min(Math.max(1024, req.thinkingBudget), Math.max(1024, max - 1))
+  return { type: 'enabled', budget_tokens: budget }
+}
+
 function toAnthropicTool(spec: ToolSpec): Record<string, unknown> {
   return {
     name: spec.name,
@@ -203,7 +229,14 @@ async function toAnthropicMessages(messages: Message[]): Promise<unknown[]> {
 
     const blocks: unknown[] = []
     for (const part of message.content) {
-      if (part.type === 'text') {
+      if (part.type === 'reasoning') {
+        // A signed thought is replayed as a thinking block, ahead of the text and
+        // the tool call it belongs to: the wire refuses a turn whose tool use
+        // lost its thinking, and refuses a block it cannot verify.
+        if (message.role === 'assistant' && part.signature) {
+          blocks.push({ type: 'thinking', thinking: part.text, signature: part.signature })
+        }
+      } else if (part.type === 'text') {
         if (part.text) blocks.push({ type: 'text', text: part.text })
       } else if (part.type === 'tool-call') {
         blocks.push({

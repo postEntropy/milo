@@ -18,7 +18,7 @@ export type RememberArgs = z.infer<typeof schema>
 export const rememberTool: Tool<RememberArgs> = {
   name: 'remember',
   description:
-    'Save a durable fact that should outlive this conversation — a preference, a convention, a decision, or something about the user or their setup. Facts are later recalled by keyword match against what the user says, so write each as one short standalone sentence in the user\'s own terms. Do not save what is already in the code, in the repository, or in this transcript: recall is keyword-based, and trivia crowds out the facts that matter.',
+    'Save a durable fact that should outlive this conversation — a preference, a convention, a decision, or something about the user or their setup. Save only what will still matter in a later conversation: a greeting, an acknowledgement, small talk, a one-off request, or anything that is true only of the task at hand is not a fact and must not be saved. Facts are later recalled by keyword match against what the user says, so write each as one short standalone sentence in the user\'s own terms. Do not save what is already in the code, in the repository, or in this transcript: recall is keyword-based, and trivia crowds out the facts that matter.',
   schema,
   internal: true,
   async execute(args, ctx) {

@@ -30,6 +30,8 @@ Usage:
   milo setup                 Configure providers, keys, tools, display, gateways, memory, skills
   milo model                 Choose the provider/model (setup wizard)
   milo skills                Install, list and remove skills (list | available | find | add | remove)
+  milo history               What the history log costs (status | trim)
+  milo routines              The prompts Milo runs on a timer (list | add | remove | enable | run)
   milo serve                 Run the enabled bot gateways (Telegram, Discord)
   milo --continue            Continue the last session in this terminal
   milo --resume <id>         Open a specific session (see /sessions)
@@ -144,6 +146,16 @@ async function main(): Promise<void> {
     case 'skills': {
       const { runSkills } = await import('./skills.js')
       process.exitCode = await runSkills(process.argv.slice(2))
+      return
+    }
+    case 'history': {
+      const { runHistory } = await import('./history.js')
+      process.exitCode = await runHistory(process.argv.slice(2))
+      return
+    }
+    case 'routines': {
+      const { runRoutines } = await import('./routines.js')
+      process.exitCode = await runRoutines(process.argv.slice(2))
       return
     }
     case 'setup':

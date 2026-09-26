@@ -5,7 +5,7 @@ import type { DatabaseSync, StatementSync } from 'node:sqlite'
 import { errorMessage } from '../../util/errors.js'
 import { ensurePrivateDir } from '../../util/fs.js'
 import { logWarn } from '../../util/log.js'
-import type { HistoryEntry } from '../history.js'
+import { dayOf, type HistoryEntry } from '../history.js'
 import { hashOf, loadSqlite, tightenDb, toMatchQuery } from './sql.js'
 import type { MemoryItem, MemoryScope, TurnSource } from './types.js'
 
@@ -98,6 +98,13 @@ export const turnIndexFile = (dir: string): string => path.join(dir, DB_FILE)
 export interface TurnIndexOptions {
   /** The directory the history log lives in. */
   dir: string
+  /**
+   * How many days back a turn is worth indexing. A recency window rather than a
+   * cap: older days are dropped as they fall out, so the store stays bounded
+   * while still reaching further back than the row cap it replaced. `0` keeps
+   * every day.
+   */
+  windowDays?: number
   debug?: boolean
 }
 
@@ -105,11 +112,13 @@ export class TurnIndex implements TurnSource {
   private readonly db: DatabaseSync
   private readonly location: string
   private readonly dir: string
+  private readonly windowDays: number
   private readonly debug: boolean
   private readonly insertStmt: StatementSync
   private readonly fileStmt: StatementSync
   private readonly markStmt: StatementSync
   private readonly selectStmt: StatementSync
+  private readonly pruneStmt: StatementSync
   /** One line per process is enough for a log that cannot be read. */
   private warned = false
 
@@ -118,6 +127,7 @@ export class TurnIndex implements TurnSource {
 
     ensurePrivateDir(options.dir)
     this.dir = options.dir
+    this.windowDays = Math.max(0, options.windowDays ?? 0)
     this.location = turnIndexFile(options.dir)
     this.debug = options.debug ?? process.env.MILO_DEBUG === '1'
 
@@ -148,6 +158,7 @@ export class TurnIndex implements TurnSource {
     this.fileStmt = this.db.prepare('select offset from files where name = ?')
     this.markStmt = this.db.prepare('insert or replace into files (name, offset) values (?, ?)')
     this.selectStmt = this.db.prepare(TURNS_SQL)
+    this.pruneStmt = this.db.prepare('delete from turns where at < ?')
 
     this.sync()
   }
@@ -188,6 +199,29 @@ export class TurnIndex implements TurnSource {
   }
 
   /**
+   * Drops every turn older than `iso`. The window calls this as it slides, and
+   * `milo history trim` calls it after deleting day-files, so a turn from a day
+   * that is gone cannot come back as a recall.
+   */
+  pruneBefore(iso: string): number {
+    try {
+      return Number(this.pruneStmt.run(iso).changes ?? 0)
+    } catch (error) {
+      // Recall rides every turn: a prune that cannot run is a line in the log,
+      // never a turn taken down.
+      this.warnOnce(`could not prune the history index: ${errorMessage(error)}`)
+      return 0
+    }
+  }
+
+  /** The oldest day the window keeps, as a day-file name and an ISO instant. */
+  private cutoff(): { file: string; iso: string } | null {
+    if (this.windowDays <= 0) return null
+    const from = new Date(Date.now() - this.windowDays * 24 * 60 * 60 * 1000)
+    return { file: `${dayOf(from)}.jsonl`, iso: from.toISOString() }
+  }
+
+  /**
    * Brings the index up to what is on disk.
    *
    * Per file: if the recorded offset is past the file's size the file was
@@ -206,7 +240,14 @@ export class TurnIndex implements TurnSource {
       return // No log yet. Nothing is written here that could be missed.
     }
 
+    // The window is a date: a day-file named older than it is not read, and any
+    // row that outlived it — from a pass made before the window narrowed — is
+    // dropped. The name sorts as a date, so comparing it is a string compare.
+    const cutoff = this.cutoff()
+    if (cutoff) this.pruneBefore(cutoff.iso)
+
     for (const name of names) {
+      if (cutoff && name < cutoff.file) continue
       const file = path.join(this.dir, name)
       let size: number
       try {

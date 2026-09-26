@@ -1,4 +1,4 @@
-import type { ButtonBuilder, Message } from 'discord.js'
+import type { ButtonBuilder, Client, Message } from 'discord.js'
 import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
@@ -17,6 +17,7 @@ import {
   turnOf,
 } from '../commands.js'
 import { runTurns } from '../runner.js'
+import { chunk } from '../chunk.js'
 import { TurnQueue } from '../turns.js'
 import type { ChatSurface } from '../surface.js'
 import type { Gateway } from '../types.js'
@@ -65,7 +66,7 @@ const TYPING_REFRESH_MS = 8_000
 
 export class DiscordGateway implements Gateway {
   readonly id = 'discord' as const
-  private client: { destroy: () => Promise<void> } | undefined
+  private client: Client | undefined
   private readonly turns = new TurnQueue()
 
   constructor(private readonly options: DiscordGatewayOptions) {}
@@ -280,5 +281,16 @@ export class DiscordGateway implements Gateway {
 
   async stop(): Promise<void> {
     await this.client?.destroy()
+  }
+
+  /** A routine's answer, posted as its own message — no turn behind it. */
+  async deliver(conversationId: string, text: string): Promise<void> {
+    const client = this.client
+    if (!client) throw new Error('discord gateway is not running')
+    const channel = await client.channels.fetch(conversationId)
+    if (!channel?.isSendable()) {
+      throw new Error(`discord channel ${conversationId} cannot receive messages`)
+    }
+    for (const part of chunk(text, MAX_LENGTH)) await channel.send(part)
   }
 }

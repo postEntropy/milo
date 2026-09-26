@@ -119,6 +119,12 @@ export const SessionsSchema = z.object({
   /** Turns kept verbatim when compacting; the older ones get summarized. */
   keepTurns: z.number().int().positive().default(8),
   compaction: z.boolean().default(true),
+  /**
+   * How many sessions are kept on disk. Every run leaves one behind, so without
+   * this the directory grows a file per run; the oldest beyond this are pruned at
+   * startup, and one currently bound to a scope is never touched.
+   */
+  maxSessions: z.number().int().positive().default(50),
 })
 export type SessionsConfig = z.infer<typeof SessionsSchema>
 
@@ -127,7 +133,27 @@ export const DEFAULT_SESSIONS: SessionsConfig = {
   maxInputTokens: 12000,
   keepTurns: 8,
   compaction: true,
+  maxSessions: 50,
 }
+
+/**
+ * The history log under `~/.milo/history`: one JSONL file per day, the record of
+ * every turn that survives its session. Milo never trims it on its own — the log
+ * is the honest shape for a record — so `milo history` reports what it costs and
+ * `milo history trim` is the deliberate way to make it smaller.
+ */
+export const HistorySchema = z.object({
+  /**
+   * How far back recall reads the log. The index holds a window rather than a
+   * cap: a window bounds the store while still reaching further back than the
+   * 2,000-row cap it replaced, and older days are dropped rather than refused.
+   * `0` keeps every day.
+   */
+  windowDays: z.number().int().nonnegative().default(365),
+})
+export type HistoryConfig = z.infer<typeof HistorySchema>
+
+export const DEFAULT_HISTORY: HistoryConfig = { windowDays: 365 }
 
 /**
  * Whether a surface shows the model's reasoning. `on` keeps the text under the
@@ -205,6 +231,7 @@ export const ConfigSchema = z.object({
   providers: z.record(z.string(), ProviderEntrySchema),
   memory: MemorySchema.default(DEFAULT_MEMORY),
   sessions: SessionsSchema.default(DEFAULT_SESSIONS),
+  history: HistorySchema.default(DEFAULT_HISTORY),
   display: DisplaySchema.default(DEFAULT_DISPLAY),
   gateways: z.record(z.string(), GatewaySchema).default({}),
   permissions: PermissionsSchema.default(DEFAULT_PERMISSIONS),
@@ -222,8 +249,9 @@ export const ConfigSchema = z.object({
   /**
    * How hard the model thinks before answering. Defaults to `medium`, so every
    * request carries an explicit effort instead of leaving the choice to whatever
-   * each provider and model makes of an absent field. Anthropic's `thinking`
-   * budget is a different shape and is not covered by this yet.
+   * each provider and model makes of an absent field. On the OpenAI wire it is
+   * `reasoning_effort`; on the Anthropic wire the same effort is mapped to a
+   * `thinking` token budget, and the thinking blocks are echoed back with it.
    */
   reasoningEffort: z.enum(REASONING_EFFORTS).default(DEFAULT_REASONING_EFFORT),
 })

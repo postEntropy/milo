@@ -292,6 +292,39 @@ export class FileSessionStore implements SessionStore {
     }
   }
 
+  async prune(options: { keep: number; protect?: Iterable<string> }): Promise<string[]> {
+    if (options.keep <= 0) return []
+    // Newest first, so the ones beyond `keep` are the oldest.
+    const summaries = await this.list()
+    if (summaries.length <= options.keep) return []
+
+    const keep = new Set(options.protect ?? [])
+    for (const id of this.boundIds()) keep.add(id)
+
+    const removed: string[] = []
+    for (const summary of summaries.slice(options.keep)) {
+      if (keep.has(summary.id)) continue
+      await this.remove(summary.id)
+      removed.push(summary.id)
+    }
+    return removed
+  }
+
+  /** Every id a scope is bound to now, wherever the binding is written. */
+  private boundIds(): string[] {
+    const ids: string[] = []
+    const dir = path.join(this.dir, BINDINGS_DIR)
+    if (existsSync(dir)) {
+      for (const name of readdirSync(dir)) {
+        if (!name.endsWith(RECORD_SUFFIX)) continue
+        const id = this.readBindingFile(path.join(dir, name))
+        if (id) ids.push(id)
+      }
+    }
+    ids.push(...Object.values(this.readLegacyBindings()))
+    return ids
+  }
+
   async getBinding(scopeKey: string): Promise<string | undefined> {
     const own = this.readBindingFile(this.bindingFile(scopeKey))
     if (own) return own

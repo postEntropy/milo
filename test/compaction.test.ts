@@ -5,7 +5,13 @@ import { describe, expect, it } from 'vitest'
 import { SqliteMemory } from '../src/core/memory/sqlite.js'
 import type { ChatRequest, Message, Provider, ReasoningEffort, StreamEvent } from '../src/core/providers/types.js'
 import { Session } from '../src/core/session.js'
-import { digest, estimateTokens, planCut, summarize } from '../src/core/sessions/compact.js'
+import {
+  digest,
+  estimateTokens,
+  planCut,
+  planCutUnderBudget,
+  summarize,
+} from '../src/core/sessions/compact.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
 
@@ -59,6 +65,8 @@ async function compactingSession(
     failing?: boolean
     contextWindow?: number
     lookup?: (model: string) => Promise<number | undefined>
+    maxInputTokens?: number
+    keepTurns?: number
   } = {},
 ) {
   const provider = new ScriptedProvider()
@@ -79,9 +87,10 @@ async function compactingSession(
     store,
     sessions: {
       compactAt: 0.7,
-      maxInputTokens: 40,
-      keepTurns: 1,
+      maxInputTokens: options.maxInputTokens ?? 2400,
+      keepTurns: options.keepTurns ?? 1,
       compaction: true,
+      maxSessions: 50,
       contextWindow: options.contextWindow,
     },
     lookupContextWindow: options.lookup,
@@ -93,10 +102,10 @@ async function compactingSession(
 }
 
 const longSeed = (): Message[] => [
-  text('user', `first ${'x'.repeat(200)}`),
+  text('user', `first ${'x'.repeat(2000)}`),
   ...toolTurn('call_1'),
-  text('user', `second ${'y'.repeat(200)}`),
-  text('assistant', `reply ${'z'.repeat(200)}`),
+  text('user', `second ${'y'.repeat(2000)}`),
+  text('assistant', `reply ${'z'.repeat(2000)}`),
   text('user', 'third'),
   text('assistant', 'third reply'),
 ]
@@ -126,6 +135,7 @@ async function manualSession(
       maxInputTokens: 100_000,
       keepTurns: overrides.keepTurns ?? 1,
       compaction: overrides.compaction ?? true,
+      maxSessions: 50,
     },
   })
   return { provider, session, store, record }
@@ -206,6 +216,21 @@ describe('estimateTokens', () => {
     const withTools = estimateTokens([text('user', 'hi'), ...toolTurn('call_1')])
     expect(withTools).toBeGreaterThan(estimateTokens([text('user', 'hi')]))
   })
+
+  it('prices a signed thought and not an unsigned one', () => {
+    // A thought never goes back to the provider, so it costs nothing — unless
+    // Anthropic signed it, in which case it rides every later request.
+    const thought = 'w'.repeat(400)
+    const unsigned = estimateTokens([
+      { role: 'assistant', content: [{ type: 'reasoning', text: thought }] },
+    ])
+    const signed = estimateTokens([
+      { role: 'assistant', content: [{ type: 'reasoning', text: thought, signature: 'sig' }] },
+    ])
+
+    expect(unsigned).toBe(0)
+    expect(signed).toBeGreaterThan(90)
+  })
 })
 
 describe('planCut', () => {
@@ -233,6 +258,45 @@ describe('planCut', () => {
   it('has nothing to cut when there are few turns', () => {
     expect(planCut([text('user', 'a'), text('assistant', 'b')], 5)).toBe(0)
     expect(planCut(longSeed(), 0)).toBe(0)
+  })
+})
+
+describe('planCutUnderBudget', () => {
+  it('stays at the floor when the turns it protects fit', () => {
+    const messages = longSeed()
+    const budget = estimateTokens(messages) + 100
+    const cut = planCutUnderBudget(messages, { keepTurns: 1, budget, fixed: 0 })
+
+    // The same boundary the plain floor would pick.
+    expect(cut).toBe(planCut(messages, 1))
+    expect(messages[cut]!.role).toBe('user')
+  })
+
+  it('recuses past the floor when the protected turns are themselves too big', () => {
+    const big = text('user', `big ${'w'.repeat(4000)}`)
+    const last = text('user', 'last')
+    const messages = [text('user', 'first'), text('assistant', 'a'), big, text('assistant', 'r'), last]
+    // Room for the last turn alone, but not for the big one beside it.
+    const budget = 300 + estimateTokens([last])
+    const cut = planCutUnderBudget(messages, { keepTurns: 2, budget, fixed: 0 })
+
+    // Two turns were asked to stay; only the last one fits, so the cut lands
+    // before the big turn instead of carrying it over the ceiling.
+    expect(planCut(messages, 2)).toBe(messages.indexOf(big))
+    expect(cut).toBe(messages.indexOf(last))
+    expect(messages[cut]!.role).toBe('user')
+  })
+
+  it('has no cut when even the last turn is over the budget', () => {
+    const messages = [text('user', 'first'), text('assistant', 'a'), text('user', 'x'.repeat(4000))]
+
+    expect(planCutUnderBudget(messages, { keepTurns: 2, budget: 10, fixed: 0 })).toBe(0)
+  })
+
+  it('has nothing to cut with no user turn at all', () => {
+    expect(
+      planCutUnderBudget([text('assistant', 'only')], { keepTurns: 1, budget: 10, fixed: 0 }),
+    ).toBe(0)
   })
 })
 
@@ -338,7 +402,7 @@ describe('Session compaction', () => {
 
   it('measures against the model window, not the fallback, when one is known', async () => {
     // A 100k window at 70% is 70k: this transcript is nowhere near it, where the
-    // 40-token fallback would have summarized it. The fallback is what a fixed
+    // configured fallback would have summarized it. The fallback is what a fixed
     // 12000 against a million-token model was doing every turn.
     const { provider, session, events } = await compactingSession(longSeed(), {
       lookup: async () => 100_000,
@@ -359,7 +423,10 @@ describe('Session compaction', () => {
   })
 
   it('reports the fallback when nothing knows the window', async () => {
-    const { session } = await compactingSession(longSeed(), { lookup: async () => undefined })
+    const { session } = await compactingSession(longSeed(), {
+      lookup: async () => undefined,
+      maxInputTokens: 40,
+    })
 
     expect(session.stats().maxInputTokens).toBe(40)
   })
@@ -380,7 +447,7 @@ describe('Session compaction', () => {
       cwd: process.cwd(),
       record,
       store,
-      sessions: { compactAt: 0.7, maxInputTokens: 40, keepTurns: 1, compaction: false },
+      sessions: { compactAt: 0.7, maxInputTokens: 40, keepTurns: 1, compaction: false, maxSessions: 50 },
     })
 
     for await (const _event of session.send('another one')) {
@@ -391,34 +458,55 @@ describe('Session compaction', () => {
     expect(session.stats().compacted).toBe(false)
   })
 
-  it('counts the system prompt against the budget, not just the transcript', async () => {
-    // A transcript of almost nothing, and a budget far above it — but the tool
-    // list and environment that ride along with every request do not fit, which
-    // is the part the old count ignored.
+  it('does not summarize when the prompt alone is over the ceiling', async () => {
+    // A transcript of almost nothing and a budget far above it — but the tool
+    // list and environment that ride along with every request do not fit. There
+    // is nothing a summary could fold away here, so none is bought; that is the
+    // work the old code did on every turn for nothing.
     const seed = [text('user', 'first'), text('assistant', 'ok'), text('user', 'second')]
-    const store = new MemorySessionStore()
-    const record = await store.create()
-    record.messages = seed
-    const provider = new ScriptedProvider()
-
-    const session = new Session({
-      scope: { gateway: 'cli', conversationId: 'c' },
-      provider,
-      model: 'm',
-      system: 'BASE',
-      registry: createToolRegistry(),
-      memory: new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
-      cwd: process.cwd(),
-      record,
-      store,
-      sessions: { compactAt: 0.7, maxInputTokens: 500, keepTurns: 1, compaction: true },
-    })
-
-    for await (const _event of session.send('another one')) {
-      // drain
-    }
+    const { provider, session, events } = await compactingSession(seed, { maxInputTokens: 500 })
 
     expect(estimateTokens(seed)).toBeLessThan(100)
-    expect(provider.systems.some((system) => system.includes('compress a conversation'))).toBe(true)
+    expect(provider.systems.some((system) => system.includes('compress a conversation'))).toBe(false)
+    expect(events.some((event) => event.type === 'compacted')).toBe(false)
+    expect(session.stats().compacted).toBe(false)
+  })
+
+  it('recuses past the keepTurns floor instead of summarizing every turn', async () => {
+    // The last two turns are asked to stay, but the big one beside the last does
+    // not fit the ceiling — so it is folded too, rather than riding the request
+    // over the budget and being summarized again on the next turn.
+    const big = text('user', `big ${'w'.repeat(20_000)}`)
+    const seed = [
+      text('user', 'first'),
+      text('assistant', 'a'),
+      big,
+      text('assistant', 'r'),
+      text('user', 'last'),
+    ]
+    const { session, events } = await compactingSession(seed, { maxInputTokens: 4000, keepTurns: 2 })
+
+    expect(events.some((event) => event.type === 'compacted')).toBe(true)
+    // Only the last user turn survived ahead of the new question; the floor would
+    // have kept the big turn beside it.
+    expect(session.messages[0]).toMatchObject({
+      role: 'user',
+      content: [{ type: 'text', text: 'last' }],
+    })
+    expect(session.stats().compacted).toBe(true)
+  })
+
+  it('stops paying for a summary that cannot get under the ceiling', async () => {
+    // Even the last turn alone, plus the prompt, is over the ceiling: no fold can
+    // bring the request under, so no model call is made for it.
+    const huge = text('user', `huge ${'w'.repeat(20_000)}`)
+    const seed = [text('user', 'first'), text('assistant', 'a'), huge]
+    const before = seed.length
+    const { provider, session, events } = await compactingSession(seed, { maxInputTokens: 4000, keepTurns: 2 })
+
+    expect(events.some((event) => event.type === 'compacted')).toBe(false)
+    expect(provider.systems.some((system) => system.includes('compress a conversation'))).toBe(false)
+    // Nothing was folded: the transcript is the seed, the question and the answer.
+    expect(session.messages.length).toBe(before + 2)
   })
 })

@@ -96,6 +96,14 @@ export interface SessionStore {
   acquire(id: string, options?: { signal?: AbortSignal }): Promise<SessionLease>
   list(): Promise<SessionSummary[]>
   remove(id: string): Promise<void>
+  /**
+   * Deletes every session beyond the `keep` most recently updated, returning the
+   * ids removed. A session a scope is bound to is never pruned, nor one named in
+   * `protect`: a binding to a session that is gone would silently start a new
+   * conversation on the next message. The store's own `remove` is what deletes,
+   * so a prune waits for a turn the way a removal does.
+   */
+  prune(options: { keep: number; protect?: Iterable<string> }): Promise<string[]>
   getBinding(scopeKey: string): Promise<string | undefined>
   setBinding(scopeKey: string, id: string): Promise<void>
 }

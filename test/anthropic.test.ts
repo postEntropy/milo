@@ -92,6 +92,102 @@ describe('AnthropicProvider', () => {
     expect(events.at(-1)).toMatchObject({ type: 'done', finishReason: 'tool_calls' })
   })
 
+  it('reads the signature that follows a thought', async () => {
+    stubFetch([
+      frame({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } }),
+      frame({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'thinking_delta', thinking: 'pondering' },
+      }),
+      frame({
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'signature_delta', signature: 'sig-abc' },
+      }),
+      frame({ type: 'content_block_stop', index: 0 }),
+      frame({ type: 'message_delta', delta: { stop_reason: 'end_turn' } }),
+    ])
+
+    const events = await collect(new AnthropicProvider({ id: 'test', baseURL: 'https://a.test/v1' }))
+
+    expect(events.find((event) => event.type === 'reasoning-signature')).toMatchObject({
+      signature: 'sig-abc',
+    })
+  })
+
+  it('asks for a thinking budget, and leaves room to answer in', async () => {
+    const fetchMock = stubFetch([frame({ type: 'message_delta', delta: { stop_reason: 'end_turn' } })])
+
+    for await (const _event of new AnthropicProvider({
+      id: 'test',
+      baseURL: 'https://a.test/v1',
+    }).stream({
+      model: 'claude-test',
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      temperature: 0.5,
+      thinkingBudget: 2048,
+    })) {
+      // drain
+    }
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      thinking?: { type: string; budget_tokens: number }
+      max_tokens: number
+    }
+    expect(body.thinking).toEqual({ type: 'enabled', budget_tokens: 2048 })
+    // A budget has to sit strictly below `max_tokens`.
+    expect(body.max_tokens).toBeGreaterThan(2048)
+    // Thinking is only compatible with the default temperature.
+    expect(body).not.toHaveProperty('temperature')
+  })
+
+  it('sends no thinking when the request did not ask for it', async () => {
+    const fetchMock = stubFetch([frame({ type: 'message_delta', delta: { stop_reason: 'end_turn' } })])
+
+    await collect(new AnthropicProvider({ id: 'test', baseURL: 'https://a.test/v1' }))
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as Record<string, unknown>
+    expect(body).not.toHaveProperty('thinking')
+  })
+
+  it('replays a signed thought as a thinking block, and drops an unsigned one', async () => {
+    const fetchMock = stubFetch([frame({ type: 'message_delta', delta: { stop_reason: 'end_turn' } })])
+
+    for await (const _event of new AnthropicProvider({
+      id: 'test',
+      baseURL: 'https://a.test/v1',
+    }).stream({
+      model: 'claude-test',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+        {
+          role: 'assistant',
+          content: [
+            { type: 'reasoning', text: 'signed thought', signature: 'sig-abc' },
+            { type: 'reasoning', text: 'unsigned thought' },
+            { type: 'text', text: 'the answer' },
+          ],
+        },
+      ],
+    })) {
+      // drain
+    }
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body)) as {
+      messages: { role: string; content: { type: string }[] }[]
+    }
+    const assistant = body.messages.find((message) => message.role === 'assistant')!
+    // The thought leads the turn, ahead of the text it belongs to.
+    expect(assistant.content[0]).toEqual({
+      type: 'thinking',
+      thinking: 'signed thought',
+      signature: 'sig-abc',
+    })
+    // A block the wire cannot verify is not one it may be sent.
+    expect(JSON.stringify(body)).not.toContain('unsigned thought')
+  })
+
   it('keeps the reasoning out of the request it sends back', async () => {
     const fetchMock = stubFetch([frame({ type: 'message_delta', delta: { stop_reason: 'end_turn' } })])
 

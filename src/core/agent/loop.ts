@@ -1,4 +1,5 @@
 import { saveImage } from '../images.js'
+import { thinkingBudgetFor } from '../providers/thinking.js'
 import { dropOldSnapshots } from '../sessions/compact.js'
 import type {
   ContentPart,
@@ -78,6 +79,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     const toolCalls: { id: string; name: string; args: unknown }[] = []
     let text = ''
     let reasoning = ''
+    let signature = ''
     let finish: FinishReason = 'stop'
 
     // Before every request, not once a turn: what makes a page snapshot expensive
@@ -92,6 +94,10 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       temperature: options.temperature,
       maxTokens: options.maxTokens,
       reasoningEffort: options.reasoningEffort,
+      // Read off the effort, so the two wires mean the same thing by it: OpenAI
+      // takes the level, Anthropic takes a token budget. Absent effort means
+      // neither asks to think.
+      thinkingBudget: options.reasoningEffort ? thinkingBudgetFor(options.reasoningEffort) : undefined,
       signal: options.signal,
     })) {
       if (event.type === 'text') {
@@ -100,6 +106,8 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       } else if (event.type === 'reasoning') {
         reasoning += event.delta
         yield { type: 'reasoning-delta', delta: event.delta }
+      } else if (event.type === 'reasoning-signature') {
+        signature = event.signature
       } else if (event.type === 'tool-call') {
         toolCalls.push({ id: event.id, name: event.name, args: event.args })
       } else if (event.type === 'usage') {
@@ -110,8 +118,12 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     }
 
     // The thought comes first because that is how it arrived; it stays in the
-    // transcript for whoever reads it, and no wire sends it back.
-    if (reasoning) parts.push({ type: 'reasoning', text: reasoning })
+    // transcript for whoever reads it. The Anthropic wire signs it and requires
+    // it echoed on the next request, so the signature rides along when there is
+    // one; without it the part is dropped on the way out, as before.
+    if (reasoning) {
+      parts.push({ type: 'reasoning', text: reasoning, ...(signature ? { signature } : {}) })
+    }
     if (text) parts.push({ type: 'text', text })
     for (const call of toolCalls) {
       parts.push({ type: 'tool-call', id: call.id, name: call.name, args: call.args })

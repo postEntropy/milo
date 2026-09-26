@@ -76,4 +76,12 @@ describe('remember', () => {
     expect(rememberTool.internal).toBe(true)
     expect(await new DefaultPermissionPolicy().decide(rememberTool, { facts: ['x'] })).toBe('allow')
   })
+
+  it('says in its description what is not worth keeping', () => {
+    // The bar is the tool's to state: a greeting once became a durable fact, and
+    // that is the description failing to say what a fact is not.
+    expect(rememberTool.description).toMatch(/greeting/i)
+    expect(rememberTool.description).toMatch(/small talk/i)
+    expect(rememberTool.description).toMatch(/one-off/i)
+  })
 })

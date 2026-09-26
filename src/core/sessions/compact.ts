@@ -21,7 +21,10 @@ export function estimateTokens(messages: Message[]): number {
           chars += part.name.length + safeJson(part.args).length
           break
         case 'reasoning':
-          // Kept in the transcript but never sent, so it costs no input tokens.
+          // Kept in the transcript and normally never sent, so it costs nothing —
+          // except a signed Anthropic thought, which the wire requires echoed and
+          // which therefore rides every later request.
+          if (part.signature) chars += part.text.length
           break
       }
     }
@@ -52,6 +55,40 @@ export function planCut(messages: Message[], keepTurns: number): number {
   })
   if (userIndexes.length <= keepTurns) return 0
   return userIndexes[userIndexes.length - keepTurns]!
+}
+
+/**
+ * Where to cut so the transcript that survives fits `budget`, past the floor.
+ *
+ * `keepTurns` is where the cut prefers to land, and where it lands whenever those
+ * turns fit. When they do not — one long turn, or a big tool result inside one —
+ * the cut moves back before the floor, a user turn at a time, until what is left
+ * fits, keeping as many of them as it can. The most recent user turn is never
+ * folded: it is the question being answered, and a request that has lost its own
+ * question is not one worth sending.
+ *
+ * `fixed` is the cost of everything that is not the transcript — the system
+ * prompt, the summary, the tool list. Returns 0 when even that last turn plus
+ * `fixed` is over `budget`, the one case a summary cannot change: folding cannot
+ * make the request smaller than the turn it keeps, so the caller does not buy one.
+ */
+export function planCutUnderBudget(
+  messages: Message[],
+  options: { keepTurns: number; budget: number; fixed: number },
+): number {
+  const userIndexes: number[] = []
+  messages.forEach((message, index) => {
+    if (message.role === 'user') userIndexes.push(index)
+  })
+  if (userIndexes.length === 0) return 0
+
+  const room = options.budget - options.fixed
+  const floor = Math.min(Math.max(options.keepTurns, 1), userIndexes.length)
+  for (let keep = floor; keep >= 1; keep -= 1) {
+    const cut = userIndexes[userIndexes.length - keep]!
+    if (estimateTokens(messages.slice(cut)) <= room) return cut
+  }
+  return 0
 }
 
 /**

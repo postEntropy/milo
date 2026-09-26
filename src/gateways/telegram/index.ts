@@ -6,6 +6,7 @@ import type { PermissionRequest } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
 import { readDisplay, setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
+import { chunk } from '../chunk.js'
 import {
   decodePermission,
   encodePermission,
@@ -304,5 +305,12 @@ export class TelegramGateway implements Gateway {
 
   async stop(): Promise<void> {
     await this.bot?.stop()
+  }
+
+  /** A routine's answer, posted as its own message — no turn behind it. */
+  async deliver(conversationId: string, text: string): Promise<void> {
+    const bot = this.bot
+    if (!bot) throw new Error('telegram gateway is not running')
+    for (const part of chunk(text, MAX_LENGTH)) await bot.api.sendMessage(conversationId, part)
   }
 }

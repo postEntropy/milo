@@ -14,6 +14,7 @@ import { DEFAULT_DISPLAY, type DisplayConfig } from '../../core/config/schema.js
 import type { MemoryScope } from '../../core/memory/index.js'
 import type { PermissionMode } from '../../core/tools/permission.js'
 import { DEFAULT_REASONING_EFFORT, type ReasoningEffort } from '../../core/providers/types.js'
+import { shortModel } from '../model-label.js'
 import { ChatScreen } from './screens/chat.js'
 import { ModelPicker } from './screens/model-picker.js'
 import { SettingsScreen } from './screens/settings.js'
@@ -309,16 +310,6 @@ export function Shell({
       )}
     </Box>
   )
-}
-
-/**
- * The model without its vendor prefix: `deepseek/deepseek-v4.1-flash` reads as
- * `deepseek-v4.1-flash`, since the provider beside it already says where the
- * request goes and the header has one row to spend.
- */
-function shortModel(model: string): string {
-  const slash = model.lastIndexOf('/')
-  return slash === -1 ? model : model.slice(slash + 1)
 }
 
 /**

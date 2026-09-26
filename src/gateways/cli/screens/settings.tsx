@@ -22,9 +22,11 @@ import {
   browserProfileDir,
   browserProfilesDir,
   embedEngineDir,
+  historyDir,
   memoryDir,
   skillsDir,
 } from '../../../core/config/paths.js'
+import { historyStatus } from '../../../core/history.js'
 import { DEFAULT_RECALL_LIMIT, memoryStatus } from '../../../core/memory/index.js'
 import { provisionEmbedding } from '../../../core/memory/provision.js'
 import {
@@ -48,7 +50,7 @@ import {
 import { resolveSource, type ResolvedSkill } from '../../../core/skills/sources.js'
 import type { PermissionMode } from '../../../core/tools/permission.js'
 import { formatWhen } from '../../../core/sessions/index.js'
-import { humanSize, shortenPath } from '../../../util/format.js'
+import { humanSize, plural, shortenPath } from '../../../util/format.js'
 import { resolveToolPath } from '../../../core/tools/walk.js'
 import { errorMessage } from '../../../util/errors.js'
 import { describeAccess } from '../../access.js'
@@ -240,6 +242,10 @@ export function SettingsScreen({
    */
   // biome-ignore lint/correctness/useExhaustiveDependencies: view is the re-read trigger, not a closure value
   const memory = useMemo(() => memoryStatus(memoryDir()), [view])
+
+  /** What the log costs, read off disk like the facts above it. */
+  // biome-ignore lint/correctness/useExhaustiveDependencies: view is the re-read trigger, not a closure value
+  const history = useMemo(() => historyStatus(historyDir()), [view])
 
   /** The key rows, grouped, plus the cursor map that skips the group headers. */
   const keys = keyLayout(auth)
@@ -613,6 +619,7 @@ export function SettingsScreen({
     `${memory.facts} facts · ${humanSize(memory.bytes)}`,
     shortenPath(memory.location, home),
     `Answers from the top ${recallLimit}: these facts, and what you said, out of the history.`,
+    `${plural(history.files, 'day')} of history · ${humanSize(history.bytes)} — trim it with \`milo history trim\``,
   ]
 
   const enabledGateways = GATEWAYS.filter((id) => config.gateways[id]?.enabled)

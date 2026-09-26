@@ -6,10 +6,11 @@ import { readAuth, resolveSearchKey, type LoadedConfig } from './config/load.js'
 import { fileHistory } from './history.js'
 import { createMemory, embeddingKey, installMemory, TurnIndex } from './memory/index.js'
 import { engineOnDemand } from './memory/provision.js'
+import { addRoutine } from './routines.js'
 import { createProvider } from './providers/create.js'
 import { lookupContextWindow } from './providers/context.js'
 import { AgentRuntime } from './runtime.js'
-import { FileRecapStore, FileSessionStore } from './sessions/index.js'
+import { FileRecapStore, FileSessionStore, pruneSessions } from './sessions/index.js'
 import { createSearchProvider } from './search/index.js'
 import { discoverSkills, ensureSkillsDir } from './skills/index.js'
 import { createJevReviewer } from './tools/jev.js'
@@ -19,6 +20,8 @@ import {
   createToolRegistry,
   type DangerReviewer,
 } from './tools/index.js'
+import { errorMessage } from '../util/errors.js'
+import { logWarn } from '../util/log.js'
 
 export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   const auth = readAuth()
@@ -60,7 +63,19 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
 
   // What recall reads the person's own words from: an index over the history log
   // beside it. Derived and rebuildable, so it is created rather than checked.
-  const turns = new TurnIndex({ dir: historyDir() })
+  const turns = new TurnIndex({
+    dir: historyDir(),
+    windowDays: loaded.config.history.windowDays,
+  })
+
+  const store = new FileSessionStore({ dir: sessionsDir() })
+  const recaps = new FileRecapStore({ dir: recapsDir() })
+  // Every run leaves a session behind, so the directory is pruned on the way in.
+  // Not waited for: the first turn does not need it, and a prune is not a reason
+  // to keep someone waiting at the prompt.
+  void pruneSessions(store, recaps, loaded.config.sessions.maxSessions).catch((error) => {
+    logWarn(`could not prune old sessions: ${errorMessage(error)}`)
+  })
 
   return new AgentRuntime({
     provider: createProvider(loaded.provider, loaded.model),
@@ -82,9 +97,12 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     ),
     recallLimit: loaded.config.memory.recallLimit,
     derive: loaded.config.memory.derive,
-    store: new FileSessionStore({ dir: sessionsDir() }),
-    recaps: new FileRecapStore({ dir: recapsDir() }),
+    store,
+    recaps,
     history: fileHistory,
+    // A routine the model makes is filed here, not in the session: the list
+    // belongs to the install, and `milo serve` is what runs it.
+    routine: async (input) => addRoutine(input),
     skills,
     sessions: loaded.config.sessions,
     // Where the compaction ceiling comes from: a model's window is not in the

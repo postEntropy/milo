@@ -76,6 +76,29 @@ describe('TurnIndex', () => {
     index.close()
   })
 
+  it('keeps to a recency window, dropping the days that fall out', async () => {
+    const dir = tempDir()
+    writeLog(dir, [entry('user', 'a senha antiga gira na segunda', { at: '2000-01-01T12:00:00.000Z' })], '2000-01-01')
+    writeLog(dir, [entry('user', 'o deploy sai hoje')])
+
+    // No window (the default): the whole log is reachable, however old.
+    const all = new TurnIndex({ dir })
+    expect(await all.recall(scope, 'senha antiga')).toHaveLength(1)
+    all.close()
+
+    // A window: the day that fell out is neither read nor kept.
+    const windowed = new TurnIndex({ dir, windowDays: 365 })
+    expect(await windowed.recall(scope, 'senha antiga')).toEqual([])
+    expect(await windowed.recall(scope, 'deploy hoje')).toHaveLength(1)
+    windowed.close()
+
+    // Dropped, not merely unfound: reopening without a window does not bring it
+    // back, because the row is gone from the index.
+    const again = new TurnIndex({ dir })
+    expect(await again.recall(scope, 'senha antiga')).toEqual([])
+    again.close()
+  })
+
   it('reads only what was appended since the last pass', async () => {
     const dir = tempDir()
     const file = writeLog(dir, [entry('user', 'primeira nota')])

@@ -10,6 +10,7 @@ import { listDirTool } from './list-dir.js'
 import { readFileTool } from './read-file.js'
 import { recallTool } from './recall.js'
 import { rememberTool } from './remember.js'
+import { routineTool } from './routine.js'
 import { searchHistoryTool } from './search-history.js'
 import { ToolRegistry } from './registry.js'
 import { shellTool } from './shell.js'
@@ -32,6 +33,7 @@ export { writeFileTool } from './write-file.js'
 export { editFileTool } from './edit-file.js'
 export { rememberTool } from './remember.js'
 export { recallTool } from './recall.js'
+export { routineTool } from './routine.js'
 export { searchHistoryTool } from './search-history.js'
 export { shellTool } from './shell.js'
 export { taskTool } from './task.js'
@@ -50,6 +52,7 @@ export const builtinTools = [
   rememberTool,
   recallTool,
   searchHistoryTool,
+  routineTool,
   taskTool,
   shellTool,
 ]

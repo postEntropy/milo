@@ -8,7 +8,12 @@ import type { HistoryEntry } from '../src/core/history.js'
 const home = mkdtempSync(path.join(tmpdir(), 'milo-history-'))
 process.env.MILO_HOME = home
 
-const { fileHistory, searchHistory } = await import('../src/core/history.js')
+const { fileHistory, searchHistory, historyDays, historyStatus, trimHistory } = await import(
+  '../src/core/history.js'
+)
+// Imported after the home is pointed at a throwaway directory: a static import
+// would be hoisted above the line that sets it and read the real one.
+const { runHistory } = await import('../src/bin/history.js')
 
 const historyDir = path.join(home, 'history')
 
@@ -135,5 +140,71 @@ describe('the turn index over the log', () => {
     const hits = await index.recall({ gateway: 'cli', conversationId: 'main' }, 'neovim')
     expect(hits.map((hit) => hit.text)).toEqual(['meu editor e o neovim'])
     index.close()
+  })
+})
+
+describe('the log on disk', () => {
+  it('reports what it costs and which days it spans', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-history-status-'))
+    writeFileSync(path.join(dir, '2020-01-01.jsonl'), 'x'.repeat(100))
+    writeFileSync(path.join(dir, '2020-01-02.jsonl'), 'y'.repeat(50))
+
+    const report = historyStatus(dir)
+    expect(report.files).toBe(2)
+    expect(report.bytes).toBe(150)
+    expect(report.oldest).toBe('2020-01-01')
+    expect(report.newest).toBe('2020-01-02')
+    expect(historyDays(dir)).toEqual(['2020-01-01', '2020-01-02'])
+  })
+
+  it('trims only the days before the date it was given', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-history-trim-'))
+    for (const day of ['2020-01-01', '2020-06-01', '2026-01-01']) {
+      writeFileSync(path.join(dir, `${day}.jsonl`), '{}\n')
+    }
+
+    const removed = trimHistory('2025-01-01', dir)
+    expect(removed).toEqual(['2020-01-01', '2020-06-01'])
+    expect(historyDays(dir)).toEqual(['2026-01-01'])
+  })
+
+  it('reports nothing, quietly, when there is no log yet', () => {
+    const dir = path.join(mkdtempSync(path.join(tmpdir(), 'milo-history-empty-')), 'history')
+    expect(historyStatus(dir)).toMatchObject({ files: 0, bytes: 0 })
+    expect(trimHistory('2025-01-01', dir)).toEqual([])
+  })
+})
+
+describe('milo history', () => {
+  it('prints what the log holds', async () => {
+    const lines: string[] = []
+    const code = await runHistory(['history'], { out: (line) => lines.push(line), err: () => {} })
+
+    expect(code).toBe(0)
+    expect(lines[0]).toMatch(/^\d+ day-file\(s\), /)
+  })
+
+  it('refuses a trim with no date, and deletes nothing', async () => {
+    const err: string[] = []
+    const code = await runHistory(['history', 'trim'], {
+      out: () => {},
+      err: (line) => err.push(line),
+      confirm: async () => true,
+    })
+
+    expect(code).toBe(1)
+    expect(err.join('\n')).toContain('--older-than')
+  })
+
+  it('says there is nothing older instead of deleting', async () => {
+    const out: string[] = []
+    const code = await runHistory(['history', 'trim', '--before', '1970-01-01'], {
+      out: (line) => out.push(line),
+      err: () => {},
+      confirm: async () => true,
+    })
+
+    expect(code).toBe(0)
+    expect(out.join('\n')).toContain('Nothing older than')
   })
 })

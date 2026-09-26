@@ -116,6 +116,13 @@ export function setReasoningEffort(effort: ReasoningEffort): void {
   saveConfig({ ...config, reasoningEffort: effort })
 }
 
+/** Writes down the model, so a switch made in a chat outlives the process. */
+export function setModel(model: string): void {
+  const config = readConfigOrNull()
+  if (!config) return
+  saveConfig({ ...config, model })
+}
+
 /**
  * The display settings as they are on disk. Read per turn by the bot gateways,
  * so a `/tools` typed in a chat takes effect without restarting `milo serve`.

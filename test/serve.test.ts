@@ -120,6 +120,32 @@ describe('runServe', () => {
     expect(output).toContain(home)
   })
 
+  it('counts the routines it will run', async () => {
+    writeFileSync(
+      path.join(home, 'config.json'),
+      configWith({ telegram: { enabled: true, allowlist: [] } }),
+    )
+    process.env.TELEGRAM_BOT_TOKEN = 'tg-token'
+    writeFileSync(
+      path.join(home, 'routines.json'),
+      JSON.stringify([
+        {
+          id: 'calm-otter-1',
+          prompt: 'briefing',
+          when: { kind: 'at', time: '08:00' },
+          target: { gateway: 'telegram', conversationId: '123' },
+          enabled: true,
+          createdAt: 0,
+        },
+      ]),
+    )
+
+    await runServe()
+
+    // Only visible on the boot line, and only true if the loop started.
+    expect(messages.join('\n')).toContain('1 routine')
+  })
+
   it('says the token is missing and starts nothing', async () => {
     writeFileSync(
       path.join(home, 'config.json'),

@@ -7,6 +7,8 @@ import { describe, expect, it } from 'vitest'
 import lockfile from 'proper-lockfile'
 import { FileSessionStore } from '../src/core/sessions/file-store.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
+import { FileRecapStore } from '../src/core/sessions/recap.js'
+import { pruneSessions } from '../src/core/sessions/retention.js'
 import {
   INITIAL_SESSION_VERSION,
   isValidSessionId,
@@ -144,6 +146,76 @@ describe('FileSessionStore', () => {
     await store.remove(created.id)
     expect(await store.load(created.id)).toBeNull()
     expect(await store.list()).toEqual([])
+  })
+})
+
+// Every run leaves a session behind, so the directory has to be pruned.
+describe('pruning old sessions', () => {
+  const seed = async (store: FileSessionStore | MemorySessionStore) => {
+    await store.save(record('calm-otter-1', 100), INITIAL_SESSION_VERSION)
+    await store.save(record('brave-wolf-2', 200), INITIAL_SESSION_VERSION)
+    await store.save(record('tidy-heron-3', 300), INITIAL_SESSION_VERSION)
+  }
+
+  it('keeps the newest and removes the rest', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    await seed(store)
+
+    const removed = await store.prune({ keep: 2 })
+    expect(removed).toEqual(['calm-otter-1'])
+    expect((await store.list()).map((entry) => entry.id)).toEqual(['tidy-heron-3', 'brave-wolf-2'])
+  })
+
+  it('never removes a session a scope is bound to', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    await seed(store)
+    await store.setBinding('cli:main', 'calm-otter-1')
+
+    // `keep: 1` puts both the other old ones out — but the bound session is
+    // spared, because a binding to a session that is gone would only silently
+    // start a new conversation on the next message.
+    expect(await store.prune({ keep: 1 })).toEqual(['brave-wolf-2'])
+    expect(await store.load('calm-otter-1')).not.toBeNull()
+  })
+
+  it('honours an explicit protect list', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    await seed(store)
+
+    expect(await store.prune({ keep: 1, protect: ['calm-otter-1'] })).toEqual(['brave-wolf-2'])
+    expect(await store.load('calm-otter-1')).not.toBeNull()
+  })
+
+  it('does nothing when there is nothing beyond the limit', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    await store.create()
+    expect(await store.prune({ keep: 5 })).toEqual([])
+  })
+
+  it('prunes the in-memory store the same way', async () => {
+    const store = new MemorySessionStore()
+    await seed(store)
+    await store.setBinding('cli:main', 'calm-otter-1')
+
+    expect(await store.prune({ keep: 2 })).toEqual([])
+    expect((await store.list()).map((entry) => entry.id)).toEqual([
+      'tidy-heron-3',
+      'brave-wolf-2',
+      'calm-otter-1',
+    ])
+  })
+
+  it('takes the recaps of what it removed, and leaves the rest', async () => {
+    const dir = tempDir()
+    const store = new FileSessionStore({ dir })
+    const recaps = new FileRecapStore({ dir: path.join(dir, 'recaps') })
+    await seed(store)
+    await recaps.write({ session: 'calm-otter-1', text: 'x', sourceUpdatedAt: 100, at: 100 })
+    await recaps.write({ session: 'tidy-heron-3', text: 'y', sourceUpdatedAt: 300, at: 300 })
+
+    expect(await pruneSessions(store, recaps, 2)).toBe(1)
+    expect(await recaps.read('calm-otter-1')).toBeNull()
+    expect(await recaps.read('tidy-heron-3')).not.toBeNull()
   })
 })
 

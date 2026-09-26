@@ -13,7 +13,7 @@ Hand-rolled LLM layer (no provider SDKs), built for a fast boot and immediate to
 ```
 GATEWAYS   CLI (Ink)      Telegram (grammY)      Discord (discord.js)
               └────────────────┴────────────────────────┘
-CORE       AgentRuntime → Session → AgentLoop   +  Tools · Memory · Providers · Config
+CORE       AgentRuntime → Session → AgentLoop   +  Tools · Memory · Providers · Config · Routines
 PROVIDERS  Command Code Provider API · OpenRouter · OpenAI · Anthropic · Ollama · custom
 ```
 
@@ -184,11 +184,12 @@ queue — a `/stop` that waited for the turn it is meant to stop would arrive af
 | `/queue <text>` | Says it as its own turn, after the one running now. The one way to say something *after* the answer instead of into it. |
 
 `/compact` is a session command, so it does queue like one: it folds the oldest turns into the
-summary on demand, keeping the same `keepTurns` the automatic pass keeps, and says how many turns it
-folded and what they held — or that there was nothing old enough to fold, which is the common answer
-and not the same one as a compaction that worked. If the summary call fails the turns go anyway (a
-request that fits beats one the provider rejects) and the reply says so rather than pretending a
-summary exists.
+summary on demand, keeping the last `keepTurns` turns verbatim — the manual fold keeps the floor,
+where the automatic pass will recuse past it to fit — and says how many turns it folded and what they
+held, or that the fold still leaves the request over its ceiling, or that there was nothing old
+enough to fold, which is the common answer and not the same one as a compaction that worked. If the
+summary call fails the turns go anyway (a request that fits beats one the provider rejects) and the
+reply says so rather than pretending a summary exists.
 
 The terminal has the same four commands, because they are the names for what it already does with
 modifier keys: `/stop` is Ctrl+C, `/steer` is Ctrl+Enter, `/queue` is Enter-during-a-turn — same
@@ -230,6 +231,64 @@ provider and tools, and its epoch bumped so the turns queued before the stop are
 turn comes. A stop is not a failure: `session.send` turns a cancelled stream into an `aborted` event,
 so the message ends with `🛑 stopped` instead of a red `AbortError`.
 
+## Routines
+
+A prompt Milo runs on a timer and delivers to a chat, with nobody there when it fires. "Every weekday
+at 8, look at the repo and tell me what moved" is a routine: it opens its own conversation, runs the
+prompt, and posts the answer to the chat you named.
+
+Made two ways, one list. In chat you say it in your own words — *"every two hours, check the deploy"*,
+*"every weekday at 8, look at the repo and tell me what moved"* — and the `routine` tool turns the
+sentence into one, defaulting the destination to the chat you said it in. Or on the terminal:
+
+```bash
+milo routines add "look at the repo and tell me what moved" --name "daily briefing" \
+  --at 08:00 --days mon-fri --gateway telegram --to 123456789
+milo routines add "deploy status" --every 6h --gateway discord --to 987654321
+milo routines list
+milo routines disable calm-otter-7
+milo routines run calm-otter-7        # fire it now, printing the answer
+milo routines remove calm-otter-7
+```
+
+Every routine has a **name**: the `--name` you give it, or the first words of the prompt when you give
+none (`look at the repo and tell me what moved…`). The name is what `milo routines list` leads with,
+what the assistant says back when it makes one, and what signs the message in the chat — `daily
+briefing` on its own line, then the answer — so a room with several of them can tell which one just
+spoke. The id (`calm-otter-7`) is only for the commands.
+
+The list is `~/.milo/routines.json`: one JSON array, readable and editable by hand, and reread on every
+tick — so a routine the assistant created mid-chat is picked up without restarting the daemon, and one
+you delete is dropped just as quietly. It holds up to 50.
+
+A routine's time is one of two shapes: an interval (`every 30m`, `every 2h`) counted from the last run,
+or a wall-clock time (`08:00`, `8h`) with optional days (`mon-fri`, `mon,wed,fri`, `1-5`). Times are
+**local**, and one with no days runs every day. Day names are read in English or Portuguese, and
+written back in English. There is no five-field cron yet — day-of-month and `*/15` are not expressible.
+
+Three things are worth knowing before you rely on one:
+
+- **Only `milo serve` fires them.** The daemon is the process that stays up; a routine does not run
+  while it is down, and a time it slept through is **skipped, not caught up** — you get the next one,
+  once, rather than a burst of the mornings you missed.
+- **Permission is decided when the routine is made, not when it fires.** Reading needs nothing.
+  Anything that writes or runs a command is a standing grant it carries (`--allow
+  shell_command,write_file`, or what the assistant proposes in chat), and it is confirmed where there
+  is someone to confirm it — at creation. At fire time the grant is what stands in for a person: a
+  granted tool runs, anything else keeps the policy's answer, which with nobody to ask is a refusal. An
+  explicit deny still denies, and the rules that bar a destructive command or a protected path still
+  apply — granting a tool is not granting every use of it. In `yolo` mode nothing is asked and the
+  routine simply runs in yolo.
+- **Each run is a new conversation.** A routine does not carry yesterday's context into today's run —
+  it is a prompt on a timer, not a thread. The runs are sessions like any other (`routine:<id>`), named
+  after the routine, so they show up in `/sessions` and are searchable with `search_history`.
+
+The answer is posted at the target when the run finishes, split across messages if it is long. A
+failure is posted too (`⚠ routine "…" failed: …`), so one that breaks reaches you instead of going
+quiet. If a run is still going when its next time comes, that occurrence is skipped rather than
+stacked, and `milo routines list` shows what the last one did. A routine cannot create more routines —
+the `routine` tool is absent inside a routine's own run.
+
 ## Tools
 
 | Tool | Read-only | Notes |
@@ -244,6 +303,7 @@ so the message ends with `🛑 stopped` instead of a red `AbortError`.
 | `remember` | — | Saves a durable fact; only touches Milo's own memory, so it never asks. |
 | `recall` | yes | Which past session a question is about, and what it was about. |
 | `search_history` | yes | Term search over Milo's own past turns, reasoning and tool calls included. |
+| `routine` | — | Runs a prompt on a timer and delivers it to a chat. Asks only when the routine carries a standing grant; absent inside a routine's own run. |
 | `web_search` | yes | Registered only when a search provider is configured. |
 | `read_skill` | yes | Loads a skill's instructions on demand; registered only when a skill is installed. |
 | `task` | — | Runs a subtask in its own context; only the report comes back. Only on request; never asks itself. |
@@ -563,10 +623,11 @@ Faint greys and the terminal's own `dim` attribute were tried and dropped — a 
 `/thinking` decides what you *see*; this decides what the model *does* — and it is the one that costs.
 `reasoningEffort` (`low`, `medium` or `high`, set from `/effort` on any surface, from the Display
 section of `milo setup`, or in the config) is put on the request as `reasoning_effort` on the OpenAI
-wire. It **defaults to `medium`**: every request carries an explicit effort, because "whatever each
-provider and model makes of an absent field" was a value nobody could name and a label — `effort
-default` — nobody could read. A provider that does not know the field ignores it; one that rejects it
-fails loudly on the turn.
+wire, and mapped to a `thinking` token budget (`low` 1024, `medium` 2048, `high` 4096) on the
+Anthropic one. It **defaults to `medium`**: every request carries an explicit effort, because
+"whatever each provider and model makes of an absent field" was a value nobody could name and a label
+— `effort default` — nobody could read. A provider that does not know the field ignores it; one that
+rejects it fails loudly on the turn.
 
 On a bot that answers more than one person `/effort` is **locked**, for the same reason `/mode` is:
 what an answer costs is not one person's to change for everybody.
@@ -581,8 +642,12 @@ minute of a turn, whose result nobody reads. Those two ask for `low` regardless,
 does not know the field at all the call is made again without it, because losing every summary to an
 unknown field is the worse failure.
 
-Anthropic's equivalent is a `thinking` budget rather than a level, and is not wired up yet — see the
-roadmap.
+On the Anthropic wire, thinking on means the thinking blocks must come back with every follow-up
+request, so the signature the wire puts on each one rides with it in the transcript and the block is
+replayed ahead of the text and the tool call it belongs to. A thought without a signature is dropped on
+the way out — the wire refuses a block it cannot verify — which is why the budget is only sent for the
+turn itself and never for a mechanical call: the internal calls ask for nothing on that wire, so they
+pay no reasoning tax. Thinking has only run against a fake so far; see the roadmap.
 
 The terminal renders the answer as **light markdown**: a fenced code block keeps its code (the fence
 lines go, the code is not reflowed as prose, and a long line is cut at the width instead of wrapping
@@ -722,6 +787,12 @@ In the terminal, `milo` begins a new conversation every time it opens, and the o
 on disk, listed by `/sessions`. `milo --continue` picks that one back up, and `milo --resume <id>`
 opens a specific one.
 
+That rule means the directory grows a file per run, so `sessions.maxSessions` (default 50) caps it: at
+startup the oldest sessions beyond that are pruned, and one a scope is still bound to is never touched
+— a binding to a session that is gone would only silently start a new conversation on the next
+message. A pruned session's recap goes with it. The prune is off the critical path: it runs on the way
+in and never holds up the first turn.
+
 Memory is keyed to the install, not to the session or the conversation: what you told Milo in the
 terminal is there on Telegram, and a `/new` never changes what it remembers.
 
@@ -774,12 +845,15 @@ go over while the estimate said it was fine. `/stats` reports both numbers for t
 shows them against the budget (`~9.5k of 12k tokens`) — a token count with no ceiling says nothing
 about whether the session is anywhere near one.
 
-`keepTurns` is a floor, not a target, so a session can still pay on every turn: if the turns it
-protects are themselves bigger than the ceiling — eight long turns against a 12k fallback, say — the
-summary can never bring the request under; the next turn finds it over the ceiling again and
-summarizes again, forever. That is a model call per turn whose answer is never shown to anyone, and
-it is the part of a slow turn that looks like the model. The CLI names it in the wait so it stops
-looking like one:
+`keepTurns` is where the cut prefers to land, not a promise it keeps: when the turns it protects are
+themselves bigger than the ceiling — eight long turns against a 12k fallback, say — the cut recuses
+past the floor until what is left fits, keeping as many of them as it can and never folding the most
+recent turn, which is the question being answered. When even that turn plus the prompt is over the
+ceiling, no fold can bring the request under, so the summary is **not called at all** — folding cannot
+make the request smaller than the turn it keeps, and paying for a summary that cannot help is exactly
+the model call per turn the old rule made. A session can still sit over its trigger, but it no longer
+pays a model call every turn pretending otherwise. The CLI names the compaction it does run in the
+wait, so it stops looking like the model:
 
 ```
 ✻ Thought for 12s (4.2s compacting)
@@ -795,16 +869,25 @@ A turn writes its lines in one `append`, so the worst a kill can leave behind is
 and the reader skips that instead of failing.
 
 The reasoning is the part that had nowhere to go before: it was streamed to the screen and died with
-the turn. It is now kept in the transcript — and deliberately never sent back. It is not part of the
-conversation, so replaying it would pay for the same tokens twice; neither wire forwards it, and
-`estimateTokens` does not count it, because a transcript is measured by what the provider receives,
-not by what is on disk.
+the turn. It is now kept in the transcript, and it is not part of the conversation — replaying it
+would pay for the same tokens twice — so neither wire sends it back, with one exception: the Anthropic
+wire signs its thinking blocks and requires them echoed with each follow-up request once thinking is
+on, so a signed thought is replayed as a thinking block and `estimateTokens` counts it, while an
+unsigned one is dropped on the way out and costs nothing. On the OpenAI wire reasoning is never sent
+back at all.
 
 `search_history` is the read side: give it terms (all of them have to appear, any case) and it returns
 the newest matches from the last 30 days, reading the reasoning, the tool arguments and the tool
 results as well — which is what makes "what did we try for X?" answerable. Pass `session` to stay
 inside one conversation; `recall` is what names it. The reply is capped and says when there were more
 matches than it showed.
+
+Recall reads the log through an index of what you typed, rebuilt from the log and bounded by a
+**recency window**: `history.windowDays` (default 365) is how far back a turn stays reachable, and a
+day that falls out is dropped from the index rather than refused. `0` keeps every day. The log itself
+is never trimmed on its own — it is the record — so `milo history` reports how many day-files it holds
+and what they cost, and `milo history trim --older-than <days>` (or `--before <date>`) deletes the
+days you name, dropping the same days from the index so a deleted turn cannot answer a recall.
 
 ### Taking a conversation out
 
@@ -1104,11 +1187,13 @@ worth knowing: with `NODE_ENV=production` exported in your shell, npm treats eve
     browser, the page observer, and the three tools.
   - `sessions/` — `SessionStore` interface + `FileSessionStore` / `MemorySessionStore`, the recaps
     kept out of a transcript (`RecapStore`) and their ranking (`rankSessions`), nickname
-    generation, compaction (`estimateTokens` / `planCut` / `summarize`) and `/stats` formatting.
+    generation, compaction (`estimateTokens` / `planCut` / `planCutUnderBudget` / `summarize`),
+    retention (`pruneSessions`) and `/stats` formatting.
   - `config/` — paths, zod schema, presets, load/save, onboarding wizard.
-  - `runtime.ts` / `session.ts` / `bootstrap.ts`.
+  - `runtime.ts` / `session.ts` / `bootstrap.ts` / `history.ts` (the log and its readout).
 - `src/gateways/` — `cli/` (Ink), `telegram/` (grammY), `discord/` (discord.js).
-- `src/bin/` — `cli.ts` (`milo`), `serve.ts` (`milo serve`).
+- `src/bin/` — `cli.ts` (`milo`), `serve.ts` (`milo serve`), and the plain terminal commands
+  `skills.ts` (`milo skills`), `history.ts` (`milo history`) and `routines.ts` (`milo routines`).
 
 ## Roadmap
 
@@ -1126,6 +1211,9 @@ against a fake: the code is right about the shape of the API and unproven about 
   engine archive, then 593 MB for `embeddinggemma`.
 - **The bot gateways.** Telegram and Discord are exercised against fakes, so a real token is still
   needed to confirm the permission buttons, the rich messages and the turn queue against the live APIs.
+  Routine delivery posts through the same calls, so it rides the same unproven path.
+- **The routine loop's firing.** `nextRunAt` and the loop are unit-tested with a fake clock and a fake
+  runtime, but no routine has ever fired inside a running `milo serve` against a real chat.
 - **`web_search`.** `config.json` has no `search` section, so the tool is not even registered right
   now, and the Exa and Parallel adapters have never been called for real.
 - **The web surface.** The newest gateway and the thinnest tests: `hub.ts` at 4 % and `studio.ts` at
@@ -1133,31 +1221,9 @@ against a fake: the code is right about the shape of the API and unproven about 
 - **Chrome for Testing.** The platform and URL mapping is covered; the download itself
   (`browser/install.ts`) is 15 %, so what has been proven is the shape of the index it reads.
 - **`milo serve` assembled.** The pieces are tested and the daemon that wires them is at 78 %.
-
-**Unfinished, or wrong today.**
-
-- **Compaction that cannot reach the budget.** `keepTurns` is a floor, so when the turns it protects are
-  themselves bigger than the ceiling, the summary runs on every turn and never gets under. Either cut
-  past the floor until it fits, or stop paying for a summary that cannot help — and that second one
-  needs a criterion, which is the decision nobody has made yet.
-- **Reasoning effort on the Anthropic wire.** Not a rename. OpenAI takes a level
-  (`reasoning_effort`); Anthropic takes a `thinking` budget in tokens, and turning thinking on means the
-  thinking blocks must be sent back with every follow-up request — precisely what the transcript does
-  not do today, since reasoning is kept and deliberately never forwarded. Enabling it on a turn with
-  tools would break the loop until that echo exists. The internal calls need nothing: on that wire
-  thinking is off unless it is asked for, so they already pay no reasoning tax.
-- **The `remember` description still invites small talk.** A greeting became a durable fact once
-  ("Howdy! What can I help you with?"), which is the tool's description failing to say what is worth
-  keeping, not the model misbehaving.
-- **Sessions accumulate.** Nothing prunes `~/.milo/sessions/`, and every launch now leaves one behind —
-  that is the new-session-per-run rule working as intended, and it means the directory grows by a file
-  per run. Small files, and `FileSessionStore` can already delete one, so this is a policy nobody has
-  picked: age, count, or nothing.
-- **The history index has no window.** It holds every turn the log has, which is what makes recall reach
-  further back than the 2,000-row cap it replaced. It is 0.3 ms at 5,000 turns; the day a store is big
-  enough for that to be wrong, this is the item, and the answer is a recency window rather than a cap.
-- **The history log itself has no retention.** Plain JSONL that only ever grows, which is the honest
-  shape for a record — but nothing anywhere tells a person how big it is or offers to trim it.
+- **Anthropic thinking.** The `thinking` budget is sent and the signed thinking blocks are echoed back
+  with each follow-up, but the path has only run against a fake: confirming it against the live API
+  needs an Anthropic key.
 
 **Recall quality.**
 
@@ -1182,12 +1248,6 @@ against a fake: the code is right about the shape of the API and unproven about 
   code: in-process (fast, shares the process, and a bad plugin can take the turn down with it) against a
   subprocess (isolatable and language-agnostic, at the cost of a wire format and a start per call), and
   whether a plugin may ship skills and personas as well as tools.
-- **Scheduled prompts.** Nothing in Milo runs on a timer — the only `setInterval`s in the tree are typing
-  indicators. Everything else needed is here: sessions, gateways, recaps, and a turn that can start
-  without a person. "Every weekday at 8, look at the repo and send me what moved on Telegram" is a cron
-  entry that opens a session and delivers to a gateway. Decide: where a schedule lives, what a job does
-  when a turn is already running on that conversation, and how its failures reach someone when nobody is
-  watching.
 - **`milo doctor`.** One command that answers "is this install healthy": the config parses, the keys are
   there, both databases open and pass `integrity_check`, the index agrees with the log it is derived
   from, `~/.milo` has the private permissions it is supposed to, and the legacy files are listed rather

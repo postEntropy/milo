@@ -2,6 +2,7 @@ import process from 'node:process'
 import { createRuntime } from '../core/bootstrap.js'
 import { loadConfig, readAuth, resolveGatewayToken } from '../core/config/load.js'
 import { MILO_HOME } from '../core/config/paths.js'
+import { readRoutines, RoutineScheduler } from '../core/routines.js'
 import type { Gateway } from './types.js'
 
 export async function runServe(): Promise<void> {
@@ -49,6 +50,23 @@ export async function runServe(): Promise<void> {
   }
 
   for (const gateway of gateways) await gateway.start()
+
+  // The prompts that run on a timer. It shares this runtime, so a routine's turn
+  // has the same memory, sessions and history as any other — and it delivers
+  // through the gateways already running, which is the only reason a routine
+  // needs one.
+  const scheduler = new RoutineScheduler({
+    runtime,
+    deliver: async (routine, text) => {
+      const gateway = gateways.find((candidate) => candidate.id === routine.target.gateway)
+      if (!gateway?.deliver) throw new Error(`no ${routine.target.gateway} surface to deliver to`)
+      await gateway.deliver(routine.target.conversationId, text)
+    },
+    log: (line) => console.error(line),
+  })
+  scheduler.start()
+  const routines = readRoutines().filter((routine) => routine.enabled).length
+
   console.error(`Milo serving: ${gateways.map((gateway) => gateway.id).join(', ')}`)
   // One line at the boundary, not one per turn: a daemon that logs every turn is
   // noise, and the turns are the users', not the operator's. The skill count is
@@ -60,6 +78,7 @@ export async function runServe(): Promise<void> {
       `mode ${runtime.permissions?.mode ?? 'ask'}`,
       `effort ${runtime.reasoningEffort}`,
       `${runtime.skills.length} skill${runtime.skills.length === 1 ? '' : 's'}`,
+      `${routines} routine${routines === 1 ? '' : 's'}`,
       // A capability that only exists in the catalog is invisible in a daemon:
       // the TUI header is not there to show it, so the boot line says it.
       runtime.browser ? `browser ${loaded.config.browser.headless ? 'headless' : 'visible'}` : 'browser off',
@@ -68,6 +87,7 @@ export async function runServe(): Promise<void> {
   )
 
   const shutdown = async (): Promise<void> => {
+    scheduler.stop()
     for (const gateway of gateways) {
       await gateway.stop().catch(() => undefined)
     }

@@ -94,6 +94,23 @@ export class MemorySessionStore implements SessionStore {
     }
   }
 
+  async prune(options: { keep: number; protect?: Iterable<string> }): Promise<string[]> {
+    if (options.keep <= 0) return []
+    const newest = [...this.records.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+    if (newest.length <= options.keep) return []
+
+    const keep = new Set(options.protect ?? [])
+    for (const id of this.bindings.values()) keep.add(id)
+
+    const removed: string[] = []
+    for (const record of newest.slice(options.keep)) {
+      if (keep.has(record.id)) continue
+      await this.remove(record.id)
+      removed.push(record.id)
+    }
+    return removed
+  }
+
   async getBinding(scopeKey: string): Promise<string | undefined> {
     return this.bindings.get(scopeKey)
   }

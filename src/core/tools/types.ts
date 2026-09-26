@@ -1,6 +1,7 @@
 import type { z } from 'zod'
-import type { MemoryInput } from '../memory/types.js'
+import type { MemoryInput, MemoryScope } from '../memory/types.js'
 import type { ImageMime } from '../providers/types.js'
+import type { NewRoutine, Routine } from '../routines.js'
 import type { SessionSummary } from '../sessions/types.js'
 
 /**
@@ -20,6 +21,9 @@ export type RecallFn = (query: string, opts?: { limit?: number }) => Promise<Ses
  */
 export type TaskFn = (input: { description: string; prompt: string }) => Promise<ToolResult>
 
+/** How a session hands a tool the ability to add a routine to the install's list. */
+export type RoutineFn = (input: NewRoutine) => Promise<Routine>
+
 export interface ToolContext {
   cwd: string
   signal: AbortSignal
@@ -29,6 +33,17 @@ export interface ToolContext {
   recall?: RecallFn
   /** Absent on a context that cannot delegate (a subagent's own, a bare test one). */
   task?: TaskFn
+  /**
+   * The conversation this turn came from. It is where a routine created in chat
+   * delivers by default — and its gateway tells the tool whether there is anyone
+   * to deliver to at all.
+   */
+  origin?: MemoryScope
+  /**
+   * Absent on a context that cannot make routines. A routine's own run is one of
+   * them, so a routine cannot create more routines.
+   */
+  routine?: RoutineFn
 }
 
 /**
@@ -60,6 +75,13 @@ export interface Tool<A = unknown> {
    * saving one not worth doing.
    */
   internal?: boolean
+  /**
+   * Whether *this* call is the kind of side effect that needs a confirmation.
+   * For a tool whose danger lives in its arguments rather than in its name:
+   * scheduling a prompt that only reads is not the same act as scheduling one
+   * that may run a command. Absent means the flags above are the whole answer.
+   */
+  asksWhen?(args: A): boolean
   /**
    * The tool's own effect is to hand work to a subagent, whose individual tool
    * calls are each put to the same policy. So it needs no confirmation of its

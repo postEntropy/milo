@@ -71,6 +71,7 @@ describe('tool permission gating', () => {
       remember: false,
       recall: true,
       search_history: true,
+      routine: false,
       task: false,
       shell_command: false,
     })

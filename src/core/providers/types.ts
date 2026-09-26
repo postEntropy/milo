@@ -7,13 +7,20 @@ export interface TextPart {
 
 /**
  * What the model thought before answering. It is kept with the transcript so a
- * session read back later still shows how the answer was reached — and it is
- * deliberately never sent to a provider: it is not part of the conversation,
- * and replaying it would pay for the same tokens twice.
+ * session read back later still shows how the answer was reached, and it is not
+ * part of the conversation the model is sent back — with one exception: the
+ * Anthropic wire signs its thinking blocks and requires them echoed with every
+ * follow-up request once thinking is on, so a part carrying a `signature` is
+ * replayed as one, and any part without a signature is dropped on the way out.
  */
 export interface ReasoningPart {
   type: 'reasoning'
   text: string
+  /**
+   * The provider's signature over this thought, when it gave one. Only the
+   * Anthropic wire has one, and a thinking block is only replayable with it.
+   */
+  signature?: string
 }
 
 export interface ToolCallPart {
@@ -93,11 +100,19 @@ export interface ChatRequest {
    * think hard, and a reasoning model's default will.
    */
   reasoningEffort?: ReasoningEffort
+  /**
+   * How many tokens the Anthropic wire may spend thinking before answering.
+   * Absent means thinking is off on that wire — a mechanical call leaves it
+   * absent, so it pays no reasoning tax. The OpenAI wire ignores this and reads
+   * `reasoningEffort` instead.
+   */
+  thinkingBudget?: number
 }
 
 export type StreamEvent =
   | { type: 'text'; delta: string }
   | { type: 'reasoning'; delta: string }
+  | { type: 'reasoning-signature'; signature: string }
   | { type: 'tool-call'; id: string; name: string; args: unknown }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   | { type: 'done'; finishReason: FinishReason }
