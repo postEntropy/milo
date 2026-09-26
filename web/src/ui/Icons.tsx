@@ -3,7 +3,6 @@ import type { SVGProps } from 'react'
 const paths: Record<string, React.ReactNode> = {
   plus: <><path d="M12 5v14M5 12h14" /></>,
   search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
-  chat: <><path d="M21 12a8 8 0 0 1-11.6 7.1L3 21l1.9-6.4A8 8 0 1 1 21 12Z" /></>,
   sliders: <><path d="M4 7h16M4 12h16M4 17h16" /><circle cx="9" cy="7" r="1.9" /><circle cx="15" cy="12" r="1.9" /><circle cx="7" cy="17" r="1.9" /></>,
   send: <><path d="M21.5 2.5 11 13" /><path d="M21.5 2.5 15 21.5l-4-8.5-8.5-4Z" /></>,
   stop: <><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none" /></>,

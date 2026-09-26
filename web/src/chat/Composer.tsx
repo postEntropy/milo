@@ -76,7 +76,7 @@ export function Composer({ busy, queued, provider, model, onSend, onStop, onMode
 
   return (
     <div className="composer-shell">
-      {busy && <div className="stream-bar"><span className="pulse" /><span>Milo is replying…</span><button className="chip-button" type="button" onClick={onStop}><Icon name="stop" size={14} /> Stop</button></div>}
+      {busy && <div className="stream-bar"><span className="pulse" /><span>Milo is replying…</span></div>}
       <div className="queue-list" aria-live="polite">{queued > 0 && <div className="queue-chip"><Icon name="history" size={14} /> {queued} {queued === 1 ? 'message queued' : 'messages queued'}</div>}</div>
       <div className="composer-box">
         <textarea

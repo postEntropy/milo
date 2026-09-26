@@ -8,7 +8,6 @@ import { Permissions } from './chat/Permissions.js'
 import { Studio } from './studio/Studio.js'
 import type { ServerFrame, PermissionRequest } from '@protocol'
 import { toolDetail } from '../../src/gateways/tool-line.ts'
-import { shortModel } from '../../src/gateways/model-label.ts'
 import { Icon } from './ui/Icons.js'
 import { miloAvatar } from './ui/milo.js'
 
@@ -41,6 +40,8 @@ export default function App() {
   const [notice, setNotice] = useState('')
   const socket = useMemo(() => new MiloSocket(), [])
   const messagesRef = useRef<HTMLDivElement>(null)
+  /** When the current wait began: the turn's first output, and again after each tool. */
+  const waitStartedAt = useRef(0)
 
   useEffect(() => {
     localStorage.setItem('milo-conversation', conversationId)
@@ -76,6 +77,7 @@ export default function App() {
     if (frame.type === 'error') { setNotice(frame.message); return }
     if (frame.type === 'state') { setBusy(frame.busy); setQueued(frame.queued); return }
     if (frame.type === 'turn-start') {
+      waitStartedAt.current = Date.now()
       setMessages((current) => [...current, { id: `user-${frame.id}`, role: 'user', text: frame.text }, { id: frame.id, role: 'assistant', text: '' }])
       setBusy(true)
       return
@@ -84,9 +86,16 @@ export default function App() {
       setMessages((current) => current.map((message) => {
         if (message.id !== frame.turnId) return message
         const event = frame.event
-        if (event.type === 'text-delta') return { ...message, text: message.text + event.delta }
+        if (event.type === 'text-delta') {
+          // The first output ends the wait — tool lines arrive as text too, so
+          // this is the model talking after its last thought or its last tool.
+          const waited = waitStartedAt.current ? Date.now() - waitStartedAt.current : 0
+          waitStartedAt.current = 0
+          return { ...message, text: message.text + event.delta, ...(waited > 0 ? { thoughtMs: waited } : {}) }
+        }
         if (event.type === 'reasoning-delta') return { ...message, reasoning: (message.reasoning ?? '') + event.delta }
         if (event.type === 'tool-start') return { ...message, tools: [...(message.tools ?? []), `⚙ ${event.name}${toolDetail(event.args)}`] }
+        if (event.type === 'tool-end') { waitStartedAt.current = Date.now(); return message }
         if (event.type === 'waiting') return { ...message, status: 'Waiting for this session to free up…' }
         if (event.type === 'waited') return { ...message, status: `Session freed after ${formatMs(event.ms)}.` }
         if (event.type === 'compacted') return { ...message, status: `Tidying the context (${formatMs(event.ms)}).` }
@@ -94,7 +103,6 @@ export default function App() {
         if (event.type === 'steer') return { ...message, status: 'Correction received by Milo.' }
         if (event.type === 'error') return { ...message, status: `Error: ${event.message}` }
         if (event.type === 'aborted') return { ...message, status: 'Stopped · the partial reply was kept.' }
-        if (event.type === 'usage') return { ...message, status: `${event.inputTokens.toLocaleString()} input tokens · ${event.outputTokens.toLocaleString()} output` }
         if (event.type === 'done' && event.finishReason === 'length') return { ...message, status: 'The reply hit the output limit.' }
         return message
       }))
@@ -233,10 +241,9 @@ export default function App() {
     <main className="main">
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
-        <div className="topbar-title"><h1>{studio ? 'Studio' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1><p>{studio ? studioLabel(studioSection) : `${identity.provider}/${shortModel(identity.model)}`}</p></div>
+        <div className="topbar-title"><h1>{studio ? 'Studio' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1>{studio && <p>{studioLabel(studioSection)}</p>}</div>
         <div className="topbar-actions">
           {!studio && connection !== 'online' && <span className={`connection-status ${connection}`}><span />{connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
-          <button className="topbar-studio" type="button" onClick={() => { setStudio(!studio); setSidebarOpen(false) }}><Icon name={studio ? 'chat' : 'sliders'} size={16} />{studio ? 'Chat' : 'Studio'}</button>
         </div>
       </header>
       {studio
@@ -244,7 +251,7 @@ export default function App() {
         : <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef}>
             <MessageList messages={messages} thinking={thinking} onPrompt={send} />
-            {pendingPermission && <article className="message assistant"><img className="assistant-mark" src={miloAvatar} alt="" /><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
+            {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
           </div>
           {notice && <div className="notice error" role="alert">{notice}<button className="icon-button" type="button" aria-label="Dismiss notice" onClick={() => setNotice('')}><Icon name="x" size={15} /></button></div>}
           <Composer busy={busy} queued={queued} provider={identity.provider} model={identity.model} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} />

@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { TranscriptMessage } from '@protocol'
 import { Markdown } from './Markdown.js'
 import { Icon } from '../ui/Icons.js'
@@ -7,6 +8,8 @@ export interface ChatMessage extends TranscriptMessage {
   id: string
   status?: string
   tools?: string[]
+  /** How long the model took before its first output of this turn, in ms. */
+  thoughtMs?: number
   /** Already on screen when the session was opened, so it does not settle in again. */
   loaded?: boolean
 }
@@ -47,10 +50,12 @@ export function MessageList({ messages, thinking, onPrompt }: { messages: ChatMe
   return <div className="thread-inner" aria-live="polite" aria-relevant="additions text">
     {messages.map((message) => (
       <article className={`message ${message.role}${message.loaded ? ' is-loaded' : ''}`} key={message.id}>
-        {message.role === 'assistant' && <img className="assistant-mark" src={miloAvatar} alt="" />}
         <div className="message-content">
-          {message.role === 'user' && <div className="message-label">You</div>}
-          {message.reasoning && thinking && <details className="reasoning"><summary><Icon name="spark" size={15} /> Reasoning <Icon className="reasoning-chevron" name="chevron" size={14} /></summary><div className="reasoning-body">{message.reasoning}</div></details>}
+          {message.reasoning && thinking
+            ? <Reasoning text={message.reasoning} thoughtMs={message.thoughtMs} />
+            : message.thoughtMs !== undefined && message.thoughtMs >= 1000
+              ? <div className="reasoning-note"><Icon name="spark" size={14} /> {thoughtLabel(message.thoughtMs)}</div>
+              : null}
           {message.tools && message.tools.length > 0 && <ToolLines id={message.id} tools={message.tools} />}
           {message.text && <Markdown text={message.text} />}
           {message.status && <div className="message-status">{message.status}</div>}
@@ -58,4 +63,26 @@ export function MessageList({ messages, thinking, onPrompt }: { messages: ChatMe
       </article>
     ))}
   </div>
+}
+
+/**
+ * What the model thought, and how long it took. Open by default: the wait is
+ * the thing a person asks about, and a collapsed block answers it with nothing.
+ */
+function Reasoning({ text, thoughtMs }: { text: string; thoughtMs?: number }) {
+  const [open, setOpen] = useState(true)
+  return <details className="reasoning" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <summary><Icon name="spark" size={15} /> {thoughtLabel(thoughtMs)} <Icon className="reasoning-chevron" name="chevron" size={14} /></summary>
+    <div className="reasoning-body">{text}</div>
+  </details>
+}
+
+/** The terminal's wording, so both surfaces say the same thing about a wait. */
+function thoughtLabel(ms?: number): string {
+  return ms !== undefined && ms >= 1000 ? `Thought for ${formatSeconds(ms / 1000)}` : 'Reasoning'
+}
+
+/** A tenth of a second matters at 6.4s; at 51s it is noise. */
+function formatSeconds(value: number): string {
+  return `${value < 10 ? Math.round(value * 10) / 10 : Math.round(value)}s`
 }
