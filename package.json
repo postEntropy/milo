@@ -22,6 +22,8 @@
     "bench:jev": "tsx scripts/bench-jev.ts",
     "bench:browser": "tsx scripts/bench-browser.ts",
     "bench:memory": "tsx scripts/bench-memory.ts",
+    "eval:memory": "tsx scripts/eval-memory.ts",
+    "eval:mem0": "tsx scripts/eval-mem0.ts",
     "check:browser": "tsx scripts/check-browser.ts"
   },
   "dependencies": {
