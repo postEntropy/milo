@@ -227,7 +227,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .approval-time { display: flex; align-items: center; gap: 6px; margin-inline-start: auto; color: var(--muted); font: 12px var(--font-mono); }
 
 .settings-workspace { flex: 1; min-height: 0; overflow: auto; }
-.settings-inner { width: min(760px, 100%); margin: 0 auto; padding: 30px 32px 96px; }
+.settings-inner { width: min(1040px, 100%); margin: 0 auto; padding: 30px 32px 96px; }
 .btn-secondary { display: inline-flex; min-height: 40px; align-items: center; gap: 7px; border: 0; border-radius: 11px; background: var(--surface-warm); padding: 8px 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; white-space: nowrap; transition: background var(--motion-fast); }
 .btn-secondary:hover { background: var(--border-soft); }
 .settings-section { width: 100%; margin-bottom: 16px; border: 0; border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-sm); }
