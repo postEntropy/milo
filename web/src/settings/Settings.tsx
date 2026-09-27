@@ -1,5 +1,7 @@
-import { Children, cloneElement, isValidElement, useCallback, useEffect, useId, useRef, useState, type ReactElement, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
+import { formatBytes, formatWhen, message, splitNames } from '../lib/format.js'
+import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from '@protocol'
 
@@ -24,18 +26,6 @@ type SettingsConfig = {
 type Skill = { name: string; description: string; origin?: string; installedAt?: string }
 type MemoryStats = { backend: string; location: string; scopes: number; facts: number; bytes: number }
 type Note = { id: string; text: string; createdAt: number; tags?: string[] }
-type Routine = {
-  id: string
-  name?: string
-  prompt: string
-  whenLabel: string
-  targetLabel: string
-  nextRunAt: number | null
-  enabled: boolean
-  allow?: string[]
-  lastRunAt?: number
-  lastResult?: 'ok' | 'error'
-}
 type Browser = { id: string; name: string; path: string; version: string | null }
 type Profile = { id: string; name: string; dir: string; bytes: number }
 type SettingsData = {
@@ -70,18 +60,8 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [notes, setNotes] = useState<Note[] | null>(null)
-  const [routines, setRoutines] = useState<Routine[]>([])
   const [browsers, setBrowsers] = useState<Browser[] | null>(null)
   const [profiles, setProfiles] = useState<Profile[] | null>(null)
-  const [routineError, setRoutineError] = useState('')
-  const [runResult, setRunResult] = useState<{ text: string; error: boolean } | null>(null)
-  const [newPrompt, setNewPrompt] = useState('')
-  const [newEvery, setNewEvery] = useState('')
-  const [newAt, setNewAt] = useState('')
-  const [newDays, setNewDays] = useState('')
-  const [newAllow, setNewAllow] = useState('')
-  const [newGateway, setNewGateway] = useState<'web' | 'telegram' | 'discord'>('web')
-  const [newTarget, setNewTarget] = useState(conversationId)
 
   const reload = useCallback(async (): Promise<void> => {
     try {
@@ -111,13 +91,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
     catch (error) { setNotice({ text: message(error), error: true }) }
   }, [])
 
-  const refreshRoutines = useCallback(async (): Promise<void> => {
-    try { setRoutines(await api<Routine[]>('routines')) }
-    catch (error) { setNotice({ text: message(error), error: true }) }
-  }, [])
-
   useEffect(() => { if (section === 'memory') void refreshNotes() }, [section, refreshNotes])
-  useEffect(() => { if (section === 'routines') void refreshRoutines() }, [section, refreshRoutines])
 
   const currentProvider = draft?.provider ?? ''
   const preset = data?.presets.find((item) => item.id === currentProvider)
@@ -212,35 +186,6 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
     catch (error) { setNotice({ text: message(error), error: true }) }
   }
 
-  async function addRoutine(): Promise<void> {
-    setRoutineError('')
-    try {
-      await api('routine-add', {
-        prompt: newPrompt,
-        every: newEvery || undefined,
-        at: newAt || undefined,
-        days: newDays ? splitNames(newDays) : undefined,
-        allow: newAllow ? splitNames(newAllow) : undefined,
-        target: { gateway: newGateway, conversationId: newTarget },
-      })
-      setNewPrompt('')
-      setNewEvery('')
-      setNewAt('')
-      setNewDays('')
-      setNewAllow('')
-      await refreshRoutines()
-      setNotice({ text: 'Routine created.', error: false })
-    } catch (error) { setRoutineError(message(error)) }
-  }
-
-  async function runRoutine(id: string): Promise<void> {
-    setRunResult({ text: 'Running…', error: false })
-    try {
-      const { answer, failure } = await api<{ answer: string; failure: string | null }>('routine-run', { id })
-      setRunResult({ text: failure ?? (answer || '(no answer)'), error: Boolean(failure) })
-    } catch (error) { setRunResult({ text: message(error), error: true }) }
-  }
-
   async function exportSession(id: string): Promise<void> {
     try {
       const result = await api<{ path: string } | null>('export', { id, format: 'md' })
@@ -314,39 +259,6 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           {notes === null ? <p className="list-empty">Reading…</p>
             : notes.length === 0 ? <p className="list-empty">Nothing is remembered yet.</p>
             : notes.map((note) => <div className="entry-row" key={note.id}><div><div className="secret-name">{note.text}</div><div className="secret-state">{formatWhen(note.createdAt)} · {note.id.slice(0, 8)}</div></div><button className="button danger" type="button" onClick={() => void forgetNote(note.id)}>Forget</button></div>)}
-        </Section>
-        <Section title="Routines" description="Prompts Milo runs on a timer and delivers to a chat." active={section === 'routines'}>
-          {routines.length === 0 ? <p className="list-empty">No routines yet.</p> : routines.map((routine) => <div className="entry-row" key={routine.id}>
-            <div>
-              <div className="secret-name">{routine.name ?? routine.prompt}</div>
-              <div className="secret-state">{routine.whenLabel} → {routine.targetLabel}{routine.allow?.length ? ` · may use ${routine.allow.join(', ')}` : ''}</div>
-              <div className="secret-state">{routine.enabled ? routine.nextRunAt ? `next ${formatWhen(routine.nextRunAt, true)}` : 'enabled' : 'paused'}{routine.lastRunAt ? ` · last ${routine.lastResult ?? 'ok'}` : ' · never run'}</div>
-            </div>
-            <div className="row-actions">
-              <button className="button" type="button" onClick={() => void runRoutine(routine.id)}><Icon name="play" size={13} /> Run now</button>
-              <button className="button" type="button" onClick={async () => { await api('routine-enable', { id: routine.id, enabled: !routine.enabled }); await refreshRoutines() }}>{routine.enabled ? 'Pause' : 'Enable'}</button>
-              <button className="button danger" type="button" onClick={async () => { await api('routine-remove', { id: routine.id }); await refreshRoutines() }}>Remove</button>
-            </div>
-          </div>)}
-          {runResult && <pre className={`job-log ${runResult.error ? 'error' : ''}`}>{runResult.text}</pre>}
-
-          <h3 className="section-label" style={{ paddingInline: 0 }}>New routine</h3>
-          <div className="form-grid">
-            <Field className="full" label="Prompt"><input value={newPrompt} onChange={(event) => setNewPrompt(event.target.value)} placeholder="look at the repo and tell me what moved" /></Field>
-            <Field label="Every"><input value={newEvery} onChange={(event) => setNewEvery(event.target.value)} placeholder="2h or 30m" /></Field>
-            <Field label="Or at"><input value={newAt} onChange={(event) => setNewAt(event.target.value)} placeholder="08:00" /></Field>
-            <Field label="Days (for a clock time)"><input value={newDays} onChange={(event) => setNewDays(event.target.value)} placeholder="mon-fri" /></Field>
-            <Field label="May use (unattended)"><input value={newAllow} onChange={(event) => setNewAllow(event.target.value)} placeholder="shell_command, write_file" /></Field>
-            <Field label="Deliver to"><select value={newGateway} onChange={(event) => {
-              const gateway = event.target.value as typeof newGateway
-              setNewGateway(gateway)
-              setNewTarget(gateway === 'web' ? conversationId : '')
-            }}><option value="web">This web chat</option><option value="telegram">Telegram</option><option value="discord">Discord</option></select></Field>
-            <Field label="Conversation id"><input value={newTarget} onChange={(event) => setNewTarget(event.target.value)} placeholder="a chat or channel id" disabled={newGateway === 'web'} /><small>{newGateway === 'web' ? 'This browser’s conversation.' : 'The chat to post into.'}</small></Field>
-          </div>
-          {routineError && <p className="notice error" role="alert">{routineError}</p>}
-          <button className="button primary" type="button" disabled={!newPrompt.trim()} onClick={() => void addRoutine()}>Create routine</button>
-          <p className="panel-note">A routine fires only while <code className="mono">milo serve</code> is running. Anything that writes or runs a command must be named above — a scheduled run has nobody to ask.</p>
         </Section>
         <Section title="Gateways" description="Optional chat channels; tokens are stored locally." active={section === 'gateways'}>
           {(['telegram', 'discord'] as const).map((gateway) => <div key={gateway}>
@@ -503,43 +415,3 @@ function jobLabel(kind: string): string {
   return ({ 'browser-install': 'Chrome for Testing', 'profile-copy': 'Copying a profile', 'embed-provision': 'The embedding engine' })[kind] ?? kind
 }
 
-function Field({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {
-  const id = useId()
-  return <div className={`field ${className}`}>
-    <label htmlFor={id}>{label}</label>
-    {Children.map(children, (child) => {
-      if (!isValidElement(child)) return child
-      const type = child.type
-      if (type !== 'input' && type !== 'select' && type !== 'textarea') return child
-      return cloneElement(child as ReactElement<{ id?: string }>, { id })
-    })}
-  </div>
-}
-
-function splitNames(value: string): string[] {
-  return value.split(',').map((item) => item.trim()).filter(Boolean)
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
-/** Absolute for a next run, relative for a past one. */
-function formatWhen(timestamp: number, absolute = false): string {
-  if (absolute) return new Date(timestamp).toLocaleString()
-  const elapsed = Date.now() - timestamp
-  const minute = 60_000
-  const hour = minute * 60
-  const day = hour * 24
-  if (elapsed < minute) return 'just now'
-  if (elapsed < hour) return `${Math.floor(elapsed / minute)} min ago`
-  if (elapsed < day) return `${Math.floor(elapsed / hour)} h ago`
-  if (elapsed < day * 7) return `${Math.floor(elapsed / day)} d ago`
-  return new Date(timestamp).toLocaleDateString()
-}
-
-function message(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}

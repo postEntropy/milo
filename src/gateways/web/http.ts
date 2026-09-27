@@ -1,10 +1,13 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { createReadStream, existsSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
+import { networkInterfaces } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { AgentRuntime } from '../../core/runtime.js'
+import { errorMessage } from '../../util/errors.js'
+import { hyperlink } from '../../util/terminal.js'
 import { parseClientFrame, PROTOCOL_VERSION, type ServerFrame } from './protocol.js'
 import { WebHub } from './hub.js'
 import { WebSettings } from './settings.js'
@@ -66,6 +69,12 @@ export interface RunningWebServer {
   server: Server
   token: string
   url: string
+  /**
+   * The addresses the machine is reachable at, one URL each. Empty unless the
+   * bind was to every interface: a fixed bind has exactly one name, and `url`
+   * already is it.
+   */
+  urls: string[]
   /** Posts a message into a conversation with no turn behind it (a routine's answer). */
   deliver(conversationId: string, text: string): Promise<void>
   stop(): Promise<void>
@@ -149,13 +158,22 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   })
   const address = server.address()
   const port = typeof address === 'object' && address ? address.port : options.port
+  // `0.0.0.0` is what you bind, not what you open: it names no machine, so a URL
+  // built from it opens nothing on any device — the phone on the same tailnet
+  // included, which is what "I set it to 0.0.0.0 and cannot reach it" turns out
+  // to be. Bound to every interface, the URL printed (and opened by `milo web`)
+  // is loopback, and the names the machine actually answers on are listed with it.
+  const wildcard = isWildcardHost(options.host)
   const hostname = options.host.includes(':') ? `[${options.host}]` : options.host
-  const url = `http://${hostname}:${port}/?t=${encodeURIComponent(token)}`
+  const reachable = (host: string): string => `http://${host}:${port}/?t=${encodeURIComponent(token)}`
+  const url = reachable(wildcard ? '127.0.0.1' : hostname)
+  const urls = wildcard ? reachableHosts().map(reachable) : []
 
   return {
     server,
     token,
     url,
+    urls,
     deliver: (conversationId, text) => hub.deliver(conversationId, text),
     stop: () => new Promise<void>((resolve, reject) => {
       hub.close()
@@ -230,7 +248,7 @@ function sameOrigin(request: IncomingMessage, boundHost: string): boolean {
     const addressed = hostName(request.headers.host ?? '')
     // Bound to every interface: whichever name it was reached by is the name the
     // page must also have come from — there is no fixed one to allow.
-    if (WILDCARD_HOSTS.has(boundHost.trim().toLowerCase())) return originHost === addressed
+    if (isWildcardHost(boundHost)) return originHost === addressed
     // Otherwise the page has to have come from a name this server answers to:
     // loopback, or the address it was configured to bind.
     const allowed = new Set(['localhost', '127.0.0.1', '::1', hostName(boundHost)])
@@ -240,8 +258,58 @@ function sameOrigin(request: IncomingMessage, boundHost: string): boolean {
   }
 }
 
+/**
+ * A bind failure said in terms of what to change. The errno is a code, and this
+ * line is the only place a person learns the surface is not up and why — so the
+ * three that actually happen are spelled out rather than handed over raw.
+ */
+export function bindProblem(error: unknown, host: string, port: number): string {
+  const code = (error as { code?: string } | null)?.code
+  if (code === 'EADDRINUSE') return `port ${port} is already in use — another process holds it`
+  if (code === 'EADDRNOTAVAIL') return `${host} is not an address of this machine`
+  if (code === 'EACCES') return `port ${port} needs privileges this process does not have`
+  return errorMessage(error)
+}
+
 /** Binding here means "every interface", so the name it answers to is not fixed. */
 const WILDCARD_HOSTS = new Set(['0.0.0.0', '::', ''])
+
+/** Whether the bind is every interface, in which case no single name opens it. */
+export function isWildcardHost(host: string): boolean {
+  return WILDCARD_HOSTS.has(host.trim().toLowerCase())
+}
+
+/**
+ * What a boot log owes about where the page is, beyond the URL itself.
+ *
+ * A fixed bind names itself, so the URL is the whole answer. Bound to every
+ * interface there is no such name — and `0.0.0.0`, the address that was bound, is
+ * not one any other device opens. That is the silent trap: the URL looks right,
+ * the daemon is up, and the phone on the same tailnet reaches nothing. So the
+ * names it answers on are printed, and `0.0.0.0` is called what it is.
+ */
+export function webReachLines(host: string, urls: string[]): string[] {
+  if (!isWildcardHost(host)) return []
+  return [
+    '! bound to every interface — 0.0.0.0 is not a name another device opens. Reachable at:',
+    ...urls.map((url) => `           ${hyperlink(url)}`),
+  ]
+}
+
+/**
+ * The addresses this machine answers on, loopback aside. A tailnet or LAN address
+ * is what another device opens; typed on the machine itself, any of them works,
+ * which is why the list is offered rather than one host picked for the reader.
+ */
+function reachableHosts(): string[] {
+  const hosts: string[] = []
+  for (const entries of Object.values(networkInterfaces())) {
+    for (const entry of entries ?? []) {
+      if (entry.family === 'IPv4' && !entry.internal) hosts.push(entry.address)
+    }
+  }
+  return hosts
+}
 
 /** The host out of a `Host` header or a bind address, without its port or brackets. */
 function hostName(value: string): string {

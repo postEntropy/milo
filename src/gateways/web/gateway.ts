@@ -1,8 +1,13 @@
 import type { AgentRuntime } from '../../core/runtime.js'
-import { errorMessage } from '../../util/errors.js'
 import { hyperlink } from '../../util/terminal.js'
 import type { Gateway } from '../types.js'
-import { startWebServer, webUiBuilt, type RunningWebServer } from './http.js'
+import {
+  bindProblem,
+  startWebServer,
+  webReachLines,
+  webUiBuilt,
+  type RunningWebServer,
+} from './http.js'
 
 export interface WebGatewayOptions {
   runtime: AgentRuntime
@@ -39,8 +44,10 @@ export class WebGateway implements Gateway {
     } catch (error) {
       // A port someone else holds must not take the daemon down with it: the bots
       // are a working install on their own, and the web UI is one surface among
-      // them. Said out loud, because a silent skip reads as a feature that is on.
-      console.error(`✗ the web UI did not start: ${errorMessage(error)}`)
+      // them. Said out loud — with the address it tried, and in terms of what to
+      // change — because a silent skip reads as a feature that is on.
+      const { host, port } = this.options
+      console.error(`✗ the web UI did not start at ${host}:${port}: ${bindProblem(error, host, port)}`)
       this.running = null
       return
     }
@@ -48,6 +55,7 @@ export class WebGateway implements Gateway {
       console.error('! the web UI is not built — run `npm run build:web`, then reload the page')
     }
     console.error(`Milo web · ${hyperlink(this.running.url)}`)
+    for (const line of webReachLines(this.options.host, this.running.urls)) console.error(line)
   }
 
   async stop(): Promise<void> {

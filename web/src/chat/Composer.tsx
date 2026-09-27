@@ -194,7 +194,6 @@ export function Composer({ busy, queued, provider, model, onSend, onStop, onMode
             : <button className="send-button" type="button" title="Send (Enter)" aria-label="Send message" disabled={!draft.trim()} onClick={() => submit('queue')}><Icon name="send" size={17} /></button>}
         </div>
       </div>
-      <p className="composer-disclaimer">Milo can make mistakes. Check commands before letting them run.</p>
     </div>
   )
 }

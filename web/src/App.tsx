@@ -5,9 +5,10 @@ import { MiloSocket, type ConnectionState } from './lib/ws.js'
 import { Composer } from './chat/Composer.js'
 import { MessageList, type ChatMessage } from './chat/MessageList.js'
 import { Permissions } from './chat/Permissions.js'
+import { Routines } from './routines/Routines.js'
 import { Settings } from './settings/Settings.js'
 import type { ServerFrame, PermissionRequest } from '@protocol'
-import { toolDetail } from '../../src/gateways/tool-line.ts'
+import { toolLine } from '../../src/gateways/tool-line.ts'
 import { Icon } from './ui/Icons.js'
 import { miloAvatar } from './ui/milo.js'
 
@@ -18,7 +19,7 @@ type Notice = { text: string; error: boolean }
 
 const settingsSections = [
   ['provider', 'cpu', 'Provider & model'], ['keys', 'key', 'API keys'], ['memory', 'database', 'Memory'],
-  ['routines', 'repeat', 'Routines'], ['gateways', 'server', 'Gateways'], ['web', 'globe', 'Web'],
+  ['gateways', 'server', 'Gateways'], ['web', 'globe', 'Web'],
   ['tools', 'settings', 'Tools'], ['permissions', 'shield', 'Permissions'], ['display', 'eye', 'Display'],
   ['skills', 'spark', 'Skills'], ['sessions', 'history', 'Sessions'],
 ] as const
@@ -35,7 +36,7 @@ export default function App() {
   const [thinking, setThinking] = useState(true)
   const [identity, setIdentity] = useState({ provider: 'milo', model: '' })
   const [connection, setConnection] = useState<ConnectionState>('connecting')
-  const [settings, setSettings] = useState(false)
+  const [view, setView] = useState<'chat' | 'settings' | 'routines'>('chat')
   const [settingsSection, setSettingsSection] = useState('provider')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('milo-theme') ?? 'system')
@@ -53,7 +54,7 @@ export default function App() {
     setListScrolled(list.scrollTop > 2)
   }, [])
   // biome-ignore lint/correctness/useExhaustiveDependencies: this recomputes when the rows or the view change, not for the values themselves — the list's height is what moved
-  useEffect(() => { updateListTop() }, [updateListTop, sessions, search, settings, sidebarOpen])
+  useEffect(() => { updateListTop() }, [updateListTop, sessions, search, view, sidebarOpen])
   useEffect(() => {
     window.addEventListener('resize', updateListTop)
     return () => window.removeEventListener('resize', updateListTop)
@@ -69,6 +70,10 @@ export default function App() {
     else localStorage.setItem('milo-theme', theme)
     const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
     document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+    // The status bar and the toolbar take the app's own background: launched full
+    // screen, the page would otherwise sit under a band of another colour. Read
+    // from the token rather than repeated here, so the two cannot drift.
+    document.querySelector('meta[name=theme-color]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim())
   }, [conversationId, theme])
 
   useEffect(() => {
@@ -114,8 +119,11 @@ export default function App() {
           return { ...message, text: message.text + event.delta, ...(waited > 0 ? { thoughtMs: waited } : {}) }
         }
         if (event.type === 'reasoning-delta') return { ...message, reasoning: (message.reasoning ?? '') + event.delta }
-        if (event.type === 'tool-start') return { ...message, tools: [...(message.tools ?? []), `⚙ ${event.name}${toolDetail(event.args)}`] }
-        if (event.type === 'tool-end') { waitStartedAt.current = Date.now(); return message }
+        if (event.type === 'tool-start') return { ...message, tools: [...(message.tools ?? []), toolLine(event.name, event.args)] }
+        if (event.type === 'tool-end') {
+          waitStartedAt.current = Date.now()
+          return event.isError ? { ...message, tools: [...(message.tools ?? []), `${toolLine(event.name)} failed`] } : message
+        }
         if (event.type === 'waiting') return { ...message, status: 'Waiting for this session to free up…' }
         if (event.type === 'waited') return { ...message, status: `Session freed after ${formatMs(event.ms)}.` }
         if (event.type === 'compacted') return { ...message, status: `Tidying the context (${formatMs(event.ms)}).` }
@@ -152,7 +160,7 @@ export default function App() {
       socket.close()
       setMessages([])
       setSessionId(session.id)
-      setSettings(false)
+      setView('chat')
       setSidebarOpen(false)
       setConversationId(nextConversationId)
     } catch (error) { fail(error) }
@@ -162,6 +170,9 @@ export default function App() {
   useEffect(() => {
     const container = messagesRef.current
     if (!container) return
+    // The empty state is a screen of its own: it stays at the top, so the hero
+    // is never half-scrolled out of view when it is only slightly too tall.
+    if (messages.length === 0) { container.scrollTop = 0; return }
     const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120
     if (nearBottom) container.scrollTop = container.scrollHeight
   }, [messages, pendingPermission])
@@ -202,7 +213,7 @@ export default function App() {
       setMessages([])
       setSessionId(id)
       setConversationId(nextConversationId)
-      setSettings(false)
+      setView('chat')
       setSidebarOpen(false)
     } catch (error) { fail(error) }
   }
@@ -212,7 +223,7 @@ export default function App() {
     socket.close()
     setMessages([])
     socket.connect(conversationId)
-    setSettings(false)
+    setView('chat')
   }
 
   async function exportSession(): Promise<void> {
@@ -253,9 +264,10 @@ export default function App() {
   return <div className="app-shell">
     {sidebarOpen && <button className="sidebar-scrim" type="button" aria-label="Close menu" onClick={() => setSidebarOpen(false)} />}
     <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`} aria-label="Main navigation">
-      {!settings ? <div className="sidebar-chat-nav">
+      {view !== 'settings' ? <div className="sidebar-chat-nav">
         <div className="brand-row"><img className="brand-mark" src={miloAvatar} alt="" /><span className="brand-name" translate="no">Milo</span></div>
         <div className="sidebar-pad">
+          <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={16} /><span>Routines</span></button>
           <div className="sidebar-controls">
             <label className="sidebar-search"><Icon name="search" size={16} /><input aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
             <button className="new-chat" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>
@@ -269,12 +281,12 @@ export default function App() {
           <div className={`scroll-blur top ${listScrolled ? 'on' : ''}`} aria-hidden="true" />
         </div>
         <div className="sidebar-footer">
-          <button className="sidebar-action" type="button" onClick={() => { setSettings(true); setSidebarOpen(false) }}><Icon name="settings" /><span className="sidebar-action-text"><strong>Settings</strong><small>Models, keys and tools</small></span></button>
+          <button className="sidebar-action" type="button" onClick={() => { setView('settings'); setSidebarOpen(false) }}><Icon name="settings" /><span className="sidebar-action-text"><strong>Settings</strong><small>Models, keys and tools</small></span></button>
         </div>
       </div> : <div className="sidebar-settings-nav">
         <div className="settings-nav-heading"><h2>Settings</h2><p>For this installation</p></div>
         <nav className="settings-nav" aria-label="Settings sections">
-          {settingsSections.map(([id, icon, label]) => <button type="button" key={id} className={`settings-nav-item ${settingsSection === id ? 'active' : ''}`} onClick={() => setSettingsSection(id)}><Icon name={icon} /><span>{label}</span></button>)}
+          {settingsSections.map(([id, icon, label]) => <button type="button" key={id} className={`settings-nav-item ${settingsSection === id ? 'active' : ''}`} onClick={() => { setSettingsSection(id); setSidebarOpen(false) }}><Icon name={icon} /><span>{label}</span></button>)}
         </nav>
       </div>}
     </aside>
@@ -282,16 +294,19 @@ export default function App() {
     <main className="main">
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
-        {settings && <button className="btn-secondary" type="button" onClick={() => setSettings(false)}><span aria-hidden="true">←</span> Back to chat</button>}
-        <div className="topbar-title"><h1>{settings ? 'Settings' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
+        {view !== 'chat' && <button className="btn-secondary" type="button" onClick={() => setView('chat')}><span aria-hidden="true">←</span> Back to chat</button>}
+        <div className="topbar-title"><h1>{view === 'settings' ? 'Settings' : view === 'routines' ? 'Routines' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
         <div className="topbar-actions">
-          {!settings && sessionId && <button className="icon-button" type="button" title="Export this conversation" aria-label="Export this conversation" onClick={() => void exportSession()}><Icon name="download" size={16} /></button>}
-          {!settings && sessionId && <button className="icon-button" type="button" title="Clear this conversation" aria-label="Clear this conversation" onClick={() => void clearSession()}><Icon name="trash" size={16} /></button>}
-          {!settings && connection !== 'online' && <span className={`connection-status ${connection}`}><span />{connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
+          {view === 'chat' && sessionId && <button className="icon-button topbar-action" type="button" title="Export this conversation" aria-label="Export this conversation" onClick={() => void exportSession()}><Icon name="download" size={16} /></button>}
+          {view === 'chat' && sessionId && <button className="icon-button topbar-action" type="button" title="Clear this conversation" aria-label="Clear this conversation" onClick={() => void clearSession()}><Icon name="trash" size={16} /></button>}
+          {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>}
+          {view === 'chat' && connection !== 'online' && <span className={`connection-status ${connection}`}><span />{connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
         </div>
       </header>
-      {settings
-        ? <Settings section={settingsSection} conversationId={conversationId} sessionId={sessionId} onClose={() => setSettings(false)} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} />
+      {view === 'settings'
+        ? <Settings section={settingsSection} conversationId={conversationId} sessionId={sessionId} onClose={() => setView('chat')} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} />
+        : view === 'routines'
+        ? <Routines conversationId={conversationId} />
         : <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef}>
             <MessageList messages={messages} thinking={thinking} onPrompt={send} />

@@ -10,7 +10,6 @@
   --text: #272724;
   --subtext: #3B3934;
   --muted: #746A6A;
-  --meta: #7A716A;
   --border: #DED8CB;
   --border-soft: #E7E1D5;
   --line: #DED8CB;
@@ -51,7 +50,6 @@
   --text: #EFEEE9;
   --subtext: #D9D6CE;
   --muted: #A8A29A;
-  --meta: #8A847C;
   --border: #34352F;
   --border-soft: #2A2B27;
   --line: #34352F;
@@ -86,6 +84,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .brand-mark { display: grid; width: 30px; height: 30px; place-items: center; flex: none; border-radius: 9px; background: var(--accent); color: var(--accent-on); object-fit: cover; font-size: 15px; font-weight: 600; letter-spacing: -.05em; }
 .brand-name { font-size: 17px; font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
 .sidebar-pad { padding-inline: 14px; }
+.sidebar-tab { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; margin-top: 6px; border: 0; border-radius: 10px; background: transparent; padding: 8px 10px; color: var(--fg-2); font-size: 13px; font-weight: 500; text-align: start; transition: background var(--motion-fast); }
+.sidebar-tab > svg { flex: none; }
+.sidebar-tab:hover { background: var(--surface); }
+.sidebar-tab.active { background: var(--surface); color: var(--fg); }
 .sidebar-controls { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .new-chat { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 12px; background: var(--surface); color: var(--fg-2); transition: background var(--motion-fast); }
 .new-chat:hover { background: var(--border-soft); }
@@ -132,10 +134,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-nav-item.active svg { color: var(--fg-2); }
 .sidebar-scrim { display: none; }
 
-.main { grid-column: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--bg); }
+.main { position: relative; grid-column: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--bg); }
 .topbar { z-index: 5; display: flex; align-items: center; gap: 12px; min-height: 62px; background: var(--bg); padding: 10px 20px; }
-.mobile-menu { display: none; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 10px; background: transparent; padding: 0; color: var(--fg-2); transition: background var(--motion-fast); }
-.mobile-menu:hover { background: var(--surface); }
+.mobile-menu, .topbar-new { display: none; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 10px; background: transparent; padding: 0; color: var(--fg-2); transition: background var(--motion-fast); }
+.mobile-menu:hover, .topbar-new:hover { background: var(--surface); }
 .topbar-title { flex: 1; min-width: 0; }
 .topbar-title h1 { overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .topbar-title p { overflow: hidden; margin-top: 1px; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -215,7 +217,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .send-button:disabled { cursor: not-allowed; background: var(--surface-warm); color: var(--muted); box-shadow: none; }
 .send-button.stop { border: 1px solid var(--border); background: var(--surface); color: var(--fg); box-shadow: none; }
 .send-button.stop:hover:not(:disabled) { background: var(--surface-warm); transform: none; }
-.composer-disclaimer { width: min(772px, 100%); margin: 9px auto 0; color: var(--meta); font-size: 11px; text-align: center; }
 .queue-list { width: min(772px, 100%); margin: 0 auto; }
 .queue-chip { display: flex; min-height: 34px; align-items: center; gap: 8px; margin-bottom: 6px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface-warm); padding: 6px 11px; color: var(--muted); font-size: 12px; }
 
@@ -234,24 +235,28 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .deny-button:hover { background: var(--border-soft); }
 .approval-time { display: flex; align-items: center; gap: 6px; margin-inline-start: auto; color: var(--muted); font: 12px var(--font-mono); }
 
-.settings-workspace { flex: 1; min-height: 0; overflow: auto; }
-.settings-inner { width: min(1040px, 100%); margin: 0 auto; padding: 30px 32px 96px; }
+.settings-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: auto; }
+/* The panel stack takes up the slack so the save bar's own place is the bottom
+   of the screen: sticky only pins it while the content runs past the view, and
+   on a short section it would otherwise sit in the middle of the page. */
+.settings-inner { display: flex; flex: 1; width: min(1040px, 100%); flex-direction: column; margin: 0 auto; padding: 30px 32px 0; }
+.settings-panel-stack { flex: 1; }
 .btn-secondary { display: inline-flex; min-height: 40px; align-items: center; gap: 7px; border: 0; border-radius: 11px; background: var(--surface-warm); padding: 8px 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; white-space: nowrap; transition: background var(--motion-fast); }
 .btn-secondary:hover { background: var(--border-soft); }
-.settings-section { width: 100%; margin-bottom: 16px; border: 0; border-radius: 18px; background: var(--surface); box-shadow: var(--shadow-sm); }
+.settings-section { width: 100%; margin-bottom: 30px; }
 .settings-section[hidden] { display: none; }
-.settings-section .panel-head { padding: 22px 22px 0; }
+.settings-section .panel-head { padding: 0 0 16px; }
 .settings-section .panel-head h2 { font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
 .settings-section .panel-head p { margin-top: 4px; color: var(--muted); font-size: 13px; line-height: 1.55; }
 .settings-section .panel-body > p { margin-top: 10px; color: var(--muted); font-size: 13px; line-height: 1.55; }
 .settings-section .panel-body > p em { color: var(--fg-2); font-family: var(--font-mono); font-size: 12px; font-style: normal; }
-.settings-section .panel-body { padding: 16px 22px 20px; }
+.settings-section .panel-body { padding: 0; }
 .settings-section .panel-body > h3.section-label { padding-top: 14px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 .field { display: grid; min-width: 0; gap: 6px; }
 .field.full { grid-column: 1 / -1; }
 .settings-section .field > label, .settings-section .field > span { font-size: 13px; font-weight: 500; }
-.field input, .field select, .field textarea { width: 100%; min-height: 42px; border: 0; border-radius: 11px; background: var(--bg); padding: 9px 12px; color: var(--fg); font-size: 13px; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
+.field input, .field select, .field textarea { width: 100%; min-height: 42px; border: 0; border-radius: 11px; background: var(--surface); padding: 9px 12px; color: var(--fg); font-size: 13px; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
 .field input:focus, .field select:focus, .field textarea:focus { outline: 0; background: var(--surface); box-shadow: var(--focus-ring); }
 .field textarea { min-height: 88px; resize: vertical; }
 .field small { color: var(--muted); font-size: 12px; line-height: 1.5; }
@@ -260,14 +265,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .section-label { padding: 14px 0 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
 .secret-row, .skill-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; transition: background var(--motion-fast); }
 .secret-row:hover, .skill-row:hover, .entry-row:hover { background: var(--surface-warm); }
-.secret-row input { flex: 1; min-width: 0; min-height: 40px; border: 0; border-radius: 11px; background: var(--bg); padding: 8px 11px; font-size: 13px; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
+.secret-row input { flex: 1; min-width: 0; min-height: 40px; border: 0; border-radius: 11px; background: var(--surface); padding: 8px 11px; font-size: 13px; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
 .secret-row input:focus { outline: 0; background: var(--surface); box-shadow: var(--focus-ring); }
 .secret-name { font-size: 13px; font-weight: 500; }
 .secret-row .secret-name { flex: none; min-width: 96px; }
 .secret-state { color: var(--muted); font: 11px var(--font-mono); }
 .secret-row .secret-state, .skill-row .secret-state { flex: none; }
 .settings-section .list-empty { padding: 18px; color: var(--muted); font-size: 13px; text-align: center; }
-.settings-save { position: sticky; z-index: 4; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 18px -8px 0; background: color-mix(in oklab, var(--bg) 96%, transparent); padding: 12px 8px; }
+/* Pinned to the foot of the screen, the content passing under it softening into
+   a blur the way the sidebar's list does — no rule, and no text showing through. */
+.settings-save { position: sticky; z-index: 4; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 18px -8px 0; background: color-mix(in oklab, var(--bg) 84%, transparent); padding: 12px 8px; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .save-context { color: var(--muted); font-size: 12px; }
 .save-actions { display: flex; gap: 9px; }
 .button { display: inline-flex; flex: none; min-height: 40px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 11px; background: var(--surface-warm); padding: 8px 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
@@ -313,25 +320,40 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { position: fixed; z-index: 60; inset-block: 0; inset-inline-start: 0; width: 286px; max-width: 86vw; transform: translateX(-102%); transition: transform var(--motion-base) var(--ease-standard); box-shadow: var(--shadow); }
+  .sidebar { position: fixed; z-index: 60; inset-block: 0; inset-inline-start: 0; width: 286px; max-width: 86vw; transform: translateX(-102%); transition: transform var(--motion-base) var(--ease-standard); box-shadow: var(--shadow); padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom); }
   .sidebar.open { transform: none; }
   .sidebar-scrim { position: fixed; z-index: 55; inset: 0; display: block; border: 0; background: rgb(0 0 0 / 40%); }
   .main { grid-column: 1; }
-  .mobile-menu { display: grid; }
-  .messages { padding: 18px 18px 8px; }
-  .composer-shell { padding: 10px 18px 14px; }
-  .settings-inner { padding: 28px 20px 84px; }
+  .mobile-menu, .topbar-new { display: grid; }
+  /* The bar floats over the content instead of taking a band above it, so the
+     screen belongs to what it is showing and the buttons ride on top. Only the
+     buttons take taps: the rest of the strip stays see-through to the page.
+     Every screen names itself below — the chat in the sidebar, Settings in its
+     own nav and panel head, Routines in its panel head — and the per-session
+     actions are desktop affordances. */
+  .topbar { position: absolute; z-index: 6; inset-inline: 0; top: 0; min-height: 0; background: none; padding: max(8px, env(safe-area-inset-top)) 12px 8px; pointer-events: none; }
+  .topbar > *, .topbar-actions > * { pointer-events: auto; }
+  .topbar-actions { margin-inline-start: auto; }
+  .topbar-action, .topbar-title { display: none; }
+  /* A frosted pill each, so they stay legible with the content running under. */
+  .mobile-menu, .topbar-new { background: color-mix(in oklab, var(--surface) 82%, transparent); box-shadow: var(--shadow-sm); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  /* The content starts below the pills, wherever the screen's own bars put them. */
+  .messages { padding: calc(max(8px, env(safe-area-inset-top)) + 44px) 18px 8px; }
+  /* Hug the bottom: the browser's own bar already supplies the breathing room,
+     and the safe area only pushes it up when that bar has scrolled away. */
+  .composer-shell { padding: 10px 18px max(6px, env(safe-area-inset-bottom)); }
+  .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 48px) 20px 0; }
+  .settings-save { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 }
 @media (max-width: 620px) {
   .suggestion-grid { grid-template-columns: 1fr; gap: 9px; margin-top: 26px; }
   .suggestion { min-height: 62px; }
-  .settings-inner { padding: 24px 16px 72px; }
+  .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 48px) 16px 0; }
   .form-grid { grid-template-columns: 1fr; }
   .field.full { grid-column: auto; }
   .secret-row { flex-wrap: wrap; }
   .secret-row input { flex-basis: 100%; order: 2; }
   .secret-row .button { order: 3; margin-inline-start: auto; }
-  .topbar { min-height: 58px; padding: 8px 12px; }
   .connection-status { font-size: 0; }
   .connection-status > span { width: 8px; height: 8px; }
   .message.user .message-content { max-width: 92%; }

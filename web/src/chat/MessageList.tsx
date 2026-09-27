@@ -26,7 +26,7 @@ function ToolLines({ id, tools }: { id: string; tools: string[] }) {
   return <>{tools.map((tool) => {
     const occurrence = seen.get(tool) ?? 0
     seen.set(tool, occurrence + 1)
-    return <div className="tool-line" key={`${id}-${tool}-${occurrence}`}><Icon name="settings" size={14} /><code>{tool}</code></div>
+    return <div className="tool-line" key={`${id}-${tool}-${occurrence}`}><code>{tool}</code></div>
   })}</>
 }
 

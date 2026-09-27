@@ -10,6 +10,7 @@ import { TurnQueue } from '../turns.js'
 import type { ClientFrame, ServerFrame, TranscriptMessage } from './protocol.js'
 import { PERMISSION_TIMEOUT_MS } from './protocol.js'
 import { displayEvent } from './turn.js'
+import { toolLine } from '../tool-line.js'
 
 export interface WebClient {
   send(frame: ServerFrame): void
@@ -256,7 +257,16 @@ function transcript(session: Session): TranscriptMessage[] {
     if (message.role !== 'user' && message.role !== 'assistant') return []
     const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
     const reasoning = message.content.filter((part) => part.type === 'reasoning').map((part) => part.text).join('')
-    if (!text && !reasoning) return []
-    return [{ role: message.role, text, ...(reasoning ? { reasoning } : {}) }]
+    // The tool calls stay with the turn they belong to: a session read back — a
+    // reload, or a tab opened later — shows the same lines the live stream drew,
+    // from the same formatter the other surfaces use.
+    const tools = message.content.flatMap((part) => part.type === 'tool-call' ? [toolLine(part.name, part.args)] : [])
+    if (!text && !reasoning && tools.length === 0) return []
+    return [{
+      role: message.role,
+      text,
+      ...(reasoning ? { reasoning } : {}),
+      ...(tools.length > 0 ? { tools } : {}),
+    }]
   })
 }

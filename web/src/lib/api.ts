@@ -4,16 +4,23 @@ export class ApiError extends Error {
   }
 }
 
+const TOKEN_KEY = 'milo-token'
+
+/**
+ * The token the server printed, taken out of the URL once and kept on the device.
+ * It outlives the tab on purpose: a page added to the home screen opens at the
+ * app's root, with no `?t=` on it, and would otherwise have nothing to present.
+ */
 export function apiToken(): string {
   const params = new URLSearchParams(location.search)
   const fromUrl = params.get('t')
   if (fromUrl) {
-    sessionStorage.setItem('milo-token', fromUrl)
+    localStorage.setItem(TOKEN_KEY, fromUrl)
     params.delete('t')
     const search = params.toString()
     history.replaceState(null, '', `${location.pathname}${search ? `?${search}` : ''}${location.hash}`)
   }
-  return sessionStorage.getItem('milo-token') ?? ''
+  return localStorage.getItem(TOKEN_KEY) ?? ''
 }
 
 export async function api<T>(action: string, body: Record<string, unknown> = {}): Promise<T> {

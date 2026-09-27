@@ -4,7 +4,7 @@ import { pathToFileURL } from 'node:url'
 import { createRuntime } from '../core/bootstrap.js'
 import { loadConfig, readAuth, resolveGatewayToken } from '../core/config/load.js'
 import { MILO_HOME } from '../core/config/paths.js'
-import { startWebServer } from '../gateways/web/http.js'
+import { bindProblem, startWebServer, webReachLines } from '../gateways/web/http.js'
 import { errorMessage } from '../util/errors.js'
 import { hyperlink } from '../util/terminal.js'
 
@@ -39,11 +39,13 @@ export async function runWeb(args = process.argv.slice(2)): Promise<void> {
     })
   } catch (error) {
     await runtime.close()
-    throw error
+    // Said in terms of what to change, since this is all the person gets to see.
+    throw new Error(bindProblem(error, host, port))
   }
 
   console.error(`Milo web · ${loaded.model} (${loaded.provider.id}) · mode ${runtime.permissions?.mode ?? 'ask'} · effort ${runtime.reasoningEffort} · ${runtime.skills.length} skills · browser ${runtime.browser ? 'on' : 'off'} · ${MILO_HOME}`)
   console.error(`Open ${hyperlink(web.url)}`)
+  for (const line of webReachLines(host, web.urls)) console.error(line)
   if (options.open) void openBrowser(web.url)
 
   let closing = false

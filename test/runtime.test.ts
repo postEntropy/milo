@@ -95,6 +95,21 @@ describe('AgentRuntime sessions', () => {
     expect(back?.messages.length).toBeGreaterThan(0)
   })
 
+  it('keeps the resumed session when the scope is opened again in the same run', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const runtime = new AgentRuntime(runtimeOptions(dir))
+
+    const first = await runtime.getSession(cli)
+    await drain(first.send('remember this'))
+    await runtime.newSession(cli)
+
+    await runtime.resumeSession(cli, first.id)
+    // Opening the scope is not a reason to start over: a surface that resumes and
+    // then opens it — the web, whose socket connects on the id it just minted —
+    // has to land in the session it asked for.
+    expect((await runtime.sessionFor(cli)).id).toBe(first.id)
+  })
+
   it('returns null for an unknown session id', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
     const runtime = new AgentRuntime(runtimeOptions(dir))

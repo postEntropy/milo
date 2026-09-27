@@ -300,7 +300,12 @@ edits it in the terminal, and the Settings screen in the browser has the same se
 false` is `--no-web` written down. **Anything but loopback is reachable from the network** — the page
 still requires the token, but the token is then the only thing in the way, so a host other than
 `127.0.0.1`/`localhost` is a decision to make deliberately. Binding to `0.0.0.0` accepts whatever
-name the request came in on; any other address is pinned to the name it was given.
+name the request came in on; any other address is pinned to the name it was given. Bound to every
+interface there is no name to print, so the URL is loopback and the machine's own addresses are
+listed under it — `0.0.0.0` is what you bind, not a name another device can open, and a URL built
+from it opens nothing on the phone you meant to reach it from. A bind that fails says which address
+it tried and what to change (`port 7717 is already in use — another process holds it`), because a
+surface that is not up must not be read as one that is.
 
 The chat itself is the terminal's turn model with a real browser behind it: messages stream in,
 reasoning folds under the question it belongs to, tool lines appear as they run, a confirmation is

@@ -49,6 +49,8 @@ export interface TranscriptMessage {
   role: 'user' | 'assistant'
   text: string
   reasoning?: string
+  /** The tool calls this turn made, one line each, in the shared chat format. */
+  tools?: string[]
 }
 
 export function parseClientFrame(value: unknown): ClientFrame | null {

@@ -131,13 +131,19 @@ export class AgentRuntime {
     return this.newSession(scope)
   }
 
-  /** Rebinds `scope` to an existing session; null when the id is unknown. */
+  /**
+   * Rebinds `scope` to an existing session; null when the id is unknown. The
+   * scope counts as opened: a resume is this run choosing the session for it, so
+   * a surface that then opens the scope — the web, whose socket reconnects after
+   * the id is minted — must be handed that session rather than a fresh one.
+   */
   async resumeSession(scope: MemoryScope, id: string): Promise<Session | null> {
     const cached = this.cache.get(id)
     if (cached) {
       await this.detach(scope, id)
       cached.scope = scope
       await this.store.setBinding(scopeKey(scope), id)
+      this.opened.add(scopeKey(scope))
       return cached
     }
     const record = await this.store.load(id)
@@ -145,6 +151,7 @@ export class AgentRuntime {
     await this.detach(scope, id)
     const session = this.adopt(record, scope)
     await this.store.setBinding(scopeKey(scope), id)
+    this.opened.add(scopeKey(scope))
     return session
   }
 

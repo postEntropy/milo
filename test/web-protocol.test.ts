@@ -14,12 +14,22 @@ describe('web protocol', () => {
     expect(parseClientFrame(null)).toBeNull()
   })
 
+  it('sends tool calls as events, not folded into the reply text', () => {
+    output.length = 0
+    displayEvent({ type: 'tool-start', id: '1', name: 'read_file', args: { path: 'a.txt' } }, 'turn', { tools: 'full', thinking: 'on' }, send as never)
+    displayEvent({ type: 'tool-start', id: '2', name: 'read_file', args: { path: 'a.txt' } }, 'turn', { tools: 'name', thinking: 'on' }, send as never)
+    expect(output).toMatchObject([
+      { event: { type: 'tool-start', name: 'read_file', args: { path: 'a.txt' } } },
+      { event: { type: 'tool-start', name: 'read_file', args: undefined } },
+    ])
+  })
+
   it('keeps failures visible when tool lines are hidden', () => {
     output.length = 0
     displayEvent({ type: 'tool-start', id: '1', name: 'write_file', args: { path: 'a.txt' } }, 'turn', { tools: 'off', thinking: 'on' }, send as never)
     displayEvent({ type: 'tool-end', id: '1', name: 'write_file', result: 'failed', isError: true }, 'turn', { tools: 'off', thinking: 'on' }, send as never)
     expect(output).toHaveLength(1)
-    expect(output[0]).toMatchObject({ event: { delta: '❌ write_file failed\n' } })
+    expect(output[0]).toMatchObject({ event: { type: 'tool-end', name: 'write_file', isError: true } })
   })
 
   it('hides reasoning only when configured off', () => {
