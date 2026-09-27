@@ -6,6 +6,7 @@ import { loadConfig, readAuth, resolveGatewayToken } from '../core/config/load.j
 import { MILO_HOME } from '../core/config/paths.js'
 import { startWebServer } from '../gateways/web/http.js'
 import { errorMessage } from '../util/errors.js'
+import { hyperlink } from '../util/terminal.js'
 
 interface Options {
   host?: string
@@ -42,7 +43,7 @@ export async function runWeb(args = process.argv.slice(2)): Promise<void> {
   }
 
   console.error(`Milo web · ${loaded.model} (${loaded.provider.id}) · mode ${runtime.permissions?.mode ?? 'ask'} · effort ${runtime.reasoningEffort} · ${runtime.skills.length} skills · browser ${runtime.browser ? 'on' : 'off'} · ${MILO_HOME}`)
-  console.error(`Open ${web.url}`)
+  console.error(`Open ${hyperlink(web.url)}`)
   if (options.open) void openBrowser(web.url)
 
   let closing = false

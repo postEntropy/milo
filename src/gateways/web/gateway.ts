@@ -1,5 +1,6 @@
 import type { AgentRuntime } from '../../core/runtime.js'
 import { errorMessage } from '../../util/errors.js'
+import { hyperlink } from '../../util/terminal.js'
 import type { Gateway } from '../types.js'
 import { startWebServer, webUiBuilt, type RunningWebServer } from './http.js'
 
@@ -46,7 +47,7 @@ export class WebGateway implements Gateway {
     if (!webUiBuilt()) {
       console.error('! the web UI is not built — run `npm run build:web`, then reload the page')
     }
-    console.error(`Milo web · ${this.running.url}`)
+    console.error(`Milo web · ${hyperlink(this.running.url)}`)
   }
 
   async stop(): Promise<void> {
