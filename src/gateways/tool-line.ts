@@ -8,6 +8,11 @@
  * every other detail (so copying it out copied something incomplete), and the
  * terminal drew both shapes the same way anyway. One shape, and it is the one the
  * other tools already had.
+ *
+ * The block is back for `shell_command`, with both of those answered rather than
+ * argued away: the label sits *outside* the fence, so the name is still a name,
+ * and the command goes in whole (`shellCommand`, not `toolDetail`) — a fenced
+ * block whose contents are cut off is a block that lies about what it is for.
  */
 
 /**
@@ -61,6 +66,19 @@ export function toolLine(
  */
 export function toolLabel(name: string, markdown: boolean): string {
   return markdown ? `**${name}**` : name
+}
+
+/**
+ * The raw command of a `shell_command` call, whole.
+ *
+ * `toolDetail` flattens and cuts at 120 characters, which is right for a gist
+ * beside a tool's name and wrong for a fenced block: that block is there to be
+ * read and copied, and a copy of something incomplete is worse than no block.
+ */
+export function shellCommand(args: unknown): string {
+  if (!args || typeof args !== 'object') return ''
+  const value = (args as Record<string, unknown>).command
+  return typeof value === 'string' ? value.trim() : ''
 }
 
 const GIST_LIMIT = 120
