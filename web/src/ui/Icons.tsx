@@ -3,7 +3,6 @@ import type { SVGProps } from 'react'
 const paths: Record<string, React.ReactNode> = {
   plus: <><path d="M12 5v14M5 12h14" /></>,
   search: <><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></>,
-  sliders: <><path d="M4 7h16M4 12h16M4 17h16" /><circle cx="9" cy="7" r="1.9" /><circle cx="15" cy="12" r="1.9" /><circle cx="7" cy="17" r="1.9" /></>,
   send: <><path d="M21.5 2.5 11 13" /><path d="M21.5 2.5 15 21.5l-4-8.5-8.5-4Z" /></>,
   stop: <><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none" /></>,
   chevron: <><path d="m9 6 6 6-6 6" /></>,
@@ -24,6 +23,13 @@ const paths: Record<string, React.ReactNode> = {
   file: <><path d="M6 3h8l4 4v14H6zM14 3v4h4" /></>,
   terminal: <><rect x="4" y="5" width="16" height="14" rx="2" /><path d="m8 10 2.5 2.5L8 15m5 0h3" /></>,
   clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  cpu: <><rect x="7" y="7" width="10" height="10" rx="2" /><path d="M10 2v3m4-3v3M10 19v3m4-3v3M2 10h3m-3 4h3m14-4h3m-3 4h3" /></>,
+  download: <><path d="M12 3v12m0 0 4-4m-4 4-4-4" /><path d="M4 19h16" /></>,
+  trash: <><path d="M4 7h16M10 4h4M9 7v12m6-12v12M6 7l1 13h10l1-13" /></>,
+  note: <><path d="M5 3h9l5 5v13H5zM14 3v5h5" /><path d="M9 13h6M9 17h4" /></>,
+  play: <><path d="M7 4.5v15l13-7.5Z" /></>,
+  repeat: <><path d="M4 11V9a4 4 0 0 1 4-4h9m0 0-3-3m3 3-3 3" /><path d="M20 13v2a4 4 0 0 1-4 4H7m0 0 3 3m-3-3 3-3" /></>,
+  globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.4 2.6 2.4 15.4 0 18M12 3c-2.4 2.6-2.4 15.4 0 18" /></>,
 }
 
 export function Icon({ name, size = 18, className = '', ...props }: SVGProps<SVGSVGElement> & { name: keyof typeof paths; size?: number }) {
