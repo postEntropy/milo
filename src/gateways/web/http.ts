@@ -7,7 +7,7 @@ import { WebSocketServer, type WebSocket } from 'ws'
 import type { AgentRuntime } from '../../core/runtime.js'
 import { parseClientFrame, PROTOCOL_VERSION, type ServerFrame } from './protocol.js'
 import { WebHub } from './hub.js'
-import { WebStudio } from './studio.js'
+import { WebSettings } from './settings.js'
 
 const MAX_BODY = 1024 * 1024
 
@@ -74,10 +74,10 @@ export interface RunningWebServer {
 export async function startWebServer(options: WebServerOptions): Promise<RunningWebServer> {
   const token = options.token ?? randomBytes(32).toString('base64url')
   const hub = new WebHub(options.runtime, options.identity ?? { provider: 'milo', model: 'unknown' })
-  const studio = new WebStudio(options.runtime, options.cwd)
+  const settings = new WebSettings(options.runtime, options.cwd)
   const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
   const server = createServer((request, response) => {
-    void handleHttp(request, response, token, studio, options.host).catch((error: unknown) => {
+    void handleHttp(request, response, token, settings, options.host).catch((error: unknown) => {
       if (!response.headersSent) json(response, 500, { error: error instanceof Error ? error.message : String(error) })
       else response.destroy()
     })
@@ -174,7 +174,7 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
     try {
       const body = await readBody(request)
       const action = url.pathname.slice('/api/'.length)
-      const result = await studio.handle(action, body)
+      const result = await settings.handle(action, body)
       return json(response, 200, result)
     } catch (error) {
       return json(response, 400, { error: error instanceof Error ? error.message : String(error) })

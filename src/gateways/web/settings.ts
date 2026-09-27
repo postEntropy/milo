@@ -50,7 +50,7 @@ import { JobRegistry } from './jobs.js'
 const SESSION_ID = /^[a-z]+-[a-z]+-\d{1,3}$/
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
-export class WebStudio {
+export class WebSettings {
   private writeTail: Promise<unknown> = Promise.resolve()
   private readonly jobs = new JobRegistry()
 
@@ -86,7 +86,7 @@ export class WebStudio {
       case 'profiles': return this.profiles()
       case 'job-start': return this.jobStart(body)
       case 'job-status': return this.jobStatus(body)
-      default: throw new Error('Unknown Studio action.')
+      default: throw new Error('Unknown Settings action.')
     }
   }
 

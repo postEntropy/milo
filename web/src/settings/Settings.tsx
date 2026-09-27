@@ -4,7 +4,7 @@ import { Icon } from '../ui/Icons.js'
 import { EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from '@protocol'
 
 type ProviderPreset = { id: string; name: string; baseURL: string; wire: string; keyless?: boolean; models: string[]; keyURL?: string }
-type StudioConfig = {
+type SettingsConfig = {
   provider: string
   model: string
   providers: Record<string, { name?: string; baseURL: string; wire?: string; keyless?: boolean; keyEnv?: string; headers?: Record<string, string> }>
@@ -38,8 +38,8 @@ type Routine = {
 }
 type Browser = { id: string; name: string; path: string; version: string | null }
 type Profile = { id: string; name: string; dir: string; bytes: number }
-type StudioData = {
-  config: StudioConfig
+type SettingsData = {
+  config: SettingsConfig
   auth: Record<string, Record<string, { set: boolean; masked?: string }>>
   presets: ProviderPreset[]
   skills: { global: Skill[]; project: Skill[] }
@@ -50,7 +50,7 @@ type StudioData = {
 type JobView = { id: string; kind: string; status: 'running' | 'done' | 'error'; lines: string[]; result?: Record<string, unknown>; error?: string }
 type Notice = { text: string; error: boolean }
 
-export function Studio({ section, conversationId, sessionId, onClose, onSessionChange, theme, onThemeChange }: {
+export function Settings({ section, conversationId, sessionId, onClose, onSessionChange, theme, onThemeChange }: {
   section: string
   conversationId: string
   sessionId: string
@@ -59,8 +59,8 @@ export function Studio({ section, conversationId, sessionId, onClose, onSessionC
   theme: string
   onThemeChange(theme: string): void
 }) {
-  const [data, setData] = useState<StudioData | null>(null)
-  const [draft, setDraft] = useState<StudioConfig | null>(null)
+  const [data, setData] = useState<SettingsData | null>(null)
+  const [draft, setDraft] = useState<SettingsConfig | null>(null)
   const [secrets, setSecrets] = useState<Record<string, string>>({})
   const [skillSource, setSkillSource] = useState('')
   const [skillScope, setSkillScope] = useState<'global' | 'project'>('global')
@@ -85,7 +85,7 @@ export function Studio({ section, conversationId, sessionId, onClose, onSessionC
 
   const reload = useCallback(async (): Promise<void> => {
     try {
-      const result = await api<StudioData>('overview')
+      const result = await api<SettingsData>('overview')
       setData(result)
       setDraft(structuredClone(result.config))
     } catch (error) { setNotice({ text: message(error), error: true }) }
@@ -94,7 +94,7 @@ export function Studio({ section, conversationId, sessionId, onClose, onSessionC
   const load = useCallback(async (): Promise<void> => {
     setBusy(true)
     try {
-      const result = await api<StudioData>('overview')
+      const result = await api<SettingsData>('overview')
       setData(result)
       setDraft(structuredClone(result.config))
       setNotice(null)
@@ -161,7 +161,7 @@ export function Studio({ section, conversationId, sessionId, onClose, onSessionC
   }
 
   /** Writes the config straight away, for a control that acts rather than edits. */
-  async function saveNow(patch: (config: StudioConfig) => void, note: string): Promise<void> {
+  async function saveNow(patch: (config: SettingsConfig) => void, note: string): Promise<void> {
     if (!draft) return
     setSaving(true)
     try {
@@ -254,19 +254,15 @@ export function Studio({ section, conversationId, sessionId, onClose, onSessionC
     catch (error) { setNotice({ text: message(error), error: true }) }
   }
 
-  return <main className="studio-workspace">
-    <div className="studio-inner">
-      <header className="studio-heading">
-        <div><p className="eyebrow">Installation settings</p><h1>{studioTitle(section)}</h1><p>{studioDescription(section)}</p></div>
-        <button className="btn-secondary" type="button" onClick={onClose}><span aria-hidden="true">←</span> Back to chat</button>
-      </header>
+  return <main className="settings-workspace">
+    <div className="settings-inner">
       {busy && <p role="status">Reading Milo’s settings…</p>}
       {!busy && !data && <div className="notice error">{notice?.text ?? 'Could not open settings.'} <button className="button" type="button" onClick={() => void load()}>Try again</button></div>}
       {data && draft && <>
         {notice && <p className={`notice ${notice.error ? 'error' : 'success'}`} role="status">{notice.text}</p>}
         {job.job && <JobLog job={job.job} onClose={() => job.clear()} />}
         {requiresRestart && <p className="notice restart-notice" role="status">Saved changes need a restart of the web server to reach the chat.</p>}
-        <div className="studio-panel-stack">
+        <div className="settings-panel-stack">
         <Section title="Provider & model" description="Choose the service that produces the replies." active={section === 'provider'}>
           <div className="form-grid">
             <Field label="Provider"><select value={draft.provider} onChange={(event) => {
@@ -449,7 +445,7 @@ export function Studio({ section, conversationId, sessionId, onClose, onSessionC
           </div>)}
         </Section>
         </div>
-        <div className="studio-save">
+        <div className="settings-save">
           <span className="save-context">Changes apply to this Milo installation.</span>
           <div className="save-actions"><button className="button" type="button" onClick={onClose}>Cancel</button>
           <button className="button primary" type="button" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save changes'}</button></div>
@@ -460,8 +456,8 @@ export function Studio({ section, conversationId, sessionId, onClose, onSessionC
 }
 
 function Section({ title, description, active = false, children }: { title: string; description: string; active?: boolean; children: ReactNode }) {
-  const headingId = `studio-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
-  return <section className="studio-section" hidden={!active} aria-labelledby={headingId}>
+  const headingId = `settings-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`
+  return <section className="settings-section" hidden={!active} aria-labelledby={headingId}>
     <div className="panel-head"><h2 id={headingId}>{title}</h2><p>{description}</p></div>
     <div className="panel-body">{children}</div>
   </section>
@@ -505,26 +501,6 @@ function useJob(onFinished: () => void): { job: JobView | null; run(kind: string
 
 function jobLabel(kind: string): string {
   return ({ 'browser-install': 'Chrome for Testing', 'profile-copy': 'Copying a profile', 'embed-provision': 'The embedding engine' })[kind] ?? kind
-}
-
-function studioTitle(section: string): string {
-  return ({ provider: 'Provider & model', keys: 'API keys', memory: 'Memory', routines: 'Routines', gateways: 'Gateways', web: 'Web', tools: 'Tools', permissions: 'Permissions', display: 'Display', skills: 'Skills', sessions: 'Sessions' })[section] ?? 'Settings'
-}
-
-function studioDescription(section: string): string {
-  return ({
-    provider: 'Choose the service and the model that produce Milo’s replies.',
-    keys: 'Credentials are stored locally and shown masked.',
-    memory: 'What Milo keeps between conversations, and how it looks it up.',
-    routines: 'Prompts Milo runs on a timer, with nobody there when they fire.',
-    gateways: 'Configure the optional chat channels for this installation.',
-    web: 'The browser chat this install serves, and the address it answers on.',
-    tools: 'Turn on the optional capabilities Milo can use.',
-    permissions: 'Decide when tools that change the system ask for authorization.',
-    display: 'Choose how replies, tools and reasoning appear in the chat.',
-    skills: 'Install and manage extra instructions for Milo.',
-    sessions: 'Saved sessions, and how a long transcript is folded.',
-  })[section] ?? 'Settings for this installation.'
 }
 
 function Field({ label, children, className = '' }: { label: string; children: ReactNode; className?: string }) {

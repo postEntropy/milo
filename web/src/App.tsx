@@ -5,7 +5,7 @@ import { MiloSocket, type ConnectionState } from './lib/ws.js'
 import { Composer } from './chat/Composer.js'
 import { MessageList, type ChatMessage } from './chat/MessageList.js'
 import { Permissions } from './chat/Permissions.js'
-import { Studio } from './studio/Studio.js'
+import { Settings } from './settings/Settings.js'
 import type { ServerFrame, PermissionRequest } from '@protocol'
 import { toolDetail } from '../../src/gateways/tool-line.ts'
 import { Icon } from './ui/Icons.js'
@@ -16,7 +16,7 @@ type PendingPermission = { id: string; request: PermissionRequest; expiresAt: nu
 type SessionGroup = { label: string; sessions: SessionSummary[] }
 type Notice = { text: string; error: boolean }
 
-const studioSections = [
+const settingsSections = [
   ['provider', 'cpu', 'Provider & model'], ['keys', 'key', 'API keys'], ['memory', 'database', 'Memory'],
   ['routines', 'repeat', 'Routines'], ['gateways', 'server', 'Gateways'], ['web', 'globe', 'Web'],
   ['tools', 'settings', 'Tools'], ['permissions', 'shield', 'Permissions'], ['display', 'eye', 'Display'],
@@ -35,8 +35,8 @@ export default function App() {
   const [thinking, setThinking] = useState(true)
   const [identity, setIdentity] = useState({ provider: 'milo', model: '' })
   const [connection, setConnection] = useState<ConnectionState>('connecting')
-  const [studio, setStudio] = useState(false)
-  const [studioSection, setStudioSection] = useState('provider')
+  const [settings, setSettings] = useState(false)
+  const [settingsSection, setSettingsSection] = useState('provider')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('milo-theme') ?? 'system')
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -138,7 +138,7 @@ export default function App() {
       socket.close()
       setMessages([])
       setSessionId(session.id)
-      setStudio(false)
+      setSettings(false)
       setSidebarOpen(false)
       setConversationId(nextConversationId)
     } catch (error) { fail(error) }
@@ -188,7 +188,7 @@ export default function App() {
       setMessages([])
       setSessionId(id)
       setConversationId(nextConversationId)
-      setStudio(false)
+      setSettings(false)
       setSidebarOpen(false)
     } catch (error) { fail(error) }
   }
@@ -198,7 +198,7 @@ export default function App() {
     socket.close()
     setMessages([])
     socket.connect(conversationId)
-    setStudio(false)
+    setSettings(false)
   }
 
   async function exportSession(): Promise<void> {
@@ -239,7 +239,7 @@ export default function App() {
   return <div className="app-shell">
     {sidebarOpen && <button className="sidebar-scrim" type="button" aria-label="Close menu" onClick={() => setSidebarOpen(false)} />}
     <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`} aria-label="Main navigation">
-      {!studio ? <div className="sidebar-chat-nav">
+      {!settings ? <div className="sidebar-chat-nav">
         <div className="brand-row"><img className="brand-mark" src={miloAvatar} alt="" /><span className="brand-name" translate="no">Milo</span></div>
         <div className="sidebar-pad">
           <div className="sidebar-controls">
@@ -252,13 +252,12 @@ export default function App() {
           {visibleSessions.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
         </nav>
         <div className="sidebar-footer">
-          <button className="sidebar-action" type="button" onClick={() => { setStudio(true); setSidebarOpen(false) }}><Icon name="settings" /><span className="sidebar-action-text"><strong>Settings</strong><small>Models, keys and tools</small></span></button>
+          <button className="sidebar-action" type="button" onClick={() => { setSettings(true); setSidebarOpen(false) }}><Icon name="settings" /><span className="sidebar-action-text"><strong>Settings</strong><small>Models, keys and tools</small></span></button>
         </div>
-      </div> : <div className="sidebar-studio-nav">
-        <button className="back-button" type="button" onClick={() => setStudio(false)}><Icon name="chevron" size={15} className="back-chevron" /> Back to chat</button>
-        <div className="studio-nav-heading"><h2>Settings</h2><p>For this installation</p></div>
-        <nav className="studio-nav" aria-label="Settings sections">
-          {studioSections.map(([id, icon, label]) => <button type="button" key={id} className={`studio-nav-item ${studioSection === id ? 'active' : ''}`} onClick={() => setStudioSection(id)}><Icon name={icon} /><span>{label}</span></button>)}
+      </div> : <div className="sidebar-settings-nav">
+        <div className="settings-nav-heading"><h2>Settings</h2><p>For this installation</p></div>
+        <nav className="settings-nav" aria-label="Settings sections">
+          {settingsSections.map(([id, icon, label]) => <button type="button" key={id} className={`settings-nav-item ${settingsSection === id ? 'active' : ''}`} onClick={() => setSettingsSection(id)}><Icon name={icon} /><span>{label}</span></button>)}
         </nav>
       </div>}
     </aside>
@@ -266,15 +265,16 @@ export default function App() {
     <main className="main">
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
-        <div className="topbar-title"><h1>{studio ? 'Settings' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1>{studio && <p>{studioLabel(studioSection)}</p>}</div>
+        <div className="topbar-title"><h1>{settings ? 'Settings' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
         <div className="topbar-actions">
-          {!studio && sessionId && <button className="icon-button" type="button" title="Export this conversation" aria-label="Export this conversation" onClick={() => void exportSession()}><Icon name="download" size={16} /></button>}
-          {!studio && sessionId && <button className="icon-button" type="button" title="Clear this conversation" aria-label="Clear this conversation" onClick={() => void clearSession()}><Icon name="trash" size={16} /></button>}
-          {!studio && connection !== 'online' && <span className={`connection-status ${connection}`}><span />{connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
+          {settings && <button className="btn-secondary" type="button" onClick={() => setSettings(false)}><span aria-hidden="true">←</span> Back to chat</button>}
+          {!settings && sessionId && <button className="icon-button" type="button" title="Export this conversation" aria-label="Export this conversation" onClick={() => void exportSession()}><Icon name="download" size={16} /></button>}
+          {!settings && sessionId && <button className="icon-button" type="button" title="Clear this conversation" aria-label="Clear this conversation" onClick={() => void clearSession()}><Icon name="trash" size={16} /></button>}
+          {!settings && connection !== 'online' && <span className={`connection-status ${connection}`}><span />{connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
         </div>
       </header>
-      {studio
-        ? <Studio section={studioSection} conversationId={conversationId} sessionId={sessionId} onClose={() => setStudio(false)} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} />
+      {settings
+        ? <Settings section={settingsSection} conversationId={conversationId} sessionId={sessionId} onClose={() => setSettings(false)} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} />
         : <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef}>
             <MessageList messages={messages} thinking={thinking} onPrompt={send} />
@@ -289,10 +289,6 @@ export default function App() {
 
 function SessionRow({ session, active, onClick }: { session: SessionSummary; active: boolean; onClick(): void }) {
   return <button className={`session-row ${active ? 'active' : ''}`} type="button" onClick={onClick}><span className="session-content"><span className="session-title">{sessionLabel(session)}</span><span className="session-preview">{sessionMeta(session)}</span></span></button>
-}
-
-function studioLabel(section: string): string {
-  return ({ provider: 'Provider & model', keys: 'API keys', memory: 'Memory', routines: 'Routines', gateways: 'Gateways', web: 'Web', tools: 'Tools', permissions: 'Permissions', display: 'Display', skills: 'Skills', sessions: 'Sessions' })[section] ?? 'Settings'
 }
 
 function formatMs(ms: number): string {
