@@ -7,18 +7,18 @@
 [![CI](https://github.com/postEntropy/milo/actions/workflows/ci.yml/badge.svg)](https://github.com/postEntropy/milo/actions/workflows/ci.yml)
 
 A multi-surface agent — one transport-agnostic **core** with pluggable **gateways** (CLI, Telegram,
-Discord), pluggable **LLM providers**, a pluggable **memory** layer and durable **sessions**.
+Discord, web), pluggable **LLM providers**, a pluggable **memory** layer and durable **sessions**.
 Hand-rolled LLM layer (no provider SDKs), built for a fast boot and immediate token streaming.
 
 ```
-GATEWAYS   CLI (Ink)      Telegram (grammY)      Discord (discord.js)
-              └────────────────┴────────────────────────┘
+GATEWAYS   CLI (Ink)      Telegram (grammY)      Discord (discord.js)      Web (React)
+              └────────────────────┴───────────────────────┴──────────────────┘
 CORE       AgentRuntime → Session → AgentLoop   +  Tools · Memory · Providers · Config · Routines
 PROVIDERS  Command Code Provider API · OpenRouter · OpenAI · Anthropic · Ollama · custom
 ```
 
-The core never knows about Ink, Telegram or Discord. It hands each gateway a stream of normalized
-`AgentEvent`s; gateways translate user input in and events out.
+The core never knows about Ink, Telegram, Discord or a browser. It hands each gateway a stream of
+normalized `AgentEvent`s; gateways translate user input in and events out.
 
 ## Requirements
 
@@ -70,8 +70,13 @@ slow" has no answer beyond a guess; with it, the wait says what it was spent on.
 
 ## Configuration
 
-- `~/.milo/config.json` — provider, model, `maxTokens`, reasoning effort, memory settings, session
-  settings, display, permissions, browser and enabled gateways.
+- `~/.milo/config.yml` — provider, model, `maxTokens`, reasoning effort, memory settings, session
+  settings, display, permissions, browser, the web UI's address and enabled gateways. YAML rather than
+  JSON for the one thing JSON cannot express: a comment. Every surface rewrites this file (`/mode`,
+  `/tools`, `/effort`, `/model`, `milo setup`, the browser's Settings screen), so the help is stamped on
+  by the code that writes it (`src/core/config/comments.ts`), and a line you add yourself survives every
+  write that does not touch the key it sits above. (`src/core/skills/index.ts` reached the opposite
+  conclusion for a skill's frontmatter, and rightly: two scalars are not worth a parser. A config is.)
 - `~/.milo/auth.json` — API keys and bot tokens (written `0600`).
 - `~/.milo/input-history.json` — what was typed at the CLI's prompt, for `↑`/`↓`.
 - `~/.milo/sessions/` — one JSON file per session, plus one binding file per address and one recap
@@ -88,12 +93,15 @@ slow" has no answer beyond a guess; with it, the wait says what it was spent on.
   [Browser](#browser)).
 - `~/.milo/exports/` — conversations written out by `/export`, one file each (`0600`).
 
-A corrupt `config.json` is reported at startup rather than swallowed, but the settings a running
+A corrupt `config.yml` is reported at startup rather than swallowed, but the settings a running
 conversation changes (`/mode`, `/tools`, `/thinking`) read it defensively: a file that cannot be
-parsed leaves the current values alone instead of failing the turn.
+parsed leaves the current values alone instead of failing the turn. A write is an edit rather than a
+rewrite — the file is read as a document, the keys whose values moved are the only ones replaced, and
+everything else stays as it was, comments and order included — so changing a setting never costs you
+the notes you put beside the others.
 
 Environment variables override stored secrets: `COMMANDCODE_API_KEY`, `OPENROUTER_API_KEY`,
-`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`.
+`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, `MILO_WEB_TOKEN`.
 Set `MILO_HOME` to relocate `~/.milo`; set `MILO_DEBUG=1` for debug logs (memory `remember`/`recall`
 calls, skipped stream chunks).
 
@@ -108,7 +116,7 @@ calls, skipped stream chunks).
 | `ollama` | `http://localhost:11434/v1` | OpenAI (no key) |
 
 The Command Code Provider API needs a plan above Go (GOAT/Pro/Max/Team or the Provider plan), and
-uses the same API key as the CLI (Studio → API keys).
+uses the same API key as the CLI (Command Code's Studio → API keys — not this project's Settings).
 
 ## Gateways
 
@@ -116,8 +124,10 @@ The CLI is always available. The bot gateways run as a daemon:
 
 ```bash
 milo setup                 # Gateways section toggles them and stores the tokens
-# or edit ~/.milo/config.json:
-{ "gateways": { "telegram": { "enabled": true }, "discord": { "enabled": true } } }
+# or edit ~/.milo/config.yml:
+gateways:
+  telegram: { enabled: true }
+  discord: { enabled: true }
 ```
 
 ```bash
@@ -130,12 +140,25 @@ Each conversation maps to its own session (`telegram:<chatId>`, `discord:<channe
 Milo remembers is one store for the whole install: what you told it in the terminal is there on
 Telegram. Replies stream by editing one message; tool activity becomes one line per
 call — a **quote box** with the tool's icon, its name and the one value worth showing, whether that
-is a search query, a file path or a shell command. Every tool line opens with an emoji, never a
+is a search query or a file path. Every tool line opens with an emoji, never a
 typographic glyph (these are read in chat clients), and the tool **name is bold** so it does not read
 as the first word of its own arguments; a tool that fails adds `❌ <name> failed` as another line of
-the same shape. The command used to go in a fenced code block of its own, and that block was the odd
-one out: the name inside it could not be emphasised, and the command in it is truncated to 120
-characters like every other detail, so copying it out copied something incomplete.
+the same shape.
+
+A **shell command is the exception**: it gets a fenced `shell` block of its own, under the same label
+line, because a command is meant to be read and copied and neither is served by a 120-character gist.
+The block was here before and was taken away for two reasons worth keeping, so both are answered
+rather than argued away: the label sits *outside* the fence, so the name is still emphasised, and the
+command goes in **whole** — a block whose contents were cut off is a block that lies about what it is
+for. Being a block of its own, it ends the run of tool lines; the next call opens a quote of its own.
+
+```
+⚡ **shell_command**
+
+```shell
+cd /opt/app && npm test -- --runInBand
+```
+```
 
 **Why a run of tool lines shares one quote.** A tool call is one burst of work, and the model's own
 activity reads better together. A quote is a single paragraph, though, and a newline inside a
@@ -157,8 +180,11 @@ waits for the press and fails closed after five minutes.
 
 By default a bot answers anyone who finds it. Give it an `allowlist` to close that down:
 
-```json
-{ "gateways": { "telegram": { "enabled": true, "allowlist": ["123456789"] } } }
+```yaml
+gateways:
+  telegram:
+    enabled: true
+    allowlist: ["123456789"]
 ```
 
 An entry matches either the sender's **user id** or the **conversation id** (chat, channel or
@@ -170,7 +196,7 @@ fails closed for everyone else, and a blocked sender is told their own id so you
 Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/stats`, `/compact`, `/export`,
 `/skills`,
 `/mode ask|auto|yolo`, `/yolo`, `/tools full|name|off`, `/thinking on|off`, `/effort low|medium|high`,
-`/clear`, `/status`. A mode change from a chat is written to `config.json` like any other,
+`/clear`, `/status`. A mode change from a chat is written to `config.yml` like any other,
 so it survives a restart of `milo serve`; sessions are written to `~/.milo/sessions/` and survive it
 too. Provider and key changes happen in `milo setup` on the terminal side.
 
@@ -231,7 +257,76 @@ provider and tools, and its epoch bumped so the turns queued before the stop are
 turn comes. A stop is not a failure: `session.send` turns a cancelled stream into an `aborted` event,
 so the message ends with `🛑 stopped` instead of a red `AbortError`.
 
-## Routines
+## Web
+
+The fourth surface is a browser chat, with the same core, sessions and memory behind it. It is
+served by `milo serve`, so a daemon that was already keeping the bots up also opens the URL it
+prints:
+
+```
+Milo serving: telegram, web
+Milo web · http://127.0.0.1:7717/?t=<token>
+```
+
+The token in that URL is the whole of the authorization — it is what the page sends back on every
+request, and it is why the address is not meant to be shared. Loopback is the default for the same
+reason. It is **minted per run unless one is stored**, and that is the whole of why a URL printed
+yesterday is a 401 today: a token meant to outlive the process goes in `auth.json` →
+`gateways.web` — the `0600` slot the bot tokens already use, rather than the readable
+`config.yml` — or arrives as `MILO_WEB_TOKEN`, which wins over the stored one. With neither, each
+run mints its own and prints it, which is the old behaviour and the default. It is deliberately not
+one of the fields `milo setup` → **Web** edits: that screen is where the address lives, and the
+token is a secret, so it is set the way the other secrets are.
+
+```bash
+milo serve                 # the bots and the web UI
+milo serve --no-web        # the bots alone
+milo serve --web-port 8080 # one run on another port
+milo web                   # the web UI alone, no bots, opening the browser
+```
+
+`milo web` is the standalone form: it starts nothing else and opens the browser at the URL, which
+is the useful shape while setting the UI up. It takes `--host`, `--port` and `--no-open`.
+
+```yaml
+web:
+  enabled: true
+  host: 127.0.0.1
+  port: 7717
+```
+
+Where it binds comes from that section, and a flag wins over it for one run. `milo setup` → **Web**
+edits it in the terminal, and the Settings screen in the browser has the same section. `enabled:
+false` is `--no-web` written down. **Anything but loopback is reachable from the network** — the page
+still requires the token, but the token is then the only thing in the way, so a host other than
+`127.0.0.1`/`localhost` is a decision to make deliberately. Binding to `0.0.0.0` accepts whatever
+name the request came in on; any other address is pinned to the name it was given.
+
+The chat itself is the terminal's turn model with a real browser behind it: messages stream in,
+reasoning folds under the question it belongs to, tool lines appear as they run, a confirmation is
+a card with Allow and Deny, and `Enter` queues while `Ctrl+Enter` steers. Typing `/` opens the
+command palette, so the slash commands are discoverable rather than memorized. Export and Clear sit
+in the top bar, and sessions can be searched, resumed and deleted.
+
+**Settings** (the sidebar's last row) is `milo setup` in the browser — provider and model, API keys,
+memory (including the notes themselves, and turning embeddings on), routines, gateways, tools and
+the browser, the permission policy, display, skills and sessions. The long setup jobs run here with
+their output streamed into a panel: downloading a Chrome for Testing build, copying a profile out of
+another browser, and provisioning the local embedding engine (the ~1.9 GB one). `milo serve` starts
+it by default and it can be turned off here or in `milo setup` → **Web**, which is where its address
+and port live.
+
+A routine can be delivered to a web chat: `gateway: "web"` with the conversation id from the
+browser's address, and the answer is written into that conversation's session, so it is still there
+when the tab is next opened.
+
+Two things are worth knowing before pointing a browser at it:
+
+- **The frontend has to be built.** `npm run build:web` compiles `web/` into `web/dist`, which is
+  what the server serves; without it the page is a 503 and the boot line says so.
+- **The page may only come from a name the server answers to.** A request whose `Origin` names
+  something else is refused, which is what keeps another site from reaching the local install
+  through a logged-in browser.
 
 A prompt Milo runs on a timer and delivers to a chat, with nobody there when it fires. "Every weekday
 at 8, look at the repo and tell me what moved" is a routine: it opens its own conversation, runs the
@@ -352,16 +447,13 @@ last, so trimming only the end is how an error message gets thrown away.
 
 Anything with side effects goes through the permission policy in the core:
 
-```json
-{
-  "permissions": {
-    "mode": "ask",
-    "allow": ["shell_command"],
-    "deny": [],
-    "jevThreshold": 0.35,
-    "jevTimeoutMs": 1500
-  }
-}
+```yaml
+permissions:
+  mode: ask
+  allow: [shell_command]
+  deny: []
+  jevThreshold: 0.35
+  jevTimeoutMs: 1500
 ```
 
 | Mode | Behavior |
@@ -532,8 +624,11 @@ works on a real profile since 136), point `cdpUrl` at `host:port`, and Milo open
 the browser you are already signed into. Or simply sign in to Milo's own profile once with **Window**
 set to `visible` — it is kept, so tomorrow it is still signed in.
 
-```json
-{ "browser": { "enabled": true, "headless": true, "keepSnapshots": 2 } }
+```yaml
+browser:
+  enabled: true
+  headless: true
+  keepSnapshots: 2
 ```
 
 `chromePath` names a binary instead of searching `PATH`, `profileDir` a profile instead of its own,
@@ -558,8 +653,10 @@ How much of a turn you get to see is a per-install setting, not a per-surface on
 in Telegram applies to the terminal too — and the other way round. The bot gateways read it from
 disk on every turn, so a change takes effect without restarting `milo serve`.
 
-```json
-{ "display": { "tools": "full", "thinking": "on" } }
+```yaml
+display:
+  tools: full
+  thinking: on
 ```
 
 A config that still says `true`, `false`, `brief` or `full` loads fine: anything that showed the
@@ -632,8 +729,8 @@ rejects it fails loudly on the turn.
 On a bot that answers more than one person `/effort` is **locked**, for the same reason `/mode` is:
 what an answer costs is not one person's to change for everybody.
 
-```json
-{ "reasoningEffort": "low" }
+```yaml
+reasoningEffort: low
 ```
 
 The **internal calls do not follow it**: summarizing a transcript and writing a session recap are
@@ -666,8 +763,8 @@ The Anthropic wire has a hard default of 4096 output tokens. That is low enough 
 in half — and to cut a `write_file` of a large file mid-JSON, which then looks like an invalid tool
 call. OpenAI gets the provider's own default.
 
-```json
-{ "maxTokens": 16384 }
+```yaml
+maxTokens: 16384
 ```
 
 Set `maxTokens` (or the **Output limit** row in `milo setup` → Display) to whatever the model really
@@ -704,8 +801,9 @@ exercised only looks closed. Both scripts need a browser and are not in CI.
 
 ### Web search
 
-```json
-{ "search": { "provider": "exa" } }
+```yaml
+search:
+  provider: exa
 ```
 
 Three providers behind one interface; `milo setup` → **Tools** → **Web search** picks one and asks for
@@ -791,7 +889,10 @@ That rule means the directory grows a file per run, so `sessions.maxSessions` (d
 startup the oldest sessions beyond that are pruned, and one a scope is still bound to is never touched
 — a binding to a session that is gone would only silently start a new conversation on the next
 message. A pruned session's recap goes with it. The prune is off the critical path: it runs on the way
-in and never holds up the first turn.
+in and never holds up the first turn. `0` is how the cap is lifted — every session is kept — and it is
+the same word `history.windowDays` uses for "keep the lot". Nothing is lost either way: what pruning
+trims is the working transcript, and the log `recall` and `search_history` read is not touched by it,
+so an install that would rather grow than forget pays in disk and nothing else.
 
 Memory is keyed to the install, not to the session or the conversation: what you told Milo in the
 terminal is there on Telegram, and a `/new` never changes what it remembers.
@@ -826,8 +927,11 @@ the system prompt; the last `sessions.keepTurns` turns are kept verbatim. The cu
 user turn, so a tool call is never separated from its result. If the summary call fails, the turns are
 dropped anyway — a request that fits beats one the provider rejects.
 
-```json
-{ "sessions": { "compactAt": 0.7, "keepTurns": 8, "compaction": true } }
+```yaml
+sessions:
+  compactAt: 0.7
+  keepTurns: 8
+  compaction: true
 ```
 
 The window itself comes from public model metadata — the OpenRouter catalog, which needs no key and
@@ -984,16 +1088,25 @@ which is precisely why it is pinned rather than left to the planner, and why a t
 query's own query plan: both plans return the same rows, so no behavioural test can tell them apart.
 
 The turns are queried by a second copy of the same SQL, pinned for the same reason, and the two answers
-are merged in `installMemory`: the facts first, then the turns the facts did not already cover, cut to
-`recallLimit` and re-scored by position so `1` is still the best line the model is reading. When the
-facts already fill the reply the history is not asked at all.
+are merged in `installMemory`: the facts, then the turns the facts did not already cover, cut to
+`recallLimit` and re-scored so `1` is still the best line the model is reading. Order is by **evidence** and
+then by how well each note matched: what the question's own words reached comes above what meaning reached,
+a fact wins an exact tie, which is what keeps a durable note from being drowned by the last thing said. The
+history is not asked at all only when notes the *words* reached already fill the reply — and that
+qualification is not a detail. The plain version of the shortcut ("the facts filled it") was measured
+starving the log: with meaning padding the facts out to five from a store that held no word in common, three
+questions whose answer had been *said* rather than saved stopped being recalled at all.
 
 ### Recall by meaning, off by default
 
 Words match words. A note that says "editor" is not found by a question that says "IDE", so there is a
-second, **opt-in** signal: an embedding model scores the same rows, and the two rankings are fused by
-rank (reciprocal rank fusion) and unioned. Union, not reorder — the vectors may **introduce** a note
-the words never matched, which is the whole point of having them.
+second, **opt-in** signal: an embedding model scores the same rows, and what it finds is added **after**
+what the words found, never above it. That order was measured, and getting it wrong is what made the first
+version look bad: interleaving the two by rank (reciprocal rank fusion) let a near-but-unrelated note
+displace the one that matched the question's own words — precision fell from **73.5% to 23.0%** and recall
+from 97% to 90.9%, the answer lost on questions the words had already answered. The vectors still
+**introduce** a note the words never matched, which is the whole point of having them; they just do not get
+to outrank one.
 
 There is deliberately **no similarity cutoff**. Measured on 8 notes and 32 questions, across two
 models, the scores of a correct note (0.01–0.70) overlap the scores of a wrong one (0.05–0.31): no
@@ -1017,8 +1130,57 @@ BM25 exactly as before; an engine that is down, slow or refusing a note falls ba
 log line. A note the model permanently rejects (400/413/422) is set aside rather than retried, so it
 cannot block the notes behind it, while a transient failure — network, 5xx, rate limit — is retried.
 
-What it does not fix is the order among notes that do match: a reranker is the real answer to "several
-notes fit and the best one is not first", and it is not here.
+What it does not fix is the order among notes that do match, and it never trimmed the notes that do not —
+which is what the coverage rule below is for.
+
+### What recall gets right
+
+`npm run eval:memory` scores recall against a checked-in set: 36 notes, 33 questions each carrying the note
+that answers it, 13 more asking for those same notes **in other words** (no word in common with the answer),
+and 8 questions nothing in the store answers. It reports precision@5, recall@5, MRR, the share of
+unanswerable questions that came back with a note anyway, and how many of the reworded ones came back at all.
+`--semantic` adds the rows that use the embedder the install is configured with, skipped with a line when
+there is none.
+
+| | precision@5 | recall@5 | MRR | no-answer | reworded | p50 |
+| --- | --- | --- | --- | --- | --- | --- |
+| words only | 49.2% | 97.0% | 0.939 | 0% | 0/13 | 0.19 ms |
+| words + coverage | **73.5%** | 97.0% | 0.939 | **0%** | 0/13 | 0.22 ms |
+| + embedder | 20.0% | **100%** | **0.955** | 100% | **11/13** | 472 ms |
+| + embedder + coverage | 28.6% | **100%** | **0.955** | 100% | **11/13** | 455 ms |
+
+The number worth reading first is `no-answer`, which was **62.5%** before, and the cause was not the ranking
+at all: `qual`, `como`, `pra` and the rest of what makes a question a question were being treated as subject
+words. "Qual a capital da França?" matched a chat turn for containing `qual` — one shared word, and the whole
+of why five of eight unanswerable questions came back with something. They are stopwords now, which is what
+that list already did for `que`, `de` and `para`, and nothing is lost by it: a question keeps every word that
+is actually about something. **That fix is the whole of the `no-answer` column** — the embedder puts it back
+to 100%, because a vector search always returns its nearest notes and nothing in it can say "none of these".
+
+`coverage.ts` drops the tail, and it is less than the reranker this was going to be. Re-ordering the
+candidates *within* the word matches was tried first and measured at **nothing** — the same precision and the
+same MRR, to the digit — because `bm25` was already putting the right note first, so the signals that only
+re-ordered were deleted rather than kept as decoration, exactly as the lightpanda and the `brief` mode were.
+What was left is the one thing no ranking can do for itself: noticing that most of what a keyword match
+returns is notes that *share a word*, and that the reply was barely half answers. So it measures one thing —
+how much of the question a note carries — and keeps only the notes within a fraction of the best. Relative on
+purpose: the absolute floor was measured and removed, because those bands overlap, and the gap is what
+separates them. A note the words never matched, that only meaning brought in, is never trimmed — it is asked
+for only when the words left room, and it is placed after them.
+
+**What the last two rows cost, exactly.** The embedder is what reaches the reworded questions: **0/13 to
+11/13**, and it recovers the last three points of plain recall — including the one question in the main set
+that shares no word with its answer. It also improves MRR, and it is the only thing here that can. What it
+costs is on the other three columns: precision falls, because a reply that gets filled with neighbours is
+mostly neighbours; `no-answer` returns to 100%, for the reason above; and the round trip is measured at ~455
+ms, paid on every question the words did not fully answer. That is the honest shape of the trade, and which
+side of it is right is not something these numbers decide — they measure *retrieval*, not whether the model
+answers better with four extra lines in front of it.
+
+All of it is arithmetic over at most a couple of dozen short strings. It runs before every turn, so the
+budget is a millisecond, and `test/memory-eval.test.ts` holds the floors — and was seen failing, by breaking
+the trim on purpose, before it was trusted. The reworded axis is deliberately not asserted there: it only
+moves with a model, and a test that needs the network is not a floor anything can stand on.
 
 ### What it costs
 
@@ -1157,13 +1319,16 @@ much itself: it audits, and still cannot guarantee what a listed skill does. Rea
 
 ```bash
 npm run dev         # run the CLI from source (tsx)
-npm run serve       # run the bot gateways from source
+npm run serve       # run the bot gateways and the web UI from source
+npm run build:web   # build web/ into web/dist, which `milo serve` serves
 npm run typecheck   # tsc --noEmit
 npm run lint        # biome lint
 npm test            # vitest
 npm run build       # bundle to dist/ (tsup)
 npm run bench:browser   # what the browser toolset costs (needs a browser)
 npm run bench:memory    # what recall costs, against the JSON store it replaced
+npm run eval:memory     # what recall gets right (add --semantic for the local engine)
+npm run eval:mem0       # the same set through mem0, verbatim and with its pipeline
 npm run check:browser   # that every verb in it works (needs a browser)
 ```
 
@@ -1180,8 +1345,9 @@ worth knowing: with `NODE_ENV=production` exported in your shell, npm treats eve
   - `agent/` — the loop (`runAgent`), events, system prompt.
   - `tools/` — `Tool` interface, registry (zod → JSON Schema), built-in tools.
   - `search/` — `SearchProvider` plus the Tavily, Exa and Parallel adapters.
-  - `memory/` — the `Memory` interface, the SQLite store behind it (`sqlite.ts`), the JSON store it
-    replaced (`local.ts`) and the one-time import between them (`migrate.ts`).
+  - `memory/` — the `Memory` interface, the SQLite store behind it (`sqlite.ts`) and the coverage rule
+    that trims a reply (`coverage.ts`), the JSON store it replaced (`local.ts`) and the one-time import
+    between them (`migrate.ts`).
   - `skills/` — `SKILL.md` discovery, frontmatter parsing, and the loader behind the `read_skill` tool.
   - `browser/` — the CDP client, finding and starting Chrome, copying a profile out of another
     browser, the page observer, and the three tools.
@@ -1191,9 +1357,12 @@ worth knowing: with `NODE_ENV=production` exported in your shell, npm treats eve
     retention (`pruneSessions`) and `/stats` formatting.
   - `config/` — paths, zod schema, presets, load/save, onboarding wizard.
   - `runtime.ts` / `session.ts` / `bootstrap.ts` / `history.ts` (the log and its readout).
-- `src/gateways/` — `cli/` (Ink), `telegram/` (grammY), `discord/` (discord.js).
-- `src/bin/` — `cli.ts` (`milo`), `serve.ts` (`milo serve`), and the plain terminal commands
-  `skills.ts` (`milo skills`), `history.ts` (`milo history`) and `routines.ts` (`milo routines`).
+- `src/gateways/` — `cli/` (Ink), `telegram/` (grammY), `discord/` (discord.js) and `web/` (the HTTP
+  + WebSocket server, the hub that drives turns, the settings actions and the job registry).
+- `web/` — the browser frontend (React + Vite), built into `web/dist` and served by `src/gateways/web/`.
+- `src/bin/` — `cli.ts` (`milo`), `serve.ts` (`milo serve`), `web.ts` (`milo web`), and the plain
+  terminal commands `skills.ts` (`milo skills`), `history.ts` (`milo history`) and `routines.ts`
+  (`milo routines`).
 
 ## Roadmap
 
@@ -1214,27 +1383,41 @@ against a fake: the code is right about the shape of the API and unproven about 
   Routine delivery posts through the same calls, so it rides the same unproven path.
 - **The routine loop's firing.** `nextRunAt` and the loop are unit-tested with a fake clock and a fake
   runtime, but no routine has ever fired inside a running `milo serve` against a real chat.
-- **`web_search`.** `config.json` has no `search` section, so the tool is not even registered right
+- **`web_search`.** `config.yml` has no `search` section, so the tool is not even registered right
   now, and the Exa and Parallel adapters have never been called for real.
-- **The web surface.** The newest gateway and the thinnest tests: `hub.ts` at 4 % and `studio.ts` at
-  11 %, with six tests over the whole surface (`web-http`, `web-protocol`, `web-studio`).
+- **The web surface.** The newest gateway, and the least driven: `milo serve` starts it now and it
+  reaches the same core the other surfaces do, but nothing here has been used by anyone but its
+  author — the settings screen's setup jobs in particular have only run against fakes for the embedding
+  engine, and the whole surface wants a real session in a real browser.
 - **Chrome for Testing.** The platform and URL mapping is covered; the download itself
   (`browser/install.ts`) is 15 %, so what has been proven is the shape of the index it reads.
 - **`milo serve` assembled.** The pieces are tested and the daemon that wires them is at 78 %.
 - **Anthropic thinking.** The `thinking` budget is sent and the signed thinking blocks are echoed back
   with each follow-up, but the path has only run against a fake: confirming it against the live API
   needs an Anthropic key.
+- **The semantic half of the recall eval.** The coverage rule is measured with words alone. `npm run
+  eval:memory -- --semantic` has never been run against a real embedding model here, so how much the
+  vectors add — and whether the notes they pad a reply with are worth their lines — has no number
+  behind it yet.
 
 **Recall quality.**
 
-- **A reranker.** Recall fuses two rankings and unions them; what it does not do is re-score the
-  candidates that came back, which is the real answer to "several notes match and the best one is not
-  first" (see [Memory](#memory)).
 - **The assistant's side of the index.** Recall reads what the person typed; replies are reachable only
   through `search_history`. Indexing them would roughly double the file to answer a question recall is
   not asked — worth revisiting before it is worth doing.
 - **Nothing expires a fact, and nothing notices a stale one.** A fact contradicted by the live state is
   caught only by the line in the system prompt saying the live lines win.
+- **Honcho and Zep.** mem0 has now been run against the same set (`npm run eval:mem0`), on the same
+  notes, the same questions and the same embedder: verbatim it is a near-tie — better on nothing but the
+  reworded questions, 12/13 against 11/13, and worse on recall, MRR and precision. With its own
+  write-time pipeline on (`--infer`) it does not recall the notes it was given at all: 36 notes in,
+  rewritten into its own words, **0/33** answers back as text and **37.5%** of the answer's words. A
+  memory layer that rewrites what the person said cannot be asked what the person said. Honcho and Zep
+  have not been run — both want Docker or a key, which is a thing to turn on rather than a thing to
+  write.
+- **Retrieval is not the answer.** Every number the eval reports is about what came back, never about
+  whether the model answered better for it. A reply that is mostly neighbours in front of it is a cost
+  nothing here measures.
 
 **Not started.**
 
@@ -1257,11 +1440,6 @@ against a fake: the code is right about the shape of the API and unproven about 
   of you, but nothing is written down: no per-day, per-surface or per-model totals, and no cost estimate.
   A JSONL beside the history, or a table in the store, would make "what has this cost me" answerable —
   and one line at the `usage` event is where it starts.
-- **A recall eval set.** The precision questions — the reranker, whether a similarity cut-off earns its
-  keep — have no number behind them today; the measurements in this README were run by hand, once, on 8
-  notes. A checked-in set of questions with the notes they should reach, scored as precision@5, turns
-  every future recall change into a number instead of an opinion. It is the prerequisite for the
-  reranker, not a nice-to-have.
 - **Provider fallback.** One provider is configured, so a rate limit, a revoked key or a retired model
   ends the turn. A second entry to fall back to — with the surface saying which one answered — is small
   in `providers/create.ts` and one more row in setup.
