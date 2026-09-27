@@ -96,13 +96,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-search input:focus { outline: 0; border-color: var(--accent); box-shadow: var(--focus-ring); }
 .session-region { position: relative; display: flex; flex: 1; min-height: 0; }
 .session-list { flex: 1; min-height: 0; overflow: auto; padding: 6px 14px 12px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
-/* A soft edge where the sessions meet the search above and Settings below: the
-   rows blur out instead of being cut, so the boundaries read as one surface. It
-   only appears once there is content under it, and only while scrolling. */
+/* A soft edge under the search box: the top rows blur out instead of being cut,
+   so the list reads as one surface with the search above. It appears only once
+   the list is scrolled. The bottom is left alone — a blur there drew a line
+   against the Settings button rather than softening it. */
 .scroll-blur { position: absolute; z-index: 1; inset-inline: 0; height: 30px; pointer-events: none; opacity: 0; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); transition: opacity var(--motion-base) var(--ease-standard); }
 .scroll-blur.on { opacity: 1; }
 .scroll-blur.top { top: 0; -webkit-mask-image: linear-gradient(to bottom, #000 20%, transparent); mask-image: linear-gradient(to bottom, #000 20%, transparent); }
-.scroll-blur.bottom { bottom: 0; -webkit-mask-image: linear-gradient(to top, #000 20%, transparent); mask-image: linear-gradient(to top, #000 20%, transparent); }
 .session-group + .session-group { margin-top: 8px; }
 .section-label { padding: 14px 8px 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
 .session-row { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 44px; margin: 2px 0; border: 0; border-radius: 10px; background: transparent; padding: 8px 10px; color: var(--fg-2); text-align: start; transition: background var(--motion-fast) var(--ease-standard); }
