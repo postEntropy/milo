@@ -14,11 +14,13 @@ import { miloAvatar } from './ui/milo.js'
 type SessionSummary = { id: string; title?: string; preview: string; messageCount: number; updatedAt: number; recap?: string }
 type PendingPermission = { id: string; request: PermissionRequest; expiresAt: number }
 type SessionGroup = { label: string; sessions: SessionSummary[] }
+type Notice = { text: string; error: boolean }
 
 const studioSections = [
   ['provider', 'cpu', 'Provider & model'], ['keys', 'key', 'API keys'], ['memory', 'database', 'Memory'],
-  ['gateways', 'server', 'Gateways'], ['tools', 'settings', 'Tools'], ['permissions', 'shield', 'Permissions'],
-  ['display', 'eye', 'Display'], ['skills', 'spark', 'Skills'], ['sessions', 'history', 'Sessions'],
+  ['routines', 'repeat', 'Routines'], ['gateways', 'server', 'Gateways'], ['web', 'globe', 'Web'],
+  ['tools', 'settings', 'Tools'], ['permissions', 'shield', 'Permissions'], ['display', 'eye', 'Display'],
+  ['skills', 'spark', 'Skills'], ['sessions', 'history', 'Sessions'],
 ] as const
 
 export default function App() {
@@ -37,11 +39,15 @@ export default function App() {
   const [studioSection, setStudioSection] = useState('provider')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('milo-theme') ?? 'system')
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState<Notice | null>(null)
   const socket = useMemo(() => new MiloSocket(), [])
   const messagesRef = useRef<HTMLDivElement>(null)
   /** When the current wait began: the turn's first output, and again after each tool. */
   const waitStartedAt = useRef(0)
+
+  const fail = useCallback((error: unknown): void => {
+    setNotice({ text: error instanceof Error ? error.message : String(error), error: true })
+  }, [])
 
   useEffect(() => {
     localStorage.setItem('milo-conversation', conversationId)
@@ -62,8 +68,8 @@ export default function App() {
 
   const refreshSessions = useCallback(async (): Promise<void> => {
     try { setSessions(await api<SessionSummary[]>('sessions')) }
-    catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
-  }, [])
+    catch (error) { fail(error) }
+  }, [fail])
 
   const handleFrame = useCallback((frame: ServerFrame): void => {
     if (frame.type === 'ready') {
@@ -74,7 +80,7 @@ export default function App() {
       setMessages(frame.messages.map((message, index) => ({ ...message, id: `loaded-${index}`, loaded: true })))
       return
     }
-    if (frame.type === 'error') { setNotice(frame.message); return }
+    if (frame.type === 'error') { setNotice({ text: frame.message, error: true }); return }
     if (frame.type === 'state') { setBusy(frame.busy); setQueued(frame.queued); return }
     if (frame.type === 'turn-start') {
       waitStartedAt.current = Date.now()
@@ -135,8 +141,8 @@ export default function App() {
       setStudio(false)
       setSidebarOpen(false)
       setConversationId(nextConversationId)
-    } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
-  }, [socket])
+    } catch (error) { fail(error) }
+  }, [socket, fail])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-render triggers, not closure values — the list has already grown by the time this runs, and the scroll follows the rendered height
   useEffect(() => {
@@ -170,8 +176,8 @@ export default function App() {
     try {
       if (text.startsWith('/')) socket.send({ type: 'command', text })
       else socket.send({ type: 'send', text, intent })
-      setNotice('')
-    } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
+      setNotice(null)
+    } catch (error) { fail(error) }
   }
 
   async function openSession(id: string): Promise<void> {
@@ -184,7 +190,7 @@ export default function App() {
       setConversationId(nextConversationId)
       setStudio(false)
       setSidebarOpen(false)
-    } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
+    } catch (error) { fail(error) }
   }
 
   function handleSessionChange(id: string): void {
@@ -195,13 +201,32 @@ export default function App() {
     setStudio(false)
   }
 
+  async function exportSession(): Promise<void> {
+    if (!sessionId) return
+    try {
+      const result = await api<{ path: string } | null>('export', { id: sessionId, format: 'md' })
+      setNotice(result
+        ? { text: `Exported to ${result.path}`, error: false }
+        : { text: 'Nothing to export yet — this session has no log.', error: true })
+    } catch (error) { fail(error) }
+  }
+
+  async function clearSession(): Promise<void> {
+    try {
+      await api('clear-session', { conversationId })
+      setMessages([])
+      setNotice({ text: 'This conversation was cleared.', error: false })
+      void refreshSessions()
+    } catch (error) { fail(error) }
+  }
+
   const changeModel = useCallback(async (model: string): Promise<void> => {
     try {
       const result = await api<{ model: string }>('set-model', { model })
       setIdentity((current) => ({ ...current, model: result.model }))
-      setNotice('')
-    } catch (error) { setNotice(error instanceof Error ? error.message : String(error)) }
-  }, [])
+      setNotice(null)
+    } catch (error) { fail(error) }
+  }, [fail])
 
   const query = search.trim().toLowerCase()
   const visibleSessions = sessions
@@ -227,12 +252,12 @@ export default function App() {
           {visibleSessions.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
         </nav>
         <div className="sidebar-footer">
-          <button className="sidebar-action" type="button" onClick={() => { setStudio(true); setSidebarOpen(false) }}><Icon name="sliders" /><span className="sidebar-action-text"><strong>Studio</strong><small>Models, keys and tools</small></span></button>
+          <button className="sidebar-action" type="button" onClick={() => { setStudio(true); setSidebarOpen(false) }}><Icon name="settings" /><span className="sidebar-action-text"><strong>Settings</strong><small>Models, keys and tools</small></span></button>
         </div>
       </div> : <div className="sidebar-studio-nav">
         <button className="back-button" type="button" onClick={() => setStudio(false)}><Icon name="chevron" size={15} className="back-chevron" /> Back to chat</button>
-        <div className="studio-nav-heading"><h2>Studio</h2><p>Settings for this installation</p></div>
-        <nav className="studio-nav" aria-label="Studio sections">
+        <div className="studio-nav-heading"><h2>Settings</h2><p>For this installation</p></div>
+        <nav className="studio-nav" aria-label="Settings sections">
           {studioSections.map(([id, icon, label]) => <button type="button" key={id} className={`studio-nav-item ${studioSection === id ? 'active' : ''}`} onClick={() => setStudioSection(id)}><Icon name={icon} /><span>{label}</span></button>)}
         </nav>
       </div>}
@@ -241,19 +266,21 @@ export default function App() {
     <main className="main">
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
-        <div className="topbar-title"><h1>{studio ? 'Studio' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1>{studio && <p>{studioLabel(studioSection)}</p>}</div>
+        <div className="topbar-title"><h1>{studio ? 'Settings' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1>{studio && <p>{studioLabel(studioSection)}</p>}</div>
         <div className="topbar-actions">
+          {!studio && sessionId && <button className="icon-button" type="button" title="Export this conversation" aria-label="Export this conversation" onClick={() => void exportSession()}><Icon name="download" size={16} /></button>}
+          {!studio && sessionId && <button className="icon-button" type="button" title="Clear this conversation" aria-label="Clear this conversation" onClick={() => void clearSession()}><Icon name="trash" size={16} /></button>}
           {!studio && connection !== 'online' && <span className={`connection-status ${connection}`}><span />{connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
         </div>
       </header>
       {studio
-        ? <Studio section={studioSection} conversationId={conversationId} onClose={() => setStudio(false)} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} />
+        ? <Studio section={studioSection} conversationId={conversationId} sessionId={sessionId} onClose={() => setStudio(false)} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} />
         : <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef}>
             <MessageList messages={messages} thinking={thinking} onPrompt={send} />
             {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
           </div>
-          {notice && <div className="notice error" role="alert">{notice}<button className="icon-button" type="button" aria-label="Dismiss notice" onClick={() => setNotice('')}><Icon name="x" size={15} /></button></div>}
+          {notice && <div className={`notice ${notice.error ? 'error' : 'success'}`} role="alert">{notice.text}<button className="icon-button" type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}><Icon name="x" size={15} /></button></div>}
           <Composer busy={busy} queued={queued} provider={identity.provider} model={identity.model} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} />
         </section>}
     </main>
@@ -261,11 +288,11 @@ export default function App() {
 }
 
 function SessionRow({ session, active, onClick }: { session: SessionSummary; active: boolean; onClick(): void }) {
-  return <button className={`session-row ${active ? 'active' : ''}`} type="button" onClick={onClick}><Icon name="history" size={15} /><span className="session-content"><span className="session-title">{sessionLabel(session)}</span><span className="session-preview">{sessionMeta(session)}</span></span></button>
+  return <button className={`session-row ${active ? 'active' : ''}`} type="button" onClick={onClick}><span className="session-content"><span className="session-title">{sessionLabel(session)}</span><span className="session-preview">{sessionMeta(session)}</span></span></button>
 }
 
 function studioLabel(section: string): string {
-  return ({ provider: 'Provider & model', keys: 'API keys', memory: 'Memory', gateways: 'Gateways', tools: 'Tools', permissions: 'Permissions', display: 'Display', skills: 'Skills', sessions: 'Sessions' })[section] ?? 'Settings'
+  return ({ provider: 'Provider & model', keys: 'API keys', memory: 'Memory', routines: 'Routines', gateways: 'Gateways', web: 'Web', tools: 'Tools', permissions: 'Permissions', display: 'Display', skills: 'Skills', sessions: 'Sessions' })[section] ?? 'Settings'
 }
 
 function formatMs(ms: number): string {

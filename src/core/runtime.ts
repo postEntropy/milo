@@ -202,6 +202,11 @@ export class AgentRuntime {
     return this.options.skills ?? []
   }
 
+  /** The install's memory store, for a surface that lists or drops notes. */
+  get memory(): Memory {
+    return this.options.memory
+  }
+
   get permissions(): PermissionPolicy | undefined {
     return this.options.permissionPolicy
   }
