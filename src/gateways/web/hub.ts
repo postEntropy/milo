@@ -120,6 +120,14 @@ export class WebHub {
   }
 
   private startTurn(conversationId: string, text: string): void {
+    // The state frame that *ends* a turn comes from the queue's settle handler
+    // below, not from the turn's own `finally`. `busy` is the queue's answer to
+    // "is a turn running", and the queue only lets the turn go after this work
+    // returns — so a state read inside the body reports the turn still running.
+    // Being the last one sent, that left the page's stop button where it was, and
+    // pressing it answered "nothing is running to stop". The frame under it is the
+    // other half: sent at once, so a message enqueued behind a running turn shows
+    // up as queued now rather than when that turn ends.
     this.turns.run(conversationId, async (inbox, signal) => {
       const id = randomUUID()
       const activeConversation = this.conversations.get(conversationId)
@@ -183,9 +191,8 @@ export class WebHub {
         this.broadcast(conversationId, { type: 'turn-end', id, status })
         const endedConversation = this.conversations.get(conversationId)
         if (endedConversation?.activeTurnId === id) endedConversation.activeTurnId = undefined
-        this.sendState(conversationId)
       }
-    })
+    }, () => this.sendState(conversationId))
     this.sendState(conversationId)
   }
 

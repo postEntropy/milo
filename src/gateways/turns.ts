@@ -19,8 +19,12 @@ export class TurnQueue {
   private readonly tails = new Map<string, Promise<unknown>>()
   /** The turn running right now: the inbox it reads, and its abort handle. */
   private readonly running = new Map<string, { inbox: string[]; controller: AbortController }>()
-  /** Turns registered and not finished, the running one included. */
-  private readonly registered = new Map<string, number>()
+  /**
+   * Turns waiting behind another one. A turn with nothing ahead of it runs as
+   * soon as it is registered, so it is never counted here — the tail alone
+   * cannot tell a turn that runs at once from one that waits its turn.
+   */
+  private readonly waiting = new Map<string, number>()
   /**
    * Bumped by `stop`. A turn queued before the bump is skipped when its turn
    * comes: `/stop` means stop, not "stop this one and start the next message of
@@ -51,8 +55,7 @@ export class TurnQueue {
 
   /** How many turns are waiting behind the running one. */
   queued(key: string): number {
-    const registered = this.registered.get(key) ?? 0
-    return Math.max(0, registered - (this.running.has(key) ? 1 : 0))
+    return this.waiting.get(key) ?? 0
   }
 
   /**
@@ -71,14 +74,34 @@ export class TurnQueue {
     return { stopped: true, dropped: this.queued(key) }
   }
 
-  /** Queues `work` behind whatever is already running for `key`. */
-  run(key: string, work: (inbox: string[], signal: AbortSignal) => Promise<void>): void {
+  /**
+   * Queues `work` behind whatever is already running for `key`.
+   *
+   * `onSettled` runs once the turn is over **and the queue has let it go** — a
+   * moment `work` itself cannot see, because `busy` stays true for as long as it
+   * runs. Deliberately a callback and not a returned promise: this class exists so
+   * that no gateway ever awaits a turn in its update handler (the Telegram
+   * deadlock above), and a promise is exactly the offer that ends in one.
+   */
+  run(
+    key: string,
+    work: (inbox: string[], signal: AbortSignal) => Promise<void>,
+    onSettled?: () => void,
+  ): void {
     const previous = this.tails.get(key) ?? Promise.resolve()
     const epoch = this.epoch.get(key) ?? 0
-    this.registered.set(key, (this.registered.get(key) ?? 0) + 1)
+    // A turn already on the tail is ahead of this one, so it waits — and waiting
+    // is the only thing that makes it queued. A turn with nothing ahead runs at
+    // once, and reporting it as queued is a lie the state frame shows on screen.
+    const waiting = this.tails.has(key)
+    if (waiting) this.waiting.set(key, (this.waiting.get(key) ?? 0) + 1)
 
     const next = previous
       .then(async () => {
+        // Only a turn that was counted as waiting leaves the count when it
+        // starts. The first turn was never in it, and taking a slot out here
+        // would steal the next message's.
+        if (waiting) this.dequeue(key)
         // Queued before a stop: that stop was the answer to these too.
         if ((this.epoch.get(key) ?? 0) !== epoch) return
         const controller = new AbortController()
@@ -94,16 +117,30 @@ export class TurnQueue {
       })
       // Never rejects: a failed turn must not poison the queue for the next one.
       .catch((error: unknown) => logWarn(`turn failed: ${errorMessage(error)}`))
-      .finally(() => {
-        const left = (this.registered.get(key) ?? 1) - 1
-        if (left > 0) this.registered.set(key, left)
-        else this.registered.delete(key)
-      })
 
     this.tails.set(key, next)
     void next.then(() => {
       if (this.tails.get(key) === next) this.tails.delete(key)
     })
+    if (onSettled) {
+      // On the same promise, so it runs for a turn that failed as well — a surface
+      // still has to be told the turn is over — and after the queue has forgotten
+      // it, which is the whole reason this is not read from inside `work`.
+      void next.then(() => {
+        try {
+          onSettled()
+        } catch (error) {
+          logWarn(`turn settle handler failed: ${errorMessage(error)}`)
+        }
+      })
+    }
+  }
+
+  /** One fewer turn is waiting: this one is starting, or a stop dropped it. */
+  private dequeue(key: string): void {
+    const left = (this.waiting.get(key) ?? 0) - 1
+    if (left > 0) this.waiting.set(key, left)
+    else this.waiting.delete(key)
   }
 
   /** Conversations with a turn running or queued. */

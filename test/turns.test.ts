@@ -103,4 +103,19 @@ describe('TurnQueue', () => {
     await tick(40)
     expect(queue.busy('chat-1')).toBe(false)
   })
+
+  it('settles only once the queue has let the turn go', async () => {
+    const queue = new TurnQueue()
+    let resolveSettled: (busy: boolean) => void = () => undefined
+    const settled = new Promise<boolean>((resolve) => { resolveSettled = resolve })
+
+    // What a surface waits on to announce "not busy any more". Read from inside
+    // the turn's own body it would still say true, which is how a web page ends
+    // up holding a stop button for a turn that is over.
+    queue.run('chat-1', async () => {
+      await tick(20)
+    }, () => resolveSettled(queue.busy('chat-1')))
+
+    await expect(settled).resolves.toBe(false)
+  })
 })
