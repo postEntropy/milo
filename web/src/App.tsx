@@ -265,9 +265,9 @@ export default function App() {
     <main className="main">
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
+        {settings && <button className="btn-secondary" type="button" onClick={() => setSettings(false)}><span aria-hidden="true">←</span> Back to chat</button>}
         <div className="topbar-title"><h1>{settings ? 'Settings' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
         <div className="topbar-actions">
-          {settings && <button className="btn-secondary" type="button" onClick={() => setSettings(false)}><span aria-hidden="true">←</span> Back to chat</button>}
           {!settings && sessionId && <button className="icon-button" type="button" title="Export this conversation" aria-label="Export this conversation" onClick={() => void exportSession()}><Icon name="download" size={16} /></button>}
           {!settings && sessionId && <button className="icon-button" type="button" title="Clear this conversation" aria-label="Clear this conversation" onClick={() => void clearSession()}><Icon name="trash" size={16} /></button>}
           {!settings && connection !== 'online' && <span className={`connection-status ${connection}`}><span />{connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
