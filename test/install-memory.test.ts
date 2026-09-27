@@ -49,10 +49,16 @@ describe('installMemory', () => {
       limit: 3,
     })
 
+    // `meu editor e o neovim` last, and it is the one thing here that is not
+    // about the question: nothing in "bullet tmux" reaches it. A real history
+    // would never have returned it — the stand-in above answers with the same
+    // two notes whatever is asked — but what it exposes is the rule that matters:
+    // an answer the words did not reach goes below one they did, so a turn can
+    // still be recalled when meaning has padded the facts out to five.
     expect(hits.map((hit) => hit.text)).toEqual([
       'prefere bullet points',
-      'meu editor e o neovim',
       'uso tmux tambem',
+      'meu editor e o neovim',
     ])
     // The scores are the reply's own order: `1` is still the best note in it.
     expect(hits.map((hit) => hit.score)).toEqual([1, 0.5, 1 / 3])

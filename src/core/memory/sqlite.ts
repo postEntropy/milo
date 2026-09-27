@@ -6,6 +6,7 @@ import { errorMessage } from '../../util/errors.js'
 import { ensurePrivateDir } from '../../util/fs.js'
 import { logWarn } from '../../util/log.js'
 import { InputRefusedError, isNoise, type Embedder } from './embed.js'
+import { keepCovered } from './coverage.js'
 import { readLegacyMemory } from './migrate.js'
 import { hashOf, loadSqlite, sizeOnDisk, tightenDb, toMatchQuery } from './sql.js'
 import { contentWords } from './tokenize.js'
@@ -23,14 +24,6 @@ const DB_FILE = 'memory.db'
 const MIGRATED_KEY = 'migrated_json_v1'
 const UNIFIED_KEY = 'unified_scope_v1'
 const EMBEDDED_KEY = 'embed_model'
-
-/**
- * Reciprocal-rank fusion's dampener. The two rankings are merged by position,
- * not by score, because the two scores are not the same kind of number: bm25 is
- * unbounded and negative, a cosine is between -1 and 1, and a weighted sum of
- * them would be a constant nobody could justify. Position is comparable.
- */
-const RRF_K = 60
 
 /** How many notes are embedded in one request while filling the store in. */
 const EMBED_BATCH = 64
@@ -109,6 +102,13 @@ export interface SqliteMemoryOptions {
    * usual case — is a store that works on words alone, exactly as it always has.
    */
   embedder?: Embedder
+  /**
+   * Whether the reply is trimmed to the notes that carry the question
+   * (`coverage.ts`). On by default. Off is the untrimmed ranking it replaced,
+   * kept reachable so the two can be measured against each other rather than
+   * argued about.
+   */
+  coverage?: boolean
 }
 
 interface Row {
@@ -159,6 +159,7 @@ export class SqliteMemory implements Memory {
   private readonly vectorStmt: StatementSync
   private readonly setVectorStmt: StatementSync
   private readonly embedder?: Embedder
+  private readonly coverage: boolean
   /** The fill-in, once per process. Nothing waits on it. */
   private filling: Promise<void> | null = null
   /** One line per process is enough for an engine that is simply not up. */
@@ -172,6 +173,7 @@ export class SqliteMemory implements Memory {
     this.db = new DatabaseSync(this.location)
     this.debug = options.debug ?? process.env.MILO_DEBUG === '1'
     this.embedder = options.embedder
+    this.coverage = options.coverage ?? true
 
     // WAL, because the CLI and `milo serve` are two processes on one store and
     // the default rollback journal would make one of them wait on the other.
@@ -248,14 +250,8 @@ export class SqliteMemory implements Memory {
     const limit = opts?.limit ?? 5
     const match = toMatchQuery(query)
     const key = scopeKey(scope)
-    const vector = await this.queryVector(query)
-    // A question made only of filler is no keyword query at all — but it can
-    // still mean something, and the semantic side is the one that knows.
-    if (!match && !vector) return []
 
-    // Ordered by both signals at once: `bm25` is the index's own ranking, the
-    // vectors are the model's, and recency breaks what is left.
-    const items = this.rank(key, match, vector, limit)
+    const items = (await this.rank(key, query, match, limit))
       .slice(0, limit)
       .map((row, index) => ({
         id: row.uid,
@@ -272,43 +268,72 @@ export class SqliteMemory implements Memory {
   }
 
   /**
-   * The store's candidates from both signals, merged by rank.
+   * What answers the question: the notes whose words match, and then — only if
+   * those leave room — the notes meaning reaches.
    *
-   * The semantic side is allowed to bring in notes the words never matched —
-   * that is the whole point of it, and the case that made it necessary: a
-   * question sharing no word with the note that answers it returns nothing from
-   * keywords alone.
+   * The order is the point, and it was measured. Interleaving the two signals by
+   * rank (reciprocal rank fusion, what this used to do) let a near-but-unrelated
+   * note displace the one that matched the question's own words: on the eval set
+   * that was precision falling from **73.5% to 23.0%** and recall from 97% to
+   * 90.9% — the answer lost on questions the words had already answered. A note
+   * found by meaning is added *after* the ones found by words, never above them,
+   * which is the promise the store makes ("union, not reorder") without the part
+   * that cost the answer its place.
    *
-   * There is deliberately no similarity cut-off. One was added, measured and
-   * removed: against two models, eight notes and thirty-two questions, the note
-   * a question was about scored 0.01 to 0.70 and the ones it was not scored 0.05
-   * to 0.31 — overlapping bands, so any floor either loses a correct answer or
-   * keeps an unrelated one. The first version looked right on nine questions and
-   * fell apart on thirty-two, which is the argument for measuring before
-   * trusting a threshold.
+   * The words going first is also what makes meaning affordable. The reply is
+   * asked of the embedder **only when the words did not fill it**, so a question
+   * the index can answer costs no request at all — measured at 0.2 ms against
+   * 433 ms for a round trip to a hosted model, paid before every turn otherwise.
+   * It is the same rule the two halves of recall already follow: what was said
+   * fills what the facts leave.
    *
-   * The cost of that is real and worth naming: a question that has nothing to do
-   * with anything still brings the nearest notes in — measured live, "qual a
-   * capital da França?" came back with the editor note. They are framed as data
-   * the model may ignore, the list is short, and the fix for this is a reranking
-   * model rather than a number.
+   * The semantic side is still allowed to introduce a note the words never
+   * matched. That is the whole point of it, and the case that made it necessary:
+   * a question sharing no word with the note that answers it.
+   *
+   * There is deliberately no similarity cut-off, and `coverage.ts` does not add
+   * one: an absolute floor was added, measured and removed, because the notes a
+   * question was about (0.01–0.70) and the notes it was not (0.05–0.31) scored
+   * in overlapping bands, so any threshold either loses a correct answer or keeps
+   * an unrelated one. What is trimmed there is the *gap* instead.
+   *
+   * `coverage: false` is this same order with nothing trimmed. It is kept
+   * reachable so the two can be measured against each other instead of argued
+   * about.
    */
-  private rank(
+  private async rank(
     key: string,
+    text: string,
     match: string | null,
-    query: Float32Array | null,
     limit: number,
-  ): Row[] {
+  ): Promise<Row[]> {
     const lexical = match ? this.select(key, match, limit) : []
-    if (!query) return lexical
+    const candidates = lexical.map((row) => ({
+      item: row,
+      text: row.text,
+      byMeaningOnly: false,
+    }))
 
-    const semantic = this.nearest(key, query, limit)
-    if (semantic.length === 0) return lexical
-    if (lexical.length === 0) return semantic
-    return fuse(lexical, semantic, limit)
+    // Only the embedder is skipped here, never the trim: a question the words
+    // already fill is still mostly notes that share a word.
+    if (lexical.length < limit) {
+      const vector = await this.queryVector(text)
+      if (vector) {
+        const seen = new Set(lexical.map((row) => row.uid))
+        for (const row of this.nearest(key, vector, limit)) {
+          if (seen.has(row.uid)) continue
+          candidates.push({ item: row, text: row.text, byMeaningOnly: true })
+        }
+      }
+    }
+
+    if (!this.coverage) return candidates.slice(0, limit).map((entry) => entry.item)
+    return keepCovered(candidates, text)
+      .slice(0, limit)
+      .map((entry) => entry.item)
   }
 
-  /** The notes closest to the query, by cosine. */
+  /** The notes closest to the query, by cosine, best first. */
   private nearest(key: string, query: Float32Array, limit: number): Row[] {
     let rows: VectorRow[]
     try {
@@ -718,33 +743,6 @@ export function sqliteMemoryStatus(location: string): MemoryStatus {
   } finally {
     db?.close()
   }
-}
-
-/**
- * Merges two rankings of the same notes by position.
- *
- * By position and not by score, because the two scores are not the same kind of
- * number and a weighted sum of them would be a constant nobody could defend.
- * A note that only one side found keeps its place: that is how a question with
- * no shared word reaches the note that answers it.
- */
-function fuse(lexical: Row[], semantic: Row[], limit: number): Row[] {
-  const merged = new Map<string, { row: Row; score: number }>()
-  const add = (rows: Row[]) => {
-    rows.forEach((row, index) => {
-      const gain = 1 / (RRF_K + index + 1)
-      const found = merged.get(row.uid)
-      if (found) found.score += gain
-      else merged.set(row.uid, { row, score: gain })
-    })
-  }
-  add(lexical)
-  add(semantic)
-
-  return [...merged.values()]
-    .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
-    .map((entry) => entry.row)
 }
 
 /** Stored vectors are unit length, so closeness is the plain dot product. */
