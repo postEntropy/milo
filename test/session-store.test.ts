@@ -192,6 +192,20 @@ describe('pruning old sessions', () => {
     expect(await store.prune({ keep: 5 })).toEqual([])
   })
 
+  it('keeps every one when the limit is zero, which is how "no limit" is written', async () => {
+    const file = new FileSessionStore({ dir: tempDir() })
+    await seed(file)
+    expect(await file.prune({ keep: 0 })).toEqual([])
+    expect(await file.list()).toHaveLength(3)
+
+    // The same word has to mean the same thing in both stores, since the config
+    // hands the number to whichever one is in use.
+    const memory = new MemorySessionStore()
+    await seed(memory)
+    expect(await memory.prune({ keep: 0 })).toEqual([])
+    expect(await memory.list()).toHaveLength(3)
+  })
+
   it('prunes the in-memory store the same way', async () => {
     const store = new MemorySessionStore()
     await seed(store)

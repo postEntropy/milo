@@ -153,6 +153,21 @@ export class AgentRuntime {
   }
 
   /**
+   * Deletes a saved session outright — the record and the recap with it. Only
+   * the record goes: a scope still bound to it falls through to a fresh
+   * conversation on its next message, so refusing to delete the session a
+   * conversation is currently in is the caller's decision, not this one's.
+   */
+  async removeSession(id: string): Promise<boolean> {
+    const exists = (await this.store.list()).some((session) => session.id === id)
+    if (!exists) return false
+    this.cache.delete(id)
+    await this.store.remove(id)
+    await this.recaps.remove(id)
+    return true
+  }
+
+  /**
    * Waits for the recaps still being written in the background. A switch never
    * waits for them, so this is the seam for a caller that is about to exit. A
    * recap that failed is already logged and must not fail this too.

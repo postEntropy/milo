@@ -122,9 +122,12 @@ export const SessionsSchema = z.object({
   /**
    * How many sessions are kept on disk. Every run leaves one behind, so without
    * this the directory grows a file per run; the oldest beyond this are pruned at
-   * startup, and one currently bound to a scope is never touched.
+   * startup, and one currently bound to a scope is never touched. `0` keeps every
+   * one, the same way `history.windowDays` says "keep the lot" — pruning only ever
+   * trims these working files, never the log that recall reads, so refusing to
+   * prune costs disk and nothing else.
    */
-  maxSessions: z.number().int().positive().default(50),
+  maxSessions: z.number().int().nonnegative().default(50),
 })
 export type SessionsConfig = z.infer<typeof SessionsSchema>
 

@@ -57,6 +57,21 @@ describe('setPermissionMode', () => {
   })
 })
 
+describe('session retention', () => {
+  it('caps the directory at 50 sessions when the file says nothing', () => {
+    expect(readConfig()?.sessions.maxSessions).toBe(50)
+  })
+
+  it('takes 0 as "keep every one", the way windowDays does', () => {
+    // A 0 that failed the schema would fail the whole file and take every other
+    // setting down with it — which is exactly what it did before this was
+    // `nonnegative`.
+    writeFileSync(configFile, JSON.stringify({ ...base, sessions: { maxSessions: 0 } }, null, 2))
+
+    expect(readConfig()?.sessions.maxSessions).toBe(0)
+  })
+})
+
 describe('reasoning effort', () => {
   it('asks for medium when the file says nothing about it', () => {
     // Every request carries an explicit effort now: "let the provider and model
