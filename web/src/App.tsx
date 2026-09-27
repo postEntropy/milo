@@ -44,6 +44,22 @@ export default function App() {
   const messagesRef = useRef<HTMLDivElement>(null)
   /** When the current wait began: the turn's first output, and again after each tool. */
   const waitStartedAt = useRef(0)
+  const sessionListRef = useRef<HTMLElement | null>(null)
+  /** The list's soft edges only show when content is actually scrolled under them. */
+  const [listEdges, setListEdges] = useState({ top: false, bottom: false })
+  const updateListEdges = useCallback((): void => {
+    const list = sessionListRef.current
+    if (!list) return
+    const top = list.scrollTop > 2
+    const bottom = list.scrollHeight - list.scrollTop - list.clientHeight > 2
+    setListEdges((current) => current.top === top && current.bottom === bottom ? current : { top, bottom })
+  }, [])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: this recomputes when the rows or the view change, not for the values themselves — the list's height is what moved
+  useEffect(() => { updateListEdges() }, [updateListEdges, sessions, search, settings, sidebarOpen])
+  useEffect(() => {
+    window.addEventListener('resize', updateListEdges)
+    return () => window.removeEventListener('resize', updateListEdges)
+  }, [updateListEdges])
 
   const fail = useCallback((error: unknown): void => {
     setNotice({ text: error instanceof Error ? error.message : String(error), error: true })
@@ -247,10 +263,14 @@ export default function App() {
             <button className="new-chat" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>
           </div>
         </div>
-        <nav className="session-list" aria-label="Sessions">
-          {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} />)}</div>)}
-          {visibleSessions.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
-        </nav>
+        <div className="session-region">
+          <nav className="session-list" aria-label="Sessions" ref={sessionListRef} onScroll={updateListEdges}>
+            {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} />)}</div>)}
+            {visibleSessions.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
+          </nav>
+          <div className={`scroll-blur top ${listEdges.top ? 'on' : ''}`} aria-hidden="true" />
+          <div className={`scroll-blur bottom ${listEdges.bottom ? 'on' : ''}`} aria-hidden="true" />
+        </div>
         <div className="sidebar-footer">
           <button className="sidebar-action" type="button" onClick={() => { setSettings(true); setSidebarOpen(false) }}><Icon name="settings" /><span className="sidebar-action-text"><strong>Settings</strong><small>Models, keys and tools</small></span></button>
         </div>
