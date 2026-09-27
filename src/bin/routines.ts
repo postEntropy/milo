@@ -12,7 +12,8 @@ import {
   parseWhen,
   readRoutines,
   removeRoutine,
-  ROUTINE_GATEWAY,
+  ROUTINE_GATEWAYS,
+  runRoutineOnce,
   setEnabled,
   type RoutineGateway,
 } from '../core/routines.js'
@@ -46,13 +47,15 @@ const USAGE = [
   '  milo routines                              list the routines',
   '  milo routines add "<prompt>" --at 08:00 [--days mon-fri] --gateway telegram --to <chat id>',
   '  milo routines add "<prompt>" --every 2h --gateway discord --to <channel id>',
+  '  milo routines add "<prompt>" --every 6h --gateway web --to <conversation id>',
   '  milo routines remove <id>                  delete a routine',
   '  milo routines enable|disable <id>          turn a routine on or off',
   '  milo routines run <id>                     fire it now, printing the answer (no delivery)',
   '',
   'A routine fires only while `milo serve` is running, and delivers its answer to',
-  'the chat named by --gateway/--to. Times are local; `--days` takes mon,wed or a',
-  'range like mon-fri.',
+  'the chat named by --gateway/--to (telegram, discord or web — a web conversation',
+  'is the id in the browser\'s address). Times are local; `--days` takes mon,wed or',
+  'a range like mon-fri.',
   '',
   'Reading needs no permission. A routine that writes or runs something needs the',
   'tool named in --allow shell_command,write_file — there is nobody at the other end',
@@ -156,10 +159,10 @@ function parseAdd(argv: string[]): AddFlags {
     } else if (token === '--yes' || token === '-y') flags.yes = true
     else if (token === '--gateway') {
       const gateway = value()
-      if (gateway !== 'telegram' && gateway !== 'discord') {
-        throw new Error('--gateway must be telegram or discord.')
+      if (!(ROUTINE_GATEWAYS as readonly string[]).includes(gateway)) {
+        throw new Error(`--gateway must be one of ${ROUTINE_GATEWAYS.join(', ')}.`)
       }
-      flags.gateway = gateway
+      flags.gateway = gateway as RoutineGateway
     } else if (token === '--to' || token === '--conversation') flags.conversationId = value()
     else if (token.startsWith('-')) throw new Error(`Unknown option ${token}.`)
     else positionals.push(token)
@@ -184,7 +187,7 @@ async function add(argv: string[], context: Required<RoutineIo>): Promise<number
   }
 
   if (!flags.gateway || !flags.conversationId) {
-    context.err('add needs --gateway telegram|discord and --to <chat id> — a timer has no chat of its own.')
+    context.err('add needs --gateway telegram|discord|web and --to <chat id> — a timer has no chat of its own.')
     context.err(USAGE)
     return 1
   }
@@ -280,18 +283,9 @@ async function run(argv: string[], out: RoutineIo['out'], err: RoutineIo['err'])
 
   const runtime = createRuntime(loaded, process.cwd())
   try {
-    const session = await runtime.newSession(
-      { gateway: ROUTINE_GATEWAY, conversationId: routine.id },
-      routine.name,
-    )
-    let answer = ''
-    let failure: string | null = null
-    for await (const event of session.send(routine.prompt)) {
-      if (event.type === 'text-delta') answer += event.delta
-      else if (event.type === 'error') failure = event.message
-    }
+    const { answer, failure } = await runRoutineOnce(runtime, routine)
     if (failure) err(`⚠ ${failure}`)
-    out(answer.trim() || '(no answer)')
+    out(answer || '(no answer)')
     out('(printed only — `run` does not deliver)')
     return failure ? 1 : 0
   } finally {

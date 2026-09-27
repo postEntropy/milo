@@ -102,6 +102,23 @@ export class WebHub {
     for (const id of this.conversations.keys()) this.turns.stop(id)
   }
 
+  /**
+   * Posts a message into a conversation with no turn behind it — how a routine
+   * reaches a web chat. It is written into the conversation's session first, so
+   * it is there when the tab is next opened, and then broadcast to whoever is
+   * watching right now; the broadcast is a no-op when nobody is. The frame is the
+   * one a command reply uses, so the chat renders it and lists it like any other
+   * message without the protocol knowing about routines.
+   */
+  async deliver(conversationId: string, text: string): Promise<void> {
+    if (!/^[0-9a-f-]{36}$/i.test(conversationId)) {
+      throw new Error(`not a web conversation id: ${conversationId}`)
+    }
+    const session = await this.runtime.getSession({ gateway: 'web', conversationId })
+    await session.appendNotice(text)
+    this.broadcast(conversationId, { type: 'command-result', reply: text, markdown: text })
+  }
+
   private startTurn(conversationId: string, text: string): void {
     this.turns.run(conversationId, async (inbox, signal) => {
       const id = randomUUID()

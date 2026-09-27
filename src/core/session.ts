@@ -546,6 +546,24 @@ export class Session {
   }
 
   /**
+   * Adds a message with no turn behind it, so something said out of band — a
+   * routine's answer delivered to this chat — is in the transcript when it is
+   * next opened rather than existing only for whoever was watching. Under the
+   * lease for the same reason every other write is: appending from a stale copy
+   * would be refused, or would erase the turns written since.
+   */
+  async appendNotice(text: string): Promise<void> {
+    const lease = await this.store.acquire(this.id)
+    try {
+      if (lease.latest) this.adoptLatest(lease.latest)
+      this.messages.push({ role: 'assistant', content: [{ type: 'text', text }] })
+      await this.persist()
+    } finally {
+      await lease.release()
+    }
+  }
+
+  /**
    * A short recap of the whole session, written when it is switched away from,
    * and kept out of the transcript so it cannot be overwritten by a turn — nor
    * overwrite one. It records which version of the transcript it describes, so a

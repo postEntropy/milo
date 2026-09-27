@@ -35,6 +35,8 @@ export interface RunningWebServer {
   server: Server
   token: string
   url: string
+  /** Posts a message into a conversation with no turn behind it (a routine's answer). */
+  deliver(conversationId: string, text: string): Promise<void>
   stop(): Promise<void>
 }
 
@@ -123,6 +125,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     server,
     token,
     url,
+    deliver: (conversationId, text) => hub.deliver(conversationId, text),
     stop: () => new Promise<void>((resolve, reject) => {
       hub.close()
       webSocketServer.close()

@@ -6,7 +6,10 @@ import type { AgentRuntime } from './runtime.js'
 import { generateNickname } from './sessions/nickname.js'
 
 /** The surfaces a routine can deliver to — ones that receive messages out of band. */
-export type RoutineGateway = 'telegram' | 'discord'
+export type RoutineGateway = 'telegram' | 'discord' | 'web'
+
+/** The gateway names a routine's target may carry; one place, so the tool, the CLI and the store agree. */
+export const ROUTINE_GATEWAYS: readonly RoutineGateway[] = ['telegram', 'discord', 'web']
 
 /**
  * The gateway name a routine's own run carries. It is not a surface: it is how a
@@ -246,6 +249,41 @@ export function markRun(id: string, result: 'ok' | 'error', at: number): void {
   writeRoutines(routines)
 }
 
+export interface RoutineRunResult {
+  /** What it answered, trimmed; empty when it said nothing. */
+  answer: string
+  /** The failure message, when the run ended in one. */
+  failure: string | null
+}
+
+/**
+ * One run of a routine: a turn in a conversation of the routine's own, carrying
+ * the grants the person approved and with nobody to ask — a tool that would need
+ * confirmation is denied unless it is in `allow`. The turn is new every time: a
+ * routine is not a conversation, and yesterday's context would only make today's
+ * answer drift.
+ *
+ * Shared by the timer and by "run it now", so a manual run behaves the way the
+ * scheduled one will rather than being a second, differently-permissioned path.
+ */
+export async function runRoutineOnce(
+  runtime: AgentRuntime,
+  routine: Routine,
+): Promise<RoutineRunResult> {
+  const session = await runtime.newSession(
+    { gateway: ROUTINE_GATEWAY, conversationId: routine.id },
+    routine.name,
+    { grantedTools: routine.allow },
+  )
+  let answer = ''
+  let failure: string | null = null
+  for await (const event of session.send(routine.prompt)) {
+    if (event.type === 'text-delta') answer += event.delta
+    else if (event.type === 'error') failure = event.message
+  }
+  return { answer: answer.trim(), failure }
+}
+
 export interface RoutineSchedulerOptions {
   runtime: AgentRuntime
   /** Posts the finished text at the routine's target. Injected: the loop knows no gateway. */
@@ -359,33 +397,23 @@ export class RoutineScheduler {
    * the routine was granted it: there is nobody at the other end of a timer.
    */
   private async fire(routine: Routine): Promise<void> {
-    let failure: string | null = null
-    let answer = ''
+    let result: RoutineRunResult
     try {
-      const scope = { gateway: ROUTINE_GATEWAY, conversationId: routine.id }
-      const session = await this.options.runtime.newSession(scope, routine.name, {
-        // What the person approved when the routine was made. Everything else
-        // keeps the policy's answer, which without an asker is a denial.
-        grantedTools: routine.allow,
-      })
-      for await (const event of session.send(routine.prompt)) {
-        if (event.type === 'text-delta') answer += event.delta
-        else if (event.type === 'error') failure = event.message
-      }
+      result = await runRoutineOnce(this.options.runtime, routine)
     } catch (error) {
-      failure = errorMessage(error)
+      result = { answer: '', failure: errorMessage(error) }
     }
 
-    markRun(routine.id, failure ? 'error' : 'ok', this.now().getTime())
-    if (failure) this.log(`routine ${routine.id} failed: ${failure}`)
+    markRun(routine.id, result.failure ? 'error' : 'ok', this.now().getTime())
+    if (result.failure) this.log(`routine ${routine.id} failed: ${result.failure}`)
 
     // The routine's name leads its message, so a chat with several of them can
     // tell at a glance which one just spoke.
     const name = routine.name ?? routine.id
-    const text = failure
-      ? `⚠ routine "${name}" failed: ${failure}`
-      : answer.trim()
-        ? `${name}\n\n${answer.trim()}`
+    const text = result.failure
+      ? `⚠ routine "${name}" failed: ${result.failure}`
+      : result.answer
+        ? `${name}\n\n${result.answer}`
         : ''
     if (!text) return
     try {
@@ -495,7 +523,7 @@ function isTarget(value: unknown): value is RoutineTarget {
   if (!value || typeof value !== 'object') return false
   const target = value as Record<string, unknown>
   return (
-    (target.gateway === 'telegram' || target.gateway === 'discord') &&
+    ROUTINE_GATEWAYS.includes(target.gateway as RoutineGateway) &&
     typeof target.conversationId === 'string' &&
     target.conversationId.length > 0
   )

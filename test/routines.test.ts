@@ -166,6 +166,21 @@ describe('the store', () => {
     expect(readRoutines()[0]!.enabled).toBe(true)
   })
 
+  it('accepts a web chat as a destination', () => {
+    writeFileSync(
+      routinesFile(),
+      JSON.stringify([
+        {
+          id: 'ok-otter-1',
+          prompt: 'x',
+          when: at('08:00'),
+          target: { gateway: 'web', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' },
+        },
+      ]),
+    )
+    expect(readRoutines()[0]!.target.gateway).toBe('web')
+  })
+
   it('removes, enables and disables by id', () => {
     writeRoutines([])
     const added = addRoutine(routine())

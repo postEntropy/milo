@@ -5,6 +5,8 @@ import {
   formatLocal,
   nextRunAt,
   parseWhen,
+  ROUTINE_GATEWAYS,
+  type RoutineGateway,
   type RoutineTarget,
 } from '../routines.js'
 import type { Tool, ToolContext } from './types.js'
@@ -35,7 +37,7 @@ const schema = z.object({
     .optional()
     .describe('Days for `at`, e.g. ["mon","tue","wed"] or ["mon-fri"]. Absent means every day.'),
   gateway: z
-    .enum(['telegram', 'discord'])
+    .enum(['telegram', 'discord', 'web'])
     .optional()
     .describe('Where to deliver. Absent: the chat this request came from, when it can receive messages.'),
   conversationId: z
@@ -76,7 +78,7 @@ export const routineTool: Tool<RoutineArgs> = {
     if (!target) {
       return {
         content:
-          'I need to know which chat to deliver to: pass `gateway` ("telegram" or "discord") and `conversationId`.',
+          'I need to know which chat to deliver to: pass `gateway` ("telegram", "discord" or "web") and `conversationId`.',
         isError: true,
       }
     }
@@ -115,8 +117,8 @@ function resolveTarget(args: RoutineArgs, ctx: ToolContext): RoutineTarget | nul
   if (args.gateway || args.conversationId) return null
 
   const origin = ctx.origin
-  if (origin && (origin.gateway === 'telegram' || origin.gateway === 'discord')) {
-    return { gateway: origin.gateway, conversationId: origin.conversationId }
+  if (origin && (ROUTINE_GATEWAYS as readonly string[]).includes(origin.gateway)) {
+    return { gateway: origin.gateway as RoutineGateway, conversationId: origin.conversationId }
   }
   return null
 }
