@@ -16,14 +16,26 @@ export class MiloSocket {
   connect(conversationId: string): void {
     this.conversationId = conversationId
     this.closed = false
+    this.retire()
     this.open()
   }
 
   close(): void {
     this.closed = true
+    this.retire()
+  }
+
+  /**
+   * Detach the current socket before closing it, so the close event it fires
+   * later finds `this.socket` pointing elsewhere and cannot revive a second
+   * connection. Without this, a reconnect racing an earlier close leaves two
+   * live sockets, and every frame arrives twice.
+   */
+  private retire(): void {
     window.clearTimeout(this.timer)
-    this.socket?.close()
+    const socket = this.socket
     this.socket = null
+    socket?.close()
   }
 
   send(frame: ClientFrame): void {
@@ -55,10 +67,12 @@ export class MiloSocket {
     const socket = new WebSocket(url)
     this.socket = socket
     socket.addEventListener('open', () => {
+      if (this.socket !== socket) return
       this.retry = 0
       socket.send(JSON.stringify({ type: 'hello', version: 1, conversationId }))
     })
     socket.addEventListener('message', (event) => {
+      if (this.socket !== socket) return
       try {
         const frame = JSON.parse(String(event.data)) as ServerFrame
         for (const listener of this.listeners) listener(frame)
@@ -67,7 +81,7 @@ export class MiloSocket {
       }
     })
     socket.addEventListener('close', () => {
-      if (this.closed) return
+      if (this.socket !== socket || this.closed) return
       this.status('offline')
       const delay = Math.min(500 * (2 ** this.retry), 8000)
       this.retry += 1
