@@ -2,6 +2,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { stringify } from 'yaml'
 import { cleanup, render } from 'ink-testing-library'
 
 // Point the app at a throwaway home *before* the config modules load.
@@ -9,9 +10,9 @@ const home = mkdtempSync(path.join(tmpdir(), 'milo-shell-layout-'))
 process.env.MILO_HOME = home
 
 writeFileSync(
-  path.join(home, 'config.json'),
-  JSON.stringify(
-    {
+  path.join(home, 'config.yml'),
+  stringify(
+  {
       provider: 'commandcode',
       model: 'deepseek/deepseek-v4.1-flash',
       providers: { commandcode: { baseURL: 'https://api.commandcode.ai/provider/v1' } },

@@ -584,7 +584,7 @@ export function ChatScreen({
             if (finishReason === 'length') {
               push({
                 kind: 'info',
-                text: '⚠ hit the output limit — the answer was cut off. Raise "maxTokens" in config.json.',
+                text: '⚠ hit the output limit — the answer was cut off. Raise "maxTokens" in config.yml.',
               })
             }
           },

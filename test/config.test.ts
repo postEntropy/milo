@@ -1,17 +1,19 @@
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { stringify } from 'yaml'
 
 // Point the app at a throwaway home *before* the config modules load.
 const home = mkdtempSync(path.join(tmpdir(), 'milo-config-'))
 process.env.MILO_HOME = home
 
-const { readConfig, readDisplay, setDisplay, setPermissionMode } = await import(
+const { readConfig, readDisplay, saveConfig, setDisplay, setPermissionMode } = await import(
   '../src/core/config/load.js'
 )
+const { ConfigSchema } = await import('../src/core/config/schema.js')
 
-const configFile = path.join(home, 'config.json')
+const configFile = path.join(home, 'config.yml')
 
 const base = {
   provider: 'commandcode',
@@ -28,7 +30,7 @@ const base = {
 }
 
 beforeEach(() => {
-  writeFileSync(configFile, JSON.stringify(base, null, 2))
+  writeFileSync(configFile, stringify(base))
 })
 
 afterEach(() => {
@@ -75,15 +77,12 @@ describe('display settings', () => {
     // setting with it.
     writeFileSync(
       configFile,
-      JSON.stringify({ ...base, display: { tools: 'name', thinking: false } }, null, 2),
+      stringify({ ...base, display: { tools: 'name', thinking: false } }),
     )
     expect(readDisplay()).toEqual({ tools: 'name', thinking: 'off' })
 
     for (const before of [true, 'brief', 'full']) {
-      writeFileSync(
-        configFile,
-        JSON.stringify({ ...base, display: { tools: 'full', thinking: before } }, null, 2),
-      )
+      writeFileSync(configFile, stringify({ ...base, display: { tools: 'full', thinking: before } }))
       // Every one of them showed the reasoning, which is `on`.
       expect(readDisplay()).toEqual({ tools: 'full', thinking: 'on' })
     }
@@ -112,5 +111,70 @@ describe('display settings', () => {
     expect(() => setDisplay({ tools: 'off' })).not.toThrow()
     expect(() => setPermissionMode('yolo')).not.toThrow()
     expect(readDisplay()).toEqual({ tools: 'full', thinking: 'on' })
+  })
+})
+
+describe('the config as YAML', () => {
+  it('explains itself, because every surface rewrites it', () => {
+    rmSync(configFile, { force: true })
+    saveConfig(ConfigSchema.parse(base))
+
+    // A comment that only lived in the file would be gone by the next `/mode`, so
+    // the help is written by the code that writes the file.
+    const text = readFileSync(configFile, 'utf8')
+    expect(text).toContain('# Which provider this install talks to')
+    expect(text).toContain('# How many sessions stay on disk. 0 keeps every one.')
+    // An empty section is still written, or the file would lose the one place the
+    // bot surfaces are turned on.
+    expect(text).toContain('gateways: {}')
+    expect(readConfig()?.provider).toBe('commandcode')
+  })
+
+  it('leaves a blank line between the top-level blocks, and only one', () => {
+    rmSync(configFile, { force: true })
+    saveConfig(ConfigSchema.parse(base))
+
+    let text = readFileSync(configFile, 'utf8')
+    // The comment opens the section it explains, so the separator goes above it.
+    expect(text).toContain('\n\n# One entry per provider')
+    // The file does not open on a blank line — there is nothing to separate from.
+    expect(text.startsWith('# Which provider')).toBe(true)
+
+    // A later save rewrites every line, so the flag must not stack up one more
+    // blank line per save.
+    setDisplay({ tools: 'name' })
+    text = readFileSync(configFile, 'utf8')
+    expect(text).not.toContain('\n\n\n')
+    expect(text.match(/\n\n# One entry per provider/g)).toHaveLength(1)
+  })
+
+  it('keeps a comment the file was written with, through a save', () => {
+    writeFileSync(
+      configFile,
+      stringify(base).replace(/^provider:/m, '# mine, keep it\nprovider:'),
+    )
+
+    setDisplay({ tools: 'name' })
+
+    const text = readFileSync(configFile, 'utf8')
+    expect(text).toContain('# mine, keep it')
+    expect(readConfig()?.display.tools).toBe('name')
+    // And the help is stamped alongside it, not instead of it.
+    expect(text).toContain('# How much of a turn the surfaces show')
+  })
+
+  it('does not stamp the help a second time on a later save', () => {
+    rmSync(configFile, { force: true })
+    saveConfig(ConfigSchema.parse(base))
+
+    // The comment before a block's first key comes back from the parser attached
+    // to the collection above it rather than to the key, so a save that looked for
+    // it on the key would miss it and add another copy — one per save, forever.
+    setDisplay({ tools: 'name' })
+
+    const text = readFileSync(configFile, 'utf8')
+    expect(text.match(/# How many sessions stay on disk/g)).toHaveLength(1)
+    expect(text.match(/# How much of a turn the surfaces show/g)).toHaveLength(1)
+    expect(readConfig()?.display.tools).toBe('name')
   })
 })

@@ -2,6 +2,7 @@ import { mkdtempSync, } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { stringify } from 'yaml'
 import { cleanup, render } from 'ink-testing-library'
 
 // Point the app at a throwaway home *before* the config modules load.
@@ -36,8 +37,8 @@ vi.mock('../src/gateways/cli/screens/model-picker', async () => {
     ModelPicker: ({ onDone }: { onDone: (config: unknown) => void }) => {
       useInput((_input, key) => {
         if (!key.return) return
-        const file = path.join(process.env.MILO_HOME!, 'config.json')
-        write(file, JSON.stringify(CONFIG, null, 2))
+        const file = path.join(process.env.MILO_HOME!, 'config.yml')
+        write(file, stringify(CONFIG))
         onDone(CONFIG)
       })
       return (

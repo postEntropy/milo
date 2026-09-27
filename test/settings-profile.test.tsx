@@ -4,6 +4,7 @@ import path from 'node:path'
 import { useState } from 'react'
 import { cleanup, render } from 'ink-testing-library'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { parse as parseYaml, stringify } from 'yaml'
 
 /**
  * Copying a profile from the setup screen — the question being whether Milo
@@ -47,10 +48,11 @@ const config = {
   display: { tools: 'full' as const, thinking: 'on' },
   reasoningEffort: 'medium' as const,
   gateways: {},
+  web: { enabled: true, host: '127.0.0.1', port: 7717 },
   permissions: { mode: 'ask' as const, allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
   browser: { enabled: true, chromePath: null, headless: true, profileDir: null, cdpUrl: null, keepSnapshots: 2 },
 }
-writeFileSync(path.join(home, 'config.json'), JSON.stringify(config, null, 2))
+writeFileSync(path.join(home, 'config.yml'), stringify(config))
 
 const { SettingsScreen } = await import('../src/gateways/cli/screens/settings.js')
 
@@ -59,14 +61,14 @@ const DOWN = '\u001b[B'
 
 function renderSettings() {
   function Live() {
-    const [current, setCurrent] = useState(() => JSON.parse(readFileSync(path.join(home, 'config.json'), 'utf8')))
+    const [current, setCurrent] = useState(() => parseYaml(readFileSync(path.join(home, 'config.yml'), 'utf8')))
     return (
       <SettingsScreen
         config={current}
         mode="ask"
         onModeChange={() => {}}
         onOpenModel={() => {}}
-        onSaved={() => setCurrent(JSON.parse(readFileSync(path.join(home, 'config.json'), 'utf8')))}
+        onSaved={() => setCurrent(parseYaml(readFileSync(path.join(home, 'config.yml'), 'utf8')))}
         onClose={() => {}}
       />
     )
@@ -100,10 +102,10 @@ async function waitUntil(check: () => boolean, timeoutMs = 4000): Promise<void> 
   throw new Error('timed out waiting for condition')
 }
 
-const readConfig = () => JSON.parse(readFileSync(path.join(home, 'config.json'), 'utf8'))
+const readConfig = () => parseYaml(readFileSync(path.join(home, 'config.yml'), 'utf8'))
 
 beforeEach(() => {
-  writeFileSync(path.join(home, 'config.json'), JSON.stringify(config, null, 2))
+  writeFileSync(path.join(home, 'config.yml'), stringify(config))
 })
 
 afterEach(() => cleanup())

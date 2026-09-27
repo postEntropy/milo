@@ -5,16 +5,7 @@ import Spinner from 'ink-spinner'
 import { errorMessage } from '../../../util/errors.js'
 import { readAuth, readConfig, resolveApiKey, saveAuth, saveConfig } from '../../../core/config/load.js'
 import { PRESETS, type Preset } from '../../../core/config/presets.js'
-import type { Config, ProviderEntry } from '../../../core/config/schema.js'
-import {
-  DEFAULT_BROWSER,
-  DEFAULT_PERMISSIONS,
-  DEFAULT_SESSIONS,
-  DEFAULT_DISPLAY,
-  DEFAULT_HISTORY,
-  DEFAULT_MEMORY,
-} from '../../../core/config/schema.js'
-import { DEFAULT_REASONING_EFFORT } from '../../../core/providers/types.js'
+import { ConfigSchema, type Config, type ProviderEntry } from '../../../core/config/schema.js'
 import { listModels, type ModelInfo } from '../../../core/providers/models.js'
 import { isCtrlC } from '../keys.js'
 import { theme } from '../theme.js'
@@ -131,22 +122,17 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
       saveAuth(auth)
     }
 
-    const config: Config = {
+    // Built from what is on disk, not from the defaults: a file that already
+    // exists may hold settings this screen has never heard of, and an object
+    // assembled from scratch would drop them — and take every comment with them,
+    // which is the whole reason the config is YAML. `ConfigSchema.parse` is what
+    // supplies the defaults on a first run, when there is nothing on disk yet.
+    const config: Config = ConfigSchema.parse({
+      ...(existing ?? {}),
       provider: preset.id,
       model,
       providers: { ...(existing?.providers ?? {}), [preset.id]: presetEntry() },
-      memory: existing?.memory ?? DEFAULT_MEMORY,
-      sessions: existing?.sessions ?? DEFAULT_SESSIONS,
-      history: existing?.history ?? DEFAULT_HISTORY,
-      display: existing?.display ?? DEFAULT_DISPLAY,
-      reasoningEffort: existing?.reasoningEffort ?? DEFAULT_REASONING_EFFORT,
-      gateways: existing?.gateways ?? {},
-      permissions: existing?.permissions ?? DEFAULT_PERMISSIONS,
-      browser: existing?.browser ?? DEFAULT_BROWSER,
-      ...(existing?.search ? { search: existing.search } : {}),
-      ...(existing?.systemPrompt ? { systemPrompt: existing.systemPrompt } : {}),
-      ...(existing?.maxSteps ? { maxSteps: existing.maxSteps } : {}),
-    }
+    })
 
     saveConfig(config)
     onDone(config)

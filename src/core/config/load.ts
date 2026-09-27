@@ -5,6 +5,7 @@ import { DEFAULT_SEARCH_KEY_ENV } from '../search/types.js'
 import type { ReasoningEffort } from '../providers/types.js'
 import type { PermissionMode } from '../tools/permission.js'
 import { MILO_HOME, authFile, configFile } from './paths.js'
+import { applyConfig, readDocument, renderDocument } from './document.js'
 import {
   AuthSchema,
   ConfigSchema,
@@ -49,13 +50,20 @@ export function configExists(): boolean {
 
 export function readConfig(): Config | null {
   if (!existsSync(configFile())) return null
-  const parsed = JSON.parse(readFileSync(configFile(), 'utf8'))
-  return ConfigSchema.parse(parsed)
+  const doc = readDocument()
+  // The same contract `JSON.parse` had: a file that cannot be read is reported
+  // rather than half-read, and the defensive readers catch it and keep going.
+  if (doc.errors.length > 0) throw doc.errors[0]
+  return ConfigSchema.parse(doc.toJS())
 }
 
 export function saveConfig(config: Config): void {
   mkdirSync(MILO_HOME, { recursive: true })
-  writeFileSync(configFile(), `${JSON.stringify(config, null, 2)}\n`)
+  // Read, edit, write — rather than serialize the object over the file — so the
+  // comments the file carries, ours and anyone else's, survive the write.
+  const doc = readDocument()
+  applyConfig(doc, config)
+  writeFileSync(configFile(), renderDocument(doc))
 }
 
 export function readAuth(): Auth {
@@ -68,6 +76,11 @@ export function readAuth(): Auth {
   }
 }
 
+/**
+ * `auth.json` stays JSON, and stays a whole-file rewrite: it holds secrets, it is
+ * written only by Milo, and nobody has a reason to annotate it — which is the
+ * entire case for YAML next door.
+ */
 export function saveAuth(auth: Auth): void {
   mkdirSync(MILO_HOME, { recursive: true })
   writeFileSync(authFile(), `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 })
