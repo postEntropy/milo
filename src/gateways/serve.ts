@@ -117,7 +117,11 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     ].join(' · '),
   )
 
+  let shuttingDown = false
   const shutdown = async (): Promise<void> => {
+    // A second Ctrl+C is the person insisting: stop waiting for a clean exit.
+    if (shuttingDown) process.exit(0)
+    shuttingDown = true
     scheduler.stop()
     for (const gateway of gateways) {
       await gateway.stop().catch(() => undefined)

@@ -47,13 +47,15 @@ export async function runWeb(args = process.argv.slice(2)): Promise<void> {
 
   let closing = false
   const close = async (): Promise<void> => {
-    if (closing) return
+    // A second Ctrl+C is the person insisting: go now.
+    if (closing) process.exit(0)
     closing = true
     await web.stop().catch(() => undefined)
     await runtime.close().catch(() => undefined)
+    process.exit(0)
   }
-  process.once('SIGINT', () => { void close().finally(() => process.exit(0)) })
-  process.once('SIGTERM', () => { void close().finally(() => process.exit(0)) })
+  process.on('SIGINT', () => void close())
+  process.on('SIGTERM', () => void close())
 }
 
 function parseOptions(args: string[]): Options {

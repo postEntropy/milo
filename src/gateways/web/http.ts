@@ -159,13 +159,18 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     deliver: (conversationId, text) => hub.deliver(conversationId, text),
     stop: () => new Promise<void>((resolve, reject) => {
       hub.close()
+      // A page left open holds a keep-alive connection and a websocket, and
+      // `server.close()` only calls back once every connection has ended — so the
+      // daemon's shutdown would hang there while a browser is watching. Cut them.
+      for (const client of webSocketServer.clients) client.terminate()
       webSocketServer.close()
+      server.closeAllConnections()
       server.close((error) => error ? reject(error) : resolve())
     }),
   }
 }
 
-async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, studio: WebStudio, boundHost: string): Promise<void> {
+async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, settings: WebSettings, boundHost: string): Promise<void> {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
   if (!sameOrigin(request, boundHost)) return json(response, 403, { error: 'Origin not allowed.' })
   if (url.pathname.startsWith('/api/')) {
