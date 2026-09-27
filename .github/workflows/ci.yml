@@ -29,11 +29,15 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: npm
       - run: npm ci
+      - run: npm --prefix web ci
       - run: npm run lint
       - run: npm run typecheck
+      - run: npm --prefix web run typecheck
       - run: npm run test:coverage
       - run: npm run build
+      - run: npm --prefix web run build
       - run: node dist/bin/cli.js --version
+      - run: node dist/bin/web.js --help
 
   # The lease is a lock on the filesystem, so "one turn per session" is a claim
   # about the platform as much as about the code: mkdir semantics, mtime

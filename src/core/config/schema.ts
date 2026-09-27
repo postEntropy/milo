@@ -225,6 +225,24 @@ export const DEFAULT_BROWSER: BrowserConfig = {
   keepSnapshots: 2,
 }
 
+/**
+ * The web UI: the browser chat `milo serve` starts beside the bots. On by
+ * default, because a surface nobody can start is not really a surface; turn it
+ * off here or with `milo serve --no-web` and the daemon serves the bots alone.
+ *
+ * `host` is where it binds. Leaving it on loopback is the point — anything else
+ * is reachable from the network, and the token in the URL is then the only thing
+ * between a stranger and the install.
+ */
+export const WebSchema = z.object({
+  enabled: z.boolean().default(true),
+  host: z.string().min(1).default('127.0.0.1'),
+  port: z.number().int().min(0).max(65535).default(7717),
+})
+export type WebConfig = z.infer<typeof WebSchema>
+
+export const DEFAULT_WEB: WebConfig = { enabled: true, host: '127.0.0.1', port: 7717 }
+
 export const ConfigSchema = z.object({
   provider: z.string(),
   model: z.string(),
@@ -234,6 +252,7 @@ export const ConfigSchema = z.object({
   history: HistorySchema.default(DEFAULT_HISTORY),
   display: DisplaySchema.default(DEFAULT_DISPLAY),
   gateways: z.record(z.string(), GatewaySchema).default({}),
+  web: WebSchema.default(DEFAULT_WEB),
   permissions: PermissionsSchema.default(DEFAULT_PERMISSIONS),
   browser: BrowserSchema.default(DEFAULT_BROWSER),
   search: SearchSchema.optional(),

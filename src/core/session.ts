@@ -36,7 +36,7 @@ import {
   type SessionSummary,
 } from './sessions/index.js'
 
-const SURFACES: SurfaceKind[] = ['cli', 'telegram', 'discord']
+const SURFACES: SurfaceKind[] = ['cli', 'telegram', 'discord', 'web']
 
 function asSurface(gateway: string): SurfaceKind | undefined {
   return (SURFACES as string[]).includes(gateway) ? (gateway as SurfaceKind) : undefined

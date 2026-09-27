@@ -1,6 +1,6 @@
 import type { AgentRuntime } from '../core/runtime.js'
 
-export type GatewayId = 'cli' | 'telegram' | 'discord'
+export type GatewayId = 'cli' | 'telegram' | 'discord' | 'web'
 
 export interface Gateway {
   readonly id: GatewayId

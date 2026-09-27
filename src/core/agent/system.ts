@@ -6,12 +6,13 @@ import type { SkillSummary } from '../skills/index.js'
 import type { BrowserFacts } from '../browser/index.js'
 import { plural } from '../../util/format.js'
 
-export type SurfaceKind = 'cli' | 'telegram' | 'discord'
+export type SurfaceKind = 'cli' | 'telegram' | 'discord' | 'web'
 
 const SURFACE_LABEL: Record<SurfaceKind, string> = {
   cli: 'terminal (the Milo CLI chat)',
   telegram: 'a Telegram chat',
   discord: 'a Discord channel',
+  web: 'the Milo web app (a browser chat)',
 }
 
 const SURFACE_FORMATTING: Record<SurfaceKind, string> = {
@@ -19,6 +20,7 @@ const SURFACE_FORMATTING: Record<SurfaceKind, string> = {
   telegram:
     'Markdown renders as a rich message (headings, bold, italics, lists, code blocks, tables) — use it',
   discord: 'Markdown renders (bold, italics, code blocks); keep it light',
+  web: 'Markdown renders (headings, bold, italics, lists, code blocks, tables) — use it',
 }
 
 /**
@@ -82,7 +84,7 @@ export interface SystemPromptInput {
  * What Milo runs with, and where each part of it is set.
  *
  * Asked "how do I turn on X" or "where do I change Y", a model with no idea of
- * its own wiring goes looking — reading `~/.milo/config.json`, globbing for
+ * its own wiring goes looking — reading `~/.milo/config.yml`, globbing for
  * files, guessing at screen names — and answers a question that only needed a
  * sentence. The capabilities are read off the registered tools rather than a
  * second list, because `web_search` and the browser tools are only registered
@@ -113,8 +115,12 @@ function setupSection(input: SystemPromptInput): string {
     '- `milo setup` in a terminal is the settings screen. Sections: **Provider & model**, **API keys**,',
     '  **Tools** (the optional capabilities — Web search and Browser — one row each), **Permissions**',
     '  (the mode and the allow/deny lists), **Display** (tool lines, thinking, effort, output limit),',
-    '  **Gateways**, **Memory**, **Skills**.',
-    '- Settings live in `~/.milo/config.json`, secrets in `~/.milo/auth.json`. `/export` writes the',
+    '  **Gateways** (the bot surfaces), **Web** (the browser chat: on or off, its address and port),',
+    '  **Memory**, **Skills**.',
+    '- The same settings, in a browser, are the web UI\'s **Settings** screen — the page `milo serve`',
+    '  prints the URL of. It covers everything `milo setup` does, and runs the setup jobs (the browser',
+    '  download, the embedding engine) with their output on screen.',
+    '- Settings live in `~/.milo/config.yml`, secrets in `~/.milo/auth.json`. `/export` writes the',
     '  conversation so far to `~/.milo/exports/`; `/stats`, `/sessions`, `/compact` are about it.',
     '- An optional capability is off when it is absent from the tool catalog: that is what "off" means',
     '  here, not a tool that fails.',

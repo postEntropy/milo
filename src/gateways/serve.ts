@@ -5,7 +5,14 @@ import { MILO_HOME } from '../core/config/paths.js'
 import { readRoutines, RoutineScheduler } from '../core/routines.js'
 import type { Gateway } from './types.js'
 
-export async function runServe(): Promise<void> {
+export interface ServeOptions {
+  /** Starts the bot gateways without the web UI. */
+  noWeb?: boolean
+  /** The port the web UI listens on; 7717 unless changed. */
+  webPort?: number
+}
+
+export async function runServe(options: ServeOptions = {}): Promise<void> {
   const loaded = loadConfig()
   if (!loaded) {
     console.error('No configuration found. Run `milo` first to set things up.')
@@ -40,10 +47,34 @@ export async function runServe(): Promise<void> {
     }
   }
 
+  // The web UI rides along with the daemon rather than being a process of its
+  // own: it is the surface the same install is already serving, and a routine
+  // can deliver into a web chat only while something is there to hand it to.
+  // Off only when the config says so or `--no-web` was passed; the port the flag
+  // names wins over the one the config holds.
+  const web = loaded.config.web
+  if (!options.noWeb && web.enabled) {
+    const { WebGateway } = await import('./web/gateway.js')
+    gateways.push(
+      new WebGateway({
+        runtime,
+        cwd: process.cwd(),
+        host: web.host,
+        port: options.webPort ?? web.port,
+        // A stored token (`auth.json` → `gateways.web`, or MILO_WEB_TOKEN) is
+        // what makes the URL survive a restart; with neither, the server mints a
+        // fresh one per run — the old behaviour, and still the default.
+        token: resolveGatewayToken('web', auth),
+        identity: { provider: loaded.provider.id, model: loaded.model },
+      }),
+    )
+  }
+
   if (gateways.length === 0) {
     console.error(
-      'No gateways enabled. Enable them in ~/.milo/config.json, e.g.\n' +
-        '  "gateways": { "telegram": { "enabled": true } }',
+      'No gateways enabled. Enable them in ~/.milo/config.yml, e.g.\n' +
+        '  "gateways": { "telegram": { "enabled": true } }\n' +
+        'or leave the web UI on (that is the default) and open the URL it prints.',
     )
     process.exitCode = 1
     return

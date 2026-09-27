@@ -37,6 +37,7 @@ const loadedConfig = (
     display: { tools: 'full', thinking: 'on' },
     reasoningEffort: 'medium',
     gateways: {},
+    web: { enabled: true, host: '127.0.0.1', port: 7717 },
     permissions: { mode: 'auto', allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
     browser: {
       enabled: browser,

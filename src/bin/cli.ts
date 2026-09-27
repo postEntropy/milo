@@ -32,18 +32,21 @@ Usage:
   milo skills                Install, list and remove skills (list | available | find | add | remove)
   milo history               What the history log costs (status | trim)
   milo routines              The prompts Milo runs on a timer (list | add | remove | enable | run)
-  milo serve                 Run the enabled bot gateways (Telegram, Discord)
+  milo serve                 Run the enabled bot gateways and the web UI
+  milo web                   Run only the web UI (opens the browser)
+  milo serve --no-web        Run the bot gateways without the web UI
   milo --continue            Continue the last session in this terminal
   milo --resume <id>         Open a specific session (see /sessions)
   milo --model <id>          Override the model for this session
   milo --provider <id>       Use another configured provider
   milo --mode <mode>         Permission mode: ask | auto | yolo
   milo --yolo                Shorthand for --mode yolo
+  milo --web-port <port>     Port for the web UI (default 7717)
 
 In the chat: /model · /setup · /mode ask|auto|yolo · /yolo · /tools full|name|off · /thinking on|off ·
 /effort low|medium|high · /new · /sessions · /resume · /stats · /skills · /clear · /help · /exit
 
-Config:  ~/.milo/config.json
+Config:  ~/.milo/config.yml
 Sessions: ~/.milo/sessions/
 Keys:    ~/.milo/auth.json (or env: COMMANDCODE_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY, …)`)
 }
@@ -137,7 +140,12 @@ async function main(): Promise<void> {
   switch (resolveCommand(args.command)) {
     case 'serve': {
       const { runServe } = await import('../gateways/serve.js')
-      await runServe()
+      await runServe({ noWeb: args.noWeb, webPort: args.webPort })
+      return
+    }
+    case 'web': {
+      const { runWeb } = await import('./web.js')
+      await runWeb(process.argv.slice(2))
       return
     }
     case 'model':

@@ -4,6 +4,7 @@ export default defineConfig({
   entry: {
     'bin/cli': 'src/bin/cli.ts',
     'bin/serve': 'src/bin/serve.ts',
+    'bin/web': 'src/bin/web.ts',
   },
   format: ['esm'],
   target: 'node22',

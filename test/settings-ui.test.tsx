@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { parse as parseYaml, stringify } from 'yaml'
 import { cleanup, render } from 'ink-testing-library'
 
 // Point the app at a throwaway home *before* the config modules load.
@@ -17,10 +18,11 @@ const config = {
   display: { tools: 'full' as const, thinking: 'on' },
   reasoningEffort: 'medium' as const,
   gateways: {},
+  web: { enabled: true, host: '127.0.0.1', port: 7717 },
   permissions: { mode: 'ask' as const, allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
   browser: { enabled: false, chromePath: null, headless: true, profileDir: null, cdpUrl: null, keepSnapshots: 2 },
 }
-writeFileSync(path.join(home, 'config.json'), JSON.stringify(config, null, 2))
+writeFileSync(path.join(home, 'config.yml'), stringify(config))
 
 const { SettingsScreen } = await import('../src/gateways/cli/screens/settings.js')
 type PermissionMode = import('../src/core/tools/permission.js').PermissionMode
@@ -37,6 +39,18 @@ interface App {
 async function press(app: App, key: string): Promise<void> {
   app.stdin.write(key)
   await tick(20)
+}
+
+/**
+ * Empties an input that was prefilled with what is stored. One backspace per
+ * character, each its own write: a run of them in a single write arrives as one
+ * keypress, the way a terminal delivers it.
+ */
+async function clearField(app: App, length: number): Promise<void> {
+  for (let index = 0; index < length; index += 1) {
+    app.stdin.write('\u007f')
+    await tick(20)
+  }
 }
 
 /**
@@ -97,7 +111,9 @@ async function waitUntil(check: () => boolean, timeoutMs = 1500): Promise<void> 
   throw new Error('timed out waiting for condition')
 }
 
-const readJson = (name: string) => JSON.parse(readFileSync(path.join(home, name), 'utf8'))
+// One reader for both files: YAML is a superset of JSON, so this reads the config
+// (now YAML) and `auth.json` (still JSON) without caring which it was handed.
+const readData = (name: string) => parseYaml(readFileSync(path.join(home, name), 'utf8'))
 
 /** A leaderboard row the way the page prints it: a heading, a repository, a count. */
 const LEADERBOARD_ROW =
@@ -119,7 +135,7 @@ function renderSettings(overrides: Record<string, unknown> = {}) {
    * reads the value it is about to change from its props.
    */
   function Live() {
-    const [current, setCurrent] = useState(() => readJson('config.json'))
+    const [current, setCurrent] = useState(() => readData('config.yml'))
     return (
       <SettingsScreen
         config={current}
@@ -128,7 +144,7 @@ function renderSettings(overrides: Record<string, unknown> = {}) {
           (overrides.onModeChange as ((mode: PermissionMode) => void) | undefined) ?? (() => {})
         }
         onOpenModel={() => {}}
-        onSaved={() => setCurrent(readJson('config.json'))}
+        onSaved={() => setCurrent(readData('config.yml'))}
         onClose={(overrides.onClose as () => void) ?? (() => {})}
       />
     )
@@ -145,7 +161,7 @@ afterEach(() => {
 // Each test starts from a clean config + auth, so flows do not inherit the
 // previous test's token or allowlist.
 beforeEach(() => {
-  writeFileSync(path.join(home, 'config.json'), JSON.stringify(config, null, 2))
+  writeFileSync(path.join(home, 'config.yml'), stringify(config))
   rmSync(path.join(home, 'auth.json'), { force: true })
 })
 
@@ -182,15 +198,15 @@ describe('SettingsScreen', () => {
     expect(flatFrame(app)).toContain('OpenRouter key')
     // And nothing is written yet: a config naming a key that is not there would
     // silently do nothing.
-    expect(readJson('config.json').memory.embedding).toBeUndefined()
+    expect(readData('config.yml').memory.embedding).toBeUndefined()
 
     app.stdin.write('sk-or-typed')
     await tick(20)
     app.stdin.write('\r')
     await waitFor(app, 'Recall by meaning')
 
-    expect(readJson('auth.json').providers.openrouter).toBe('sk-or-typed')
-    expect(readJson('config.json').memory.embedding).toEqual({
+    expect(readData('auth.json').providers.openrouter).toBe('sk-or-typed')
+    expect(readData('config.yml').memory.embedding).toEqual({
       provider: 'openrouter',
       model: 'nvidia/nemotron-3-embed-1b:free',
     })
@@ -210,7 +226,7 @@ describe('SettingsScreen', () => {
     await press(app, DOWN)
     await press(app, '\r')
 
-    expect(readJson('config.json').memory.embedding).toEqual({
+    expect(readData('config.yml').memory.embedding).toEqual({
       provider: 'openrouter',
       model: 'nvidia/nemotron-3-embed-1b:free',
     })
@@ -584,7 +600,7 @@ describe('SettingsScreen', () => {
     app.stdin.write('\r')
     await waitFor(app, 'API keys')
 
-    expect(readJson('auth.json').providers.commandcode).toBe('sk-test-123')
+    expect(readData('auth.json').providers.commandcode).toBe('sk-test-123')
   })
 
   it('cycles the permission mode and hands it to the shell', async () => {
@@ -657,9 +673,9 @@ describe('SettingsScreen', () => {
     await press(app, '\r') // Enable
     await waitFor(app, 'enabled')
 
-    expect(readJson('auth.json').gateways.telegram).toBe('123:ABC')
-    expect(readJson('config.json').gateways.telegram.allowlist).toEqual(['42', '99'])
-    expect(readJson('config.json').gateways.telegram.enabled).toBe(true)
+    expect(readData('auth.json').gateways.telegram).toBe('123:ABC')
+    expect(readData('config.yml').gateways.telegram.allowlist).toEqual(['42', '99'])
+    expect(readData('config.yml').gateways.telegram.enabled).toBe(true)
   })
 
   it('lets the access step be left empty (anyone)', async () => {
@@ -679,7 +695,7 @@ describe('SettingsScreen', () => {
     app.stdin.write('\r') // leave it empty
     await waitFor(app, 'Step 3 of 3')
 
-    expect(readJson('config.json').gateways.telegram.allowlist).toEqual([])
+    expect(readData('config.yml').gateways.telegram.allowlist).toEqual([])
   })
 
   it('cycles how much of a tool call is shown, and writes it down', async () => {
@@ -690,10 +706,10 @@ describe('SettingsScreen', () => {
 
     expect(app.lastFrame()).toContain('full')
     await press(app, '\r') // full -> name
-    await waitUntil(() => readJson('config.json').display?.tools === 'name')
+    await waitUntil(() => readData('config.yml').display?.tools === 'name')
 
     await press(app, '\r') // name -> off
-    await waitUntil(() => readJson('config.json').display?.tools === 'off')
+    await waitUntil(() => readData('config.yml').display?.tools === 'off')
     expect(app.lastFrame()).toContain('off')
   })
 
@@ -707,7 +723,7 @@ describe('SettingsScreen', () => {
     await press(app, '\r')
 
     // on → off
-    await waitUntil(() => readJson('config.json').display?.thinking === 'off')
+    await waitUntil(() => readData('config.yml').display?.thinking === 'off')
     expect(app.lastFrame()).toContain('applies to every surface')
   })
 
@@ -722,7 +738,7 @@ describe('SettingsScreen', () => {
     await press(app, '\r')
 
     // medium → high
-    await waitUntil(() => readJson('config.json').reasoningEffort === 'high')
+    await waitUntil(() => readData('config.yml').reasoningEffort === 'high')
     expect(app.lastFrame()).toContain('applies to every surface')
   })
 
@@ -741,7 +757,7 @@ describe('SettingsScreen', () => {
     app.stdin.write('8192')
     await tick(20)
     app.stdin.write('\r')
-    await waitUntil(() => readJson('config.json').maxTokens === 8192)
+    await waitUntil(() => readData('config.yml').maxTokens === 8192)
 
     // Reopening shows what is stored; empty means "leave it to the wire", and an
     // empty field is how that is asked for.
@@ -760,7 +776,7 @@ describe('SettingsScreen', () => {
       await tick(20)
     }
     app.stdin.write('\r')
-    await waitUntil(() => readJson('config.json').maxTokens === undefined)
+    await waitUntil(() => readData('config.yml').maxTokens === undefined)
   })
 
   it('rejects a nonsense ceiling rather than writing it', async () => {
@@ -777,7 +793,7 @@ describe('SettingsScreen', () => {
     app.stdin.write('lots')
     await tick(20)
     app.stdin.write('\r')
-    await waitUntil(() => readJson('config.json').maxTokens === undefined)
+    await waitUntil(() => readData('config.yml').maxTokens === undefined)
   })
 
   it('shows the browser off in the hub while the tools are absent, not idle', async () => {
@@ -855,7 +871,7 @@ describe('SettingsScreen', () => {
     await waitUntil(() =>
       flatFrame(app).includes('Chrome 136 and later ignore the debugging port there without saying so'),
     )
-    expect(readJson('config.json').browser.profileDir).toBe(blocked)
+    expect(readData('config.yml').browser.profileDir).toBe(blocked)
   })
 
   it('takes a profile of its own without complaint', async () => {
@@ -874,7 +890,7 @@ describe('SettingsScreen', () => {
     app.stdin.write('\r')
     await waitUntil(() => flatFrame(app).includes('cookies from it are what Milo will be signed in with'))
 
-    expect(readJson('config.json').browser.profileDir).toBe('~/chrome-copy')
+    expect(readData('config.yml').browser.profileDir).toBe('~/chrome-copy')
   })
 
   it('turns the browser on, which is what adds the tools', async () => {
@@ -885,7 +901,7 @@ describe('SettingsScreen', () => {
     await press(app, '\r')
     await press(app, '\r') // the Enabled row
 
-    await waitUntil(() => readJson('config.json').browser.enabled === true)
+    await waitUntil(() => readData('config.yml').browser.enabled === true)
     expect(app.lastFrame()).toContain('on — the three browser tools')
   })
 
@@ -900,6 +916,53 @@ describe('SettingsScreen', () => {
 
     // 2 → 4: the one direction that changes anything, since the row reads its
     // value from the config the shell hands back.
-    await waitUntil(() => readJson('config.json').browser.keepSnapshots === 4)
+    await waitUntil(() => readData('config.yml').browser.keepSnapshots === 4)
+  })
+
+  it('turns the web UI off, and moves where it listens', async () => {
+    const app = renderSettings()
+    await moveTo(app, 'Web')
+    await press(app, '\r')
+    await waitFor(app, 'Serve with')
+
+    await press(app, '\r') // on → off
+    await waitUntil(() => readData('config.yml').web.enabled === false)
+
+    // The address is prefilled with what is stored, so it is cleared first.
+    await moveTo(app, 'Address')
+    await press(app, '\r')
+    await waitFor(app, 'binds to')
+    await clearField(app, '127.0.0.1'.length)
+    app.stdin.write('0.0.0.0')
+    await tick(20)
+    app.stdin.write('\r')
+    await waitUntil(() => readData('config.yml').web.host === '0.0.0.0')
+    // Said out loud, because it puts the install on the network.
+    expect(app.lastFrame()).toContain('reachable from the network')
+
+    await moveTo(app, 'Port')
+    await press(app, '\r')
+    await waitFor(app, 'listens on')
+    await clearField(app, '7717'.length)
+    app.stdin.write('8123')
+    await tick(20)
+    app.stdin.write('\r')
+    await waitUntil(() => readData('config.yml').web.port === 8123)
+  })
+
+  it('keeps the port when what was typed is not one', async () => {
+    const app = renderSettings()
+    await moveTo(app, 'Web')
+    await press(app, '\r')
+    await moveTo(app, 'Port')
+    await press(app, '\r')
+    await waitFor(app, 'listens on')
+
+    app.stdin.write('nonsense')
+    await tick(20)
+    app.stdin.write('\r')
+    await waitFor(app, 'not a port')
+    // A value the server cannot bind would be a web UI that silently never starts.
+    expect(readData('config.yml').web.port).toBe(7717)
   })
 })

@@ -8,6 +8,10 @@ export interface Args {
   help: boolean
   resume?: string
   continueSession: boolean
+  /** `milo serve` without the web UI. */
+  noWeb: boolean
+  /** The port `milo serve` puts the web UI on. */
+  webPort?: number
 }
 
 /**
@@ -21,6 +25,7 @@ export function parseArgs(argv: string[]): Args {
     help: false,
     yolo: false,
     continueSession: false,
+    noWeb: false,
   }
   if (argv[0] && !argv[0].startsWith('-')) args.command = argv[0]
 
@@ -29,6 +34,8 @@ export function parseArgs(argv: string[]): Args {
     if (flag === '--version' || flag === '-v') args.version = true
     else if (flag === '--help' || flag === '-h') args.help = true
     else if (flag === '--yolo') args.yolo = true
+    else if (flag === '--no-web') args.noWeb = true
+    else if (flag === '--web-port') args.webPort = Number(argv[++i])
     else if (flag === '--mode') args.mode = argv[++i]
     else if (flag === '--provider') args.provider = argv[++i]
     else if (flag === '--model' || flag === '-m') args.model = argv[++i]

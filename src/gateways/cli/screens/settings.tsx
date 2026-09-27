@@ -176,6 +176,8 @@ type View =
   | { kind: 'browserEdit'; field: 'chromePath' | 'cdpUrl' | 'profileDir' }
   | { kind: 'gateways' }
   | { kind: 'gatewayFlow'; id: GatewayId; steps: FlowStep[]; step: FlowStep }
+  | { kind: 'web' }
+  | { kind: 'webEdit'; field: 'host' | 'port' }
   | { kind: 'memory' }
   | { kind: 'memoryConfirm' }
   | { kind: 'memoryKey' }
@@ -206,6 +208,8 @@ const TITLE: Record<string, string> = {
   browserProfileConfirm: 'Setup · Tools · Browser',
   browserEdit: 'Setup · Tools · Browser',
   gateways: 'Setup · Gateways',
+  web: 'Setup · Web',
+  webEdit: 'Setup · Web',
   memory: 'Setup · Memory',
   memoryConfirm: 'Setup · Memory',
   memoryKey: 'Setup · Memory',
@@ -690,6 +694,15 @@ export function SettingsScreen({
       hint: enabledGateways.join(', ') || 'none enabled',
       hintColor: enabledGateways.length > 0 ? theme.success : undefined,
     },
+    {
+      // The fourth surface. It is here rather than in the Gateways list because
+      // it has no token to paste and no allowlist: it is a server on this
+      // machine, and what it needs told is where to listen.
+      icon: '🌐',
+      label: 'Web',
+      hint: config.web.enabled ? `on · ${config.web.host}:${config.web.port}` : 'off',
+      hintColor: config.web.enabled ? theme.success : undefined,
+    },
     { icon: '🧠',
       label: 'Memory', hint: memory.backend },
     {
@@ -871,6 +884,17 @@ export function SettingsScreen({
     hintColor: config.gateways[id]?.enabled ? theme.success : theme.danger,
   }))
 
+  /** The web UI: a server here, not a bot out there — so it is told where to listen, not who may talk. */
+  const webItems: MenuItem[] = [
+    {
+      label: 'Serve with `milo serve`',
+      hint: config.web.enabled ? 'on' : 'off',
+      hintColor: config.web.enabled ? theme.success : theme.danger,
+    },
+    { label: 'Address', hint: config.web.host },
+    { label: 'Port', hint: String(config.web.port) },
+  ]
+
   /** Step-by-step, like the provider flow: token, access, then enable. */
   const startGatewayFlow = (id: GatewayId) => {
     const needsToken = gatewayTokenState(id) === 'not set'
@@ -1009,8 +1033,9 @@ export function SettingsScreen({
           else if (index === 3) go({ kind: 'permissions' })
           else if (index === 4) go({ kind: 'display' })
           else if (index === 5) go({ kind: 'gateways' })
-          else if (index === 6) go({ kind: 'memory' })
-          else if (index === 7) {
+          else if (index === 6) go({ kind: 'web' })
+          else if (index === 7) go({ kind: 'memory' })
+          else if (index === 8) {
             // Opening the section starts from what is on disk, not from whatever
             // was toggled before it was last left.
             setDesired({})
@@ -1220,6 +1245,21 @@ export function SettingsScreen({
         else if (key.escape) go({ kind: 'menu' })
         break
 
+      case 'web':
+        if (key.upArrow) setIndex((value) => Math.max(0, value - 1))
+        else if (key.downArrow) setIndex((value) => Math.min(webItems.length - 1, value + 1))
+        else if (key.return) {
+          setNotices([])
+          if (index === 0) patchConfig({ web: { ...config.web, enabled: !config.web.enabled } })
+          else if (index === 1) go({ kind: 'webEdit', field: 'host' }, config.web.host)
+          else go({ kind: 'webEdit', field: 'port' }, String(config.web.port))
+        } else if (key.escape) go({ kind: 'menu' })
+        break
+
+      case 'webEdit':
+        if (key.escape) go({ kind: 'web' })
+        break
+
       case 'gatewayFlow': {
         if (key.escape) {
           go({ kind: 'gateways' })
@@ -1391,6 +1431,34 @@ export function SettingsScreen({
           : { maxTokens: undefined },
       )
       go({ kind: 'display' })
+      return
+    }
+
+    if (view.kind === 'webEdit') {
+      if (view.field === 'host') {
+        const host = value.trim() || '127.0.0.1'
+        updateConfig((current) => ({ ...current, web: { ...current.web, host } }))
+        const loopback = host === '127.0.0.1' || host === 'localhost' || host === '::1'
+        setNotices([
+          loopback
+            ? { text: `The web UI binds to ${host} — reachable from this machine only`, tone: 'success' }
+            : {
+                text: `${host} is not loopback, so the web UI is reachable from the network. The token in its URL is then the only thing in the way.`,
+                tone: 'danger',
+              },
+        ])
+      } else {
+        const port = Number(value.trim())
+        if (Number.isInteger(port) && port >= 0 && port <= 65535) {
+          updateConfig((current) => ({ ...current, web: { ...current.web, port } }))
+          setNotices([{ text: `The web UI listens on port ${port}`, tone: 'success' }])
+        } else {
+          // Kept, not saved as something the server cannot bind: a bad value here
+          // would be a web UI that silently never starts.
+          setNotices([{ text: `"${value.trim()}" is not a port — the previous one stands`, tone: 'danger' }])
+        }
+      }
+      go({ kind: 'web' })
       return
     }
 
@@ -1608,6 +1676,36 @@ export function SettingsScreen({
           <Box flexDirection="column">
             <Menu items={gatewayItems} index={index} />
             <Notices notices={notices} />
+          </Box>
+        )}
+
+        {view.kind === 'web' && (
+          <Box flexDirection="column">
+            <Menu items={webItems} index={index} />
+            <Box marginTop={1} flexDirection="column">
+              <Text color={theme.muted}>
+                The browser chat, started by `milo serve` and opened at the URL it prints.
+              </Text>
+              <Text color={theme.muted}>
+                Loopback by default. `milo serve --no-web` skips it for one run; the address and
+                port can also be overridden with `milo web --host` and `--port`.
+              </Text>
+            </Box>
+            <Notices notices={notices} />
+          </Box>
+        )}
+
+        {view.kind === 'webEdit' && (
+          <Box flexDirection="column">
+            <Text color={theme.accent}>
+              {view.field === 'host'
+                ? 'The address the web UI binds to. 127.0.0.1 keeps it on this machine; 0.0.0.0 accepts every interface it is reached on.'
+                : 'The port the web UI listens on. 0 lets the system pick a free one.'}
+            </Text>
+            <Box>
+              <Text color={theme.accent}>❯ </Text>
+              <TextInput key={view.field} value={text} onChange={setText} onSubmit={saveText} />
+            </Box>
           </Box>
         )}
 

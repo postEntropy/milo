@@ -10,7 +10,38 @@ import { WebHub } from './hub.js'
 import { WebStudio } from './studio.js'
 
 const MAX_BODY = 1024 * 1024
-const WEB_ROOT = fileURLToPath(new URL('../../../web/dist/', import.meta.url))
+
+/**
+ * The built frontend. Found by walking up from this module rather than by one
+ * relative path, because the layout differs: in the source tree this file sits in
+ * `src/gateways/web/`, while the bundle is `dist/bin/*.js` — and an installed
+ * package is a third arrangement again. The first `web/dist` with an
+ * `index.html` in it is the one, wherever the entry point was bundled to.
+ */
+let webRoot: string | null | undefined
+
+function webRootDir(): string | null {
+  if (webRoot !== undefined) return webRoot
+  let dir = fileURLToPath(new URL('.', import.meta.url))
+  for (let depth = 0; depth < 6; depth += 1) {
+    const candidate = path.join(dir, 'web', 'dist')
+    if (existsSync(path.join(candidate, 'index.html'))) {
+      webRoot = candidate
+      return webRoot
+    }
+    const parent = path.dirname(dir)
+    if (parent === dir) break
+    dir = parent
+  }
+  webRoot = null
+  return webRoot
+}
+
+/** Whether the frontend has been built; the server answers 503 for the page until it has. */
+export function webUiBuilt(): boolean {
+  return webRootDir() !== null
+}
+
 const MIME: Record<string, string> = {
   '.css': 'text/css; charset=utf-8',
   '.html': 'text/html; charset=utf-8',
@@ -46,7 +77,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   const studio = new WebStudio(options.runtime, options.cwd)
   const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
   const server = createServer((request, response) => {
-    void handleHttp(request, response, token, studio).catch((error: unknown) => {
+    void handleHttp(request, response, token, studio, options.host).catch((error: unknown) => {
       if (!response.headersSent) json(response, 500, { error: error instanceof Error ? error.message : String(error) })
       else response.destroy()
     })
@@ -58,7 +89,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
       socket.destroy()
       return
     }
-    if (!sameOrigin(request)) {
+    if (!sameOrigin(request, options.host)) {
       socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
       socket.destroy()
       return
@@ -134,9 +165,9 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   }
 }
 
-async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, studio: WebStudio): Promise<void> {
+async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, studio: WebStudio, boundHost: string): Promise<void> {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
-  if (!sameOrigin(request)) return json(response, 403, { error: 'Origin not allowed.' })
+  if (!sameOrigin(request, boundHost)) return json(response, 403, { error: 'Origin not allowed.' })
   if (url.pathname.startsWith('/api/')) {
     if (!authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
     if (request.method !== 'POST') return json(response, 405, { error: 'Use POST.' })
@@ -150,13 +181,15 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
     }
   }
   if (request.method !== 'GET' && request.method !== 'HEAD') return json(response, 405, { error: 'Method not allowed.' })
-  if (!existsSync(WEB_ROOT)) {
-    return json(response, 503, { error: 'Web UI is not built. Run `npm --prefix web install && npm --prefix web run build`.' })
+  const root = webRootDir()
+  if (!root) {
+    return json(response, 503, { error: 'Web UI is not built. Run `npm run build:web`.' })
   }
-  const candidate = path.resolve(WEB_ROOT, `.${decodeURIComponent(url.pathname)}`)
-  const file = candidate.startsWith(WEB_ROOT) && existsSync(candidate) && statSync(candidate).isFile()
+  const candidate = path.resolve(root, `.${decodeURIComponent(url.pathname)}`)
+  const inside = candidate === root || candidate.startsWith(root + path.sep)
+  const file = inside && existsSync(candidate) && statSync(candidate).isFile()
     ? candidate
-    : path.join(WEB_ROOT, 'index.html')
+    : path.join(root, 'index.html')
   if (!existsSync(file)) return json(response, 404, { error: 'Not found.' })
   response.writeHead(200, {
     'content-type': MIME[path.extname(file)] ?? 'application/octet-stream',
@@ -181,18 +214,41 @@ function authorized(request: IncomingMessage, token: string, queryToken?: string
   return left.length === right.length && timingSafeEqual(left, right)
 }
 
-function sameOrigin(request: IncomingMessage): boolean {
+function sameOrigin(request: IncomingMessage, boundHost: string): boolean {
   const origin = request.headers.origin
+  // No Origin: not a page, so not a cross-site request. The token is the gate.
   if (!origin) return true
   try {
     const parsed = new URL(origin)
+    if (parsed.protocol !== 'http:') return false
     const originHost = parsed.hostname.toLowerCase()
-    const localOrigin = originHost === 'localhost' || originHost === '127.0.0.1' || originHost === '::1'
-    const localServer = (request.headers.host ?? '').startsWith('localhost:') || (request.headers.host ?? '').startsWith('127.0.0.1:') || (request.headers.host ?? '').startsWith('[::1]:')
-    return parsed.protocol === 'http:' && localOrigin && localServer
+    const addressed = hostName(request.headers.host ?? '')
+    // Bound to every interface: whichever name it was reached by is the name the
+    // page must also have come from — there is no fixed one to allow.
+    if (WILDCARD_HOSTS.has(boundHost.trim().toLowerCase())) return originHost === addressed
+    // Otherwise the page has to have come from a name this server answers to:
+    // loopback, or the address it was configured to bind.
+    const allowed = new Set(['localhost', '127.0.0.1', '::1', hostName(boundHost)])
+    return allowed.has(originHost) && allowed.has(addressed)
   } catch {
     return false
   }
+}
+
+/** Binding here means "every interface", so the name it answers to is not fixed. */
+const WILDCARD_HOSTS = new Set(['0.0.0.0', '::', ''])
+
+/** The host out of a `Host` header or a bind address, without its port or brackets. */
+function hostName(value: string): string {
+  const trimmed = value.trim().toLowerCase()
+  if (trimmed.startsWith('[')) {
+    const end = trimmed.indexOf(']')
+    return end === -1 ? trimmed.slice(1) : trimmed.slice(1, end)
+  }
+  // A bare IPv6 address has more than one colon, and nothing to strip from it.
+  if ((trimmed.match(/:/g) ?? []).length > 1) return trimmed
+  const colon = trimmed.indexOf(':')
+  return colon === -1 ? trimmed : trimmed.slice(0, colon)
 }
 
 async function readBody(request: IncomingMessage): Promise<Record<string, unknown>> {

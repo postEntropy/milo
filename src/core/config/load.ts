@@ -27,6 +27,10 @@ const PROVIDER_ENV: Record<string, string[]> = {
 const GATEWAY_ENV: Record<string, string> = {
   telegram: 'TELEGRAM_BOT_TOKEN',
   discord: 'DISCORD_BOT_TOKEN',
+  // Not a chat bot, but the same shape: the string the surface authenticates
+  // with. Unlike the two above, its absence is not a misconfiguration — the web
+  // server mints a fresh token per run instead.
+  web: 'MILO_WEB_TOKEN',
 }
 
 export interface ResolvedProvider {

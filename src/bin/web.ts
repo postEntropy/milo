@@ -2,14 +2,14 @@
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 import { createRuntime } from '../core/bootstrap.js'
-import { loadConfig } from '../core/config/load.js'
+import { loadConfig, readAuth, resolveGatewayToken } from '../core/config/load.js'
 import { MILO_HOME } from '../core/config/paths.js'
 import { startWebServer } from '../gateways/web/http.js'
 import { errorMessage } from '../util/errors.js'
 
 interface Options {
-  host: string
-  port: number
+  host?: string
+  port?: number
   open: boolean
 }
 
@@ -17,10 +17,25 @@ export async function runWeb(args = process.argv.slice(2)): Promise<void> {
   const options = parseOptions(args)
   const loaded = loadConfig()
   if (!loaded) throw new Error('No configuration found. Run `milo` first to set things up.')
+  // Where the config puts it, unless a flag overrode it for this run.
+  const host = options.host ?? loaded.config.web.host
+  const port = options.port ?? loaded.config.web.port
+  if (!host || !Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error('Host must be non-empty and port must be between 0 and 65535.')
+  }
   const runtime = createRuntime(loaded, process.cwd())
   let web: Awaited<ReturnType<typeof startWebServer>>
   try {
-    web = await startWebServer({ runtime, cwd: process.cwd(), host: options.host, port: options.port, identity: { provider: loaded.provider.id, model: loaded.model } })
+    web = await startWebServer({
+      runtime,
+      cwd: process.cwd(),
+      host,
+      port,
+      // Stored once (`auth.json` → `gateways.web`, or MILO_WEB_TOKEN), the URL
+      // outlives the process; without one it is minted per run.
+      token: resolveGatewayToken('web', readAuth()),
+      identity: { provider: loaded.provider.id, model: loaded.model },
+    })
   } catch (error) {
     await runtime.close()
     throw error
@@ -42,19 +57,17 @@ export async function runWeb(args = process.argv.slice(2)): Promise<void> {
 }
 
 function parseOptions(args: string[]): Options {
-  const options: Options = { host: '127.0.0.1', port: 7717, open: true }
+  const options: Options = { open: true }
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]
     if (arg === '--no-open') options.open = false
     else if (arg === '--host') options.host = args[++index] ?? ''
     else if (arg === '--port') options.port = Number(args[++index])
     else if (arg === '--help' || arg === '-h') {
-      console.log('Usage: milo-web [--host 127.0.0.1] [--port 7717] [--no-open]')
+      console.log('Usage: milo web [--host <addr>] [--port <n>] [--no-open]')
+      console.log('Defaults come from the `web` section of ~/.milo/config.yml (127.0.0.1:7717).')
       process.exit(0)
     } else throw new Error(`Unknown option: ${arg}`)
-  }
-  if (!options.host || !Number.isInteger(options.port) || options.port < 0 || options.port > 65535) {
-    throw new Error('Host must be non-empty and port must be between 0 and 65535.')
   }
   return options
 }

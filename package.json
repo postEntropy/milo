@@ -5,7 +5,8 @@
   "description": "Milo — a multi-surface agent (CLI, Telegram, Discord) with pluggable LLM providers and memory.",
   "type": "module",
   "bin": {
-    "milo": "dist/bin/cli.js"
+    "milo": "dist/bin/cli.js",
+    "milo-web": "dist/bin/web.js"
   },
   "engines": {
     "node": ">=22.13.0"
@@ -14,6 +15,7 @@
     "dev": "tsx src/bin/cli.ts",
     "serve": "tsx src/bin/serve.ts",
     "build": "tsup",
+    "build:web": "npm --prefix web install && npm --prefix web run build",
     "start": "node dist/bin/cli.js",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint .",

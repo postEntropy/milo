@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseArgs } from '../src/bin/args.js'
+import { validateArgs } from '../src/bin/dispatch.js'
 
 describe('parseArgs', () => {
   it('defaults to the chat with nothing set', () => {
@@ -9,6 +10,7 @@ describe('parseArgs', () => {
       help: false,
       yolo: false,
       continueSession: false,
+      noWeb: false,
     })
   })
 
@@ -52,8 +54,26 @@ describe('parseArgs', () => {
     expect(parseArgs(['--yolo']).yolo).toBe(true)
   })
 
+  it('reads the web flags of serve', () => {
+    const args = parseArgs(['serve', '--no-web', '--web-port', '8080'])
+    expect(args.command).toBe('serve')
+    expect(args.noWeb).toBe(true)
+    expect(args.webPort).toBe(8080)
+    expect(parseArgs(['serve']).noWeb).toBe(false)
+    expect(parseArgs(['serve']).webPort).toBeUndefined()
+  })
+
   it('leaves a flag with a missing value undefined instead of throwing', () => {
     expect(parseArgs(['--model']).model).toBeUndefined()
     expect(parseArgs(['--mode']).mode).toBeUndefined()
+  })
+})
+
+describe('validateArgs', () => {
+  it('checks the web port, and accepts one in range', () => {
+    expect(validateArgs(parseArgs(['serve', '--web-port', '70000']))).toContain('Invalid --web-port')
+    expect(validateArgs(parseArgs(['serve', '--web-port', 'nonsense']))).toContain('Invalid --web-port')
+    expect(validateArgs(parseArgs(['serve', '--web-port', '8080']))).toBeNull()
+    expect(validateArgs(parseArgs(['serve']))).toBeNull()
   })
 })
