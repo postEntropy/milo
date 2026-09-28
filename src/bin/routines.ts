@@ -89,11 +89,11 @@ export async function runRoutines(argv: string[], io: Partial<RoutineIo> = {}): 
         return await add(rest, { out, err, confirm })
       case 'remove':
       case 'rm':
-        return remove(rest, out, err)
+        return await remove(rest, out, err)
       case 'enable':
-        return toggle(rest, true, out, err)
+        return await toggle(rest, true, out, err)
       case 'disable':
-        return toggle(rest, false, out, err)
+        return await toggle(rest, false, out, err)
       case 'run':
         return await run(rest, out, err)
       case 'help':
@@ -213,7 +213,7 @@ async function add(argv: string[], context: Required<RoutineIo>): Promise<number
     }
   }
 
-  const routine = addRoutine({
+  const routine = await addRoutine({
     prompt: flags.prompt,
     name: flags.name,
     when,
@@ -231,13 +231,13 @@ async function add(argv: string[], context: Required<RoutineIo>): Promise<number
   return 0
 }
 
-function remove(argv: string[], out: RoutineIo['out'], err: RoutineIo['err']): number {
+async function remove(argv: string[], out: RoutineIo['out'], err: RoutineIo['err']): Promise<number> {
   const id = argv.find((token) => !token.startsWith('-'))
   if (!id) {
     err('remove needs a routine id (see milo routines list).')
     return 1
   }
-  if (!removeRoutine(id)) {
+  if (!(await removeRoutine(id))) {
     err(`No routine ${id}.`)
     return 1
   }
@@ -245,18 +245,18 @@ function remove(argv: string[], out: RoutineIo['out'], err: RoutineIo['err']): n
   return 0
 }
 
-function toggle(
+async function toggle(
   argv: string[],
   enabled: boolean,
   out: RoutineIo['out'],
   err: RoutineIo['err'],
-): number {
+): Promise<number> {
   const id = argv.find((token) => !token.startsWith('-'))
   if (!id) {
     err(`${enabled ? 'enable' : 'disable'} needs a routine id (see milo routines list).`)
     return 1
   }
-  if (!setEnabled(id, enabled)) {
+  if (!(await setEnabled(id, enabled))) {
     err(`No routine ${id}.`)
     return 1
   }

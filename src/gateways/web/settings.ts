@@ -310,7 +310,7 @@ export class WebSettings {
     return readRoutines().map((routine) => this.routineView(routine))
   }
 
-  private addRoutine(body: Record<string, unknown>): unknown {
+  private async addRoutine(body: Record<string, unknown>): Promise<unknown> {
     const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
     if (!prompt) throw new Error('A prompt is required.')
     const when = parseWhen({
@@ -320,7 +320,7 @@ export class WebSettings {
     })
     if (!when) throw new Error('Set a time: an interval like "2h", or a clock time like "08:00" with optional days.')
     const allow = stringList(body.allow)
-    const routine = addRoutine({
+    const routine = await addRoutine({
       prompt,
       name: optionalText(body.name),
       when,
@@ -331,17 +331,17 @@ export class WebSettings {
     return { routine: this.routineView(routine) }
   }
 
-  private removeRoutine(body: Record<string, unknown>): unknown {
+  private async removeRoutine(body: Record<string, unknown>): Promise<unknown> {
     const id = optionalText(body.id)
-    if (!id || !removeRoutine(id)) throw new Error('No routine with that id.')
+    if (!id || !(await removeRoutine(id))) throw new Error('No routine with that id.')
     return { removed: true }
   }
 
-  private enableRoutine(body: Record<string, unknown>): unknown {
+  private async enableRoutine(body: Record<string, unknown>): Promise<unknown> {
     const id = optionalText(body.id)
     if (!id) throw new Error('A routine id is required.')
     const enabled = body.enabled !== false
-    if (!setEnabled(id, enabled)) throw new Error('No routine with that id.')
+    if (!(await setEnabled(id, enabled))) throw new Error('No routine with that id.')
     return { id, enabled }
   }
 

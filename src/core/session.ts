@@ -203,6 +203,15 @@ export class Session {
   }
 
   /**
+   * Switches the provider the turns that follow run through. A model can
+   * resolve to another wire, so the runtime hands the new one to the sessions
+   * it already opened rather than leaving them on the previous.
+   */
+  setProvider(provider: Provider): void {
+    this.options.provider = provider
+  }
+
+  /**
    * The ceiling a request is measured against: the model's context window times
    * `compactAt`, or `maxInputTokens` when nothing knows the window.
    */
@@ -316,7 +325,13 @@ export class Session {
     let reasoning = ''
     let running: { name: string; args: unknown } | null = null
 
-    const tools = registry.specs()
+    // A tool with nothing to act on is absent from the catalog, and `send_file`
+    // reaches only the chat a routine names: offered in a chat someone is
+    // sitting at, it is a call the model can only fail on. (A subagent filters
+    // `task` out of its own list the same way.)
+    const tools = registry
+      .specs()
+      .filter((tool) => tool.name !== 'send_file' || this.options.deliverTo !== undefined)
     const recalled = await memory.recall(this.scope, input, {
       limit: this.options.recallLimit ?? DEFAULT_RECALL_LIMIT,
     })

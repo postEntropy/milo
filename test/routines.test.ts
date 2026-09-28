@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import lockfile from 'proper-lockfile'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRuntime } from '../src/core/runtime.js'
 import type { OutgoingFile } from '../src/core/outgoing.js'
@@ -126,9 +127,9 @@ describe('the store', () => {
     ...over,
   })
 
-  it('round-trips what it writes', () => {
-    writeRoutines([])
-    const added = addRoutine(routine())
+  it('round-trips what it writes', async () => {
+    await writeRoutines([])
+    const added = await addRoutine(routine())
     expect(added.id).toMatch(/^[a-z]+-[a-z]+-\d+$/)
     expect(added.createdAt).toBeGreaterThan(0)
 
@@ -182,31 +183,31 @@ describe('the store', () => {
     expect(readRoutines()[0]!.target.gateway).toBe('web')
   })
 
-  it('removes, enables and disables by id', () => {
-    writeRoutines([])
-    const added = addRoutine(routine())
+  it('removes, enables and disables by id', async () => {
+    await writeRoutines([])
+    const added = await addRoutine(routine())
 
-    expect(removeRoutine('nobody-here-1')).toBe(false)
-    expect(setEnabled('nobody-here-1', false)).toBe(false)
+    expect(await removeRoutine('nobody-here-1')).toBe(false)
+    expect(await setEnabled('nobody-here-1', false)).toBe(false)
 
-    expect(setEnabled(added.id, false)).toBe(true)
+    expect(await setEnabled(added.id, false)).toBe(true)
     expect(findRoutine(added.id)?.enabled).toBe(false)
 
-    expect(removeRoutine(added.id)).toBe(true)
+    expect(await removeRoutine(added.id)).toBe(true)
     expect(findRoutine(added.id)).toBeUndefined()
   })
 
-  it('writes down the run so a restart can tell', () => {
-    writeRoutines([])
-    const added = addRoutine(routine())
+  it('writes down the run so a restart can tell', async () => {
+    await writeRoutines([])
+    const added = await addRoutine(routine())
 
-    markRun(added.id, 'error', 1_700_000_000_000)
+    await markRun(added.id, 'error', 1_700_000_000_000)
     expect(findRoutine(added.id)).toMatchObject({ lastRunAt: 1_700_000_000_000, lastResult: 'error' })
   })
 
-  it('keeps the grants a routine carries, and copes with a file without them', () => {
-    writeRoutines([])
-    const added = addRoutine({ ...routine(), allow: ['shell_command'] })
+  it('keeps the grants a routine carries, and copes with a file without them', async () => {
+    await writeRoutines([])
+    const added = await addRoutine({ ...routine(), allow: ['shell_command'] })
     expect(findRoutine(added.id)?.allow).toEqual(['shell_command'])
 
     writeFileSync(
@@ -218,28 +219,28 @@ describe('the store', () => {
     expect(readRoutines()[0]!.allow).toBeUndefined()
   })
 
-  it('refuses to grow past its ceiling', () => {
-    writeRoutines(
+  it('refuses to grow past its ceiling', async () => {
+    await writeRoutines(
       Array.from({ length: MAX_ROUTINES }, (_value, index) => ({
         ...routine(),
         id: `routine-${index}-1`,
         createdAt: 0,
       })),
     )
-    expect(() => addRoutine(routine())).toThrow(/at most/)
+    await expect(addRoutine(routine())).rejects.toThrow(/at most/)
   })
 
-  it('writes a file a person can read', () => {
-    writeRoutines([])
-    addRoutine(routine({ name: 'briefing' }))
+  it('writes a file a person can read', async () => {
+    await writeRoutines([])
+    await addRoutine(routine({ name: 'briefing' }))
     const raw = readFileSync(routinesFile(), 'utf8')
     expect(raw.endsWith('\n')).toBe(true)
     expect(raw).toContain('"briefing"')
   })
 
-  it('names a routine from its prompt, on a word boundary', () => {
-    writeRoutines([])
-    const added = addRoutine(
+  it('names a routine from its prompt, on a word boundary', async () => {
+    await writeRoutines([])
+    const added = await addRoutine(
       routine({ prompt: 'look at the repo and tell me what moved since yesterday' }),
     )
 
@@ -249,9 +250,55 @@ describe('the store', () => {
     expect(nameFor('say hi')).toBe('say hi')
   })
 
-  it('keeps the name it was given rather than deriving one', () => {
-    writeRoutines([])
-    expect(addRoutine(routine({ name: '  daily briefing  ' })).name).toBe('daily briefing')
+  it('keeps the name it was given rather than deriving one', async () => {
+    await writeRoutines([])
+    expect((await addRoutine(routine({ name: '  daily briefing  ' }))).name).toBe('daily briefing')
+  })
+
+  // Two writers in different processes each rewrite the whole list from the copy
+  // they read, so the lock is what keeps the slower one from erasing the other.
+  it('waits for the lock another process is holding', async () => {
+    await writeRoutines([])
+    const release = await lockfile.lock(routinesFile(), { realpath: false, stale: 10_000 })
+    let added = false
+    const adding = addRoutine(routine()).then(() => {
+      added = true
+    })
+
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    expect(added).toBe(false)
+
+    await release()
+    await adding
+    expect(readRoutines()).toHaveLength(1)
+  })
+
+  it('lands its change on top of one written while it waited', async () => {
+    await writeRoutines([])
+    const release = await lockfile.lock(routinesFile(), { realpath: false, stale: 10_000 })
+    const adding = addRoutine(routine({ prompt: 'from the assistant' }))
+
+    // The other process writes its own change while this add waits for the lock.
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    writeFileSync(
+      routinesFile(),
+      JSON.stringify([
+        {
+          id: 'calm-otter-9',
+          prompt: 'from the CLI',
+          when: at('08:00'),
+          target: { gateway: 'telegram', conversationId: '1' },
+          enabled: true,
+        },
+      ]),
+    )
+
+    await release()
+    await adding
+    expect(readRoutines().map((entry) => entry.prompt).sort()).toEqual([
+      'from the CLI',
+      'from the assistant',
+    ])
   })
 })
 
@@ -334,6 +381,15 @@ function harness(options: FakeRun = {}) {
     advanceClock: (ms: number) => {
       clock = new Date(clock.getTime() + ms)
     },
+    /**
+     * Moves the timers and waits for the runs the tick started: a fire marks the
+     * run in `routines.json` under the file's lock, and a test that only advanced
+     * the clock would read that file while the write is still in flight.
+     */
+    advance: async (ms: number) => {
+      await vi.advanceTimersByTimeAsync(ms)
+      await scheduler.settle()
+    },
   }
 }
 
@@ -348,12 +404,12 @@ describe('RoutineScheduler', () => {
   })
 
   it('fires a due routine and delivers what it answered', async () => {
-    writeRoutines([sample()])
+    await writeRoutines([sample()])
     const h = harness()
     h.scheduler.start()
 
     h.advanceClock(60_000)
-    await vi.advanceTimersByTimeAsync(61_000)
+    await h.advance(61_000)
 
     expect(h.prompts).toEqual(['look at the repo'])
     // The name leads the message, so a chat with several routines can tell which
@@ -366,12 +422,12 @@ describe('RoutineScheduler', () => {
 
   it('does not make up a routine it slept through', async () => {
     // 07:00 has already passed when the daemon comes up at 07:59.
-    writeRoutines([sample({ when: at('07:00') })])
+    await writeRoutines([sample({ when: at('07:00') })])
     const h = harness()
     h.scheduler.start()
 
     h.setClock(new Date(2026, 8, 25, 9, 0, 0))
-    await vi.advanceTimersByTimeAsync(120_000)
+    await h.advance(120_000)
 
     expect(h.prompts).toEqual([])
     expect(readRoutines()[0]!.lastRunAt).toBeUndefined()
@@ -379,31 +435,31 @@ describe('RoutineScheduler', () => {
   })
 
   it('runs an interval routine once per occurrence, never twice for one', async () => {
-    writeRoutines([sample({ when: every(1) })])
+    await writeRoutines([sample({ when: every(1) })])
     const h = harness()
     h.scheduler.start()
 
     h.setClock(new Date(2026, 8, 25, 8, 0, 40))
-    await vi.advanceTimersByTimeAsync(120_000)
+    await h.advance(120_000)
     expect(h.prompts).toHaveLength(1)
 
     // More ticks at the same instant: the occurrence already had its turn.
-    await vi.advanceTimersByTimeAsync(120_000)
+    await h.advance(120_000)
     expect(h.prompts).toHaveLength(1)
 
     h.setClock(new Date(2026, 8, 25, 8, 1, 40))
-    await vi.advanceTimersByTimeAsync(120_000)
+    await h.advance(120_000)
     expect(h.prompts).toHaveLength(2)
     h.scheduler.stop()
   })
 
   it('leaves a disabled routine alone', async () => {
-    writeRoutines([sample({ when: every(1), enabled: false })])
+    await writeRoutines([sample({ when: every(1), enabled: false })])
     const h = harness()
     h.scheduler.start()
 
     h.setClock(new Date(2026, 8, 25, 8, 0, 40))
-    await vi.advanceTimersByTimeAsync(120_000)
+    await h.advance(120_000)
 
     expect(h.prompts).toEqual([])
     h.scheduler.stop()
@@ -414,11 +470,13 @@ describe('RoutineScheduler', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    writeRoutines([sample({ when: every(1) })])
+    await writeRoutines([sample({ when: every(1) })])
     const h = harness({ gate })
     h.scheduler.start()
 
     h.setClock(new Date(2026, 8, 25, 8, 0, 40))
+    // The gate keeps the first run going, so these advance the timers without
+    // waiting the run out — which is the whole point of the test.
     await vi.advanceTimersByTimeAsync(120_000)
     expect(h.prompts).toHaveLength(1)
 
@@ -429,17 +487,17 @@ describe('RoutineScheduler', () => {
     expect(h.logs.some((line) => line.includes('skipped'))).toBe(true)
 
     release()
-    await vi.advanceTimersByTimeAsync(10)
+    await h.advance(10)
     h.scheduler.stop()
   })
 
   it('says when a routine failed, and marks the run', async () => {
-    writeRoutines([sample({ when: every(1) })])
+    await writeRoutines([sample({ when: every(1) })])
     const h = harness({ fail: 'boom' })
     h.scheduler.start()
 
     h.setClock(new Date(2026, 8, 25, 8, 0, 40))
-    await vi.advanceTimersByTimeAsync(120_000)
+    await h.advance(120_000)
 
     expect(h.delivered[0]!.text).toContain('failed')
     expect(h.delivered[0]!.text).toContain('boom')
@@ -449,24 +507,24 @@ describe('RoutineScheduler', () => {
   })
 
   it('posts nothing when the routine answered nothing', async () => {
-    writeRoutines([sample({ when: every(1) })])
+    await writeRoutines([sample({ when: every(1) })])
     const h = harness({ answer: '' })
     h.scheduler.start()
 
     h.setClock(new Date(2026, 8, 25, 8, 0, 40))
-    await vi.advanceTimersByTimeAsync(120_000)
+    await h.advance(120_000)
 
     expect(h.delivered).toEqual([])
     h.scheduler.stop()
   })
 
   it("carries the routine's grants into the run, which is the only place they apply", async () => {
-    writeRoutines([sample({ when: every(1), allow: ['shell_command'] })])
+    await writeRoutines([sample({ when: every(1), allow: ['shell_command'] })])
     const h = harness()
     h.scheduler.start()
 
     h.setClock(new Date(2026, 8, 25, 8, 0, 40))
-    await vi.advanceTimersByTimeAsync(120_000)
+    await h.advance(120_000)
 
     expect(h.sessions).toEqual([{
       grantedTools: ['shell_command'],
@@ -476,38 +534,38 @@ describe('RoutineScheduler', () => {
   })
 
   it("tells the run which chat it may send files to, the routine's own target", async () => {
-    writeRoutines([sample({ when: every(1), target: { gateway: 'discord', conversationId: '987' } })])
+    await writeRoutines([sample({ when: every(1), target: { gateway: 'discord', conversationId: '987' } })])
     const h = harness()
     h.scheduler.start()
 
     h.setClock(new Date(2026, 8, 25, 8, 0, 40))
-    await vi.advanceTimersByTimeAsync(120_000)
+    await h.advance(120_000)
 
     expect(h.sessions).toEqual([{ grantedTools: undefined, deliverTo: { gateway: 'discord', conversationId: '987' } }])
     h.scheduler.stop()
   })
 
   it('delivers a file even when the run answered nothing', async () => {
-    writeRoutines([sample({ when: every(1) })])
+    await writeRoutines([sample({ when: every(1) })])
     const shot: OutgoingFile = { path: '/tmp/shot.png', name: 'shot.png', mimeType: 'image/png' }
     const h = harness({ answer: '', files: [shot] })
     h.scheduler.start()
 
     h.setClock(new Date(2026, 8, 25, 8, 0, 40))
-    await vi.advanceTimersByTimeAsync(120_000)
+    await h.advance(120_000)
 
     expect(h.delivered).toEqual([{ id: 'calm-otter-1', files: [shot] }])
     h.scheduler.stop()
   })
 
   it('stops firing once stopped', async () => {
-    writeRoutines([sample({ when: every(1) })])
+    await writeRoutines([sample({ when: every(1) })])
     const h = harness()
     h.scheduler.start()
     h.scheduler.stop()
 
     h.setClock(new Date(2026, 8, 25, 9, 0, 0))
-    await vi.advanceTimersByTimeAsync(600_000)
+    await h.advance(600_000)
 
     expect(h.prompts).toEqual([])
   })

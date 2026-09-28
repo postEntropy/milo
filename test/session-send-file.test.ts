@@ -13,11 +13,14 @@ import { createToolRegistry } from '../src/core/tools/index.js'
 class ShotProvider implements Provider {
   readonly id = 'shot'
   private calls = 0
+  /** The tool names each request was offered, first call first. */
+  readonly offered: string[][] = []
 
   constructor(private readonly file: string) {}
 
-  async *stream(_req: ChatRequest): AsyncGenerator<StreamEvent> {
+  async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     this.calls += 1
+    this.offered.push((req.tools ?? []).map((tool) => tool.name))
     if (this.calls === 1) {
       yield { type: 'tool-call', id: 'c1', name: 'send_file', args: { path: this.file, caption: 'the screen' } }
       yield { type: 'done', finishReason: 'tool_calls' }
@@ -36,9 +39,10 @@ async function run(deliverTo?: { gateway: string; conversationId: string }) {
 
   const store = new MemorySessionStore()
   const record = await store.create()
+  const provider = new ShotProvider(file)
   const session = new Session({
     scope: { gateway: 'routine', conversationId: 'calm-otter-1' },
-    provider: new ShotProvider(file),
+    provider,
     model: 'm',
     system: 'BASE',
     registry: createToolRegistry(),
@@ -53,13 +57,15 @@ async function run(deliverTo?: { gateway: string; conversationId: string }) {
   const events: AgentEvent[] = []
   for await (const event of session.send('take a screenshot and send it')) events.push(event)
   const ended = events.find((event): event is Extract<AgentEvent, { type: 'tool-end' }> => event.type === 'tool-end')
-  return { session, events, ended, file }
+  return { session, events, ended, file, provider }
 }
 
 describe('a turn that sends a file', () => {
   it('collects the file for the chat the session delivers to', async () => {
-    const { session, events, ended } = await run({ gateway: 'telegram', conversationId: '123' })
+    const { session, events, ended, provider } = await run({ gateway: 'telegram', conversationId: '123' })
 
+    // Offered, because this turn has a chat to deliver to.
+    expect(provider.offered[0]).toContain('send_file')
     expect(ended?.isError).toBe(false)
     expect(events.some((event) => event.type === 'text-delta' && event.delta === 'sent')).toBe(true)
     expect(session.takeOutgoing()).toEqual([
@@ -75,5 +81,13 @@ describe('a turn that sends a file', () => {
     expect(ended?.isError).toBe(true)
     expect(ended?.result).toContain('no chat')
     expect(session.takeOutgoing()).toEqual([])
+  })
+
+  // The catalog rule, and the refusal above is only the second line: a tool the
+  // turn has nothing to act on is absent from the list, not offered and failing.
+  it('is not offered to a turn with nobody to deliver to', async () => {
+    const { provider } = await run()
+
+    expect(provider.offered[0]).not.toContain('send_file')
   })
 })

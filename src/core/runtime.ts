@@ -22,6 +22,13 @@ import { logWarn } from '../util/log.js'
 
 export interface RuntimeOptions {
   provider: Provider
+  /**
+   * How a provider is built for a model. `auto` picks its wire from the model
+   * id, so a runtime given this builds the provider again when `setModel` moves
+   * it, rather than carrying the first one into turns it was never resolved
+   * for. Absent on a runtime holding a fixed provider: a test, a script.
+   */
+  providerFor?: (model: string) => Provider
   model: string
   system: string
   registry: ToolRegistry
@@ -199,12 +206,17 @@ export class AgentRuntime {
   }
 
   /**
-   * The way out: the recaps still being written, and the browser, if one was
-   * started. Safe to call more than once, and safe to call when a caller only
-   * ever wanted the recaps — `flush()` remains the seam for that.
+   * The way out: the recaps still being written, the fact extractions still in
+   * flight, and the browser, if one was started. Safe to call more than once,
+   * and safe to call when a caller only ever wanted the recaps — `flush()`
+   * remains the seam for that.
    */
   async close(): Promise<void> {
     await this.flush()
+    // Extractions write to memory, and a process that exits under them drops a
+    // fact the turn decided was worth keeping. Waited for together, and a
+    // failure in one is not a reason to leave the rest of the way out undone.
+    await Promise.allSettled([...this.cache.values()].map((session) => session.settle()))
     await this.options.browser?.close()
   }
 
@@ -232,10 +244,20 @@ export class AgentRuntime {
     return this.options.model
   }
 
-  /** Switches the model for this install: the open sessions and the ones after. */
+  /**
+   * Switches the model for this install: the open sessions and the ones after.
+   * The provider is built again where the runtime knows how — a model can
+   * resolve to another wire — and the sessions already open, which hold the
+   * previous one, are handed the new.
+   */
   setModel(model: string): void {
     this.options.model = model
-    for (const session of this.cache.values()) session.setModel(model)
+    const provider = this.options.providerFor?.(model)
+    if (provider) this.options.provider = provider
+    for (const session of this.cache.values()) {
+      session.setModel(model)
+      if (provider) session.setProvider(provider)
+    }
   }
 
   /** How hard the model thinks, from the turn after this one. */

@@ -79,6 +79,10 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
 
   return new AgentRuntime({
     provider: createProvider(loaded.provider, loaded.model),
+    // One entry, and the model it is on: `auto` picks its wire from the model
+    // id, so a model switched later resolves a provider of its own instead of
+    // keeping the wire of the one it replaced.
+    providerFor: (model) => createProvider(loaded.provider, model),
     model: loaded.model,
     system: loaded.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     registry: createToolRegistry({ search, skills, browser }),
@@ -102,7 +106,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     history: fileHistory,
     // A routine the model makes is filed here, not in the session: the list
     // belongs to the install, and `milo serve` is what runs it.
-    routine: async (input) => addRoutine(input),
+    routine: addRoutine,
     skills,
     sessions: loaded.config.sessions,
     // Where the compaction ceiling comes from: a model's window is not in the

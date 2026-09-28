@@ -263,3 +263,76 @@ describe('AgentRuntime recaps', () => {
     expect(provider.calls).toBe(0)
   })
 })
+
+describe('AgentRuntime model switch', () => {
+  it('builds the provider again, so a session open across a switch runs on the new one', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const used: string[] = []
+    const providerFor = (model: string): Provider => ({
+      id: model,
+      async *stream(): AsyncGenerator<StreamEvent> {
+        used.push(model)
+        yield { type: 'text', delta: 'ok' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    })
+    const runtime = new AgentRuntime({
+      ...runtimeOptions(dir),
+      provider: providerFor('deepseek/deepseek-v4-flash'),
+      providerFor,
+    })
+
+    const session = await runtime.getSession(cli)
+    await drain(session.send('first'))
+    expect(used).toEqual(['deepseek/deepseek-v4-flash'])
+
+    runtime.setModel('claude-sonnet-4-5')
+    await drain(session.send('second'))
+
+    // The session was opened before the switch, and `claude` resolves to the
+    // other wire: the turn that follows has to run through the provider the new
+    // model chose, not the one it was built with.
+    expect(used).toEqual(['deepseek/deepseek-v4-flash', 'claude-sonnet-4-5'])
+  })
+})
+
+describe('AgentRuntime close', () => {
+  it('waits for the facts of a finished turn before closing', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const memory = new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-mem-')) })
+    let release: () => void = () => {}
+    const extractionGate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let call = 0
+    const provider: Provider = {
+      id: 'gated',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        call += 1
+        // The turn answers first; the extraction of what to keep from it is the
+        // call after, and the one held open here.
+        if (call > 1) await extractionGate
+        yield { type: 'text', delta: call > 1 ? 'Meu editor e o Neovim.' : 'ok' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+    const runtime = new AgentRuntime({ ...runtimeOptions(dir), provider, memory, derive: true })
+    const session = await runtime.getSession(cli)
+    await drain(session.send('qual editor eu uso?'))
+
+    let closed = false
+    const closing = runtime.close().then(() => {
+      closed = true
+    })
+    await new Promise((resolve) => setImmediate(resolve))
+    // Parked at the extraction: the way out is still waiting on it, because a
+    // fact the turn decided to keep must not die with the process.
+    expect(closed).toBe(false)
+
+    release()
+    await closing
+
+    const notes = await session.memories()
+    expect(notes.map((note) => note.text)).toContain('Meu editor e o Neovim.')
+  })
+})

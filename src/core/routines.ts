@@ -1,6 +1,9 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import lockfile from 'proper-lockfile'
 import { errorMessage } from '../util/errors.js'
+import { writePrivateFile } from '../util/fs.js'
+import { logWarn } from '../util/log.js'
 import { routinesFile } from './config/paths.js'
 import type { OutgoingFile, OutgoingMessage } from './outgoing.js'
 import type { AgentRuntime } from './runtime.js'
@@ -195,59 +198,116 @@ export function readRoutines(): Routine[] {
   }
 }
 
-export function writeRoutines(routines: Routine[]): void {
+/**
+ * How long a lock is believed after the process holding it stops refreshing it.
+ * A read-modify-write holds it for milliseconds; the holder that dies is the one
+ * whose lock this breaks.
+ */
+const LOCK_STALE_MS = 10_000
+/** Write windows are short and rare: waiting is cheaper than losing a change. */
+const WRITE_LOCK_RETRIES = { retries: 15, factor: 1.5, minTimeout: 20, maxTimeout: 250, randomize: true }
+
+/**
+ * Takes the file's lock, so a read-modify-write is one step across processes.
+ * `routines.json` has two writers in different processes — `milo serve` marking
+ * a run while `milo routines add` adds one — and each rewrites the whole list
+ * from the copy it read, so without the lock the slower writer's copy wins and
+ * the other change is gone.
+ */
+async function lockRoutines(): Promise<() => Promise<void>> {
+  // Only the directory has to exist: `realpath: false` locks the path as given,
+  // and the lock itself is a directory created beside the file.
   mkdirSync(dirname(routinesFile()), { recursive: true })
-  writeFileSync(routinesFile(), `${JSON.stringify(routines, null, 2)}\n`)
+  return lockfile.lock(routinesFile(), {
+    realpath: false,
+    stale: LOCK_STALE_MS,
+    retries: WRITE_LOCK_RETRIES,
+    // A late write is not a reason to take the process down.
+    onCompromised: (error) => logWarn(`lost the lock on routines.json: ${errorMessage(error)}`),
+  })
+}
+
+function serialize(routines: Routine[]): string {
+  return `${JSON.stringify(routines, null, 2)}\n`
+}
+
+/** Replaces the whole list, under the lock and through a rename, like every write here. */
+export async function writeRoutines(routines: Routine[]): Promise<void> {
+  const release = await lockRoutines()
+  try {
+    await writePrivateFile(routinesFile(), serialize(routines))
+  } finally {
+    await release()
+  }
 }
 
 export function findRoutine(id: string): Routine | undefined {
   return readRoutines().find((routine) => routine.id === id)
 }
 
+/**
+ * The one way the list changes: read, apply `change`, write the result back —
+ * all while holding the lock. `next` absent means there was nothing to write.
+ */
+async function changeRoutines<T>(
+  change: (routines: Routine[]) => { result: T; next?: Routine[] },
+): Promise<T> {
+  const release = await lockRoutines()
+  try {
+    const routines = readRoutines()
+    const outcome = change(routines)
+    if (outcome.next) await writePrivateFile(routinesFile(), serialize(outcome.next))
+    return outcome.result
+  } finally {
+    await release()
+  }
+}
+
 /** Adds a routine and returns it, id and all. Throws when the list is at its ceiling. */
-export function addRoutine(input: NewRoutine): Routine {
-  const routines = readRoutines()
-  if (routines.length >= MAX_ROUTINES) {
-    throw new Error(`at most ${MAX_ROUTINES} routines — remove one first`)
-  }
-  const id = generateNickname((candidate) => routines.some((routine) => routine.id === candidate))
-  const routine: Routine = {
-    id,
-    createdAt: Date.now(),
-    ...input,
-    // Named here rather than at the surfaces, so every path — the tool, the CLI,
-    // a hand-edited file — ends up with a routine a person can refer to by name.
-    name: input.name?.trim() || nameFor(input.prompt),
-  }
-  writeRoutines([...routines, routine])
-  return routine
+export async function addRoutine(input: NewRoutine): Promise<Routine> {
+  return changeRoutines((routines) => {
+    if (routines.length >= MAX_ROUTINES) {
+      throw new Error(`at most ${MAX_ROUTINES} routines — remove one first`)
+    }
+    const id = generateNickname((candidate) => routines.some((routine) => routine.id === candidate))
+    const routine: Routine = {
+      id,
+      createdAt: Date.now(),
+      ...input,
+      // Named here rather than at the surfaces, so every path — the tool, the CLI,
+      // a hand-edited file — ends up with a routine a person can refer to by name.
+      name: input.name?.trim() || nameFor(input.prompt),
+    }
+    return { result: routine, next: [...routines, routine] }
+  })
 }
 
-export function removeRoutine(id: string): boolean {
-  const routines = readRoutines()
-  const kept = routines.filter((routine) => routine.id !== id)
-  if (kept.length === routines.length) return false
-  writeRoutines(kept)
-  return true
+export async function removeRoutine(id: string): Promise<boolean> {
+  return changeRoutines((routines) => {
+    const kept = routines.filter((routine) => routine.id !== id)
+    if (kept.length === routines.length) return { result: false }
+    return { result: true, next: kept }
+  })
 }
 
-export function setEnabled(id: string, enabled: boolean): boolean {
-  const routines = readRoutines()
-  const target = routines.find((routine) => routine.id === id)
-  if (!target) return false
-  target.enabled = enabled
-  writeRoutines(routines)
-  return true
+export async function setEnabled(id: string, enabled: boolean): Promise<boolean> {
+  return changeRoutines((routines) => {
+    const target = routines.find((routine) => routine.id === id)
+    if (!target) return { result: false }
+    target.enabled = enabled
+    return { result: true, next: routines }
+  })
 }
 
 /** Writes down that a routine fired, so a restart does not fire the same minute twice. */
-export function markRun(id: string, result: 'ok' | 'error', at: number): void {
-  const routines = readRoutines()
-  const target = routines.find((routine) => routine.id === id)
-  if (!target) return
-  target.lastRunAt = at
-  target.lastResult = result
-  writeRoutines(routines)
+export async function markRun(id: string, result: 'ok' | 'error', at: number): Promise<void> {
+  await changeRoutines((routines) => {
+    const target = routines.find((routine) => routine.id === id)
+    if (!target) return { result: undefined }
+    target.lastRunAt = at
+    target.lastResult = result
+    return { result: undefined, next: routines }
+  })
 }
 
 export interface RoutineRunResult {
@@ -317,6 +377,8 @@ export class RoutineScheduler {
   private readonly cursors = new Map<string, Date>()
   /** Routines mid-run, so one longer than its interval does not overlap itself. */
   private readonly running = new Set<string>()
+  /** Those runs, so a caller about to exit can wait them out. */
+  private readonly pending = new Set<Promise<void>>()
   private stopped = false
   private readonly now: () => Date
   private readonly maxWaitMs: number
@@ -335,6 +397,11 @@ export class RoutineScheduler {
     this.stopped = true
     if (this.timer) clearTimeout(this.timer)
     this.timer = undefined
+  }
+
+  /** Waits for the runs in flight — the seam for a caller about to exit, or a test. */
+  async settle(): Promise<void> {
+    while (this.pending.size > 0) await Promise.allSettled([...this.pending])
   }
 
   /**
@@ -388,7 +455,9 @@ export class RoutineScheduler {
         continue
       }
       this.running.add(routine.id)
-      void this.fire(routine).finally(() => this.running.delete(routine.id))
+      const work = this.fire(routine).finally(() => this.running.delete(routine.id))
+      this.pending.add(work)
+      void work.finally(() => this.pending.delete(work))
     }
     this.arm()
   }
@@ -409,7 +478,13 @@ export class RoutineScheduler {
       result = { answer: '', failure: errorMessage(error), files: [] }
     }
 
-    markRun(routine.id, result.failure ? 'error' : 'ok', this.now().getTime())
+    try {
+      await markRun(routine.id, result.failure ? 'error' : 'ok', this.now().getTime())
+    } catch (error) {
+      // The run happened; only writing it down did not. Said rather than thrown:
+      // an unhandled rejection here would take the daemon down over a late write.
+      this.log(`could not record the run of ${routine.id}: ${errorMessage(error)}`)
+    }
     if (result.failure) this.log(`routine ${routine.id} failed: ${result.failure}`)
 
     // The routine's name leads its message, so a chat with several of them can
