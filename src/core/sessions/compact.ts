@@ -26,6 +26,10 @@ export function estimateTokens(messages: Message[]): number {
           // which therefore rides every later request.
           if (part.signature) chars += part.text.length
           break
+        case 'file':
+          // A delivered file is on disk, not in the request: the wires skip the
+          // part, so it is not charged to the transcript it sits in.
+          break
       }
     }
   }

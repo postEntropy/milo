@@ -7,8 +7,9 @@ import { deriveFacts } from './memory/derive.js'
 import { scopeKey, DEFAULT_RECALL_LIMIT, type Memory, type MemoryInput, type MemoryItem, type MemoryScope } from './memory/index.js'
 import type { SkillSummary } from './skills/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
+import { describeOutgoing, type OutgoingFile } from './outgoing.js'
 import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
-import type { PermissionAsker, PermissionPolicy, RoutineFn, ToolRegistry } from './tools/index.js'
+import type { PermissionAsker, PermissionPolicy, RoutineFn, SendFileFn, ToolRegistry } from './tools/index.js'
 import { withGrants } from './tools/index.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent } from './agent/loop.js'
@@ -88,6 +89,12 @@ export interface SessionOptions {
    */
   routine?: RoutineFn
   /**
+   * The chat this session's turns deliver files to, when there is one. Set only
+   * on a routine's own run: the routine knows its target, and `send_file` reaches
+   * it. Absent everywhere else, so a chat someone is sitting at has none.
+   */
+  deliverTo?: { gateway: string; conversationId: string }
+  /**
    * Tools this run may use with nobody to ask — a routine's standing grants,
    * decided by the person when it was created. Layered on the policy for this
    * session only, and only where the rules do not bar the act anyway.
@@ -146,6 +153,12 @@ export class Session {
   private readonly resolving: Promise<void>
   /** Turns being read for facts in the background. Nothing waits on them. */
   private readonly deriving = new Set<Promise<void>>()
+  /**
+   * Files the running turn asked to send to its chat, held until the turn ends.
+   * Held rather than sent at once because a delivery takes the session's lease —
+   * the same one the turn holds for as long as it runs.
+   */
+  private outgoing: OutgoingFile[] = []
 
   constructor(options: SessionOptions) {
     this.options = options
@@ -345,6 +358,17 @@ export class Session {
     // A routine's own run is the one conversation that must not make routines:
     // without this, a routine could add routines every time it fires.
     const routine = this.scope.gateway === ROUTINE_GATEWAY ? undefined : this.options.routine
+    // What this turn asks to send, and whether it has a chat to send it to. A
+    // routine's own run is the only turn that does: it named a target when it was
+    // made, and a delivery must not be rerouted to whichever surface is live.
+    this.outgoing = []
+    const sendFile: SendFileFn | undefined = this.options.deliverTo
+      ? async (input) => {
+          const file = describeOutgoing(input.path, input.caption)
+          this.outgoing.push(file)
+          return file
+        }
+      : undefined
 
     let errored = false
 
@@ -368,6 +392,7 @@ export class Session {
           recall,
           origin: this.scope,
           routine,
+          sendFile,
           // A subtask runs in its own context, but under this turn's model,
           // tools, permissions and stop: the same `ask` puts the subagent's
           // confirmations to the user, and the same signal stops both.
@@ -385,7 +410,7 @@ export class Session {
               temperature,
               reasoningEffort: effort,
               input,
-              context: { remember, recall, origin: this.scope, routine },
+              context: { remember, recall, origin: this.scope, routine, sendFile },
             }),
         },
         maxSteps,
@@ -546,17 +571,38 @@ export class Session {
   }
 
   /**
-   * Adds a message with no turn behind it, so something said out of band — a
-   * routine's answer delivered to this chat — is in the transcript when it is
-   * next opened rather than existing only for whoever was watching. Under the
-   * lease for the same reason every other write is: appending from a stale copy
-   * would be refused, or would erase the turns written since.
+   * What the turn just finished asked to send, and clears it. Read once the turn
+   * ends, by whoever delivers on its behalf — the scheduler, for a routine.
    */
-  async appendNotice(text: string): Promise<void> {
+  takeOutgoing(): OutgoingFile[] {
+    const files = this.outgoing
+    this.outgoing = []
+    return files
+  }
+
+  /**
+   * Adds a message with no turn behind it, so something said out of band — a
+   * routine's answer, with any files it delivered, reaching this chat — is in the
+   * transcript when it is next opened rather than existing only for whoever was
+   * watching. Under the lease for the same reason every other write is: appending
+   * from a stale copy would be refused, or would erase the turns written since.
+   */
+  async appendNotice(text: string, files: OutgoingFile[] = []): Promise<void> {
     const lease = await this.store.acquire(this.id)
     try {
       if (lease.latest) this.adoptLatest(lease.latest)
-      this.messages.push({ role: 'assistant', content: [{ type: 'text', text }] })
+      this.messages.push({
+        role: 'assistant',
+        content: [
+          { type: 'text', text },
+          ...files.map((file) => ({
+            type: 'file' as const,
+            path: file.path,
+            name: file.name,
+            mimeType: file.mimeType,
+          })),
+        ],
+      })
       await this.persist()
     } finally {
       await lease.release()

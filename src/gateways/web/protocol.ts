@@ -34,6 +34,19 @@ export type ClientFrame =
   | { type: 'control'; action: 'stop' | 'allow' | 'deny'; id?: string }
   | { type: 'command'; text: string }
 
+/**
+ * A file that has been delivered into a conversation. The browser never sees a
+ * path: it asks the server for `id`, and only files it has delivered are served.
+ * `image` is decided here so the page does not have to know MIME types.
+ */
+export interface FrameAttachment {
+  id: string
+  name: string
+  mimeType: string
+  size: number
+  image: boolean
+}
+
 export type ServerFrame =
   | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: 'on' | 'off'; provider: string; model: string }
   | { type: 'turn-start'; id: string; text: string }
@@ -41,7 +54,7 @@ export type ServerFrame =
   | { type: 'permission'; id: string; request: PermissionRequest; expiresAt: number }
   | { type: 'permission-result'; id: string; allowed: boolean }
   | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error' }
-  | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string }
+  | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; attachments?: FrameAttachment[] }
   | { type: 'state'; busy: boolean; queued: number }
   | { type: 'error'; message: string }
 
@@ -51,6 +64,8 @@ export interface TranscriptMessage {
   reasoning?: string
   /** The tool calls this turn made, one line each, in the shared chat format. */
   tools?: string[]
+  /** Files delivered into this conversation, still on disk and served by id. */
+  attachments?: FrameAttachment[]
 }
 
 export function parseClientFrame(value: unknown): ClientFrame | null {

@@ -88,10 +88,10 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   // needs one.
   const scheduler = new RoutineScheduler({
     runtime,
-    deliver: async (routine, text) => {
+    deliver: async (routine, message) => {
       const gateway = gateways.find((candidate) => candidate.id === routine.target.gateway)
       if (!gateway?.deliver) throw new Error(`no ${routine.target.gateway} surface to deliver to`)
-      await gateway.deliver(routine.target.conversationId, text)
+      await gateway.deliver(routine.target.conversationId, message)
     },
     log: (line) => console.error(line),
   })

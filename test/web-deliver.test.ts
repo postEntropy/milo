@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { ServerFrame } from '../src/gateways/web/protocol.js'
@@ -40,6 +40,14 @@ async function transcript(runtime: InstanceType<typeof AgentRuntime>): Promise<s
     message.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])))
 }
 
+/** Every delivered-file part of a session's transcript, in order. */
+async function attachments(runtime: InstanceType<typeof AgentRuntime>) {
+  const session = await runtime.getSession({ gateway: 'web', conversationId: CONVERSATION })
+  return session.messages.flatMap((message) =>
+    message.content.flatMap((part) =>
+      part.type === 'file' ? [{ path: part.path, name: part.name, mimeType: part.mimeType }] : []))
+}
+
 describe('a routine delivering into a web chat', () => {
   it('writes the message into the conversation and hands it to whoever is watching', async () => {
     const runtime = build()
@@ -49,7 +57,7 @@ describe('a routine delivering into a web chat', () => {
 
     await hub.connect(client, CONVERSATION)
     frames.length = 0 // the handshake; only what follows is the delivery
-    await hub.deliver(CONVERSATION, 'daily briefing\n\nnothing moved')
+    await hub.deliver(CONVERSATION, { text: 'daily briefing\n\nnothing moved' })
 
     expect(frames).toContainEqual({
       type: 'command-result',
@@ -59,11 +67,36 @@ describe('a routine delivering into a web chat', () => {
     expect(await transcript(runtime)).toContain('daily briefing\n\nnothing moved')
   })
 
+  it('delivers a file alongside the answer and serves it back by id', async () => {
+    const runtime = build()
+    const hub = new WebHub(runtime, { provider: 'test', model: 'test-model' })
+    const frames: ServerFrame[] = []
+    const client = { send: (frame: ServerFrame) => frames.push(frame) }
+    const shot = path.join(home, 'shot.png')
+    writeFileSync(shot, 'not really a png')
+
+    await hub.connect(client, CONVERSATION)
+    frames.length = 0 // the handshake; only what follows is the delivery
+    await hub.deliver(CONVERSATION, {
+      text: 'the screen',
+      files: [{ path: shot, name: 'shot.png', mimeType: 'image/png' }],
+    })
+
+    const frame = frames.find(
+      (entry): entry is Extract<ServerFrame, { type: 'command-result' }> => entry.type === 'command-result',
+    )
+    expect(frame?.attachments?.[0]).toMatchObject({ name: 'shot.png', mimeType: 'image/png', image: true })
+    // The id is the only name the browser holds, and it resolves back to exactly
+    // the file that was delivered — nothing else on disk can be asked for.
+    expect(hub.attachment(frame!.attachments![0]!.id)).toEqual({ path: shot, name: 'shot.png', mimeType: 'image/png' })
+    expect(await attachments(runtime)).toEqual([{ path: shot, name: 'shot.png', mimeType: 'image/png' }])
+  })
+
   it('keeps it for a chat nobody is watching', async () => {
     const runtime = build()
     const hub = new WebHub(runtime, { provider: 'test', model: 'test-model' })
 
-    await hub.deliver(CONVERSATION, 'nightly report')
+    await hub.deliver(CONVERSATION, { text: 'nightly report' })
 
     // No client, so nothing was broadcast — the session is the only copy, and
     // that is exactly why the delivery is written before it is announced.
@@ -72,7 +105,7 @@ describe('a routine delivering into a web chat', () => {
 
   it('refuses anything that is not a conversation id', async () => {
     const hub = new WebHub(build(), { provider: 'test', model: 'test-model' })
-    await expect(hub.deliver('not-a-uuid', 'x')).rejects.toThrow('not a web conversation id')
+    await expect(hub.deliver('not-a-uuid', { text: 'x' })).rejects.toThrow('not a web conversation id')
   })
 })
 

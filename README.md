@@ -372,8 +372,8 @@ Three things are worth knowing before you rely on one:
   while it is down, and a time it slept through is **skipped, not caught up** — you get the next one,
   once, rather than a burst of the mornings you missed.
 - **Permission is decided when the routine is made, not when it fires.** Reading needs nothing.
-  Anything that writes or runs a command is a standing grant it carries (`--allow
-  shell_command,write_file`, or what the assistant proposes in chat), and it is confirmed where there
+  Anything that writes, runs or sends a file is a standing grant it carries (`--allow
+  shell_command,send_file`, or what the assistant proposes in chat), and it is confirmed where there
   is someone to confirm it — at creation. At fire time the grant is what stands in for a person: a
   granted tool runs, anything else keeps the policy's answer, which with nobody to ask is a refusal. An
   explicit deny still denies, and the rules that bar a destructive command or a protected path still
@@ -384,8 +384,13 @@ Three things are worth knowing before you rely on one:
   after the routine, so they show up in `/sessions` and are searchable with `search_history`.
 
 The answer is posted at the target when the run finishes, split across messages if it is long. A
-failure is posted too (`⚠ routine "…" failed: …`), so one that breaks reaches you instead of going
-quiet. If a run is still going when its next time comes, that occurrence is skipped rather than
+routine can also deliver **files**: its `send_file` tool posts a file from the machine to the same
+chat, as a picture when it is an image and a document otherwise. So *"every morning, screenshot the
+screen and send it"* is a routine — `shell_command` runs `grim` (Wayland) or `scrot` (X11), then
+`send_file` hands over the PNG. On the terminal that is `--allow shell_command,send_file`; a file
+reaches the chat with no answer to lead it, so a run that says nothing but delivers a picture still
+speaks. A failure is posted too (`⚠ routine "…" failed: …`), so one that breaks reaches you instead
+of going quiet. If a run is still going when its next time comes, that occurrence is skipped rather than
 stacked, and `milo routines list` shows what the last one did. A routine cannot create more routines —
 the `routine` tool is absent inside a routine's own run.
 
@@ -404,6 +409,7 @@ the `routine` tool is absent inside a routine's own run.
 | `recall` | yes | Which past session a question is about, and what it was about. |
 | `search_history` | yes | Term search over Milo's own past turns, reasoning and tool calls included. |
 | `routine` | — | Runs a prompt on a timer and delivers it to a chat. Asks only when the routine carries a standing grant; absent inside a routine's own run. |
+| `send_file` | no | Sends a file to the chat this turn delivers to — a routine's target — as a picture when it is an image. Asks; needs a grant to run unattended. Unavailable in a chat someone is sitting at. |
 | `web_search` | yes | Registered only when a search provider is configured. |
 | `read_skill` | yes | Loads a skill's instructions on demand; registered only when a skill is installed. |
 | `task` | — | Runs a subtask in its own context; only the report comes back. Only on request; never asks itself. |

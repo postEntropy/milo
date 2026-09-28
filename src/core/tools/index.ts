@@ -12,6 +12,7 @@ import { recallTool } from './recall.js'
 import { rememberTool } from './remember.js'
 import { routineTool } from './routine.js'
 import { searchHistoryTool } from './search-history.js'
+import { sendFileTool } from './send-file.js'
 import { ToolRegistry } from './registry.js'
 import { shellTool } from './shell.js'
 import { createReadSkillTool } from './read-skill.js'
@@ -35,6 +36,7 @@ export { rememberTool } from './remember.js'
 export { recallTool } from './recall.js'
 export { routineTool } from './routine.js'
 export { searchHistoryTool } from './search-history.js'
+export { sendFileTool } from './send-file.js'
 export { shellTool } from './shell.js'
 export { taskTool } from './task.js'
 export { createWebSearchTool } from './web-search.js'
@@ -53,6 +55,7 @@ export const builtinTools = [
   recallTool,
   searchHistoryTool,
   routineTool,
+  sendFileTool,
   taskTool,
   shellTool,
 ]

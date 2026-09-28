@@ -1,5 +1,6 @@
 import type { z } from 'zod'
 import type { MemoryInput, MemoryScope } from '../memory/types.js'
+import type { OutgoingFile } from '../outgoing.js'
 import type { ImageMime } from '../providers/types.js'
 import type { NewRoutine, Routine } from '../routines.js'
 import type { SessionSummary } from '../sessions/types.js'
@@ -24,6 +25,13 @@ export type TaskFn = (input: { description: string; prompt: string }) => Promise
 /** How a session hands a tool the ability to add a routine to the install's list. */
 export type RoutineFn = (input: NewRoutine) => Promise<Routine>
 
+/**
+ * How a session hands a tool the ability to send a file to the chat this turn
+ * delivers to. The session owns the destination — a routine's target — and holds
+ * what was sent until the turn ends, when the surface posts it.
+ */
+export type SendFileFn = (input: { path: string; caption?: string }) => Promise<OutgoingFile>
+
 export interface ToolContext {
   cwd: string
   signal: AbortSignal
@@ -44,6 +52,12 @@ export interface ToolContext {
    * them, so a routine cannot create more routines.
    */
   routine?: RoutineFn
+  /**
+   * Absent on a context with no chat to send to. Present on a routine's own run,
+   * where the destination is the routine's target, so `send_file` reaches the
+   * person the routine was made for.
+   */
+  sendFile?: SendFileFn
 }
 
 /**

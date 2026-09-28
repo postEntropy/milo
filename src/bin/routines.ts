@@ -34,6 +34,7 @@ export interface RoutineIo {
  */
 const GRANTABLE = new Set([
   ...builtinTools.map((tool) => tool.name),
+  'send_file',
   'web_search',
   'read_skill',
   'browser_open',
@@ -57,9 +58,13 @@ const USAGE = [
   'is the id in the browser\'s address). Times are local; `--days` takes mon,wed or',
   'a range like mon-fri.',
   '',
-  'Reading needs no permission. A routine that writes or runs something needs the',
-  'tool named in --allow shell_command,write_file — there is nobody at the other end',
-  'to confirm, so what is not granted is refused. In `yolo` mode nothing is asked.',
+  'A routine may also deliver files — a screenshot, a report — with its send_file',
+  'tool, which posts the file to the same chat as its answer.',
+  '',
+  'Reading needs no permission. A routine that writes, runs or sends something',
+  'needs the tool named in --allow shell_command,send_file — there is nobody at the',
+  'other end to confirm, so what is not granted is refused. In `yolo` mode nothing',
+  'is asked.',
 ].join('\n')
 
 /**
@@ -283,9 +288,10 @@ async function run(argv: string[], out: RoutineIo['out'], err: RoutineIo['err'])
 
   const runtime = createRuntime(loaded, process.cwd())
   try {
-    const { answer, failure } = await runRoutineOnce(runtime, routine)
+    const { answer, failure, files } = await runRoutineOnce(runtime, routine)
     if (failure) err(`⚠ ${failure}`)
     out(answer || '(no answer)')
+    if (files.length > 0) out(`(${files.length} file(s) prepared: ${files.map((file) => file.name).join(', ')})`)
     out('(printed only — `run` does not deliver)')
     return failure ? 1 : 0
   } finally {

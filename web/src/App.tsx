@@ -148,7 +148,12 @@ export default function App() {
     }
     if (frame.type === 'command-result') {
       if (frame.sessionId) setSessionId(frame.sessionId)
-      setMessages((current) => [...current, { id: randomUUID(), role: 'assistant', text: frame.markdown ?? frame.reply }])
+      setMessages((current) => [...current, {
+        id: randomUUID(),
+        role: 'assistant',
+        text: frame.markdown ?? frame.reply,
+        ...(frame.attachments?.length ? { attachments: frame.attachments } : {}),
+      }])
       void refreshSessions()
     }
   }, [refreshSessions])

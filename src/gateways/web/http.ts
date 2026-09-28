@@ -6,6 +6,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { AgentRuntime } from '../../core/runtime.js'
+import { isImage, type OutgoingMessage } from '../../core/outgoing.js'
 import { errorMessage } from '../../util/errors.js'
 import { hyperlink } from '../../util/terminal.js'
 import { parseClientFrame, PROTOCOL_VERSION, type ServerFrame } from './protocol.js'
@@ -76,7 +77,7 @@ export interface RunningWebServer {
    */
   urls: string[]
   /** Posts a message into a conversation with no turn behind it (a routine's answer). */
-  deliver(conversationId: string, text: string): Promise<void>
+  deliver(conversationId: string, message: OutgoingMessage): Promise<void>
   stop(): Promise<void>
 }
 
@@ -86,7 +87,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   const settings = new WebSettings(options.runtime, options.cwd)
   const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
   const server = createServer((request, response) => {
-    void handleHttp(request, response, token, settings, options.host).catch((error: unknown) => {
+    void handleHttp(request, response, token, settings, hub, options.host).catch((error: unknown) => {
       if (!response.headersSent) json(response, 500, { error: error instanceof Error ? error.message : String(error) })
       else response.destroy()
     })
@@ -174,7 +175,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     token,
     url,
     urls,
-    deliver: (conversationId, text) => hub.deliver(conversationId, text),
+    deliver: (conversationId, message) => hub.deliver(conversationId, message),
     stop: () => new Promise<void>((resolve, reject) => {
       hub.close()
       // A page left open holds a keep-alive connection and a websocket, and
@@ -188,7 +189,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   }
 }
 
-async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, settings: WebSettings, boundHost: string): Promise<void> {
+async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, settings: WebSettings, hub: WebHub, boundHost: string): Promise<void> {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
   if (!sameOrigin(request, boundHost)) return json(response, 403, { error: 'Origin not allowed.' })
   if (url.pathname.startsWith('/api/')) {
@@ -204,6 +205,33 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
     }
   }
   if (request.method !== 'GET' && request.method !== 'HEAD') return json(response, 405, { error: 'Method not allowed.' })
+
+  // A file delivered into a chat. Only an id the hub has registered is served —
+  // never a path the browser names — which is what keeps this from being a way to
+  // read any file on the machine. The token comes from the URL here because an
+  // `<img>` sends no header; the page is already inside the same origin.
+  if (url.pathname.startsWith('/attachment/')) {
+    if (!authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
+    const known = hub.attachment(url.pathname.slice('/attachment/'.length))
+    const stats = known ? statSync(known.path, { throwIfNoEntry: false }) : undefined
+    if (!known || !stats?.isFile()) return json(response, 404, { error: 'Not found.' })
+    response.writeHead(200, {
+      'content-type': known.mimeType,
+      'content-length': String(stats.size),
+      // A picture shows in the chat; anything else downloads, under the name it
+      // was delivered with.
+      'content-disposition': `${isImage(known.mimeType) ? 'inline' : 'attachment'}; filename="${headerName(known.name)}"`,
+      'cache-control': 'private, max-age=3600',
+      'x-content-type-options': 'nosniff',
+    })
+    if (request.method === 'HEAD') {
+      response.end()
+      return
+    }
+    createReadStream(known.path).pipe(response)
+    return
+  }
+
   const root = webRootDir()
   if (!root) {
     return json(response, 503, { error: 'Web UI is not built. Run `npm run build:web`.' })
@@ -225,6 +253,16 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
     return
   }
   createReadStream(file).pipe(response)
+}
+
+/** A filename safe in a header: a quote or a control character would break it. */
+function headerName(name: string): string {
+  let safe = ''
+  for (const char of name) {
+    const code = char.codePointAt(0) ?? 0
+    safe += char === '"' || char === '\\' || code < 32 ? '_' : char
+  }
+  return safe
 }
 
 function authorized(request: IncomingMessage, token: string, queryToken?: string | null): boolean {

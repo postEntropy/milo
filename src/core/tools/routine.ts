@@ -48,7 +48,7 @@ const schema = z.object({
     .array(z.string())
     .optional()
     .describe(
-      'Tools this routine may use with nobody there to confirm, e.g. ["shell_command","write_file"] — needed for anything that writes or runs something, since a scheduled run has no one to ask. Every name is a standing grant, and the person is asked to approve it when the routine is created, so name the fewest that do it.',
+      'Tools this routine may use with nobody there to confirm, e.g. ["shell_command","send_file"] — needed for anything that writes, runs or sends something, since a scheduled run has no one to ask. Every name is a standing grant, and the person is asked to approve it when the routine is created, so name the fewest that do it.',
     ),
 })
 

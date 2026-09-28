@@ -3,6 +3,7 @@ import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
+import type { OutgoingMessage } from '../../core/outgoing.js'
 import { readDisplay, setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
 import {
@@ -47,6 +48,8 @@ function untilStopped(signal: AbortSignal | undefined): Promise<null> {
 }
 
 const MAX_LENGTH = 1900
+/** Discord takes at most ten files in one message; the rest go in a following one. */
+const FILES_PER_MESSAGE = 10
 
 /**
  * Asks one channel for a permission decision. The signal is the turn's own: a
@@ -283,14 +286,37 @@ export class DiscordGateway implements Gateway {
     await this.client?.destroy()
   }
 
-  /** A routine's answer, posted as its own message — no turn behind it. */
-  async deliver(conversationId: string, text: string): Promise<void> {
+  /**
+   * A routine's answer — its text and any files it delivered — posted as its own
+   * messages, with no turn behind it. Discord shows a picture from its file
+   * attachments directly, so every file rides as one.
+   */
+  async deliver(conversationId: string, message: OutgoingMessage): Promise<void> {
     const client = this.client
     if (!client) throw new Error('discord gateway is not running')
     const channel = await client.channels.fetch(conversationId)
     if (!channel?.isSendable()) {
       throw new Error(`discord channel ${conversationId} cannot receive messages`)
     }
-    for (const part of chunk(text, MAX_LENGTH)) await channel.send(part)
+    const text = message.text ?? ''
+    const files = message.files ?? []
+
+    if (files.length === 0) {
+      for (const part of chunk(text, MAX_LENGTH)) await channel.send(part)
+      return
+    }
+
+    const { AttachmentBuilder } = await import('discord.js')
+    const parts = chunk(text, MAX_LENGTH)
+    for (let index = 0; index < files.length; index += FILES_PER_MESSAGE) {
+      const builders = files
+        .slice(index, index + FILES_PER_MESSAGE)
+        .map((file) => new AttachmentBuilder(file.path, { name: file.name }))
+      // The first chunk rides with the first batch of files; anything left over
+      // follows as its own messages, so no answer is dropped for its length.
+      const content = index === 0 ? parts.shift() : undefined
+      await channel.send(content ? { content, files: builders } : { files: builders })
+    }
+    for (const part of parts) await channel.send(part)
   }
 }

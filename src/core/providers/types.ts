@@ -54,7 +54,21 @@ export interface ToolResultPart {
   images?: ImageRef[]
 }
 
-export type ContentPart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart
+/**
+ * A file delivered to this conversation out of band — a routine's picture or
+ * document, kept so a chat read back later still shows it. It is not sent to the
+ * model: the wires here build their blocks from the known part types and skip
+ * this one, so what the person received is on the transcript without costing a
+ * token on every request that follows.
+ */
+export interface FilePart {
+  type: 'file'
+  path: string
+  name: string
+  mimeType: string
+}
+
+export type ContentPart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart | FilePart
 
 export interface Message {
   role: Role

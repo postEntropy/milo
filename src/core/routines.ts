@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { errorMessage } from '../util/errors.js'
 import { routinesFile } from './config/paths.js'
+import type { OutgoingFile, OutgoingMessage } from './outgoing.js'
 import type { AgentRuntime } from './runtime.js'
 import { generateNickname } from './sessions/nickname.js'
 
@@ -254,6 +255,8 @@ export interface RoutineRunResult {
   answer: string
   /** The failure message, when the run ended in one. */
   failure: string | null
+  /** Files the turn asked to send to its target, in the order it named them. */
+  files: OutgoingFile[]
 }
 
 /**
@@ -273,7 +276,7 @@ export async function runRoutineOnce(
   const session = await runtime.newSession(
     { gateway: ROUTINE_GATEWAY, conversationId: routine.id },
     routine.name,
-    { grantedTools: routine.allow },
+    { grantedTools: routine.allow, deliverTo: routine.target },
   )
   let answer = ''
   let failure: string | null = null
@@ -281,13 +284,15 @@ export async function runRoutineOnce(
     if (event.type === 'text-delta') answer += event.delta
     else if (event.type === 'error') failure = event.message
   }
-  return { answer: answer.trim(), failure }
+  // Read once the turn is done: the files it asked the surfaces to send, which
+  // it collected rather than posted — a delivery takes the lease the turn holds.
+  return { answer: answer.trim(), failure, files: session.takeOutgoing() }
 }
 
 export interface RoutineSchedulerOptions {
   runtime: AgentRuntime
-  /** Posts the finished text at the routine's target. Injected: the loop knows no gateway. */
-  deliver: (routine: Routine, text: string) => Promise<void>
+  /** Posts a finished run at the routine's target. Injected: the loop knows no gateway. */
+  deliver: (routine: Routine, message: OutgoingMessage) => Promise<void>
   log?: (line: string) => void
   now?: () => Date
   /** The longest the loop will sleep before looking again, so a new routine is seen soon. */
@@ -401,7 +406,7 @@ export class RoutineScheduler {
     try {
       result = await runRoutineOnce(this.options.runtime, routine)
     } catch (error) {
-      result = { answer: '', failure: errorMessage(error) }
+      result = { answer: '', failure: errorMessage(error), files: [] }
     }
 
     markRun(routine.id, result.failure ? 'error' : 'ok', this.now().getTime())
@@ -415,9 +420,16 @@ export class RoutineScheduler {
       : result.answer
         ? `${name}\n\n${result.answer}`
         : ''
-    if (!text) return
+    // Files go even when there is nothing to say: a routine whose whole job is a
+    // picture has no answer to lead with. A failed turn sends no files with its
+    // error — what it half-produced is not something to hand over.
+    const files = result.failure ? [] : result.files
+    if (!text && files.length === 0) return
     try {
-      await this.options.deliver(routine, text)
+      await this.options.deliver(routine, {
+        ...(text ? { text } : {}),
+        ...(files.length > 0 ? { files } : {}),
+      })
     } catch (error) {
       this.log(`could not deliver ${routine.id}: ${errorMessage(error)}`)
     }

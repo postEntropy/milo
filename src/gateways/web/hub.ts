@@ -1,13 +1,15 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
+import { statSync } from 'node:fs'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { Session } from '../../core/session.js'
 import type { MemoryScope } from '../../core/memory/index.js'
+import { isImage, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
 import { setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { readDisplay } from '../../core/config/load.js'
 import { handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
-import type { ClientFrame, ServerFrame, TranscriptMessage } from './protocol.js'
+import type { ClientFrame, FrameAttachment, ServerFrame, TranscriptMessage } from './protocol.js'
 import { PERMISSION_TIMEOUT_MS } from './protocol.js'
 import { displayEvent } from './turn.js'
 import { toolLine } from '../tool-line.js'
@@ -27,6 +29,13 @@ export class WebHub {
   private readonly conversations = new Map<string, Conversation>()
   private readonly turns = new TurnQueue()
   private readonly pending = new PendingDecisions()
+  /**
+   * The files delivered into this process's conversations, by id. Only what is
+   * here is ever served, so the browser cannot ask for a path of its own naming.
+   * Rebuilt from a transcript as conversations are opened, which is why the id is
+   * a hash of the path rather than a fresh token each time.
+   */
+  private readonly attachments = new Map<string, { path: string; name: string; mimeType: string }>()
 
   constructor(
     private readonly runtime: AgentRuntime,
@@ -48,7 +57,7 @@ export class WebHub {
       type: 'ready',
       version: 1,
       sessionId: conversation.session.id,
-      messages: transcript(conversation.session),
+      messages: this.transcript(conversation.session),
       thinking: readDisplay().thinking,
       provider: this.identity.provider,
       model: this.runtime.model,
@@ -105,19 +114,45 @@ export class WebHub {
 
   /**
    * Posts a message into a conversation with no turn behind it — how a routine
-   * reaches a web chat. It is written into the conversation's session first, so
-   * it is there when the tab is next opened, and then broadcast to whoever is
-   * watching right now; the broadcast is a no-op when nobody is. The frame is the
-   * one a command reply uses, so the chat renders it and lists it like any other
-   * message without the protocol knowing about routines.
+   * reaches a web chat, with its answer and any files it delivered. It is written
+   * into the conversation's session first, so it is there when the tab is next
+   * opened, and then broadcast to whoever is watching right now; the broadcast is
+   * a no-op when nobody is. The frame is the one a command reply uses, so the
+   * chat renders it and lists it like any other message without the protocol
+   * knowing about routines.
    */
-  async deliver(conversationId: string, text: string): Promise<void> {
+  async deliver(conversationId: string, message: OutgoingMessage): Promise<void> {
     if (!/^[0-9a-f-]{36}$/i.test(conversationId)) {
       throw new Error(`not a web conversation id: ${conversationId}`)
     }
+    const files = message.files ?? []
+    const text = message.text ?? ''
     const session = await this.runtime.getSession({ gateway: 'web', conversationId })
-    await session.appendNotice(text)
-    this.broadcast(conversationId, { type: 'command-result', reply: text, markdown: text })
+    await session.appendNotice(text, files)
+    const attachments = files.map((file) => this.register(file))
+    this.broadcast(conversationId, {
+      type: 'command-result',
+      reply: text,
+      markdown: text,
+      ...(attachments.length > 0 ? { attachments } : {}),
+    })
+  }
+
+  /** The file behind an id, for the HTTP layer to stream. Null when none was delivered under it. */
+  attachment(id: string): { path: string; name: string; mimeType: string } | null {
+    return this.attachments.get(id) ?? null
+  }
+
+  /**
+   * Notes a delivered file under its id and describes it for the browser. The id
+   * is the path's hash, so opening the same conversation again — a reload, a tab
+   * reopened later — registers the same id the page was already given.
+   */
+  private register(file: OutgoingFile): FrameAttachment {
+    const id = createHash('sha1').update(file.path).digest('hex')
+    const size = statSync(file.path, { throwIfNoEntry: false })?.size ?? 0
+    this.attachments.set(id, { path: file.path, name: file.name, mimeType: file.mimeType })
+    return { id, name: file.name, mimeType: file.mimeType, size, image: isImage(file.mimeType) }
   }
 
   private startTurn(conversationId: string, text: string): void {
@@ -250,23 +285,34 @@ export class WebHub {
   private broadcast(conversationId: string, frame: ServerFrame): void {
     for (const client of this.conversations.get(conversationId)?.clients ?? []) client.send(frame)
   }
-}
 
-function transcript(session: Session): TranscriptMessage[] {
-  return session.messages.flatMap((message): TranscriptMessage[] => {
-    if (message.role !== 'user' && message.role !== 'assistant') return []
-    const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
-    const reasoning = message.content.filter((part) => part.type === 'reasoning').map((part) => part.text).join('')
-    // The tool calls stay with the turn they belong to: a session read back — a
-    // reload, or a tab opened later — shows the same lines the live stream drew,
-    // from the same formatter the other surfaces use.
-    const tools = message.content.flatMap((part) => part.type === 'tool-call' ? [toolLine(part.name, part.args)] : [])
-    if (!text && !reasoning && tools.length === 0) return []
-    return [{
-      role: message.role,
-      text,
-      ...(reasoning ? { reasoning } : {}),
-      ...(tools.length > 0 ? { tools } : {}),
-    }]
-  })
+  /**
+   * A session's history as the page renders it. Reading it re-registers any file
+   * it delivered, so a delivered picture is served again after a reload without
+   * anything being kept in memory across restarts.
+   */
+  private transcript(session: Session): TranscriptMessage[] {
+    return session.messages.flatMap((message): TranscriptMessage[] => {
+      if (message.role !== 'user' && message.role !== 'assistant') return []
+      const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
+      const reasoning = message.content.filter((part) => part.type === 'reasoning').map((part) => part.text).join('')
+      // The tool calls stay with the turn they belong to: a session read back — a
+      // reload, or a tab opened later — shows the same lines the live stream drew,
+      // from the same formatter the other surfaces use.
+      const tools = message.content.flatMap((part) => part.type === 'tool-call' ? [toolLine(part.name, part.args)] : [])
+      const attachments = message.content.flatMap((part) =>
+        part.type === 'file'
+          ? [this.register({ path: part.path, name: part.name, mimeType: part.mimeType })]
+          : [],
+      )
+      if (!text && !reasoning && tools.length === 0 && attachments.length === 0) return []
+      return [{
+        role: message.role,
+        text,
+        ...(reasoning ? { reasoning } : {}),
+        ...(tools.length > 0 ? { tools } : {}),
+        ...(attachments.length > 0 ? { attachments } : {}),
+      }]
+    })
+  }
 }

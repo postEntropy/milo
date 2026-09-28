@@ -186,6 +186,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tool-line { display: flex; align-items: center; gap: 9px; min-height: 36px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); padding: 7px 12px; color: var(--fg-2); font-size: 12px; }
 .tool-line svg.icon { color: var(--muted); }
 .message-content .tool-line code { overflow: hidden; color: var(--fg); font: 500 12px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.attachments { display: flex; flex-direction: column; gap: 8px; }
+.attachment-image { display: block; width: fit-content; max-width: 100%; }
+.attachment-image img { display: block; max-width: min(420px, 100%); max-height: 420px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); }
+.attachment-file { display: flex; max-width: 100%; min-height: 40px; align-items: center; gap: 9px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); padding: 8px 12px; color: var(--fg-2); font-size: 12px; text-decoration: none; }
+.attachment-name { overflow: hidden; color: var(--fg); font: 500 12px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.attachment-size { margin-inline-start: auto; color: var(--muted); }
+.attachment-file svg.icon { flex: none; color: var(--muted); }
 .notice { display: flex; align-items: center; gap: 12px; width: min(772px, calc(100% - 40px)); margin: 0 auto 10px; border: 1px solid var(--border); border-radius: 12px; padding: 11px 13px; font-size: 13px; }
 .notice.error { border-color: color-mix(in oklab, var(--danger) 30%, var(--border)); background: color-mix(in oklab, var(--danger) 7%, var(--surface)); color: var(--danger); }
 .notice button { margin-inline-start: auto; }

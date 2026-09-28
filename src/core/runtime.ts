@@ -62,6 +62,14 @@ export interface RuntimeOptions {
   keepSnapshots?: number
 }
 
+/** What a caller may pin on a fresh session, beyond the scope it talks to. */
+export interface NewSessionOptions {
+  /** Tools the run may use with nobody to ask — a routine's standing grants. */
+  grantedTools?: string[]
+  /** The chat its turns may send files to — a routine's own target. */
+  deliverTo?: { gateway: string; conversationId: string }
+}
+
 /**
  * The transport-agnostic core. Gateways ask it for a Session; the transport
  * address is only a pointer to the session currently bound to it, so the same
@@ -102,14 +110,15 @@ export class AgentRuntime {
 
   /**
    * Starts a fresh session and rebinds `scope` to it. `grantedTools` is a
-   * routine's standing grants — tools it may use with nobody to ask.
+   * routine's standing grants — tools it may use with nobody to ask — and
+   * `deliverTo` is the chat its turns may send files to.
    */
   async newSession(
     scope: MemoryScope,
     title?: string,
-    options?: { grantedTools?: string[] },
+    options?: NewSessionOptions,
   ): Promise<Session> {
-    return this.createSession(scope, title, options?.grantedTools)
+    return this.createSession(scope, title, options)
   }
 
   /**
@@ -246,13 +255,13 @@ export class AgentRuntime {
   private async createSession(
     scope: MemoryScope,
     title?: string,
-    grantedTools?: string[],
+    options?: NewSessionOptions,
   ): Promise<Session> {
     await this.detach(scope)
     const record = await this.store.create()
     if (title?.trim()) record.title = title.trim()
     await this.store.setBinding(scopeKey(scope), record.id)
-    const session = this.adopt(record, scope, grantedTools)
+    const session = this.adopt(record, scope, options)
     // Write it out now, so it shows up in /sessions and is /resume-able right away.
     await session.persist()
     return session
@@ -279,7 +288,7 @@ export class AgentRuntime {
     void pending.finally(() => this.pendingRecaps.delete(pending))
   }
 
-  private adopt(record: SessionRecord, scope: MemoryScope, grantedTools?: string[]): Session {
+  private adopt(record: SessionRecord, scope: MemoryScope, options?: NewSessionOptions): Session {
     const cached = this.cache.get(record.id)
     if (cached) {
       cached.scope = scope
@@ -300,7 +309,8 @@ export class AgentRuntime {
       recallLimit: this.options.recallLimit,
       derive: this.options.derive,
       permissionPolicy: this.options.permissionPolicy,
-      grantedTools,
+      grantedTools: options?.grantedTools,
+      deliverTo: options?.deliverTo,
       record,
       store: this.store,
       recaps: this.recaps,

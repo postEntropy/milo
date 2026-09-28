@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import type { TranscriptMessage } from '@protocol'
+import type { FrameAttachment, TranscriptMessage } from '@protocol'
+import { attachmentUrl } from '../lib/api.js'
 import { Markdown } from './Markdown.js'
 import { Icon } from '../ui/Icons.js'
 import { miloAvatar } from '../ui/milo.js'
@@ -20,6 +21,23 @@ const suggestions = [
   { icon: 'settings', title: 'Tune Milo', detail: 'Set up the model and tools', prompt: 'I want to adjust Milo’s settings.' },
   { icon: 'spark', title: 'Plan a change', detail: 'Break it into safe steps', prompt: 'Help me plan a change in the project.' },
 ] as const
+
+/**
+ * The files delivered into this conversation. A picture shows itself, opening
+ * full size when clicked; anything else is a row to download.
+ */
+function Attachments({ items }: { items: FrameAttachment[] }) {
+  return <div className="attachments">{items.map((item) => item.image
+    ? <a className="attachment-image" key={item.id} href={attachmentUrl(item.id)} target="_blank" rel="noreferrer"><img src={attachmentUrl(item.id)} alt={item.name} loading="lazy" /></a>
+    : <a className="attachment-file" key={item.id} href={attachmentUrl(item.id)} download={item.name}><Icon name="file" size={16} /><span className="attachment-name">{item.name}</span><small className="attachment-size">{formatBytes(item.size)}</small></a>,
+  )}</div>
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
+  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
+}
 
 function ToolLines({ id, tools }: { id: string; tools: string[] }) {
   const seen = new Map<string, number>()
@@ -57,6 +75,7 @@ export function MessageList({ messages, thinking, onPrompt }: { messages: ChatMe
               ? <div className="reasoning-note"><Icon name="spark" size={14} /> {thoughtLabel(message.thoughtMs)}</div>
               : null}
           {message.tools && message.tools.length > 0 && <ToolLines id={message.id} tools={message.tools} />}
+          {message.attachments && message.attachments.length > 0 && <Attachments items={message.attachments} />}
           {message.text && <Markdown text={message.text} />}
           {message.status && <div className="message-status">{message.status}</div>}
         </div>

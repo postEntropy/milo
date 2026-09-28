@@ -1,4 +1,5 @@
 import type { AgentRuntime } from '../../core/runtime.js'
+import type { OutgoingMessage } from '../../core/outgoing.js'
 import { hyperlink } from '../../util/terminal.js'
 import type { Gateway } from '../types.js'
 import {
@@ -63,8 +64,8 @@ export class WebGateway implements Gateway {
     this.running = null
   }
 
-  async deliver(conversationId: string, text: string): Promise<void> {
+  async deliver(conversationId: string, message: OutgoingMessage): Promise<void> {
     if (!this.running) throw new Error('the web UI is not running')
-    await this.running.deliver(conversationId, text)
+    await this.running.deliver(conversationId, message)
   }
 }

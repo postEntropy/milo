@@ -4,6 +4,7 @@ import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
+import { isTelegramPhoto, type OutgoingMessage } from '../../core/outgoing.js'
 import { readDisplay, setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
 import { chunk } from '../chunk.js'
@@ -37,6 +38,8 @@ export interface TelegramGatewayOptions {
 
 const ASK_TIMEOUT_MS = 5 * 60 * 1000
 const MAX_LENGTH = 4000
+/** Telegram caps a file's caption at 1024 characters; longer text goes as its own messages. */
+const CAPTION_MAX = 1024
 
 /**
  * Telegram's chat action expires after about five seconds and nothing renews it,
@@ -307,10 +310,48 @@ export class TelegramGateway implements Gateway {
     await this.bot?.stop()
   }
 
-  /** A routine's answer, posted as its own message — no turn behind it. */
-  async deliver(conversationId: string, text: string): Promise<void> {
+  /**
+   * A routine's answer — its text and any files it delivered — posted as its own
+   * messages, with no turn behind it. A picture goes as a photo so it shows in
+   * the chat; anything else goes as a document, which is a download rather than a
+   * preview but arrives the same.
+   */
+  async deliver(conversationId: string, message: OutgoingMessage): Promise<void> {
     const bot = this.bot
     if (!bot) throw new Error('telegram gateway is not running')
-    for (const part of chunk(text, MAX_LENGTH)) await bot.api.sendMessage(conversationId, part)
+    const text = message.text ?? ''
+    const files = message.files ?? []
+
+    if (files.length === 0) {
+      for (const part of chunk(text, MAX_LENGTH)) await bot.api.sendMessage(conversationId, part)
+      return
+    }
+
+    const { InputFile } = await import('grammy')
+    // A caption under a file is capped at 1024. A longer answer is not cut to fit
+    // under a picture: the files go first, then the answer as its own messages.
+    const trimmed = text.trim()
+    const caption = trimmed.length > 0 && trimmed.length <= CAPTION_MAX ? trimmed : ''
+    for (const [index, file] of files.entries()) {
+      const first = index === 0
+      const line = first ? (file.caption ?? caption) : file.caption
+      const options = line ? { caption: line } : {}
+      const photo = isTelegramPhoto(file.mimeType)
+      if (!photo) {
+        await bot.api.sendDocument(conversationId, new InputFile(file.path, file.name), options)
+        continue
+      }
+      try {
+        await bot.api.sendPhoto(conversationId, new InputFile(file.path, file.name), options)
+      } catch {
+        // A picture Telegram refuses — an oversized PNG, a format it will not
+        // take as a photo — still goes as a document. The first `InputFile` was
+        // spent on the refusal, so this one is built afresh.
+        await bot.api.sendDocument(conversationId, new InputFile(file.path, file.name), options)
+      }
+    }
+    if (!caption && trimmed) {
+      for (const part of chunk(text, MAX_LENGTH)) await bot.api.sendMessage(conversationId, part)
+    }
   }
 }

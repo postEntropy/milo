@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRuntime } from '../src/core/runtime.js'
+import type { OutgoingFile } from '../src/core/outgoing.js'
 import type { Routine } from '../src/core/routines.js'
 
 // Point the install somewhere throwaway *before* the path module is loaded.
@@ -269,19 +270,27 @@ interface FakeRun {
   answer?: string
   fail?: string
   gate?: Promise<void>
+  /** Files the fake turn asked the surfaces to send. */
+  files?: OutgoingFile[]
+}
+
+/** What the stub session was pinned with, so a test can read it back. */
+interface SentSession {
+  grantedTools?: string[]
+  deliverTo?: { gateway: string; conversationId: string }
 }
 
 /** A runtime whose one session answers in whatever way the test asked for. */
 function fakeRuntime(options: FakeRun = {}): {
   runtime: AgentRuntime
   prompts: string[]
-  sessions: { grantedTools?: string[] }[]
+  sessions: SentSession[]
 } {
   const prompts: string[] = []
-  const sessions: { grantedTools?: string[] }[] = []
+  const sessions: SentSession[] = []
   const runtime = {
-    async newSession(_scope: unknown, _title?: string, session?: { grantedTools?: string[] }) {
-      sessions.push({ grantedTools: session?.grantedTools })
+    async newSession(_scope: unknown, _title?: string, session?: SentSession) {
+      sessions.push({ grantedTools: session?.grantedTools, deliverTo: session?.deliverTo })
       return {
         async *send(prompt: string) {
           prompts.push(prompt)
@@ -292,6 +301,7 @@ function fakeRuntime(options: FakeRun = {}): {
           }
           yield { type: 'text-delta' as const, delta: options.answer ?? 'ok' }
         },
+        takeOutgoing: () => options.files ?? [],
       }
     },
   }
@@ -300,13 +310,13 @@ function fakeRuntime(options: FakeRun = {}): {
 
 function harness(options: FakeRun = {}) {
   const { runtime, prompts, sessions } = fakeRuntime(options)
-  const delivered: { id: string; text: string }[] = []
+  const delivered: { id: string; text?: string; files?: OutgoingFile[] }[] = []
   const logs: string[] = []
   let clock = new Date(2026, 8, 25, 7, 59, 30)
   const scheduler = new RoutineScheduler({
     runtime,
-    deliver: async (routine, text) => {
-      delivered.push({ id: routine.id, text })
+    deliver: async (routine, message) => {
+      delivered.push({ id: routine.id, ...message })
     },
     log: (line) => logs.push(line),
     now: () => clock,
@@ -458,7 +468,35 @@ describe('RoutineScheduler', () => {
     h.setClock(new Date(2026, 8, 25, 8, 0, 40))
     await vi.advanceTimersByTimeAsync(120_000)
 
-    expect(h.sessions).toEqual([{ grantedTools: ['shell_command'] }])
+    expect(h.sessions).toEqual([{
+      grantedTools: ['shell_command'],
+      deliverTo: { gateway: 'telegram', conversationId: '123' },
+    }])
+    h.scheduler.stop()
+  })
+
+  it("tells the run which chat it may send files to, the routine's own target", async () => {
+    writeRoutines([sample({ when: every(1), target: { gateway: 'discord', conversationId: '987' } })])
+    const h = harness()
+    h.scheduler.start()
+
+    h.setClock(new Date(2026, 8, 25, 8, 0, 40))
+    await vi.advanceTimersByTimeAsync(120_000)
+
+    expect(h.sessions).toEqual([{ grantedTools: undefined, deliverTo: { gateway: 'discord', conversationId: '987' } }])
+    h.scheduler.stop()
+  })
+
+  it('delivers a file even when the run answered nothing', async () => {
+    writeRoutines([sample({ when: every(1) })])
+    const shot: OutgoingFile = { path: '/tmp/shot.png', name: 'shot.png', mimeType: 'image/png' }
+    const h = harness({ answer: '', files: [shot] })
+    h.scheduler.start()
+
+    h.setClock(new Date(2026, 8, 25, 8, 0, 40))
+    await vi.advanceTimersByTimeAsync(120_000)
+
+    expect(h.delivered).toEqual([{ id: 'calm-otter-1', files: [shot] }])
     h.scheduler.stop()
   })
 

@@ -19,8 +19,8 @@ export interface SubagentRun {
   reasoningEffort?: ReasoningEffort
   /** The subtask, exactly as the `task` tool received it. */
   input: { description: string; prompt: string }
-  /** The parent's memory, recall and address, so the subagent's tools still work. */
-  context: Pick<ToolContext, 'remember' | 'recall' | 'origin' | 'routine'>
+  /** The parent's memory, recall, address and delivery, so the subagent's tools still work. */
+  context: Pick<ToolContext, 'remember' | 'recall' | 'origin' | 'routine' | 'sendFile'>
 }
 
 /**
@@ -55,6 +55,7 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     recall: options.context.recall,
     origin: options.context.origin,
     routine: options.context.routine,
+    sendFile: options.context.sendFile,
   }
 
   let text = ''

@@ -23,6 +23,15 @@ export function apiToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? ''
 }
 
+/**
+ * Where a delivered file is fetched. The id is all the server will accept — it
+ * knows what it delivered and serves nothing else — and the token rides in the
+ * query because an `<img>` sends no header.
+ */
+export function attachmentUrl(id: string): string {
+  return `/attachment/${encodeURIComponent(id)}?t=${encodeURIComponent(apiToken())}`
+}
+
 export async function api<T>(action: string, body: Record<string, unknown> = {}): Promise<T> {
   const response = await fetch(`/api/${action}`, {
     method: 'POST',
