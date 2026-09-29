@@ -1,4 +1,4 @@
-import type { ButtonBuilder, Client, Message } from 'discord.js'
+import type { ActionRowBuilder, ButtonBuilder, Client, Message } from 'discord.js'
 import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
@@ -22,6 +22,13 @@ import { chunk } from '../chunk.js'
 import { TurnQueue } from '../turns.js'
 import type { ChatSurface } from '../surface.js'
 import type { Gateway } from '../types.js'
+import {
+  ActionRouter,
+  buildSessionsList,
+  toDiscordComponents,
+  type ActionContext,
+  type DiscordBuilders,
+} from '../actions.js'
 
 export interface DiscordGatewayOptions {
   runtime: AgentRuntime
@@ -70,6 +77,7 @@ const TYPING_REFRESH_MS = 8_000
 export class DiscordGateway implements Gateway {
   readonly id = 'discord' as const
   private client: Client | undefined
+  private builders: DiscordBuilders | undefined
   private readonly turns = new TurnQueue()
 
   constructor(private readonly options: DiscordGatewayOptions) {}
@@ -84,6 +92,23 @@ export class DiscordGateway implements Gateway {
         GatewayIntentBits.GuildMessages,
         GatewayIntentBits.MessageContent,
       ],
+    })
+
+    this.builders = { ActionRowBuilder, ButtonBuilder, ButtonStyle }
+    const builders = this.builders
+
+    const actionRouter = new ActionRouter()
+    actionRouter.on('sessions', async (payload, context) => {
+      const outcome = buildSessionsList(await this.options.runtime.listSessions(), payload)
+      if (!outcome.ok) {
+        await context.edit({ text: outcome.error, markdown: outcome.error, actions: [] })
+        return
+      }
+      await context.edit({
+        text: outcome.result.markdown,
+        markdown: outcome.result.markdown,
+        actions: outcome.result.actions,
+      })
     })
 
     const ask = async (
@@ -168,6 +193,41 @@ export class DiscordGateway implements Gateway {
       this.startTurn(message, ask, text)
     })
 
+    client.on(Events.InteractionCreate, async (interaction) => {
+      if (!interaction.isButton()) return
+      const customId = interaction.customId
+      if (customId.startsWith('perm:')) return // Handled by prompt.awaitMessageComponent in ask()
+
+      if (!isAllowed(this.options.allowlist, [interaction.user.id, interaction.channelId, interaction.guildId])) {
+        await interaction.reply({ content: denialMessage(interaction.user.id), ephemeral: true }).catch(() => undefined)
+        return
+      }
+
+      const context: ActionContext = {
+        gateway: 'discord',
+        conversationId: interaction.channelId ?? '',
+        userId: interaction.user.id,
+        messageId: interaction.message?.id,
+        answer: async () => {},
+        edit: async (content) => {
+          const components = toDiscordComponents<ActionRowBuilder<ButtonBuilder>>(content.actions, builders)
+          await interaction.update({
+            content: content.markdown ?? content.text,
+            components,
+          }).catch(() => undefined)
+        },
+      }
+
+      const handled = await actionRouter.dispatch(customId, context).catch(() => false)
+      if (handled) return
+
+      // A button no handler knows — an old message, say. Answer it, or Discord shows
+      // the person "This interaction failed" for a control it will never resolve.
+      await interaction
+        .reply({ content: 'This button is no longer available.', ephemeral: true })
+        .catch(() => undefined)
+    })
+
     client.once(Events.ClientReady, () => console.error('Discord gateway running'))
     await client.login(this.options.token)
     this.client = client
@@ -234,7 +294,17 @@ export class DiscordGateway implements Gateway {
     }
     if (command.handled) {
       // Discord renders Markdown natively, so the richer rendering goes as-is.
-      await message.reply(command.markdown ?? command.reply ?? '')
+      const components = this.builders
+        ? toDiscordComponents<ActionRowBuilder<ButtonBuilder>>(command.actions, this.builders)
+        : []
+      if (components.length > 0) {
+        await message.reply({
+          content: command.markdown ?? command.reply ?? '',
+          components,
+        })
+      } else {
+        await message.reply(command.markdown ?? command.reply ?? '')
+      }
       return
     }
 

@@ -735,6 +735,10 @@ describe('ChatScreen', () => {
     await tick()
     expect(lastFrame()).toContain('calm-otter-7')
 
+    await submit(stdin, '/sessions nope')
+    await tick()
+    expect(lastFrame()).toContain('Invalid page: "nope". Use /sessions 1..1')
+
     await submit(stdin, '/stats')
     await tick()
     expect(lastFrame()).toContain('~42 tokens')

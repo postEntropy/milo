@@ -41,11 +41,32 @@ export interface SendTarget {
 
 const SEND_GATEWAYS = ['telegram', 'discord', 'web'] as const
 
+export type ActionButtonStyle = 'default' | 'primary' | 'danger' | 'success'
+
+export interface ActionButton {
+  id: string
+  label: string
+  style?: ActionButtonStyle
+  url?: string
+  disabled?: boolean
+}
+
+export type ActionRow = ActionButton[]
+
+export interface SessionCardItem {
+  id: string
+  title?: string
+  messageCount: number
+  when: string
+  summary: string
+}
+
 export type ClientFrame =
   | { type: 'hello'; version: number; conversationId: string }
   | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget }
   | { type: 'control'; action: 'stop' | 'allow' | 'deny'; id?: string }
   | { type: 'command'; text: string }
+  | { type: 'action'; actionId: string; messageId?: string }
 
 /**
  * A file that has been delivered into a conversation. The browser never sees a
@@ -67,7 +88,7 @@ export type ServerFrame =
   | { type: 'permission'; id: string; request: PermissionRequest; expiresAt: number }
   | { type: 'permission-result'; id: string; allowed: boolean }
   | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error' }
-  | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; attachments?: FrameAttachment[] }
+  | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; attachments?: FrameAttachment[]; actions?: ActionRow[]; messageId?: string; cards?: SessionCardItem[] }
   | { type: 'state'; busy: boolean; queued: number }
   | { type: 'error'; message: string }
 
@@ -99,6 +120,9 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
     return frame as ClientFrame
   }
   if (frame.type === 'command' && typeof frame.text === 'string') return frame as ClientFrame
+  if (frame.type === 'action' && typeof frame.actionId === 'string' && (frame.messageId === undefined || typeof frame.messageId === 'string')) {
+    return frame as ClientFrame
+  }
   return null
 }
 

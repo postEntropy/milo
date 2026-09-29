@@ -159,12 +159,39 @@ export default function App() {
     }
     if (frame.type === 'command-result') {
       if (frame.sessionId) setSessionId(frame.sessionId)
-      setMessages((current) => [...current, {
-        id: randomUUID(),
-        role: 'assistant',
-        text: frame.markdown ?? frame.reply,
-        ...(frame.attachments?.length ? { attachments: frame.attachments } : {}),
-      }])
+      // Actions and rich cards (e.g. /sessions pagination) are ephemeral in-memory UI
+      // controls received over websocket; they re-render or re-issue commands when clicked.
+      if (frame.messageId) {
+        setMessages((current) => {
+          const exists = current.some((msg) => msg.id === frame.messageId)
+          if (exists) {
+            return current.map((msg) => msg.id === frame.messageId ? {
+              ...msg,
+              text: frame.markdown ?? frame.reply,
+              ...(frame.attachments?.length ? { attachments: frame.attachments } : {}),
+              actions: frame.actions?.length ? frame.actions : undefined,
+              cards: frame.cards?.length ? frame.cards : undefined,
+            } : msg)
+          }
+          return [...current, {
+            id: randomUUID(),
+            role: 'assistant',
+            text: frame.markdown ?? frame.reply,
+            ...(frame.attachments?.length ? { attachments: frame.attachments } : {}),
+            ...(frame.actions?.length ? { actions: frame.actions } : {}),
+            ...(frame.cards?.length ? { cards: frame.cards } : {}),
+          }]
+        })
+      } else {
+        setMessages((current) => [...current, {
+          id: randomUUID(),
+          role: 'assistant',
+          text: frame.markdown ?? frame.reply,
+          ...(frame.attachments?.length ? { attachments: frame.attachments } : {}),
+          ...(frame.actions?.length ? { actions: frame.actions } : {}),
+          ...(frame.cards?.length ? { cards: frame.cards } : {}),
+        }])
+      }
       void refreshSessions()
     }
   }, [refreshSessions])
@@ -226,7 +253,10 @@ export default function App() {
    */
   function send(text: string, intent: 'queue' | 'steer' = 'queue', target?: SendTarget): void {
     try {
-      if (text.startsWith('/')) socket.send({ type: 'command', text })
+      if (text.startsWith('/')) {
+        setMessages((current) => [...current, { id: `user-${randomUUID()}`, role: 'user', text }])
+        socket.send({ type: 'command', text })
+      }
       else socket.send({ type: 'send', text, intent, ...(target ? { target } : {}) })
       setNotice(null)
     } catch (error) { fail(error) }
@@ -247,7 +277,7 @@ export default function App() {
     socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })
   }
 
-  async function openSession(id: string): Promise<void> {
+  const openSession = useCallback(async (id: string): Promise<void> => {
     const nextConversationId = randomUUID()
     try {
       await api('resume-session', { conversationId: nextConversationId, id })
@@ -258,7 +288,19 @@ export default function App() {
       setView('chat')
       setSidebarOpen(false)
     } catch (error) { fail(error) }
-  }
+  }, [socket, fail])
+
+  const handleAction = useCallback((actionId: string, messageId?: string) => {
+    if (actionId.startsWith('resume:')) {
+      void openSession(actionId.slice('resume:'.length))
+      return
+    }
+    try {
+      socket.send({ type: 'action', actionId, ...(messageId ? { messageId } : {}) })
+    } catch (error) {
+      fail(error)
+    }
+  }, [openSession, socket, fail])
 
   function handleSessionChange(id: string): void {
     setSessionId(id)
@@ -352,7 +394,7 @@ export default function App() {
         ? <Routines conversationId={conversationId} chat={{ messages, thinking, busy, connection, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef}>
-            <MessageList messages={messages} thinking={thinking} onPrompt={send} />
+            <MessageList messages={messages} thinking={thinking} onPrompt={send} onAction={handleAction} />
             {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
           </div>
           {notice && <div className={`notice ${notice.error ? 'error' : 'success'}`} role="alert">{notice.text}<button className="icon-button" type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}><Icon name="x" size={15} /></button></div>}

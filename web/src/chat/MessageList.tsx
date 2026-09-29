@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import type { FrameAttachment, TranscriptMessage } from '@protocol'
+import type { ActionRow, FrameAttachment, SessionCardItem, TranscriptMessage } from '@protocol'
 import { attachmentUrl } from '../lib/api.js'
 import { Markdown } from './Markdown.js'
 import { Icon } from '../ui/Icons.js'
@@ -16,6 +16,8 @@ export interface ChatMessage extends TranscriptMessage {
   waitingSince?: number
   /** Already on screen when the session was opened, so it does not settle in again. */
   loaded?: boolean
+  actions?: ActionRow[]
+  cards?: SessionCardItem[]
 }
 
 const suggestions = [
@@ -51,7 +53,44 @@ function ToolLines({ id, tools }: { id: string; tools: string[] }) {
   })}</>
 }
 
-export function MessageList({ messages, thinking, onPrompt }: { messages: ChatMessage[]; thinking: boolean; onPrompt?(text: string): void }) {
+function SessionCards({
+  cards,
+  onSelect,
+}: {
+  cards: SessionCardItem[]
+  onSelect(id: string): void
+}) {
+  return (
+    <div className="session-cards-container">
+      {cards.map((card) => {
+        const hasDistinctTitle = card.title && card.title !== card.id
+        return (
+          <button
+            key={card.id}
+            type="button"
+            className="session-card"
+            onClick={() => onSelect(card.id)}
+          >
+            <div className="session-card-head">
+              <div className="session-card-title-row">
+                <span className="session-card-title">{card.title || card.id}</span>
+                {hasDistinctTitle && <span className="session-card-id">{card.id}</span>}
+              </div>
+              <div className="session-card-meta">
+                <span>{card.messageCount} {card.messageCount === 1 ? 'msg' : 'msgs'}</span>
+                <span>·</span>
+                <span>{card.when}</span>
+              </div>
+            </div>
+            {card.summary && <div className="session-card-body">{card.summary}</div>}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+export function MessageList({ messages, thinking, onPrompt, onAction }: { messages: ChatMessage[]; thinking: boolean; onPrompt?(text: string): void; onAction?(actionId: string, messageId?: string): void }) {
   if (messages.length === 0) return (
     <section className="empty-state" aria-labelledby="welcome-title">
       <img className="empty-brand" src={miloAvatar} alt="" />
@@ -79,7 +118,55 @@ export function MessageList({ messages, thinking, onPrompt }: { messages: ChatMe
               : null}
           {message.tools && message.tools.length > 0 && <ToolLines id={message.id} tools={message.tools} />}
           {message.attachments && message.attachments.length > 0 && <Attachments items={message.attachments} />}
-          {message.text && <Markdown text={message.text} />}
+          {message.cards && message.cards.length > 0 ? (
+            <SessionCards
+              cards={message.cards}
+              onSelect={(id) => onAction?.(`resume:${id}`, message.id)}
+            />
+          ) : (
+            message.text && <Markdown text={message.text} />
+          )}
+          {message.actions && message.actions.length > 0 && (
+            <div className="message-actions">
+              {message.actions.map((row) => (
+                <div className="action-row" key={row.map((b) => b.id).join('-')}>
+                  {row.map((btn) => {
+                    const isIndicator = Boolean(btn.disabled)
+                    if (isIndicator) {
+                      return (
+                        <span key={btn.id} className="action-indicator">
+                          {btn.label}
+                        </span>
+                      )
+                    }
+                    if (btn.url) {
+                      return (
+                        <a
+                          key={btn.id}
+                          className={`action-btn ${btn.style ? `action-${btn.style}` : ''}`}
+                          href={btn.url}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          {btn.label}
+                        </a>
+                      )
+                    }
+                    return (
+                      <button
+                        key={btn.id}
+                        type="button"
+                        className={`action-btn ${btn.style ? `action-${btn.style}` : ''}`}
+                        onClick={() => onAction?.(btn.id, message.id)}
+                      >
+                        {btn.label}
+                      </button>
+                    )
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
           {message.waitingSince !== undefined && <WaitLine />}
           {message.status && <div className="message-status">{message.status}</div>}
         </div>

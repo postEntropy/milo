@@ -11,7 +11,7 @@ import {
   type ReasoningEffort,
 } from '../../../core/providers/types.js'
 import type { AgentRuntime } from '../../../core/runtime.js'
-import { formatSessionList, formatWhen, type SessionStats } from '../../../core/sessions/index.js'
+import { formatWhen, type SessionStats } from '../../../core/sessions/index.js'
 import { formatSkillList } from '../../../core/skills/index.js'
 import type {
   PermissionAsker,
@@ -20,6 +20,7 @@ import type {
   PermissionResult,
 } from '../../../core/tools/permission.js'
 import { errorMessage } from '../../../util/errors.js'
+import { buildSessionsList } from '../../actions.js'
 import {
   compactReply,
   formatMemoryList,
@@ -76,7 +77,7 @@ const HELP_TEXT = [
   "/effort low|medium|high — how hard the model thinks",
   "  The other axis, and the one that costs: /effort default goes back to the provider's own.",
   '/new [title] — start a new session',
-  '/sessions — list saved sessions',
+  '/sessions [page] — list saved sessions',
   '/resume <id> — switch to another session',
   '/stats — numbers for the current session',
   '/skills — the skills installed, and where they live',
@@ -364,9 +365,11 @@ export function ChatScreen({
         push({ kind: 'info', text: `New session: ${session.id}` })
         break
       }
-      case 'sessions':
-        push({ kind: 'info', text: formatSessionList(await runtime.listSessions()) })
+      case 'sessions': {
+        const outcome = buildSessionsList(await runtime.listSessions(), argument)
+        push({ kind: 'info', text: outcome.ok ? outcome.result.reply : outcome.error })
         break
+      }
       case 'skills':
         push({ kind: 'info', text: formatSkillList(runtime.skills) })
         break

@@ -29,6 +29,14 @@ import type { ChatSurface } from '../surface.js'
 import type { Gateway } from '../types.js'
 import { TelegramMessenger, isNotModified } from './messenger.js'
 import { commandReplyParts } from './reply.js'
+import { toHtml } from './html.js'
+import {
+  ActionRouter,
+  DISABLED_CALLBACK,
+  buildSessionsList,
+  toTelegramKeyboard,
+  type ActionContext,
+} from '../actions.js'
 
 export interface TelegramGatewayOptions {
   runtime: AgentRuntime
@@ -79,8 +87,62 @@ export class TelegramGateway implements Gateway {
       ])
       .catch(() => undefined)
 
+    const actionRouter = new ActionRouter()
+    actionRouter.on('sessions', async (payload, context) => {
+      const outcome = buildSessionsList(await this.options.runtime.listSessions(), payload)
+      if (!outcome.ok) {
+        await context.edit({ text: outcome.error, markdown: outcome.error, actions: [] })
+        return
+      }
+      await context.edit({
+        text: outcome.result.markdown,
+        markdown: outcome.result.markdown,
+        actions: outcome.result.actions,
+      })
+    })
+
     bot.on('callback_query:data', async (ctx) => {
-      const parsed = decodePermission(ctx.callbackQuery.data)
+      const data = ctx.callbackQuery.data
+      if (data === DISABLED_CALLBACK) {
+        await ctx.answerCallbackQuery().catch(() => undefined)
+        return
+      }
+      const chatId = String(ctx.chat?.id ?? '')
+      const messageId = ctx.callbackQuery.message?.message_id
+
+      if (!isAllowed(this.options.allowlist, [ctx.from?.id, ctx.chat?.id])) {
+        await ctx.answerCallbackQuery({ text: 'Access denied' }).catch(() => undefined)
+        return
+      }
+
+      const context: ActionContext = {
+        gateway: 'telegram',
+        conversationId: chatId,
+        userId: String(ctx.from?.id ?? ''),
+        messageId: messageId !== undefined ? String(messageId) : undefined,
+        answer: async (text) => {
+          await ctx.answerCallbackQuery(text ? { text } : undefined).catch(() => undefined)
+        },
+        edit: async (content) => {
+          if (messageId === undefined) return
+          const replyMarkup = toTelegramKeyboard(content.actions)
+          const html = toHtml(content.markdown ?? content.text)
+          await bot.api
+            .editMessageText(chatId, messageId, html, {
+              parse_mode: 'HTML',
+              reply_markup: replyMarkup,
+            })
+            .catch(() => undefined)
+        },
+      }
+
+      const handled = await actionRouter.dispatch(data, context).catch(() => false)
+      if (handled) {
+        await context.answer().catch(() => undefined)
+        return
+      }
+
+      const parsed = decodePermission(data)
       if (!parsed) {
         await ctx.answerCallbackQuery().catch(() => undefined)
         return
@@ -115,7 +177,7 @@ export class TelegramGateway implements Gateway {
           turn: turnOf(this.turns, chatId),
           start: (pending) => this.startTurn(bot, ctx, chatId, pending),
         })
-        void this.reply(bot, ctx, chatId, result).catch(() => undefined)
+        void this.reply(bot, chatId, result).catch(() => undefined)
         return
       }
 
@@ -194,7 +256,7 @@ export class TelegramGateway implements Gateway {
       return
     }
     if (command.handled) {
-      await this.reply(bot, ctx, chatId, command)
+      await this.reply(bot, chatId, command)
       return
     }
 
@@ -251,20 +313,33 @@ export class TelegramGateway implements Gateway {
    */
   private async reply(
     bot: Bot,
-    ctx: Context,
     chatId: string,
     command: CommandResult,
   ): Promise<void> {
     const { html, plain } = commandReplyParts(command, MAX_LENGTH)
+    const replyMarkup = toTelegramKeyboard(command.actions)
     if (html.length > 0) {
       try {
-        for (const part of html) await bot.api.sendMessage(chatId, part, { parse_mode: 'HTML' })
+        for (let i = 0; i < html.length; i++) {
+          const part = html[i]
+          const isLast = i === html.length - 1
+          await bot.api.sendMessage(chatId, part, {
+            parse_mode: 'HTML',
+            reply_markup: isLast && replyMarkup ? replyMarkup : undefined,
+          })
+        }
         return
       } catch {
         // Fall through to the plain text, which never trips on Markdown syntax.
       }
     }
-    for (const part of plain) await ctx.reply(part)
+    for (let i = 0; i < plain.length; i++) {
+      const part = plain[i]
+      const isLast = i === plain.length - 1
+      await bot.api.sendMessage(chatId, part, {
+        reply_markup: isLast && replyMarkup ? replyMarkup : undefined,
+      })
+    }
   }
 
   /**

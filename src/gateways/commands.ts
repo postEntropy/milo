@@ -1,5 +1,5 @@
 import { describeExport, writeSessionExport, type ExportFormat } from '../core/export.js'
-import { formatSessionList, formatStats, formatWhen } from '../core/sessions/index.js'
+import { formatStats, formatWhen } from '../core/sessions/index.js'
 import type { CompactResult, SessionStats, SessionSummary } from '../core/sessions/index.js'
 import { formatSkillList, type SkillSummary } from '../core/skills/index.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
@@ -11,6 +11,7 @@ import {
 import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.js'
 import type { MemoryItem } from '../core/memory/index.js'
 import type { TurnQueue } from './turns.js'
+import { buildSessionsList, type ActionRow, type SessionCardItem } from './actions.js'
 
 export interface CommandContext {
   policy?: PermissionPolicy
@@ -57,6 +58,17 @@ export interface CommandResult {
   reply?: string
   /** The same reply with Markdown, for surfaces that render it. */
   markdown?: string
+  /** Optional interactive action buttons for surfaces that support them. */
+  actions?: ActionRow[]
+  /** Optional rich session cards for surfaces that support rich cards (e.g. web). */
+  cards?: SessionCardItem[]
+  /** Optional pagination info, e.g. for surfaces that render navigation buttons. */
+  pagination?: {
+    page: number
+    totalPages: number
+    totalItems: number
+    pageSize: number
+  }
 }
 
 const HELP = [
@@ -67,7 +79,7 @@ const HELP = [
   '/thinking on|off — show the model\'s reasoning (display only; /effort is what changes how it thinks)',
   "/effort low|medium|high — how hard the model thinks (the one that costs)",
   '/new [title] — start a new session',
-  '/sessions — list saved sessions',
+  '/sessions [page] — list saved sessions',
   '/resume <id> — switch to another session',
   '/stats — numbers for the current session',
   '/compact — fold the oldest turns into the summary now, instead of when the context fills up',
@@ -324,12 +336,9 @@ export async function handleCommand(
       if (!context.listSessions) {
         return { handled: true, reply: 'Session switching is not available on this surface.' }
       }
-      const sessions = await context.listSessions()
-      return {
-        handled: true,
-        reply: formatSessionList(sessions),
-        markdown: formatSessionList(sessions, { markdown: true }),
-      }
+      const outcome = buildSessionsList(await context.listSessions(), argument)
+      if (!outcome.ok) return { handled: true, reply: outcome.error }
+      return { handled: true, ...outcome.result }
     }
 
     case 'resume': {

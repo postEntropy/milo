@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { humanSize, shortenPath } from '../src/util/format.js'
+import { formatSessionList, summarizeRecap } from '../src/core/sessions/index.js'
 
 describe('humanSize', () => {
   it('says a size as a person reads it', () => {
@@ -37,5 +38,60 @@ describe('shortenPath', () => {
 
   it('copes with no home to shorten against', () => {
     expect(shortenPath('/somewhere', '')).toBe('/somewhere')
+  })
+})
+
+describe('summarizeRecap', () => {
+  it('extracts the first bullet and strips bullet markers', () => {
+    const recap = '- First point discussing setup.\n- Second point.\n- Third point.'
+    expect(summarizeRecap(recap, 'fallback')).toBe('First point discussing setup.')
+  })
+
+  it('handles asterisk and numbered bullets', () => {
+    expect(summarizeRecap('* Star bullet', 'fallback')).toBe('Star bullet')
+    expect(summarizeRecap('1. Numbered bullet', 'fallback')).toBe('Numbered bullet')
+  })
+
+  it('falls back to preview when recap is undefined or empty', () => {
+    expect(summarizeRecap(undefined, 'initial prompt')).toBe('initial prompt')
+    expect(summarizeRecap('', 'initial prompt')).toBe('initial prompt')
+    expect(summarizeRecap('   \n  ', 'initial prompt')).toBe('initial prompt')
+  })
+
+  it('truncates overly long recap bullets', () => {
+    const long = `- ${'a'.repeat(200)}`
+    const result = summarizeRecap(long, 'fallback', 50)
+    expect(result.length).toBe(50)
+    expect(result.endsWith('…')).toBe(true)
+  })
+})
+
+describe('formatSessionList', () => {
+  it('formats empty session list', () => {
+    expect(formatSessionList([])).toBe('Sessions\n\nNothing saved yet. /new starts one.')
+    expect(formatSessionList([], { markdown: true })).toBe('🗂 **Sessions**\n\nNothing saved yet. `/new` starts one.')
+  })
+
+  it('pages sessions in chunks of 5 by default', () => {
+    const sessions = Array.from({ length: 7 }, (_, i) => ({
+      id: `s-${i + 1}`,
+      createdAt: 0,
+      updatedAt: 0,
+      messageCount: 1,
+      preview: `msg ${i + 1}`,
+    }))
+
+    const p1 = formatSessionList(sessions, { page: 1 })
+    expect(p1).toContain('Sessions (page 1/2)')
+    expect(p1).toContain('s-1')
+    expect(p1).toContain('s-5')
+    expect(p1).not.toContain('s-6')
+    expect(p1).toContain('Next: /sessions 2')
+
+    const p2 = formatSessionList(sessions, { page: 2 })
+    expect(p2).toContain('Sessions (page 2/2)')
+    expect(p2).toContain('s-6')
+    expect(p2).toContain('s-7')
+    expect(p2).not.toContain('Next: /sessions')
   })
 })

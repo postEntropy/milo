@@ -370,6 +370,78 @@ describe('handleCommand', () => {
     expect(result.reply).not.toContain('**')
   })
 
+  it('keeps the session list compact by showing only the first bullet of a recap', async () => {
+    const session = {
+      id: 'calm-otter-7',
+      createdAt: 0,
+      updatedAt: 0,
+      messageCount: 5,
+      preview: 'initial prompt',
+      recap: [
+        '- Discussed setting up a bot deployment pipeline.',
+        '- Decided to use docker-compose.',
+        '- Paths: /opt/milo/docker-compose.yml.',
+        '- Left open: backup script configuration.',
+      ].join('\n'),
+    }
+    const result = await handleCommand('/sessions', { listSessions: async () => [session] })
+    expect(result.reply).toContain('Discussed setting up a bot deployment pipeline.')
+    expect(result.reply).not.toContain('docker-compose')
+    expect(result.reply).not.toContain('backup script configuration')
+    expect(result.markdown).toContain('> Discussed setting up a bot deployment pipeline.')
+    expect(result.markdown).not.toContain('docker-compose')
+  })
+
+  it('paginates the session list with 5 sessions per page', async () => {
+    const sessions = Array.from({ length: 12 }, (_, i) => ({
+      id: `session-${i + 1}`,
+      createdAt: i * 1000,
+      updatedAt: i * 1000,
+      messageCount: 2,
+      preview: `hello ${i + 1}`,
+    }))
+
+    const page1 = await handleCommand('/sessions', { listSessions: async () => sessions })
+    expect(page1.pagination).toEqual({
+      page: 1,
+      totalPages: 3,
+      totalItems: 12,
+      pageSize: 5,
+    })
+    expect(page1.reply).toContain('session-1')
+    expect(page1.reply).toContain('session-5')
+    expect(page1.reply).not.toContain('session-6')
+    expect(page1.reply).toContain('page 1/3')
+    expect(page1.reply).toContain('Next: /sessions 2')
+
+    const page2 = await handleCommand('/sessions 2', { listSessions: async () => sessions })
+    expect(page2.pagination?.page).toBe(2)
+    expect(page2.reply).toContain('session-6')
+    expect(page2.reply).toContain('session-10')
+    expect(page2.reply).not.toContain('session-1\n')
+    expect(page2.reply).toContain('page 2/3')
+    expect(page2.reply).toContain('Next: /sessions 3')
+
+    const page3 = await handleCommand('/sessions 3', { listSessions: async () => sessions })
+    expect(page3.pagination?.page).toBe(3)
+    expect(page3.reply).toContain('session-11')
+    expect(page3.reply).toContain('session-12')
+    expect(page3.reply).not.toContain('Next: /sessions')
+  })
+
+  it('reports error on invalid page argument for /sessions', async () => {
+    const sessions = Array.from({ length: 12 }, (_, i) => ({
+      id: `session-${i + 1}`,
+      createdAt: i * 1000,
+      updatedAt: i * 1000,
+      messageCount: 2,
+      preview: `hello ${i + 1}`,
+    }))
+
+    const invalid = await handleCommand('/sessions abc', { listSessions: async () => sessions })
+    expect(invalid.reply).toBe('Invalid page: "abc". Use /sessions 1..3')
+  })
+
   it('resumes a session and reports unknown ids', async () => {
     let used = ''
     const ok = await handleCommand('/resume calm-otter-7', {

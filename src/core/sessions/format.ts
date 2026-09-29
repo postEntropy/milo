@@ -1,10 +1,14 @@
 import type { SessionStats, SessionSummary } from './types.js'
 
-const MAX_LISTED = 10
+export const DEFAULT_PAGE_SIZE = 5
 
 export interface SessionListStyle {
   /** Render for a surface that understands Markdown (Telegram, Discord). */
   markdown?: boolean
+  /** 1-based page number. Defaults to 1. */
+  page?: number
+  /** Number of sessions per page. Defaults to 5. */
+  pageSize?: number
 }
 
 export function formatWhen(timestamp: number): string {
@@ -21,6 +25,9 @@ export function formatSessionList(
   style: SessionListStyle = {},
 ): string {
   const markdown = style.markdown ?? false
+  const pageSize = style.pageSize ?? DEFAULT_PAGE_SIZE
+  const totalPages = Math.max(1, Math.ceil(sessions.length / pageSize))
+  const page = Math.min(Math.max(1, style.page ?? 1), totalPages)
 
   if (sessions.length === 0) {
     return markdown
@@ -28,31 +35,63 @@ export function formatSessionList(
       : 'Sessions\n\nNothing saved yet. /new starts one.'
   }
 
-  const entries = sessions.slice(0, MAX_LISTED).map((session) => {
+  const offset = (page - 1) * pageSize
+  const pageSessions = sessions.slice(offset, offset + pageSize)
+
+  const entries = pageSessions.map((session) => {
     const label = session.title ? `${session.id} — ${session.title}` : session.id
     const name = markdown ? `**${label}**` : label
     const meta = `${session.messageCount} msgs · ${formatWhen(session.updatedAt)}`
     const detail = markdown ? meta : `  ${meta}`
     // The recap says what the session was about; the preview is the fallback for
-    // one that was never switched away from, so it never got one.
-    const body = quote(session.recap ?? session.preview, markdown)
+    // one that was never switched away from, so it never got one. In a listing of
+    // sessions, only the first bullet of the recap is shown so replies do not
+    // outgrow the chat.
+    const summary = summarizeRecap(session.recap, session.preview)
+    const body = quote(summary, markdown)
     return [name, detail, body].filter(Boolean).join('\n')
   })
 
-  const more =
-    sessions.length > MAX_LISTED ? `… and ${sessions.length - MAX_LISTED} more` : undefined
-  const hint = markdown
-    ? 'Use `/resume <id>` to switch.'
-    : 'Use /resume <id> to switch.'
+  const header = markdown
+    ? (totalPages > 1 ? `🗂 **Sessions** (page ${page}/${totalPages})` : '🗂 **Sessions**')
+    : (totalPages > 1 ? `Sessions (page ${page}/${totalPages})` : 'Sessions (most recent first)')
+
+  const hints: string[] = []
+  if (page < totalPages) {
+    hints.push(markdown ? `Next: \`/sessions ${page + 1}\`` : `Next: /sessions ${page + 1}`)
+  }
+  hints.push(markdown ? 'Use `/resume <id>` to switch.' : 'Use /resume <id> to switch.')
 
   return [
-    markdown ? '🗂 **Sessions**' : 'Sessions (most recent first)',
+    header,
     ...entries,
-    more,
-    hint,
+    hints.join(' · '),
   ]
     .filter(Boolean)
     .join('\n\n')
+}
+
+/**
+ * A one-line summary for a session listing. A session's recap covers 3 to 5
+ * bullets — what it was about, decisions settled, paths and commands, open
+ * items — but in a list of up to ten sessions, quoting the full digest across
+ * every one makes the message gigantic. We show only the first bullet (what it
+ * was about) and fall back to the preview of the first message.
+ */
+export function summarizeRecap(recap: string | undefined, preview: string, limit = 120): string {
+  if (recap) {
+    const first = recap
+      .split('\n')
+      .map((line) => line.trim())
+      .find((line) => line.length > 0)
+    if (first) {
+      const clean = first.replace(/^[-*•]\s+/, '').replace(/^\d+\.\s+/, '').trim()
+      if (clean) {
+        return clean.length > limit ? `${clean.slice(0, limit - 1)}…` : clean
+      }
+    }
+  }
+  return preview
 }
 
 /** A block of lines as a Markdown quote, or indented for a plain-text surface. */

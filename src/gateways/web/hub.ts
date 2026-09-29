@@ -106,6 +106,20 @@ export class WebHub {
     if (frame.type === 'command') void this.command(client, conversation, frame.text).catch((error: unknown) => {
       client.send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     })
+
+    if (frame.type === 'action') {
+      const actionId = frame.actionId
+      const messageId = frame.messageId
+      // Action buttons and cards (e.g. /sessions pagination) are ephemeral in-memory
+      // UI controls that re-invoke the command when interacted with.
+      if (actionId.startsWith('sessions:')) {
+        const page = actionId.slice('sessions:'.length)
+        void this.command(client, conversation, `/sessions ${page}`, messageId).catch((error: unknown) => {
+          client.send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+        })
+        return
+      }
+    }
   }
 
   close(): void {
@@ -183,12 +197,12 @@ export class WebHub {
           if (command.handled) {
             session = await this.runtime.getSession(conversation.scope)
             conversation.session = session
-            this.broadcast(conversationId, { type: 'command-result', reply: command.reply ?? '', markdown: command.markdown, sessionId: session.id })
+            this.broadcast(conversationId, { type: 'command-result', reply: command.reply ?? '', markdown: command.markdown, actions: command.actions, cards: command.cards, sessionId: session.id })
             const queuedText = inbox.shift()
             if (queuedText?.startsWith('/')) {
               const queuedCommand = await handleCommand(queuedText, this.commandContext(conversation, session, signal))
               conversation.session = await this.runtime.getSession(conversation.scope)
-              if (queuedCommand.handled) this.broadcast(conversationId, { type: 'command-result', reply: queuedCommand.reply ?? '', markdown: queuedCommand.markdown, sessionId: conversation.session.id })
+              if (queuedCommand.handled) this.broadcast(conversationId, { type: 'command-result', reply: queuedCommand.reply ?? '', markdown: queuedCommand.markdown, actions: queuedCommand.actions, cards: queuedCommand.cards, sessionId: conversation.session.id })
               currentText = inbox.shift() ?? ''
             } else {
               currentText = queuedText ?? ''
@@ -248,14 +262,14 @@ export class WebHub {
     this.sendState(conversationId)
   }
 
-  private async command(client: WebClient, conversation: Conversation, text: string): Promise<void> {
+  private async command(client: WebClient, conversation: Conversation, text: string, messageId?: string): Promise<void> {
     const context = this.commandContext(conversation, conversation.session, new AbortController().signal)
     const result = handleTurnControl(text, {
       turn: turnOf(this.turns, conversation.scope.conversationId),
       start: (pending) => this.startTurn(conversation.scope.conversationId, pending),
     })
     if (result.handled) {
-      client.send({ type: 'command-result', reply: result.reply ?? '' })
+      client.send({ type: 'command-result', reply: result.reply ?? '', ...(messageId ? { messageId } : {}) })
       this.sendState(conversation.scope.conversationId)
       return
     }
@@ -264,7 +278,15 @@ export class WebHub {
       if (response.handled) {
         const refreshed = await this.runtime.getSession(conversation.scope)
         conversation.session = refreshed
-        client.send({ type: 'command-result', reply: response.reply ?? '', markdown: response.markdown, sessionId: refreshed.id })
+        client.send({
+          type: 'command-result',
+          reply: response.reply ?? '',
+          markdown: response.markdown,
+          actions: response.actions,
+          cards: response.cards,
+          sessionId: refreshed.id,
+          ...(messageId ? { messageId } : {}),
+        })
       }
       this.sendState(conversation.scope.conversationId)
     })
