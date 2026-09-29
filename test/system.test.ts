@@ -191,4 +191,17 @@ describe('what Milo knows about its own setup', () => {
     expect(build([tool], 1)).toContain('1 skill installed')
     expect(build([tool], 3)).toContain('3 skills installed')
   })
+
+  it('knows how a routine runs, so it is not answered by reading its own source', () => {
+    const prompt = build([tool])
+    expect(prompt).toContain('Routines are the prompts you run on a timer')
+    expect(prompt).toContain('milo routines list|add|remove|enable|disable|run')
+    expect(prompt).toContain('~/.milo/routines.json')
+    // The operational half: what the source read was actually trying to find out.
+    expect(prompt).toContain('Only `milo serve` fires them')
+    expect(prompt).toContain('is skipped rather than caught up')
+    // A routine's answer is not only text.
+    expect(prompt).toContain('deliver files')
+    expect(prompt).toContain('`shell_command` and `send_file` in `allow`')
+  })
 })

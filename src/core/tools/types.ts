@@ -27,8 +27,9 @@ export type RoutineFn = (input: NewRoutine) => Promise<Routine>
 
 /**
  * How a session hands a tool the ability to send a file to the chat this turn
- * delivers to. The session owns the destination — a routine's target — and holds
- * what was sent until the turn ends, when the surface posts it.
+ * is talking in. The destination is the session's: the live surface it runs on,
+ * or the target a routine named. It holds what was sent until the turn ends,
+ * when the surface posts it.
  */
 export type SendFileFn = (input: { path: string; caption?: string }) => Promise<OutgoingFile>
 
@@ -42,7 +43,8 @@ export interface ToolContext {
   /** Absent on a context that cannot delegate (a subagent's own, a bare test one). */
   task?: TaskFn
   /**
-   * The conversation this turn came from. It is where a routine created in chat
+   * The address this turn is speaking to: the conversation it came from, or the
+   * destination the surface pinned for it. It is where a routine created here
    * delivers by default — and its gateway tells the tool whether there is anyone
    * to deliver to at all.
    */
@@ -53,9 +55,9 @@ export interface ToolContext {
    */
   routine?: RoutineFn
   /**
-   * Absent on a context with no chat to send to. Present on a routine's own run,
-   * where the destination is the routine's target, so `send_file` reaches the
-   * person the routine was made for.
+   * Absent on a context with no chat to send to — the terminal. Present on a
+   * live surface, where a file goes to the chat the turn is talking in, and on a
+   * routine's own run, where it goes to the routine's target.
    */
   sendFile?: SendFileFn
 }

@@ -29,9 +29,21 @@ export type AgentEvent =
   | { type: 'aborted' }
   | { type: 'error'; message: string }
 
+/**
+ * The chat a screen is addressing, when it is not the one the turn came from. A
+ * routine made from the routines screen is pinned to the destination that screen
+ * chose, so the model does not have to infer it from the sentence.
+ */
+export interface SendTarget {
+  gateway: 'telegram' | 'discord' | 'web'
+  conversationId: string
+}
+
+const SEND_GATEWAYS = ['telegram', 'discord', 'web'] as const
+
 export type ClientFrame =
   | { type: 'hello'; version: number; conversationId: string }
-  | { type: 'send'; text: string; intent?: 'steer' | 'queue' }
+  | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget }
   | { type: 'control'; action: 'stop' | 'allow' | 'deny'; id?: string }
   | { type: 'command'; text: string }
 
@@ -75,7 +87,12 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
   if (frame.type === 'hello' && typeof frame.conversationId === 'string' && typeof frame.version === 'number') {
     return frame as ClientFrame
   }
-  if (frame.type === 'send' && typeof frame.text === 'string' && (frame.intent === undefined || frame.intent === 'steer' || frame.intent === 'queue')) {
+  if (
+    frame.type === 'send' &&
+    typeof frame.text === 'string' &&
+    (frame.intent === undefined || frame.intent === 'steer' || frame.intent === 'queue') &&
+    (frame.target === undefined || isSendTarget(frame.target))
+  ) {
     return frame as ClientFrame
   }
   if (frame.type === 'control' && ['stop', 'allow', 'deny'].includes(String(frame.action))) {
@@ -83,4 +100,16 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
   }
   if (frame.type === 'command' && typeof frame.text === 'string') return frame as ClientFrame
   return null
+}
+
+/**
+ * Half a target is not one — the same rule the routine tool applies to its own
+ * arguments, because guessing the other half is how a routine goes quiet.
+ */
+function isSendTarget(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const target = value as Record<string, unknown>
+  return (SEND_GATEWAYS as readonly string[]).includes(String(target.gateway))
+    && typeof target.conversationId === 'string'
+    && target.conversationId.trim() !== ''
 }

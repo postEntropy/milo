@@ -9,10 +9,10 @@ import { readDisplay } from '../../core/config/load.js'
 import { handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
-import type { ClientFrame, FrameAttachment, ServerFrame, TranscriptMessage } from './protocol.js'
+import type { ClientFrame, FrameAttachment, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
 import { PERMISSION_TIMEOUT_MS } from './protocol.js'
 import { displayEvent } from './turn.js'
-import { toolLine } from '../tool-line.js'
+import { showsToolCall, toolLine } from '../tool-line.js'
 
 export interface WebClient {
   send(frame: ServerFrame): void
@@ -99,7 +99,7 @@ export class WebHub {
           return
         }
       }
-      this.startTurn(conversationId, frame.text)
+      this.startTurn(conversationId, frame.text, frame.target)
       return
     }
 
@@ -114,7 +114,8 @@ export class WebHub {
 
   /**
    * Posts a message into a conversation with no turn behind it — how a routine
-   * reaches a web chat, with its answer and any files it delivered. It is written
+   * reaches a web chat, and how a live turn's own files reach it too: the answer
+   * is already on screen, so the files arrive as their own message. It is written
    * into the conversation's session first, so it is there when the tab is next
    * opened, and then broadcast to whoever is watching right now; the broadcast is
    * a no-op when nobody is. The frame is the one a command reply uses, so the
@@ -155,7 +156,7 @@ export class WebHub {
     return { id, name: file.name, mimeType: file.mimeType, size, image: isImage(file.mimeType) }
   }
 
-  private startTurn(conversationId: string, text: string): void {
+  private startTurn(conversationId: string, text: string, target?: SendTarget): void {
     // The state frame that *ends* a turn comes from the queue's settle handler
     // below, not from the turn's own `finally`. `busy` is the queue's answer to
     // "is a turn running", and the queue only lets the turn go after this work
@@ -198,6 +199,10 @@ export class WebHub {
           for await (const event of session.send(currentText, {
             signal,
             steering: inbox,
+            // A screen may pin where this turn is addressing — the routines screen
+            // names a routine's destination, and the tool takes it from here
+            // rather than from the chat the turn happens to be running in.
+            ...(target ? { origin: target } : {}),
             ask: async (request) => {
               const permissionId = randomUUID()
               this.broadcast(conversationId, {
@@ -214,6 +219,17 @@ export class WebHub {
             if (event.type === 'error') status = 'error'
             if (event.type === 'aborted') status = 'stopped'
             displayEvent(event, id, display, (frame) => this.broadcast(conversationId, frame))
+          }
+          // The files this turn asked to send, read once it is over. They go
+          // through the delivery a routine's answer uses, so the transcript keeps
+          // them and a reload serves them again.
+          const files = session.takeOutgoing()
+          if (files.length > 0) {
+            try {
+              await this.deliver(conversationId, { files })
+            } catch (error) {
+              this.broadcast(conversationId, { type: 'error', message: error instanceof Error ? error.message : String(error) })
+            }
           }
           currentText = inbox.shift() ?? ''
         }
@@ -299,7 +315,9 @@ export class WebHub {
       // The tool calls stay with the turn they belong to: a session read back — a
       // reload, or a tab opened later — shows the same lines the live stream drew,
       // from the same formatter the other surfaces use.
-      const tools = message.content.flatMap((part) => part.type === 'tool-call' ? [toolLine(part.name, part.args)] : [])
+      const tools = message.content.flatMap((part) =>
+        part.type === 'tool-call' && showsToolCall(part.name) ? [toolLine(part.name, part.args)] : [],
+      )
       const attachments = message.content.flatMap((part) =>
         part.type === 'file'
           ? [this.register({ path: part.path, name: part.name, mimeType: part.mimeType })]

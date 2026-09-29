@@ -4,7 +4,7 @@ import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
-import { isTelegramPhoto, type OutgoingMessage } from '../../core/outgoing.js'
+import { isTelegramPhoto, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
 import { readDisplay, setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
 import { chunk } from '../chunk.js'
@@ -219,6 +219,7 @@ export class TelegramGateway implements Gateway {
         await messenger.edit(chatId, Number(messageId), value).catch(() => undefined)
       },
       ask: (_conversationId, _messageId, request) => this.ask(bot, chatId, request, signal),
+      files: (_conversationId, files) => this.postFiles(chatId, files),
       typing: () => this.typing(bot, chatId),
     }
 
@@ -328,31 +329,53 @@ export class TelegramGateway implements Gateway {
       return
     }
 
-    const { InputFile } = await import('grammy')
     // A caption under a file is capped at 1024. A longer answer is not cut to fit
     // under a picture: the files go first, then the answer as its own messages.
     const trimmed = text.trim()
     const caption = trimmed.length > 0 && trimmed.length <= CAPTION_MAX ? trimmed : ''
     for (const [index, file] of files.entries()) {
       const first = index === 0
-      const line = first ? (file.caption ?? caption) : file.caption
-      const options = line ? { caption: line } : {}
-      const photo = isTelegramPhoto(file.mimeType)
-      if (!photo) {
-        await bot.api.sendDocument(conversationId, new InputFile(file.path, file.name), options)
-        continue
-      }
-      try {
-        await bot.api.sendPhoto(conversationId, new InputFile(file.path, file.name), options)
-      } catch {
-        // A picture Telegram refuses — an oversized PNG, a format it will not
-        // take as a photo — still goes as a document. The first `InputFile` was
-        // spent on the refusal, so this one is built afresh.
-        await bot.api.sendDocument(conversationId, new InputFile(file.path, file.name), options)
-      }
+      await this.sendFile(bot, conversationId, file, first ? (file.caption ?? caption) : file.caption)
     }
     if (!caption && trimmed) {
       for (const part of chunk(text, MAX_LENGTH)) await bot.api.sendMessage(conversationId, part)
+    }
+  }
+
+  /**
+   * A live turn's own files, posted once the turn is over. The answer is already
+   * in the chat, so each file rides with its own caption rather than the reply's
+   * text — which the turn has already sent.
+   */
+  private async postFiles(chatId: string, files: OutgoingFile[]): Promise<void> {
+    const bot = this.bot
+    if (!bot) throw new Error('telegram gateway is not running')
+    for (const file of files) await this.sendFile(bot, chatId, file, file.caption)
+  }
+
+  /**
+   * One file: a photo when Telegram takes that format, a document otherwise. A
+   * picture Telegram refuses still goes as a document, under the same name.
+   */
+  private async sendFile(
+    bot: Bot,
+    chatId: string,
+    file: OutgoingFile,
+    caption?: string,
+  ): Promise<void> {
+    const { InputFile } = await import('grammy')
+    const options = caption ? { caption } : {}
+    if (!isTelegramPhoto(file.mimeType)) {
+      await bot.api.sendDocument(chatId, new InputFile(file.path, file.name), options)
+      return
+    }
+    try {
+      await bot.api.sendPhoto(chatId, new InputFile(file.path, file.name), options)
+    } catch {
+      // A picture Telegram refuses — an oversized PNG, a format it will not take
+      // as a photo — still goes as a document. The first `InputFile` was spent on
+      // the refusal, so this one is built afresh.
+      await bot.api.sendDocument(chatId, new InputFile(file.path, file.name), options)
     }
   }
 }

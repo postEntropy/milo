@@ -177,7 +177,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
           break
         case 'tool-start': {
           await flushReasoning()
-          if (display.tools === 'off') break
+          if (display.tools === 'off' || !showsToolCall(event.name)) break
           // A shell command gets a fenced block of its own; everything else keeps
           // the shared quote. With `name` there is no command to show, so it falls
           // back to the plain line — which is what that level asks for anyway.
@@ -237,6 +237,13 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
     output += `${output === '' ? '' : '\n\n'}⚠ no answer came back: this model sends everything it says as reasoning, and /thinking off hides it.`
   }
   await surface.edit(conversationId, messageId, clamp(output.trim() || '(no response)', maxLength))
+
+  // The files the turn asked to send, read once it is over: they follow the
+  // answer as their own messages rather than riding as a caption on it. Read
+  // here, per turn, so a correction that runs as a second turn cannot overwrite
+  // what the first one sent.
+  const files = session.takeOutgoing()
+  if (files.length > 0) await surface.files(conversationId, files)
 }
 
 /** What another Milo left in this session, as one clause. */

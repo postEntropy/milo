@@ -45,6 +45,15 @@ function asSurface(gateway: string): SurfaceKind | undefined {
 }
 
 /**
+ * Whether a surface can receive a file the turn sends. The terminal is the one
+ * that cannot: it has nowhere to put a file, so `send_file` stays out of its
+ * catalog rather than being offered to fail on.
+ */
+function receivesFiles(surface: SurfaceKind | undefined): boolean {
+  return surface !== undefined && surface !== 'cli'
+}
+
+/**
  * Whether the error means "the caller stopped us". A cancelled fetch rejects
  * with an `AbortError`, but the signal is checked too: a provider is free to
  * fail in its own way once the request is already gone.
@@ -90,9 +99,11 @@ export interface SessionOptions {
    */
   routine?: RoutineFn
   /**
-   * The chat this session's turns deliver files to, when there is one. Set only
-   * on a routine's own run: the routine knows its target, and `send_file` reaches
-   * it. Absent everywhere else, so a chat someone is sitting at has none.
+   * The chat this session's turns deliver files to, when it is not the chat they
+   * are already in. Set on a routine's own run, whose target was named when it
+   * was made and must not be rerouted to whichever surface is live. Absent
+   * everywhere else, where the live surface the turn talks through is the
+   * destination.
    */
   deliverTo?: { gateway: string; conversationId: string }
   /**
@@ -124,6 +135,12 @@ export interface SendOptions {
   signal?: AbortSignal
   /** The surface's inline confirmation prompt for tools that need it. */
   ask?: PermissionAsker
+  /**
+   * The address this turn speaks to, when the surface pins one — a routine made
+   * from a screen that named its destination. Absent, the session's own chat is
+   * the address. Memory stays scoped by the session's scope either way.
+   */
+  origin?: MemoryScope
   /**
    * Where the surface hands in a message sent while this turn is already
    * running. The array belongs to the caller and is emptied as the messages are
@@ -327,18 +344,19 @@ export class Session {
     let running: { name: string; args: unknown } | null = null
 
     // A tool with nothing to act on is absent from the catalog, and `send_file`
-    // reaches only the chat a routine names: offered in a chat someone is
-    // sitting at, it is a call the model can only fail on. (A subagent filters
+    // needs a chat that can receive a file: a routine's named target, or the live
+    // surface the turn is talking through. The terminal is the one surface with
+    // nowhere to put one, so the tool stays out of its list. (A subagent filters
     // `task` out of its own list the same way.)
-    const tools = registry
-      .specs()
-      .filter((tool) => tool.name !== 'send_file' || this.options.deliverTo !== undefined)
+    const surface = asSurface(this.scope.gateway)
+    const canSendFiles = this.options.deliverTo !== undefined || receivesFiles(surface)
+    const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
     const recalled = await memory.recall(this.scope, input, {
       limit: this.options.recallLimit ?? DEFAULT_RECALL_LIMIT,
     })
     const prompt = {
       base: system,
-      surface: asSurface(this.scope.gateway),
+      surface,
       cwd,
       provider: provider.id,
       model,
@@ -374,17 +392,21 @@ export class Session {
     // A routine's own run is the one conversation that must not make routines:
     // without this, a routine could add routines every time it fires.
     const routine = this.scope.gateway === ROUTINE_GATEWAY ? undefined : this.options.routine
-    // What this turn asks to send, and whether it has a chat to send it to. A
-    // routine's own run is the only turn that does: it named a target when it was
-    // made, and a delivery must not be rerouted to whichever surface is live.
+    // What this turn asks to send, and whether it has a chat to send it to: the
+    // live surface it is talking through, or a routine's named target. A delivery
+    // must not be rerouted, so the destination is fixed before the turn runs.
     this.outgoing = []
-    const sendFile: SendFileFn | undefined = this.options.deliverTo
+    const sendFile: SendFileFn | undefined = canSendFiles
       ? async (input) => {
           const file = describeOutgoing(input.path, input.caption)
           this.outgoing.push(file)
           return file
         }
       : undefined
+    // Where this turn is addressing. A surface that named the destination — the
+    // routines screen — pins it, and a tool that defaults to "the chat this
+    // request came from" then means that chat.
+    const origin = opts?.origin ?? this.scope
 
     let errored = false
 
@@ -406,7 +428,7 @@ export class Session {
           signal: abort,
           remember,
           recall,
-          origin: this.scope,
+          origin,
           routine,
           sendFile,
           // A subtask runs in its own context, but under this turn's model,
@@ -426,7 +448,7 @@ export class Session {
               temperature,
               reasoningEffort: effort,
               input,
-              context: { remember, recall, origin: this.scope, routine, sendFile },
+              context: { remember, recall, origin, routine, sendFile },
             }),
         },
         maxSteps,

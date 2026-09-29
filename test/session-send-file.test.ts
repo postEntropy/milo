@@ -32,7 +32,7 @@ class ShotProvider implements Provider {
 }
 
 /** A real turn over a real Session, with a file the tool can name. */
-async function run(deliverTo?: { gateway: string; conversationId: string }) {
+async function run(deliverTo?: { gateway: string; conversationId: string }, gateway = 'routine') {
   const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-send-'))
   const file = path.join(dir, 'shot.png')
   writeFileSync(file, 'not really a png')
@@ -41,7 +41,7 @@ async function run(deliverTo?: { gateway: string; conversationId: string }) {
   const record = await store.create()
   const provider = new ShotProvider(file)
   const session = new Session({
-    scope: { gateway: 'routine', conversationId: 'calm-otter-1' },
+    scope: { gateway, conversationId: 'calm-otter-1' },
     provider,
     model: 'm',
     system: 'BASE',
@@ -89,5 +89,22 @@ describe('a turn that sends a file', () => {
     const { provider } = await run()
 
     expect(provider.offered[0]).not.toContain('send_file')
+  })
+
+  it('is offered to a live chat that can receive a file, and collects for it', async () => {
+    const { session, ended, provider } = await run(undefined, 'web')
+
+    expect(provider.offered[0]).toContain('send_file')
+    expect(ended?.isError).toBe(false)
+    expect(session.takeOutgoing()).toEqual([
+      expect.objectContaining({ name: 'shot.png', mimeType: 'image/png', caption: 'the screen' }),
+    ])
+  })
+
+  it('stays out of the terminal, which has nowhere to put a file', async () => {
+    const { ended, provider } = await run(undefined, 'cli')
+
+    expect(provider.offered[0]).not.toContain('send_file')
+    expect(ended?.isError).toBe(true)
   })
 })

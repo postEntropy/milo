@@ -1,3 +1,4 @@
+import type { OutgoingFile } from '../core/outgoing.js'
 import type { PermissionRequest } from '../core/tools/permission.js'
 
 /**
@@ -12,6 +13,11 @@ export interface ChatSurface {
   edit(conversationId: string, messageId: string, text: string): Promise<void>
   /** Ask for permission inline; must resolve false on expiry. */
   ask(conversationId: string, messageId: string, request: PermissionRequest): Promise<boolean>
+  /**
+   * Post the files the turn asked to send, as their own messages. Called once the
+   * turn is over, so the files follow the answer rather than interrupting it.
+   */
+  files(conversationId: string, files: OutgoingFile[]): Promise<void>
   /**
    * Keep the transport's own "Milo is working" indicator on — Telegram's chat
    * action, Discord's typing — until the returned function is called.

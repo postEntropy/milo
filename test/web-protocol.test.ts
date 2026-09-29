@@ -14,6 +14,19 @@ describe('web protocol', () => {
     expect(parseClientFrame(null)).toBeNull()
   })
 
+  it('carries a pinned destination, and refuses half of one', () => {
+    const pinned = parseClientFrame({ type: 'send', text: 'every day at 8', target: { gateway: 'telegram', conversationId: '123' } })
+    // Half a target is not one: guessing the other half is how a routine goes quiet.
+    expect(parseClientFrame({ type: 'send', text: 'x', target: { gateway: 'telegram' } })).toBeNull()
+    expect(parseClientFrame({ type: 'send', text: 'x', target: { conversationId: '123' } })).toBeNull()
+    expect(parseClientFrame({ type: 'send', text: 'x', target: { gateway: 'email', conversationId: '123' } })).toBeNull()
+    expect(parseClientFrame({ type: 'send', text: 'x', target: { gateway: 'telegram', conversationId: '  ' } })).toBeNull()
+    expect(parseClientFrame({ type: 'send', text: 'x', target: null })).toBeNull()
+
+    expect(pinned).toMatchObject({ target: { gateway: 'telegram', conversationId: '123' } })
+    expect(parseClientFrame({ type: 'send', text: 'plain' })).not.toHaveProperty('target')
+  })
+
   it('sends tool calls as events, not folded into the reply text', () => {
     output.length = 0
     displayEvent({ type: 'tool-start', id: '1', name: 'read_file', args: { path: 'a.txt' } }, 'turn', { tools: 'full', thinking: 'on' }, send as never)

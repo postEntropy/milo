@@ -29,7 +29,7 @@ import {
 import { isCtrlC, isSteerKey } from '../keys.js'
 import { readInputHistory, saveInputHistory } from '../input-history.js'
 import { theme } from '../theme.js'
-import { toolDetail } from '../../tool-line.js'
+import { showsToolCall, toolDetail } from '../../tool-line.js'
 import { buildLines, padToBottom, visibleWindow, type Item, type Line } from '../transcript.js'
 import { useElapsed } from '../use-elapsed.js'
 import { useTerminalSize } from '../use-terminal-size.js'
@@ -543,14 +543,15 @@ export function ChatScreen({
             // where it was actually said.
             commitLive()
             // `off` keeps tool activity out of the transcript and out of the
-            // status line, so the turn reads as plain thinking.
-            if (display.tools === 'off') return
+            // status line, so the turn reads as plain thinking. A tool whose own
+            // call is not drawn never reaches the status line either.
+            if (display.tools === 'off' || !showsToolCall(name)) return
             setToolName(name)
             setPhase('tool')
           },
           onToolEnd: (name, isError) => {
             // A failure is always shown, even with tools off.
-            if (display.tools !== 'off' || isError) {
+            if ((display.tools !== 'off' && showsToolCall(name)) || isError) {
               push({
                 kind: 'tool',
                 name,

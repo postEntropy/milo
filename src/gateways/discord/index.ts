@@ -3,7 +3,7 @@ import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
-import type { OutgoingMessage } from '../../core/outgoing.js'
+import type { OutgoingFile, OutgoingMessage } from '../../core/outgoing.js'
 import { readDisplay, setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
 import {
@@ -245,6 +245,7 @@ export class DiscordGateway implements Gateway {
         await target.edit(value)
       },
       ask: (_conversationId, _messageId, request) => ask(message, request, signal),
+      files: (_conversationId, files) => this.postFiles(message.channelId, files),
       typing: () => this.typing(message.channel),
     }
 
@@ -292,12 +293,7 @@ export class DiscordGateway implements Gateway {
    * attachments directly, so every file rides as one.
    */
   async deliver(conversationId: string, message: OutgoingMessage): Promise<void> {
-    const client = this.client
-    if (!client) throw new Error('discord gateway is not running')
-    const channel = await client.channels.fetch(conversationId)
-    if (!channel?.isSendable()) {
-      throw new Error(`discord channel ${conversationId} cannot receive messages`)
-    }
+    const channel = await this.sendable(conversationId)
     const text = message.text ?? ''
     const files = message.files ?? []
 
@@ -318,5 +314,31 @@ export class DiscordGateway implements Gateway {
       await channel.send(content ? { content, files: builders } : { files: builders })
     }
     for (const part of parts) await channel.send(part)
+  }
+
+  /**
+   * A live turn's own files, posted once the turn is over. The answer is already
+   * in the channel, so the files follow it as their own messages.
+   */
+  private async postFiles(conversationId: string, files: OutgoingFile[]): Promise<void> {
+    const channel = await this.sendable(conversationId)
+    const { AttachmentBuilder } = await import('discord.js')
+    for (let index = 0; index < files.length; index += FILES_PER_MESSAGE) {
+      const builders = files
+        .slice(index, index + FILES_PER_MESSAGE)
+        .map((file) => new AttachmentBuilder(file.path, { name: file.name }))
+      await channel.send({ files: builders })
+    }
+  }
+
+  /** The channel a delivery can be sent to, or a throw saying why it cannot. */
+  private async sendable(conversationId: string) {
+    const client = this.client
+    if (!client) throw new Error('discord gateway is not running')
+    const channel = await client.channels.fetch(conversationId)
+    if (!channel?.isSendable()) {
+      throw new Error(`discord channel ${conversationId} cannot receive messages`)
+    }
+    return channel
   }
 }

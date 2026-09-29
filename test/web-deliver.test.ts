@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
+import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
 import type { ServerFrame } from '../src/gateways/web/protocol.js'
 
 const home = mkdtempSync(path.join(os.tmpdir(), 'milo-web-deliver-'))
@@ -9,6 +10,7 @@ process.env.MILO_HOME = home
 
 const { WebHub } = await import('../src/gateways/web/hub.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
+const { createToolRegistry } = await import('../src/core/tools/index.js')
 
 const CONVERSATION = '11111111-2222-3333-4444-555555555555'
 
@@ -23,6 +25,42 @@ function build(): InstanceType<typeof AgentRuntime> {
     model: 'test-model',
     system: '',
     registry: { specs: () => [] } as never,
+    memory: {
+      remember: async () => undefined,
+      recall: async () => [],
+      list: async () => [],
+      forget: async () => false,
+    } as never,
+    cwd: home,
+  })
+}
+
+/** Emits one `send_file` call and then the answer: a turn that sends a file. */
+class ShotProvider implements Provider {
+  readonly id = 'shot'
+  private calls = 0
+
+  constructor(private readonly file: string) {}
+
+  async *stream(_request: ChatRequest): AsyncGenerator<StreamEvent> {
+    this.calls += 1
+    if (this.calls === 1) {
+      yield { type: 'tool-call', id: 'c1', name: 'send_file', args: { path: this.file, caption: 'the screen' } }
+      yield { type: 'done', finishReason: 'tool_calls' }
+      return
+    }
+    yield { type: 'text', delta: 'sent' }
+    yield { type: 'done', finishReason: 'stop' }
+  }
+}
+
+/** A runtime whose turn runs a real tool registry, so `send_file` reaches the session. */
+function buildWith(provider: Provider): InstanceType<typeof AgentRuntime> {
+  return new AgentRuntime({
+    provider,
+    model: 'test-model',
+    system: '',
+    registry: createToolRegistry(),
     memory: {
       remember: async () => undefined,
       recall: async () => [],
@@ -131,6 +169,33 @@ describe('a turn in a web conversation', () => {
     const ended = frames.findIndex((frame) => frame.type === 'turn-end')
     const after = frames.slice(ended + 1).filter((frame) => frame.type === 'state')
     expect(after.at(-1)).toEqual({ type: 'state', busy: false, queued: 0 })
+  })
+
+  it('delivers a file the live turn sends into the chat it is talking in', async () => {
+    const shot = path.join(home, 'shot.png')
+    writeFileSync(shot, 'not really a png')
+    const runtime = buildWith(new ShotProvider(shot))
+    const hub = new WebHub(runtime, { provider: 'test', model: 'test-model' })
+    const frames: ServerFrame[] = []
+    const client = { send: (frame: ServerFrame) => frames.push(frame) }
+
+    await hub.connect(client, CONVERSATION)
+    frames.length = 0 // the handshake; only what follows is the turn
+    hub.handle(client, { type: 'send', text: 'screenshot and send it' }, CONVERSATION)
+
+    const delivered = (): Extract<ServerFrame, { type: 'command-result' }> | undefined =>
+      frames.find(
+        (frame): frame is Extract<ServerFrame, { type: 'command-result' }> =>
+          frame.type === 'command-result' && (frame.attachments?.length ?? 0) > 0,
+      )
+    expect(await waitFor(() => delivered() !== undefined)).toBe(true)
+
+    const frame = delivered()!
+    expect(frame.attachments?.[0]).toMatchObject({ name: 'shot.png', mimeType: 'image/png', image: true })
+    // The id is the only name the browser holds, and it resolves to the file.
+    expect(hub.attachment(frame.attachments![0]!.id)).toEqual({ path: shot, name: 'shot.png', mimeType: 'image/png' })
+    // Kept in the transcript, so a reload serves the same picture again.
+    expect(await attachments(runtime)).toEqual([{ path: shot, name: 'shot.png', mimeType: 'image/png' }])
   })
 })
 

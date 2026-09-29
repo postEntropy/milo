@@ -39,6 +39,19 @@ const TOOLS: Record<string, string> = {
 
 const FALLBACK = '🔧'
 
+/**
+ * Tools whose own activity is not drawn. Reaching for one should read as the
+ * answer itself, not as a call: `send_file` is the case — the file lands in the
+ * chat, and a line announcing it is a line between the person and the picture.
+ * A failure is still reported, so nothing goes wrong in silence.
+ */
+const HIDDEN = new Set(['send_file'])
+
+/** Whether a tool's own call is drawn as a line on the surfaces. */
+export function showsToolCall(name: string): boolean {
+  return !HIDDEN.has(name)
+}
+
 /** The icon alone, for surfaces that draw their own line (the CLI). */
 export function toolIcon(name: string): string {
   return TOOLS[name] ?? FALLBACK

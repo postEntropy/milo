@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { AgentEvent } from '../src/core/agent/events.js'
 import type { DisplayConfig } from '../src/core/config/schema.js'
+import type { OutgoingFile } from '../src/core/outgoing.js'
 import type { Session, SendOptions } from '../src/core/session.js'
 import type { PermissionRequest } from '../src/core/tools/permission.js'
 import { runTurn } from '../src/gateways/runner.js'
@@ -8,9 +9,11 @@ import type { ChatSurface } from '../src/gateways/surface.js'
 
 type StreamFn = (options?: SendOptions) => AsyncGenerator<AgentEvent>
 
-function makeHarness(stream: StreamFn, askAnswer = true, display?: DisplayConfig) {
+function makeHarness(stream: StreamFn, askAnswer = true, display?: DisplayConfig, outgoing: OutgoingFile[] = []) {
   const edits: string[] = []
   const asks: PermissionRequest[] = []
+  /** The files the turn asked to send, as the surface was handed them. */
+  const posted: OutgoingFile[] = []
   /** The transport's working indicator: started how often, stopped how often. */
   const typing = { starts: [] as string[], stops: 0 }
 
@@ -23,6 +26,9 @@ function makeHarness(stream: StreamFn, askAnswer = true, display?: DisplayConfig
       asks.push(request)
       return askAnswer
     },
+    files: async (_conversationId, files) => {
+      posted.push(...files)
+    },
     typing: (conversationId) => {
       typing.starts.push(conversationId)
       return () => {
@@ -34,12 +40,13 @@ function makeHarness(stream: StreamFn, askAnswer = true, display?: DisplayConfig
   const session = {
     messages: [],
     send: (_text: string, options?: SendOptions) => stream(options),
+    takeOutgoing: () => outgoing,
   } as unknown as Session
 
   const run = (maxLength = 1000, steering?: string[]) =>
     runTurn({ session, conversationId: 'c1', text: 'hi', surface, maxLength, display, flushMs: 0, steering })
 
-  return { edits, asks, typing, run }
+  return { edits, asks, posted, typing, run }
 }
 
 describe('runTurn', () => {
@@ -202,7 +209,7 @@ describe('runTurn', () => {
     await harness.run()
     // The other one: a block whose contents were cut off is a block that lies
     // about what it is for.
-    expect(harness.edits.at(-1)).toBe(`⚡ **shell_command**\n\n\`\`\`shell\n${long}\n\`\`\``)
+    expect(harness.edits.at(-1)).toBe(`\`\`\`shell\n${long}\n\`\`\``)
   })
 
   it('gives each of two shell commands its own block', async () => {
@@ -371,6 +378,22 @@ describe('runTurn', () => {
     const harness = makeHarness(stream)
     await harness.run()
     expect(harness.edits.at(-1)).toBe('(no response)')
+  })
+
+  it('posts the files the turn asked to send, after the answer', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'text-delta', delta: 'took the shot' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const shot: OutgoingFile = { path: '/tmp/shot.png', name: 'shot.png', mimeType: 'image/png' }
+    const harness = makeHarness(stream, true, undefined, [shot])
+    await harness.run()
+
+    // The answer is already in the chat, so the file follows it as its own
+    // message rather than riding as a caption on the reply.
+    expect(harness.edits.at(-1)).toBe('took the shot')
+    expect(harness.posted).toEqual([shot])
   })
 })
 
