@@ -30,9 +30,13 @@ import { historyStatus } from '../../../core/history.js'
 import { DEFAULT_RECALL_LIMIT, memoryStatus } from '../../../core/memory/index.js'
 import { provisionEmbedding } from '../../../core/memory/provision.js'
 import {
+  CLASSIFIER_BACKENDS,
   DEFAULT_CLOUD_EMBED_MODEL,
   DEFAULT_LOCAL_EMBED_MODEL,
+  OLLAYA_DEFAULT_MODEL,
+  OLLAYA_URL,
   type Auth,
+  type ClassifierBackend,
   type Config,
   type GatewayConfig,
 } from '../../../core/config/schema.js'
@@ -94,6 +98,20 @@ const TOOL_LEVELS = ['full', 'name', 'off'] as const
 /** Cycled in order, starting wherever the current value is. */
 const EFFORT_LEVELS = REASONING_EFFORTS
 const GATEWAYS: GatewayId[] = ['telegram', 'discord']
+
+/** What a backend answers with when no model is named. */
+function defaultClassifierModel(backend: ClassifierBackend): string {
+  if (backend === 'ollaya') return `${OLLAYA_DEFAULT_MODEL} (default)`
+  if (backend === 'custom') return '—'
+  return 'typesafe/jev (default)'
+}
+
+/** Where a backend reaches its decision model when no url is named. */
+function defaultClassifierUrl(backend: ClassifierBackend): string {
+  if (backend === 'ollaya') return `${OLLAYA_URL} (default)`
+  // The hosted one rides on the chat provider's own URL.
+  return backend === 'custom' ? '— set one' : 'from the provider'
+}
 
 /** One run of a hint, when a hint is more than one kind of thing. */
 interface MenuHintPart {
@@ -167,6 +185,8 @@ type View =
   | { kind: 'tools' }
   | { kind: 'permissions' }
   | { kind: 'permissionEdit'; field: 'threshold' | 'allow' | 'deny' }
+  | { kind: 'classifier' }
+  | { kind: 'classifierEdit'; field: 'model' | 'url' }
   | { kind: 'display' }
   | { kind: 'displayEdit' }
   | { kind: 'browser' }
@@ -200,6 +220,8 @@ const TITLE: Record<string, string> = {
   tools: 'Setup · Tools',
   permissions: 'Setup · Permissions',
   permissionEdit: 'Setup · Permissions',
+  classifier: 'Setup · Permissions · Classifier',
+  classifierEdit: 'Setup · Permissions · Classifier',
   display: 'Setup · Display',
   displayEdit: 'Setup · Display',
   browser: 'Setup · Tools · Browser',
@@ -684,6 +706,16 @@ export function SettingsScreen({
       hintColor: mode === 'ask' ? undefined : mode === 'yolo' ? theme.danger : theme.warning,
     },
     {
+      // The policy's other half: which decision model an auto-mode review is asked
+      // of, and where it lives. Both are about what may run, so they sit together.
+      icon: '🧭',
+      label: 'Classifier',
+      hint: config.classifier.model
+        ? `${config.classifier.backend} · ${config.classifier.model}`
+        : config.classifier.backend,
+      hintColor: theme.success,
+    },
+    {
       icon: '👁️',
       label: 'Display',
       hint: `${config.display.tools} · thinking display ${config.display.thinking}`,
@@ -860,6 +892,28 @@ export function SettingsScreen({
     { label: 'Never allow', hint: config.permissions.deny.join(', ') || '—' },
   ]
 
+  /**
+   * Where the decision model lives. Only the hosted backend rides on the chat
+   * provider; a local Ollaya or a custom endpoint stands on its own, which is why
+   * this is not a field of the provider.
+   */
+  const classifierItems: MenuItem[] = [
+    {
+      label: 'Backend',
+      hint: `${config.classifier.backend} (commandcode → ollaya → custom)`,
+      hintColor: theme.accent,
+    },
+    {
+      label: 'Model',
+      hint: config.classifier.model ?? defaultClassifierModel(config.classifier.backend),
+    },
+    {
+      label: 'URL',
+      hint: config.classifier.url ?? defaultClassifierUrl(config.classifier.backend),
+      hintColor: config.classifier.url ? undefined : theme.muted,
+    },
+  ]
+
   const gatewayTokenState = (id: GatewayId): string =>
     keyState(KEY_SLOTS.find((slot) => slot.id === id)!, auth)
 
@@ -1031,11 +1085,12 @@ export function SettingsScreen({
           else if (index === 1) go({ kind: 'keys' })
           else if (index === 2) go({ kind: 'tools' })
           else if (index === 3) go({ kind: 'permissions' })
-          else if (index === 4) go({ kind: 'display' })
-          else if (index === 5) go({ kind: 'gateways' })
-          else if (index === 6) go({ kind: 'web' })
-          else if (index === 7) go({ kind: 'memory' })
-          else if (index === 8) {
+          else if (index === 4) go({ kind: 'classifier' })
+          else if (index === 5) go({ kind: 'display' })
+          else if (index === 6) go({ kind: 'gateways' })
+          else if (index === 7) go({ kind: 'web' })
+          else if (index === 8) go({ kind: 'memory' })
+          else if (index === 9) {
             // Opening the section starts from what is on disk, not from whatever
             // was toggled before it was last left.
             setDesired({})
@@ -1111,6 +1166,39 @@ export function SettingsScreen({
 
       case 'permissionEdit':
         if (key.escape) go({ kind: 'permissions' })
+        break
+
+      case 'classifier':
+        if (key.upArrow) setIndex((value) => Math.max(0, value - 1))
+        else if (key.downArrow) setIndex((value) => Math.min(classifierItems.length - 1, value + 1))
+        else if (key.return) {
+          if (index === 0) {
+            const backend =
+              CLASSIFIER_BACKENDS[
+                (CLASSIFIER_BACKENDS.indexOf(config.classifier.backend) + 1) % CLASSIFIER_BACKENDS.length
+              ]!
+            patchConfig({ classifier: { ...config.classifier, backend } })
+            setNotices([
+              {
+                // The reviewer is built once at startup, so a backend switch is a
+                // restart away, the way the browser and the embedding engine are.
+                text:
+                  backend === 'custom'
+                    ? 'Classifier: custom — set a URL below; applies on the next start'
+                    : `Classifier: ${backend} — applies on the next start`,
+                tone: backend === 'custom' ? 'warning' : 'success',
+              },
+            ])
+          } else if (index === 1) {
+            go({ kind: 'classifierEdit', field: 'model' }, config.classifier.model ?? '')
+          } else {
+            go({ kind: 'classifierEdit', field: 'url' }, config.classifier.url ?? '')
+          }
+        } else if (key.escape) go({ kind: 'menu' })
+        break
+
+      case 'classifierEdit':
+        if (key.escape) go({ kind: 'classifier' })
         break
 
       case 'display':
@@ -1478,6 +1566,17 @@ export function SettingsScreen({
       }
       patchConfig({ permissions })
       go({ kind: 'permissions' })
+      return
+    }
+
+    if (view.kind === 'classifierEdit') {
+      const trimmed = value.trim()
+      // Empty means "use the backend's own": its default model, or its default URL.
+      const classifier = { ...config.classifier }
+      if (view.field === 'model') classifier.model = trimmed || undefined
+      else classifier.url = trimmed || undefined
+      patchConfig({ classifier })
+      go({ kind: 'classifier' })
     }
   }
 
@@ -1491,7 +1590,10 @@ export function SettingsScreen({
   // always there and never written down, which is the same as not being there.
   const EXIT = 'Ctrl+C exit'
   const footer =
-    view.kind === 'memoryKey' || view.kind === 'keyEdit' || view.kind === 'permissionEdit'
+    view.kind === 'memoryKey' ||
+    view.kind === 'keyEdit' ||
+    view.kind === 'permissionEdit' ||
+    view.kind === 'classifierEdit'
       ? `Enter save (empty clears) · Esc back · ${EXIT}`
       : view.kind === 'gatewayFlow' && view.step !== 'enable'
         ? `Enter save · Esc back · ${EXIT}`
@@ -1544,6 +1646,19 @@ export function SettingsScreen({
           </Box>
         )}
         {view.kind === 'permissions' && <Menu items={permissionItems} index={index} />}
+        {view.kind === 'classifier' && (
+          <Box flexDirection="column">
+            <Menu items={classifierItems} index={index} />
+            <Box marginTop={1}>
+              <Text color={theme.muted}>
+                The decision model an auto-mode review is asked of. The hosted jev rides on the
+                chat provider; a local Ollaya or a custom endpoint stands on its own. A switch
+                takes effect when Milo next starts.
+              </Text>
+            </Box>
+            <Notices notices={notices} />
+          </Box>
+        )}
         {view.kind === 'display' && (
           <Box flexDirection="column">
             <Menu items={displayItems} index={index} />
@@ -1876,14 +1991,16 @@ export function SettingsScreen({
           </Box>
         )}
 
-        {(view.kind === 'keyEdit' || view.kind === 'permissionEdit') && (
+        {(view.kind === 'keyEdit' || view.kind === 'permissionEdit' || view.kind === 'classifierEdit') && (
           <Box flexDirection="column">
             <Text color={theme.accent}>
               {view.kind === 'keyEdit'
                 ? `${view.slot.label} — ${view.slot.env} (empty clears)`
-                : view.field === 'threshold'
-                  ? 'jev threshold (0..1)'
-                  : `${view.field === 'allow' ? 'Always allow' : 'Never allow'} (comma-separated tool names)`}
+                : view.kind === 'classifierEdit'
+                  ? `${view.field === 'model' ? 'Classifier model' : 'Classifier URL'} (empty uses the backend default)`
+                  : view.field === 'threshold'
+                    ? 'jev threshold (0..1)'
+                    : `${view.field === 'allow' ? 'Always allow' : 'Never allow'} (comma-separated tool names)`}
             </Text>
             <Box>
               <Text color={theme.accent}>❯ </Text>

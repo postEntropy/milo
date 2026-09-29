@@ -69,6 +69,36 @@ export type MemoryConfig = z.infer<typeof MemorySchema>
  */
 export const DEFAULT_MEMORY: MemoryConfig = MemorySchema.parse({})
 
+/**
+ * The decision model a review is asked of, and how to reach it. Same shape as
+ * `memory.embedding`: a provider, a url, a model. `commandcode` rides on the chat
+ * provider (the hosted `typesafe/jev`); `ollaya` and `custom` are a TypeSafe-compatible
+ * endpoint of their own, so the classifier no longer has to live where the chat does.
+ */
+export const CLASSIFIER_BACKENDS = ['commandcode', 'ollaya', 'custom'] as const
+export type ClassifierBackend = (typeof CLASSIFIER_BACKENDS)[number]
+
+/** The local decision-model daemon (Ollaya), TypeSafe-compatible on this base. */
+export const OLLAYA_URL = 'http://127.0.0.1:11435/v1'
+/** The recommended local model when there is a GPU; `laya` is the CPU one. */
+export const OLLAYA_DEFAULT_MODEL = 'winnow:e4b'
+
+export const ClassifierSchema = z.object({
+  /** Where the decision model lives. `commandcode` rides on the chat provider. */
+  backend: z.enum(CLASSIFIER_BACKENDS).default('commandcode'),
+  /** The model to ask. Absent, each backend's own default. */
+  model: z.string().optional(),
+  /** For `ollaya`/`custom`: a TypeSafe-compatible base URL. Absent, Ollaya's default. */
+  url: z.string().optional(),
+  /** For `custom`: the env var holding the key. Ollaya needs any value. */
+  keyEnv: z.string().optional(),
+  /** Abort the review after this long, then fail closed to asking. */
+  timeoutMs: z.number().int().positive().optional(),
+})
+export type ClassifierConfig = z.infer<typeof ClassifierSchema>
+
+export const DEFAULT_CLASSIFIER: ClassifierConfig = { backend: 'commandcode' }
+
 export const GatewaySchema = z.object({
   enabled: z.boolean().default(false),
   /**
@@ -257,6 +287,7 @@ export const ConfigSchema = z.object({
   gateways: z.record(z.string(), GatewaySchema).default({}),
   web: WebSchema.default(DEFAULT_WEB),
   permissions: PermissionsSchema.default(DEFAULT_PERMISSIONS),
+  classifier: ClassifierSchema.default(DEFAULT_CLASSIFIER),
   browser: BrowserSchema.default(DEFAULT_BROWSER),
   search: SearchSchema.optional(),
   systemPrompt: z.string().optional(),

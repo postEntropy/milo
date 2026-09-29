@@ -3,7 +3,7 @@ import { api } from '../lib/api.js'
 import { formatBytes, formatWhen, message, splitNames } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
-import { EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from '@protocol'
+import { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from '@protocol'
 
 type ProviderPreset = { id: string; name: string; baseURL: string; wire: string; keyless?: boolean; models: string[]; keyURL?: string }
 type SettingsConfig = {
@@ -16,6 +16,7 @@ type SettingsConfig = {
   gateways: Record<string, { enabled: boolean; allowlist: string[] }>
   web: { enabled: boolean; host: string; port: number }
   permissions: { mode: 'ask' | 'auto' | 'yolo'; allow: string[]; deny: string[]; jevThreshold: number; jevTimeoutMs: number }
+  classifier: { backend: 'commandcode' | 'ollaya' | 'custom'; model?: string; url?: string; keyEnv?: string; timeoutMs?: number }
   browser: { enabled: boolean; chromePath: string | null; headless: boolean; profileDir: string | null; cdpUrl: string | null; keepSnapshots: number }
   search?: { provider: 'tavily' | 'exa' | 'parallel'; keyEnv?: string }
   systemPrompt?: string
@@ -100,7 +101,10 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   const requiresRestart = Boolean(draft && saved && (
     draft.provider !== saved.provider || draft.model !== saved.model ||
     JSON.stringify(draft.browser) !== JSON.stringify(saved.browser) ||
-    JSON.stringify(draft.web) !== JSON.stringify(saved.web)
+    JSON.stringify(draft.web) !== JSON.stringify(saved.web) ||
+    // The reviewer is built once at startup, so which decision model it asks is
+    // read on the next run, like the browser and the web host.
+    JSON.stringify(draft.classifier) !== JSON.stringify(saved.classifier)
   ))
 
   function update(path: string[], value: unknown): void {
@@ -129,7 +133,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
       }
       setSecrets({})
       await load()
-      setNotice({ text: requiresRestart ? 'Settings saved. Restart the web server to apply the provider, model or browser.' : 'Settings saved.', error: false })
+      setNotice({ text: requiresRestart ? 'Settings saved. Restart the web server to apply the provider, model, browser or classifier.' : 'Settings saved.', error: false })
     } catch (error) { setNotice({ text: message(error), error: true }) }
     finally { setSaving(false) }
   }
@@ -308,6 +312,9 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             <Field label="Reviewer threshold"><input type="number" min="0" max="1" step="0.05" value={draft.permissions.jevThreshold} onChange={(event) => update(['permissions', 'jevThreshold'], Number(event.target.value))} /></Field>
             <Field label="Always-allowed tools"><input value={draft.permissions.allow.join(', ')} onChange={(event) => update(['permissions', 'allow'], splitNames(event.target.value))} /></Field>
             <Field label="Blocked tools"><input value={draft.permissions.deny.join(', ')} onChange={(event) => update(['permissions', 'deny'], splitNames(event.target.value))} /></Field>
+            <Field label="Classifier backend"><select value={draft.classifier.backend} onChange={(event) => update(['classifier', 'backend'], event.target.value)}>{CLASSIFIER_BACKENDS.map((value) => <option key={value}>{value}</option>)}</select><small>Hosted jev rides on the chat provider; a local Ollaya or a custom endpoint stands on its own. Applies on the next start.</small></Field>
+            <Field label="Classifier model"><input value={draft.classifier.model ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'model'], event.target.value || undefined)} /></Field>
+            <Field label="Classifier URL"><input value={draft.classifier.url ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'url'], event.target.value || undefined)} /></Field>
           </div>
           <p>“yolo” runs actions without asking for confirmation. Use it only if that is what you want.</p>
         </Section>

@@ -20,6 +20,7 @@ const config = {
   gateways: {},
   web: { enabled: true, host: '127.0.0.1', port: 7717 },
   permissions: { mode: 'ask' as const, allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
+  classifier: { backend: 'commandcode' as const },
   browser: { enabled: false, chromePath: null, headless: true, profileDir: null, cdpUrl: null, keepSnapshots: 2 },
 }
 writeFileSync(path.join(home, 'config.yml'), stringify(config))
@@ -700,7 +701,7 @@ describe('SettingsScreen', () => {
 
   it('cycles how much of a tool call is shown, and writes it down', async () => {
     const app = renderSettings()
-    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    for (let index = 0; index < 5; index += 1) await press(app, DOWN)
     await press(app, '\r') // Display
     await waitFor(app, 'Tool calls')
 
@@ -715,7 +716,7 @@ describe('SettingsScreen', () => {
 
   it('toggles the thinking display and says it applies everywhere', async () => {
     const app = renderSettings()
-    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    for (let index = 0; index < 5; index += 1) await press(app, DOWN)
     await press(app, '\r')
     await waitFor(app, 'Thinking display')
 
@@ -729,7 +730,7 @@ describe('SettingsScreen', () => {
 
   it('cycles the reasoning effort', async () => {
     const app = renderSettings()
-    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    for (let index = 0; index < 5; index += 1) await press(app, DOWN)
     await press(app, '\r')
     await waitFor(app, 'Reasoning effort')
 
@@ -744,7 +745,7 @@ describe('SettingsScreen', () => {
 
   it('sets and clears the output ceiling', async () => {
     const app = renderSettings()
-    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    for (let index = 0; index < 5; index += 1) await press(app, DOWN)
     await press(app, '\r')
     await waitFor(app, 'Output limit')
 
@@ -781,7 +782,7 @@ describe('SettingsScreen', () => {
 
   it('rejects a nonsense ceiling rather than writing it', async () => {
     const app = renderSettings()
-    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    for (let index = 0; index < 5; index += 1) await press(app, DOWN)
     await press(app, '\r')
     await waitFor(app, 'Output limit')
     await press(app, DOWN)
@@ -964,5 +965,25 @@ describe('SettingsScreen', () => {
     await waitFor(app, 'not a port')
     // A value the server cannot bind would be a web UI that silently never starts.
     expect(readData('config.yml').web.port).toBe(7717)
+  })
+
+  it('points the reviewer at a decision model, and writes it down', async () => {
+    const app = renderSettings()
+    await moveTo(app, 'Classifier')
+    await press(app, '\r')
+    await waitFor(app, 'Backend')
+
+    // commandcode → ollaya: the local decision model, no key and no round trip.
+    await press(app, '\r')
+    await waitUntil(() => readData('config.yml').classifier?.backend === 'ollaya')
+
+    // A model the local backend should ask; empty means the backend's own default.
+    await moveTo(app, 'Model')
+    await press(app, '\r')
+    await waitFor(app, 'Classifier model')
+    app.stdin.write('laya')
+    await tick(20)
+    app.stdin.write('\r')
+    await waitUntil(() => readData('config.yml').classifier?.model === 'laya')
   })
 })

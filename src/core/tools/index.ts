@@ -41,7 +41,8 @@ export { shellTool } from './shell.js'
 export { taskTool } from './task.js'
 export { createWebSearchTool } from './web-search.js'
 export { createReadSkillTool } from './read-skill.js'
-export { JevReviewer, createJevReviewer } from './jev.js'
+export { Classifier, createClassifier, dangerousReviewer } from '../classifier/index.js'
+export type { ClassifierQuestion, ClassifierAnswers, ClassifierOptions } from '../classifier/index.js'
 
 export const builtinTools = [
   readFileTool,

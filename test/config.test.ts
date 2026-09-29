@@ -81,6 +81,31 @@ describe('reasoning effort', () => {
   })
 })
 
+describe('the classifier', () => {
+  it('points at the hosted model when the file says nothing', () => {
+    expect(readConfig()?.classifier).toEqual({ backend: 'commandcode' })
+  })
+
+  it('keeps a config that never heard of it, and the old timeout with it', () => {
+    // `classifier` is new; a file without it loads on the default, and the old
+    // permission timeout is still read so nothing that set it breaks.
+    writeFileSync(
+      configFile,
+      stringify({ ...base, permissions: { ...base.permissions, jevTimeoutMs: 5000 } }),
+    )
+
+    expect(readConfig()?.classifier.backend).toBe('commandcode')
+    expect(readConfig()?.classifier.timeoutMs).toBeUndefined()
+    expect(readConfig()?.permissions.jevTimeoutMs).toBe(5000)
+  })
+
+  it('takes its own timeout when one is set', () => {
+    writeFileSync(configFile, stringify({ ...base, classifier: { backend: 'ollaya', timeoutMs: 800 } }))
+
+    expect(readConfig()?.classifier).toMatchObject({ backend: 'ollaya', timeoutMs: 800 })
+  })
+})
+
 describe('display settings', () => {
   it('defaults to showing everything when the file predates them', () => {
     expect(readDisplay()).toEqual({ tools: 'full', thinking: 'on' })

@@ -4,6 +4,7 @@ import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { LoadedConfig } from '../src/core/config/load.js'
+import type { ClassifierConfig } from '../src/core/config/schema.js'
 import type { Tool } from '../src/core/tools/types.js'
 
 // Point the app at a throwaway home *before* the config modules load.
@@ -26,6 +27,7 @@ const loadedConfig = (
   baseURL: string,
   apiKey: string | false = 'k',
   browser = false,
+  classifier: ClassifierConfig = { backend: 'commandcode' },
 ): LoadedConfig => ({
   config: {
     provider: 'test',
@@ -39,6 +41,7 @@ const loadedConfig = (
     gateways: {},
     web: { enabled: true, host: '127.0.0.1', port: 7717 },
     permissions: { mode: 'auto', allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
+    classifier,
     browser: {
       enabled: browser,
       chromePath: null,
@@ -90,6 +93,52 @@ describe('createRuntime', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     const runtime = createRuntime(loadedConfig('https://api.openai.com/v1'), process.cwd())
+    expect(await runtime.permissions?.decide(writeTool, { command: 'npm test' })).toBe('ask')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('reviews with a local Ollaya even when the chat provider is not Command Code', async () => {
+    const fetchMock = noul(0.1)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const runtime = createRuntime(
+      loadedConfig('https://api.openai.com/v1', false, false, { backend: 'ollaya' }),
+      process.cwd(),
+    )
+    expect(await runtime.permissions?.decide(writeTool, { command: 'npm test' })).toBe('allow')
+
+    expect(fetchMock).toHaveBeenCalledWith('http://127.0.0.1:11435/v1/systemone', expect.anything())
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(body.model).toBe('winnow:e4b')
+  })
+
+  it('honors an explicit custom endpoint and model', async () => {
+    const fetchMock = noul(0.2)
+    vi.stubGlobal('fetch', fetchMock)
+
+    const runtime = createRuntime(
+      loadedConfig('https://api.openai.com/v1', 'k', false, {
+        backend: 'custom',
+        url: 'http://classifier.test/v1',
+        model: 'my-model',
+      }),
+      process.cwd(),
+    )
+    await runtime.permissions?.decide(writeTool, { command: 'npm test' })
+
+    expect(fetchMock).toHaveBeenCalledWith('http://classifier.test/v1/systemone', expect.anything())
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(body.model).toBe('my-model')
+  })
+
+  it('asks when a custom backend names no url', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const runtime = createRuntime(
+      loadedConfig('https://api.openai.com/v1', 'k', false, { backend: 'custom' }),
+      process.cwd(),
+    )
     expect(await runtime.permissions?.decide(writeTool, { command: 'npm test' })).toBe('ask')
     expect(fetchMock).not.toHaveBeenCalled()
   })

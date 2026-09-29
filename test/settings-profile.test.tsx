@@ -50,6 +50,7 @@ const config = {
   gateways: {},
   web: { enabled: true, host: '127.0.0.1', port: 7717 },
   permissions: { mode: 'ask' as const, allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
+  classifier: { backend: 'commandcode' as const },
   browser: { enabled: true, chromePath: null, headless: true, profileDir: null, cdpUrl: null, keepSnapshots: 2 },
 }
 writeFileSync(path.join(home, 'config.yml'), stringify(config))

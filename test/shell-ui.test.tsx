@@ -23,6 +23,7 @@ const { CONFIG } = vi.hoisted(() => ({
       jevThreshold: 0.35,
       jevTimeoutMs: 1500,
     },
+    classifier: { backend: 'commandcode' as const },
   },
 }))
 

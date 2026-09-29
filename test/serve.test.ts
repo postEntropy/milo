@@ -60,6 +60,7 @@ const configWith = (
     display: { tools: 'full', thinking: 'on' },
     gateways,
     permissions: { mode: 'ask', allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
+    classifier: { backend: 'commandcode' },
     ...extra,
   })
 

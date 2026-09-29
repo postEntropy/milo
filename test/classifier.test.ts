@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { JevReviewer } from '../src/core/tools/jev.js'
+import { Classifier, createClassifier, dangerousReviewer } from '../src/core/classifier/index.js'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -11,16 +11,16 @@ const answering = (noul: number) =>
       new Response(JSON.stringify({ answers: { dangerous: { noul } } }), { status: 200 }),
   )
 
-describe('JevReviewer', () => {
+describe('Classifier', () => {
   it('posts a typed noul question and parses the probability', async () => {
     const fetchMock = answering(0.93)
     vi.stubGlobal('fetch', fetchMock)
 
-    const reviewer = new JevReviewer({
+    const classifier = new Classifier({
       baseURL: 'https://api.commandcode.ai/provider/v1',
       apiKey: 'k',
     })
-    const probability = await reviewer.review('Command to run:\nrm -rf /')
+    const probability = await classifier.reviewDanger('Command to run:\nrm -rf /')
 
     expect(probability).toBeCloseTo(0.93)
     expect(fetchMock).toHaveBeenCalledWith(
@@ -36,19 +36,39 @@ describe('JevReviewer', () => {
     expect(body.state).toContain('rm -rf /')
   })
 
+  it('asks the model it is given, so a local backend names its own', async () => {
+    const fetchMock = answering(0.2)
+    vi.stubGlobal('fetch', fetchMock)
+
+    await createClassifier({ baseURL: 'http://127.0.0.1:11435/v1', model: 'winnow:e4b' }).reviewDanger('s')
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(body.model).toBe('winnow:e4b')
+  })
+
+  it('sends no authorization header without a key', async () => {
+    const fetchMock = answering(0.1)
+    vi.stubGlobal('fetch', fetchMock)
+
+    await new Classifier({ baseURL: 'http://127.0.0.1:11435/v1' }).reviewDanger('s')
+
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>
+    expect(headers.authorization).toBeUndefined()
+  })
+
   it('clamps out-of-range probabilities', async () => {
     vi.stubGlobal('fetch', answering(1.7))
-    const reviewer = new JevReviewer({ baseURL: 'https://x.test/v1' })
-    expect(await reviewer.review('s')).toBe(1)
+    const classifier = new Classifier({ baseURL: 'https://x.test/v1' })
+    expect(await classifier.reviewDanger('s')).toBe(1)
   })
 
   it('serves identical states from the cache', async () => {
     const fetchMock = answering(0.1)
     vi.stubGlobal('fetch', fetchMock)
 
-    const reviewer = new JevReviewer({ baseURL: 'https://x.test/v1' })
-    await reviewer.review('same state')
-    await reviewer.review('same state')
+    const classifier = new Classifier({ baseURL: 'https://x.test/v1' })
+    await classifier.reviewDanger('same state')
+    await classifier.reviewDanger('same state')
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
@@ -57,16 +77,16 @@ describe('JevReviewer', () => {
     const fetchMock = answering(0.1)
     vi.stubGlobal('fetch', fetchMock)
 
-    const reviewer = new JevReviewer({ baseURL: 'https://x.test/v1', cache: false })
-    await reviewer.review('same state')
-    await reviewer.review('same state')
+    const classifier = new Classifier({ baseURL: 'https://x.test/v1', cache: false })
+    await classifier.reviewDanger('same state')
+    await classifier.reviewDanger('same state')
 
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('throws on a non-ok response', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 401 })))
-    await expect(new JevReviewer({ baseURL: 'https://x.test/v1' }).review('s')).rejects.toThrow(/401/)
+    await expect(new Classifier({ baseURL: 'https://x.test/v1' }).reviewDanger('s')).rejects.toThrow(/401/)
   })
 
   it('throws when the answer carries no probability', async () => {
@@ -74,7 +94,7 @@ describe('JevReviewer', () => {
       'fetch',
       vi.fn(async () => new Response(JSON.stringify({ answers: {} }), { status: 200 })),
     )
-    await expect(new JevReviewer({ baseURL: 'https://x.test/v1' }).review('s')).rejects.toThrow(
+    await expect(new Classifier({ baseURL: 'https://x.test/v1' }).reviewDanger('s')).rejects.toThrow(
       /no probability/,
     )
   })
@@ -90,7 +110,13 @@ describe('JevReviewer', () => {
       ),
     )
 
-    const reviewer = new JevReviewer({ baseURL: 'https://x.test/v1', timeoutMs: 20 })
-    await expect(reviewer.review('slow')).rejects.toThrow()
+    const classifier = new Classifier({ baseURL: 'https://x.test/v1', timeoutMs: 20 })
+    await expect(classifier.reviewDanger('slow')).rejects.toThrow()
+  })
+
+  it('hands the permission layer a one-number reviewer', async () => {
+    vi.stubGlobal('fetch', answering(0.4))
+    const reviewer = dangerousReviewer(new Classifier({ baseURL: 'https://x.test/v1' }))
+    expect(await reviewer.review('rm -rf /')).toBeCloseTo(0.4)
   })
 })

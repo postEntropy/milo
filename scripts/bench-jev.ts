@@ -1,13 +1,15 @@
 #!/usr/bin/env node
 /**
- * Measures `typesafe/jev` latency (and sanity-checks its verdicts) against the
- * Command Code Provider API. Needs COMMANDCODE_API_KEY (or CMD_API_KEY).
+ * Measures the decision model's latency (and sanity-checks its verdicts). Runs
+ * against the hosted `typesafe/jev` by default — needs COMMANDCODE_API_KEY (or
+ * CMD_API_KEY) — or against a local Ollaya, which needs no key.
  *
  *   npm run bench:jev
  *   RUNS=10 npm run bench:jev
+ *   CLASSIFIER_BASE_URL=http://127.0.0.1:11435/v1 CLASSIFIER_MODEL=winnow:e4b npm run bench:jev
  */
 import process from 'node:process'
-import { JevReviewer } from '../src/core/tools/jev.js'
+import { Classifier } from '../src/core/classifier/index.js'
 
 const COMMANDS = [
   'ls -la',
@@ -27,17 +29,28 @@ function percentile(sorted: number[], p: number): number {
 }
 
 async function main(): Promise<void> {
+  const baseURL =
+    process.env.CLASSIFIER_BASE_URL ??
+    process.env.JEV_BASE_URL ??
+    'https://api.commandcode.ai/provider/v1'
   const apiKey = process.env.COMMANDCODE_API_KEY ?? process.env.CMD_API_KEY
-  if (!apiKey) {
-    console.error('Set COMMANDCODE_API_KEY (or CMD_API_KEY) to benchmark jev.')
+  // The hosted model is keyed; a local Ollaya is not.
+  if (baseURL.includes('commandcode.ai') && !apiKey) {
+    console.error('Set COMMANDCODE_API_KEY (or CMD_API_KEY) to benchmark the hosted jev.')
     process.exitCode = 1
     return
   }
 
-  const baseURL = process.env.JEV_BASE_URL ?? 'https://api.commandcode.ai/provider/v1'
   const runs = Number(process.env.RUNS ?? 3)
   // cache:false so repeated runs actually measure the network, not the LRU.
-  const reviewer = new JevReviewer({ baseURL, apiKey, cache: false, timeoutMs: 10_000 })
+  const reviewer = new Classifier({
+    baseURL,
+    apiKey,
+    model: process.env.CLASSIFIER_MODEL,
+    cache: false,
+    timeoutMs: 10_000,
+  })
+  console.log('classifier: %s · %s', baseURL, process.env.CLASSIFIER_MODEL ?? 'typesafe/jev')
 
   const latencies: number[] = []
   const verdicts = new Map<string, number[]>()
@@ -46,7 +59,7 @@ async function main(): Promise<void> {
     for (const command of COMMANDS) {
       const started = performance.now()
       try {
-        const probability = await reviewer.review(`Command to run:\n${command}`)
+        const probability = await reviewer.reviewDanger(`Command to run:\n${command}`)
         const elapsed = performance.now() - started
         latencies.push(elapsed)
         const list = verdicts.get(command) ?? []

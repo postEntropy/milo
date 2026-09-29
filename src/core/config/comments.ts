@@ -51,6 +51,13 @@ export const CONFIG_NOTES: Record<string, string> = {
   'permissions.mode': 'ask, auto or yolo. One value for every surface.',
   'permissions.allow': 'Tools never asked about. Beats the rules, so it is a blanket yes.',
   'permissions.deny': 'Tools refused outright. Outranked only by yolo.',
+  'permissions.jevTimeoutMs': 'Superseded by classifier.timeoutMs; kept so an older file still loads.',
+
+  classifier: 'The decision model an auto-mode review is asked of: hosted jev, a local Ollaya, or your own.',
+  'classifier.backend': 'commandcode (hosted, on the chat provider), ollaya (local, TypeSafe-compatible), or custom.',
+  'classifier.model': 'The model to ask, e.g. winnow:e4b, laya, typesafe/jev. Absent, the backend default.',
+  'classifier.url': 'For ollaya/custom: a TypeSafe-compatible base URL. Absent, Ollaya on 127.0.0.1:11435.',
+  'classifier.timeoutMs': 'Abort a review after this long, then fail closed to asking.',
 
   browser: 'The Chromium Milo drives for its browser tools. Off until it is turned on.',
   'browser.enabled': 'Off means the three browser tools are not in the catalog at all.',

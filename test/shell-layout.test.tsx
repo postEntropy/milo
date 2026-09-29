@@ -18,6 +18,7 @@ writeFileSync(
       providers: { commandcode: { baseURL: 'https://api.commandcode.ai/provider/v1' } },
       gateways: {},
       permissions: { mode: 'ask', allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
+      classifier: { backend: 'commandcode' },
     },
     null,
     2,

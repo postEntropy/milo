@@ -13,7 +13,8 @@ import { AgentRuntime } from './runtime.js'
 import { FileRecapStore, FileSessionStore, pruneSessions } from './sessions/index.js'
 import { createSearchProvider } from './search/index.js'
 import { discoverSkills, ensureSkillsDir } from './skills/index.js'
-import { createJevReviewer } from './tools/jev.js'
+import { createClassifier, dangerousReviewer } from './classifier/index.js'
+import { OLLAYA_DEFAULT_MODEL, OLLAYA_URL } from './config/schema.js'
 import { resolveToolPath } from './tools/walk.js'
 import {
   DefaultPermissionPolicy,
@@ -127,16 +128,47 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   })
 }
 
-/** The reviewer is only available where the decision model is: Command Code. */
+/**
+ * The danger reviewer, from whichever decision model the install points at. The
+ * hosted one still rides on the chat provider, so it exists only where that model
+ * is; a local Ollaya or a custom endpoint stands on its own, independent of the
+ * provider the conversation runs on. Absent, `auto` degrades to asking.
+ */
 function createReviewer(loaded: LoadedConfig): DangerReviewer | null {
-  if (!loaded.provider.baseURL.includes('commandcode.ai')) return null
-  const apiKey = typeof loaded.provider.apiKey === 'string' ? loaded.provider.apiKey : undefined
-  if (!apiKey) return null
+  const config = loaded.config.classifier
+  // The classifier's own timeout wins; a file that only set the old permission
+  // key keeps working, hence the fallback.
+  const timeoutMs = config.timeoutMs ?? loaded.config.permissions.jevTimeoutMs
 
-  return createJevReviewer({
-    baseURL: loaded.provider.baseURL,
-    apiKey,
-    headers: loaded.provider.headers,
-    timeoutMs: loaded.config.permissions.jevTimeoutMs,
-  })
+  if (config.backend === 'commandcode') {
+    if (!loaded.provider.baseURL.includes('commandcode.ai')) return null
+    const apiKey = typeof loaded.provider.apiKey === 'string' ? loaded.provider.apiKey : undefined
+    if (!apiKey) return null
+
+    return dangerousReviewer(
+      createClassifier({
+        baseURL: loaded.provider.baseURL,
+        apiKey,
+        headers: loaded.provider.headers,
+        model: config.model,
+        timeoutMs,
+      }),
+    )
+  }
+
+  // ollaya | custom: a TypeSafe-compatible endpoint of its own, so the reviewer
+  // no longer has to live where the chat does.
+  const baseURL = config.url ?? (config.backend === 'ollaya' ? OLLAYA_URL : undefined)
+  if (!baseURL) return null
+  const key = config.keyEnv ? process.env[config.keyEnv]?.trim() : undefined
+
+  return dangerousReviewer(
+    createClassifier({
+      baseURL,
+      // Ollaya accepts any value; it is a local daemon, not a keyed service.
+      apiKey: key || (config.backend === 'ollaya' ? 'local' : undefined),
+      model: config.model ?? (config.backend === 'ollaya' ? OLLAYA_DEFAULT_MODEL : undefined),
+      timeoutMs,
+    }),
+  )
 }
