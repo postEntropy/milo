@@ -314,16 +314,16 @@ export class FileSessionStore implements SessionStore {
   }
 
   /**
-   * Deletes every session nothing was ever said in — a record a run left behind
-   * without ever speaking in it. A session a scope is bound to is spared: a live
-   * conversation is not a leftover, and a binding to a session that is gone
-   * would only start a new one under the person's feet.
+   * Deletes every session nothing was ever said in. A binding is no reason to
+   * spare one: an empty record holds nothing, and a scope bound to a session
+   * that is gone simply starts a fresh conversation on its next message — which
+   * is what an empty session already is. This is for the leftovers an older run
+   * wrote before the store learned to wait for the first turn.
    */
   async pruneEmpty(): Promise<string[]> {
-    const protect = new Set(this.boundIds())
     const removed: string[] = []
     for (const summary of await this.list()) {
-      if (summary.messageCount > 0 || protect.has(summary.id)) continue
+      if (summary.messageCount > 0) continue
       await this.remove(summary.id)
       removed.push(summary.id)
     }

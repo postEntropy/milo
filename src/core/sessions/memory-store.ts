@@ -112,10 +112,9 @@ export class MemorySessionStore implements SessionStore {
   }
 
   async pruneEmpty(): Promise<string[]> {
-    const protect = new Set(this.bindings.values())
     const removed: string[] = []
     for (const [id, record] of [...this.records]) {
-      if (record.messages.length > 0 || protect.has(id)) continue
+      if (record.messages.length > 0) continue
       await this.remove(id)
       removed.push(id)
     }

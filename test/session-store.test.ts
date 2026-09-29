@@ -289,15 +289,24 @@ describe('pruning sessions nothing was said in', () => {
     expect((await store.list()).map((entry) => entry.id)).toEqual(['brave-wolf-2'])
   })
 
-  it('never removes an empty session a scope is bound to', async () => {
+  it('removes an empty session even when a scope is bound to it', async () => {
     const store = new FileSessionStore({ dir: tempDir() })
     await store.save(empty('calm-otter-1', 100), INITIAL_SESSION_VERSION)
     await store.save(empty('brave-wolf-2', 200), INITIAL_SESSION_VERSION)
     await store.setBinding('cli:main', 'calm-otter-1')
 
-    // The bound one is a live conversation someone is still in, even if nothing
-    // has been said in it yet.
-    expect(await store.pruneEmpty()).toEqual(['brave-wolf-2'])
+    // An empty record holds nothing: a binding to it only means the next message
+    // opens a fresh conversation, which is what it is anyway.
+    expect((await store.pruneEmpty()).sort()).toEqual(['brave-wolf-2', 'calm-otter-1'])
+    expect((await store.list()).map((entry) => entry.id)).toEqual([])
+  })
+
+  it('keeps a bound session that was spoken in', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    await store.save(record('calm-otter-1', 100), INITIAL_SESSION_VERSION)
+    await store.setBinding('cli:main', 'calm-otter-1')
+
+    expect(await store.pruneEmpty()).toEqual([])
     expect(await store.load('calm-otter-1')).not.toBeNull()
   })
 

@@ -580,8 +580,9 @@ In the terminal, `milo` begins a new conversation every time it opens, and the o
 disk. `milo --continue` picks that one back up, and `milo --resume <id>` opens a specific one.
 `sessions.maxSessions` (default 50) caps the directory: at startup the oldest sessions beyond it are
 pruned, never one a scope is still bound to. Sessions nothing was ever said in are swept too, whatever
-the cap — a leftover older Milo left behind goes on the next launch. `0` lifts the cap. Pruning only
-trims the working transcript; the log `recall` and `search_history` read is untouched.
+the cap and whatever is bound to them — an empty record holds nothing, and a leftover older Milo left
+behind goes on the next launch. `0` lifts the cap. Pruning only trims the working transcript; the log
+`recall` and `search_history` read is untouched.
 
 Memory is keyed to the install, not the session or the conversation: a `/new` never changes what Milo
 remembers. Leaving a session writes a short **recap** in the model's own words, kept out of the session
