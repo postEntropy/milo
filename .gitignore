@@ -8,3 +8,4 @@ coverage
 # Local agent state (taste, plans): not part of the project.
 .commandcode/
 milo-architectural-review.md
+worklog.md
