@@ -283,10 +283,9 @@ export class AgentRuntime {
     const record = await this.store.create()
     if (title?.trim()) record.title = title.trim()
     await this.store.setBinding(scopeKey(scope), record.id)
-    const session = this.adopt(record, scope, options)
-    // Write it out now, so it shows up in /sessions and is /resume-able right away.
-    await session.persist()
-    return session
+    // Not written out here: a session takes its file on its first turn, so a run
+    // that opens a conversation and never speaks in it leaves nothing behind.
+    return this.adopt(record, scope, options)
   }
 
   /**

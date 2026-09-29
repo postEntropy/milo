@@ -127,15 +127,26 @@ describe('FileSessionStore', () => {
     expect(await store.getBinding('bad:id')).toBeUndefined()
   })
 
-  it('claims the id on disk when it hands one out', async () => {
+  it('writes nothing until the first save, and still keeps its ids apart', async () => {
     const dir = tempDir()
     const store = new FileSessionStore({ dir })
     const created = await store.create()
 
-    // The file exists from the moment the id does, so a second process cannot
-    // take the same nickname.
-    expect(readdirSync(dir)).toContain(`${created.id}.json`)
+    // The id is minted in memory: a run that opens a conversation and never
+    // speaks in it must not leave a file behind.
+    expect(isValidSessionId(created.id)).toBe(true)
+    expect(readdirSync(dir)).not.toContain(`${created.id}.json`)
+
+    // The record is still served by id, so a turn in this process can run on it.
+    expect((await store.load(created.id))?.id).toBe(created.id)
+
+    // The next id does not repeat one this process is still holding, though
+    // neither is on disk yet.
     expect(await store.create()).not.toBe(created.id)
+
+    // The file appears on the first save.
+    await store.save(created, created.version)
+    expect(readdirSync(dir)).toContain(`${created.id}.json`)
   })
 
   it('persists bindings across store instances', async () => {
@@ -257,6 +268,64 @@ describe('pruning old sessions', () => {
   })
 })
 
+// A run that opens a conversation and never speaks in it leaves a record nothing
+// will ever read: no turn, no recap, only its own name. It is swept on the way
+// in, whatever the count limit says.
+describe('pruning sessions nothing was said in', () => {
+  const empty = (id: string, updatedAt = Date.now()): SessionRecord => ({
+    id,
+    createdAt: updatedAt,
+    updatedAt,
+    messages: [],
+    version: INITIAL_SESSION_VERSION,
+  })
+
+  it('removes the leftovers and keeps the sessions that were spoken in', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    await store.save(empty('calm-otter-1', 100), INITIAL_SESSION_VERSION)
+    await store.save(record('brave-wolf-2', 200), INITIAL_SESSION_VERSION)
+
+    expect(await store.pruneEmpty()).toEqual(['calm-otter-1'])
+    expect((await store.list()).map((entry) => entry.id)).toEqual(['brave-wolf-2'])
+  })
+
+  it('never removes an empty session a scope is bound to', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    await store.save(empty('calm-otter-1', 100), INITIAL_SESSION_VERSION)
+    await store.save(empty('brave-wolf-2', 200), INITIAL_SESSION_VERSION)
+    await store.setBinding('cli:main', 'calm-otter-1')
+
+    // The bound one is a live conversation someone is still in, even if nothing
+    // has been said in it yet.
+    expect(await store.pruneEmpty()).toEqual(['brave-wolf-2'])
+    expect(await store.load('calm-otter-1')).not.toBeNull()
+  })
+
+  it('sweeps them even when the count limit is lifted', async () => {
+    const dir = tempDir()
+    const store = new FileSessionStore({ dir })
+    const recaps = new FileRecapStore({ dir: path.join(dir, 'recaps') })
+    await store.save(empty('calm-otter-1', 100), INITIAL_SESSION_VERSION)
+    await store.save(record('brave-wolf-2', 200), INITIAL_SESSION_VERSION)
+
+    // `0` lifts the cap on how many are kept — it is not a promise to keep the
+    // debris, so the empty one goes and its recap with it.
+    await recaps.write({ session: 'calm-otter-1', text: 'x', sourceUpdatedAt: 100, at: 100 })
+    expect(await pruneSessions(store, recaps, 0)).toBe(1)
+    expect((await store.list()).map((entry) => entry.id)).toEqual(['brave-wolf-2'])
+    expect(await recaps.read('calm-otter-1')).toBeNull()
+  })
+
+  it('prunes the in-memory store the same way', async () => {
+    const store = new MemorySessionStore()
+    await store.save(empty('calm-otter-1', 100), INITIAL_SESSION_VERSION)
+    await store.save(record('brave-wolf-2', 200), INITIAL_SESSION_VERSION)
+
+    expect(await store.pruneEmpty()).toEqual(['calm-otter-1'])
+    expect((await store.list()).map((entry) => entry.id)).toEqual(['brave-wolf-2'])
+  })
+})
+
 // Two store instances over one directory stand in for two processes.
 describe('concurrent writers', () => {
   function message(text: string) {
@@ -268,21 +337,23 @@ describe('concurrent writers', () => {
     const first = new FileSessionStore({ dir })
     const second = new FileSessionStore({ dir })
     const created = await first.create()
+    // On disk before anyone opens it: the write is what a second process reads.
+    await first.save(created, created.version)
 
     // Both processes open the same session and hold their own copy.
     const one = (await first.load(created.id))!
     const two = (await second.load(created.id))!
 
     one.messages.push(message('from the first'))
-    await first.save(one, created.version)
+    await first.save(one, one.version)
 
     two.messages.push(message('from the second'))
-    await expect(second.save(two, created.version)).rejects.toBeInstanceOf(SessionConflictError)
+    await expect(second.save(two, two.version)).rejects.toBeInstanceOf(SessionConflictError)
 
     // The stale copy did not erase the turn that landed in between.
     const onDisk = (await first.load(created.id))!
     expect(onDisk.messages).toEqual([message('from the first')])
-    expect(onDisk.version).toBe(created.version + 1)
+    expect(onDisk.version).toBe(created.version + 2)
   })
 
   it('accepts the stale writer once it rereads the record', async () => {
@@ -290,10 +361,11 @@ describe('concurrent writers', () => {
     const first = new FileSessionStore({ dir })
     const second = new FileSessionStore({ dir })
     const created = await first.create()
+    await first.save(created, created.version)
 
     const one = (await first.load(created.id))!
     one.messages.push(message('from the first'))
-    await first.save(one, created.version)
+    await first.save(one, one.version)
 
     // Retrying against the revision actually on disk is the whole recovery path.
     const two = (await second.load(created.id))!
@@ -487,6 +559,9 @@ describe('session leases', () => {
       const dir = tempDir()
       const store = new FileSessionStore({ dir })
       const created = await store.create()
+      // The children are separate processes: they only see a record that is on
+      // disk, so it is written once here before they open it.
+      await store.save(created, created.version)
       const child = fileURLToPath(new URL('./fixtures/lease-child.ts', import.meta.url))
 
       const run = (label: string) =>
@@ -507,12 +582,12 @@ describe('session leases', () => {
       await Promise.all([run('A'), run('B')])
 
       // Both turns are there — nobody's write was lost — and the revision moved
-      // exactly twice, which is what says the two saves were serialized instead
-      // of one being refused as stale.
+      // exactly twice more, which is what says the two saves were serialized
+      // instead of one being refused as stale.
       const final = (await store.load(created.id))!
       const texts = final.messages.map((message) => (message.content[0] as { text: string }).text)
       expect([...texts].sort()).toEqual(['A', 'B'])
-      expect(final.version).toBe(created.version + 2)
+      expect(final.version).toBe(created.version + 3)
     },
     60_000,
   )

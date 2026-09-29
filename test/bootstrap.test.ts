@@ -177,12 +177,28 @@ describe('createRuntime', () => {
   })
 
   it('begins a new conversation on a new run, and keeps the one it left', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async (_input: string | URL, _init?: RequestInit) =>
+          new Response(
+            'data: {"choices":[{"delta":{"content":"hi there"}}]}\n\ndata: [DONE]\n\n',
+            { status: 200, headers: { 'content-type': 'text/event-stream' } },
+          ),
+      ),
+    )
+
     const cli = { gateway: 'cli', conversationId: 'restart' }
 
     const run = createRuntime(loadedConfig('https://x.test/v1'), process.cwd())
     const opened = await run.sessionFor(cli)
     // The same run keeps talking in the conversation it opened.
     expect((await run.sessionFor(cli)).id).toBe(opened.id)
+    // Spoken in, so there is something to keep: a conversation that is opened and
+    // never used leaves nothing behind.
+    for await (const _event of opened.send('remember me')) {
+      // drain
+    }
 
     // A restart is a second run over the same home, and it opens its own.
     await run.close()
@@ -216,15 +232,21 @@ describe('createRuntime', () => {
 
     const dir = path.join(home, 'history')
     const [file] = readdirSync(dir).sort()
-    const log = readFileSync(path.join(dir, file!), 'utf8').trim().split('\n')
+    // Other tests in this file write to the same day file, so this reads back
+    // the lines this turn wrote rather than the whole log.
+    const log = readFileSync(path.join(dir, file!), 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line))
+      .filter((entry) => entry.session === session.id)
 
     expect(file).toMatch(/^\d{4}-\d{2}-\d{2}\.jsonl$/)
     expect(log).toHaveLength(2)
-    expect(JSON.parse(log[0]!)).toMatchObject({
+    expect(log[0]).toMatchObject({
       kind: 'user',
       text: 'write this down',
       session: session.id,
     })
-    expect(JSON.parse(log[1]!)).toMatchObject({ kind: 'assistant', text: 'hi there' })
+    expect(log[1]).toMatchObject({ kind: 'assistant', text: 'hi there' })
   })
 })

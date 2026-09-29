@@ -106,6 +106,13 @@ export interface SessionStore {
    * so a prune waits for a turn the way a removal does.
    */
   prune(options: { keep: number; protect?: Iterable<string> }): Promise<string[]>
+  /**
+   * Deletes every session nothing was ever said in — a record a run left behind
+   * without ever speaking in it. A session a scope is bound to is never pruned,
+   * for the same reason `prune` spares one: it is a live conversation, not a
+   * leftover. Returns the ids removed.
+   */
+  pruneEmpty(): Promise<string[]>
   getBinding(scopeKey: string): Promise<string | undefined>
   setBinding(scopeKey: string, id: string): Promise<void>
 }

@@ -57,6 +57,9 @@ describe('AgentRuntime sessions', () => {
     const run = new AgentRuntime(runtimeOptions(dir))
     const opened = await run.sessionFor(cli)
     expect((await run.sessionFor(cli)).id).toBe(opened.id)
+    // Spoken in, so it is a session: one that is opened and never used leaves
+    // nothing behind to resume.
+    await drain(opened.send('hi'))
 
     // A restart is a second run over the same store: a new conversation, with the
     // one left behind still there to resume.
@@ -76,6 +79,8 @@ describe('AgentRuntime sessions', () => {
     const second = await runtime.newSession(cli, 'my project')
     expect(second.id).not.toBe(first.id)
     expect(second.title).toBe('my project')
+    // A session is listed once it has a turn in it; the title rides along.
+    await drain(second.send('hello'))
 
     const list = await runtime.listSessions()
     expect(list.map((entry) => entry.id)).toEqual(expect.arrayContaining([first.id, second.id]))

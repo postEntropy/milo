@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import lockfile, { type LockOptions } from 'proper-lockfile'
-import { ensurePrivateDir, writePrivateFile, PRIVATE_FILE_MODE } from '../../util/fs.js'
+import { ensurePrivateDir, writePrivateFile } from '../../util/fs.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import type { Message } from '../providers/types.js'
@@ -81,51 +81,51 @@ export class FileSessionStore implements SessionStore {
   private queue: Promise<unknown> = Promise.resolve()
   /** Who holds a session in this process, so a turn waits on its own mutex. */
   private readonly leases = new KeyedMutex()
+  /**
+   * Sessions this process has minted but not yet written. A session takes its
+   * file on the first save, so a run that opens a conversation and never speaks
+   * in it leaves nothing behind; until then it lives here and is served by id.
+   */
+  private readonly pending = new Map<string, SessionRecord>()
 
   constructor(options: FileSessionStoreOptions) {
     this.dir = options.dir
     this.now = options.now ?? Date.now
   }
 
+  /**
+   * Mints an id and returns an empty record — in memory, not on disk. A session
+   * takes its file on the first save, so a run that opens a conversation and
+   * never speaks in it leaves nothing behind to list or prune. The id is still
+   * ours: `generateNickname` is checked against both the records this process
+   * has handed out and the ones already on disk, so a second process cannot take
+   * a nickname this one is holding.
+   */
   async create(): Promise<SessionRecord> {
     return this.run(() => {
-      ensurePrivateDir(this.dir)
       const timestamp = this.now()
-
-      for (let attempt = 0; attempt < 100; attempt += 1) {
-        const id = generateNickname((candidate) => existsSync(this.fileFor(candidate)))
-        const record = {
-          id,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-          messages: [],
-          version: INITIAL_SESSION_VERSION,
-        } satisfies SessionRecord
-        // Creating the file exclusively is what makes the id ours: two `milo`
-        // processes picking the same nickname is only a race if nothing claims
-        // it, and the write is the claim.
-        if (this.claim(record)) return record
-      }
-      throw new Error('Could not find a free session id')
+      const id = generateNickname(
+        (candidate) => this.pending.has(candidate) || existsSync(this.fileFor(candidate)),
+      )
+      const record = {
+        id,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        messages: [],
+        version: INITIAL_SESSION_VERSION,
+      } satisfies SessionRecord
+      this.pending.set(id, record)
+      return structuredClone(record)
     })
-  }
-
-  /** Writes the record's file only if it does not exist yet. */
-  private claim(record: SessionRecord): boolean {
-    try {
-      writeFileSync(this.fileFor(record.id), `${JSON.stringify(record, null, 2)}\n`, {
-        flag: 'wx',
-        mode: PRIVATE_FILE_MODE,
-      })
-      return true
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'EEXIST') return false
-      throw error
-    }
   }
 
   async load(id: string): Promise<SessionRecord | null> {
     if (!isValidSessionId(id)) return null
+    // A record created here but not yet saved lives only in memory. It is
+    // handed back by id — a turn in this process runs against it — while `list`,
+    // which reads the directory, does not see it.
+    const pending = this.pending.get(id)
+    if (pending) return structuredClone(pending)
     const file = this.fileFor(id)
     if (!existsSync(file)) return null
     try {
@@ -152,6 +152,9 @@ export class FileSessionStore implements SessionStore {
           throw new SessionConflictError(record.id, expectedVersion, actual)
         }
         await writePrivateFile(file, `${JSON.stringify({ ...record, version: expectedVersion + 1 }, null, 2)}\n`)
+        // Materialized: from here the record is the file's, and a load reads it
+        // from disk rather than from the in-memory copy.
+        this.pending.delete(record.id)
       })
     })
   }
@@ -274,15 +277,15 @@ export class FileSessionStore implements SessionStore {
     if (!isValidSessionId(id)) return
     ensurePrivateDir(this.dir)
     const file = this.fileFor(id)
-    if (!existsSync(file)) return
-    // Under the turn lease, like a turn: taking it means a removal waits for the
-    // turn in flight rather than unlinking the record out from under it, and a
-    // save that had already read the revision cannot put the file straight back
-    // and make the deletion look like it never happened.
+    // A session minted but never saved has no file to unlink, but it still goes
+    // — and under the same lease, so a removal waits for the turn in flight
+    // whether or not the record reached the disk yet.
+    if (!this.pending.has(id) && !existsSync(file)) return
     const unlock = await this.leases.acquire(id)
     try {
       const release = await this.takeLock(turnTarget(file), TURN_LOCK_RETRIES)
       try {
+        this.pending.delete(id)
         rmSync(file, { force: true })
       } finally {
         await release()
@@ -304,6 +307,23 @@ export class FileSessionStore implements SessionStore {
     const removed: string[] = []
     for (const summary of summaries.slice(options.keep)) {
       if (keep.has(summary.id)) continue
+      await this.remove(summary.id)
+      removed.push(summary.id)
+    }
+    return removed
+  }
+
+  /**
+   * Deletes every session nothing was ever said in — a record a run left behind
+   * without ever speaking in it. A session a scope is bound to is spared: a live
+   * conversation is not a leftover, and a binding to a session that is gone
+   * would only start a new one under the person's feet.
+   */
+  async pruneEmpty(): Promise<string[]> {
+    const protect = new Set(this.boundIds())
+    const removed: string[] = []
+    for (const summary of await this.list()) {
+      if (summary.messageCount > 0 || protect.has(summary.id)) continue
       await this.remove(summary.id)
       removed.push(summary.id)
     }

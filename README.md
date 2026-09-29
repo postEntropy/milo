@@ -560,7 +560,9 @@ are not streamed — only the report comes back.
 ## Sessions
 
 A conversation is a **session** with its own name (`calm-otter-7`), stored as one JSON file under
-`~/.milo/sessions/`. A transport address is only a **binding** to the session attached to it, so the
+`~/.milo/sessions/`. The file is written on the session's **first turn**: a run that opens a
+conversation and never speaks in it leaves nothing behind, so opening the CLI or the web UI does not
+litter the directory. A transport address is only a **binding** to the session attached to it, so the
 same session can be picked up from any gateway. Bindings live in `sessions/bindings/<scope>.json`, one
 file per address. Two turns never run on one session at once: a turn takes a **lease** for as long as it
 runs, so two terminals that both bind `cli:main` take turns. The record carries a **revision**, so a
@@ -577,8 +579,9 @@ save built from a stale copy is refused instead of overwriting a newer one.
 In the terminal, `milo` begins a new conversation every time it opens, and the one you were in stays on
 disk. `milo --continue` picks that one back up, and `milo --resume <id>` opens a specific one.
 `sessions.maxSessions` (default 50) caps the directory: at startup the oldest sessions beyond it are
-pruned, never one a scope is still bound to. `0` lifts the cap. Pruning only trims the working
-transcript; the log `recall` and `search_history` read is untouched.
+pruned, never one a scope is still bound to. Sessions nothing was ever said in are swept too, whatever
+the cap — a leftover older Milo left behind goes on the next launch. `0` lifts the cap. Pruning only
+trims the working transcript; the log `recall` and `search_history` read is untouched.
 
 Memory is keyed to the install, not the session or the conversation: a `/new` never changes what Milo
 remembers. Leaving a session writes a short **recap** in the model's own words, kept out of the session

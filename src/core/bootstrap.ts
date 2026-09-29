@@ -71,9 +71,10 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
 
   const store = new FileSessionStore({ dir: sessionsDir() })
   const recaps = new FileRecapStore({ dir: recapsDir() })
-  // Every run leaves a session behind, so the directory is pruned on the way in.
-  // Not waited for: the first turn does not need it, and a prune is not a reason
-  // to keep someone waiting at the prompt.
+  // A run leaves a session behind once it is spoken in, so the directory is
+  // pruned on the way in — and the empties a run opened but never used are
+  // swept with it. Not waited for: the first turn does not need it, and a prune
+  // is not a reason to keep someone waiting at the prompt.
   void pruneSessions(store, recaps, loaded.config.sessions.maxSessions).catch((error) => {
     logWarn(`could not prune old sessions: ${errorMessage(error)}`)
   })

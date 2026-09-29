@@ -1,4 +1,4 @@
-import { mkdtempSync, } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -65,7 +65,10 @@ async function waitFor(lastFrame: () => string | undefined, text: string, timeou
   throw new Error(`timed out waiting for ${JSON.stringify(text)}`)
 }
 
-afterEach(() => cleanup())
+afterEach(() => {
+  cleanup()
+  vi.unstubAllGlobals()
+})
 
 describe('Shell', () => {
   it('continues into the settings hub after the first-run wizard of `milo setup`', async () => {
@@ -100,8 +103,10 @@ describe('Shell', () => {
   /**
    * One `milo` launch, far enough to know which conversation it is in: the
    * wizard hands over, and the header's first right-hand field is the session.
+   * With `say`, the conversation is spoken in, so it is written to disk and can
+   * be continued — a run that is opened and never used leaves nothing behind.
    */
-  async function launch(continueSession: boolean): Promise<string> {
+  async function launch(continueSession: boolean, say?: string): Promise<string> {
     const app = render(
       <Shell
         initial={null}
@@ -113,23 +118,50 @@ describe('Shell', () => {
     )
     app.stdin.write('\r')
 
+    let id: string | undefined
     const started = Date.now()
     while (Date.now() - started < 2000) {
       const match = /([a-z]+-[a-z]+-\d{1,3})/.exec(app.lastFrame() ?? '')
       if (match) {
-        app.unmount()
-        // The runtime closes on unmount, and the next launch reads what it wrote.
-        await tick(40)
-        return match[1]!
+        id = match[1]!
+        break
       }
       await tick(20)
     }
-    throw new Error('no session id in the header')
+    if (!id) throw new Error('no session id in the header')
+
+    if (say) {
+      app.stdin.write(say)
+      await tick(20)
+      app.stdin.write('\r')
+      // The message is written to the store before the model is called, so the
+      // session is on disk from here — whether or not the turn answers.
+      const file = path.join(home, 'sessions', `${id}.json`)
+      const deadline = Date.now() + 2000
+      while (!existsSync(file) && Date.now() < deadline) await tick(20)
+      if (!existsSync(file)) throw new Error(`session ${id} was never written`)
+    }
+
+    app.unmount()
+    // The runtime closes on unmount, and the next launch reads what it wrote.
+    await tick(40)
+    return id
   }
 
   it('opens a new conversation on each run, and `--continue` picks the last one up', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('data: {"choices":[{"delta":{"content":"hi"}}]}\n\ndata: [DONE]\n\n', {
+            status: 200,
+            headers: { 'content-type': 'text/event-stream' },
+          }),
+      ),
+    )
+
     const first = await launch(false)
-    const second = await launch(false)
+    const second = await launch(false, 'hello')
     expect(second).not.toBe(first)
 
     // The way back to the conversation this terminal left, without `/resume`.
