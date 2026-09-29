@@ -39,6 +39,8 @@ export interface SessionStats {
   title?: string
   createdAt: number
   updatedAt: number
+  /** What the person said and what the model answered — a tool result behind a
+   *  call is not a message of its own. */
   messages: number
   turns: number
   tokens: number
@@ -164,6 +166,20 @@ export function countTurns(messages: Message[]): number {
   return turns
 }
 
+/**
+ * The messages a surface draws as the conversation: what the person said and
+ * what the model answered. A tool result is not a message of its own — it
+ * belongs to the turn that called it, and one message can carry several calls —
+ * so counting it inflates the size shown for every conversation.
+ */
+export function countMessages(messages: Message[]): number {
+  let count = 0
+  for (const message of messages) {
+    if (message.role === 'user' || message.role === 'assistant') count += 1
+  }
+  return count
+}
+
 /** First line of the first thing the user said, for listing sessions. */
 export function previewOf(messages: Message[], limit = 80): string {
   for (const message of messages) {
@@ -186,7 +202,7 @@ export function toSummary(record: SessionRecord): SessionSummary {
     title: record.title,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
-    messageCount: record.messages.length,
+    messageCount: countMessages(record.messages),
     preview: previewOf(record.messages),
   }
 }

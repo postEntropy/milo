@@ -238,7 +238,8 @@ describe('Session', () => {
     const stats = session.stats()
 
     expect(stats.id).toBe(session.id)
-    expect(stats.messages).toBe(session.messages.length)
+    // The conversation, not the provider's list: one question and one answer.
+    expect(stats.messages).toBe(2)
     expect(stats.turns).toBe(1)
     expect(stats.tokens).toBeGreaterThan(0)
     expect(stats.compacted).toBe(false)

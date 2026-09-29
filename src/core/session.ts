@@ -16,6 +16,7 @@ import { runAgent } from './agent/loop.js'
 import { runSubagent } from './agent/subagent.js'
 import { buildSystemPrompt, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import {
+  countMessages,
   countTurns,
   digest,
   dropOldImages,
@@ -677,7 +678,7 @@ export class Session {
       title: this.record.title,
       createdAt: this.record.createdAt,
       updatedAt: this.record.updatedAt,
-      messages: this.messages.length,
+      messages: countMessages(this.messages),
       turns: countTurns(this.messages),
       tokens: estimateTokens(this.messages),
       systemTokens: this.lastSystemTokens,

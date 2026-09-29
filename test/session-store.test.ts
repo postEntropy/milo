@@ -49,6 +49,30 @@ describe('FileSessionStore', () => {
     expect(list[0]!.preview).toContain('hello')
   })
 
+  it('counts the conversation, not the tool results behind it', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    const created = await store.create()
+    created.messages.push(
+      { role: 'user', content: [{ type: 'text', text: 'take a shot and send it' }] },
+      // One assistant message carrying both calls, then one result message per
+      // call: a turn with two tool calls is one exchange, not four messages.
+      {
+        role: 'assistant',
+        content: [
+          { type: 'tool-call', id: 'c1', name: 'shell_command', args: { command: 'grim' } },
+          { type: 'tool-call', id: 'c2', name: 'send_file', args: { path: 'shot.png' } },
+        ],
+      },
+      { role: 'tool', content: [{ type: 'tool-result', id: 'c1', name: 'shell_command', content: 'ok', isError: false }] },
+      { role: 'tool', content: [{ type: 'tool-result', id: 'c2', name: 'send_file', content: 'Sent shot.png', isError: false }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'sent' }] },
+    )
+    await store.save(created, created.version)
+
+    const summary = (await store.list())[0]!
+    expect(summary.messageCount).toBe(3)
+  })
+
   it('keeps the ids it hands out unique', async () => {
     const store = new FileSessionStore({ dir: tempDir() })
     const ids = new Set<string>()
