@@ -11,6 +11,9 @@ export interface ChatMessage extends TranscriptMessage {
   tools?: string[]
   /** How long the model took before its first output of this turn, in ms. */
   thoughtMs?: number
+  /** When the turn's wait for its next output began: what the thought time is
+   *  measured from, and that its own line belongs on screen. */
+  waitingSince?: number
   /** Already on screen when the session was opened, so it does not settle in again. */
   loaded?: boolean
 }
@@ -28,7 +31,7 @@ const suggestions = [
  */
 function Attachments({ items }: { items: FrameAttachment[] }) {
   return <div className="attachments">{items.map((item) => item.image
-    ? <a className="attachment-image" key={item.id} href={attachmentUrl(item.id)} target="_blank" rel="noreferrer"><img src={attachmentUrl(item.id)} alt={item.name} loading="lazy" /></a>
+    ? <a className="attachment-image" key={item.id} href={attachmentUrl(item.id)}><img src={attachmentUrl(item.id)} alt={item.name} loading="lazy" /></a>
     : <a className="attachment-file" key={item.id} href={attachmentUrl(item.id)} download={item.name}><Icon name="file" size={16} /><span className="attachment-name">{item.name}</span><small className="attachment-size">{formatBytes(item.size)}</small></a>,
   )}</div>
 }
@@ -48,14 +51,14 @@ function ToolLines({ id, tools }: { id: string; tools: string[] }) {
   })}</>
 }
 
-export function MessageList({ messages, thinking, onPrompt }: { messages: ChatMessage[]; thinking: boolean; onPrompt(text: string): void }) {
+export function MessageList({ messages, thinking, onPrompt }: { messages: ChatMessage[]; thinking: boolean; onPrompt?(text: string): void }) {
   if (messages.length === 0) return (
     <section className="empty-state" aria-labelledby="welcome-title">
       <img className="empty-brand" src={miloAvatar} alt="" />
       <h1 id="welcome-title">How can I help today?</h1>
       <div className="suggestion-grid">
         {suggestions.map((item) => (
-          <button className="suggestion" key={item.title} type="button" onClick={() => onPrompt(item.prompt)}>
+          <button className="suggestion" key={item.title} type="button" onClick={() => onPrompt?.(item.prompt)}>
             <Icon name={item.icon} size={19} />
             <span><strong>{item.title}</strong><small>{item.detail}</small></span>
             <Icon className="suggestion-arrow" name="chevron" size={16} />
@@ -77,10 +80,25 @@ export function MessageList({ messages, thinking, onPrompt }: { messages: ChatMe
           {message.tools && message.tools.length > 0 && <ToolLines id={message.id} tools={message.tools} />}
           {message.attachments && message.attachments.length > 0 && <Attachments items={message.attachments} />}
           {message.text && <Markdown text={message.text} />}
+          {message.waitingSince !== undefined && <WaitLine />}
           {message.status && <div className="message-status">{message.status}</div>}
         </div>
       </article>
     ))}
+  </div>
+}
+
+/**
+ * The wait for the model's next output: a glyph, the word and three dots, so a
+ * turn that has nothing to show yet still says it is running. Whatever arrives
+ * next takes this line's place.
+ */
+function WaitLine() {
+  return <div className="wait-line">
+    <Icon name="spark" size={14} />
+    <span>thinking</span>
+    {/* Motion rather than something to read: out of the accessibility tree. */}
+    <span className="wait-dots" aria-hidden="true"><span className="wait-dot" /><span className="wait-dot" /><span className="wait-dot" /></span>
   </div>
 }
 

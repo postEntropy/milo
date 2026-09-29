@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api } from '../lib/api.js'
 import { shortModel } from '../../../src/gateways/model-label.ts'
 import { Icon } from '../ui/Icons.js'
@@ -8,12 +8,20 @@ interface Props {
   queued: number
   provider: string
   model: string
+  /** Bumped when something asks for the cursor, so the field takes the next keystroke. */
+  focusSignal: number
   onSend(text: string, intent: 'steer' | 'queue'): void
   onStop(): void
   onModelChange(model: string): void
 }
 
 type ModelInfo = { id: string; name?: string }
+
+/** What the app may ask the composer to do from outside it. */
+export interface ComposerHandle {
+  /** Put the cursor in the field, inside whatever click asked for it. */
+  focus(): void
+}
 
 /** What `/` offers: the names the gateways share, with what each one does. */
 const COMMANDS: Array<{ name: string; hint: string }> = [
@@ -38,7 +46,10 @@ const COMMANDS: Array<{ name: string; hint: string }> = [
   { name: 'queue', hint: 'say it as its own turn, after this one' },
 ]
 
-export function Composer({ busy, queued, provider, model, onSend, onStop, onModelChange }: Props) {
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
+  { busy, queued, provider, model, focusSignal, onSend, onStop, onModelChange },
+  handle,
+) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const wrap = useRef<HTMLDivElement>(null)
   const [draft, setDraft] = useState('')
@@ -60,6 +71,16 @@ export function Composer({ busy, queued, provider, model, onSend, onStop, onMode
   useEffect(() => {
     if (highlight >= palette.length) setHighlight(0)
   }, [palette.length, highlight])
+
+  // Starting a new session leaves the cursor on the button that was pressed.
+  // The field takes it back, so the next keystroke is the message. Zero is the
+  // first render, where nothing has asked for it yet.
+  useEffect(() => {
+    if (focusSignal === 0) return
+    ref.current?.focus()
+  }, [focusSignal])
+
+  useImperativeHandle(handle, () => ({ focus: () => ref.current?.focus() }), [])
 
   useEffect(() => {
     if (!menu) return
@@ -196,4 +217,4 @@ export function Composer({ busy, queued, provider, model, onSend, onStop, onMode
       </div>
     </div>
   )
-}
+})

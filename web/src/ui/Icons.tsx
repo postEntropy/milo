@@ -6,6 +6,7 @@ const paths: Record<string, React.ReactNode> = {
   send: <><path d="M21.5 2.5 11 13" /><path d="M21.5 2.5 15 21.5l-4-8.5-8.5-4Z" /></>,
   stop: <><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none" /></>,
   chevron: <><path d="m9 6 6 6-6 6" /></>,
+  'arrow-left': <><path d="M19 12H5" /><path d="m11 18-6-6 6-6" /></>,
   check: <><path d="m5 13 4 4L19 7" /></>,
   x: <><path d="m6 6 12 12M18 6 6 18" /></>,
   shield: <><path d="m12 3 7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" /></>,

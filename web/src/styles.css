@@ -126,6 +126,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-nav-heading { padding: 16px 10px 10px; }
 .settings-nav-heading h2 { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
 .settings-nav-heading p { margin-top: 4px; color: var(--muted); font-size: 12px; }
+/* The way out of Settings: a control of its own, filled and raised, so it does
+   not read as one more row of the section list below it. */
+.settings-back { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 44px; margin-bottom: 8px; border: 0; border-radius: 12px; background: var(--surface); padding: 9px 11px; color: var(--fg); box-shadow: var(--shadow-sm); font-size: 13px; font-weight: 550; text-align: start; transition: background var(--motion-fast); }
+.settings-back svg.icon { flex: none; color: var(--accent); }
+.settings-back:hover { background: var(--border-soft); }
 .settings-nav { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 2px; overflow: auto; padding: 4px 0 12px; }
 .settings-nav-item { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 44px; border: 0; border-radius: 10px; background: transparent; padding: 9px 11px; color: var(--fg-2); font-size: 13px; text-align: start; transition: background var(--motion-fast); }
 .settings-nav-item svg.icon { color: var(--muted); }
@@ -183,6 +188,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .reasoning[open] .reasoning-chevron { transform: rotate(90deg); }
 .reasoning-body { padding: 2px 14px 13px; color: var(--muted); font-family: var(--font-display); font-size: 14px; font-style: italic; line-height: 1.6; white-space: pre-wrap; }
 .reasoning-note { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+/* The wait for the model's next output, before there is anything of its own to
+   show: the glyph and the word the terminal uses while a turn runs, in the tone
+   it uses there, with three dots breathing rather than a number ticking. An
+   output arriving takes its place. */
+.wait-line { display: flex; align-items: center; gap: 7px; color: var(--warn); font-size: 12px; }
+.wait-line svg.icon { flex: none; animation: wait-pulse 1.4s var(--ease-standard) infinite; }
+.wait-dots { display: inline-flex; gap: 3px; }
+.wait-dot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .3; animation: wait-dot 1.2s var(--ease-standard) infinite; }
+.wait-dot:nth-child(2) { animation-delay: .16s; }
+.wait-dot:nth-child(3) { animation-delay: .32s; }
+@keyframes wait-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
+@keyframes wait-dot { 0%, 100% { opacity: .3; } 40% { opacity: 1; } }
 .tool-line { display: flex; align-items: center; gap: 9px; min-height: 36px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); padding: 7px 12px; color: var(--fg-2); font-size: 12px; }
 .tool-line svg.icon { color: var(--muted); }
 .message-content .tool-line code { overflow: hidden; color: var(--fg); font: 500 12px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
@@ -197,12 +214,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .notice.error { border-color: color-mix(in oklab, var(--danger) 30%, var(--border)); background: color-mix(in oklab, var(--danger) 7%, var(--surface)); color: var(--danger); }
 .notice button { margin-inline-start: auto; }
 
-.composer-shell { width: 100%; background: var(--bg); padding: 12px 28px 16px; }
-.composer-box { position: relative; width: min(772px, 100%); margin: 0 auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); transition: border-color var(--motion-fast), box-shadow var(--motion-fast); }
+.composer-shell { width: 100%; background: var(--bg); padding: 6px 28px max(8px, env(safe-area-inset-bottom)); }
+.composer-box { position: relative; width: min(700px, 100%); margin: 0 auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); transition: border-color var(--motion-fast), box-shadow var(--motion-fast); }
 .composer-box:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
-.composer-box textarea { display: block; width: 100%; min-height: 46px; max-height: 180px; resize: none; border: 0; outline: 0; background: none; padding: 13px 16px 2px; font-size: 14px; line-height: 1.55; }
+.composer-box textarea { display: block; width: 100%; min-height: 44px; max-height: 180px; resize: none; border: 0; outline: 0; background: none; padding: 12px 16px 4px; font-size: 14px; line-height: 1.55; }
 .composer-box textarea::placeholder { color: var(--muted); }
-.composer-toolbar { display: flex; min-height: 48px; align-items: center; gap: 8px; padding: 5px 9px 9px 14px; }
+.composer-toolbar { display: flex; min-height: 42px; align-items: center; gap: 8px; padding: 2px 9px 4px 14px; }
 .composer-model-wrap { position: relative; }
 .composer-model { display: flex; align-items: center; gap: 7px; max-width: 240px; border: 0; border-radius: 999px; background: var(--bg); padding: 5px 10px; font-size: 12px; font-weight: 500; transition: background var(--motion-fast); }
 .composer-model:hover { background: var(--surface-warm); }
@@ -224,7 +241,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .send-button:disabled { cursor: not-allowed; background: var(--surface-warm); color: var(--muted); box-shadow: none; }
 .send-button.stop { border: 1px solid var(--border); background: var(--surface); color: var(--fg); box-shadow: none; }
 .send-button.stop:hover:not(:disabled) { background: var(--surface-warm); transform: none; }
-.queue-list { width: min(772px, 100%); margin: 0 auto; }
+.queue-list { width: min(700px, 100%); margin: 0 auto; }
 .queue-chip { display: flex; min-height: 34px; align-items: center; gap: 8px; margin-bottom: 6px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface-warm); padding: 6px 11px; color: var(--muted); font-size: 12px; }
 
 .approval { width: 100%; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 16px 18px; box-shadow: var(--shadow); }
@@ -260,7 +277,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-section .panel-body { padding: 0; }
 .settings-section .panel-body > h3.section-label { padding-top: 14px; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-.field { display: grid; min-width: 0; gap: 6px; }
+.field { display: grid; align-content: start; min-width: 0; gap: 6px; }
 .field.full { grid-column: 1 / -1; }
 .settings-section .field > label, .settings-section .field > span { font-size: 13px; font-weight: 500; }
 .field input, .field select, .field textarea { width: 100%; min-height: 42px; border: 0; border-radius: 11px; background: var(--surface); padding: 9px 12px; color: var(--fg); font-size: 13px; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
@@ -323,6 +340,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .row-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
 .button-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .panel-note { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+.ask-actions { display: flex; align-items: center; gap: 10px; margin-top: 14px; }
+/* What the field asked and Milo's answer to it, drawn with the chat's own thread
+   and approval card so the two surfaces cannot read differently. */
+.routines-thread { margin-top: 8px; }
 .mono { color: var(--fg-2); font-family: var(--font-mono); }
 
 @media (max-width: 900px) {
@@ -395,6 +416,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message:not(.is-loaded),
 .message:not(.is-loaded) .tool-line,
 .message:not(.is-loaded) .reasoning,
+.message:not(.is-loaded) .wait-line,
 .approval,
 .command-menu,
 .job-panel,

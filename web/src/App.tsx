@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from './lib/api.js'
 import { randomUUID } from './lib/uuid.js'
 import { MiloSocket, type ConnectionState } from './lib/ws.js'
-import { Composer } from './chat/Composer.js'
+import { Composer, type ComposerHandle } from './chat/Composer.js'
 import { MessageList, type ChatMessage } from './chat/MessageList.js'
 import { Permissions } from './chat/Permissions.js'
 import { Routines } from './routines/Routines.js'
 import { Settings } from './settings/Settings.js'
-import type { ServerFrame, PermissionRequest } from '@protocol'
+import type { ServerFrame, PermissionRequest, SendTarget } from '@protocol'
 import { toolLine } from '../../src/gateways/tool-line.ts'
 import { Icon } from './ui/Icons.js'
 import { miloAvatar } from './ui/milo.js'
@@ -33,6 +33,8 @@ export default function App() {
   const [busy, setBusy] = useState(false)
   const [queued, setQueued] = useState(0)
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null)
+  /** Counts finished turns: the routines screen re-reads its list when one ends. */
+  const [turnEnds, setTurnEnds] = useState(0)
   const [thinking, setThinking] = useState(true)
   const [identity, setIdentity] = useState({ provider: 'milo', model: '' })
   const [connection, setConnection] = useState<ConnectionState>('connecting')
@@ -41,10 +43,11 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [theme, setTheme] = useState(() => localStorage.getItem('milo-theme') ?? 'system')
   const [notice, setNotice] = useState<Notice | null>(null)
+  /** Bumped to hand the cursor to the composer, e.g. once a new session opens. */
+  const [composerFocus, setComposerFocus] = useState(0)
   const socket = useMemo(() => new MiloSocket(), [])
+  const composerRef = useRef<ComposerHandle>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
-  /** When the current wait began: the turn's first output, and again after each tool. */
-  const waitStartedAt = useRef(0)
   const sessionListRef = useRef<HTMLElement | null>(null)
   /** The soft edge under the search box shows only once the list is scrolled. */
   const [listScrolled, setListScrolled] = useState(false)
@@ -102,8 +105,9 @@ export default function App() {
     if (frame.type === 'error') { setNotice({ text: frame.message, error: true }); return }
     if (frame.type === 'state') { setBusy(frame.busy); setQueued(frame.queued); return }
     if (frame.type === 'turn-start') {
-      waitStartedAt.current = Date.now()
-      setMessages((current) => [...current, { id: `user-${frame.id}`, role: 'user', text: frame.text }, { id: frame.id, role: 'assistant', text: '' }])
+      // The wait starts here and the turn says so on screen: the assistant
+      // message carries it, so the line appears where the reply will.
+      setMessages((current) => [...current, { id: `user-${frame.id}`, role: 'user', text: frame.text }, { id: frame.id, role: 'assistant', text: '', waitingSince: Date.now() }])
       setBusy(true)
       return
     }
@@ -114,15 +118,21 @@ export default function App() {
         if (event.type === 'text-delta') {
           // The first output ends the wait — tool lines arrive as text too, so
           // this is the model talking after its last thought or its last tool.
-          const waited = waitStartedAt.current ? Date.now() - waitStartedAt.current : 0
-          waitStartedAt.current = 0
-          return { ...message, text: message.text + event.delta, ...(waited > 0 ? { thoughtMs: waited } : {}) }
+          const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
+          return { ...message, text: message.text + event.delta, waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
         }
         if (event.type === 'reasoning-delta') return { ...message, reasoning: (message.reasoning ?? '') + event.delta }
-        if (event.type === 'tool-start') return { ...message, tools: [...(message.tools ?? []), toolLine(event.name, event.args)] }
+        if (event.type === 'tool-start') {
+          // Reasoning deltas do not end a wait — they are what fills it. A tool
+          // call is an output of its own, and the wait before it was thinking.
+          const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
+          return { ...message, tools: [...(message.tools ?? []), toolLine(event.name, event.args)], waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
+        }
         if (event.type === 'tool-end') {
-          waitStartedAt.current = Date.now()
-          return event.isError ? { ...message, tools: [...(message.tools ?? []), `${toolLine(event.name)} failed`] } : message
+          // The result is in: the model is thinking again about what to do with it.
+          return event.isError
+            ? { ...message, tools: [...(message.tools ?? []), `${toolLine(event.name)} failed`], waitingSince: Date.now() }
+            : { ...message, waitingSince: Date.now() }
         }
         if (event.type === 'waiting') return { ...message, status: 'Waiting for this session to free up…' }
         if (event.type === 'waited') return { ...message, status: `Session freed after ${formatMs(event.ms)}.` }
@@ -139,10 +149,11 @@ export default function App() {
     if (frame.type === 'permission') { setPendingPermission(frame); return }
     if (frame.type === 'permission-result') { setPendingPermission((current) => current?.id === frame.id ? null : current); return }
     if (frame.type === 'turn-end') {
-      setMessages((current) => current.map((message) => message.id === frame.id && frame.status === 'stopped'
-        ? { ...message, status: 'Stopped · the partial reply was kept.' }
+      setMessages((current) => current.map((message) => message.id === frame.id
+        ? { ...message, waitingSince: undefined, ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
         : message))
       setPendingPermission(null)
+      setTurnEnds((current) => current + 1)
       void refreshSessions()
       return
     }
@@ -160,6 +171,12 @@ export default function App() {
 
   const newChat = useCallback(async (): Promise<void> => {
     const nextConversationId = randomUUID()
+    // Inside the click that asked for it, before any state moves: a focus handed
+    // over a tick later is a focus the browser is free to drop. The counter is
+    // the other half — when this chat is not the view on screen, the composer
+    // mounts only once it is, and takes the cursor then.
+    composerRef.current?.focus()
+    setComposerFocus((current) => current + 1)
     try {
       const session = await api<{ id: string }>('new-session', { conversationId: nextConversationId })
       socket.close()
@@ -202,12 +219,32 @@ export default function App() {
     return () => window.removeEventListener('keydown', onKey)
   }, [newChat])
 
-  function send(text: string, intent: 'queue' | 'steer' = 'queue'): void {
+  /**
+   * A turn in the conversation this browser is in. `target` is how the routines
+   * screen pins the destination a routine it asks for is made for, when that is
+   * not this chat — the sentence then does not have to say it.
+   */
+  function send(text: string, intent: 'queue' | 'steer' = 'queue', target?: SendTarget): void {
     try {
       if (text.startsWith('/')) socket.send({ type: 'command', text })
-      else socket.send({ type: 'send', text, intent })
+      else socket.send({ type: 'send', text, intent, ...(target ? { target } : {}) })
       setNotice(null)
     } catch (error) { fail(error) }
+  }
+
+  /**
+   * A routine asked for from the routines screen: always its own turn, and the
+   * destination that screen named travels with it, so the sentence does not have
+   * to spell it out.
+   */
+  function askRoutine(text: string, target?: SendTarget): void {
+    send(text, 'queue', target)
+  }
+
+  /** The answer to a permission prompt, wherever on screen it is drawn. */
+  function decide(allowed: boolean): void {
+    if (!pendingPermission) return
+    socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })
   }
 
   async function openSession(id: string): Promise<void> {
@@ -290,6 +327,7 @@ export default function App() {
         </div>
       </div> : <div className="sidebar-settings-nav">
         <div className="settings-nav-heading"><h2>Settings</h2><p>For this installation</p></div>
+        <button className="settings-back" type="button" onClick={() => { setView('chat'); setSidebarOpen(false) }}><Icon name="arrow-left" /><span>Back to chat</span></button>
         <nav className="settings-nav" aria-label="Settings sections">
           {settingsSections.map(([id, icon, label]) => <button type="button" key={id} className={`settings-nav-item ${settingsSection === id ? 'active' : ''}`} onClick={() => { setSettingsSection(id); setSidebarOpen(false) }}><Icon name={icon} /><span>{label}</span></button>)}
         </nav>
@@ -299,7 +337,7 @@ export default function App() {
     <main className="main">
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
-        {view !== 'chat' && <button className="btn-secondary" type="button" onClick={() => setView('chat')}><span aria-hidden="true">←</span> Back to chat</button>}
+        {view === 'routines' && <button className="btn-secondary" type="button" onClick={() => setView('chat')}><span aria-hidden="true">←</span> Back to chat</button>}
         <div className="topbar-title"><h1>{view === 'settings' ? 'Settings' : view === 'routines' ? 'Routines' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
         <div className="topbar-actions">
           {view === 'chat' && sessionId && <button className="icon-button topbar-action" type="button" title="Export this conversation" aria-label="Export this conversation" onClick={() => void exportSession()}><Icon name="download" size={16} /></button>}
@@ -311,14 +349,14 @@ export default function App() {
       {view === 'settings'
         ? <Settings section={settingsSection} conversationId={conversationId} sessionId={sessionId} onClose={() => setView('chat')} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} />
         : view === 'routines'
-        ? <Routines conversationId={conversationId} />
+        ? <Routines conversationId={conversationId} chat={{ messages, thinking, busy, connection, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef}>
             <MessageList messages={messages} thinking={thinking} onPrompt={send} />
             {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
           </div>
           {notice && <div className={`notice ${notice.error ? 'error' : 'success'}`} role="alert">{notice.text}<button className="icon-button" type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}><Icon name="x" size={15} /></button></div>}
-          <Composer busy={busy} queued={queued} provider={identity.provider} model={identity.model} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} />
+          <Composer ref={composerRef} busy={busy} queued={queued} provider={identity.provider} model={identity.model} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} />
         </section>}
     </main>
   </div>
@@ -330,6 +368,17 @@ function SessionRow({ session, active, onClick }: { session: SessionSummary; act
 
 function formatMs(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`
+}
+
+/**
+ * The number a wait leaves behind on the message. The first one worth reporting
+ * wins: it belongs to the tool call or the answer it led to, and it sits above
+ * both, so a later wait replacing it would rewrite what the reader already read.
+ * Under a second there is nothing to report — the terminal's own threshold.
+ */
+function thoughtMsFor(waited: number, message: ChatMessage): { thoughtMs?: number } {
+  if (message.thoughtMs !== undefined || waited < 1000) return {}
+  return { thoughtMs: waited }
 }
 
 /** What a session is called on screen: its message, never the generated id. */

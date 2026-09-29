@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
+import type { PermissionRequest, SendTarget } from '@protocol'
 import { api } from '../lib/api.js'
-import { formatWhen, message, splitNames } from '../lib/format.js'
+import { formatWhen, message } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
+import { MessageList, type ChatMessage } from '../chat/MessageList.js'
+import { Permissions } from '../chat/Permissions.js'
 
 type Routine = {
   id: string
@@ -18,23 +21,44 @@ type Routine = {
 }
 
 /**
- * The routines surface: the prompts Milo runs on a timer, with their actions
- * and the form that creates one. It lives here rather than in Settings because
- * a routine is a thing you use, not a setting you configure — Settings keeps
- * only what changes Milo's behaviour.
+ * The chat this screen makes routines through. The app owns the socket, so the
+ * turn runs in the conversation the browser is already in and this screen draws
+ * it: the field below is a way to say what you want, not a form to fill.
  */
-export function Routines({ conversationId }: { conversationId: string }) {
+export interface RoutinesChat {
+  messages: ChatMessage[]
+  thinking: boolean
+  busy: boolean
+  connection: 'connecting' | 'online' | 'offline'
+  /** Bumped when a turn ends, so the list is re-read from disk. */
+  turnEnds: number
+  pendingPermission: { id: string; request: PermissionRequest; expiresAt: number } | null
+  send(text: string, target?: SendTarget): void
+  decide(allowed: boolean): void
+}
+
+const GATEWAYS = [
+  ['web', 'This web chat'],
+  ['telegram', 'Telegram'],
+  ['discord', 'Discord'],
+] as const
+
+/**
+ * The routines surface: the prompts Milo runs on a timer, with their actions and
+ * the one field that makes a new one — said in your own words, because turning a
+ * sentence into a schedule is the model's job, not the person's. It lives here
+ * rather than in Settings because a routine is a thing you use, not a setting you
+ * configure — Settings keeps only what changes Milo's behaviour.
+ */
+export function Routines({ conversationId, chat }: { conversationId: string; chat: RoutinesChat }) {
   const [routines, setRoutines] = useState<Routine[] | null>(null)
   const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null)
   const [runResult, setRunResult] = useState<{ text: string; error: boolean } | null>(null)
-  const [prompt, setPrompt] = useState('')
-  const [every, setEvery] = useState('')
-  const [at, setAt] = useState('')
-  const [days, setDays] = useState('')
-  const [allow, setAllow] = useState('')
-  const [gateway, setGateway] = useState<'web' | 'telegram' | 'discord'>('web')
+  const [ask, setAsk] = useState('')
+  const [gateway, setGateway] = useState<SendTarget['gateway']>('web')
   const [target, setTarget] = useState(conversationId)
-  const [creating, setCreating] = useState(false)
+  /** Where the creation turn starts in the chat's transcript; null until asked. */
+  const [createdFrom, setCreatedFrom] = useState<number | null>(null)
 
   const refresh = useCallback(async (): Promise<void> => {
     try { setRoutines(await api<Routine[]>('routines')) }
@@ -42,28 +66,23 @@ export function Routines({ conversationId }: { conversationId: string }) {
   }, [])
 
   useEffect(() => { void refresh() }, [refresh])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the counter is the trigger, not a value read here — the turn it counts may have just made a routine
+  useEffect(() => { void refresh() }, [chat.turnEnds, refresh])
 
-  async function create(): Promise<void> {
+  function create(): void {
+    const text = ask.trim()
+    if (!text) return
     setNotice(null)
-    setCreating(true)
-    try {
-      await api('routine-add', {
-        prompt,
-        every: every || undefined,
-        at: at || undefined,
-        days: days ? splitNames(days) : undefined,
-        allow: allow ? splitNames(allow) : undefined,
-        target: { gateway, conversationId: target },
-      })
-      setPrompt('')
-      setEvery('')
-      setAt('')
-      setDays('')
-      setAllow('')
-      await refresh()
-      setNotice({ text: 'Routine created.', error: false })
-    } catch (error) { setNotice({ text: message(error), error: true }) }
-    finally { setCreating(false) }
+    // Taken before the turn starts: everything from here on is this ask and Milo's
+    // answer to it, so the wait and the permission prompt stay beside the field.
+    setCreatedFrom((from) => from ?? chat.messages.length)
+    setAsk('')
+    // The destination is the one thing the sentence does not have to carry. It is
+    // pinned on the turn, so a routine named for Telegram is made for Telegram
+    // even though the chat it was asked in is this one.
+    chat.send(text, gateway === 'web'
+      ? { gateway: 'web', conversationId }
+      : { gateway, conversationId: target.trim() })
   }
 
   async function run(id: string): Promise<void> {
@@ -84,6 +103,9 @@ export function Routines({ conversationId }: { conversationId: string }) {
     try { await api('routine-remove', { id: routine.id }); await refresh() }
     catch (error) { setNotice({ text: message(error), error: true }) }
   }
+
+  /** What has been asked here and answered here: nothing until the first ask. */
+  const thread = createdFrom === null ? [] : chat.messages.slice(createdFrom)
 
   return <main className="settings-workspace">
     <div className="settings-inner">
@@ -110,20 +132,27 @@ export function Routines({ conversationId }: { conversationId: string }) {
 
             <h3 className="section-label" style={{ paddingInline: 0 }}>New routine</h3>
             <div className="form-grid">
-              <Field className="full" label="Prompt"><input value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="look at the repo and tell me what moved" /></Field>
-              <Field label="Every"><input value={every} onChange={(event) => setEvery(event.target.value)} placeholder="2h or 30m" /></Field>
-              <Field label="Or at"><input value={at} onChange={(event) => setAt(event.target.value)} placeholder="08:00" /></Field>
-              <Field label="Days (for a clock time)"><input value={days} onChange={(event) => setDays(event.target.value)} placeholder="mon-fri" /></Field>
-              <Field label="May use (unattended)"><input value={allow} onChange={(event) => setAllow(event.target.value)} placeholder="shell_command, write_file" /></Field>
+              <Field className="full" label="Ask for it in your own words">
+                <textarea value={ask} onChange={(event) => setAsk(event.target.value)} rows={2} placeholder="Every weekday at 8, look at the repo and tell me what moved." />
+              </Field>
               <Field label="Deliver to"><select value={gateway} onChange={(event) => {
-                const next = event.target.value as typeof gateway
+                const next = event.target.value as SendTarget['gateway']
                 setGateway(next)
                 setTarget(next === 'web' ? conversationId : '')
-              }}><option value="web">This web chat</option><option value="telegram">Telegram</option><option value="discord">Discord</option></select></Field>
+              }}>{GATEWAYS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
               <Field label="Conversation id"><input value={target} onChange={(event) => setTarget(event.target.value)} placeholder="a chat or channel id" disabled={gateway === 'web'} /><small>{gateway === 'web' ? 'This browser’s conversation.' : 'The chat to post into.'}</small></Field>
             </div>
-            <button className="button primary" type="button" disabled={!prompt.trim() || creating} onClick={() => void create()}>{creating ? 'Creating…' : 'Create routine'}</button>
-            <p className="panel-note">A routine fires only while <code className="mono">milo serve</code> is running. Anything that writes or runs a command must be named above — a scheduled run has nobody to ask.</p>
+            <div className="ask-actions">
+              <button className="button primary" type="button" disabled={!ask.trim() || chat.busy || chat.connection !== 'online'} onClick={create}>{chat.busy ? 'Milo is on it…' : 'Create it'}</button>
+              {chat.connection !== 'online' && <span className={`connection-status ${chat.connection}`}><span />{chat.connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
+            </div>
+            {thread.length > 0 && <div className="routines-thread">
+              <MessageList messages={thread} thinking={chat.thinking} />
+              {chat.pendingPermission && <article className="message assistant">
+                <Permissions request={chat.pendingPermission.request} expiresAt={chat.pendingPermission.expiresAt} onDecision={(allowed) => chat.decide(allowed)} />
+              </article>}
+            </div>}
+            <p className="panel-note">Say what it should do and when, in your own words — Milo works out the time and what the routine may use. It fires only while <code className="mono">milo serve</code> is running, and anything that writes, runs or sends is granted when the routine is made: Milo asks you right here, because a scheduled run has nobody to ask.</p>
           </div>
         </section>
       </div>
