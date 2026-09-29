@@ -239,8 +239,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .send-button:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); }
 .send-button:active:not(:disabled) { transform: none; }
 .send-button:disabled { cursor: not-allowed; background: var(--surface-warm); color: var(--muted); box-shadow: none; }
-.send-button.stop { border: 1px solid var(--border); background: var(--surface); color: var(--fg); box-shadow: none; }
-.send-button.stop:hover:not(:disabled) { background: var(--surface-warm); transform: none; }
+.send-button.stop { border: 0; background: var(--surface-warm); color: var(--fg); box-shadow: none; }
+.send-button.stop:hover:not(:disabled) { background: var(--border-soft); transform: none; }
 .queue-list { width: min(700px, 100%); margin: 0 auto; }
 .queue-chip { display: flex; min-height: 34px; align-items: center; gap: 8px; margin-bottom: 6px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface-warm); padding: 6px 11px; color: var(--muted); font-size: 12px; }
 
