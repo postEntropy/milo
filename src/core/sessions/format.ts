@@ -3,7 +3,7 @@ import type { SessionStats, SessionSummary } from './types.js'
 const MAX_LISTED = 10
 
 export interface SessionListStyle {
-  /** Render for a surface that understands Markdown (Telegram rich, Discord). */
+  /** Render for a surface that understands Markdown (Telegram, Discord). */
   markdown?: boolean
 }
 

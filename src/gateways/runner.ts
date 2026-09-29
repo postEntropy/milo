@@ -2,7 +2,7 @@ import type { Session } from '../core/session.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
 import { errorMessage } from '../util/errors.js'
 import type { ChatSurface } from './surface.js'
-import { shellCommand, toolIcon, toolLabel, toolLine } from './tool-line.js'
+import { shellCommand, showsToolCall, toolLabel, toolLine } from './tool-line.js'
 
 export interface RunTurnOptions {
   session: Session
@@ -116,18 +116,17 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   }
 
   /**
-   * A shell command as a fenced block under the usual label line.
+   * A shell command as a fenced block, on its own.
    *
-   * A command is meant to be read and copied, which is what the 120-character gist
-   * every other line is cut to cannot offer — and the label sits outside the fence
-   * so the tool's name is still emphasised, which is the other thing the block got
-   * wrong the first time it was here. It ends the run of tool lines: a fence is a
-   * block of its own, and the next call opens a quote of its own rather than
-   * pretending to continue this one.
+   * A command is meant to be read and copied, which is what the 120-character
+   * gist every other line is cut to cannot offer — and it carries no label line:
+   * the block's own `shell` marker already says what it is, and a name above it
+   * only repeats that. It ends the run of tool lines: a fence is a block of its
+   * own, and the next call opens a quote of its own rather than pretending to
+   * continue this one.
    */
   const appendShell = async (command: string): Promise<void> => {
-    const line = `${toolIcon('shell_command')} ${toolLabel('shell_command', true)}`
-    const block = `${line}\n\n\`\`\`shell\n${command}\n\`\`\``
+    const block = `\`\`\`shell\n${command}\n\`\`\``
     output += output === '' ? block : `\n\n${block}`
     openQuote = null
     atLineEnd = true

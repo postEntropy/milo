@@ -18,7 +18,7 @@ const SURFACE_LABEL: Record<SurfaceKind, string> = {
 const SURFACE_FORMATTING: Record<SurfaceKind, string> = {
   cli: 'light markdown — code fences, inline code, bold and headings render; avoid tables and nested lists',
   telegram:
-    'Markdown renders as a rich message (headings, bold, italics, lists, code blocks, tables) — use it',
+    'Markdown renders (bold, italics, inline code, fenced code blocks, quotes, links); a heading comes out as a bold line, and lists and tables come out as plain text',
   discord: 'Markdown renders (bold, italics, code blocks); keep it light',
   web: 'Markdown renders (headings, bold, italics, lists, code blocks, tables) — use it',
 }

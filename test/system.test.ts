@@ -85,7 +85,7 @@ describe('buildSystemPrompt', () => {
       memories: [],
     })
     expect(telegram).toContain('You are talking through a Telegram chat')
-    expect(telegram).toContain('Markdown renders as a rich message')
+    expect(telegram).toContain('Markdown renders (bold, italics, inline code')
     expect(telegram).toContain("not on the user's device")
 
     const cli = buildSystemPrompt({

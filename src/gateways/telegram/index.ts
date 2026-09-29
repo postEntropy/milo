@@ -27,7 +27,8 @@ import { runTurns } from '../runner.js'
 import { TurnQueue } from '../turns.js'
 import type { ChatSurface } from '../surface.js'
 import type { Gateway } from '../types.js'
-import { RichMessenger, isNotModified } from './rich.js'
+import { toHtml } from './html.js'
+import { TelegramMessenger, isNotModified } from './messenger.js'
 
 export interface TelegramGatewayOptions {
   runtime: AgentRuntime
@@ -195,13 +196,13 @@ export class TelegramGateway implements Gateway {
       return
     }
 
-    const messenger = new RichMessenger({
-      sendRich: async (chat, markdown) =>
-        (await bot.api.sendRichMessage(chat, { markdown })).message_id,
+    const messenger = new TelegramMessenger({
+      sendHtml: async (chat, html) =>
+        (await bot.api.sendMessage(chat, html, { parse_mode: 'HTML' })).message_id,
       sendPlain: async (chat, text) => (await bot.api.sendMessage(chat, text)).message_id,
-      editRich: async (chat, messageId, markdown) => {
+      editHtml: async (chat, messageId, html) => {
         try {
-          await bot.api.editMessageText(chat, messageId, { markdown })
+          await bot.api.editMessageText(chat, messageId, html, { parse_mode: 'HTML' })
         } catch (error) {
           if (!isNotModified(error)) throw error
         }
@@ -237,8 +238,8 @@ export class TelegramGateway implements Gateway {
 
   /**
    * Most command replies are plain text. A few — `/sessions` — also come with a
-   * Markdown rendering, which goes out as a rich message and falls back to the
-   * plain text when the API refuses it.
+   * Markdown rendering, which goes out as an ordinary message in HTML and falls
+   * back to the plain text when the API refuses it.
    */
   private async reply(
     bot: Bot,
@@ -248,7 +249,7 @@ export class TelegramGateway implements Gateway {
   ): Promise<void> {
     if (command.markdown) {
       try {
-        await bot.api.sendRichMessage(chatId, { markdown: command.markdown })
+        await bot.api.sendMessage(chatId, toHtml(command.markdown), { parse_mode: 'HTML' })
         return
       } catch {
         // Fall through to the plain text, which never trips on Markdown syntax.

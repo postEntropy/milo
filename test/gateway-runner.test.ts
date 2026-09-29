@@ -175,7 +175,7 @@ describe('runTurn', () => {
     )
   })
 
-  it('shows a shell command as a fenced block, with the name outside it', async () => {
+  it('shows a shell command as a fenced block, with nothing above it', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'tool-start', id: '1', name: 'shell_command', args: { command: 'echo hi' } }
       yield { type: 'tool-end', id: '1', name: 'shell_command', result: 'hi', isError: false }
@@ -185,9 +185,9 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    // The label is not inside the fence, so it is still emphasised — which is one
-    // of the two things that took the block away the first time it was here.
-    expect(harness.edits.at(-1)).toBe('⚡ **shell_command**\n\n```shell\necho hi\n```\n\npronto')
+    // No `⚡ shell_command` line: the block's own `shell` marker already says what
+    // it is, and a name above it only repeats that.
+    expect(harness.edits.at(-1)).toBe('```shell\necho hi\n```\n\npronto')
   })
 
   it('puts the command in whole, not the 120-character gist', async () => {
@@ -220,7 +220,7 @@ describe('runTurn', () => {
     // A fence is a block of its own, so it ends the run of tool lines rather than
     // joining it — the next call opens a quote (or a block) of its own.
     expect(harness.edits.at(-1)).toBe(
-      '⚡ **shell_command**\n\n```shell\nls\n```\n\n⚡ **shell_command**\n\n```shell\npwd\n```\n\npronto',
+      '```shell\nls\n```\n\n```shell\npwd\n```\n\npronto',
     )
   })
 
@@ -233,7 +233,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('⚡ **shell_command**\n\n```shell\nls\n```')
+    expect(harness.edits.at(-1)).toBe('```shell\nls\n```')
   })
 
   it('separates tool lines from prose with a blank line, not a soft break', async () => {
@@ -498,8 +498,6 @@ describe('runTurn — display settings', () => {
     expect(harness.edits.at(-1)).toBe(
       [
         '> 🌐 **web_search** a',
-        '',
-        '⚡ **shell_command**',
         '',
         '```shell',
         'ls',

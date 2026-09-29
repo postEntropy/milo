@@ -2,17 +2,12 @@
  * How a tool call is written into a message.
  *
  * One line per call, in the same shape on every surface: an icon, the tool's
- * name, and the one value worth showing. It used to be two shapes — a shell
- * command got a fenced code block — and the block was the odd one out: the name
- * inside it could not be emphasised, the command in it was truncated exactly like
- * every other detail (so copying it out copied something incomplete), and the
- * terminal drew both shapes the same way anyway. One shape, and it is the one the
- * other tools already had.
- *
- * The block is back for `shell_command`, with both of those answered rather than
- * argued away: the label sits *outside* the fence, so the name is still a name,
- * and the command goes in whole (`shellCommand`, not `toolDetail`) — a fenced
- * block whose contents are cut off is a block that lies about what it is for.
+ * name, and the one value worth showing. `shell_command` is the one exception,
+ * and it is drawn by the runner rather than here: a fenced block of its own, with
+ * no line above it — the block's `shell` marker already says what it is, and a
+ * name on a line of its own only repeats that. The command goes in whole
+ * (`shellCommand`), never cut to this file's 120-character gist: a fenced block
+ * whose contents are cut off is a block that lies about what it is for.
  */
 
 /**
