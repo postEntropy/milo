@@ -43,11 +43,19 @@ class ScriptedProvider implements Provider {
   failing = false
   /** Refuses any request that names an effort, the way a provider without the field would. */
   rejectsEffort = false
+  /** Never answers: waits for the caller's budget to cut it off, the way a slow provider does. */
+  hanging = false
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     this.systems.push(req.system ?? '')
     if (!req.tools) {
       this.efforts.push(req.reasoningEffort)
+      if (this.hanging) {
+        await new Promise<void>((resolve) =>
+          req.signal?.addEventListener('abort', () => resolve(), { once: true }),
+        )
+        throw new Error('This operation was aborted')
+      }
       if (this.failing) throw new Error('summary failed')
       if (this.rejectsEffort && req.reasoningEffort) throw new Error('unknown field: reasoning_effort')
       yield { type: 'text', delta: 'OLD_TURNS_SUMMARY' }
@@ -331,6 +339,18 @@ describe('summarize', () => {
     // provider has never heard of is the worse failure.
     expect(result).toBe('OLD_TURNS_SUMMARY')
     expect(provider.efforts).toEqual(['low', undefined])
+  })
+
+  it('gives up after one attempt when the call was cut off by its own budget', async () => {
+    const provider = new ScriptedProvider()
+    provider.hanging = true
+
+    const result = await summarize({ provider, model: 'm', dropped: longSeed(), timeoutMs: 10 })
+
+    // A retry is cut off at the same budget, so it would only cost the wait and
+    // another warning — and the second call was the one that never got cancelled.
+    expect(result).toBeNull()
+    expect(provider.efforts).toEqual(['low'])
   })
 })
 

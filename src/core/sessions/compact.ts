@@ -1,6 +1,6 @@
 import type { Message, Provider, ReasoningEffort, ToolResultPart } from '../providers/types.js'
 import { errorMessage } from '../../util/errors.js'
-import { logWarn } from '../../util/log.js'
+import { logDebug, logWarn } from '../../util/log.js'
 import { IMAGE_TOKENS } from '../images.js'
 
 /** Rough token estimate. Cheap on purpose: no tokenizer, ~4 chars per token. */
@@ -226,6 +226,21 @@ export async function summarize(options: SummarizeOptions): Promise<string | nul
 
   const asked = await call({ ...request, reasoningEffort: 'low' })
   if (asked.ok) return asked.text || null
+
+  // A cut-off call is not the provider refusing the field: the attempt was ended
+  // by its own budget, or because the turn asking for the summary was stopped.
+  // Asking again is cut off the same way — and after a stop the listener is spent,
+  // so the second call would not even be cancelled — which is why the retry is
+  // only for a failure that says something about the request.
+  if (asked.aborted) {
+    if (asked.aborted === 'stopped') logDebug('summary was stopped with the turn')
+    else
+      logWarn(
+        `summary took longer than ${request.timeoutMs}ms and was cut off, dropping the turns plain`,
+      )
+    return null
+  }
+
   logWarn(`summary failed with the effort hint, asking again without it: ${asked.error}`)
 
   const plain = await call(request)
@@ -244,9 +259,16 @@ interface CallOptions {
   signal?: AbortSignal
 }
 
+/**
+ * One attempt. `aborted` says the attempt was cut off rather than answered or
+ * refused — by its own budget (`timeout`), or because the turn it belongs to was
+ * stopped (`stopped`) — and neither is a fact about the request worth a retry.
+ */
 async function call(
   options: CallOptions,
-): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+): Promise<
+  { ok: true; text: string } | { ok: false; aborted: 'timeout' | 'stopped' | null; error: string }
+> {
   const controller = new AbortController()
   const abort = () => controller.abort()
   const timer = setTimeout(abort, options.timeoutMs)
@@ -265,7 +287,12 @@ async function call(
     }
     return { ok: true, text }
   } catch (error) {
-    return { ok: false, error: errorMessage(error) }
+    const aborted = !controller.signal.aborted
+      ? null
+      : options.signal?.aborted
+        ? 'stopped'
+        : 'timeout'
+    return { ok: false, aborted, error: errorMessage(error) }
   } finally {
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', abort)
@@ -280,7 +307,14 @@ Answer with 3 to 5 terse bullet points covering:
 - anything left open.
 Write in the language of the conversation, in the third person. Bullets only, no preamble.`
 
-const DEFAULT_DIGEST_TIMEOUT_MS = 8_000
+/**
+ * A recap summarizes a whole session, so it gets at least the budget a
+ * compaction summary of a few turns gets. It used to get less, which is
+ * backwards: nobody waits on a recap — it is written when a session is switched
+ * away from — and the transcript handed to it is the largest of any of these
+ * calls, so it was the one being cut off.
+ */
+const DEFAULT_DIGEST_TIMEOUT_MS = 20_000
 
 export interface DigestOptions {
   provider: Provider

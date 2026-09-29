@@ -79,4 +79,23 @@ describe('deriveFacts', () => {
 
     expect(await deriveFacts({ provider, model: 'm', messages: turn })).toEqual([])
   })
+
+  it('asks only once when the attempt is cut off by its own budget', async () => {
+    let calls = 0
+    const provider: Provider = {
+      id: 'slow',
+      async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+        calls += 1
+        await new Promise<void>((resolve) =>
+          req.signal?.addEventListener('abort', () => resolve(), { once: true }),
+        )
+        throw new Error('This operation was aborted')
+      },
+    }
+
+    expect(await deriveFacts({ provider, model: 'm', messages: turn, timeoutMs: 10 })).toEqual([])
+    // The retry is for a provider that rejects the effort field, not for a call
+    // that ran out of time: asking again would be cut off at the same budget.
+    expect(calls).toBe(1)
+  })
 })

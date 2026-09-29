@@ -1,9 +1,18 @@
 import { errorMessage } from '../../util/errors.js'
-import { logWarn } from '../../util/log.js'
+import { logDebug, logWarn } from '../../util/log.js'
 import type { Message, Provider } from '../providers/types.js'
 
-/** How long the extraction may take before it is dropped. */
-const DEFAULT_DERIVE_TIMEOUT_MS = 8_000
+/**
+ * How long one extraction may take before it is dropped.
+ *
+ * Nobody is waiting on this call — it runs once the turn has answered, and only
+ * `settle()` at exit waits for it — so the budget is the one the compaction
+ * summary gets rather than a tight one. Measured against the real provider, a
+ * turn whose question and answer run to tens of thousands of tokens reads back
+ * in around nine seconds, and the 8s this used to be killed those extractions
+ * every time.
+ */
+const DEFAULT_DERIVE_TIMEOUT_MS = 20_000
 
 /** Facts kept from one exchange. More than this is a summary, not a memory. */
 const MAX_FACTS = 5
@@ -53,6 +62,21 @@ export async function deriveFacts(options: DeriveOptions): Promise<string[]> {
 async function ask(options: DeriveOptions): Promise<string | null> {
   const hinted = await stream(options, 'low')
   if (hinted.ok) return hinted.text
+
+  // A cut-off call is not the provider refusing the field: the attempt was ended
+  // by its own budget, or because the turn was stopped. Asking again would be cut
+  // off the same way — and after a stop the listener is spent, so the second call
+  // would not even be cancelled — which is why the retry is only for a failure
+  // that says something about the request.
+  if (hinted.aborted) {
+    if (hinted.aborted === 'stopped') logDebug('fact extraction was stopped with the turn')
+    else
+      logWarn(
+        `fact extraction took longer than ${options.timeoutMs ?? DEFAULT_DERIVE_TIMEOUT_MS}ms and was cut off, keeping nothing from this turn`,
+      )
+    return null
+  }
+
   logWarn(`fact extraction failed with the effort hint, asking again without it: ${hinted.error}`)
 
   const plain = await stream(options, undefined)
@@ -61,10 +85,15 @@ async function ask(options: DeriveOptions): Promise<string | null> {
   return null
 }
 
+/**
+ * One attempt. `aborted` says the attempt was cut off rather than answered or
+ * refused — by its own budget (`timeout`), or because the turn it belongs to was
+ * stopped (`stopped`) — and neither is a fact about the request worth a retry.
+ */
 async function stream(
   options: DeriveOptions,
   reasoningEffort: 'low' | undefined,
-): Promise<{ ok: true; text: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; text: string } | { ok: false; aborted: 'timeout' | 'stopped' | null; error: string }> {
   const controller = new AbortController()
   const abort = () => controller.abort()
   const timer = setTimeout(abort, options.timeoutMs ?? DEFAULT_DERIVE_TIMEOUT_MS)
@@ -83,7 +112,12 @@ async function stream(
     }
     return { ok: true, text }
   } catch (error) {
-    return { ok: false, error: errorMessage(error) }
+    const aborted = !controller.signal.aborted
+      ? null
+      : options.signal?.aborted
+        ? 'stopped'
+        : 'timeout'
+    return { ok: false, aborted, error: errorMessage(error) }
   } finally {
     clearTimeout(timer)
     options.signal?.removeEventListener('abort', abort)
