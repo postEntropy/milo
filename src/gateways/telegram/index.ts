@@ -27,8 +27,8 @@ import { runTurns } from '../runner.js'
 import { TurnQueue } from '../turns.js'
 import type { ChatSurface } from '../surface.js'
 import type { Gateway } from '../types.js'
-import { toHtml } from './html.js'
 import { TelegramMessenger, isNotModified } from './messenger.js'
+import { commandReplyParts } from './reply.js'
 
 export interface TelegramGatewayOptions {
   runtime: AgentRuntime
@@ -188,7 +188,9 @@ export class TelegramGateway implements Gateway {
       })
     } catch (error) {
       // A command that throws must not swallow the message it was answering.
-      await ctx.reply(`⚠ ${errorMessage(error)}`).catch(() => undefined)
+      for (const part of chunk(`⚠ ${errorMessage(error)}`, MAX_LENGTH)) {
+        await ctx.reply(part).catch(() => undefined)
+      }
       return
     }
     if (command.handled) {
@@ -234,13 +236,18 @@ export class TelegramGateway implements Gateway {
       signal,
     })
     // A stop is not a failure, and it is already on screen as "🛑 stopped".
-    if (failure) await ctx.reply(`[error] ${failure}`).catch(() => undefined)
+    if (failure) {
+      for (const part of chunk(`[error] ${failure}`, MAX_LENGTH)) {
+        await ctx.reply(part).catch(() => undefined)
+      }
+    }
   }
 
   /**
    * Most command replies are plain text. A few — `/sessions` — also come with a
    * Markdown rendering, which goes out as an ordinary message in HTML and falls
-   * back to the plain text when the API refuses it.
+   * back to the plain text when the API refuses it. Either way it is split to
+   * the message limit, because a command reply can outgrow one message.
    */
   private async reply(
     bot: Bot,
@@ -248,15 +255,16 @@ export class TelegramGateway implements Gateway {
     chatId: string,
     command: CommandResult,
   ): Promise<void> {
-    if (command.markdown) {
+    const { html, plain } = commandReplyParts(command, MAX_LENGTH)
+    if (html.length > 0) {
       try {
-        await bot.api.sendMessage(chatId, toHtml(command.markdown), { parse_mode: 'HTML' })
+        for (const part of html) await bot.api.sendMessage(chatId, part, { parse_mode: 'HTML' })
         return
       } catch {
         // Fall through to the plain text, which never trips on Markdown syntax.
       }
     }
-    await ctx.reply(command.reply ?? '')
+    for (const part of plain) await ctx.reply(part)
   }
 
   /**

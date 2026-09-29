@@ -513,7 +513,9 @@ turn itself, never for a mechanical call.
 The terminal renders the answer as **light markdown**: fenced code blocks keep their code, inline code
 and bold are styled, headings lose their hashes, and consecutive tool calls stack with no blank line
 between them. Tables and nested lists are left as plain text. A bot trims a turn that outgrows the
-message limit in the **middle**, keeping the beginning and the end.
+message limit in the **middle**, keeping the beginning and the end. A command's reply is split into
+whole messages instead — `/sessions` lists ten conversations with their recaps, which is more than one
+message holds.
 
 ### Output limit
 
