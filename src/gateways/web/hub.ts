@@ -61,6 +61,7 @@ export class WebHub {
       thinking: readDisplay().thinking,
       provider: this.identity.provider,
       model: this.runtime.model,
+      effort: this.runtime.reasoningEffort,
     })
     this.sendState(conversationId)
   }
@@ -330,29 +331,59 @@ export class WebHub {
    * anything being kept in memory across restarts.
    */
   private transcript(session: Session): TranscriptMessage[] {
-    return session.messages.flatMap((message): TranscriptMessage[] => {
-      if (message.role !== 'user' && message.role !== 'assistant') return []
-      const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
-      const reasoning = message.content.filter((part) => part.type === 'reasoning').map((part) => part.text).join('')
-      // The tool calls stay with the turn they belong to: a session read back — a
-      // reload, or a tab opened later — shows the same lines the live stream drew,
-      // from the same formatter the other surfaces use.
-      const tools = message.content.flatMap((part) =>
-        part.type === 'tool-call' && showsToolCall(part.name) ? [toolLine(part.name, part.args)] : [],
-      )
-      const attachments = message.content.flatMap((part) =>
-        part.type === 'file'
-          ? [this.register({ path: part.path, name: part.name, mimeType: part.mimeType })]
-          : [],
-      )
-      if (!text && !reasoning && tools.length === 0 && attachments.length === 0) return []
-      return [{
-        role: message.role,
-        text,
-        ...(reasoning ? { reasoning } : {}),
-        ...(tools.length > 0 ? { tools } : {}),
-        ...(attachments.length > 0 ? { attachments } : {}),
-      }]
-    })
+    const messages: TranscriptMessage[] = []
+    let currentAssistant: TranscriptMessage | null = null
+
+    for (const message of session.messages) {
+      if (message.role === 'user') {
+        currentAssistant = null
+        const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
+        if (text) messages.push({ role: 'user', text })
+        continue
+      }
+      if (message.role === 'assistant') {
+        const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
+        const reasoning = message.content.filter((part) => part.type === 'reasoning').map((part) => part.text).join('')
+        const tools = message.content.flatMap((part) =>
+          part.type === 'tool-call' && showsToolCall(part.name) ? [toolLine(part.name, part.args)] : [],
+        )
+        const attachments = message.content.flatMap((part) =>
+          part.type === 'file'
+            ? [this.register({ path: part.path, name: part.name, mimeType: part.mimeType })]
+            : [],
+        )
+
+        if (!currentAssistant) {
+          currentAssistant = {
+            role: 'assistant',
+            text,
+            ...(reasoning ? { reasoning } : {}),
+            ...(tools.length > 0 ? { tools } : {}),
+            ...(attachments.length > 0 ? { attachments } : {}),
+          }
+          messages.push(currentAssistant)
+        } else {
+          if (text) {
+            currentAssistant.text = currentAssistant.text ? `${currentAssistant.text}\n\n${text}` : text
+          }
+          if (reasoning) {
+            currentAssistant.reasoning = currentAssistant.reasoning ? `${currentAssistant.reasoning}\n\n${reasoning}` : reasoning
+          }
+          if (tools.length > 0) {
+            currentAssistant.tools = [...(currentAssistant.tools ?? []), ...tools]
+          }
+          if (attachments.length > 0) {
+            currentAssistant.attachments = [...(currentAssistant.attachments ?? []), ...attachments]
+          }
+        }
+      }
+    }
+
+    return messages.filter((m) =>
+      m.text.trim() ||
+      (m.tools && m.tools.length > 0) ||
+      (m.attachments && m.attachments.length > 0) ||
+      m.reasoning,
+    )
   }
 }

@@ -44,12 +44,40 @@ function formatBytes(bytes: number): string {
   return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
 }
 
+function ToolLine({ tool }: { tool: string }) {
+  const [copied, setCopied] = useState(false)
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(tool)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // clipboard write might fail in unpermitted context
+    }
+  }
+
+  return (
+    <div className="tool-line">
+      <code>{tool}</code>
+      <button
+        className="tool-copy-btn"
+        type="button"
+        title={copied ? 'Copied' : 'Copy command'}
+        aria-label={copied ? 'Copied' : 'Copy command'}
+        onClick={() => void handleCopy()}
+      >
+        <Icon name={copied ? 'check' : 'copy'} size={13} />
+      </button>
+    </div>
+  )
+}
+
 function ToolLines({ id, tools }: { id: string; tools: string[] }) {
   const seen = new Map<string, number>()
   return <>{tools.map((tool) => {
     const occurrence = seen.get(tool) ?? 0
     seen.set(tool, occurrence + 1)
-    return <div className="tool-line" key={`${id}-${tool}-${occurrence}`}><code>{tool}</code></div>
+    return <ToolLine key={`${id}-${tool}-${occurrence}`} tool={tool} />
   })}</>
 }
 
@@ -108,7 +136,7 @@ export function MessageList({ messages, thinking, onPrompt, onAction }: { messag
   )
 
   return <div className="thread-inner" aria-live="polite" aria-relevant="additions text">
-    {messages.map((message) => (
+    {messages.filter((m) => hasContent(m, thinking)).map((message) => (
       <article className={`message ${message.role}${message.loaded ? ' is-loaded' : ''}`} key={message.id}>
         <div className="message-content">
           {message.reasoning && thinking
@@ -167,6 +195,11 @@ export function MessageList({ messages, thinking, onPrompt, onAction }: { messag
               ))}
             </div>
           )}
+          {message.role === 'assistant' && message.text && message.waitingSince === undefined && (
+            <div className="message-toolbar">
+              <CopyButton text={message.text} />
+            </div>
+          )}
           {message.waitingSince !== undefined && <WaitLine />}
           {message.status && <div className="message-status">{message.status}</div>}
         </div>
@@ -209,4 +242,43 @@ function thoughtLabel(ms?: number): string {
 /** A tenth of a second matters at 6.4s; at 51s it is noise. */
 function formatSeconds(value: number): string {
   return `${value < 10 ? Math.round(value * 10) / 10 : Math.round(value)}s`
+}
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false)
+
+  const handleCopy = async () => {
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch {
+      // Clipboard write might fail in non-secure origins
+    }
+  }
+
+  return (
+    <button
+      className="message-tool-btn"
+      type="button"
+      title={copied ? 'Copied' : 'Copy message'}
+      aria-label={copied ? 'Copied' : 'Copy message'}
+      onClick={() => void handleCopy()}
+    >
+      <Icon name={copied ? 'check' : 'copy'} size={14} />
+      {copied && <span className="message-tool-label">Copied</span>}
+    </button>
+  )
+}
+
+function hasContent(message: ChatMessage, thinking: boolean): boolean {
+  if (message.text?.trim()) return true
+  if (message.tools && message.tools.length > 0) return true
+  if (message.attachments && message.attachments.length > 0) return true
+  if (message.cards && message.cards.length > 0) return true
+  if (message.actions && message.actions.length > 0) return true
+  if (message.reasoning && thinking) return true
+  if (message.waitingSince !== undefined) return true
+  if (message.status) return true
+  return false
 }
