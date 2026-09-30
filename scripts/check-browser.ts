@@ -52,6 +52,15 @@ const PAGE = `<!doctype html><html><head><title>Acoes</title><style>body{height:
 </script>
 </body></html>`
 
+/**
+ * The page that replaces itself 200ms after loading: what puts the look and the
+ * action on two different documents.
+ */
+const ESCAPING = `<!doctype html><html><head><title>Escaping</title></head><body>
+<button id="b">Clique</button>
+<script>setTimeout(function () { location.reload() }, 200)</script>
+</body></html>`
+
 interface Check {
   /** The verb from the tool's own list that this one exercises. */
   action: BrowserAction
@@ -141,11 +150,33 @@ function checksFor(file: string): Check[] {
   ]
 }
 
+/**
+ * The failure that is not a verb: the page replaces itself between the look and
+ * the action. The ref is still the newest look's, and what died is the frame —
+ * a different failure with a different answer, and the model has to be told
+ * which one it is, because "look again" is the remedy for only one of them.
+ */
+async function checkEscapingPage(session: BrowserSession, url: string): Promise<Result> {
+  const what = 'the page replacing itself under a ref'
+  const opening = await session.navigate(url, 'load', AbortSignal.timeout(30_000))
+  const ref = opening.elements[0]?.ref ?? ''
+  // Past the page's own reload, so the action lands on a document that is gone.
+  await new Promise((resolve) => setTimeout(resolve, 900))
+  try {
+    await session.act({ action: 'click', ref }, AbortSignal.timeout(10_000))
+    return { what, said: 'the action landed — the page had not reloaded yet', ok: false }
+  } catch (error) {
+    const said = (error as Error).message
+    return { what, said, ok: said.includes('replaced itself') }
+  }
+}
+
 async function runEngine(
   label: string,
   options: BrowserSessionOptions,
   url: string,
   file: string,
+  escapingUrl: string,
 ): Promise<Result[]> {
   const session = new BrowserSession(options)
   const results: Result[] = []
@@ -169,6 +200,7 @@ async function runEngine(
         ok: Boolean(marked?.startsWith(`@${check.expect}`)),
       })
     }
+    results.push(await checkEscapingPage(session, escapingUrl))
   } finally {
     await session.close()
   }
@@ -181,9 +213,9 @@ async function main(): Promise<void> {
   const file = path.join(work, 'nota.txt')
   writeFileSync(file, 'conteudo')
 
-  const server = createServer((_request, response) => {
+  const server = createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
-    response.end(PAGE)
+    response.end(request.url === '/escaping' ? ESCAPING : PAGE)
   })
   await new Promise<void>((done) => server.listen(0, '127.0.0.1', done))
   const url = `http://127.0.0.1:${(server.address() as { port: number }).port}/`
@@ -209,6 +241,7 @@ async function main(): Promise<void> {
         { chromePath: chrome, profileDir: path.join(work, 'profile'), headless: true },
         url,
         file,
+        `${url}escaping`,
       )
     } catch (error) {
       startup = (error as Error).message
