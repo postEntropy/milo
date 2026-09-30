@@ -182,6 +182,19 @@ describe('web Settings sessions', () => {
     expect((await settings.handle('sessions') as Array<{ id: string }>).some((item) => item.id === session.id)).toBe(false)
     await expect(settings.handle('session-delete', { id: session.id })).rejects.toThrow('not found')
   })
+
+  it('renames a saved session', async () => {
+    writeConfig()
+    const runtime = build({})
+    const settings = new WebSettings(runtime, home)
+
+    const session = await runtime.newSession({ gateway: 'web', conversationId: CONVERSATION })
+    expect(await settings.handle('session-rename', { id: session.id, title: 'My Project' }))
+      .toEqual({ renamed: true, id: session.id, title: 'My Project' })
+
+    const list = await settings.handle('sessions') as Array<{ id: string; title?: string }>
+    expect(list.find((item) => item.id === session.id)?.title).toBe('My Project')
+  })
 })
 
 describe('web Settings skills', () => {
@@ -225,5 +238,17 @@ describe('web Settings config', () => {
     const next = { ...before.config, web: { enabled: true, host: '0.0.0.0', port: 8123 } }
     await settings.handle('save-config', { config: next })
     expect(readConfig()?.web).toEqual({ enabled: true, host: '0.0.0.0', port: 8123 })
+  })
+
+  it('sets reasoning effort on runtime and persists to config', async () => {
+    writeConfig()
+    const runtime = build({})
+    const settings = new WebSettings(runtime, home)
+
+    expect(await settings.handle('set-effort', { effort: 'high' })).toEqual({ effort: 'high' })
+    expect(runtime.reasoningEffort).toBe('high')
+    expect(readConfig()?.reasoningEffort).toBe('high')
+
+    await expect(settings.handle('set-effort', { effort: 'invalid' })).rejects.toThrow('Reasoning effort must be low, medium or high.')
   })
 })

@@ -61,6 +61,7 @@ export class WebSettings {
       case 'overview': return this.overview()
       case 'save-config': return this.saveConfig(body)
       case 'set-model': return this.setModel(body)
+      case 'set-effort': return this.setEffort(body)
       case 'save-secret': return this.saveSecret(body)
       case 'remove-secret': return this.removeSecret(body)
       case 'models': return this.models(body)
@@ -69,6 +70,7 @@ export class WebSettings {
       case 'resume-session': return this.resumeSession(body)
       case 'clear-session': return this.clearSession(body)
       case 'session-delete': return this.deleteSession(body)
+      case 'session-rename': return this.renameSession(body)
       case 'transcript': return this.transcript(body)
       case 'export': return this.export(body)
       case 'skills': return this.skills()
@@ -200,6 +202,16 @@ export class WebSettings {
     return { model }
   }
 
+  /** Switches the reasoning effort and writes it down, so the next turn uses it. */
+  private setEffort(body: Record<string, unknown>): unknown {
+    const effort = typeof body.effort === 'string' ? body.effort.trim() : ''
+    if (!['low', 'medium', 'high'].includes(effort)) throw new Error('Reasoning effort must be low, medium or high.')
+    const validated = effort as 'low' | 'medium' | 'high'
+    this.runtime.setReasoningEffort(validated)
+    setReasoningEffort(validated)
+    return { effort: validated }
+  }
+
   private async models(body: Record<string, unknown>): Promise<unknown> {
     const id = typeof body.provider === 'string' ? body.provider : ''
     const config = readConfig()
@@ -281,6 +293,14 @@ export class WebSettings {
     }
     if (!(await this.runtime.removeSession(id))) throw new Error('Session not found.')
     return { removed: true }
+  }
+
+  private async renameSession(body: Record<string, unknown>): Promise<unknown> {
+    const id = sessionId(body.id)
+    const title = typeof body.title === 'string' ? body.title : ''
+    const renamed = await this.runtime.renameSession(id, title)
+    if (!renamed) throw new Error('Session not found.')
+    return { renamed: true, id, title: title.trim() || undefined }
   }
 
   private transcript(body: Record<string, unknown>): unknown {
