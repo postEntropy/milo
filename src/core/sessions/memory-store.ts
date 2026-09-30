@@ -1,7 +1,9 @@
 import { KeyedMutex, waitForLease } from './lease.js'
 import { generateNickname } from './nickname.js'
+import { sliceMessagesUpToTurn } from './compact.js'
 import {
   INITIAL_SESSION_VERSION,
+  isValidSessionId,
   SessionConflictError,
   toSummary,
   type SessionLease,
@@ -92,6 +94,33 @@ export class MemorySessionStore implements SessionStore {
     } finally {
       unlock()
     }
+  }
+
+  async fork(sourceId: string, options?: { upToTurn?: number; title?: string }): Promise<SessionRecord | null> {
+    if (!isValidSessionId(sourceId)) return null
+    const source = this.records.get(sourceId)
+    if (!source) return null
+
+    const timestamp = this.now()
+    const id = generateNickname((candidate) => this.records.has(candidate))
+    const messages = sliceMessagesUpToTurn(source.messages, options?.upToTurn)
+    const title = options?.title?.trim() || (source.title ? `${source.title} (fork)` : undefined)
+    // A summary describes the turns that were folded away. A slice did not fold
+    // them, it left them out — so a fork of the first turns must not open with a
+    // summary of the turns that came after it.
+    const whole = messages.length === source.messages.length
+    const record: SessionRecord = {
+      id,
+      title,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      messages: structuredClone(messages),
+      version: INITIAL_SESSION_VERSION,
+      summary: whole ? source.summary : undefined,
+      droppedTokens: whole ? source.droppedTokens : undefined,
+    }
+    this.records.set(id, record)
+    return structuredClone(record)
   }
 
   async prune(options: { keep: number; protect?: Iterable<string> }): Promise<string[]> {

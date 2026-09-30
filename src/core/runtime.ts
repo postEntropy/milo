@@ -171,6 +171,27 @@ export class AgentRuntime {
     return session
   }
 
+  /**
+   * Forks an existing session into a new one and rebinds `scope` to it.
+   * Returns the new Session, or null if `sourceId` was not found.
+   */
+  async forkSession(
+    scope: MemoryScope,
+    sourceId: string,
+    options?: { upToTurn?: number; title?: string },
+  ): Promise<Session | null> {
+    const cached = this.cache.get(sourceId)
+    if (cached) {
+      await cached.settle()
+    }
+    await this.detach(scope)
+    const record = await this.store.fork(sourceId, options)
+    if (!record) return null
+    await this.store.setBinding(scopeKey(scope), record.id)
+    this.opened.add(scopeKey(scope))
+    return this.adopt(record, scope)
+  }
+
   async listSessions(): Promise<SessionSummary[]> {
     return withRecaps(await this.store.list(), this.recaps)
   }

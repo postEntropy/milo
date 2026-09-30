@@ -37,6 +37,8 @@ export interface CommandContext {
   newSession?: (title?: string) => Promise<{ id: string }>
   /** Binds this conversation to an existing session. */
   resumeSession?: (id: string) => Promise<boolean>
+  /** Forks the current session or a named one into a new session. */
+  forkSession?: (id?: string, options?: { upToTurn?: number }) => Promise<{ id: string } | null>
   listSessions?: () => Promise<SessionSummary[]>
   sessionStats?: () => SessionStats | Promise<SessionStats>
   /** Folds the oldest turns into the summary now, rather than when the budget forces it. */
@@ -81,6 +83,7 @@ const HELP = [
   '/new [title] — start a new session',
   '/sessions [page] — list saved sessions',
   '/resume <id> — switch to another session',
+  '/fork [id] [turn] — branch into a new session from this or a named session',
   '/stats — numbers for the current session',
   '/compact — fold the oldest turns into the summary now, instead of when the context fills up',
   '/export [md|json] — write this conversation out as a file, tool calls and reasoning included',
@@ -203,6 +206,19 @@ function parse(raw: string): { command: string; argument: string } {
     command: trimmed.slice(0, spaceIndex),
     argument: trimmed.slice(spaceIndex + 1).trim(),
   }
+}
+
+/**
+ * A `/fork` argument: an optional session id and an optional turn, in either
+ * order. Parsed here, beside the command that documents the rule, so the terminal
+ * and the chat gateways cannot come to read the same words differently.
+ */
+export function parseForkArgument(argument: string): { targetId?: string; upToTurn?: number } {
+  const parts = argument.split(/\s+/).filter(Boolean)
+  const targetId = parts[0] && !/^\d+$/.test(parts[0]) ? parts[0] : undefined
+  const turnStr = parts[0] && /^\d+$/.test(parts[0]) ? parts[0] : parts[1]
+  const upToTurn = turnStr && /^\d+$/.test(turnStr) ? Number.parseInt(turnStr, 10) : undefined
+  return { targetId, upToTurn }
 }
 
 /** Handles the non-interactive slash commands shared by the gateways. */
@@ -353,6 +369,25 @@ export async function handleCommand(
         reply: switched
           ? `Switched to session ${argument}.`
           : `No session "${argument}". See /sessions for the ids.`,
+      }
+    }
+
+    case 'fork': {
+      if (context.sessionLocked) return { handled: true, reply: context.sessionLocked }
+      if (!context.forkSession) {
+        return { handled: true, reply: 'Session switching is not available on this surface.' }
+      }
+      const { targetId, upToTurn } = parseForkArgument(argument)
+      const result = await context.forkSession(targetId, upToTurn !== undefined ? { upToTurn } : undefined)
+      if (!result) {
+        return {
+          handled: true,
+          reply: targetId ? `No session "${targetId}". See /sessions for the ids.` : 'Could not fork session.',
+        }
+      }
+      return {
+        handled: true,
+        reply: `Branched into new session: ${result.id}. /sessions to list, /resume ${result.id} to come back.`,
       }
     }
 

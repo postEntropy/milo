@@ -240,6 +240,11 @@ export class TelegramGateway implements Gateway {
         effortLocked: effortLockMessage(this.options.allowlist),
         newSession: (title) => this.options.runtime.newSession(scope, title),
         resumeSession: async (id) => (await this.options.runtime.resumeSession(scope, id)) !== null,
+        forkSession: async (targetId, options) => {
+          const id = targetId ?? (await this.options.runtime.getSession(scope)).id
+          const forked = await this.options.runtime.forkSession(scope, id, options)
+          return forked ? { id: forked.id } : null
+        },
         listSessions: () => this.options.runtime.listSessions(),
         skills: () => this.options.runtime.skills,
         sessionStats: () => session.stats(),

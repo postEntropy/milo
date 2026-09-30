@@ -310,6 +310,11 @@ export class WebHub {
       persistEffort: (effort) => { this.runtime.setReasoningEffort(effort); setReasoningEffort(effort) },
       newSession: (title) => this.runtime.newSession(conversation.scope, title),
       resumeSession: async (id) => (await this.runtime.resumeSession(conversation.scope, id)) !== null,
+      forkSession: async (targetId, options) => {
+        const id = targetId ?? (await this.runtime.getSession(conversation.scope)).id
+        const forked = await this.runtime.forkSession(conversation.scope, id, options)
+        return forked ? { id: forked.id } : null
+      },
       listSessions: () => this.runtime.listSessions(),
       sessionStats: () => session.stats(),
       compactSession: () => session.compact(signal),

@@ -14,6 +14,7 @@ export {
   estimateTokens,
   planCut,
   planCutUnderBudget,
+  sliceMessagesUpToTurn,
   summarize,
 } from './compact.js'
 export { DEFAULT_PAGE_SIZE, formatSessionList, formatStats, formatWhen, summarizeRecap } from './format.js'

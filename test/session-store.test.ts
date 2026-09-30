@@ -600,4 +600,98 @@ describe('session leases', () => {
     },
     60_000,
   )
+
+  it('forks an existing session slicing turns up to the requested point', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    const original = await store.create()
+    original.title = 'Original Session'
+    original.messages.push(
+      { role: 'user', content: [{ type: 'text', text: 'turn 1 question' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'turn 1 answer' }] },
+      { role: 'user', content: [{ type: 'text', text: 'turn 2 question' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'turn 2 answer' }] },
+    )
+    await store.save(original, original.version)
+
+    const forked = await store.fork(original.id, { upToTurn: 1 })
+    expect(forked).not.toBeNull()
+    expect(forked!.id).not.toBe(original.id)
+    expect(forked!.title).toBe('Original Session (fork)')
+    expect(forked!.messages).toHaveLength(2)
+    expect((forked!.messages[0]!.content[0] as { text: string }).text).toBe('turn 1 question')
+    expect((forked!.messages[1]!.content[0] as { text: string }).text).toBe('turn 1 answer')
+
+    const loaded = await store.load(forked!.id)
+    expect(loaded?.messages).toHaveLength(2)
+    expect(loaded?.title).toBe('Original Session (fork)')
+  })
+
+  it('returns null when attempting to fork an unknown session id', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    const result = await store.fork('non-existent-session-id')
+    expect(result).toBeNull()
+  })
+
+  it('hands back a fork that the next save accepts', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    const original = await store.create()
+    original.messages.push({ role: 'user', content: [{ type: 'text', text: 'why' }] })
+    await store.save(original, original.version)
+
+    const forked = await store.fork(original.id)
+    expect(forked).not.toBeNull()
+    // The revision it reports is the one the file holds, so the first turn in a
+    // forked session is not refused as a conflict by the file the fork wrote.
+    await expect(store.save(forked!, forked!.version)).resolves.toBeUndefined()
+  })
+
+  it('carries no summary into a fork that left the folded turns behind', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    const original = await store.create()
+    original.summary = 'what the first turns were about'
+    original.messages.push(
+      { role: 'user', content: [{ type: 'text', text: 'turn 1' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'reply 1' }] },
+      { role: 'user', content: [{ type: 'text', text: 'turn 2' }] },
+    )
+    await store.save(original, original.version)
+
+    // A slice leaves the earlier turns out rather than folding them away, so the
+    // fork cannot open with a summary of the turns that came after it.
+    expect((await store.fork(original.id, { upToTurn: 1 }))?.summary).toBeUndefined()
+    expect((await store.fork(original.id))?.summary).toBe('what the first turns were about')
+  })
+})
+
+describe('MemorySessionStore fork', () => {
+  it('forks a session keeping the requested turns in memory', async () => {
+    const store = new MemorySessionStore()
+    const original = await store.create()
+    original.title = 'Memory Session'
+    original.messages.push(
+      { role: 'user', content: [{ type: 'text', text: 'turn 1' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'reply 1' }] },
+      { role: 'user', content: [{ type: 'text', text: 'turn 2' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'reply 2' }] },
+    )
+    await store.save(original, original.version)
+
+    const forked = await store.fork(original.id, { upToTurn: 1 })
+    expect(forked).not.toBeNull()
+    expect(forked!.title).toBe('Memory Session (fork)')
+    expect(forked!.messages).toHaveLength(2)
+
+    const loaded = await store.load(forked!.id)
+    expect(loaded?.messages).toHaveLength(2)
+  })
+
+  it('hands back a fork that the next save accepts', async () => {
+    const store = new MemorySessionStore()
+    const original = await store.create()
+    original.messages.push({ role: 'user', content: [{ type: 'text', text: 'why' }] })
+    await store.save(original, original.version)
+
+    const forked = await store.fork(original.id)
+    await expect(store.save(forked!, forked!.version)).resolves.toBeUndefined()
+  })
 })

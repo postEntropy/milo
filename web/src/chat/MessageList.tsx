@@ -118,7 +118,21 @@ function SessionCards({
   )
 }
 
-export function MessageList({ messages, thinking, onPrompt, onAction }: { messages: ChatMessage[]; thinking: boolean; onPrompt?(text: string): void; onAction?(actionId: string, messageId?: string): void }) {
+export function MessageList({
+  messages,
+  thinking,
+  onPrompt,
+  onAction,
+  onFork,
+  busy,
+}: {
+  messages: ChatMessage[]
+  thinking: boolean
+  onPrompt?(text: string): void
+  onAction?(actionId: string, messageId?: string): void
+  onFork?(upToTurn: number): void
+  busy?: boolean
+}) {
   if (messages.length === 0) return (
     <section className="empty-state" aria-labelledby="welcome-title">
       <img className="empty-brand" src={miloAvatar} alt="" />
@@ -134,6 +148,13 @@ export function MessageList({ messages, thinking, onPrompt, onAction }: { messag
       </div>
     </section>
   )
+
+  let currentTurn = 0
+  const messageTurns = new Map<string, number>()
+  for (const m of messages) {
+    if (m.role === 'user') currentTurn++
+    messageTurns.set(m.id, currentTurn)
+  }
 
   return <div className="thread-inner" aria-live="polite" aria-relevant="additions text">
     {messages.filter((m) => hasContent(m, thinking)).map((message) => (
@@ -198,6 +219,19 @@ export function MessageList({ messages, thinking, onPrompt, onAction }: { messag
           {message.role === 'assistant' && message.text && message.waitingSince === undefined && (
             <div className="message-toolbar">
               <CopyButton text={message.text} />
+              {onFork && (
+                <button
+                  className="message-tool-btn"
+                  type="button"
+                  disabled={busy}
+                  title="Fork session from here"
+                  aria-label="Fork session from here"
+                  onClick={() => onFork(messageTurns.get(message.id) ?? 1)}
+                >
+                  <Icon name="branch" size={13} />
+                  <span className="message-tool-label">Fork</span>
+                </button>
+              )}
             </div>
           )}
           {message.waitingSince !== undefined && <WaitLine />}

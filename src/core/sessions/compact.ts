@@ -62,6 +62,26 @@ export function planCut(messages: Message[], keepTurns: number): number {
 }
 
 /**
+ * Slices a message history to keep only the first `upToTurn` user turns (1-indexed).
+ * Each turn begins on a message where `role === 'user'`.
+ * If `upToTurn` is undefined or exceeds total turns, returns a shallow copy of `messages`.
+ * If `upToTurn <= 0`, returns an empty array.
+ */
+export function sliceMessagesUpToTurn(messages: Message[], upToTurn?: number): Message[] {
+  if (upToTurn === undefined) return messages.slice()
+  if (upToTurn <= 0) return []
+  const userIndexes: number[] = []
+  messages.forEach((msg, idx) => {
+    if (msg.role === 'user') userIndexes.push(idx)
+  })
+  if (upToTurn < userIndexes.length) {
+    const cutIdx = userIndexes[upToTurn]!
+    return messages.slice(0, cutIdx)
+  }
+  return messages.slice()
+}
+
+/**
  * Where to cut so the transcript that survives fits `budget`, past the floor.
  *
  * `keepTurns` is where the cut prefers to land, and where it lands whenever those

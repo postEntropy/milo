@@ -99,6 +99,11 @@ export interface SessionStore {
   list(): Promise<SessionSummary[]>
   remove(id: string): Promise<void>
   /**
+   * Forks an existing session, copying history up to `upToTurn` (1-indexed) into a new session.
+   * Returns the new record, or null when `sourceId` does not exist.
+   */
+  fork(sourceId: string, options?: { upToTurn?: number; title?: string }): Promise<SessionRecord | null>
+  /**
    * Deletes every session beyond the `keep` most recently updated, returning the
    * ids removed. A session a scope is bound to is never pruned, nor one named in
    * `protect`: a binding to a session that is gone would silently start a new

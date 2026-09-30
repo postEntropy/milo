@@ -25,6 +25,7 @@ import {
   compactReply,
   formatMemoryList,
   handleTurnControl,
+  parseForkArgument,
   type TurnControlTarget,
 } from '../../commands.js'
 import { isCtrlC, isSteerKey } from '../keys.js'
@@ -97,7 +98,7 @@ const HELP_TEXT = [
  * transcript it is writing into, or take over the screen its output goes to —
  * so they would fight the turn rather than wait behind it.
  */
-const BLOCKED_WHILE_BUSY = new Set(['new', 'resume', 'clear', 'model', 'setup', 'compact'])
+const BLOCKED_WHILE_BUSY = new Set(['new', 'resume', 'fork', 'clear', 'model', 'setup', 'compact'])
 
 /**
  * How many sent lines the arrows walk back through. Kept in memory, for this
@@ -405,6 +406,18 @@ export function ChatScreen({
         }
         onSessionChange?.(session.id)
         push({ kind: 'info', text: `Switched to session ${session.id}.` })
+        break
+      }
+      case 'fork': {
+        const { targetId, upToTurn } = parseForkArgument(argument)
+        const source = targetId ?? (await runtime.getSession(scope)).id
+        const forked = await runtime.forkSession(scope, source, { upToTurn })
+        if (!forked) {
+          push({ kind: 'info', text: `No session "${source}". See /sessions for the ids.` })
+          break
+        }
+        onSessionChange?.(forked.id)
+        push({ kind: 'info', text: `Branched into session ${forked.id}.` })
         break
       }
       case 'stats': {

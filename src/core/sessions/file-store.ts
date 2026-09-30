@@ -8,6 +8,7 @@ import { logWarn } from '../../util/log.js'
 import type { Message } from '../providers/types.js'
 import { KeyedMutex, waitForLease } from './lease.js'
 import { generateNickname } from './nickname.js'
+import { sliceMessagesUpToTurn } from './compact.js'
 import {
   INITIAL_SESSION_VERSION,
   isValidSessionId,
@@ -293,6 +294,51 @@ export class FileSessionStore implements SessionStore {
     } finally {
       unlock()
     }
+  }
+
+  async fork(sourceId: string, options?: { upToTurn?: number; title?: string }): Promise<SessionRecord | null> {
+    if (!isValidSessionId(sourceId)) return null
+    return this.run(async () => {
+      const source = await this.load(sourceId)
+      if (!source) return null
+
+      const timestamp = this.now()
+      const id = generateNickname(
+        (candidate) => this.pending.has(candidate) || existsSync(this.fileFor(candidate)),
+      )
+      const messages = sliceMessagesUpToTurn(source.messages, options?.upToTurn)
+      const title = options?.title?.trim() || (source.title ? `${source.title} (fork)` : undefined)
+      // A summary describes the turns that were folded away. A slice did not fold
+      // them, it left them out — so a fork of the first turns must not open with a
+      // summary of the turns that came after it.
+      const whole = messages.length === source.messages.length
+      const record: SessionRecord = {
+        id,
+        title,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        messages: structuredClone(messages),
+        version: INITIAL_SESSION_VERSION,
+        summary: whole ? source.summary : undefined,
+        droppedTokens: whole ? source.droppedTokens : undefined,
+      }
+      // Nothing to write yet, so it lives in memory like a minted session does.
+      if (record.messages.length === 0) {
+        this.pending.set(id, record)
+        return structuredClone(record)
+      }
+      // The revision on the file is what the next save is checked against, so the
+      // record handed back carries the number the file does. Returning the one
+      // from before the write left a fork whose first turn conflicted with a file
+      // that had already moved past it.
+      const written: SessionRecord = { ...record, version: INITIAL_SESSION_VERSION + 1 }
+      ensurePrivateDir(this.dir)
+      const file = this.fileFor(record.id)
+      await this.withLock(file, async () => {
+        await writePrivateFile(file, `${JSON.stringify(written, null, 2)}\n`)
+      })
+      return structuredClone(written)
+    })
   }
 
   async prune(options: { keep: number; protect?: Iterable<string> }): Promise<string[]> {

@@ -306,6 +306,27 @@ export default function App() {
     } catch (error) { fail(error) }
   }, [socket, fail])
 
+  const forkSession = useCallback(async (upToTurn: number): Promise<void> => {
+    if (!sessionId) return
+    const nextConversationId = randomUUID()
+    composerRef.current?.focus()
+    setComposerFocus((current) => current + 1)
+    try {
+      const res = await api<{ id: string }>('fork-session', {
+        conversationId: nextConversationId,
+        sessionId,
+        upToTurn,
+      })
+      socket.close()
+      setMessages([])
+      setSessionId(res.id)
+      setConversationId(nextConversationId)
+      setView('chat')
+      setSidebarOpen(false)
+      setNotice({ text: 'Branched into a new session.', error: false })
+    } catch (error) { fail(error) }
+  }, [sessionId, socket, fail])
+
   const handleAction = useCallback((actionId: string, messageId?: string) => {
     if (actionId.startsWith('resume:')) {
       void openSession(actionId.slice('resume:'.length))
@@ -426,7 +447,7 @@ export default function App() {
         ? <Routines conversationId={conversationId} chat={{ messages, thinking, busy, connection, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>
-            <MessageList messages={messages} thinking={thinking} onPrompt={send} onAction={handleAction} />
+            <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} />
             {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
           </div>
           <div className={`scroll-blur top ${chatScrolled ? 'on' : ''}`} aria-hidden="true" />

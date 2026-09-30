@@ -462,6 +462,26 @@ describe('handleCommand', () => {
     expect(noArg.reply).toContain('Usage: /resume')
   })
 
+  it('forks a session into a new one and handles missing targets', async () => {
+    let forkedId: string | undefined
+    let forkedOptions: { upToTurn?: number } | undefined
+    const ok = await handleCommand('/fork calm-otter-7 2', {
+      forkSession: async (id, options) => {
+        forkedId = id
+        forkedOptions = options
+        return { id: 'swift-falcon-3' }
+      },
+    })
+    expect(forkedId).toBe('calm-otter-7')
+    expect(forkedOptions?.upToTurn).toBe(2)
+    expect(ok.reply).toContain('Branched into new session: swift-falcon-3')
+
+    const failed = await handleCommand('/fork nope-1', {
+      forkSession: async () => null,
+    })
+    expect(failed.reply).toContain('No session "nope-1"')
+  })
+
   it('shows the current session stats', async () => {
     const result = await handleCommand('/stats', {
       sessionStats: () => ({

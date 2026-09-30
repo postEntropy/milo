@@ -68,6 +68,7 @@ export class WebSettings {
       case 'sessions': return this.runtime.listSessions()
       case 'new-session': return this.newSession(body)
       case 'resume-session': return this.resumeSession(body)
+      case 'fork-session': return this.forkSession(body)
       case 'clear-session': return this.clearSession(body)
       case 'session-delete': return this.deleteSession(body)
       case 'session-rename': return this.renameSession(body)
@@ -270,6 +271,18 @@ export class WebSettings {
     const conversationId = validConversationId(body.conversationId)
     if (typeof body.id !== 'string') throw new Error('Invalid session id.')
     const session = await this.runtime.resumeSession({ gateway: 'web', conversationId }, body.id)
+    if (!session) throw new Error('Session not found.')
+    return { id: session.id }
+  }
+
+  private async forkSession(body: Record<string, unknown>): Promise<unknown> {
+    const conversationId = validConversationId(body.conversationId)
+    const rawId = body.sessionId ?? body.id
+    if (typeof rawId !== 'string') throw new Error('Invalid session id.')
+    const sourceId = sessionId(rawId)
+    const upToTurn = typeof body.upToTurn === 'number' ? body.upToTurn : undefined
+    const title = typeof body.title === 'string' ? body.title : undefined
+    const session = await this.runtime.forkSession({ gateway: 'web', conversationId }, sourceId, { upToTurn, title })
     if (!session) throw new Error('Session not found.')
     return { id: session.id }
   }
