@@ -224,9 +224,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-tool-btn { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 8px; background: transparent; padding: 4px 7px; color: var(--muted); font-size: 12px; transition: background var(--motion-fast), color var(--motion-fast); }
 .message-tool-btn:hover { background: var(--surface-warm); color: var(--fg); }
 .message-tool-label { font-size: 11px; font-weight: 500; }
+/* A refused copy says so where the control is, and says it whether or not the
+   pointer is on the control — the toolbar and the tool line are otherwise
+   revealed on hover alone, which would hide the one answer worth reading. */
+.tool-copy-btn.failed { width: auto; gap: 5px; opacity: 1; padding: 0 7px; color: var(--danger); }
+.message-tool-btn.failed { color: var(--danger); }
 @media (hover: hover) {
   .message-toolbar { opacity: 0; transition: opacity var(--motion-fast); }
-  .message:hover .message-toolbar, .message-toolbar:focus-within { opacity: 1; }
+  .message:hover .message-toolbar, .message-toolbar:focus-within, .message-toolbar:has(.failed) { opacity: 1; }
 }
 .attachments { display: flex; flex-direction: column; gap: 8px; }
 .attachment-image { display: block; width: fit-content; max-width: 100%; }

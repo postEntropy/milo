@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useCopy, type CopyState } from '../lib/clipboard.js'
 import type { ActionRow, FrameAttachment, SessionCardItem, TranscriptMessage } from '@protocol'
 import { attachmentUrl } from '../lib/api.js'
 import { Markdown } from './Markdown.js'
@@ -45,28 +46,21 @@ function formatBytes(bytes: number): string {
 }
 
 function ToolLine({ tool }: { tool: string }) {
-  const [copied, setCopied] = useState(false)
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(tool)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // clipboard write might fail in unpermitted context
-    }
-  }
+  const { state, copy } = useCopy(tool)
+  const label = copyLabel(state)
 
   return (
     <div className="tool-line">
       <code>{tool}</code>
       <button
-        className="tool-copy-btn"
+        className={`tool-copy-btn${state === 'failed' ? ' failed' : ''}`}
         type="button"
-        title={copied ? 'Copied' : 'Copy command'}
-        aria-label={copied ? 'Copied' : 'Copy command'}
-        onClick={() => void handleCopy()}
+        title={label}
+        aria-label={label}
+        onClick={copy}
       >
-        <Icon name={copied ? 'check' : 'copy'} size={13} />
+        <Icon name={state === 'copied' ? 'check' : 'copy'} size={13} />
+        {state === 'failed' && <span className="message-tool-label">Copy failed</span>}
       </button>
     </div>
   )
@@ -279,30 +273,27 @@ function formatSeconds(value: number): string {
 }
 
 function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false)
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setTimeout(() => setCopied(false), 2000)
-    } catch {
-      // Clipboard write might fail in non-secure origins
-    }
-  }
+  const { state, copy } = useCopy(text)
 
   return (
     <button
-      className="message-tool-btn"
+      className={`message-tool-btn${state === 'failed' ? ' failed' : ''}`}
       type="button"
-      title={copied ? 'Copied' : 'Copy message'}
-      aria-label={copied ? 'Copied' : 'Copy message'}
-      onClick={() => void handleCopy()}
+      title={copyLabel(state)}
+      aria-label={copyLabel(state)}
+      onClick={copy}
     >
-      <Icon name={copied ? 'check' : 'copy'} size={14} />
-      {copied && <span className="message-tool-label">Copied</span>}
+      <Icon name={state === 'copied' ? 'check' : 'copy'} size={13} />
+      <span className="message-tool-label">{state === 'failed' ? 'Copy failed' : state === 'copied' ? 'Copied' : 'Copy'}</span>
     </button>
   )
+}
+
+/** What the copy control says, including when it could not copy at all. */
+function copyLabel(state: CopyState): string {
+  if (state === 'copied') return 'Copied'
+  if (state === 'failed') return 'Copy failed — select the text and copy it by hand'
+  return 'Copy'
 }
 
 function hasContent(message: ChatMessage, thinking: boolean): boolean {
