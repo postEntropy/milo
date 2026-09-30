@@ -14,6 +14,8 @@
  * error that says "look again".
  */
 
+import { errorMessage } from '../../util/errors.js'
+
 /** How many elements one observation shows. Past this the page is read, not driven. */
 export const MAX_ELEMENTS = 120
 
@@ -257,6 +259,11 @@ export interface Observation {
   more: boolean
   /** Frames that could not be read, named — a silent gap is a wrong answer. */
   unread: string[]
+  /**
+   * Whether any frame answered at all. False means every frame failed, so what
+   * follows is not an empty page — it is a page nobody could read.
+   */
+  read: boolean
 }
 
 /** Stitches the frames of one page into the single observation the model sees. */
@@ -277,6 +284,7 @@ export function mergeObservations(frames: FrameObservation[], unread: string[] =
     elements: elements.slice(0, MAX_ELEMENTS),
     more: more || elements.length > MAX_ELEMENTS,
     unread,
+    read: frames.length > 0,
   }
 }
 
@@ -287,6 +295,18 @@ export function formatSnapshot(observation: Observation): string {
     .filter(Boolean)
     .join(' — ')
   if (where) lines.push(where)
+
+  // A page no frame could answer is unknown, not empty. Saying "no interactive
+  // elements" there was an answer that was wrong, and the model acted on it: a
+  // page whose frame had been replaced under the agent read as a blank form, and
+  // the loop went on clicking at something nobody could see. The reasons are
+  // named instead, once, and there is nothing else to report about a page that
+  // was never read.
+  if (!observation.read) {
+    lines.push(`(could not read the page: ${observation.unread.join(', ') || 'no frame answered'})`)
+    return lines.join('\n')
+  }
+
   if (observation.heading) lines.push(`h1: ${observation.heading}`)
   if (observation.text) {
     lines.push(observation.textTruncated ? `${observation.text}…` : observation.text)
@@ -317,4 +337,43 @@ export function formatElement(element: RawElement): string {
   const state = element.state ? `  [${element.state}]` : ''
   const sensitive = element.sensitive ? `  <${element.sensitive} field — Milo does not fill this>` : ''
   return `${element.ref.padEnd(5, ' ')}${role}${name}${state}${sensitive}`
+}
+
+/*
+ * Why a ref could not be used, in the words the model reads.
+ *
+ * Three different failures, because they have three different answers. They used
+ * to share one sentence, and it named the wrong one: a page that had replaced
+ * itself under the agent was reported as a ref from an earlier look, whose remedy
+ * — look again — minted refs that died the same way, and the agent kept clicking
+ * at a page that was never going to answer. A model told which of the three
+ * happened can look again, open the URL afresh, or stop and say what it is stuck
+ * on, instead of turning the same handle.
+ */
+
+/** The ref belongs to a look a newer one has already replaced. */
+export function refFromEarlierLook(ref: string): string {
+  return `${ref} is from an earlier look at the page and is no longer valid — a ref works only for the newest look, and every action returns one.`
+}
+
+/** The ref is from the newest look, for an element the page no longer has. */
+export function refGone(ref: string): string {
+  return `${ref} was on the page when the newest look was taken and is not there any more — the page changed under you. Take a fresh look and use the refs it gives you.`
+}
+
+/** The page's own frame went away mid-action: a navigation, or a check that reloaded it. */
+export function pageReplaced(): string {
+  return 'the page replaced itself while that was running, so its frame went away and nothing was done. Take a fresh look; if it keeps happening, something on the page is probably refusing to be driven.'
+}
+
+/**
+ * Whether an error is Chrome saying the frame's realm is gone — the page
+ * navigated, or something on it reloaded the document out from under us. Its
+ * wording is the only signal it gives, and no call is safe from it: a click
+ * resolved a moment ago can land after the frame it belonged to has died.
+ */
+export function isPageGoneError(error: unknown): boolean {
+  return /Cannot find context with specified id|Session with given id not found|Execution context was destroyed/i.test(
+    errorMessage(error),
+  )
 }

@@ -32,6 +32,9 @@ describe('dropOldSnapshots', () => {
     const [first, second, third] = bodies(messages)
     expect(first).toContain('https://a.test/')
     expect(first).toContain('[page snapshot dropped')
+    // The advice has to be true: looking again does not revive the refs that were
+    // listed here, it replaces them.
+    expect(first).toContain('its refs are dead')
     expect(first).not.toContain('element element element')
     // The two most recent are untouched: they are what the next action is
     // chosen from.

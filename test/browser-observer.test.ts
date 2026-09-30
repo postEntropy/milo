@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest'
 import {
   formatElement,
   formatSnapshot,
+  isPageGoneError,
   mergeObservations,
   observeExpression,
+  pageReplaced,
   refExpression,
+  refFromEarlierLook,
+  refGone,
   type FrameObservation,
   type Observation,
 } from '../src/core/browser/observer.js'
@@ -80,6 +84,12 @@ describe('formatSnapshot', () => {
     expect(text).toContain('(could not read: frame 2: script error)')
   })
 
+  it('says a page nobody could read could not be read, not that it is empty', () => {
+    const text = formatSnapshot(mergeObservations([], ['main: Cannot find context with specified id']))
+    expect(text).toContain('(could not read the page: main: Cannot find context with specified id)')
+    expect(text).not.toContain('no interactive elements')
+  })
+
   it('marks text that was cut for length', () => {
     const text = formatSnapshot(mergeObservations([frame({ text: 'a'.repeat(400), textTruncated: true })]))
     expect(text).toContain(`${'a'.repeat(400)}…`)
@@ -107,6 +117,14 @@ describe('mergeObservations', () => {
     const merged = mergeObservations([])
     expect(merged).toMatchObject<Partial<Observation>>({ url: '', title: '', elements: [] })
   })
+
+  it('reads a page whose frame answered as read, even with nothing to act on', () => {
+    expect(mergeObservations([frame({ elements: [] })]).read).toBe(true)
+  })
+
+  it('reports a page no frame answered as unread rather than empty', () => {
+    expect(mergeObservations([], ['main: Session with given id not found.']).read).toBe(false)
+  })
 })
 
 describe('the expressions sent to the page', () => {
@@ -123,5 +141,29 @@ describe('the expressions sent to the page', () => {
 
   it('quotes the nonce, so a ref cannot be read as anything but a key', () => {
     expect(refExpression('a"b', 'r1')).toBe('globalThis.__miloRefs["a\\"b:r1"]')
+  })
+})
+
+describe('saying why a ref could not be used', () => {
+  it('never reports a replaced page as a ref from an earlier look', () => {
+    const earlier = refFromEarlierLook('r7')
+    const replaced = pageReplaced()
+    expect(earlier).toContain('r7')
+    expect(earlier).not.toBe(replaced)
+    // Looking again is the remedy for one of these and useless for the other,
+    // which is the whole reason they are two messages.
+    expect(replaced).toContain('replaced itself')
+    expect(replaced).not.toContain('r7')
+  })
+
+  it('tells an element that went away apart from a ref out of date', () => {
+    expect(refGone('r7')).not.toBe(refFromEarlierLook('r7'))
+    expect(refGone('r7')).toContain('is not there any more')
+  })
+
+  it('recognises Chrome saying the frame is gone, and only that', () => {
+    expect(isPageGoneError(new Error('Cannot find context with specified id'))).toBe(true)
+    expect(isPageGoneError(new Error('Session with given id not found.'))).toBe(true)
+    expect(isPageGoneError(new Error('r659 is from an earlier look at the page'))).toBe(false)
   })
 })

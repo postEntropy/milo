@@ -6,9 +6,13 @@ import { browserProfileDir } from '../config/paths.js'
 import { CdpConnection } from './cdp.js'
 import { attachUrl, findChrome, launchChrome } from './chrome.js'
 import {
+  isPageGoneError,
   mergeObservations,
   observeExpression,
+  pageReplaced,
   refExpression,
+  refFromEarlierLook,
+  refGone,
   type FrameObservation,
   type Observation,
   type RawElement,
@@ -344,7 +348,7 @@ export class BrowserSession {
     await this.start()
     const target = await this.drivePage(signal)
 
-    const note = await this.perform(request, target, signal)
+    const note = await this.performReportingAReplacedPage(request, target, signal)
     if (options.observe === false) return { note }
     await sleep(SETTLE_MS)
     const observation = await this.observe(signal)
@@ -362,13 +366,14 @@ export class BrowserSession {
     }
 
     const ref = (request as { ref?: string }).ref
-    const owner = ref ? this.refs.get(ref) : undefined
-    if (!ref || !owner || owner.nonce !== this.nonce) {
-      throw new Error(this.staleRefMessage(ref ?? 'that element'))
-    }
+    if (!ref) throw new Error('an action on an element needs the ref the last look gave it')
+    const owner = this.refs.get(ref)
+    if (!owner || owner.nonce !== this.nonce) throw new Error(refFromEarlierLook(ref))
 
     const handle = await this.handleFor(ref, owner, signal)
-    if (!handle) throw new Error(this.staleRefMessage(ref))
+    // Still the look we are using, but the element behind the ref has gone: the
+    // page moved under us, which is not the same thing as a ref out of date.
+    if (!handle) throw new Error(refGone(ref))
     const lookup = refExpression(owner.nonce, ref)
 
     switch (request.action) {
@@ -415,8 +420,23 @@ export class BrowserSession {
     }
   }
 
-  private staleRefMessage(ref: string): string {
-    return `${ref} is from an earlier look at the page and is no longer valid — take a fresh look and use the refs it gives you.`
+  /**
+   * An action, with the one failure that is nobody's mistake reported as itself:
+   * the frame's realm can die between the look that minted a ref and the action
+   * that uses it — a navigation, or a page that reloads itself to run a security
+   * check. Called a ref the model got wrong, it sent the model round the same
+   * loop, clicking at a page that was never going to answer.
+   */
+  private async performReportingAReplacedPage(
+    request: ActRequest,
+    target: TargetState,
+    signal: AbortSignal,
+  ): Promise<string> {
+    try {
+      return await this.perform(request, target, signal)
+    } catch (error) {
+      throw isPageGoneError(error) ? new Error(pageReplaced()) : error
+    }
   }
 
   private async launch(): Promise<void> {
@@ -866,7 +886,7 @@ export class BrowserSession {
     signal: AbortSignal,
   ): Promise<void> {
     const owner = request.ref ? this.refs.get(request.ref) : undefined
-    if (request.ref && !owner) throw new Error(this.staleRefMessage(request.ref))
+    if (request.ref && !owner) throw new Error(refFromEarlierLook(request.ref))
     const expression = `(${SCROLL_SOURCE})(${
       owner ? refExpression(owner.nonce, request.ref!) : 'null'
     }, ${JSON.stringify(request.direction)})`

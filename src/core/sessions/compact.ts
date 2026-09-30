@@ -185,7 +185,7 @@ export function dropOldSnapshots(messages: Message[], keep = KEEP_SNAPSHOTS_IN_C
   }
   for (const part of snapshots.slice(0, Math.max(0, snapshots.length - keep))) {
     const headline = part.content.split('\n', 1)[0] ?? ''
-    part.content = `${headline}\n[page snapshot dropped to keep the request small — take a fresh look if you need it]`
+    part.content = `${headline}\n[page snapshot dropped to keep the request small — its refs are dead: only the newest look's refs work, and one action spends them]`
   }
 }
 
