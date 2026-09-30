@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import lockfile from 'proper-lockfile'
 import { errorMessage } from '../util/errors.js'
+import { closeParagraph } from '../util/format.js'
 import { writePrivateFile } from '../util/fs.js'
 import { logWarn } from '../util/log.js'
 import { routinesFile } from './config/paths.js'
@@ -342,6 +343,9 @@ export async function runRoutineOnce(
   let failure: string | null = null
   for await (const event of session.send(routine.prompt)) {
     if (event.type === 'text-delta') answer += event.delta
+    else if (event.type === 'tool-start') {
+      answer = closeParagraph(answer)
+    }
     else if (event.type === 'error') failure = event.message
   }
   // Read once the turn is done: the files it asked the surfaces to send, which

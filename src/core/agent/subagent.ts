@@ -1,3 +1,4 @@
+import { closeParagraph } from '../../util/format.js'
 import type { Message, Provider, ReasoningEffort } from '../providers/types.js'
 import type { SkillSummary } from '../skills/index.js'
 import type { ToolContext, ToolRegistry, ToolResult } from '../tools/index.js'
@@ -76,6 +77,9 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     permission: options.permission,
   })) {
     if (event.type === 'text-delta') text += event.delta
+    else if (event.type === 'tool-start') {
+      text = closeParagraph(text)
+    }
     // A subagent has no surface to report to, so a failure has to come back as
     // the result: the parent is the only one who can say it went wrong.
     else if (event.type === 'error') failure = event.message

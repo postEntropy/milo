@@ -29,3 +29,18 @@ export function shortenPath(target: string, home: string): string {
 export function plural(count: number, one: string, many = `${one}s`): string {
   return `${count} ${count === 1 ? one : many}`
 }
+
+/**
+ * An answer closed with a paragraph break, so what comes next — the text after a
+ * tool call, a routine's report, a subagent's result — starts its own paragraph
+ * instead of running into the sentence before it.
+ *
+ * One rule for the four places that accumulate a turn's text: the session's own
+ * log, a routine, a subagent and the chat's live transcript all draw the same
+ * answer, so all four have to break it in the same place.
+ */
+export function closeParagraph(text: string): string {
+  if (!text) return text
+  if (text.endsWith('\n\n')) return text
+  return text.endsWith('\n') ? `${text}\n` : `${text}\n\n`
+}

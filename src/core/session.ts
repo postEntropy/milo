@@ -1,4 +1,5 @@
 import { errorMessage } from '../util/errors.js'
+import { closeParagraph } from '../util/format.js'
 import { logDebug, logWarn } from '../util/log.js'
 import type { SessionsConfig } from './config/schema.js'
 import type { BrowserFacts } from './browser/index.js'
@@ -477,7 +478,7 @@ export class Session {
           // The step that called a tool is finished being written. Without the
           // break, the line before a tool call and the answer after it are one
           // sentence in the log — and in an export, one paragraph.
-          if (answer && !answer.endsWith('\n')) answer += '\n\n'
+          answer = closeParagraph(answer)
           running = { name: event.name, args: event.args }
         }
         else if (event.type === 'steer') {

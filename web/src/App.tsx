@@ -9,6 +9,7 @@ import { Routines } from './routines/Routines.js'
 import { Settings } from './settings/Settings.js'
 import type { ServerFrame, PermissionRequest, SendTarget } from '@protocol'
 import { toolLine } from '../../src/gateways/tool-line.ts'
+import { closeParagraph } from '../../src/util/format.ts'
 import { Icon } from './ui/Icons.js'
 import { miloAvatar } from './ui/milo.js'
 
@@ -135,14 +136,16 @@ export default function App() {
           // The first output ends the wait — tool lines arrive as text too, so
           // this is the model talking after its last thought or its last tool.
           const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-          return { ...message, text: message.text + event.delta, waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
+          const baseText = message.waitingSince && message.text ? closeParagraph(message.text) : message.text
+          return { ...message, text: baseText + event.delta, waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
         }
         if (event.type === 'reasoning-delta') return { ...message, reasoning: (message.reasoning ?? '') + event.delta }
         if (event.type === 'tool-start') {
           // Reasoning deltas do not end a wait — they are what fills it. A tool
           // call is an output of its own, and the wait before it was thinking.
           const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-          return { ...message, tools: [...(message.tools ?? []), toolLine(event.name, event.args)], waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
+          const text = closeParagraph(message.text)
+          return { ...message, text, tools: [...(message.tools ?? []), toolLine(event.name, event.args)], waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
         }
         if (event.type === 'tool-end') {
           // The result is in: the model is thinking again about what to do with it.
