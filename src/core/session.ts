@@ -258,6 +258,13 @@ export class Session {
     return this.record.title
   }
 
+  async rename(title: string): Promise<void> {
+    const trimmed = title.trim()
+    this.record.title = trimmed || undefined
+    await this.store.save(this.record, this.record.version)
+    this.record.version += 1
+  }
+
   /**
    * A conversation turn. The session is taken exclusively for as long as it runs
    * — two terminals both bind `cli:main`, and a daemon may hold a session a

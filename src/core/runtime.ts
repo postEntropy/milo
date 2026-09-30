@@ -191,6 +191,24 @@ export class AgentRuntime {
   }
 
   /**
+   * Sets or clears a session's title. Writes the update through the store,
+   * keeping the cache in sync when the session is currently in memory.
+   */
+  async renameSession(id: string, title: string): Promise<boolean> {
+    const trimmed = title.trim()
+    const cached = this.cache.get(id)
+    if (cached) {
+      await cached.rename(trimmed)
+      return true
+    }
+    const record = await this.store.load(id)
+    if (!record) return false
+    record.title = trimmed || undefined
+    await this.store.save(record, record.version)
+    return true
+  }
+
+  /**
    * Waits for the recaps still being written in the background. A switch never
    * waits for them, so this is the seam for a caller that is about to exit. A
    * recap that failed is already logged and must not fail this too.
