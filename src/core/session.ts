@@ -259,11 +259,24 @@ export class Session {
     return this.record.title
   }
 
+  /**
+   * Renames the session and writes it down. Under the lease, for the reason
+   * `clear` gives: a rename sent from a copy the file has already moved past would
+   * be refused at best, and would write back a transcript that dropped the turns
+   * written since that copy was read at worst.
+   */
   async rename(title: string): Promise<void> {
     const trimmed = title.trim()
-    this.record.title = trimmed || undefined
-    await this.store.save(this.record, this.record.version)
-    this.record.version += 1
+    const lease = await this.store.acquire(this.id)
+    try {
+      if (lease.latest) this.adoptLatest(lease.latest)
+      this.record.title = trimmed || undefined
+      this.record.version = this.baseVersion + 1
+      await this.store.save(this.record, this.baseVersion)
+      this.baseVersion = this.record.version
+    } finally {
+      await lease.release()
+    }
   }
 
   /**
