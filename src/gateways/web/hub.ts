@@ -346,14 +346,13 @@ export class WebHub {
     let currentAssistant: TranscriptMessage | null = null
 
     for (const message of session.messages) {
+      const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
       if (message.role === 'user') {
         currentAssistant = null
-        const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
         if (text) messages.push({ role: 'user', text })
         continue
       }
       if (message.role === 'assistant') {
-        const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
         const reasoning = message.content.filter((part) => part.type === 'reasoning').map((part) => part.text).join('')
         const tools = message.content.flatMap((part) =>
           part.type === 'tool-call' && showsToolCall(part.name) ? [toolLine(part.name, part.args)] : [],
@@ -390,11 +389,11 @@ export class WebHub {
       }
     }
 
-    return messages.filter((m) =>
-      m.text.trim() ||
-      (m.tools && m.tools.length > 0) ||
-      (m.attachments && m.attachments.length > 0) ||
-      m.reasoning,
+    return messages.filter((message) =>
+      message.text.trim() !== '' ||
+      (message.tools?.length ?? 0) > 0 ||
+      (message.attachments?.length ?? 0) > 0 ||
+      Boolean(message.reasoning),
     )
   }
 }
