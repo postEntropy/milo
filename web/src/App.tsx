@@ -36,6 +36,7 @@ export default function App() {
   /** Counts finished turns: the routines screen re-reads its list when one ends. */
   const [turnEnds, setTurnEnds] = useState(0)
   const [thinking, setThinking] = useState(true)
+  const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium')
   const [identity, setIdentity] = useState({ provider: 'milo', model: '' })
   const [connection, setConnection] = useState<ConnectionState>('connecting')
   const [view, setView] = useState<'chat' | 'settings' | 'routines'>('chat')
@@ -62,6 +63,20 @@ export default function App() {
     window.addEventListener('resize', updateListTop)
     return () => window.removeEventListener('resize', updateListTop)
   }, [updateListTop])
+
+  /** The soft edge under the session header shows only once messages are scrolled. */
+  const [chatScrolled, setChatScrolled] = useState(false)
+  const updateMessagesTop = useCallback((): void => {
+    const el = messagesRef.current
+    if (!el) return
+    setChatScrolled(el.scrollTop > 2)
+  }, [])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: recomputes when messages or view change
+  useEffect(() => { updateMessagesTop() }, [updateMessagesTop, messages, view])
+  useEffect(() => {
+    window.addEventListener('resize', updateMessagesTop)
+    return () => window.removeEventListener('resize', updateMessagesTop)
+  }, [updateMessagesTop])
 
   const fail = useCallback((error: unknown): void => {
     setNotice({ text: error instanceof Error ? error.message : String(error), error: true })
@@ -98,6 +113,7 @@ export default function App() {
       setConnection('online')
       setSessionId(frame.sessionId)
       setThinking(frame.thinking === 'on')
+      if (frame.effort) setEffort(frame.effort)
       setIdentity({ provider: frame.provider, model: frame.model })
       setMessages(frame.messages.map((message, index) => ({ ...message, id: `loaded-${index}`, loaded: true })))
       return
@@ -310,22 +326,32 @@ export default function App() {
     setView('chat')
   }
 
-  async function exportSession(): Promise<void> {
-    if (!sessionId) return
+  async function exportSession(id = sessionId): Promise<void> {
+    if (!id) return
     try {
-      const result = await api<{ path: string } | null>('export', { id: sessionId, format: 'md' })
+      const result = await api<{ path: string } | null>('export', { id, format: 'md' })
       setNotice(result
         ? { text: `Exported to ${result.path}`, error: false }
         : { text: 'Nothing to export yet — this session has no log.', error: true })
     } catch (error) { fail(error) }
   }
 
-  async function clearSession(): Promise<void> {
+  async function deleteSession(id: string): Promise<void> {
     try {
-      await api('clear-session', { conversationId })
-      setMessages([])
-      setNotice({ text: 'This conversation was cleared.', error: false })
-      void refreshSessions()
+      if (id === sessionId) {
+        await newChat()
+      }
+      await api('session-delete', { id })
+      setSessions((current) => current.filter((s) => s.id !== id))
+      setNotice({ text: 'Session deleted.', error: false })
+    } catch (error) { fail(error) }
+  }
+
+  async function renameSession(id: string, title: string): Promise<void> {
+    try {
+      await api('session-rename', { id, title })
+      setSessions((current) => current.map((s) => s.id === id ? { ...s, title: title.trim() || undefined } : s))
+      setNotice({ text: 'Session renamed.', error: false })
     } catch (error) { fail(error) }
   }
 
@@ -337,13 +363,21 @@ export default function App() {
     } catch (error) { fail(error) }
   }, [fail])
 
+  const changeEffort = useCallback(async (next: 'low' | 'medium' | 'high'): Promise<void> => {
+    try {
+      setEffort(next)
+      await api('set-effort', { effort: next })
+      setNotice(null)
+    } catch (error) { fail(error) }
+  }, [fail])
+
+  const currentSession = sessions.find((session) => session.id === sessionId)
   const query = search.trim().toLowerCase()
   const visibleSessions = sessions
     .filter((session) => session.messageCount > 0)
     .filter((session) => `${session.title ?? ''} ${session.preview} ${session.id}`.toLowerCase().includes(query))
     .sort((a, b) => b.updatedAt - a.updatedAt)
   const sessionGroups = groupSessions(visibleSessions)
-  const currentSession = sessions.find((session) => session.id === sessionId)
 
   return <div className="app-shell">
     {sidebarOpen && <button className="sidebar-scrim" type="button" aria-label="Close menu" onClick={() => setSidebarOpen(false)} />}
@@ -359,7 +393,7 @@ export default function App() {
         </div>
         <div className="session-region">
           <nav className="session-list" aria-label="Sessions" ref={sessionListRef} onScroll={updateListTop}>
-            {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} />)}</div>)}
+            {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} onRename={renameSession} onExport={exportSession} onDelete={deleteSession} />)}</div>)}
             {visibleSessions.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
           </nav>
           <div className={`scroll-blur top ${listScrolled ? 'on' : ''}`} aria-hidden="true" />
@@ -382,8 +416,6 @@ export default function App() {
         {view === 'routines' && <button className="btn-secondary" type="button" onClick={() => setView('chat')}><span aria-hidden="true">←</span> Back to chat</button>}
         <div className="topbar-title"><h1>{view === 'settings' ? 'Settings' : view === 'routines' ? 'Routines' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
         <div className="topbar-actions">
-          {view === 'chat' && sessionId && <button className="icon-button topbar-action" type="button" title="Export this conversation" aria-label="Export this conversation" onClick={() => void exportSession()}><Icon name="download" size={16} /></button>}
-          {view === 'chat' && sessionId && <button className="icon-button topbar-action" type="button" title="Clear this conversation" aria-label="Clear this conversation" onClick={() => void clearSession()}><Icon name="trash" size={16} /></button>}
           {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>}
           {view === 'chat' && connection !== 'online' && <span className={`connection-status ${connection}`}><span />{connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
         </div>
@@ -393,19 +425,158 @@ export default function App() {
         : view === 'routines'
         ? <Routines conversationId={conversationId} chat={{ messages, thinking, busy, connection, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : <section className="chat-view">
-          <div className="messages" id="messages" ref={messagesRef}>
+          <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>
             <MessageList messages={messages} thinking={thinking} onPrompt={send} onAction={handleAction} />
             {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
           </div>
+          <div className={`scroll-blur top ${chatScrolled ? 'on' : ''}`} aria-hidden="true" />
           {notice && <div className={`notice ${notice.error ? 'error' : 'success'}`} role="alert">{notice.text}<button className="icon-button" type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}><Icon name="x" size={15} /></button></div>}
-          <Composer ref={composerRef} busy={busy} queued={queued} provider={identity.provider} model={identity.model} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} />
+          <Composer ref={composerRef} busy={busy} queued={queued} provider={identity.provider} model={identity.model} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} />
         </section>}
     </main>
   </div>
 }
 
-function SessionRow({ session, active, onClick }: { session: SessionSummary; active: boolean; onClick(): void }) {
-  return <button className={`session-row ${active ? 'active' : ''}`} type="button" onClick={onClick}><span className="session-content"><span className="session-title">{sessionLabel(session)}</span><span className="session-preview">{sessionMeta(session)}</span></span></button>
+function SessionRow({
+  session,
+  active,
+  onClick,
+  onRename,
+  onExport,
+  onDelete,
+}: {
+  session: SessionSummary
+  active: boolean
+  onClick(): void
+  onRename(id: string, title: string): Promise<void>
+  onExport(id: string): Promise<void>
+  onDelete(id: string): Promise<void>
+}) {
+  const [editing, setEditing] = useState(false)
+  const [editTitle, setEditTitle] = useState(session.title ?? '')
+  const [menuOpen, setMenuOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!menuOpen) return
+    const onDocClick = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setMenuOpen(false)
+      }
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMenuOpen(false)
+    }
+    window.addEventListener('click', onDocClick)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('click', onDocClick)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [menuOpen])
+
+  const handleSaveRename = async () => {
+    setEditing(false)
+    if (editTitle.trim() !== (session.title ?? '')) {
+      await onRename(session.id, editTitle.trim())
+    }
+  }
+
+  return (
+    <div className={`session-item ${active ? 'active' : ''} ${menuOpen ? 'menu-open' : ''}`}>
+      {editing ? (
+        <form
+          className="session-rename-form"
+          onSubmit={(e) => {
+            e.preventDefault()
+            void handleSaveRename()
+          }}
+        >
+          <input
+            className="session-rename-input"
+            // biome-ignore lint/a11y/noAutofocus: intentional focus for inline rename
+            autoFocus
+            value={editTitle}
+            onChange={(e) => setEditTitle(e.target.value)}
+            onBlur={() => void handleSaveRename()}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setEditing(false)
+                setEditTitle(session.title ?? '')
+              }
+            }}
+          />
+        </form>
+      ) : (
+        <button className="session-row" type="button" onClick={onClick}>
+          <span className="session-content">
+            <span className="session-title">{sessionLabel(session)}</span>
+            <span className="session-preview">{sessionMeta(session)}</span>
+          </span>
+        </button>
+      )}
+
+      <div className="session-row-actions" ref={menuRef}>
+        <button
+          className={`session-more-btn ${menuOpen ? 'open' : ''}`}
+          type="button"
+          title="Session actions"
+          aria-label="Session actions"
+          onClick={(e) => {
+            e.stopPropagation()
+            setMenuOpen((prev) => !prev)
+          }}
+        >
+          <Icon name="dots" size={16} />
+        </button>
+
+        {menuOpen && (
+          <div className="session-dropdown" role="menu">
+            <button
+              className="session-dropdown-item"
+              type="button"
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation()
+                setMenuOpen(false)
+                setEditTitle(session.title || session.preview || '')
+                setEditing(true)
+              }}
+            >
+              <Icon name="edit" size={16} />
+              <span>Rename</span>
+            </button>
+            <button
+              className="session-dropdown-item"
+              type="button"
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation()
+                setMenuOpen(false)
+                void onExport(session.id)
+              }}
+            >
+              <Icon name="download" size={16} />
+              <span>Export</span>
+            </button>
+            <button
+              className="session-dropdown-item danger"
+              type="button"
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation()
+                setMenuOpen(false)
+                void onDelete(session.id)
+              }}
+            >
+              <Icon name="trash" size={16} />
+              <span>Delete</span>
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
 
 function formatMs(ms: number): string {

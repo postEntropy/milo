@@ -8,11 +8,13 @@ interface Props {
   queued: number
   provider: string
   model: string
+  effort: 'low' | 'medium' | 'high'
   /** Bumped when something asks for the cursor, so the field takes the next keystroke. */
   focusSignal: number
   onSend(text: string, intent: 'steer' | 'queue'): void
   onStop(): void
   onModelChange(model: string): void
+  onEffortChange(effort: 'low' | 'medium' | 'high'): void
 }
 
 type ModelInfo = { id: string; name?: string }
@@ -47,13 +49,15 @@ const COMMANDS: Array<{ name: string; hint: string }> = [
 ]
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { busy, queued, provider, model, focusSignal, onSend, onStop, onModelChange },
+  { busy, queued, provider, model, effort, focusSignal, onSend, onStop, onModelChange, onEffortChange },
   handle,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const wrap = useRef<HTMLDivElement>(null)
+  const effortWrap = useRef<HTMLDivElement>(null)
   const [draft, setDraft] = useState('')
   const [menu, setMenu] = useState(false)
+  const [effortMenu, setEffortMenu] = useState(false)
   const [models, setModels] = useState<ModelInfo[] | null>(null)
   const [filter, setFilter] = useState('')
   const [loading, setLoading] = useState(false)
@@ -97,6 +101,22 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       document.removeEventListener('keydown', onKey)
     }
   }, [menu])
+
+  useEffect(() => {
+    if (!effortMenu) return
+    const onDown = (event: MouseEvent) => {
+      if (!effortWrap.current?.contains(event.target as Node)) setEffortMenu(false)
+    }
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setEffortMenu(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [effortMenu])
 
   function submit(intent: 'steer' | 'queue'): void {
     const text = draft.trim()
@@ -206,9 +226,38 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               {visible.map((item) => <button className={`model-option ${item.id === model ? 'active' : ''}`} type="button" role="option" aria-selected={item.id === model} key={item.id} onClick={() => pick(item.id)}><span className="model-option-id">{item.id}</span>{item.name ? <small>{item.name}</small> : null}</button>)}
             </div>}
           </div>
-          <button className="composer-hint" type="button" title="Commands" aria-label="Show commands" onClick={() => { setDraft('/'); setDismissed(null); ref.current?.focus() }}>
-            <code className="mono">/</code> commands
-          </button>
+          <div className="composer-effort-wrap" ref={effortWrap}>
+            <button
+              className="composer-effort"
+              type="button"
+              title="Reasoning effort"
+              aria-haspopup="listbox"
+              aria-expanded={effortMenu}
+              onClick={() => setEffortMenu((open) => !open)}
+            >
+              <Icon name="light" size={13} />
+              <span className="composer-effort-name">{effort}</span>
+            </button>
+            {effortMenu && (
+              <div className="effort-menu" role="listbox" aria-label="Reasoning effort">
+                {(['low', 'medium', 'high'] as const).map((level) => (
+                  <button
+                    key={level}
+                    className={`effort-option ${level === effort ? 'active' : ''}`}
+                    type="button"
+                    role="option"
+                    aria-selected={level === effort}
+                    onClick={() => {
+                      setEffortMenu(false)
+                      if (level !== effort) onEffortChange(level)
+                    }}
+                  >
+                    <span className="effort-option-label">{level}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <span className="composer-spacer" />
           {busy
             ? <button className="send-button stop" type="button" title="Stop (Esc)" aria-label="Stop Milo" onClick={onStop}><Icon name="stop" size={16} /></button>
