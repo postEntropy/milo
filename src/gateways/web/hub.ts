@@ -66,11 +66,17 @@ export class WebHub {
     this.sendState(conversationId)
   }
 
+  /**
+   * Loses the client, never the turn. A page reloading, a tab left in the
+   * background and a connection dropping all close this socket exactly the way a
+   * closing tab does, and nothing on the wire tells them apart — stopping here
+   * made looking away end the answer. What a turn says is written to the session
+   * as it streams and the next `connect` hands the whole transcript back, so an
+   * answer that arrived with nobody watching is read a moment later instead of
+   * being lost. Only the stop control, and `/stop`, end a turn.
+   */
   disconnect(client: WebClient): void {
-    for (const conversation of this.conversations.values()) {
-      conversation.clients.delete(client)
-      if (conversation.clients.size === 0) this.turns.stop(conversation.scope.conversationId)
-    }
+    for (const conversation of this.conversations.values()) conversation.clients.delete(client)
   }
 
   handle(client: WebClient, frame: ClientFrame, conversationId: string): void {
