@@ -203,7 +203,7 @@ describe('web Settings routines', () => {
       .rejects.toThrow('Set a time')
   })
 
-  it('runs one now and answers with what it said', async () => {
+  it('runs one now and answers with what it said, and with the run it made', async () => {
     writeConfig()
     const settings = new WebSettings(build({}), home)
     const created = await settings.handle('routine-add', {
@@ -213,7 +213,13 @@ describe('web Settings routines', () => {
     }) as { routine: { id: string } }
 
     // The fake provider streams nothing, so the run succeeds with an empty answer.
-    expect(await settings.handle('routine-run', { id: created.routine.id })).toEqual({ answer: '', failure: null })
+    const result = await settings.handle('routine-run', { id: created.routine.id }) as { runId: string; answer: string; failure: string | null }
+    expect(result).toMatchObject({ answer: '', failure: null })
+    // The id names the run the surface then reads, so it has to be a real one.
+    expect(result.runId).toBeTruthy()
+    expect((await settings.handle('routine-runs', { id: created.routine.id }) as { runs: { id: string }[] }).runs)
+      .toEqual([expect.objectContaining({ id: result.runId })])
+
     await expect(settings.handle('routine-run', { id: 'no-such-routine' })).rejects.toThrow('No routine')
   })
 })

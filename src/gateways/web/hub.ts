@@ -12,7 +12,7 @@ import { TurnQueue } from '../turns.js'
 import type { ClientFrame, FrameAttachment, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
 import { PERMISSION_TIMEOUT_MS } from './protocol.js'
 import { displayEvent } from './turn.js'
-import { showsToolCall, toolText } from '../tool-line.js'
+import { transcriptOf } from './transcript.js'
 
 export interface WebClient {
   send(frame: ServerFrame): void
@@ -169,8 +169,12 @@ export class WebHub {
    * Notes a delivered file under its id and describes it for the browser. The id
    * is the path's hash, so opening the same conversation again — a reload, a tab
    * reopened later — registers the same id the page was already given.
+   *
+   * Public because it is this process, not the caller, that owns what may be
+   * served: the read-only view of a past run draws its files through here too,
+   * so they are fetchable by the same `/attachment/<id>` a chat message uses.
    */
-  private register(file: OutgoingFile): FrameAttachment {
+  register(file: OutgoingFile): FrameAttachment {
     const id = createHash('sha1').update(file.path).digest('hex')
     const size = statSync(file.path, { throwIfNoEntry: false })?.size ?? 0
     this.attachments.set(id, { path: file.path, name: file.name, mimeType: file.mimeType })
@@ -336,66 +340,8 @@ export class WebHub {
     for (const client of this.conversations.get(conversationId)?.clients ?? []) client.send(frame)
   }
 
-  /**
-   * A session's history as the page renders it. Reading it re-registers any file
-   * it delivered, so a delivered picture is served again after a reload without
-   * anything being kept in memory across restarts.
-   */
+  /** A session's history as the page renders it; see `transcriptOf`. */
   private transcript(session: Session): TranscriptMessage[] {
-    const messages: TranscriptMessage[] = []
-    let currentAssistant: TranscriptMessage | null = null
-
-    for (const message of session.messages) {
-      const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
-      if (message.role === 'user') {
-        currentAssistant = null
-        if (text) messages.push({ role: 'user', text })
-        continue
-      }
-      if (message.role === 'assistant') {
-        const reasoning = message.content.filter((part) => part.type === 'reasoning').map((part) => part.text).join('')
-        const tools = message.content.flatMap((part) =>
-          part.type === 'tool-call' && showsToolCall(part.name)
-            ? [{ name: part.name, text: toolText(part.name, part.args) }]
-            : [],
-        )
-        const attachments = message.content.flatMap((part) =>
-          part.type === 'file'
-            ? [this.register({ path: part.path, name: part.name, mimeType: part.mimeType })]
-            : [],
-        )
-
-        if (!currentAssistant) {
-          currentAssistant = {
-            role: 'assistant',
-            text,
-            ...(reasoning ? { reasoning } : {}),
-            ...(tools.length > 0 ? { tools } : {}),
-            ...(attachments.length > 0 ? { attachments } : {}),
-          }
-          messages.push(currentAssistant)
-        } else {
-          if (text) {
-            currentAssistant.text = currentAssistant.text ? `${currentAssistant.text}\n\n${text}` : text
-          }
-          if (reasoning) {
-            currentAssistant.reasoning = currentAssistant.reasoning ? `${currentAssistant.reasoning}\n\n${reasoning}` : reasoning
-          }
-          if (tools.length > 0) {
-            currentAssistant.tools = [...(currentAssistant.tools ?? []), ...tools]
-          }
-          if (attachments.length > 0) {
-            currentAssistant.attachments = [...(currentAssistant.attachments ?? []), ...attachments]
-          }
-        }
-      }
-    }
-
-    return messages.filter((message) =>
-      message.text.trim() !== '' ||
-      (message.tools?.length ?? 0) > 0 ||
-      (message.attachments?.length ?? 0) > 0 ||
-      Boolean(message.reasoning),
-    )
+    return transcriptOf(session.messages, (file) => this.register(file))
   }
 }

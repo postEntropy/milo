@@ -30,10 +30,11 @@ import {
   describeTarget,
   describeWhen,
   findRoutine,
+  MAX_RUNS_PER_ROUTINE,
   nextRunAt,
   parseWhen,
   readRoutines,
-  removeRoutine,
+  removeRoutineWithRuns,
   ROUTINE_GATEWAYS,
   runRoutineOnce,
   setEnabled,
@@ -48,6 +49,7 @@ import { readSession } from '../../core/history.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import { writeSessionExport } from '../../core/export.js'
 import { JobRegistry } from './jobs.js'
+import { transcriptOf, type RegisterFile } from './transcript.js'
 
 const SESSION_ID = /^[a-z]+-[a-z]+-\d{1,3}$/
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -56,7 +58,17 @@ export class WebSettings {
   private writeTail: Promise<unknown> = Promise.resolve()
   private readonly jobs = new JobRegistry()
 
-  constructor(private readonly runtime: AgentRuntime, private readonly cwd: string) {}
+  /**
+   * The browser is handed the running server's file registry, so a past run's
+   * delivered files are served by the same `/attachment/<id>` a chat message's
+   * are. Absent for a caller that serves no attachments — a test reading the
+   * settings it builds.
+   */
+  constructor(
+    private readonly runtime: AgentRuntime,
+    private readonly cwd: string,
+    private readonly files?: { register: RegisterFile },
+  ) {}
 
   async handle(action: string, body: Record<string, unknown> = {}): Promise<unknown> {
     switch (action) {
@@ -87,6 +99,8 @@ export class WebSettings {
       case 'routine-remove': return this.removeRoutine(body)
       case 'routine-enable': return this.enableRoutine(body)
       case 'routine-run': return this.runRoutine(body)
+      case 'routine-runs': return this.routineRuns(body)
+      case 'run-transcript': return this.runTranscript(body)
       case 'browsers': return this.browsers()
       case 'profiles': return this.profiles()
       case 'job-start': return this.jobStart(body)
@@ -375,7 +389,7 @@ export class WebSettings {
 
   private async removeRoutine(body: Record<string, unknown>): Promise<unknown> {
     const id = optionalText(body.id)
-    if (!id || !(await removeRoutine(id))) throw new Error('No routine with that id.')
+    if (!id || !(await removeRoutineWithRuns(this.runtime, id))) throw new Error('No routine with that id.')
     return { removed: true }
   }
 
@@ -387,14 +401,49 @@ export class WebSettings {
     return { id, enabled }
   }
 
-  /** Fires one now and answers with what it said. It does not deliver — the chat would get it twice. */
+  /**
+   * Fires one now and answers with what it said, and with the id of the run it
+   * just made — so the surface can open the run rather than draw the answer a
+   * second way. It does not deliver: the chat would get it twice.
+   */
   private async runRoutine(body: Record<string, unknown>): Promise<unknown> {
     const id = optionalText(body.id)
     if (!id) throw new Error('A routine id is required.')
     const routine = findRoutine(id)
     if (!routine) throw new Error('No routine with that id.')
-    const { answer, failure } = await runRoutineOnce(this.runtime, routine)
-    return { answer, failure }
+    const { id: runId, answer, failure } = await runRoutineOnce(this.runtime, routine)
+    return { ...(runId ? { runId } : {}), answer, failure }
+  }
+
+  /**
+   * What a routine has produced, newest first. `keep` travels with the list so
+   * the surface can say how far back the history goes instead of the number
+   * living only in a constant nobody sees.
+   */
+  private async routineRuns(body: Record<string, unknown>): Promise<unknown> {
+    const id = optionalText(body.id)
+    if (!id) throw new Error('A routine id is required.')
+    if (!findRoutine(id)) throw new Error('No routine with that id.')
+    return {
+      keep: MAX_RUNS_PER_ROUTINE,
+      runs: (await this.runtime.listRuns(id)).map((run) => ({ id: run.id, at: run.updatedAt })),
+    }
+  }
+
+  /**
+   * One run as the page draws a conversation. Read-only: it binds nothing and
+   * takes no lease, so opening a past run does not take the conversation over
+   * from whoever is in it.
+   */
+  private async runTranscript(body: Record<string, unknown>): Promise<unknown> {
+    const record = await this.runtime.loadSession(sessionId(body.id))
+    if (!record) throw new Error('No such run.')
+    // A run that delivered a file is only drawable where the files can be
+    // served; said rather than dropped, so a picture never vanishes from a run.
+    const register = this.files?.register ?? ((file: { name: string }) => {
+      throw new Error(`Serving ${file.name} needs the web server's file registry.`)
+    })
+    return transcriptOf(record.messages, register)
   }
 
   private async browsers(): Promise<unknown> {
