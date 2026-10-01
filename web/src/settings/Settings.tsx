@@ -28,6 +28,7 @@ type SettingsConfig = {
 }
 type Skill = { name: string; description: string; origin?: string; installedAt?: string }
 type MemoryStats = { backend: string; location: string; scopes: number; facts: number; bytes: number }
+type ModelInfo = { id: string; name?: string }
 type Note = { id: string; text: string; createdAt: number; tags?: string[] }
 type Browser = { id: string; name: string; path: string; version: string | null }
 type Profile = { id: string; name: string; dir: string; bytes: number }
@@ -70,6 +71,8 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   const [busy, setBusy] = useState(true)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
+  const [catalog, setCatalog] = useState<ModelInfo[] | null>(null)
+  const [editingSecret, setEditingSecret] = useState<string | null>(null)
   const [notes, setNotes] = useState<Note[] | null>(null)
   const [browsers, setBrowsers] = useState<Browser[] | null>(null)
   const [profiles, setProfiles] = useState<Profile[] | null>(null)
@@ -107,18 +110,44 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   const currentProvider = draft?.provider ?? ''
   const preset = data?.presets.find((item) => item.id === currentProvider)
   const models = preset?.models ?? []
+
+  // What the provider itself reports, through the same call the composer's model
+  // menu makes, so the two pickers cannot offer different models.
+  useEffect(() => {
+    if (section !== 'provider' || !currentProvider) return
+    let live = true
+    setCatalog(null)
+    void api<ModelInfo[]>('models', { provider: currentProvider })
+      .then((list) => { if (live) setCatalog(list) })
+      .catch(() => { if (live) setCatalog([]) })
+    return () => { live = false }
+  }, [section, currentProvider])
+
+  /** The catalog, the preset's own list, and whatever is set now, in that order. */
+  const modelOptions = (() => {
+    const byId = new Map<string, string>()
+    for (const item of catalog ?? []) byId.set(item.id, item.name ?? item.id)
+    for (const item of models) if (!byId.has(item)) byId.set(item, item)
+    if (draft?.model && !byId.has(draft.model)) byId.set(draft.model, draft.model)
+    return [...byId]
+  })()
+
   const saved = data?.config
-  const requiresRestart = Boolean(draft && saved && (
-    draft.provider !== saved.provider || draft.model !== saved.model ||
-    JSON.stringify(draft.browser) !== JSON.stringify(saved.browser) ||
-    JSON.stringify(draft.web) !== JSON.stringify(saved.web) ||
+  // What the running process cannot take on now, named one by one so the notice
+  // says which setting is asking for the restart. The model is deliberately
+  // absent: saving one moves the running model as well, so it needs none.
+  const restartReasons: string[] = !draft || !saved ? [] : [
+    ...(draft.provider !== saved.provider ? ['Provider'] : []),
+    ...(JSON.stringify(draft.browser) !== JSON.stringify(saved.browser) ? ['Browser'] : []),
+    ...(JSON.stringify(draft.web) !== JSON.stringify(saved.web) ? ['Web host and port'] : []),
     // The reviewer is built once at startup, so which decision model it asks is
     // read on the next run, like the browser and the web host.
-    JSON.stringify(draft.classifier) !== JSON.stringify(saved.classifier) ||
+    ...(JSON.stringify(draft.classifier) !== JSON.stringify(saved.classifier) ? ['Reviewer model'] : []),
     // The Google tools are registered when the runtime starts, so switching them
     // on here is read on the next run too.
-    JSON.stringify(draft.google) !== JSON.stringify(saved.google)
-  ))
+    ...(JSON.stringify(draft.google) !== JSON.stringify(saved.google) ? ['Google tools'] : []),
+  ]
+  const requiresRestart = restartReasons.length > 0
 
   function update(path: string[], value: unknown): void {
     setDraft((current) => {
@@ -146,7 +175,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
       }
       setSecrets({})
       await load()
-      setNotice({ text: requiresRestart ? 'Settings saved. Restart the web server to apply the provider, model, browser or classifier.' : 'Settings saved.', error: false })
+      setNotice({ text: requiresRestart ? `Settings saved. Restart the web server to apply: ${restartReasons.join(', ')}.` : 'Settings saved.', error: false })
     } catch (error) { setNotice({ text: message(error), error: true }) }
     finally { setSaving(false) }
   }
@@ -223,7 +252,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
       {data && draft && <>
         {notice && <p className={`notice ${notice.error ? 'error' : 'success'}`} role="status">{notice.text}</p>}
         {job.job && <JobLog job={job.job} onClose={() => job.clear()} />}
-        {requiresRestart && <p className="notice restart-notice" role="status">Saved changes need a restart of the web server to reach the chat.</p>}
+        {requiresRestart && <p className="notice restart-notice" role="status">Restart the web server to reach the chat with: {restartReasons.join(', ')}.</p>}
         <div className="settings-panel-stack">
         <Section title="Provider & model" description="Choose the service that produces the replies." active={section === 'provider'}>
           <div className="form-grid">
@@ -235,7 +264,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
                 if (next.models[0]) update(['model'], next.models[0])
               }
             }}>{data.presets.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field>
-            <Field label="Model"><input list="model-options" value={draft.model} onChange={(event) => update(['model'], event.target.value)} /><datalist id="model-options">{models.map((model) => <option key={model} value={model} />)}</datalist><small>Suggestions come from this installation’s provider.</small></Field>
+            <Field label="Model"><select value={draft.model} onChange={(event) => update(['model'], event.target.value)}>{modelOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><small>{catalog === null ? 'Reading this provider’s models…' : catalog.length > 0 ? 'The models this provider reports.' : 'The models Milo knows for this provider.'}</small></Field>
             <Field className="full" label="API URL"><input value={draft.providers?.[currentProvider]?.baseURL ?? ''} onChange={(event) => update(['providers', currentProvider, 'baseURL'], event.target.value)} /></Field>
           </div>
         </Section>

@@ -167,6 +167,11 @@ export class WebSettings {
       setPermissionMode(next.permissions.mode)
       setDisplay(next.display)
       setReasoningEffort(next.reasoningEffort)
+      // The model the install saves for next time is the one the sessions after
+      // this one start on — the conversation in progress keeps the model it is
+      // running, so nothing is hijacked mid-turn. A provider change still waits
+      // for a restart, since its client is built from the config at startup.
+      if (next.model !== current.model && next.provider === current.provider) this.runtime.setDefaultModel(next.model)
       return { saved: true }
     })
   }

@@ -297,6 +297,18 @@ describe('web Settings config', () => {
     expect(readConfig()?.web).toEqual({ enabled: true, host: '0.0.0.0', port: 8123 })
   })
 
+  it('moves the running model on a save, so only a provider change needs a restart', async () => {
+    writeConfig()
+    const runtime = build({})
+    const settings = new WebSettings(runtime, home)
+    const before = await settings.handle('overview') as { config: Record<string, unknown> }
+
+    await settings.handle('save-config', { config: { ...before.config, model: 'another-model' } })
+
+    expect(runtime.model).toBe('another-model')
+    expect(readConfig()?.model).toBe('another-model')
+  })
+
   it('sets reasoning effort on runtime and persists to config', async () => {
     writeConfig()
     const runtime = build({})

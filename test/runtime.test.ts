@@ -299,6 +299,21 @@ describe('AgentRuntime model switch', () => {
     // model chose, not the one it was built with.
     expect(used).toEqual(['deepseek/deepseek-v4-flash', 'claude-sonnet-4-5'])
   })
+
+  it('moves only the default, so the conversation in progress keeps its model', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const runtime = new AgentRuntime({ ...runtimeOptions(dir), model: 'first-model' })
+
+    const started = await runtime.getSession(cli)
+    runtime.setDefaultModel('second-model')
+
+    expect(started.model).toBe('first-model')
+    expect(runtime.model).toBe('second-model')
+    // The scope keeps the session it is bound to; a fresh one is what takes the
+    // new model, which is the point of moving the default rather than the lot.
+    expect((await runtime.getSession(cli)).model).toBe('first-model')
+    expect((await runtime.newSession(cli)).model).toBe('second-model')
+  })
 })
 
 describe('AgentRuntime close', () => {

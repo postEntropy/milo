@@ -315,19 +315,35 @@ export class AgentRuntime {
   }
 
   /**
+   * Moves the model the sessions after this one start on, leaving the ones
+   * already open on the model they are running — work in progress is not
+   * hijacked by a change to the install's default. This is what saving the
+   * config does, so the next conversation picks the model up with no restart.
+   */
+  setDefaultModel(model: string): void {
+    this.installModel(model)
+  }
+
+  /**
    * Switches the model for this install: the open sessions and the ones after.
    * The provider is built again where the runtime knows how — a model can
    * resolve to another wire — and the sessions already open, which hold the
    * previous one, are handed the new.
    */
   setModel(model: string): void {
-    this.options.model = model
-    const provider = this.options.providerFor?.(model)
-    if (provider) this.options.provider = provider
+    const provider = this.installModel(model)
     for (const session of this.cache.values()) {
       session.setModel(model)
       if (provider) session.setProvider(provider)
     }
+  }
+
+  /** Puts a model and the provider it resolves to in place, and says which. */
+  private installModel(model: string): Provider | undefined {
+    this.options.model = model
+    const provider = this.options.providerFor?.(model)
+    if (provider) this.options.provider = provider
+    return provider
   }
 
   /** How hard the model thinks, from the turn after this one. */
