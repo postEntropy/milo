@@ -32,6 +32,12 @@
   --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, monospace;
   --motion-fast: 150ms;
   --motion-base: 220ms;
+  /* The drawer is the one thing that travels a whole screen width, so it takes
+     longer than a control's own change of state. */
+  --motion-drawer: 360ms;
+  /* How much of the screen the mobile drawer takes, and how far the chat slides
+     to uncover it. One value, so the two cannot disagree. */
+  --drawer-width: min(286px, 86vw);
   --ease-standard: cubic-bezier(.16, 1, .3, 1);
   font-family: var(--font-body);
   color: var(--fg);
@@ -77,7 +83,18 @@ button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .45; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.app-shell { display: grid; grid-template-columns: 286px minmax(0, 1fr); height: 100dvh; background: var(--bg); }
+.app-shell { position: relative; display: grid; grid-template-columns: 286px minmax(0, 1fr); height: 100dvh; background: var(--bg); }
+/* iOS 26 Safari stopped reading `theme-color` and now takes the colour of its own
+   status bar and address bar from the page: it samples a `position: fixed`
+   element that reaches within a few pixels of the viewport edge, is at least 80%
+   wide and at least 3px tall. Left to itself it finds the drawer — fixed, touching
+   both edges, but a different surface from the chat — and paints the bars in that
+   tone. These two strips are the sample it should find instead, painted with the
+   page's own background. All but 3px of each sits off screen, and they take no
+   pointer. */
+.chrome-tint { position: fixed; z-index: 1; inset-inline: 0; height: 12px; pointer-events: none; background: var(--bg); }
+.chrome-tint.top { top: -9px; }
+.chrome-tint.bottom { bottom: -9px; }
 .sidebar { grid-column: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--surface-warm); }
 .sidebar-chat-nav, .sidebar-settings-nav { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .brand-row { display: flex; align-items: center; gap: 10px; padding: 18px 18px 14px; }
@@ -542,10 +559,35 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: minmax(0, 1fr); }
-  .sidebar { position: fixed; z-index: 60; inset-block: 0; inset-inline-start: 0; width: 286px; max-width: 86vw; transform: translateX(-102%); transition: transform var(--motion-base) var(--ease-standard); box-shadow: var(--shadow); padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom); }
-  .sidebar.open { transform: none; }
-  .sidebar-scrim { position: fixed; z-index: 55; inset: 0; display: block; border: 0; background: rgb(0 0 0 / 40%); }
-  .main { grid-column: 1; }
+  /* The drawer rests behind the screen and the chat slides over it, the way the
+     phone's own panels work: the strip left uncovered is the sidebar, the layer
+     that travels is the conversation, and the chat is where the finger already
+     is. Neither ever leaves bare page showing. The rounded edge goes on the chat,
+     which is the panel on top, and its own surface on the drawer is what the
+     corner cuts against. */
+  /* Absolute, not fixed: the shell is the viewport, so the geometry is the same,
+     and Safari's sampler ignores absolutely positioned elements — leaving the
+     `.chrome-tint` strips as the only thing it can read the bar colour from. */
+  .sidebar { position: absolute; z-index: 1; inset-block: 0; inset-inline-start: 0; width: var(--drawer-width); transform: none; padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom); }
+  .main { grid-column: 1; z-index: 2; transition: transform var(--motion-drawer) var(--ease-standard); }
+  /* Clipped while it is a panel, so the chat's own bars cannot square the corner
+     off: the composer paints its background right up to the edge. No shadow: the
+     two surfaces already differ in tone and the corner says which one is on top,
+     and a blurred band along the seam only read as a border that is not there. */
+  /* The backdrop the two layers sit on takes the drawer's tone. Without it the
+     chat's own rounded corner has nothing behind it: the drawer is exactly as
+     wide as the chat travels, so the cut would open onto bare page of the same
+     colour and read as a square edge. */
+  .app-shell { background: var(--surface-warm); }
+  /* The shadow is what lifts the chat off the drawer; kept tight on purpose, since
+     a wide one is a band across the drawer's surface rather than a shadow, which
+     reads as a border left behind. The rounded corner is off for now, to compare:
+     it is the two `border-*-radius` declarations below that bring it back, and
+     with it the `overflow: hidden` line. */
+  .app-shell.drawer-open .main { transform: translateX(var(--drawer-width)); box-shadow: -3px 0 12px rgb(39 39 36 / 12%); }
+  /* Only the uncovered chat takes the tap that closes it: the sidebar's own
+     controls stay live underneath. */
+  .sidebar-scrim { position: fixed; z-index: 3; inset-block: 0; inset-inline-start: var(--drawer-width); inset-inline-end: 0; display: block; border: 0; background: transparent; }
   .mobile-menu, .topbar-new { display: grid; }
   /* The bar floats over the content instead of taking a band above it, so the
      screen belongs to what it is showing and the buttons ride on top. Only the
@@ -590,6 +632,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .settings-save { align-items: flex-end; flex-direction: column; margin-inline: -4px; }
   .save-context { align-self: flex-start; }
   .save-actions { width: 100%; justify-content: flex-end; }
+}
+/* iOS Safari zooms the whole viewport when a focused field's text is under 16px,
+   which is every field above when the screen is narrow. The fix is the field's
+   own size — not `maximum-scale=1`, which would take pinch-zoom from everyone. */
+@media (max-width: 640px) {
+  .composer-box textarea,
+  .field input, .field select, .field textarea,
+  .sidebar-search input, .session-rename-input, .secret-row input, .model-filter { font-size: 1rem; }
 }
 @media (prefers-reduced-motion: reduce) {
   /* biome-ignore lint/complexity/noImportantStyles: turning motion off has to win against every component's own transition, and a universal selector can only do that with `!important` */

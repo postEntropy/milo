@@ -266,6 +266,52 @@ export default function App() {
   }, [newChat])
 
   /**
+   * The drawer's own gestures, one for each direction: a rightward swipe that
+   * starts at the left edge opens it, and a leftward swipe across the chat closes
+   * it again, the way every other panel on the phone works. The listeners stay
+   * passive, so a swipe in the page still scrolls it.
+   */
+  useEffect(() => {
+    const narrow = window.matchMedia('(max-width: 900px)')
+    const EDGE = 24
+    const OPEN_AT = 88
+    const CLOSE_AT = 64
+    let from: { x: number; y: number } | null = null
+
+    const start = (event: TouchEvent) => {
+      if (!narrow.matches || event.touches.length !== 1) return
+      const touch = event.touches[0]
+      // Opening begins at the edge; closing begins anywhere on the revealed chat.
+      const wanted = sidebarOpen ? true : touch.clientX <= EDGE
+      from = wanted ? { x: touch.clientX, y: touch.clientY } : null
+    }
+    const move = (event: TouchEvent) => {
+      if (!from || event.touches.length !== 1) return
+      const touch = event.touches[0]
+      const dx = touch.clientX - from.x
+      const dy = touch.clientY - from.y
+      // A mostly vertical drag is a scroll, so this was never the gesture.
+      if (Math.abs(dy) > Math.abs(dx)) { from = null; return }
+      if (sidebarOpen ? dx <= -CLOSE_AT : dx >= OPEN_AT) {
+        from = null
+        setSidebarOpen(!sidebarOpen)
+      }
+    }
+    const end = () => { from = null }
+
+    window.addEventListener('touchstart', start, { passive: true })
+    window.addEventListener('touchmove', move, { passive: true })
+    window.addEventListener('touchend', end, { passive: true })
+    window.addEventListener('touchcancel', end, { passive: true })
+    return () => {
+      window.removeEventListener('touchstart', start)
+      window.removeEventListener('touchmove', move)
+      window.removeEventListener('touchend', end)
+      window.removeEventListener('touchcancel', end)
+    }
+  }, [sidebarOpen])
+
+  /**
    * A turn in the conversation this browser is in. `target` is how the routines
    * screen pins the destination a routine it asks for is made for, when that is
    * not this chat — the sentence then does not have to say it.
@@ -403,7 +449,11 @@ export default function App() {
     .sort((a, b) => b.updatedAt - a.updatedAt)
   const sessionGroups = groupSessions(visibleSessions)
 
-  return <div className="app-shell">
+  return <div className={`app-shell ${sidebarOpen ? 'drawer-open' : ''}`}>
+    {/* The colour iOS 26 Safari reads for its own bars; see the `.chrome-tint`
+        rules. They sit off screen and take no pointer. */}
+    <div className="chrome-tint top" aria-hidden="true" />
+    <div className="chrome-tint bottom" aria-hidden="true" />
     {sidebarOpen && <button className="sidebar-scrim" type="button" aria-label="Close menu" onClick={() => setSidebarOpen(false)} />}
     <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`} aria-label="Main navigation">
       {view !== 'settings' ? <div className="sidebar-chat-nav">
