@@ -13,6 +13,8 @@ import type { GoogleAccount } from '../core/config/schema.js'
 import { profile } from '../core/google/gmail.js'
 import { awaitCode, exchangeCode, newVerifier } from '../core/google/oauth.js'
 import { GOOGLE_SHORTCUT, googleStepsInWords } from '../core/google/walkthrough.js'
+import { createDriveTools } from '../core/tools/drive.js'
+import { createGmailTools } from '../core/tools/gmail.js'
 import { errorMessage } from '../util/errors.js'
 import { hyperlink } from '../util/terminal.js'
 
@@ -100,7 +102,10 @@ function status(out: GoogleIo['out']): number {
   }
   const who = account.email ? ` as ${account.email}` : ''
   const when = account.connectedAt ? ` since ${account.connectedAt.slice(0, 10)}` : ''
-  out(`Connected${who}${when}. Read-only: Gmail search and read.`)
+  // The tool names come off the registry that will actually answer, so this line
+  // cannot go on naming one service after the grant has grown another.
+  const tools = [...createGmailTools(account), ...createDriveTools(account)].map((tool) => tool.name)
+  out(`Connected${who}${when}. Read-only: ${tools.join(', ')} — nothing writes.`)
   if (!enabled) out('…but the config says `google.enabled: false`, so the tools are not registered.')
   return 0
 }
