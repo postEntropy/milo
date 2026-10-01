@@ -60,6 +60,23 @@ export interface RunAgentOptions {
 const DEFAULT_MAX_STEPS = 25
 
 /**
+ * What the model is told when the steps run out.
+ *
+ * A ceiling that ends in an error and nothing to read throws the turn away: the
+ * transcript is already full of what was found. One last request — with the tools
+ * taken away, so there is nothing left to call — turns the cliff into a report,
+ * which is the difference between reading what Milo got and reading that Milo
+ * stopped. Digging itself is untouched: the ceiling is still the ceiling, and
+ * only what happens at it changes.
+ */
+const OUT_OF_STEPS = [
+  'You have run out of steps for this turn.',
+  'Answer now, in the language of the conversation, with what you have:',
+  'what you found, what you could not get to, and what you would try next.',
+  'This is the last request of the turn — do not call tools.',
+].join(' ')
+
+/**
  * The agent loop. Appends to `options.messages` in place so the caller's
  * conversation history stays in sync. Yields normalized events as they happen.
  */
@@ -168,7 +185,36 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     }
   }
 
-  yield { type: 'error', message: `Stopped after ${maxSteps} steps without a final answer.` }
+  // Out of steps with the tools still in hand. The instruction rides on the
+  // system prompt rather than on a user message, so the transcript is not left
+  // carrying a sentence nobody said.
+  let closing = ''
+  for await (const event of provider.stream({
+    model: options.model,
+    messages,
+    system: options.system ? `${options.system}\n\n${OUT_OF_STEPS}` : OUT_OF_STEPS,
+    tools: undefined,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+    reasoningEffort: options.reasoningEffort,
+    thinkingBudget: options.reasoningEffort ? thinkingBudgetFor(options.reasoningEffort) : undefined,
+    signal: options.signal,
+  })) {
+    if (event.type === 'text') {
+      closing += event.delta
+      yield { type: 'text-delta', delta: event.delta }
+    } else if (event.type === 'reasoning') {
+      yield { type: 'reasoning-delta', delta: event.delta }
+    }
+  }
+  if (closing) messages.push({ role: 'assistant', content: [{ type: 'text', text: closing }] })
+
+  yield {
+    type: 'error',
+    message: closing
+      ? `Stopped after ${maxSteps} steps — it answered with what it had.`
+      : `Stopped after ${maxSteps} steps without a final answer.`,
+  }
 }
 
 /** Empties the queue and hands back what was in it. */

@@ -162,6 +162,46 @@ describe('runAgent', () => {
     }
     expect(events.at(-1)).toMatchObject({ type: 'error' })
   })
+
+  it('asks for a closing answer when the steps run out, instead of ending on the error alone', async () => {
+    const provider = new ScriptedProvider([
+      [{ type: 'tool-call', id: 'c1', name: 'fake_read', args: { path: 'a' } }, { type: 'done', finishReason: 'tool_calls' }],
+      [{ type: 'tool-call', id: 'c2', name: 'fake_read', args: { path: 'b' } }, { type: 'done', finishReason: 'tool_calls' }],
+      [{ type: 'text', delta: 'I read a and b; c is still unread.' }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const registry = new ToolRegistry([fakeTool])
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'go' }] }]
+
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider,
+      model: 'm',
+      tools: registry.specs(),
+      registry,
+      messages,
+      context: { cwd: process.cwd(), signal: new AbortController().signal },
+      maxSteps: 2,
+    })) {
+      events.push(event)
+    }
+
+    // The closing request carries no tools: with nothing to call there is nothing
+    // left to loop on, and the instruction rides on the system prompt so the
+    // transcript is not left carrying a sentence nobody said.
+    expect(provider.calls).toBe(3)
+    expect(provider.last?.tools).toBeUndefined()
+    expect(provider.last?.system).toContain('run out of steps')
+
+    // What it says reaches the caller, and it is kept in the transcript.
+    const streamed = events.flatMap((event) => (event.type === 'text-delta' ? [event.delta] : []))
+    expect(streamed.join('')).toBe('I read a and b; c is still unread.')
+    expect(messages.at(-1)).toMatchObject({ role: 'assistant' })
+
+    // The ceiling is still reported: a turn cut short is not a turn that finished.
+    const last = events.at(-1) as { type: string; message?: string }
+    expect(last.type).toBe('error')
+    expect(last.message).toContain('answered with what it had')
+  })
 })
 
 describe('runAgent — steering', () => {
@@ -235,9 +275,11 @@ describe('runAgent — steering', () => {
   it('leaves a message it ran out of steps to answer, for the caller to run', async () => {
     const { provider, events, steering } = await runWithSteer('one more thing', { maxSteps: 1 })
 
-    expect(provider.calls).toBe(1)
+    // The step, and then the closing request the ceiling makes — the correction is
+    // part of neither, which is the contract the CLI relies on.
+    expect(provider.calls).toBe(2)
     expect(events.at(-1)).toMatchObject({ type: 'error' })
-    // The contract the CLI relies on: what is still in the array was never seen.
+    // What is still in the array was never seen.
     expect(steering).toEqual(['one more thing'])
   })
 })
