@@ -550,7 +550,7 @@ function sanitizeConfig(config: Config): Config {
 }
 
 function maskRecord(record: Record<string, string>): Record<string, { set: boolean; masked?: string }> {
-  return Object.fromEntries(Object.entries(record).map(([id, value]) => [id, { set: Boolean(value), ...(value ? { masked: '••••••••' } : {}) }]))
+  return Object.fromEntries(Object.entries(record).map(([id, value]) => [id, { set: Boolean(value), ...(value ? { masked: '••••••••••••••••' } : {}) }]))
 }
 
 function validConversationId(value: unknown): string {

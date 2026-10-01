@@ -76,7 +76,7 @@ describe('web Settings secret handling', () => {
     const overview = JSON.stringify(await settings.handle('overview'))
     expect(overview).not.toContain('provider-secret')
     expect(overview).not.toContain('header-secret')
-    expect(overview).toContain('••••••••')
+    expect(overview).toContain('••••••••••••••••')
   })
 
   it('reports the Google grant, and never the secret inside it', async () => {

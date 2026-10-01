@@ -174,6 +174,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
         await api('save-secret', { group, id, value })
       }
       setSecrets({})
+      setEditingSecret(null)
       await load()
       setNotice({ text: requiresRestart ? `Settings saved. Restart the web server to apply: ${restartReasons.join(', ')}.` : 'Settings saved.', error: false })
     } catch (error) { setNotice({ text: message(error), error: true }) }
@@ -268,17 +269,48 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             <Field className="full" label="API URL"><input value={draft.providers?.[currentProvider]?.baseURL ?? ''} onChange={(event) => update(['providers', currentProvider, 'baseURL'], event.target.value)} /></Field>
           </div>
         </Section>
-        <Section title="API keys" description="Keys live in Milo’s private file and are never shown again." active={section === 'keys'}>
-          {(['providers', 'search', 'gateways'] as const).map((group) => {
-            const ids = group === 'providers' ? [...new Set([...data.presets.map((item) => item.id), ...Object.keys(data.auth.providers)])] : group === 'search' ? ['tavily', 'exa', 'parallel'] : ['telegram', 'discord']
-            return <div key={group}><h3 className="section-label" style={{ paddingInline: 0 }}>{group === 'providers' ? 'Providers' : group === 'search' ? 'Web search' : 'Gateways'}</h3>
-              {ids.map((id) => <div className="secret-row" key={`${group}:${id}`}>
-                <span className="secret-name">{id}</span><span className="secret-state">{data.auth[group]?.[id]?.masked ?? 'not set'}</span>
-                <input aria-label={`New key for ${id}`} type="password" autoComplete="new-password" value={secrets[`${group}:${id}`] ?? ''} placeholder="New key" onChange={(event) => setSecrets((current) => ({ ...current, [`${group}:${id}`]: event.target.value }))} />
-                {data.auth[group]?.[id]?.set && <button className="button danger" type="button" onClick={async () => { await api('remove-secret', { group, id }); await load() }}>Remove</button>}
-              </div>)}
-            </div>
-          })}
+        <Section title="API keys" description="Stored keys stay hidden. Add or replace one, then save changes below." active={section === 'keys'}>
+          <div className="secret-groups">
+            {(['providers', 'search', 'gateways'] as const).map((group) => {
+              const ids = group === 'providers' ? [...new Set([...data.presets.map((item) => item.id), ...Object.keys(data.auth.providers)])] : group === 'search' ? ['tavily', 'exa', 'parallel'] : ['telegram', 'discord']
+              const label = group === 'providers' ? 'Providers' : group === 'search' ? 'Web search' : 'Gateways'
+              const orderedIds = [...ids].sort((a, b) => Number(Boolean(data.auth[group]?.[b]?.set)) - Number(Boolean(data.auth[group]?.[a]?.set)))
+              const configured = orderedIds.filter((id) => data.auth[group]?.[id]?.set).length
+              return <section className="secret-group" key={group} aria-labelledby={`keys-${group}`}>
+                <header className="secret-group-head">
+                  <h3 id={`keys-${group}`}>{label}</h3>
+                  <span className="secret-group-count">{configured} of {ids.length} configured</span>
+                </header>
+                <div className="secret-list">
+                  {orderedIds.map((id) => {
+                    const configured = Boolean(data.auth[group]?.[id]?.set)
+                    const slot = `${group}:${id}`
+                    const editing = editingSecret === slot
+                    const serviceName = group === 'providers'
+                      ? (data.presets.find((preset) => preset.id === id)?.name ?? id).replace(/\s*\(Provider API\)$/i, '')
+                      : id === 'exa' ? 'Exa' : id.charAt(0).toUpperCase() + id.slice(1)
+                    return <div className={`secret-row${editing ? ' editing' : ''}`} key={slot}>
+                      <div className="secret-identity">
+                        <span className="secret-name">{serviceName}</span>
+                        <span className={`secret-state ${configured ? 'configured' : ''}`}>{configured ? data.auth[group]?.[id]?.masked : 'Not set'}</span>
+                      </div>
+                      <div className="secret-row-actions">
+                        <button className="button" type="button" aria-expanded={editing} onClick={() => {
+                          if (editing) setSecrets((current) => { const next = { ...current }; delete next[slot]; return next })
+                          setEditingSecret(editing ? null : slot)
+                        }}>{editing ? 'Cancel' : configured ? 'Replace' : 'Add key'}</button>
+                        {configured && <button className="button danger" type="button" onClick={async () => { await api('remove-secret', { group, id }); setSecrets((current) => { const next = { ...current }; delete next[slot]; return next }); setEditingSecret(null); await load() }}>Remove</button>}
+                      </div>
+                      {editing && <label className="secret-editor">
+                        <span>{configured ? 'Replace key' : 'API key'}</span>
+                        <input aria-label={`${configured ? 'Replace' : 'Add'} ${id} API key`} type="password" autoComplete="new-password" value={secrets[slot] ?? ''} onChange={(event) => setSecrets((current) => ({ ...current, [slot]: event.target.value }))} />
+                      </label>}
+                    </div>
+                  })}
+                </div>
+              </section>
+            })}
+          </div>
         </Section>
         <Section title="Memory" description="What Milo keeps between sessions, and how it looks it up later." active={section === 'memory'}>
           <div className="form-grid">
