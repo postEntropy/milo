@@ -167,6 +167,116 @@ beforeEach(() => {
   rmSync(path.join(home, 'auth.json'), { force: true })
 })
 
+/**
+ * The connect flow, faked: what these tests are about is the screen that drives
+ * it — which step it is on, what it shows while it waits, and what it says when
+ * the answer is a refusal. The protocol itself has its own test.
+ */
+const flow = vi.hoisted(() => ({ result: null as unknown }))
+vi.mock('../src/core/google/connect.js', () => ({
+  connectGoogle: async () => {
+    const result = flow.result as { ok: boolean; value?: { account: Record<string, unknown> } }
+    // The real flow writes the grant and turns the tools on; a fake that only
+    // returned an object would leave the screen reading a disk that never changed.
+    if (result.ok && result.value) {
+      const { readAuth, readConfig, saveAuth, saveConfig } = await import('../src/core/config/load.js')
+      const auth = readAuth()
+      auth.google = result.value.account as never
+      saveAuth(auth)
+      const config = readConfig()
+      if (config) {
+        config.google = { enabled: true }
+        saveConfig(config)
+      }
+    }
+    return result
+  },
+}))
+
+async function openGoogle(app: App): Promise<void> {
+  await moveTo(app, 'Tools')
+  await press(app, '\r')
+  await moveTo(app, 'Google (Gmail and Drive)')
+  await press(app, '\r')
+}
+
+describe('the Google section', () => {
+  it('opens Google itself, instead of falling through to the browser', async () => {
+    const app = renderSettings()
+    await openGoogle(app)
+    await waitFor(app, 'Setup · Tools · Google')
+    expect(app.lastFrame() ?? '').not.toContain('Setup · Tools · Browser')
+  })
+
+  it('shows the console steps whole, then asks for the client id', async () => {
+    const app = renderSettings()
+    await openGoogle(app)
+    await waitFor(app, 'Connect')
+    const before = flatFrame(app)
+    expect(before).toContain('Work at the machine that runs Milo')
+    expect(before).toContain('Connect')
+
+    await press(app, '\r')
+    await waitFor(app, 'Step 1 of 3')
+    const field = flatFrame(app)
+    expect(field).toContain('the client id of your OAuth app')
+    expect(field).toContain('.apps.googleusercontent.com')
+  })
+
+  it('connects, and says the tools need a restart to appear', async () => {
+    flow.result = {
+      ok: true,
+      value: {
+        account: {
+          clientId: 'cid',
+          clientSecret: 'shh',
+          refreshToken: 'rt',
+          email: 'ana@exemplo',
+          connectedAt: '2026-09-30T12:00:00.000Z',
+        },
+        enabledInConfig: true,
+      },
+    }
+
+    const app = renderSettings()
+    await openGoogle(app)
+    await press(app, '\r')
+    await waitFor(app, 'Step 1 of 3')
+    app.stdin.write('cid.apps.googleusercontent.com')
+    await tick(20)
+    app.stdin.write('\r')
+    await waitFor(app, 'Step 2 of 3')
+    app.stdin.write('shh')
+    await tick(20)
+    app.stdin.write('\r')
+
+    await waitFor(app, 'restart Milo')
+    const done = flatFrame(app)
+    expect(done).toContain('Connected as ana@exemplo')
+    expect(done).toContain('drive_search')
+    expect(done).toContain('`google.enabled` turned on in the config')
+  })
+
+  it('shows why Google refused, and asks for the secret again', async () => {
+    flow.result = { ok: false, error: 'Google did not recognise this client id/secret' }
+
+    const app = renderSettings()
+    await openGoogle(app)
+    await press(app, '\r')
+    await waitFor(app, 'Step 1 of 3')
+    app.stdin.write('cid')
+    await tick(20)
+    app.stdin.write('\r')
+    await waitFor(app, 'Step 2 of 3')
+    app.stdin.write('wrong')
+    await tick(20)
+    app.stdin.write('\r')
+
+    await waitFor(app, 'did not recognise')
+    expect(flatFrame(app)).toContain('Step 2 of 3')
+  })
+})
+
 describe('SettingsScreen', () => {
   it('offers both ways to match by meaning, with each cost said first', async () => {
     const app = renderSettings()
@@ -583,8 +693,8 @@ describe('SettingsScreen', () => {
     expect(frame).toContain('Web search')
     expect(frame).toContain('Gateways')
 
-    // Four provider slots, then Tavily: the header in between is not a stop.
-    for (let index = 0; index < 4; index += 1) await press(app, DOWN)
+    // Five provider slots, then Tavily: the header in between is not a stop.
+    for (let index = 0; index < 5; index += 1) await press(app, DOWN)
     await press(app, '\r')
     await waitFor(app, 'TAVILY_API_KEY')
   })

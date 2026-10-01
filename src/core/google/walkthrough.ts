@@ -52,8 +52,13 @@ export const GOOGLE_STEPS: GoogleStep[] = [
     url: `${GOOGLE_CONSOLE}/apis/credentials`,
   },
   {
-    what: 'Run the connect command on the machine Milo runs on, and paste what you copied',
-    why: 'From a phone it cannot finish: Google refuses the Gmail scopes in its device flow, and the redirect arrives at the machine running the command.',
+    // Deliberately not "run the connect command": these steps are read from
+    // inside that command, from the setup screen that replaces it, and from the
+    // web page that can only point at it. What is true in all three is *where*
+    // the work happens, so that is what the step says — the imperative belongs to
+    // whoever is showing it.
+    what: 'Work at the machine that runs Milo, where the browser comes back to',
+    why: 'From a phone it cannot finish: Google refuses the Gmail scopes in its device flow, and the redirect arrives at the machine that started it.',
   },
 ]
 

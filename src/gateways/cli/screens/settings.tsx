@@ -26,6 +26,9 @@ import {
   memoryDir,
   skillsDir,
 } from '../../../core/config/paths.js'
+import { connectGoogle } from '../../../core/google/connect.js'
+import { googleState } from '../../../core/google/state.js'
+import { googleStepsInWords } from '../../../core/google/walkthrough.js'
 import { historyStatus } from '../../../core/history.js'
 import { DEFAULT_RECALL_LIMIT, memoryStatus } from '../../../core/memory/index.js'
 import { provisionEmbedding } from '../../../core/memory/provision.js'
@@ -52,6 +55,7 @@ import {
   type InstalledSkill,
 } from '../../../core/skills/install.js'
 import { resolveSource, type ResolvedSkill } from '../../../core/skills/sources.js'
+import { googleToolNames } from '../../../core/tools/index.js'
 import type { PermissionMode } from '../../../core/tools/permission.js'
 import { formatWhen } from '../../../core/sessions/index.js'
 import { humanSize, plural, shortenPath } from '../../../util/format.js'
@@ -72,6 +76,7 @@ interface KeySlot {
 
 const KEY_SLOTS: KeySlot[] = [
   { id: 'commandcode', label: 'Command Code', env: 'COMMANDCODE_API_KEY', kind: 'provider' },
+  { id: 'opencode', label: 'OpenCode Zen', env: 'OPENCODE_API_KEY', kind: 'provider' },
   { id: 'openrouter', label: 'OpenRouter', env: 'OPENROUTER_API_KEY', kind: 'provider' },
   { id: 'openai', label: 'OpenAI', env: 'OPENAI_API_KEY', kind: 'provider' },
   { id: 'anthropic', label: 'Anthropic', env: 'ANTHROPIC_API_KEY', kind: 'provider' },
@@ -177,6 +182,16 @@ interface Notice {
 
 type FlowStep = 'token' | 'access' | 'enable'
 
+/**
+ * The three things the Google flow does here: name the app, hand over its secret,
+ * then wait while the browser answers. The console steps a person does first are
+ * a different list, shown whole — counting the two together is what makes a setup
+ * feel longer than it is.
+ */
+type GoogleFlowStep = 'id' | 'secret' | 'waiting'
+
+const GOOGLE_FLOW: GoogleFlowStep[] = ['id', 'secret', 'waiting']
+
 type View =
   | { kind: 'menu' }
   | { kind: 'keys' }
@@ -202,6 +217,8 @@ type View =
   | { kind: 'memoryConfirm' }
   | { kind: 'memoryKey' }
   | { kind: 'skills' }
+  | { kind: 'google' }
+  | { kind: 'googleFlow'; step: GoogleFlowStep }
 
 export interface SettingsScreenProps {
   config: Config
@@ -236,6 +253,8 @@ const TITLE: Record<string, string> = {
   memoryConfirm: 'Setup · Memory',
   memoryKey: 'Setup · Memory',
   skills: 'Setup · Skills',
+  google: 'Setup · Tools · Google',
+  googleFlow: 'Setup · Tools · Google',
 }
 
 /** Where to get each bot token, shown in the token step. */
@@ -256,6 +275,10 @@ export function SettingsScreen({
   const [index, setIndex] = useState(0)
   const [text, setText] = useState('')
   const [notices, setNotices] = useState<Notice[]>([])
+  // The credentials wait here until there is a grant to write them with: a client
+  // id on its own is an app identity, not a connection.
+  const [googleClientId, setGoogleClientId] = useState('')
+  const [googleUrl, setGoogleUrl] = useState('')
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-read triggers, not closure values — auth is re-read from disk on navigation and after a save refreshes the config
   const auth = useMemo(() => readAuth(), [view, config])
@@ -655,6 +678,8 @@ export function SettingsScreen({
    * gets when they are set up, which is why they are here and not beside the
    * policy that says which tools may run without asking.
    */
+  const google = googleState(config, auth)
+
   const toolsItems: MenuItem[] = [
     {
       label: 'Web search',
@@ -677,12 +702,13 @@ export function SettingsScreen({
       // pairs: mail and files. The hint is the state, like its neighbours — what
       // to do about it belongs to the panel this opens.
       label: 'Google (Gmail and Drive)',
-      hint: !config.google.enabled
-        ? 'off'
-        : auth.google?.email
-          ? `connected as ${auth.google.email}`
-          : 'on, not connected',
-      hintColor: !config.google.enabled ? theme.accent : auth.google?.email ? theme.success : theme.danger,
+      hint:
+        google.kind === 'off'
+          ? 'off'
+          : google.kind === 'wanted'
+            ? 'on, not connected'
+            : `connected as ${google.email ?? 'an account Gmail would not name'}`,
+      hintColor: google.kind === 'off' ? theme.accent : google.kind === 'wanted' ? theme.danger : theme.success,
     },
   ]
 
@@ -970,6 +996,74 @@ export function SettingsScreen({
     go({ kind: 'gatewayFlow', id, steps, step: steps[0]! }, needsToken ? '' : accessText(id))
   }
 
+  /** What a connected account can still do about it: consent again, or drop the grant. */
+  const googleActionItems: MenuItem[] = [
+    { label: 'Reconnect', hint: 'consent again, with the same app' },
+    { label: 'Forget', hint: 'drops the grant, keeps the app identity' },
+  ]
+
+  /**
+   * The flow, off disk and back: `connectGoogle` owns the protocol and this screen
+   * only shows where it got to.
+   *
+   * Reconnecting skips the two fields, the way the command does — the app identity
+   * is already stored, and asking for it again would be asking for something we
+   * have.
+   */
+  const startGoogleFlow = () => {
+    setNotices([])
+    const stored = auth.google
+    if (stored?.clientId && stored.clientSecret) {
+      void runGoogleConnect(stored.clientId, stored.clientSecret)
+      return
+    }
+    go({ kind: 'googleFlow', step: 'id' }, stored?.clientId ?? '')
+  }
+
+  const runGoogleConnect = async (clientId: string, clientSecret: string) => {
+    go({ kind: 'googleFlow', step: 'waiting' })
+    setGoogleUrl('')
+    setBusy('waiting for Google to answer on this machine…')
+
+    const connected = await connectGoogle({ clientId, clientSecret, onUrl: setGoogleUrl })
+    setBusy(null)
+
+    if (!connected.ok) {
+      // Back to the secret with the reason on screen: the app identity is usually
+      // right and the secret usually isn't.
+      setNotices([{ text: connected.error, tone: 'danger' }])
+      go({ kind: 'googleFlow', step: 'secret' }, '')
+      return
+    }
+
+    const { account, enabledInConfig, warning } = connected.value
+    onSaved()
+    go({ kind: 'google' })
+    setNotices([
+      ...(warning ? [{ text: warning, tone: 'warning' as const }] : []),
+      {
+        // Said here because it is true here: the tools are registered when the
+        // runtime starts, so a connection made in this screen is not in the
+        // catalog yet.
+        text: `Connected${account.email ? ` as ${account.email}` : ''} — restart Milo for the tools to appear`,
+        tone: 'success' as const,
+      },
+      ...(enabledInConfig
+        ? [{ text: '`google.enabled` turned on in the config', tone: 'success' as const }]
+        : []),
+    ])
+  }
+
+  const forgetGoogle = () => {
+    patchAuth((current) => {
+      delete current.google
+    })
+    go({ kind: 'google' })
+    setNotices([
+      { text: 'Grant dropped — the tools will answer that Milo is not connected.', tone: 'success' },
+    ])
+  }
+
   const gatewayActionItems = (id: GatewayId): MenuItem[] => [
     {
       label: config.gateways[id]?.enabled ? 'Disable' : 'Enable',
@@ -1119,12 +1213,12 @@ export function SettingsScreen({
         else if (key.return) {
           setNotices([])
           if (index === 0) go({ kind: 'search' })
-          else {
+          else if (index === 1) {
             // Probing is a subprocess, so the section opens on what is already
             // known and refreshes itself.
             void probeBrowser(config.browser.chromePath)
             go({ kind: 'browser' })
-          }
+          } else go({ kind: 'google' })
         } else if (key.escape) go({ kind: 'menu' })
         break
 
@@ -1393,6 +1487,31 @@ export function SettingsScreen({
         break
       }
 
+      case 'google': {
+        if (busy) break
+        if (key.escape) {
+          go({ kind: 'tools' })
+          break
+        }
+        if (google.kind !== 'connected') {
+          if (key.return) startGoogleFlow()
+          break
+        }
+        if (key.upArrow) setIndex((value) => Math.max(0, value - 1))
+        else if (key.downArrow) setIndex((value) => Math.min(googleActionItems.length - 1, value + 1))
+        else if (key.return) {
+          if (index === 0) startGoogleFlow()
+          else forgetGoogle()
+        }
+        break
+      }
+
+      case 'googleFlow':
+        // While the browser is the thing to act on, this screen is a report.
+        if (view.step === 'waiting') break
+        if (key.escape) go({ kind: 'google' })
+        break
+
       case 'memory':
         if (busy) break
         if (key.escape) go({ kind: 'menu' })
@@ -1486,6 +1605,21 @@ export function SettingsScreen({
             : { text: `Profile: ${expanded} — cookies from it are what Milo will be signed in with`, tone: 'success' },
         ])
       }
+      return
+    }
+
+    if (view.kind === 'googleFlow' && view.step === 'id') {
+      const id = value.trim()
+      if (!id) return
+      setGoogleClientId(id)
+      go({ ...view, step: 'secret' }, '')
+      return
+    }
+
+    if (view.kind === 'googleFlow' && view.step === 'secret') {
+      const secret = value.trim()
+      if (!secret) return
+      void runGoogleConnect(googleClientId, secret)
       return
     }
 
@@ -1873,6 +2007,116 @@ export function SettingsScreen({
               with {view.id}?
             </Text>
             <Menu items={gatewayActionItems(view.id)} index={index} />
+          </Box>
+        )}
+
+        {view.kind === 'google' && (
+          <Box flexDirection="column">
+            {google.kind === 'connected' ? (
+              <>
+                <Text color={theme.success}>
+                  Connected as {google.email ?? 'an account Gmail would not name'}
+                  {google.connectedAt ? ` since ${google.connectedAt.slice(0, 10)}` : ''}
+                </Text>
+                <Box marginTop={1}>
+                  <Text color={theme.muted}>
+                    Read-only: {googleToolNames(auth.google ?? null).join(', ')} — nothing writes.
+                  </Text>
+                </Box>
+                <Box marginTop={1}>
+                  <Menu items={googleActionItems} index={index} />
+                </Box>
+                {!google.enabled && (
+                  <Box marginTop={1}>
+                    <Text color={theme.warning}>
+                      `google.enabled` is off in the config, so the tools are not registered.
+                    </Text>
+                  </Box>
+                )}
+              </>
+            ) : (
+              <>
+                <Text color={theme.muted}>
+                  Google needs an OAuth client of your own. Once, at this machine:
+                </Text>
+                <Box marginTop={1} flexDirection="column">
+                  {googleStepsInWords().map((line) => (
+                    <Text key={line} color={line.trim().startsWith('http') ? theme.accent : theme.muted}>
+                      {line}
+                    </Text>
+                  ))}
+                </Box>
+                <Box marginTop={1}>
+                  <Text color={theme.muted}>
+                    Milo reads only: mail and files, and nothing here writes.
+                  </Text>
+                </Box>
+                <Box marginTop={1}>
+                  <Menu
+                    items={[{ label: 'Connect', hint: 'paste the client id and secret' }]}
+                    index={0}
+                  />
+                </Box>
+              </>
+            )}
+            <Notices notices={notices} />
+          </Box>
+        )}
+
+        {view.kind === 'googleFlow' && view.step === 'id' && (
+          <Box flexDirection="column">
+            <Text color={theme.accent}>
+              Step {GOOGLE_FLOW.indexOf(view.step) + 1} of {GOOGLE_FLOW.length} — the client id of
+              your OAuth app
+            </Text>
+            <Text color={theme.muted}>
+              From the "Desktop app" client in the Cloud console, the one ending in
+              .apps.googleusercontent.com
+            </Text>
+            <Box>
+              <Text color={theme.accent}>❯ </Text>
+              <TextInput key={view.step} value={text} onChange={setText} onSubmit={saveText} />
+            </Box>
+            <Notices notices={notices} />
+          </Box>
+        )}
+
+        {view.kind === 'googleFlow' && view.step === 'secret' && (
+          <Box flexDirection="column">
+            <Text color={theme.accent}>
+              Step {GOOGLE_FLOW.indexOf(view.step) + 1} of {GOOGLE_FLOW.length} — its client secret
+            </Text>
+            <Text color={theme.muted}>
+              Milo keeps it to refresh the grant. It is never shown again.
+            </Text>
+            <Box>
+              <Text color={theme.accent}>❯ </Text>
+              <TextInput
+                key={view.step}
+                value={text}
+                onChange={setText}
+                onSubmit={saveText}
+                mask="*"
+              />
+            </Box>
+            <Notices notices={notices} />
+          </Box>
+        )}
+
+        {view.kind === 'googleFlow' && view.step === 'waiting' && (
+          <Box flexDirection="column">
+            <Text color={theme.accent}>
+              Step {GOOGLE_FLOW.indexOf(view.step) + 1} of {GOOGLE_FLOW.length} — open this in a
+              browser, on this machine, and allow the read-only access
+            </Text>
+            <Box marginTop={1}>
+              <Text color={theme.accent}>{googleUrl || 'waiting for a port on this machine…'}</Text>
+            </Box>
+            <Box marginTop={1}>
+              <Text color={theme.muted}>
+                <Spinner type="dots" /> {busy}
+              </Text>
+            </Box>
           </Box>
         )}
         {view.kind === 'memory' && (

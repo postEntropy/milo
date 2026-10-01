@@ -64,6 +64,17 @@ export const builtinTools = [
   shellTool,
 ]
 
+/**
+ * The Google tool names, for the surfaces that say what a connection bought.
+ *
+ * Taken from the factories that will actually answer rather than typed out again,
+ * so a line like `milo google status` cannot go on naming one service after the
+ * grant has grown another.
+ */
+export function googleToolNames(account: GoogleAccount | null): string[] {
+  return [...createGmailTools(account), ...createDriveTools(account)].map((tool) => tool.name)
+}
+
 export interface ToolRegistryOptions {
   search?: SearchProvider | null
   /** Skills found at startup; `skill` is only registered when there are any. */

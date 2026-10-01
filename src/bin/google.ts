@@ -8,13 +8,11 @@
 import process from 'node:process'
 import { readFileSync } from 'node:fs'
 import { createInterface } from 'node:readline/promises'
-import { readAuth, readConfig, saveAuth, saveConfig } from '../core/config/load.js'
-import type { GoogleAccount } from '../core/config/schema.js'
-import { profile } from '../core/google/gmail.js'
-import { awaitCode, exchangeCode, newVerifier } from '../core/google/oauth.js'
+import { readAuth, readConfig, saveAuth } from '../core/config/load.js'
+import { connectGoogle } from '../core/google/connect.js'
+import { googleState } from '../core/google/state.js'
 import { GOOGLE_SHORTCUT, googleStepsInWords } from '../core/google/walkthrough.js'
-import { createDriveTools } from '../core/tools/drive.js'
-import { createGmailTools } from '../core/tools/gmail.js'
+import { googleToolNames } from '../core/tools/index.js'
 import { errorMessage } from '../util/errors.js'
 import { hyperlink } from '../util/terminal.js'
 
@@ -88,25 +86,24 @@ function flag(argv: string[], name: string): string | undefined {
  * granted, and connected. Saying only two of them hides the one the person is in.
  */
 function status(out: GoogleIo['out']): number {
-  const config = readConfig()
-  const account = readAuth().google
-  const enabled = config?.google.enabled ?? false
+  const auth = readAuth()
+  const state = googleState(readConfig(), auth)
 
-  if (!enabled && !account) {
+  if (state.kind === 'off') {
     out('Google is off. Turn it on with `milo google connect`, or in the config.')
     return 0
   }
-  if (!account?.refreshToken) {
+  if (state.kind === 'wanted') {
     out('Google is on in the config, but no account is connected — run `milo google connect`.')
     return 0
   }
-  const who = account.email ? ` as ${account.email}` : ''
-  const when = account.connectedAt ? ` since ${account.connectedAt.slice(0, 10)}` : ''
-  // The tool names come off the registry that will actually answer, so this line
+  const who = state.email ? ` as ${state.email}` : ''
+  const when = state.connectedAt ? ` since ${state.connectedAt.slice(0, 10)}` : ''
+  // The tool names come off the factories that will actually answer, so this line
   // cannot go on naming one service after the grant has grown another.
-  const tools = [...createGmailTools(account), ...createDriveTools(account)].map((tool) => tool.name)
+  const tools = googleToolNames(auth.google ?? null)
   out(`Connected${who}${when}. Read-only: ${tools.join(', ')} — nothing writes.`)
-  if (!enabled) out('…but the config says `google.enabled: false`, so the tools are not registered.')
+  if (!state.enabled) out('…but the config says `google.enabled: false`, so the tools are not registered.')
   return 0
 }
 
@@ -180,67 +177,24 @@ async function connect(argv: string[], io: Required<GoogleIo>): Promise<number> 
     return 1
   }
 
-  const verifier = newVerifier()
-  const answered = await awaitCode({
+  const connected = await connectGoogle({
     clientId,
-    verifier,
+    clientSecret,
     onUrl: (url) => {
       io.out('Open this in a browser and allow the read-only Gmail access:')
       io.out(`  ${hyperlink(url)}`)
       io.out('(waiting for Google to answer on this machine…)')
     },
   })
-  if (!answered.ok) {
-    io.err(answered.error)
+  if (!connected.ok) {
+    io.err(connected.error)
     return 1
   }
+  if (connected.value.warning) io.err(connected.value.warning)
+  if (connected.value.enabledInConfig) io.out('Turned `google.enabled` on in the config.')
 
-  const tokens = await exchangeCode({
-    account: { clientId, clientSecret },
-    code: answered.value.code,
-    redirectUri: answered.value.redirectUri,
-    verifier,
-  })
-  if (!tokens.ok) {
-    io.err(tokens.error)
-    return 1
-  }
-  if (!tokens.value.refreshToken) {
-    // Worth its own words: without it nothing works after this process ends, and
-    // the fix is in the Cloud project, not here.
-    io.err(
-      'Google did not return a refresh token, so the connection would die with this command. ' +
-        'Remove Milo\'s access at https://myaccount.google.com/permissions and connect again.',
-    )
-    return 1
-  }
-
-  // The address is read back from Google, so the connection is proven rather than
-  // assumed — and `status` can say who it is without spending a call.
-  const who = await profile(tokens.value)
-  if (!who.ok) io.err(`Connected, but Gmail would not say which address: ${who.error}`)
-
-  const account: GoogleAccount = {
-    clientId,
-    clientSecret,
-    refreshToken: tokens.value.refreshToken,
-    ...(who.ok ? { email: who.value } : {}),
-    connectedAt: new Date().toISOString(),
-  }
-  const auth = readAuth()
-  auth.google = account
-  saveAuth(auth)
-
-  // Wanted is what registers the tools, so connecting without turning it on would
-  // leave a grant nothing could use.
-  const config = readConfig()
-  if (config && !config.google.enabled) {
-    config.google = { enabled: true }
-    saveConfig(config)
-    io.out('Turned `google.enabled` on in the config.')
-  }
-
-  io.out(`Connected${who.ok ? ` as ${who.value}` : ''}.`)
+  const who = connected.value.account.email
+  io.out(`Connected${who ? ` as ${who}` : ''}.`)
   io.out('  gmail_search/gmail_read for mail, drive_search/drive_read for files. Nothing here writes.')
   io.out(
     '  If it stops working in about a week, the Cloud app is still in "Testing": publishing it ' +
