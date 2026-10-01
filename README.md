@@ -14,7 +14,7 @@ Hand-rolled LLM layer (no provider SDKs), built for a fast boot and immediate to
 GATEWAYS   CLI (Ink)      Telegram (grammY)      Discord (discord.js)      Web (React)
               └────────────────────┴───────────────────────┴──────────────────┘
 CORE       AgentRuntime → Session → AgentLoop   +  Tools · Memory · Providers · Config · Routines
-PROVIDERS  Command Code Provider API · OpenRouter · OpenAI · Anthropic · Ollama · custom
+PROVIDERS  Command Code Provider API · OpenCode Zen · OpenRouter · OpenAI · Anthropic · Ollama · custom
 ```
 
 The core never knows about Ink, Telegram, Discord or a browser: it hands each gateway a stream of
@@ -71,8 +71,9 @@ A corrupt `config.yml` is reported at startup; the settings a running conversati
 defensively, so a file that cannot be parsed leaves the current values alone. A write is an edit rather
 than a rewrite: only the keys whose values moved are replaced, and comments and order stay.
 
-Environment variables override stored secrets: `COMMANDCODE_API_KEY`, `OPENROUTER_API_KEY`,
-`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, `MILO_WEB_TOKEN`.
+Environment variables override stored secrets: `COMMANDCODE_API_KEY`, `OPENCODE_API_KEY`,
+`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`,
+`MILO_WEB_TOKEN`.
 `MILO_HOME` relocates `~/.milo`; `MILO_DEBUG=1` logs memory calls and skipped stream chunks.
 
 ### Providers
@@ -80,6 +81,7 @@ Environment variables override stored secrets: `COMMANDCODE_API_KEY`, `OPENROUTE
 | Preset | Endpoint | Wire |
 | --- | --- | --- |
 | `commandcode` | `https://api.commandcode.ai/provider/v1` | auto (Claude → `/messages`, others → `/chat/completions`) |
+| `opencode` | `https://opencode.ai/zen/v1` | auto (Claude → `/messages`, others → `/chat/completions`) |
 | `openrouter` | `https://openrouter.ai/api/v1` | OpenAI |
 | `openai` | `https://api.openai.com/v1` | OpenAI |
 | `anthropic` | `https://api.anthropic.com/v1` | Anthropic |
@@ -87,6 +89,10 @@ Environment variables override stored secrets: `COMMANDCODE_API_KEY`, `OPENROUTE
 
 The Command Code Provider API needs a plan above Go (GOAT/Pro/Max/Team or the Provider plan) and uses
 the same API key as the CLI.
+
+OpenCode Zen serves each family on its own endpoint, so the preset uses the same auto wire: Claude ids
+go to `/messages`, everything else to `/chat/completions`. Its GPT models live on `/responses`, which
+Milo does not speak, so those ids are not offered.
 
 ## Gateways
 

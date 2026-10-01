@@ -26,6 +26,18 @@ export const PRESETS: Preset[] = [
     ],
   },
   {
+    id: 'opencode',
+    name: 'OpenCode Zen',
+    baseURL: 'https://opencode.ai/zen/v1',
+    wire: 'auto',
+    keyEnv: 'OPENCODE_API_KEY',
+    keyURL: 'https://opencode.ai/auth',
+    // The gateway serves each family on its own endpoint: Claude ids on
+    // `/messages` (auto), the rest on `/chat/completions`. Its GPT models live
+    // on `/responses`, which Milo does not speak, so they are left out.
+    models: ['claude-sonnet-5', 'deepseek-v4.1-flash', 'glm-5.3-flash', 'kimi-k2.7-code'],
+  },
+  {
     id: 'openrouter',
     name: 'OpenRouter',
     baseURL: 'https://openrouter.ai/api/v1',
