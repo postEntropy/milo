@@ -50,6 +50,8 @@ export default function App() {
   const socket = useMemo(() => new MiloSocket(), [])
   const composerRef = useRef<ComposerHandle>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
+  /** Set when the person sends: their own message comes into view even from up here. */
+  const followSend = useRef(false)
   const sessionListRef = useRef<HTMLElement | null>(null)
   /** The soft edge under the search box shows only once the list is scrolled. */
   const [listScrolled, setListScrolled] = useState(false)
@@ -241,8 +243,14 @@ export default function App() {
     // The empty state is a screen of its own: it stays at the top, so the hero
     // is never half-scrolled out of view when it is only slightly too tall.
     if (messages.length === 0) { container.scrollTop = 0; return }
+    // Reading back through the thread is respected: a turn that arrives while the
+    // person is up there does not yank them down. Sending is the exception, since
+    // the message they just wrote is the thing they are looking for.
     const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120
-    if (nearBottom) container.scrollTop = container.scrollHeight
+    if (nearBottom || followSend.current) {
+      followSend.current = false
+      container.scrollTop = container.scrollHeight
+    }
   }, [messages, pendingPermission])
 
   useEffect(() => {
@@ -317,6 +325,7 @@ export default function App() {
    * not this chat — the sentence then does not have to say it.
    */
   function send(text: string, intent: 'queue' | 'steer' = 'queue', target?: SendTarget): void {
+    followSend.current = true
     try {
       if (text.startsWith('/')) {
         setMessages((current) => [...current, { id: `user-${randomUUID()}`, role: 'user', text }])
