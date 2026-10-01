@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toolIcon, toolLine } from '../src/gateways/tool-line.js'
+import { toolBrand, toolIcon, toolLine, toolText } from '../src/gateways/tool-line.js'
 
 describe('toolLine', () => {
   it('shows a shell command like any other tool, with the command beside it', () => {
@@ -16,6 +16,11 @@ describe('toolLine', () => {
     expect(toolLine('list_dir', { path: 'src' })).toBe('📁 list_dir src')
     expect(toolLine('glob', { pattern: '**/*.ts' })).toBe('🔎 glob **/*.ts')
     expect(toolLine('grep', { pattern: 'alpha' })).toBe('🔍 grep alpha')
+  })
+
+  it('gives the Google tools one emoji per service, since neither has an emoji of its own', () => {
+    expect(toolLine('gmail_search', { query: 'is:unread' })).toBe('📧 gmail_search is:unread')
+    expect(toolLine('drive_search', { query: 'budget' })).toBe('📂 drive_search budget')
   })
 
   it('writes a file change the same way, by its path', () => {
@@ -45,7 +50,7 @@ describe('toolLine', () => {
 
   it('starts every line with an emoji, never a typographic glyph', () => {
     const emoji = /\p{Extended_Pictographic}/u
-    const names = ['read_file', 'list_dir', 'glob', 'grep', 'fetch_url', 'write_file', 'edit_file', 'remember', 'recall', 'search_history', 'web_search', 'read_skill', 'task', 'shell_command', 'unknown_tool']
+    const names = ['read_file', 'list_dir', 'glob', 'grep', 'fetch_url', 'write_file', 'edit_file', 'remember', 'recall', 'search_history', 'web_search', 'read_skill', 'task', 'shell_command', 'gmail_search', 'gmail_read', 'drive_search', 'drive_read', 'unknown_tool']
 
     for (const name of names) {
       const [icon] = toolLine(name, { path: 'a' }).split(' ')
@@ -86,6 +91,27 @@ describe('toolIcon', () => {
   it('still answers the icon alone, for the CLI', () => {
     expect(toolIcon('web_search')).toBe('🌐')
     expect(toolIcon('shell_command')).toBe('⚡')
+    expect(toolIcon('gmail_search')).toBe('📧')
+    expect(toolIcon('drive_read')).toBe('📂')
     expect(toolIcon('anything')).toBe('🔧')
+  })
+})
+
+describe('toolBrand', () => {
+  it('names the service behind a Google tool, and nothing for the rest', () => {
+    expect(toolBrand('gmail_search')).toBe('gmail')
+    expect(toolBrand('gmail_read')).toBe('gmail')
+    expect(toolBrand('drive_search')).toBe('drive')
+    expect(toolBrand('drive_read')).toBe('drive')
+    expect(toolBrand('web_search')).toBeNull()
+    expect(toolBrand('anything')).toBeNull()
+  })
+})
+
+describe('toolText', () => {
+  it('is the line without its icon, for the surface that draws the icon itself', () => {
+    expect(toolText('gmail_search', { query: 'is:unread' })).toBe('gmail_search is:unread')
+    expect(toolText('read_file')).toBe('read_file')
+    expect(toolText('read_file', { path: 'a.txt' }, { markdown: true })).toBe('**read_file** a.txt')
   })
 })

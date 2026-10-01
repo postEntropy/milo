@@ -34,6 +34,39 @@ const paths: Record<string, React.ReactNode> = {
   dots: <><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="6" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="18" cy="12" r="1.5" fill="currentColor" stroke="none" /></>,
   edit: <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></>,
   branch: <><line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" /></>,
+  gmail: <g stroke="none" transform="translate(0 2.4375) scale(0.09375)">
+    <defs>
+      <linearGradient id="milo-gmail-bar" x1="165" x2="165" y1="44" y2="166" gradientUnits="userSpaceOnUse">
+        <stop stopColor="#60d673" /><stop offset=".17" stopColor="#42c868" /><stop offset=".39" stopColor="#0ebc5f" /><stop offset=".62" stopColor="#00a9bb" /><stop offset=".86" stopColor="#3c90ff" /><stop offset="1" stopColor="#3186ff" />
+      </linearGradient>
+      <linearGradient id="milo-gmail-flap" x1="8" x2="184" y1="46.13" y2="46.13" gradientUnits="userSpaceOnUse">
+        <stop offset=".08" stopColor="#ff63a0" /><stop offset=".3" stopColor="#fc413d" /><stop offset=".5" stopColor="#fc413d" /><stop offset=".65" stopColor="#fc413d" /><stop offset=".72" stopColor="#fc5c30" /><stop offset=".86" stopColor="#feb10c" /><stop offset=".91" stopColor="#fec700" /><stop offset=".96" stopColor="#ffdb0f" />
+      </linearGradient>
+    </defs>
+    <path fill="url(#milo-gmail-bar)" d="M146 44h38v110c0 6.627-5.373 12-12 12h-20a6 6 0 0 1-6-6z" transform="translate(-11.636 -37.818)scale(1.45454)" />
+    <path fill="#fc413d" d="M55.273 26.182H0v160c0 9.638 7.816 17.454 17.455 17.454h29.09a8.727 8.727 0 0 0 8.728-8.728z" />
+    <path fill="url(#milo-gmail-flap)" d="M39.226 30.456c-8.033-6.752-20.018-5.714-26.77 2.319c-6.752 8.032-5.714 20.017 2.319 26.77l76.078 63.949a8 8 0 0 0 10.295 0l76.078-63.95c8.032-6.752 9.07-18.737 2.318-26.77c-6.752-8.032-18.737-9.07-26.769-2.318L96 78.18z" transform="translate(-11.636 -37.818)scale(1.45454)" />
+  </g>,
+  drive: <g stroke="none" transform="translate(0 0.84375) scale(0.09375)">
+    <defs>
+      <linearGradient id="milo-drive-yellow" x1="86.924%" x2="7.63%" y1="94.294%" y2="45.952%">
+        <stop offset="9%" stopColor="#ffe921" /><stop offset="100%" stopColor="#fec700" />
+      </linearGradient>
+      <linearGradient id="milo-drive-blue" x1="99.538%" x2="23.437%" y1="93.901%" y2="54.033%">
+        <stop offset="15%" stopColor="#a9a8ff" /><stop offset="33%" stopColor="#6d97ff" /><stop offset="48%" stopColor="#3186ff" />
+      </linearGradient>
+      <linearGradient id="milo-drive-green" x1="87.128%" x2="-.639%" y1="51.518%" y2="93.078%">
+        <stop offset="55%" stopColor="#0ebc5f" /><stop offset="85%" stopColor="#78c9ff" />
+      </linearGradient>
+      <path id="milo-drive-form" d="M77.303 29.27c22.531-39.026 78.863-39.027 101.394 0l69.373 120.158c22.531 39.027-5.633 87.81-50.698 87.81H58.628c-45.065 0-73.23-48.783-50.698-87.81z" />
+      <mask id="milo-drive-cut" fill="#fff"><use href="#milo-drive-form" /></mask>
+    </defs>
+    <g mask="url(#milo-drive-cut)">
+      <path fill="url(#milo-drive-yellow)" d="M341.719 295.937H200.166l-29.293-50.735l70.777-122.589z" transform="translate(-42.87 -58.67)" />
+      <path fill="url(#milo-drive-blue)" d="m0 295.916l100.069-173.325v.003l-29.282 50.723h58.57l70.783 122.596l-200.138.001z" transform="translate(-42.87 -58.67)" />
+      <path fill="url(#milo-drive-green)" d="m170.881 0l70.781 122.6l-29.286 50.726H70.812z" transform="translate(-42.87 -58.67)" />
+    </g>
+  </g>,
 }
 
 export function Icon({ name, size = 18, className = '', ...props }: SVGProps<SVGSVGElement> & { name: keyof typeof paths; size?: number }) {

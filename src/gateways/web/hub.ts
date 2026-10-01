@@ -12,7 +12,7 @@ import { TurnQueue } from '../turns.js'
 import type { ClientFrame, FrameAttachment, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
 import { PERMISSION_TIMEOUT_MS } from './protocol.js'
 import { displayEvent } from './turn.js'
-import { showsToolCall, toolLine } from '../tool-line.js'
+import { showsToolCall, toolText } from '../tool-line.js'
 
 export interface WebClient {
   send(frame: ServerFrame): void
@@ -355,7 +355,9 @@ export class WebHub {
       if (message.role === 'assistant') {
         const reasoning = message.content.filter((part) => part.type === 'reasoning').map((part) => part.text).join('')
         const tools = message.content.flatMap((part) =>
-          part.type === 'tool-call' && showsToolCall(part.name) ? [toolLine(part.name, part.args)] : [],
+          part.type === 'tool-call' && showsToolCall(part.name)
+            ? [{ name: part.name, text: toolText(part.name, part.args) }]
+            : [],
         )
         const attachments = message.content.flatMap((part) =>
           part.type === 'file'

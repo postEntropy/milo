@@ -217,6 +217,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tool-line { display: flex; align-items: center; justify-content: space-between; gap: 9px; min-height: 36px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); padding: 7px 12px; color: var(--fg-2); font-size: 12px; }
 .tool-line svg.icon { color: var(--muted); }
 .message-content .tool-line code { overflow: hidden; color: var(--fg); font: 500 12px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+/* The service's mark is a drawing on the text's baseline, not a character: it
+   needs the nudge a glyph does not. */
+.tool-line code .tool-mark { flex: none; vertical-align: -3px; }
 .tool-copy-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: none; border: 0; border-radius: 6px; background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
 .tool-line:hover .tool-copy-btn, .tool-copy-btn:focus-visible { opacity: 1; }
 .tool-copy-btn:hover { background: var(--surface-warm); color: var(--fg); }

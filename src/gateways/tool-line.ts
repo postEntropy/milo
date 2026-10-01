@@ -11,30 +11,47 @@
  */
 
 /**
+ * The service a tool belongs to, when it has a mark of its own. Only the surface
+ * that draws icons can use it — a chat client renders text, so the emoji is what
+ * a Gmail call looks like there and the mark is what it looks like in the browser.
+ */
+export type ToolBrand = 'gmail' | 'drive'
+
+/**
  * Every line starts with a real emoji, never a typographic glyph: these lines are
  * read in chat clients, where `▸` renders as a stray character next to the emoji
  * around it. The fallback is an emoji too, so an unknown tool cannot reintroduce
  * one.
+ *
+ * The emoji and the brand sit in one table because they answer one question —
+ * what does this tool look like — and a tool with two tables would be a tool with
+ * two answers.
  */
-const TOOLS: Record<string, string> = {
-  read_file: '📄',
-  list_dir: '📁',
-  glob: '🔎',
-  grep: '🔍',
-  fetch_url: '🔗',
-  write_file: '📝',
-  edit_file: '✏️',
-  remember: '🧠',
-  recall: '🗂',
-  search_history: '🕘',
-  web_search: '🌐',
-  read_skill: '📘',
-  task: '🤖',
-  shell_command: '⚡',
-  browser_open: '🧭',
-  browser_snapshot: '👁️',
-  browser_screenshot: '📸',
-  browser_act: '🖱️',
+const TOOLS: Record<string, { icon: string; brand?: ToolBrand }> = {
+  read_file: { icon: '📄' },
+  list_dir: { icon: '📁' },
+  glob: { icon: '🔎' },
+  grep: { icon: '🔍' },
+  fetch_url: { icon: '🔗' },
+  write_file: { icon: '📝' },
+  edit_file: { icon: '✏️' },
+  remember: { icon: '🧠' },
+  recall: { icon: '🗂' },
+  search_history: { icon: '🕘' },
+  web_search: { icon: '🌐' },
+  read_skill: { icon: '📘' },
+  task: { icon: '🤖' },
+  shell_command: { icon: '⚡' },
+  browser_open: { icon: '🧭' },
+  browser_snapshot: { icon: '👁️' },
+  browser_screenshot: { icon: '📸' },
+  browser_act: { icon: '🖱️' },
+  // A mail envelope and a folder rather than the services' logotypes: the text
+  // surfaces can only draw a character, and there is no Gmail or Drive emoji.
+  gmail_search: { icon: '📧', brand: 'gmail' },
+  gmail_read: { icon: '📧', brand: 'gmail' },
+  drive_search: { icon: '📂', brand: 'drive' },
+  drive_read: { icon: '📂', brand: 'drive' },
 }
 
 const FALLBACK = '🔧'
@@ -54,7 +71,31 @@ export function showsToolCall(name: string): boolean {
 
 /** The icon alone, for surfaces that draw their own line (the CLI). */
 export function toolIcon(name: string): string {
-  return TOOLS[name] ?? FALLBACK
+  return TOOLS[name]?.icon ?? FALLBACK
+}
+
+/**
+ * The mark a tool's service owns, for the surface that can draw one. Null for
+ * every tool that has none, which is every tool whose emoji is already the whole
+ * answer.
+ */
+export function toolBrand(name: string): ToolBrand | null {
+  return TOOLS[name]?.brand ?? null
+}
+
+/**
+ * The words of a line — the tool's name and the one value worth showing — with no
+ * icon in front. The browser asks for this and draws the icon itself, because an
+ * icon there is a drawing and not a character.
+ */
+export function toolText(
+  name: string,
+  args?: unknown,
+  options: { markdown?: boolean } = {},
+): string {
+  const summary = toolDetail(args)
+  const label = toolLabel(name, options.markdown ?? false)
+  return summary ? `${label} ${summary}` : label
 }
 
 export function toolLine(
@@ -62,9 +103,7 @@ export function toolLine(
   args?: unknown,
   options: { markdown?: boolean } = {},
 ): string {
-  const summary = toolDetail(args)
-  const label = toolLabel(name, options.markdown ?? false)
-  return summary ? `${toolIcon(name)} ${label} ${summary}` : `${toolIcon(name)} ${label}`
+  return `${toolIcon(name)} ${toolText(name, args, options)}`
 }
 
 /**

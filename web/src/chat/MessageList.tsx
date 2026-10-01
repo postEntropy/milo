@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useCopy, type CopyState } from '../lib/clipboard.js'
-import type { ActionRow, FrameAttachment, SessionCardItem, TranscriptMessage } from '@protocol'
+import type { ActionRow, FrameAttachment, SessionCardItem, ToolMark, TranscriptMessage } from '@protocol'
+import { toolBrand, toolIcon } from '../../../src/gateways/tool-line.ts'
 import { attachmentUrl } from '../lib/api.js'
 import { Markdown } from './Markdown.js'
 import { Icon } from '../ui/Icons.js'
@@ -9,7 +10,6 @@ import { miloAvatar } from '../ui/milo.js'
 export interface ChatMessage extends TranscriptMessage {
   id: string
   status?: string
-  tools?: string[]
   /** How long the model took before its first output of this turn, in ms. */
   thoughtMs?: number
   /** When the turn's wait for its next output began: what the thought time is
@@ -45,13 +45,17 @@ function formatBytes(bytes: number): string {
   return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
 }
 
-function ToolLine({ tool }: { tool: string }) {
-  const { state, copy } = useCopy(tool)
+function ToolLine({ tool }: { tool: ToolMark }) {
+  const { state, copy } = useCopy(tool.text)
   const label = copyLabel(state)
+  const brand = toolBrand(tool.name)
 
   return (
     <div className="tool-line">
-      <code>{tool}</code>
+      <code>
+        {brand ? <Icon className="tool-mark" name={brand} size={14} /> : toolIcon(tool.name)}{' '}
+        {tool.text}
+      </code>
       <button
         className={`tool-copy-btn${state === 'failed' ? ' failed' : ''}`}
         type="button"
@@ -66,12 +70,13 @@ function ToolLine({ tool }: { tool: string }) {
   )
 }
 
-function ToolLines({ id, tools }: { id: string; tools: string[] }) {
+function ToolLines({ id, tools }: { id: string; tools: ToolMark[] }) {
   const seen = new Map<string, number>()
   return <>{tools.map((tool) => {
-    const occurrence = seen.get(tool) ?? 0
-    seen.set(tool, occurrence + 1)
-    return <ToolLine key={`${id}-${tool}-${occurrence}`} tool={tool} />
+    const of = `${tool.name}\u0000${tool.text}`
+    const occurrence = seen.get(of) ?? 0
+    seen.set(of, occurrence + 1)
+    return <ToolLine key={`${id}-${of}-${occurrence}`} tool={tool} />
   })}</>
 }
 

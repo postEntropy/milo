@@ -92,12 +92,22 @@ export type ServerFrame =
   | { type: 'state'; busy: boolean; queued: number }
   | { type: 'error'; message: string }
 
+/**
+ * A tool call as a surface draws it. The words and the icon travel apart because
+ * only one of them is a character: a chat client pastes the emoji into the line,
+ * and the browser draws the service's mark beside it.
+ */
+export interface ToolMark {
+  name: string
+  text: string
+}
+
 export interface TranscriptMessage {
   role: 'user' | 'assistant'
   text: string
   reasoning?: string
   /** The tool calls this turn made, one line each, in the shared chat format. */
-  tools?: string[]
+  tools?: ToolMark[]
   /** Files delivered into this conversation, still on disk and served by id. */
   attachments?: FrameAttachment[]
 }
