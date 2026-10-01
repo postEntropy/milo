@@ -5,12 +5,14 @@ import lockfile, { type LockOptions } from 'proper-lockfile'
 import { ensurePrivateDir, writePrivateFile } from '../../util/fs.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
+import type { MemoryScope } from '../memory/types.js'
 import type { Message } from '../providers/types.js'
 import { KeyedMutex, waitForLease } from './lease.js'
 import { generateNickname } from './nickname.js'
 import { sliceMessagesUpToTurn } from './compact.js'
 import {
   INITIAL_SESSION_VERSION,
+  isScope,
   isValidSessionId,
   SessionConflictError,
   toSummary,
@@ -102,7 +104,7 @@ export class FileSessionStore implements SessionStore {
    * has handed out and the ones already on disk, so a second process cannot take
    * a nickname this one is holding.
    */
-  async create(): Promise<SessionRecord> {
+  async create(scope?: MemoryScope): Promise<SessionRecord> {
     return this.run(() => {
       const timestamp = this.now()
       const id = generateNickname(
@@ -114,6 +116,9 @@ export class FileSessionStore implements SessionStore {
         updatedAt: timestamp,
         messages: [],
         version: INITIAL_SESSION_VERSION,
+        // Written here, not by whoever saves first, so the record says where it
+        // came from even if the process dies before the first turn lands.
+        ...(scope ? { scope } : {}),
       } satisfies SessionRecord
       this.pending.set(id, record)
       return structuredClone(record)
@@ -296,7 +301,7 @@ export class FileSessionStore implements SessionStore {
     }
   }
 
-  async fork(sourceId: string, options?: { upToTurn?: number; title?: string }): Promise<SessionRecord | null> {
+  async fork(sourceId: string, options?: { upToTurn?: number; title?: string; scope?: MemoryScope }): Promise<SessionRecord | null> {
     if (!isValidSessionId(sourceId)) return null
     return this.run(async () => {
       const source = await this.load(sourceId)
@@ -321,6 +326,9 @@ export class FileSessionStore implements SessionStore {
         version: INITIAL_SESSION_VERSION,
         summary: whole ? source.summary : undefined,
         droppedTokens: whole ? source.droppedTokens : undefined,
+        // The fork is a session of its own, in the scope it was forked into —
+        // not the one its source happened to live in.
+        ...(options?.scope ? { scope: options.scope } : {}),
       }
       // Nothing to write yet, so it lives in memory like a minted session does.
       if (record.messages.length === 0) {
@@ -480,5 +488,8 @@ function parseRecord(value: unknown): SessionRecord | null {
     messages: raw.messages as Message[],
     summary: typeof raw.summary === 'string' ? raw.summary : undefined,
     droppedTokens: typeof raw.droppedTokens === 'number' ? raw.droppedTokens : undefined,
+    // Records written before the scope was kept read as having none; they are
+    // still readable, just unattributable.
+    scope: isScope(raw.scope) ? raw.scope : undefined,
   }
 }

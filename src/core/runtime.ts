@@ -7,6 +7,7 @@ import { DEFAULT_REASONING_EFFORT, type Provider, type ReasoningEffort } from '.
 import type { Skill } from './skills/index.js'
 import type { PermissionPolicy } from './tools/index.js'
 import type { RoutineFn, ToolRegistry } from './tools/index.js'
+import { ROUTINE_GATEWAY } from './routines.js'
 import { Session } from './session.js'
 import {
   MemoryRecapStore,
@@ -185,15 +186,45 @@ export class AgentRuntime {
       await cached.settle()
     }
     await this.detach(scope)
-    const record = await this.store.fork(sourceId, options)
+    const record = await this.store.fork(sourceId, { ...options, scope })
     if (!record) return null
     await this.store.setBinding(scopeKey(scope), record.id)
     this.opened.add(scopeKey(scope))
     return this.adopt(record, scope)
   }
 
+  /**
+   * The conversations a person can open. A routine's own runs are sessions too,
+   * but nobody talks in them: they are what a routine produced, read in the
+   * Routines surface through `listRuns`. Listing them here too had every surface
+   * offer them as resumable conversations, all titled after the routine.
+   */
   async listSessions(): Promise<SessionSummary[]> {
-    return withRecaps(await this.store.list(), this.recaps)
+    const sessions = (await this.store.list())
+      .filter((session) => session.scope?.gateway !== ROUTINE_GATEWAY)
+    return withRecaps(sessions, this.recaps)
+  }
+
+  /**
+   * What a routine has produced, newest first — its own history, not a
+   * conversation. Read off the record's scope, which is what survives the next
+   * run replacing the binding.
+   */
+  async listRuns(routineId: string): Promise<SessionSummary[]> {
+    return (await this.store.list()).filter(
+      (session) =>
+        session.scope?.gateway === ROUTINE_GATEWAY &&
+        session.scope.conversationId === routineId,
+    )
+  }
+
+  /**
+   * A saved session read as it stands. Unlike `resumeSession` this takes no
+   * lease and binds nothing, so looking at a past run does not take the
+   * conversation over from whoever is in it.
+   */
+  async loadSession(id: string): Promise<SessionRecord | null> {
+    return this.store.load(id)
   }
 
   /**
@@ -319,7 +350,7 @@ export class AgentRuntime {
     options?: NewSessionOptions,
   ): Promise<Session> {
     await this.detach(scope)
-    const record = await this.store.create()
+    const record = await this.store.create(scope)
     if (title?.trim()) record.title = title.trim()
     await this.store.setBinding(scopeKey(scope), record.id)
     // Not written out here: a session takes its file on its first turn, so a run

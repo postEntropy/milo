@@ -1,3 +1,4 @@
+import type { MemoryScope } from '../memory/types.js'
 import { KeyedMutex, waitForLease } from './lease.js'
 import { generateNickname } from './nickname.js'
 import { sliceMessagesUpToTurn } from './compact.js'
@@ -34,7 +35,7 @@ export class MemorySessionStore implements SessionStore {
     this.now = options.now ?? Date.now
   }
 
-  async create(): Promise<SessionRecord> {
+  async create(scope?: MemoryScope): Promise<SessionRecord> {
     const id = generateNickname((candidate) => this.records.has(candidate))
     const timestamp = this.now()
     const record: SessionRecord = {
@@ -43,6 +44,7 @@ export class MemorySessionStore implements SessionStore {
       updatedAt: timestamp,
       messages: [],
       version: INITIAL_SESSION_VERSION,
+      ...(scope ? { scope } : {}),
     }
     this.records.set(id, record)
     return structuredClone(record)
@@ -96,7 +98,7 @@ export class MemorySessionStore implements SessionStore {
     }
   }
 
-  async fork(sourceId: string, options?: { upToTurn?: number; title?: string }): Promise<SessionRecord | null> {
+  async fork(sourceId: string, options?: { upToTurn?: number; title?: string; scope?: MemoryScope }): Promise<SessionRecord | null> {
     if (!isValidSessionId(sourceId)) return null
     const source = this.records.get(sourceId)
     if (!source) return null
@@ -118,6 +120,7 @@ export class MemorySessionStore implements SessionStore {
       version: INITIAL_SESSION_VERSION,
       summary: whole ? source.summary : undefined,
       droppedTokens: whole ? source.droppedTokens : undefined,
+      ...(options?.scope ? { scope: options.scope } : {}),
     }
     this.records.set(id, record)
     return structuredClone(record)

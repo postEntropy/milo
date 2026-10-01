@@ -336,9 +336,15 @@ function fakeRuntime(options: FakeRun = {}): {
   const prompts: string[] = []
   const sessions: SentSession[] = []
   const runtime = {
+    // No history behind this run: the sweep has nothing to trim, and a run this
+    // fake produced is not one the test asks the store about.
+    async listRuns() {
+      return []
+    },
     async newSession(_scope: unknown, _title?: string, session?: SentSession) {
       sessions.push({ grantedTools: session?.grantedTools, deliverTo: session?.deliverTo })
       return {
+        id: 'fake-run-1',
         async *send(prompt: string) {
           prompts.push(prompt)
           if (options.gate) await options.gate
@@ -349,6 +355,9 @@ function fakeRuntime(options: FakeRun = {}): {
           yield { type: 'text-delta' as const, delta: options.answer ?? 'ok' }
         },
         takeOutgoing: () => options.files ?? [],
+        // The run writes what it produced into its own record; there is no record
+        // behind this fake, so the call is counted and dropped.
+        appendNotice: async () => undefined,
       }
     },
   }

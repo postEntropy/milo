@@ -1,3 +1,4 @@
+import type { MemoryScope } from '../memory/types.js'
 import type { Message } from '../providers/types.js'
 
 /**
@@ -11,6 +12,14 @@ export interface SessionRecord {
   createdAt: number
   updatedAt: number
   messages: Message[]
+  /**
+   * The address the session was created under, kept on the record itself. A
+   * binding only ever names the session a scope is bound to *now*, so without
+   * this a session the next run has replaced cannot say where it came from —
+   * and a routine's older runs would be unattributable. Absent on records
+   * written before this was kept.
+   */
+  scope?: MemoryScope
   /**
    * Revision of the record, bumped by the store on every accepted save. A write
    * names the revision it is based on, so a save built from a copy another
@@ -31,6 +40,8 @@ export interface SessionSummary {
   messageCount: number
   preview: string
   recap?: string
+  /** The address the session was created under; see `SessionRecord.scope`. */
+  scope?: MemoryScope
 }
 
 /** The numbers behind `/stats`. */
@@ -81,7 +92,8 @@ export interface CompactResult {
  * address (`scopeKey`) to the session currently bound to it.
  */
 export interface SessionStore {
-  create(): Promise<SessionRecord>
+  /** Mints an empty record, recording the address it was created under. */
+  create(scope?: MemoryScope): Promise<SessionRecord>
   load(id: string): Promise<SessionRecord | null>
   /**
    * Writes the record only if the stored one is still at `expectedVersion`,
@@ -99,10 +111,11 @@ export interface SessionStore {
   list(): Promise<SessionSummary[]>
   remove(id: string): Promise<void>
   /**
-   * Forks an existing session, copying history up to `upToTurn` (1-indexed) into a new session.
-   * Returns the new record, or null when `sourceId` does not exist.
+   * Forks an existing session, copying history up to `upToTurn` (1-indexed) into a
+   * new session created under `scope`. Returns the new record, or null when
+   * `sourceId` does not exist.
    */
-  fork(sourceId: string, options?: { upToTurn?: number; title?: string }): Promise<SessionRecord | null>
+  fork(sourceId: string, options?: { upToTurn?: number; title?: string; scope?: MemoryScope }): Promise<SessionRecord | null>
   /**
    * Deletes every session beyond the `keep` most recently updated, returning the
    * ids removed. A session a scope is bound to is never pruned, nor one named in
@@ -171,6 +184,17 @@ export function isValidSessionId(id: string): boolean {
   return SESSION_ID_PATTERN.test(id)
 }
 
+/** Whether a scope read off disk is one worth keeping, rather than a torn write. */
+export function isScope(value: unknown): value is MemoryScope {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const scope = value as Record<string, unknown>
+  return (
+    typeof scope.gateway === 'string' &&
+    typeof scope.conversationId === 'string' &&
+    (scope.userId === undefined || typeof scope.userId === 'string')
+  )
+}
+
 export function countTurns(messages: Message[]): number {
   let turns = 0
   for (const message of messages) if (message.role === 'user') turns += 1
@@ -215,5 +239,6 @@ export function toSummary(record: SessionRecord): SessionSummary {
     updatedAt: record.updatedAt,
     messageCount: countMessages(record.messages),
     preview: previewOf(record.messages),
+    scope: record.scope,
   }
 }

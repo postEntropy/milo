@@ -1,5 +1,6 @@
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
+import { ROUTINE_GATEWAY } from '../routines.js'
 import type { RecapStore } from './recap.js'
 import type { SessionStore } from './types.js'
 
@@ -30,7 +31,14 @@ export async function pruneSessions(
     logWarn(`could not prune empty sessions: ${errorMessage(error)}`)
   }
   try {
-    for (const id of await store.prune({ keep })) removed.add(id)
+    // A routine's runs outlive `keep`: their history is bounded by the routine
+    // itself, and pruning them here would make the Runs surface lose what it had
+    // shown. The store only knows ids, so the exclusion stays here with the rest
+    // of the policy.
+    const runs = (await store.list())
+      .filter((session) => session.scope?.gateway === ROUTINE_GATEWAY)
+      .map((session) => session.id)
+    for (const id of await store.prune({ keep, protect: runs })) removed.add(id)
   } catch (error) {
     logWarn(`could not prune old sessions: ${errorMessage(error)}`)
   }
