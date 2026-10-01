@@ -31,6 +31,13 @@ type MemoryStats = { backend: string; location: string; scopes: number; facts: n
 type Note = { id: string; text: string; createdAt: number; tags?: string[] }
 type Browser = { id: string; name: string; path: string; version: string | null }
 type Profile = { id: string; name: string; dir: string; bytes: number }
+/** The three states the server reports for the grant, with the tools it buys. */
+type GoogleReport = (
+  | { kind: 'off' }
+  | { kind: 'wanted' }
+  | { kind: 'connected'; email?: string; connectedAt?: string; enabled: boolean }
+) & { tools: string[] }
+
 type SettingsData = {
   config: SettingsConfig
   auth: Record<string, Record<string, { set: boolean; masked?: string }>>
@@ -39,6 +46,7 @@ type SettingsData = {
   sessions: Array<{ id: string; title?: string; preview: string; updatedAt: number; messageCount: number }>
   memoryStats: MemoryStats
   live: { model: string; effort: string; permissionMode: string; skills: Skill[]; browser: boolean }
+  google: GoogleReport
 }
 type JobView = { id: string; kind: string; status: 'running' | 'done' | 'error'; lines: string[]; result?: Record<string, unknown>; error?: string }
 type Notice = { text: string; error: boolean }
@@ -106,7 +114,10 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
     JSON.stringify(draft.web) !== JSON.stringify(saved.web) ||
     // The reviewer is built once at startup, so which decision model it asks is
     // read on the next run, like the browser and the web host.
-    JSON.stringify(draft.classifier) !== JSON.stringify(saved.classifier)
+    JSON.stringify(draft.classifier) !== JSON.stringify(saved.classifier) ||
+    // The Google tools are registered when the runtime starts, so switching them
+    // on here is read on the next run too.
+    JSON.stringify(draft.google) !== JSON.stringify(saved.google)
   ))
 
   function update(path: string[], value: unknown): void {
@@ -285,17 +296,40 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           <label className="field"><span>Web search</span><select value={draft.search?.provider ?? 'off'} onChange={(event) => update(['search'], event.target.value === 'off' ? undefined : { provider: event.target.value })}>{SEARCH_PROVIDERS.map((value) => <option key={value}>{value}</option>)}</select></label>
 
           <h3 className="section-label" style={{ paddingInline: 0 }}>Google</h3>
+          {data?.google.kind === 'connected' ? (
+            <p className="panel-note">
+              Connected as <code className="mono">{data.google.email ?? 'an account Gmail would not name'}</code>
+              {data.google.connectedAt ? ` since ${data.google.connectedAt.slice(0, 10)}` : ''}. Read-only:{' '}
+              {data.google.tools.join(', ')}.
+            </p>
+          ) : data?.google.kind === 'wanted' ? (
+            <p className="panel-note">
+              The tools are on in the config, but no account has been allowed yet. Run{' '}
+              <code className="mono">milo google connect</code> on the machine Milo runs on — it walks
+              these steps and opens the browser there:
+            </p>
+          ) : (
+            <p className="panel-note">The connection is yours: you make an app in Google&rsquo;s console, once, and allow it on this machine. Milo keeps read access only — it can never write to your mail or your files.</p>
+          )}
           <label className="check-row"><input type="checkbox" checked={draft.google.enabled} onChange={(event) => update(['google', 'enabled'], event.target.checked)} /> Read Gmail and Drive (restart to apply)</label>
-          <p className="panel-note">The connection is yours: you make an app in Google&rsquo;s console, once, and allow it on this machine. Milo keeps read access only — it can never write to your mail or your files.</p>
-          <ol className="panel-note">
-            {GOOGLE_STEPS.map((step) => (
-              <li key={step.what}>
-                {step.url ? <a href={step.url} target="_blank" rel="noreferrer">{step.what}</a> : step.what}
-                {step.why ? ` — ${step.why}` : ''}
-              </li>
-            ))}
-          </ol>
-          <p className="panel-note">Then run <code className="mono">milo google connect</code> on the machine Milo runs on. It walks the same steps and prints those links. The shortcut at <a href={GOOGLE_SHORTCUT} target="_blank" rel="noreferrer">Google&rsquo;s Workspace guide</a> creates the project, enables the APIs and downloads a <code className="mono">credentials.json</code>, which <code className="mono">--credentials</code> takes.</p>
+          {data?.google.kind === 'connected' ? (
+            <p className="panel-note">
+              To disconnect, run <code className="mono">milo google forget</code> on the machine Milo
+              runs on.
+            </p>
+          ) : (
+            <>
+              <ol className="panel-note">
+                {GOOGLE_STEPS.map((step) => (
+                  <li key={step.what}>
+                    {step.url ? <a href={step.url} target="_blank" rel="noreferrer">{step.what}</a> : step.what}
+                    {step.why ? ` — ${step.why}` : ''}
+                  </li>
+                ))}
+              </ol>
+              <p className="panel-note">Then run <code className="mono">milo google connect</code> on the machine Milo runs on. It walks the same steps and prints those links. The shortcut at <a href={GOOGLE_SHORTCUT} target="_blank" rel="noreferrer">Google&rsquo;s Workspace guide</a> creates the project, enables the APIs and downloads a <code className="mono">credentials.json</code>, which <code className="mono">--credentials</code> takes.</p>
+            </>
+          )}
 
           <h3 className="section-label" style={{ paddingInline: 0 }}>Browser</h3>
           <label className="check-row"><input type="checkbox" checked={draft.browser.enabled} onChange={(event) => update(['browser', 'enabled'], event.target.checked)} /> Enable the browser (restart to apply)</label>

@@ -1,6 +1,8 @@
 import path from 'node:path'
 import { listModels } from '../../core/providers/models.js'
 import { PRESETS } from '../../core/config/presets.js'
+import { googleState } from '../../core/google/state.js'
+import { googleToolNames } from '../../core/tools/index.js'
 import {
   readAuth,
   readConfig,
@@ -114,6 +116,13 @@ export class WebSettings {
         permissionMode: this.runtime.permissions?.mode ?? 'ask',
         skills: this.runtime.skills.map(({ name, description }) => ({ name, description })),
         browser: Boolean(this.runtime.browser),
+      },
+      // The grant, never the secret: the state, and the names of what it bought.
+      // `googleState` is the same function `milo google status` and the setup
+      // screen read, so the three cannot disagree about it.
+      google: {
+        ...googleState(config, auth),
+        tools: googleToolNames(auth.google ?? null),
       },
     }
   }

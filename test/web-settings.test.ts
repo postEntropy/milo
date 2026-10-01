@@ -79,6 +79,57 @@ describe('web Settings secret handling', () => {
     expect(overview).toContain('••••••••')
   })
 
+  it('reports the Google grant, and never the secret inside it', async () => {
+    writeConfig()
+    saveAuth({
+      providers: {},
+      gateways: {},
+      search: {},
+      google: {
+        clientId: 'client-id-123',
+        clientSecret: 'client-secret-456',
+        refreshToken: 'refresh-token-789',
+        email: 'ana@exemplo',
+        connectedAt: '2026-09-30T12:00:00.000Z',
+      },
+    })
+    const settings = new WebSettings(build({}), home)
+    const raw = JSON.stringify(await settings.handle('overview'))
+    expect(raw).not.toContain('client-secret-456')
+    expect(raw).not.toContain('refresh-token-789')
+
+    const overview = (await settings.handle('overview')) as {
+      google: { kind: string; email?: string; tools: string[] }
+    }
+    expect(overview.google.kind).toBe('connected')
+    expect(overview.google.email).toBe('ana@exemplo')
+    expect(overview.google.tools).toEqual([
+      'gmail_search',
+      'gmail_read',
+      'drive_search',
+      'drive_read',
+    ])
+  })
+
+  it('says the Google tools are off when the config never asked for them', async () => {
+    writeConfig()
+    const settings = new WebSettings(build({}), home)
+    const overview = (await settings.handle('overview')) as { google: { kind: string } }
+    expect(overview.google.kind).toBe('off')
+  })
+
+  it('says Google is wanted when the config asks and no account has answered', async () => {
+    writeFileSync(path.join(home, 'config.yml'), stringify({
+      provider: 'test',
+      model: 'test-model',
+      providers: { test: { baseURL: 'https://provider.example/v1' } },
+      google: { enabled: true },
+    }))
+    const settings = new WebSettings(build({}), home)
+    const overview = (await settings.handle('overview')) as { google: { kind: string } }
+    expect(overview.google.kind).toBe('wanted')
+  })
+
   it('reports the live model and effort, not the effort twice', async () => {
     writeConfig()
     const settings = new WebSettings(build({}), home)
