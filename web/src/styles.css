@@ -153,7 +153,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-action small { color: var(--muted); font-size: 12px; }
 .sidebar-action:hover { background: var(--surface); }
 .sidebar-action > svg.icon { flex: none; color: var(--muted); }
-.sidebar-settings-nav { padding: 12px 14px 14px; }
+/* The drawer holds the sections on a wide screen; on a phone they move into the
+   strip below, and the drawer keeps the session list. */
+.sidebar-settings-nav { display: none; padding: 12px 14px 14px; }
+.sidebar.settings-mode .sidebar-chat-nav { display: none; }
+.sidebar.settings-mode .sidebar-settings-nav { display: flex; }
 .settings-nav-heading { padding: 16px 10px 10px; }
 .settings-nav-heading h2 { font-size: 17px; font-weight: 600; letter-spacing: -.01em; }
 .settings-nav-heading p { margin-top: 4px; color: var(--muted); font-size: 12px; }
@@ -608,6 +612,23 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      and the safe area only pushes it up when that bar has scrolled away. */
   .composer-shell { padding: 10px 18px max(6px, env(safe-area-inset-bottom)); }
   .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 48px) 20px 0; }
+  /* This bar is the top of Settings, so the panel starts right under it. */
+  .main.has-settings-strip .settings-inner { padding-top: 26px; }
+  /* The menu button stands down here: the arrow in the bar is the way back. */
+  .main.has-settings-strip .mobile-menu { display: none; }
+  .settings-mobile-nav { display: flex; flex: none; align-items: center; padding: calc(env(safe-area-inset-top) + 24px) 0 12px; }
+  .settings-strip-back { display: grid; width: 38px; height: 38px; flex: none; place-items: center; margin-inline-start: 16px; border: 0; border-radius: 999px; background: var(--surface-warm); color: var(--accent); transition: background var(--motion-fast); }
+  .settings-strip-back:hover { background: var(--border-soft); }
+  .settings-section-strip { display: flex; flex: 1; min-width: 0; gap: 6px; overflow-x: auto; padding: 0 16px 0 10px; scrollbar-width: none; }
+  .settings-section-strip::-webkit-scrollbar { display: none; }
+  .settings-strip-item { display: inline-flex; flex: none; min-height: 38px; align-items: center; gap: 7px; border: 0; border-radius: 999px; background: var(--surface-warm); padding: 8px 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; white-space: nowrap; transition: background var(--motion-fast), color var(--motion-fast); }
+  .settings-strip-item svg.icon { flex: none; color: var(--muted); }
+  .settings-strip-item:hover { background: var(--border-soft); }
+  .settings-strip-item.active { background: var(--accent); color: var(--accent-on); }
+  .settings-strip-item.active svg.icon { color: var(--accent-on); }
+  /* The drawer holds the sessions here; the sections are the strip above. */
+  .sidebar.settings-mode .sidebar-chat-nav { display: flex; }
+  .sidebar.settings-mode .sidebar-settings-nav { display: none; }
   .settings-save { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
 }
 @media (max-width: 620px) {

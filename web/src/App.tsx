@@ -455,8 +455,8 @@ export default function App() {
     <div className="chrome-tint top" aria-hidden="true" />
     <div className="chrome-tint bottom" aria-hidden="true" />
     {sidebarOpen && <button className="sidebar-scrim" type="button" aria-label="Close menu" onClick={() => setSidebarOpen(false)} />}
-    <aside className={`sidebar ${sidebarOpen ? 'open' : ''}`} aria-label="Main navigation">
-      {view !== 'settings' ? <div className="sidebar-chat-nav">
+    <aside className={`sidebar ${view === 'settings' ? 'settings-mode' : ''}`} aria-label="Main navigation">
+      <div className="sidebar-chat-nav">
         <div className="brand-row"><img className="brand-mark" src={miloAvatar} alt="" /><span className="brand-name" translate="no">Milo</span></div>
         <div className="sidebar-pad">
           <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={16} /><span>Routines</span></button>
@@ -473,18 +473,19 @@ export default function App() {
           <div className={`scroll-blur top ${listScrolled ? 'on' : ''}`} aria-hidden="true" />
         </div>
         <div className="sidebar-footer">
-          <button className="sidebar-action" type="button" onClick={() => { setView('settings'); setSidebarOpen(false) }}><Icon name="settings" /><span className="sidebar-action-text"><strong>Settings</strong><small>Models, keys and tools</small></span></button>
+          <button className={`sidebar-action ${view === 'settings' ? 'active' : ''}`} type="button" onClick={() => { setView('settings'); setSidebarOpen(false) }}><Icon name="settings" /><span className="sidebar-action-text"><strong>Settings</strong><small>Models, keys and tools</small></span></button>
         </div>
-      </div> : <div className="sidebar-settings-nav">
+      </div>
+      <div className="sidebar-settings-nav">
         <div className="settings-nav-heading"><h2>Settings</h2><p>For this installation</p></div>
         <button className="settings-back" type="button" onClick={() => { setView('chat'); setSidebarOpen(false) }}><Icon name="arrow-left" /><span>Back to chat</span></button>
         <nav className="settings-nav" aria-label="Settings sections">
           {settingsSections.map(([id, icon, label]) => <button type="button" key={id} className={`settings-nav-item ${settingsSection === id ? 'active' : ''}`} onClick={() => { setSettingsSection(id); setSidebarOpen(false) }}><Icon name={icon} /><span>{label}</span></button>)}
         </nav>
-      </div>}
+      </div>
     </aside>
 
-    <main className="main">
+    <main className={`main ${view === 'settings' ? 'has-settings-strip' : ''}`}>
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
         {view === 'routines' && <button className="btn-secondary" type="button" onClick={() => setView('chat')}><span aria-hidden="true">←</span> Back to chat</button>}
@@ -494,6 +495,22 @@ export default function App() {
           {view === 'chat' && connection !== 'online' && <span className={`connection-status ${connection}`}><span />{connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
         </div>
       </header>
+      {/* On a phone the sections ride in a strip under the topbar instead of the
+          drawer, so switching costs one tap and the drawer keeps the sessions.
+          The arrow leads back to the chat — where the sessions are — since the
+          menu button stands down here. */}
+      {view === 'settings' && <div className="settings-mobile-nav">
+        <button className="settings-strip-back" type="button" aria-label="Back to chat" title="Back to chat" onClick={() => { setView('chat'); setSidebarOpen(false) }}><Icon name="arrow-left" size={17} /></button>
+        <nav className="settings-section-strip" aria-label="Settings sections">
+          {settingsSections.map(([id, icon, label]) => <button
+            type="button"
+            key={id}
+            className={`settings-strip-item ${settingsSection === id ? 'active' : ''}`}
+            aria-current={settingsSection === id ? 'true' : undefined}
+            onClick={() => setSettingsSection(id)}
+          ><Icon name={icon} size={15} /><span>{label}</span></button>)}
+        </nav>
+      </div>}
       {view === 'settings'
         ? <Settings section={settingsSection} conversationId={conversationId} sessionId={sessionId} onClose={() => setView('chat')} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} />
         : view === 'routines'
