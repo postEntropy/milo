@@ -247,6 +247,14 @@ export function ChatScreen({
       submit(input, isSteerKey(key))
       return
     }
+    if (key.meta && (key.upArrow || key.downArrow)) {
+      // Alt+arrow is what a wheel tick is translated into before it reaches Ink
+      // (see `../mouse.ts`): one line of transcript per tick. A bare arrow still
+      // walks the input history, which is what the meta form leaves alone.
+      const step = key.upArrow ? 1 : -1
+      setScrollOffset((value) => Math.max(0, value + step))
+      return
+    }
     if (key.upArrow) recallHistory(-1)
     else if (key.downArrow) recallHistory(1)
     else if (key.pageUp) setScrollOffset((value) => value + Math.max(1, Math.floor(chatHeight / 2)))
@@ -830,9 +838,12 @@ export function ChatScreen({
   // scroll marker, then the counters — before any of them is allowed to wrap.
   const statusText = `${statusLabel} ${formatSeconds(elapsed)}${queued > 0 ? ` · ${queued} queued` : ''}`
   const steerHint = ' · Ctrl+Enter steers'
+  // The wheel scrolls now — a drag on a phone, the wheel itself on a desktop — so
+  // the keys for it are not a legend the footer has to carry. PgUp/PgDn still
+  // work, quietly, for whoever reaches for them.
   const idleHint =
     columns >= 60
-      ? 'PgUp/PgDn scroll · Enter send · /help · Ctrl+C quits'
+      ? 'Enter send · /help · Ctrl+C quits'
       : 'Enter send · /help · Ctrl+C'
   const scrolled = window.offset > 0 ? `▲ scrolled (${window.offset})` : ''
   const idleFull = scrolled ? `${scrolled} · ${idleHint}` : idleHint

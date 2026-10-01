@@ -11,7 +11,8 @@ import {
   type LoadedConfig,
 } from '../core/config/load.js'
 import { errorMessage } from '../util/errors.js'
-import { enterAltScreen, exitAltScreen } from '../gateways/cli/ansi.js'
+import { enterMouseTracking, enterTui, exitTui } from '../gateways/cli/ansi.js'
+import { mouseStdin } from '../gateways/cli/mouse.js'
 import { Shell } from '../gateways/cli/index.js'
 import type { PermissionMode } from '../core/tools/permission.js'
 
@@ -82,7 +83,8 @@ async function runTui(
   const missingKey = loaded !== null && loaded.provider.apiKey === undefined
   const screen = missingKey ? 'model' : startScreen
 
-  enterAltScreen()
+  enterTui()
+  enterMouseTracking()
   try {
     const app = render(
       createElement(Shell, {
@@ -109,11 +111,14 @@ async function runTui(
         // terminal that does not know the sequence ignores it, and Alt+Enter
         // steers there anyway.
         kittyKeyboard: { mode: 'enabled' },
+        // The mouse arrives on the same terminal Ink reads, and the wheel is
+        // turned into a key there rather than reaching the composer as text.
+        stdin: mouseStdin(),
       },
     )
     await app.waitUntilExit()
   } finally {
-    exitAltScreen()
+    exitTui()
   }
 }
 

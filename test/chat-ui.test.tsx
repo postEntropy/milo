@@ -585,6 +585,29 @@ describe('ChatScreen', () => {
     expect(second.lastFrame()).toContain('│ › sobrevive ao reinicio')
   })
 
+  it('scrolls the transcript on a wheel tick, which reaches it as an alt+arrow', async () => {
+    // A tall answer, so the transcript has somewhere to scroll to.
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      const lines = Array.from({ length: 60 }, (_, index) => `linha ${index}`)
+      yield { type: 'text-delta', delta: lines.join('\n') }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const { stdin, lastFrame } = renderChat(makeRuntime(() => stream()))
+    await submit(stdin, 'uma pergunta qualquer')
+
+    // What `mouse.ts` hands Ink for one tick of the wheel.
+    stdin.write('\u001b[1;3A')
+    await tick()
+    stdin.write('\u001b[1;3A')
+    await tick()
+
+    const frame = lastFrame() ?? ''
+    expect(frame).toContain('▲ scrolled')
+    // And it is not the history: the composer stays as it was, empty.
+    expect(frame).not.toContain('│ › uma pergunta')
+  })
+
   it('opens the model picker via /model and the settings hub via /setup', async () => {
     let openedModel = false
     let openedSettings = false
