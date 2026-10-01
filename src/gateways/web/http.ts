@@ -55,6 +55,9 @@ const MIME: Record<string, string> = {
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.woff2': 'font/woff2',
+  // Without its own type the manifest is served as a download, and the install
+  // that makes the phone drop its browser chrome never happens.
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
 }
 
 export interface WebServerOptions {
@@ -84,7 +87,7 @@ export interface RunningWebServer {
 export async function startWebServer(options: WebServerOptions): Promise<RunningWebServer> {
   const token = options.token ?? randomBytes(32).toString('base64url')
   const hub = new WebHub(options.runtime, options.identity ?? { provider: 'milo', model: 'unknown' })
-  const settings = new WebSettings(options.runtime, options.cwd)
+  const settings = new WebSettings(options.runtime, options.cwd, hub)
   const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
   const server = createServer((request, response) => {
     void handleHttp(request, response, token, settings, hub, options.host).catch((error: unknown) => {

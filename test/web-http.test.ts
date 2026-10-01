@@ -108,6 +108,25 @@ describe('web server authentication', () => {
   })
 })
 
+describe('web server static UI', () => {
+  it('serves the manifest as a manifest, so the install can go full screen', async () => {
+    const server = await startWebServer({
+      runtime: {} as never,
+      cwd: process.cwd(),
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+      identity: { provider: 'test', model: 'test-model' },
+    })
+    running.push(server)
+    const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/manifest.webmanifest`)
+    expect(response.status).toBe(200)
+    // Served as a download, the manifest is ignored: no `display: standalone`,
+    // and the phone keeps dressing the app in its own browser chrome.
+    expect(response.headers.get('content-type')).toContain('application/manifest+json')
+  })
+})
+
 describe('webReachLines', () => {
   it('says nothing extra for a bind that names itself', () => {
     expect(webReachLines('127.0.0.1', [])).toEqual([])
