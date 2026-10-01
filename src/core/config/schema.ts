@@ -276,6 +276,34 @@ export type WebConfig = z.infer<typeof WebSchema>
 
 export const DEFAULT_WEB: WebConfig = { enabled: true, host: '127.0.0.1', port: 7717 }
 
+/**
+ * Google — Gmail and Drive. Off unless asked for, like every optional capability,
+ * and there are no keys here: the app identity and the grant are credentials and
+ * live in `auth.json` with the other secrets.
+ *
+ * `enabled` says the capability is wanted, not that it is connected. A wanted but
+ * unconnected Google still registers its tools, which answer with the one thing
+ * left to do (`milo google connect`) — an absent tool would be a silence.
+ */
+export const GoogleSchema = z.object({ enabled: z.boolean().default(false) })
+export type GoogleConfig = z.infer<typeof GoogleSchema>
+export const DEFAULT_GOOGLE: GoogleConfig = { enabled: false }
+
+/**
+ * The grant Milo holds: the OAuth app it is, and the access it was given.
+ *
+ * `email` and `connectedAt` are notes for the person — `milo google status` says
+ * who is connected without spending a call to find out.
+ */
+export const GoogleAccountSchema = z.object({
+  clientId: z.string(),
+  clientSecret: z.string(),
+  refreshToken: z.string().optional(),
+  email: z.string().optional(),
+  connectedAt: z.string().optional(),
+})
+export type GoogleAccount = z.infer<typeof GoogleAccountSchema>
+
 export const ConfigSchema = z.object({
   provider: z.string(),
   model: z.string(),
@@ -289,6 +317,7 @@ export const ConfigSchema = z.object({
   permissions: PermissionsSchema.default(DEFAULT_PERMISSIONS),
   classifier: ClassifierSchema.default(DEFAULT_CLASSIFIER),
   browser: BrowserSchema.default(DEFAULT_BROWSER),
+  google: GoogleSchema.default(DEFAULT_GOOGLE),
   search: SearchSchema.optional(),
   systemPrompt: z.string().optional(),
   maxSteps: z.number().int().positive().optional(),
@@ -319,6 +348,8 @@ export const AuthSchema = z.object({
    * failing the whole file, which would take every other key with it.
    */
   search: z.record(z.string(), z.string()).catch({}).default({}),
+  /** The Google grant, when one has been made: `milo google connect` writes it. */
+  google: GoogleAccountSchema.optional(),
 })
 export type Auth = z.infer<typeof AuthSchema>
 

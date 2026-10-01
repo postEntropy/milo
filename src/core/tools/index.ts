@@ -2,7 +2,10 @@ import type { SearchProvider } from '../search/index.js'
 import type { Skill } from '../skills/index.js'
 import type { BrowserSession } from '../browser/index.js'
 import { createBrowserTools } from '../browser/index.js'
+import type { GoogleAccount } from '../config/schema.js'
 import { editFileTool } from './edit-file.js'
+import { createGmailTools } from './gmail.js'
+import { createDriveTools } from './drive.js'
 import { fetchUrlTool } from './fetch-url.js'
 import { globTool } from './glob.js'
 import { grepTool } from './grep.js'
@@ -67,6 +70,12 @@ export interface ToolRegistryOptions {
   skills?: Skill[]
   /** The browser, when one is configured — its three tools ride along with it. */
   browser?: BrowserSession | null
+  /**
+   * Google, when the config asks for it. Registered even with a null account:
+   * the tools then answer "not connected, run `milo google connect`", which is a
+   * thing the person can act on — an absent tool is only a silence.
+   */
+  google?: { account: GoogleAccount | null } | null
 }
 
 /**
@@ -80,5 +89,9 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
   if (options.search) tools.push(createWebSearchTool(options.search))
   if (options.skills && options.skills.length > 0) tools.push(createReadSkillTool(options.skills))
   if (options.browser) tools.push(...createBrowserTools(options.browser))
+  if (options.google) {
+    tools.push(...createGmailTools(options.google.account))
+    tools.push(...createDriveTools(options.google.account))
+  }
   return new ToolRegistry(tools)
 }

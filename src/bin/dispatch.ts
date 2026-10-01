@@ -2,7 +2,16 @@ import { isValidSessionId } from '../core/sessions/index.js'
 import type { PermissionMode } from '../core/tools/permission.js'
 import type { Args } from './args.js'
 
-export type Command = 'serve' | 'model' | 'setup' | 'chat' | 'skills' | 'history' | 'routines' | 'web'
+export type Command =
+  | 'serve'
+  | 'model'
+  | 'setup'
+  | 'chat'
+  | 'skills'
+  | 'history'
+  | 'routines'
+  | 'google'
+  | 'web'
 
 /** What the command line asks for, or the message to say instead of running. */
 export function validateArgs(args: Args): string | null {
@@ -32,6 +41,7 @@ export function resolveCommand(command: string): Command | null {
     case 'skills':
     case 'history':
     case 'routines':
+    case 'google':
     case 'web':
     case 'chat':
       return command

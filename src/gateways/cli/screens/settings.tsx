@@ -672,12 +672,25 @@ export function SettingsScreen({
             : 'on, but no browser found',
       hintColor: !config.browser.enabled ? theme.accent : browser.path ? theme.success : theme.danger,
     },
+    {
+      // Named for both halves, because the grant is one and the tools are two
+      // pairs: mail and files. The hint is the state, like its neighbours — what
+      // to do about it belongs to the panel this opens.
+      label: 'Google (Gmail and Drive)',
+      hint: !config.google.enabled
+        ? 'off'
+        : auth.google?.email
+          ? `connected as ${auth.google.email}`
+          : 'on, not connected',
+      hintColor: !config.google.enabled ? theme.accent : auth.google?.email ? theme.success : theme.danger,
+    },
   ]
 
   /** What is set up, for the hub to say without opening the section. */
   const optionalTools = [
     ...(config.search ? [`web search ${config.search.provider}`] : []),
     ...(config.browser.enabled ? ['browser'] : []),
+    ...(config.google.enabled ? ['google'] : []),
   ]
   const toolsHint = optionalTools.join(' · ') || 'none enabled'
 

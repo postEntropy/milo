@@ -43,6 +43,9 @@ export const CONFIG_NOTES: Record<string, string> = {
 
   gateways: 'The chat surfaces. The browser chat is served by `milo serve` and lives under `web`.',
   web: 'The browser chat: whether it is served, and where it listens.',
+  google: 'Google (Gmail and Drive): off unless asked for. Connect with `milo google connect`.',
+  'google.enabled':
+    'Whether Milo may read your mail and files. The grant itself is a secret and lives in auth.json.',
   'web.enabled': 'false is `milo serve --no-web` written down.',
   'web.host': 'Loopback by default. Anything else is reachable from the network.',
   'web.port': 'Where it listens. `--web-port` overrides it for one run.',

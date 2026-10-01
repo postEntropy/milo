@@ -33,6 +33,7 @@ Usage:
   milo skills                Install, list and remove skills (list | available | find | add | remove)
   milo history               What the history log costs (status | trim)
   milo routines              The prompts Milo runs on a timer (list | add | remove | enable | run)
+  milo google                Connect a Google account, read-only (connect | status | forget)
   milo serve                 Run the enabled bot gateways and the web UI
   milo web                   Run only the web UI (opens the browser)
   milo serve --no-web        Run the bot gateways without the web UI
@@ -169,6 +170,11 @@ async function main(): Promise<void> {
     case 'routines': {
       const { runRoutines } = await import('./routines.js')
       process.exitCode = await runRoutines(process.argv.slice(2))
+      return
+    }
+    case 'google': {
+      const { runGoogle } = await import('./google.js')
+      process.exitCode = await runGoogle(process.argv.slice(2))
       return
     }
     case 'setup':

@@ -26,6 +26,10 @@ import { logWarn } from '../util/log.js'
 
 export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   const auth = readAuth()
+  // Wanted is not the same as connected: a config that asks for Google gets the
+  // tools, and an account that has not been granted yet is a state the tools and
+  // the setup screen both speak about.
+  const google = loaded.config.google.enabled ? { account: auth.google ?? null } : null
   const search = createSearchProvider(
     loaded.config.search,
     resolveSearchKey(loaded.config.search, auth),
@@ -87,7 +91,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     providerFor: (model) => createProvider(loaded.provider, model),
     model: loaded.model,
     system: loaded.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
-    registry: createToolRegistry({ search, skills, browser }),
+    registry: createToolRegistry({ search, skills, browser, google }),
     browser,
     keepSnapshots: loaded.config.browser.keepSnapshots,
     memory: installMemory(

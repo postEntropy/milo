@@ -4,6 +4,7 @@ import { formatBytes, formatWhen, message, splitNames } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from '@protocol'
+import { GOOGLE_SHORTCUT, GOOGLE_STEPS } from '../../../src/core/google/walkthrough.ts'
 
 type ProviderPreset = { id: string; name: string; baseURL: string; wire: string; keyless?: boolean; models: string[]; keyURL?: string }
 type SettingsConfig = {
@@ -15,6 +16,7 @@ type SettingsConfig = {
   display: { tools: 'full' | 'name' | 'off'; thinking: 'on' | 'off' }
   gateways: Record<string, { enabled: boolean; allowlist: string[] }>
   web: { enabled: boolean; host: string; port: number }
+  google: { enabled: boolean }
   permissions: { mode: 'ask' | 'auto' | 'yolo'; allow: string[]; deny: string[]; jevThreshold: number; jevTimeoutMs: number }
   classifier: { backend: 'commandcode' | 'ollaya' | 'custom'; model?: string; url?: string; keyEnv?: string; timeoutMs?: number }
   browser: { enabled: boolean; chromePath: string | null; headless: boolean; profileDir: string | null; cdpUrl: string | null; keepSnapshots: number }
@@ -281,6 +283,19 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
         </Section>
         <Section title="Tools" description="Optional capabilities Milo can use." active={section === 'tools'}>
           <label className="field"><span>Web search</span><select value={draft.search?.provider ?? 'off'} onChange={(event) => update(['search'], event.target.value === 'off' ? undefined : { provider: event.target.value })}>{SEARCH_PROVIDERS.map((value) => <option key={value}>{value}</option>)}</select></label>
+
+          <h3 className="section-label" style={{ paddingInline: 0 }}>Google</h3>
+          <label className="check-row"><input type="checkbox" checked={draft.google.enabled} onChange={(event) => update(['google', 'enabled'], event.target.checked)} /> Read Gmail and Drive (restart to apply)</label>
+          <p className="panel-note">The connection is yours: you make an app in Google&rsquo;s console, once, and allow it on this machine. Milo keeps read access only — it can never write to your mail or your files.</p>
+          <ol className="panel-note">
+            {GOOGLE_STEPS.map((step) => (
+              <li key={step.what}>
+                {step.url ? <a href={step.url} target="_blank" rel="noreferrer">{step.what}</a> : step.what}
+                {step.why ? ` — ${step.why}` : ''}
+              </li>
+            ))}
+          </ol>
+          <p className="panel-note">Then run <code className="mono">milo google connect</code> on the machine Milo runs on. It walks the same steps and prints those links. The shortcut at <a href={GOOGLE_SHORTCUT} target="_blank" rel="noreferrer">Google&rsquo;s Workspace guide</a> creates the project, enables the APIs and downloads a <code className="mono">credentials.json</code>, which <code className="mono">--credentials</code> takes.</p>
 
           <h3 className="section-label" style={{ paddingInline: 0 }}>Browser</h3>
           <label className="check-row"><input type="checkbox" checked={draft.browser.enabled} onChange={(event) => update(['browser', 'enabled'], event.target.checked)} /> Enable the browser (restart to apply)</label>
