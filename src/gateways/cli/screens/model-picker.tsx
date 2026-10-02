@@ -7,6 +7,7 @@ import { readAuth, readConfig, resolveApiKey, saveAuth, saveConfig } from '../..
 import { PRESETS, type Preset } from '../../../core/config/presets.js'
 import { ConfigSchema, type Config, type ProviderEntry } from '../../../core/config/schema.js'
 import { listModels, type ModelInfo } from '../../../core/providers/models.js'
+import { modelNote } from '../../model-label.js'
 import { isCtrlC } from '../keys.js'
 import { theme } from '../theme.js'
 
@@ -237,7 +238,7 @@ function renderModelList(filtered: ModelInfo[], selected: number): ReactNode {
           <Text key={model.id} color={isSelected ? theme.accent : undefined}>
             {isSelected ? '❯ ' : '  '}
             {model.id}
-            {model.name ? ` — ${model.name}` : ''}
+            {modelNote(model) ? ` — ${modelNote(model)}` : ''}
           </Text>
         )
       })}
