@@ -12,7 +12,7 @@ export interface Preset {
 export const PRESETS: Preset[] = [
   {
     id: 'commandcode',
-    name: 'Command Code (Provider API)',
+    name: 'Command Code',
     baseURL: 'https://api.commandcode.ai/provider/v1',
     wire: 'auto',
     keyEnv: 'COMMANDCODE_API_KEY',
