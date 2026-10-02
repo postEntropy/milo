@@ -575,9 +575,10 @@ function stringList(value: unknown): string[] | undefined {
 function routineTarget(value: unknown): RoutineTarget {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('A destination is required.')
   const target = value as Record<string, unknown>
+  if (target.gateway === 'none') return { gateway: 'none' }
   const gateway = String(target.gateway ?? '')
   if (!(ROUTINE_GATEWAYS as readonly string[]).includes(gateway)) {
-    throw new Error(`The destination must be one of ${ROUTINE_GATEWAYS.join(', ')}.`)
+    throw new Error(`The destination must be one of ${ROUTINE_GATEWAYS.join(', ')}, or none.`)
   }
   const conversationId = optionalText(target.conversationId)
   if (!conversationId) throw new Error('The destination needs a conversation id.')

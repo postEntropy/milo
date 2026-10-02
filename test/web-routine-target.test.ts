@@ -107,4 +107,22 @@ describe('a routine asked for from the routines screen', () => {
     expect(seen).toEqual([{ gateway: 'web', conversationId: CONVERSATION }])
     hub.close()
   })
+
+  it('pins a destination of none, for a routine whose runs stay on the Routines screen', async () => {
+    seen.length = 0
+    const hub = new WebHub(build(), { provider: 'test', model: 'test-model' })
+    const frames: ServerFrame[] = []
+    const client = { send: (frame: ServerFrame) => frames.push(frame) }
+
+    await hub.connect(client, CONVERSATION)
+    hub.handle(
+      client,
+      { type: 'send', text: 'every day at 8, keep it on the routines screen', target: { gateway: 'none', conversationId: CONVERSATION } },
+      CONVERSATION,
+    )
+    await vi.waitFor(() => expect(frames.some((frame) => frame.type === 'turn-end')).toBe(true))
+
+    expect(seen).toEqual([{ gateway: 'none', conversationId: CONVERSATION }])
+    hub.close()
+  })
 })

@@ -371,7 +371,10 @@ describe('digest', () => {
 
 describe('Session compaction', () => {
   it('summarizes the dropped turns and keeps them out of the transcript', async () => {
-    const { provider, session } = await compactingSession(longSeed())
+    // The ceiling is named rather than left to the default: folding needs room
+    // above the fixed cost of the prompt (the tool list is most of it), and this
+    // test is about folding a transcript, not about how big the tools happen to be.
+    const { provider, session } = await compactingSession(longSeed(), { maxInputTokens: 3200 })
 
     expect(provider.systems.some((system) => system.includes('compress a conversation'))).toBe(true)
 
@@ -389,7 +392,7 @@ describe('Session compaction', () => {
   })
 
   it('still fits the request when the summary call fails', async () => {
-    const { provider, session, events } = await compactingSession(longSeed(), { failing: true })
+    const { provider, session, events } = await compactingSession(longSeed(), { failing: true, maxInputTokens: 3200 })
 
     const system = provider.systems.at(-1)!
     expect(system).not.toContain('## Earlier in this conversation')
@@ -400,7 +403,7 @@ describe('Session compaction', () => {
   })
 
   it('reports what the summary cost, before the turn produces anything', async () => {
-    const { events } = await compactingSession(longSeed())
+    const { events } = await compactingSession(longSeed(), { maxInputTokens: 3200 })
 
     const at = events.findIndex((event) => event.type === 'compacted')
     expect(at).toBeGreaterThanOrEqual(0)

@@ -13,6 +13,7 @@ process.env.MILO_HOME = home
 
 const {
   addRoutine,
+  describeTarget,
   describeWhen,
   findRoutine,
   formatLocal,
@@ -183,6 +184,17 @@ describe('the store', () => {
     expect(readRoutines()[0]!.target.gateway).toBe('web')
   })
 
+  it('keeps a routine that delivers nowhere, its runs living on the Routines screen', () => {
+    writeFileSync(
+      routinesFile(),
+      JSON.stringify([
+        { id: 'calm-otter-2', prompt: 'x', when: at('08:00'), target: { gateway: 'none' } },
+      ]),
+    )
+    const target = readRoutines()[0]!.target
+    expect(target).toEqual({ gateway: 'none' })
+    expect(describeTarget(target)).toBe('the Routines screen')
+  })
 
   it('reads an interval in seconds, held as a fraction of a minute', () => {
     const when = parseWhen({ every: '30s' })

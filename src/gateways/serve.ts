@@ -89,6 +89,9 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   const scheduler = new RoutineScheduler({
     runtime,
     deliver: async (routine, message) => {
+      // A routine that delivers nowhere never reaches here; the guard keeps the
+      // type honest, so the conversation is read only from a real destination.
+      if (routine.target.gateway === 'none') return
       const gateway = gateways.find((candidate) => candidate.id === routine.target.gateway)
       if (!gateway?.deliver) throw new Error(`no ${routine.target.gateway} surface to deliver to`)
       await gateway.deliver(routine.target.conversationId, message)

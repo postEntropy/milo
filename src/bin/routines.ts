@@ -16,6 +16,7 @@ import {
   runRoutineOnce,
   setEnabled,
   type RoutineGateway,
+  type RoutineTarget,
 } from '../core/routines.js'
 import { builtinTools } from '../core/tools/index.js'
 import { errorMessage } from '../util/errors.js'
@@ -138,7 +139,7 @@ interface AddFlags {
   every?: string
   at?: string
   days?: string[]
-  gateway?: RoutineGateway
+  gateway?: RoutineGateway | 'none'
   conversationId?: string
   allow?: string[]
   yes: boolean
@@ -164,10 +165,10 @@ function parseAdd(argv: string[]): AddFlags {
     } else if (token === '--yes' || token === '-y') flags.yes = true
     else if (token === '--gateway') {
       const gateway = value()
-      if (!(ROUTINE_GATEWAYS as readonly string[]).includes(gateway)) {
-        throw new Error(`--gateway must be one of ${ROUTINE_GATEWAYS.join(', ')}.`)
+      if (gateway !== 'none' && !(ROUTINE_GATEWAYS as readonly string[]).includes(gateway)) {
+        throw new Error(`--gateway must be one of ${ROUTINE_GATEWAYS.join(', ')}, or none.`)
       }
-      flags.gateway = gateway as RoutineGateway
+      flags.gateway = gateway as RoutineGateway | 'none'
     } else if (token === '--to' || token === '--conversation') flags.conversationId = value()
     else if (token.startsWith('-')) throw new Error(`Unknown option ${token}.`)
     else positionals.push(token)
@@ -191,8 +192,13 @@ async function add(argv: string[], context: Required<RoutineIo>): Promise<number
     return 1
   }
 
-  if (!flags.gateway || !flags.conversationId) {
-    context.err('add needs --gateway telegram|discord|web and --to <chat id> — a timer has no chat of its own.')
+  let target: RoutineTarget
+  if (flags.gateway === 'none') {
+    target = { gateway: 'none' }
+  } else if (flags.gateway && flags.conversationId) {
+    target = { gateway: flags.gateway, conversationId: flags.conversationId }
+  } else {
+    context.err('add needs --gateway telegram|discord|web with --to <chat id>, or --gateway none to keep the runs on the Routines screen.')
     context.err(USAGE)
     return 1
   }
@@ -217,7 +223,7 @@ async function add(argv: string[], context: Required<RoutineIo>): Promise<number
     prompt: flags.prompt,
     name: flags.name,
     when,
-    target: { gateway: flags.gateway, conversationId: flags.conversationId },
+    target,
     allow: flags.allow?.length ? flags.allow : undefined,
     enabled: true,
   })

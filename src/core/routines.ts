@@ -32,10 +32,14 @@ export type RoutineWhen =
   | { kind: 'every'; minutes: number }
   | { kind: 'at'; time: string; days?: number[] }
 
-export interface RoutineTarget {
-  gateway: RoutineGateway
-  conversationId: string
-}
+/**
+ * Where a routine's answer goes: a surface that can receive a message out of
+ * band, or `none` for one whose runs are only ever read on the Routines screen —
+ * a log, not a message.
+ */
+export type RoutineTarget =
+  | { gateway: RoutineGateway; conversationId: string }
+  | { gateway: 'none' }
 
 export interface Routine {
   /** `calm-otter-7`, the same shape a session id has. */
@@ -166,7 +170,7 @@ export function describeWhen(when: RoutineWhen): string {
 }
 
 export function describeTarget(target: RoutineTarget): string {
-  return `${target.gateway}:${target.conversationId}`
+  return target.gateway === 'none' ? 'the Routines screen' : `${target.gateway}:${target.conversationId}`
 }
 
 /**
@@ -371,7 +375,16 @@ export async function runRoutineOnce(
   const session = await runtime.newSession(
     { gateway: ROUTINE_GATEWAY, conversationId: routine.id },
     routine.name,
-    { grantedTools: routine.allow, deliverTo: routine.target },
+    // A run always has somewhere for a file to land: its own record, which the
+    // Routines screen draws. A `none` routine posts to no chat, and that is the
+    // scheduler's business — but the turn must still be able to produce a file, so
+    // the destination named here is the run itself.
+    {
+      grantedTools: routine.allow,
+      deliverTo: routine.target.gateway === 'none'
+        ? { gateway: ROUTINE_GATEWAY, conversationId: routine.id }
+        : routine.target,
+    },
   )
   let answer = ''
   let failure: string | null = null
@@ -549,6 +562,10 @@ export class RoutineScheduler {
     }
     if (result.failure) this.log(`routine ${routine.id} failed: ${result.failure}`)
 
+    // A routine that delivers nowhere is a log, not a message: its run is already
+    // on the Routines screen, and there is no chat waiting to be posted into.
+    if (routine.target.gateway === 'none') return
+
     // The routine's name leads its message, so a chat with several of them can
     // tell at a glance which one just spoke.
     const name = routine.name ?? routine.id
@@ -675,6 +692,7 @@ function isWhen(value: unknown): value is RoutineWhen {
 function isTarget(value: unknown): value is RoutineTarget {
   if (!value || typeof value !== 'object') return false
   const target = value as Record<string, unknown>
+  if (target.gateway === 'none') return true
   return (
     ROUTINE_GATEWAYS.includes(target.gateway as RoutineGateway) &&
     typeof target.conversationId === 'string' &&

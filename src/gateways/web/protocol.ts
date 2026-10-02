@@ -35,11 +35,11 @@ export type AgentEvent =
  * chose, so the model does not have to infer it from the sentence.
  */
 export interface SendTarget {
-  gateway: 'telegram' | 'discord' | 'web'
+  gateway: 'telegram' | 'discord' | 'web' | 'none'
   conversationId: string
 }
 
-const SEND_GATEWAYS = ['telegram', 'discord', 'web'] as const
+const TARGET_GATEWAYS = ['telegram', 'discord', 'web', 'none'] as const
 
 export type ActionButtonStyle = 'default' | 'primary' | 'danger' | 'success'
 
@@ -143,7 +143,7 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
 function isSendTarget(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const target = value as Record<string, unknown>
-  return (SEND_GATEWAYS as readonly string[]).includes(String(target.gateway))
+  return (TARGET_GATEWAYS as readonly string[]).includes(String(target.gateway))
     && typeof target.conversationId === 'string'
     && target.conversationId.trim() !== ''
 }
