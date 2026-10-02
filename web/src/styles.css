@@ -497,6 +497,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .routine-section-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; }
 .routine-section-head h3 { color: var(--fg); font-size: 16px; font-weight: 600; }
 .routine-section-subtitle { margin-top: 4px; color: var(--muted); font-size: 12px; }
+/* What the routines said last, drawn as one list under them: the front page's
+   answer to "what have they been up to lately". */
+.routine-feed { margin-top: 30px; }
+.routine-feed-list { display: flex; flex-direction: column; gap: 4px; }
+.routine-feed-row { display: flex; width: 100%; flex-direction: column; gap: 4px; border: 0; border-radius: 12px; background: var(--surface); padding: 11px 14px; text-align: start; transition: background var(--motion-fast); }
+.routine-feed-row:hover { background: var(--surface-warm); }
+.routine-feed-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.routine-feed-head strong { color: var(--fg); font-size: 13px; font-weight: 500; }
+.routine-feed-when { flex: none; color: var(--muted); font: 11px var(--font-mono); }
+.routine-feed-text { display: -webkit-box; overflow: hidden; color: var(--fg-2); font-size: 12px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .routine-runs-count { display: grid; min-width: 28px; height: 28px; place-items: center; border-radius: 9px; background: var(--surface-warm); color: var(--fg-2); font: 11px var(--font-mono); }
 .routine-runs-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .run-list { display: flex; max-height: 520px; flex-direction: column; gap: 4px; overflow: auto; padding: 3px; }

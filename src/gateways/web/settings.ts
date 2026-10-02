@@ -50,6 +50,9 @@ import { writeSessionExport } from '../../core/export.js'
 import { JobRegistry } from './jobs.js'
 import { transcriptOf, type RegisterFile } from './transcript.js'
 
+/** How many runs the front page's timeline shows, newest across every routine. */
+const FEED_LIMIT = 20
+
 const SESSION_ID = /^[a-z]+-[a-z]+-\d{1,3}$/
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
@@ -94,6 +97,7 @@ export class WebSettings {
       case 'memory-notes': return this.memoryNotes()
       case 'forget-note': return this.forgetNote(body)
       case 'routines': return this.listRoutines()
+      case 'routine-feed': return this.routineFeed()
       case 'routine-add': return this.addRoutine(body)
       case 'routine-remove': return this.removeRoutine(body)
       case 'routine-enable': return this.enableRoutine(body)
@@ -368,6 +372,40 @@ export class WebSettings {
 
   private listRoutines(): unknown {
     return readRoutines().map((routine) => this.routineView(routine))
+  }
+
+  /**
+   * The most recent runs across every routine, newest first — a timeline of what
+   * the routines have said, mixed together rather than read one routine at a time.
+   */
+  private async routineFeed(): Promise<unknown> {
+    const runs: Array<{ routine: Routine; id: string; at: number }> = []
+    for (const routine of readRoutines()) {
+      for (const run of (await this.runtime.listRuns(routine.id)).slice(0, FEED_LIMIT)) {
+        runs.push({ routine, id: run.id, at: run.updatedAt })
+      }
+    }
+    const recent = runs.sort((a, b) => b.at - a.at).slice(0, FEED_LIMIT)
+    return Promise.all(recent.map(async (entry) => ({
+      id: entry.routine.id,
+      runId: entry.id,
+      routine: entry.routine.name ?? entry.routine.prompt,
+      at: entry.at,
+      answer: await this.runText(entry.id),
+    })))
+  }
+
+  /** The words a run produced, flattened and cut for a one-line gist. */
+  private async runText(runId: string): Promise<string> {
+    const record = await this.runtime.loadSession(runId)
+    if (!record) return ''
+    return record.messages
+      .flatMap((message) => message.content)
+      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 200)
   }
 
   private async addRoutine(body: Record<string, unknown>): Promise<unknown> {

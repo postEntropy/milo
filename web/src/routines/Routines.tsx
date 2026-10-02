@@ -58,6 +58,8 @@ const GATEWAYS = [
 export function Routines({ conversationId, chat, tick }: { conversationId: string; chat: RoutinesChat; tick: number }) {
   const [routines, setRoutines] = useState<RoutineSummary[] | null>(null)
   const [routineId, setRoutineId] = useState<string | null>(null)
+  /** The run a timeline row asked for, opened when its routine's page mounts. */
+  const [openedRun, setOpenedRun] = useState<string | null>(null)
   const [composing, setComposing] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
 
@@ -82,6 +84,7 @@ export function Routines({ conversationId, chat, tick }: { conversationId: strin
   function close(): void {
     setComposing(false)
     setRoutineId(null)
+    setOpenedRun(null)
   }
 
   if (composing) return <NewRoutine conversationId={conversationId} chat={chat} onBack={close} />
@@ -100,6 +103,7 @@ export function Routines({ conversationId, chat, tick }: { conversationId: strin
     notice={notice}
     tick={tick}
     onSelect={setRoutineId}
+    onOpen={(id, runId) => { setOpenedRun(runId); setRoutineId(id) }}
     onCompose={() => { setNotice(null); setComposing(true) }}
     onRetry={() => { setNotice(null); void refresh() }}
   />
@@ -128,6 +132,7 @@ function RoutineList({
   notice,
   tick,
   onSelect,
+  onOpen,
   onCompose,
   onRetry,
 }: {
@@ -136,10 +141,24 @@ function RoutineList({
   notice: Notice | null
   tick: number
   onSelect(id: string): void
+  /** Open one routine on one of its runs, which is what a timeline row points at. */
+  onOpen(id: string, runId: string): void
   onCompose(): void
   onRetry(): void
 }) {
   const enabled = routines?.filter((routine) => routine.enabled).length ?? 0
+  const [feed, setFeed] = useState<FeedEntry[]>([])
+
+  // What the routines said last, as one list: the front page's answer to "what
+  // have they been up to", re-read whenever one of them runs.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the tick is the trigger, not a value read here
+  useEffect(() => {
+    let live = true
+    void api<FeedEntry[]>('routine-feed')
+      .then((entries) => { if (live) setFeed(entries) })
+      .catch(() => { if (live) setFeed([]) })
+    return () => { live = false }
+  }, [tick, routines])
   return <Shell
     notice={notice}
     head={<div className="panel-head routine-page-head">
@@ -175,6 +194,17 @@ function RoutineList({
           <Icon className="routine-row-chevron" name="chevron" size={16} />
         </button>)}
       </div>}
+    {feed.length > 0 && <section className="routine-feed" aria-labelledby="routine-feed-title">
+      <div className="routine-section-head">
+        <div><h3 id="routine-feed-title">Recent outputs</h3><p className="routine-section-subtitle">The latest runs across every routine, newest first.</p></div>
+      </div>
+      <div className="routine-feed-list">
+        {feed.map((entry) => <button className="routine-feed-row" key={entry.runId} type="button" onClick={() => onOpen(entry.id, entry.runId)}>
+          <span className="routine-feed-head"><strong>{entry.routine}</strong><span className="routine-feed-when">{formatWhen(entry.at, true)}</span></span>
+          <span className="routine-feed-text">{entry.answer || 'No words — the run sent a file.'}</span>
+        </button>)}
+      </div>
+    </section>}
     {routines && routines.length > 0 && <div className="routine-list-footer">
       <span>{routines.length} {routines.length === 1 ? 'routine' : 'routines'}</span>
       <button className="button primary" type="button" onClick={onCompose}><Icon name="plus" size={15} /> New routine</button>
