@@ -7,6 +7,9 @@ const paths: Record<string, React.ReactNode> = {
   stop: <><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor" stroke="none" /></>,
   chevron: <><path d="m9 6 6 6-6 6" /></>,
   'arrow-left': <><path d="M19 12H5" /><path d="m11 18-6-6 6-6" /></>,
+  'arrow-down': <><path d="M12 5v14" /><path d="m5 12 7 7 7-7" /></>,
+  'panel-left': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></>,
+  quote: <><path d="M8 7H5a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h3v1.5A2.5 2.5 0 0 1 5.5 16" /><path d="M18 7h-3a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h3v1.5A2.5 2.5 0 0 1 15.5 16" /></>,
   check: <><path d="m5 13 4 4L19 7" /></>,
   x: <><path d="m6 6 12 12M18 6 6 18" /></>,
   shield: <><path d="m12 3 7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" /></>,
@@ -29,6 +32,14 @@ const paths: Record<string, React.ReactNode> = {
   trash: <><path d="M4 7h16M10 4h4M9 7v12m6-12v12M6 7l1 13h10l1-13" /></>,
   note: <><path d="M5 3h9l5 5v13H5zM14 3v5h5" /><path d="M9 13h6M9 17h4" /></>,
   play: <><path d="M7 4.5v15l13-7.5Z" /></>,
+  pause: <><rect x="7" y="5" width="3.5" height="14" rx="1" /><rect x="13.5" y="5" width="3.5" height="14" rx="1" /></>,
+  folder: <><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></>,
+  'file-plus': <><path d="M6 3h8l4 4v14H6zM14 3v4h4" /><path d="M12 12v5M9.5 14.5h5" /></>,
+  files: <><path d="M9 3h6l4 4v12H9zM15 3v4h4" /><path d="M5 7v14h9" /></>,
+  link: <><path d="M10 13a4 4 0 0 0 5.6 0l3-3a4 4 0 0 0-5.6-5.6l-1.5 1.5" /><path d="M14 11a4 4 0 0 0-5.6 0l-3 3a4 4 0 0 0 5.6 5.6l1.5-1.5" /></>,
+  camera: <><path d="M4 8h3l1.5-2h7L17 8h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></>,
+  cursor: <><path d="M5.5 3.5 19 10.5l-6 1.8-1.8 6z" /></>,
+  compass: <><circle cx="12" cy="12" r="9" /><path d="m15.5 8.5-2 5-5 2 2-5z" /></>,
   repeat: <><path d="M4 11V9a4 4 0 0 1 4-4h9m0 0-3-3m3 3-3 3" /><path d="M20 13v2a4 4 0 0 1-4 4H7m0 0 3 3m-3-3 3-3" /></>,
   globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.4 2.6 2.4 15.4 0 18M12 3c-2.4 2.6-2.4 15.4 0 18" /></>,
   dots: <><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="6" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="18" cy="12" r="1.5" fill="currentColor" stroke="none" /></>,
@@ -69,6 +80,8 @@ const paths: Record<string, React.ReactNode> = {
   </g>,
 }
 
-export function Icon({ name, size = 18, className = '', ...props }: SVGProps<SVGSVGElement> & { name: keyof typeof paths; size?: number }) {
+export type IconName = keyof typeof paths
+
+export function Icon({ name, size = 18, className = '', ...props }: SVGProps<SVGSVGElement> & { name: IconName; size?: number }) {
   return <svg className={`icon ${className}`} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" {...props}>{paths[name]}</svg>
 }
