@@ -7,6 +7,7 @@ import { editFileTool } from './edit-file.js'
 import { createGmailTools } from './gmail.js'
 import { createDriveTools } from './drive.js'
 import { fetchUrlTool } from './fetch-url.js'
+import { gitCommitTool, gitTool } from './git.js'
 import { globTool } from './glob.js'
 import { grepTool } from './grep.js'
 import { listDirTool } from './list-dir.js'
@@ -33,6 +34,7 @@ export { listDirTool } from './list-dir.js'
 export { globTool } from './glob.js'
 export { grepTool } from './grep.js'
 export { fetchUrlTool } from './fetch-url.js'
+export { gitTool, gitCommitTool } from './git.js'
 export { writeFileTool } from './write-file.js'
 export { editFileTool } from './edit-file.js'
 export { rememberTool } from './remember.js'
@@ -53,6 +55,8 @@ export const builtinTools = [
   globTool,
   grepTool,
   fetchUrlTool,
+  gitTool,
+  gitCommitTool,
   writeFileTool,
   editFileTool,
   rememberTool,

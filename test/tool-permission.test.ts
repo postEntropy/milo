@@ -66,6 +66,8 @@ describe('tool permission gating', () => {
       glob: true,
       grep: true,
       fetch_url: true,
+      git: true,
+      git_commit: false,
       write_file: false,
       edit_file: false,
       remember: false,
@@ -87,7 +89,7 @@ describe('tool permission gating', () => {
   it('never asks for a tool whose side effect is Milo\'s own state', () => {
     const internal = builtinTools.filter((tool) => tool.internal).map((tool) => tool.name)
 
-    expect(internal).toEqual(['remember'])
+    expect(internal).toEqual(['remember', 'todo'])
   })
 
   it('runs the tool when allowed', async () => {

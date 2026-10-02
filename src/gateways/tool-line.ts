@@ -33,6 +33,8 @@ const TOOLS: Record<string, { icon: string; brand?: ToolBrand }> = {
   glob: { icon: '🔎' },
   grep: { icon: '🔍' },
   fetch_url: { icon: '🔗' },
+  git: { icon: '🌿' },
+  git_commit: { icon: '📌' },
   write_file: { icon: '📝' },
   edit_file: { icon: '✏️' },
   remember: { icon: '🧠' },
@@ -145,10 +147,18 @@ const GIST_LIMIT = 120
 export function toolDetail(args: unknown): string {
   if (!args || typeof args !== 'object') return ''
   const record = args as Record<string, unknown>
+  // A verb-plus-target tool — the git reads, a browser action — is named by its
+  // verb, with the path it acted on beside it. Read before the flat list below,
+  // where `path` alone would otherwise answer for it and lose the verb.
+  if (typeof record.action === 'string' && record.action.trim()) {
+    const action = record.action.trim()
+    const path = typeof record.path === 'string' ? record.path.trim() : ''
+    return `${action}${path ? ` ${path}` : ''}`
+  }
   // `description` is the `task` tool's label for a subtask (its `prompt` is the
   // whole instruction, and has no place on a one-line activity log); `url` and
   // `name` are the one interesting value of `fetch_url` and `read_skill`.
-  for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name', 'action', 'app']) {
+  for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name', 'app']) {
     const value = record[key]
     if (typeof value === 'string' && value.trim()) {
       const flat = value.trim().replace(/\s+/g, ' ')

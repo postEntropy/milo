@@ -193,6 +193,17 @@ export function summarizeToolCall(args: unknown): string {
       return cwd ? `cd ${cwd} && ${record.command}` : record.command
     }
     if (typeof record.query === 'string') return record.query
+    // A commit: what will be said, and what is being staged with it — approving
+    // a commit without seeing either is not a decision.
+    if (typeof record.message === 'string' && record.message.trim()) {
+      const staging =
+        Array.isArray(record.files) && record.files.length > 0
+          ? `\nStaging: ${record.files.join(', ')}`
+          : record.all === true
+            ? '\nStaging: every tracked change'
+            : ''
+      return `${record.message.trim()}${staging}`
+    }
     if (typeof record.path === 'string') return writePreview(record) ?? record.path
     // A routine: what will be run, and what it may touch with nobody there —
     // approving one without seeing either is not a decision.

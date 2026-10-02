@@ -287,6 +287,8 @@ comes is skipped rather than stacked, and a routine cannot create routines.
 | `list_dir` | yes | One directory, not recursive. |
 | `glob` | yes | Files matching a pattern, most recently modified first. |
 | `grep` | yes | Regex over file contents, returning `path:line: text`. |
+| `git` | yes | Read a repository: `status`, `diff`, `log`, `show` and `blame`. |
+| `git_commit` | no | Stage files (or every tracked change) and commit them; asks for confirmation. |
 | `fetch_url` | yes | One http(s) URL, served back as text; a long page comes back in pages. |
 | `write_file` | no | Creates or replaces a file; asks for confirmation. |
 | `edit_file` | no | Exact string replacement; asks for confirmation. |
