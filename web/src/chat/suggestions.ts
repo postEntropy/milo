@@ -24,17 +24,20 @@ export interface SuggestInput {
   sessions: { id: string; title?: string; preview: string; messageCount: number; recap?: string }[]
   /** What Milo keeps about the person, or null while it is still being read. */
   notes: { text: string }[] | null
+  /** Ideas the model drew from what Milo knows; null until they arrive. */
+  ideas?: { title: string; prompt: string }[] | null
   /** The session on screen, which is never offered back to itself. */
   currentId?: string
 }
 
 /**
  * The cards on the welcome screen, drawn from what is actually here: the last
- * few conversations, opened again with one press, and a way into what Milo
- * remembers. Anything the person has not given it falls back to the standing
- * four, so the screen is never bare and never two cards of the same thing.
+ * few conversations, opened again with one press; a way into what Milo
+ * remembers; and the ideas the model drew from both. Ideas take the slots the
+ * standing four would hold, and the standing four pad a shorter list, so the
+ * screen is never bare and never two cards of the same thing.
  */
-export function buildSuggestions({ sessions, notes, currentId }: SuggestInput): Suggestion[] {
+export function buildSuggestions({ sessions, notes, ideas, currentId }: SuggestInput): Suggestion[] {
   const cards: Suggestion[] = []
 
   for (const session of sessions) {
@@ -54,7 +57,14 @@ export function buildSuggestions({ sessions, notes, currentId }: SuggestInput): 
     })
   }
 
-  for (const fallback of defaultSuggestions) {
+  const generated: Suggestion[] = (ideas ?? []).map((idea) => ({
+    icon: 'spark',
+    title: idea.title,
+    detail: idea.prompt,
+    prompt: idea.prompt,
+  }))
+
+  for (const fallback of [...generated, ...defaultSuggestions]) {
     if (cards.length >= 4) break
     if (cards.some((card) => card.title === fallback.title)) continue
     cards.push(fallback)

@@ -1,8 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
+import { deriveIdeas, type Idea } from '../../core/ideas.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { Session } from '../../core/session.js'
-import type { MemoryScope } from '../../core/memory/index.js'
+import { INSTALL_SCOPE, type MemoryScope } from '../../core/memory/index.js'
 import { isImage, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
 import { setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { readDisplay } from '../../core/config/load.js'
@@ -14,6 +15,37 @@ import type { ClientFrame, FrameAttachment, SendTarget, ServerFrame, TranscriptM
 import { PERMISSION_TIMEOUT_MS } from './protocol.js'
 import { displayEvent } from './turn.js'
 import { transcriptOf } from './transcript.js'
+import { errorMessage } from '../../util/errors.js'
+import { logWarn } from '../../util/log.js'
+
+/**
+ * How long the home's ideas are reused before they are asked for again. Short,
+ * because they are drawn from what Milo knows, which a turn can change — but far
+ * longer than it takes to open a few empty chats, which is what the cache is for.
+ */
+const IDEAS_TTL_MS = 10 * 60 * 1000
+
+/**
+ * The shortest gap between two generations, whatever has changed. The cache above
+ * already spares a repeated call while nothing moved; this is the floor under the
+ * one case it does not cover — a turn that taught Milo something new, which
+ * changes the key and would otherwise spend a call the next time a home opens.
+ */
+const IDEAS_MIN_GAP_MS = 5 * 60 * 1000
+
+/** How many notes ground one generation; the newest ones are the relevant ones. */
+const IDEAS_NOTES_LIMIT = 200
+
+/** How many recent sessions are named as grounding. */
+const IDEAS_SESSIONS = 5
+
+/**
+ * Whether an empty home asks for ideas. Off for now: the generation is written and
+ * tested, but the web app could not be reached past the token/URL fragility, and
+ * that is what has to be settled first — see `worklog.md`. Flip this to `true` and
+ * un-skip `test/web-ideas.test.ts` to bring it back; nothing else changes.
+ */
+const IDEAS_ENABLED = false
 
 export interface WebClient {
   send(frame: ServerFrame): void
@@ -37,6 +69,18 @@ export class WebHub {
    * a hash of the path rather than a fresh token each time.
    */
   private readonly attachments = new Map<string, { path: string; name: string; mimeType: string }>()
+  /**
+   * The ideas the home currently gets, and what they were drawn from. One slot,
+   * not one per conversation: what grounds them — the notes and the recent
+   * sessions — belongs to the install, so every empty chat gets the same ones.
+   */
+  private ideaCache: { key: string; at: number; items: Idea[] } | null = null
+  /** The generation in flight, when there is one, so a turn can cut it off. */
+  private ideaWork: { controller: AbortController } | null = null
+  /** When the last call was made, for the floor in `runIdeas`; 0 before the first. */
+  private ideaCalledAt = 0
+  /** The generations still running; `flush()` waits for them, a shutdown does not. */
+  private readonly pendingIdeas = new Set<Promise<void>>()
 
   constructor(
     private readonly runtime: AgentRuntime,
@@ -66,6 +110,8 @@ export class WebHub {
       effort: this.runtime.reasoningEffort,
     })
     this.sendState(conversationId)
+    // Parked (see `IDEAS_ENABLED`): the standing four stand, and no call is made.
+    if (IDEAS_ENABLED && conversation.session.messages.length === 0) this.ensureIdeas()
   }
 
   /**
@@ -132,7 +178,19 @@ export class WebHub {
   }
 
   close(): void {
+    this.ideaWork?.controller.abort()
     for (const id of this.conversations.keys()) this.turns.stop(id)
+  }
+
+  /**
+   * Waits for the ideas still being derived. A page never waits for them and a
+   * shutdown need not either, so this is the seam for a caller that wants the
+   * work finished before it looks — a test, or an orderly exit.
+   */
+  async flush(): Promise<void> {
+    while (this.pendingIdeas.size > 0) {
+      await Promise.allSettled([...this.pendingIdeas])
+    }
   }
 
   /**
@@ -195,7 +253,104 @@ export class WebHub {
     return { id, name: file.name, mimeType: file.mimeType, size, image: isImage(file.mimeType) }
   }
 
+  /**
+   * Starts deriving the home's ideas unless one is already under way. Called when
+   * an empty session opens; it returns at once, and the work reaches the page as
+   * a `suggestions` frame whenever it lands.
+   */
+  private ensureIdeas(): void {
+    if (this.ideaWork) return
+    const controller = new AbortController()
+    const work = this.runIdeas(controller)
+    // Set here, synchronously, before `runIdeas` reaches its first await: two
+    // chats opened in the same tick must not start two calls.
+    this.ideaWork = { controller }
+    this.pendingIdeas.add(work)
+    void work.finally(() => {
+      this.pendingIdeas.delete(work)
+      if (this.ideaWork?.controller === controller) this.ideaWork = null
+    })
+  }
+
+  /**
+   * The generation itself: ground it, reuse a fresh answer, otherwise ask and
+   * deliver. Nothing here rejects — a failure is logged and leaves the standing
+   * four on screen, which is what they are for.
+   */
+  private async runIdeas(controller: AbortController): Promise<void> {
+    try {
+      const grounding = await this.grounding()
+      if (!grounding) return
+      // Nothing moved and the answer is not old: hand back what we have.
+      if (this.ideaCache && this.ideaCache.key === grounding.key && Date.now() - this.ideaCache.at < IDEAS_TTL_MS) {
+        this.deliverIdeas()
+        return
+      }
+      // Something moved, but a call was made too recently: serve the cached ideas
+      // rather than spend another. This is the floor — one call per window at most.
+      if (this.ideaCalledAt !== 0 && Date.now() - this.ideaCalledAt < IDEAS_MIN_GAP_MS) {
+        this.deliverIdeas()
+        return
+      }
+      if (controller.signal.aborted) return
+      this.ideaCalledAt = Date.now()
+      const items = await deriveIdeas({
+        provider: this.runtime.provider,
+        model: this.runtime.model,
+        notes: grounding.notes,
+        sessions: grounding.sessions,
+        signal: controller.signal,
+      })
+      if (controller.signal.aborted || items.length === 0) return
+      this.ideaCache = { key: grounding.key, at: Date.now(), items }
+      this.deliverIdeas()
+    } catch (error) {
+      logWarn(`could not prepare home ideas: ${errorMessage(error)}`)
+    }
+  }
+
+  /**
+   * What the ideas are drawn from, and a key over it. Two reads and a hash, all
+   * local: the key changes the moment a note or a session does, so a cached
+   * answer is reused only while what grounds it is unchanged. Null when there is
+   * nothing to go on — a new install — so no call is spent on ideas with no
+   * footing.
+   */
+  private async grounding(): Promise<{
+    key: string
+    notes: string[]
+    sessions: { title?: string; preview?: string; recap?: string }[]
+  } | null> {
+    const notes = (await this.runtime.memory.list(INSTALL_SCOPE, { limit: IDEAS_NOTES_LIMIT }))
+      .map((note) => note.text)
+    const sessions = (await this.runtime.listSessions())
+      .filter((session) => session.messageCount > 0)
+      .slice(0, IDEAS_SESSIONS)
+      .map(({ title, preview, recap }) => ({ title, preview, recap }))
+    if (notes.length === 0 && sessions.length === 0) return null
+    const key = createHash('sha1').update(JSON.stringify({ notes, sessions })).digest('hex')
+    return { key, notes, sessions }
+  }
+
+  /**
+   * Sends the cached ideas to every conversation still showing a home. A chat
+   * that has spoken has no home to fill, so it is left alone.
+   */
+  private deliverIdeas(): void {
+    const items = this.ideaCache?.items
+    if (!items || items.length === 0) return
+    const frame: ServerFrame = { type: 'suggestions', items }
+    for (const [id, conversation] of this.conversations) {
+      if (conversation.session.messages.length === 0) this.broadcast(id, frame)
+    }
+  }
+
   private startTurn(conversationId: string, text: string, target?: SendTarget): void {
+    // A person who is already typing does not want ideas. The call they started
+    // is about to be wasted work, so it is cut here rather than left to finish
+    // behind the turn and replace cards nobody is looking at any more.
+    this.ideaWork?.controller.abort()
+    this.ideaWork = null
     // The state frame that *ends* a turn comes from the queue's settle handler
     // below, not from the turn's own `finally`. `busy` is the queue's answer to
     // "is a turn running", and the queue only lets the turn go after this work

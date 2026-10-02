@@ -1,3 +1,5 @@
+import type { Idea } from '../../core/ideas.js'
+
 export const PROTOCOL_VERSION = 1
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
@@ -92,6 +94,11 @@ export type ServerFrame =
   | { type: 'state'; busy: boolean; queued: number }
   /** A routine ran somewhere in this install: re-read whatever shows the history. */
   | { type: 'routines-changed' }
+  /**
+   * Ideas for the empty home, from what Milo knows. They arrive after the page is
+   * already showing the standing four, which they take the place of.
+   */
+  | { type: 'suggestions'; items: Idea[] }
   | { type: 'error'; message: string }
 
 /**

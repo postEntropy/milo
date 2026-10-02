@@ -305,6 +305,15 @@ export class AgentRuntime {
     return this.options.memory
   }
 
+  /**
+   * The provider the next turn runs on, for a caller that makes its own one-shot
+   * call — a background reading of the notes, say. It is the running provider, so
+   * a model switch is picked up here the same way a session picks it up.
+   */
+  get provider(): Provider {
+    return this.options.provider
+  }
+
   get permissions(): PermissionPolicy | undefined {
     return this.options.permissionPolicy
   }

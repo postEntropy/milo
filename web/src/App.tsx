@@ -49,6 +49,8 @@ export default function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   /** What Milo keeps, for the cards the welcome screen draws; null until read. */
   const [notes, setNotes] = useState<{ text: string }[] | null>(null)
+  /** Ideas the model drew for the empty home; null until they arrive. */
+  const [ideas, setIdeas] = useState<{ title: string; prompt: string }[] | null>(null)
   /** How much the running model holds, for the context meter; null until read. */
   const [contextWindow, setContextWindow] = useState<number | null>(null)
   const [search, setSearch] = useState('')
@@ -309,6 +311,7 @@ export default function App() {
     }
     if (frame.type === 'error') { setNotice({ text: frame.message, error: true }); return }
     if (frame.type === 'routines-changed') { setRoutinesTick((current) => current + 1); return }
+    if (frame.type === 'suggestions') { setIdeas(frame.items); return }
     if (frame.type === 'state') { setBusy(frame.busy); setQueued(frame.queued); return }
     if (frame.type === 'turn-start') {
       // The wait starts here and the turn says so on screen: the assistant
@@ -697,8 +700,8 @@ export default function App() {
     .sort((a, b) => b.updatedAt - a.updatedAt)
   const sessionGroups = groupSessions(visibleSessions)
   const suggestions = useMemo(
-    () => buildSuggestions({ sessions, notes, currentId: sessionId }),
-    [sessions, notes, sessionId],
+    () => buildSuggestions({ sessions, notes, ideas, currentId: sessionId }),
+    [sessions, notes, ideas, sessionId],
   )
   // The size of what the model last read is the size of the conversation, which is
   // what the meter measures against the window.
