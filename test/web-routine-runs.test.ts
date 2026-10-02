@@ -12,7 +12,6 @@ process.env.MILO_HOME = home
 const { WebSettings } = await import('../src/gateways/web/settings.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { createToolRegistry } = await import('../src/core/tools/index.js')
-const { MAX_RUNS_PER_ROUTINE } = await import('../src/core/routines.js')
 
 const CONVERSATION = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 

@@ -82,15 +82,6 @@ export type NewRoutine = Omit<Routine, 'id' | 'createdAt'>
  */
 export const MAX_ROUTINES = 50
 
-/**
- * How many of a routine's runs are kept. Every run is a session of its own that
- * nothing else ever deletes, so without a bound the history grows a file per
- * firing forever; the alternative — pruning it silently — would make the Runs
- * surface lose what it showed, so the number is written down (and said on the
- * surface) rather than left to disk pressure.
- */
-export const MAX_RUNS_PER_ROUTINE = 20
-
 const DURATION = /^(\d+)\s*(s|sec|secs|seg|segs|segundo|segundos|m|min|mins|minuto|minutos|h|hora|horas|d|dia|dias)?$/i
 const TIME = /^(\d{1,2}):?(\d{2})?$/
 
@@ -402,26 +393,7 @@ export async function runRoutineOnce(
   // picture a run sent and not only the words around it. A failed turn keeps
   // nothing: what it half-produced is not something to hand over, here either.
   if (files.length > 0 && !failure) await session.appendNotice('', files)
-  // The history is bounded where a run finishes, so the timer and "run it now"
-  // are held to the same ceiling rather than one of them sweeping for the other.
-  await sweepRuns(runtime, routine.id)
   return { id: session.id, answer: answer.trim(), failure, files }
-}
-
-/**
- * Keeps a routine's history to its last `MAX_RUNS_PER_ROUTINE` runs, oldest
- * first out. `listRuns` is newest-first, so what falls past the ceiling is what
- * gets removed. A removal that fails is said and not thrown: the run happened,
- * and a history one longer is not a reason to fail the turn that made it.
- */
-async function sweepRuns(runtime: AgentRuntime, routineId: string): Promise<void> {
-  for (const run of (await runtime.listRuns(routineId)).slice(MAX_RUNS_PER_ROUTINE)) {
-    try {
-      await runtime.removeSession(run.id)
-    } catch (error) {
-      logWarn(`could not remove the old run ${run.id}: ${errorMessage(error)}`)
-    }
-  }
 }
 
 export interface RoutineSchedulerOptions {

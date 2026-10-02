@@ -30,7 +30,6 @@ import {
   describeTarget,
   describeWhen,
   findRoutine,
-  MAX_RUNS_PER_ROUTINE,
   nextRunAt,
   parseWhen,
   readRoutines,

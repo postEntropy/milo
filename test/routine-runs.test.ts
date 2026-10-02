@@ -9,7 +9,7 @@ import type { Routine } from '../src/core/routines.js'
 const home = mkdtempSync(path.join(tmpdir(), 'milo-routine-runs-'))
 process.env.MILO_HOME = home
 
-const { MAX_RUNS_PER_ROUTINE, ROUTINE_GATEWAY, addRoutine, removeRoutineWithRuns, runRoutineOnce } =
+const { ROUTINE_GATEWAY, addRoutine, removeRoutineWithRuns, runRoutineOnce } =
   await import('../src/core/routines.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { FileSessionStore } = await import('../src/core/sessions/file-store.js')
@@ -98,16 +98,17 @@ describe('a routine run is a session of its own', () => {
     expect(await runtime.listSessions()).toEqual([])
   })
 
-  it('keeps only the last runs of a routine, so the history cannot grow forever', async () => {
+  it('keeps every run, so nothing a routine produced is swept away', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-runs-'))
     const { runtime } = build(dir)
     const r = routine('brave-otter-1')
 
-    for (let index = 0; index < MAX_RUNS_PER_ROUTINE + 3; index += 1) {
+    const kept = 23
+    for (let index = 0; index < kept; index += 1) {
       await runRoutineOnce(runtime, r)
     }
 
-    expect((await runtime.listRuns(r.id)).length).toBe(MAX_RUNS_PER_ROUTINE)
+    expect((await runtime.listRuns(r.id)).length).toBe(kept)
   })
 })
 
