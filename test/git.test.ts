@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
 import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -74,6 +75,13 @@ describe('git', () => {
   it('shows a commit with show', async () => {
     const result = await gitTool.execute({ action: 'show', ref: 'HEAD' }, ctx())
     expect(result.content).toContain('first commit')
+  })
+
+  it('does not interpret a revision argument as a Git option', async () => {
+    const output = path.join(dir, 'option-output.txt')
+    const result = await gitTool.execute({ action: 'show', ref: `--output=${output}` }, ctx())
+    expect(result.isError).toBe(true)
+    expect(existsSync(output)).toBe(false)
   })
 
   it('names the author of a line with blame', async () => {

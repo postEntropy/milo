@@ -111,7 +111,18 @@ export const gitTool: Tool<GitArgs> = {
     }
 
     const path = args.path?.trim() || undefined
-    const ref = args.ref?.trim() || undefined
+    const requestedRef = args.ref?.trim() || undefined
+    // Resolve user supplied revisions to an object id before passing them to
+    // another Git command. Besides rejecting invalid revisions, this prevents
+    // a value such as `--output=/tmp/file` from becoming a Git option. The
+    // `--end-of-options` boundary also protects rev-parse itself.
+    let ref = requestedRef
+    if (requestedRef) {
+      const resolved = await runGit(ctx.cwd, ['rev-parse', '--verify', '--end-of-options', `${requestedRef}^{object}`], ctx.signal)
+      if ('failed' in resolved) return { content: resolved.failed, isError: true }
+      if (resolved.code !== 0) return render(resolved)
+      ref = resolved.body.split('\n', 1)[0]
+    }
     const argv: string[] = (() => {
       switch (action) {
         case 'status':
