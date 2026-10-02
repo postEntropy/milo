@@ -4,6 +4,7 @@ import { randomUUID } from './lib/uuid.js'
 import { MiloSocket, type ConnectionState } from './lib/ws.js'
 import { Composer, type ComposerHandle } from './chat/Composer.js'
 import { MessageList, type ChatMessage } from './chat/MessageList.js'
+import { buildSuggestions } from './chat/suggestions.js'
 import { Permissions } from './chat/Permissions.js'
 import { Routines } from './routines/Routines.js'
 import { Settings } from './settings/Settings.js'
@@ -20,6 +21,20 @@ type SessionGroup = { label: string; sessions: SessionSummary[] }
 type HistoryHit = { session: string; at: string; kind: string; text: string }
 type Notice = { text: string; error: boolean }
 
+type View = 'chat' | 'settings' | 'routines'
+
+/** The address each screen lives at, so a link can be shared and Back works. */
+const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', settings: '/settings' }
+
+/** Which screen a path names; anything that is not one of them is the chat. */
+function viewFromPath(pathname: string): View {
+  const path = pathname.replace(/\/+$/, '') || '/'
+  for (const [view, at] of Object.entries(VIEW_PATH) as Array<[View, string]>) {
+    if (at === path) return view
+  }
+  return 'chat'
+}
+
 const settingsSections = [
   ['provider', 'cpu', 'Provider & model'], ['keys', 'key', 'API keys'], ['memory', 'database', 'Memory'],
   ['gateways', 'server', 'Gateways'], ['web', 'globe', 'Web'],
@@ -32,6 +47,10 @@ export default function App() {
   const [sessionId, setSessionId] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [sessions, setSessions] = useState<SessionSummary[]>([])
+  /** What Milo keeps, for the cards the welcome screen draws; null until read. */
+  const [notes, setNotes] = useState<{ text: string }[] | null>(null)
+  /** How much the running model holds, for the context meter; null until read. */
+  const [contextWindow, setContextWindow] = useState<number | null>(null)
   const [search, setSearch] = useState('')
   /** What the past turns said about the search, and null when nothing is searched. */
   const [historyHits, setHistoryHits] = useState<HistoryHit[] | null>(null)
@@ -44,11 +63,15 @@ export default function App() {
   const [routinesTick, setRoutinesTick] = useState(0)
   const [thinking, setThinking] = useState(true)
   const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium')
-  const [identity, setIdentity] = useState({ provider: 'milo', model: '' })
+  const [identity, setIdentity] = useState({ provider: 'milo', providerName: 'Milo', model: '' })
   const [connection, setConnection] = useState<ConnectionState>('connecting')
-  const [view, setView] = useState<'chat' | 'settings' | 'routines'>('chat')
+  const [view, setView] = useState<View>(() => viewFromPath(location.pathname))
   const [settingsSection, setSettingsSection] = useState('provider')
+  /** Whether the settings hold edits that were never saved. */
+  const [settingsDirty, setSettingsDirty] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  /** The desktop sidebar, folded away; the phone keeps its drawer instead. */
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('milo-sidebar') === 'collapsed')
   const [theme, setTheme] = useState(() => localStorage.getItem('milo-theme') ?? 'system')
   const [notice, setNotice] = useState<Notice | null>(null)
   /** Bumped to hand the cursor to the composer, e.g. once a new session opens. */
@@ -58,6 +81,22 @@ export default function App() {
   const messagesRef = useRef<HTMLDivElement>(null)
   /** Set when the person sends: their own message comes into view even from up here. */
   const followSend = useRef(false)
+  /** Set when a session arrives, so opening one lands at its end, not its top. */
+  const pinToEnd = useRef(false)
+  /** The words a fork-and-resend owes: sent once the new session is connected. */
+  const pendingSend = useRef<string | null>(null)
+  /** Set when an edit is being written: the next send redoes from that turn. */
+  const editingTurn = useRef<number | null>(null)
+  /** The live `send`, for the frame handler, which is defined before it. */
+  const sendRef = useRef<(text: string) => void>(() => {})
+  /**
+   * The tokens that have arrived since the last frame, by turn, and the frame that
+   * will draw them. Gathering them here and drawing once a frame — rather than
+   * once a token — is what keeps a fast answer from re-parsing and re-rendering
+   * the whole thread on every one of its chunks.
+   */
+  const pendingDeltas = useRef(new Map<string, { text: string; reasoning: string }>())
+  const drawFrame = useRef<number | null>(null)
   const sessionListRef = useRef<HTMLElement | null>(null)
   /** The soft edge under the search box shows only once the list is scrolled. */
   const [listScrolled, setListScrolled] = useState(false)
@@ -75,10 +114,13 @@ export default function App() {
 
   /** The soft edge under the session header shows only once messages are scrolled. */
   const [chatScrolled, setChatScrolled] = useState(false)
+  /** Whether the thread is at its end; when it is not, the way back shows. */
+  const [atEnd, setAtEnd] = useState(true)
   const updateMessagesTop = useCallback((): void => {
     const el = messagesRef.current
     if (!el) return
     setChatScrolled(el.scrollTop > 2)
+    setAtEnd(el.scrollHeight - el.scrollTop - el.clientHeight < 120)
   }, [])
   // biome-ignore lint/correctness/useExhaustiveDependencies: recomputes when messages or view change
   useEffect(() => { updateMessagesTop() }, [updateMessagesTop, messages, view])
@@ -87,12 +129,24 @@ export default function App() {
     return () => window.removeEventListener('resize', updateMessagesTop)
   }, [updateMessagesTop])
 
+  /** The end of the thread, brought back into view rather than jumped to. */
+  const jumpToEnd = useCallback((): void => {
+    const el = messagesRef.current
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
+  }, [])
+
+  /** Hands the words picked out of a reply to the composer, quoted. */
+  const quoteIntoComposer = useCallback((text: string): void => {
+    composerRef.current?.insertQuote(text)
+  }, [])
+
   const fail = useCallback((error: unknown): void => {
     setNotice({ text: error instanceof Error ? error.message : String(error), error: true })
   }, [])
 
   useEffect(() => {
     localStorage.setItem('milo-conversation', conversationId)
+    localStorage.setItem('milo-sidebar', sidebarCollapsed ? 'collapsed' : 'open')
     if (theme === 'system') localStorage.removeItem('milo-theme')
     else localStorage.setItem('milo-theme', theme)
     const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
@@ -101,7 +155,30 @@ export default function App() {
     // screen, the page would otherwise sit under a band of another colour. Read
     // from the token rather than repeated here, so the two cannot drift.
     document.querySelector('meta[name=theme-color]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim())
-  }, [conversationId, theme])
+  }, [conversationId, theme, sidebarCollapsed])
+
+  // A notice is not a thing to keep: it says what just happened and then gets out
+  // of the way. An error holds longer, since it is the one worth reading.
+  useEffect(() => {
+    if (!notice) return
+    const timer = window.setTimeout(() => setNotice(null), notice.error ? 9000 : 5000)
+    return () => window.clearTimeout(timer)
+  }, [notice])
+
+  /**
+   * The screen is in the address bar: a session, the routines and the settings are
+   * each a place, so a link can be shared and the browser's own Back goes where it
+   * says. Changing screen pushes a step; the Back button reads the path back.
+   */
+  useEffect(() => {
+    if (location.pathname !== VIEW_PATH[view]) window.history.pushState(null, '', VIEW_PATH[view])
+  }, [view])
+
+  useEffect(() => {
+    const fromPath = (): void => setView(viewFromPath(location.pathname))
+    window.addEventListener('popstate', fromPath)
+    return () => window.removeEventListener('popstate', fromPath)
+  }, [])
 
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)')
@@ -117,14 +194,117 @@ export default function App() {
     catch (error) { fail(error) }
   }, [fail])
 
+  // What Milo keeps, read while the welcome screen is what is showing — the only
+  // place the cards draw on it. A failure is quiet: the standing four still stand.
+  useEffect(() => {
+    if (messages.length > 0 || notes !== null) return
+    let live = true
+    void api<{ notes: { text: string }[] }>('memory-notes')
+      .then((result) => { if (live) setNotes(result.notes) })
+      .catch(() => { if (live) setNotes([]) })
+    return () => { live = false }
+  }, [messages.length, notes])
+
+  // How much the running model holds. Read once per model; a lookup that fails is
+  // no meter, not a broken chat, so the failure is quiet.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the model is the trigger, not a value read here — a new model is a new window
+  useEffect(() => {
+    let live = true
+    void api<{ window?: number }>('context-window')
+      .then((result) => { if (live) setContextWindow(result.window ?? null) })
+      .catch(() => { if (live) setContextWindow(null) })
+    return () => { live = false }
+  }, [identity.model])
+
+  // The log itself, searched a beat after typing stops: a word a tidied title
+  // dropped is still findable here. Two characters is the shortest worth asking for.
+  useEffect(() => {
+    const query = search.trim()
+    if (query.length < 2) { setHistoryHits(null); return }
+    let live = true
+    const timer = window.setTimeout(() => {
+      void api<{ hits: HistoryHit[] }>('history-search', { query })
+        .then((result) => { if (live) setHistoryHits(result.hits) })
+        .catch(() => { if (live) setHistoryHits([]) })
+    }, 250)
+    return () => { live = false; window.clearTimeout(timer) }
+  }, [search])
+
+  /** Puts a message's own words back in the composer, to be changed and resent. */
+  const editMessage = useCallback((text: string, upToTurn: number): void => {
+    editingTurn.current = upToTurn
+    composerRef.current?.load(text)
+  }, [])
+
+  /**
+   * Asks again from an earlier point: the session is forked up to the turn before
+   * the prompt, and the prompt goes out once the new session is the one the socket
+   * speaks to — so the answer is written afresh with the old one gone.
+   */
+  const redo = useCallback(async (text: string, upToTurn: number): Promise<void> => {
+    if (!sessionId) return
+    const nextConversationId = randomUUID()
+    pendingSend.current = text
+    try {
+      const res = await api<{ id: string }>('fork-session', { conversationId: nextConversationId, sessionId, upToTurn })
+      socket.close()
+      setMessages([])
+      setSessionId(res.id)
+      setConversationId(nextConversationId)
+      setView('chat')
+    } catch (error) {
+      pendingSend.current = null
+      fail(error)
+    }
+  }, [sessionId, socket, fail])
+
+  const regenerate = useCallback((text: string, upToTurn: number): void => { void redo(text, upToTurn) }, [redo])
+
   const handleFrame = useCallback((frame: ServerFrame): void => {
+    /**
+     * Draws the deltas gathered since the last frame. A token ends the wait the
+     * first time it arrives and closes the paragraph the tool line left open, so
+     * those two moves happen here, once, when the batch lands.
+     */
+    const drawDeltas = (): void => {
+      drawFrame.current = null
+      const buffer = pendingDeltas.current
+      if (buffer.size === 0) return
+      pendingDeltas.current = new Map()
+      setMessages((current) => current.map((message) => {
+        const add = buffer.get(message.id)
+        if (!add) return message
+        let next = message
+        if (add.text) {
+          const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
+          const baseText = message.waitingSince && message.text ? closeParagraph(message.text) : message.text
+          next = { ...next, text: baseText + add.text, waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
+        }
+        if (add.reasoning) next = { ...next, reasoning: (next.reasoning ?? '') + add.reasoning }
+        return next
+      }))
+    }
+    // Anything that is not a token is drawn in order: the text that led to it
+    // lands first, so a tool line never overtakes the words before it.
+    if (!(frame.type === 'event' && (frame.event.type === 'text-delta' || frame.event.type === 'reasoning-delta'))) drawDeltas()
+
     if (frame.type === 'ready') {
       setConnection('online')
       setSessionId(frame.sessionId)
       setThinking(frame.thinking === 'on')
       if (frame.effort) setEffort(frame.effort)
-      setIdentity({ provider: frame.provider, model: frame.model })
+      setIdentity({ provider: frame.provider, providerName: frame.providerName, model: frame.model })
+      // A session opens at its end, where the conversation is — the whole thread
+      // is here at once, so there is no "scrolled there" to respect.
+      pinToEnd.current = true
       setMessages(frame.messages.map((message, index) => ({ ...message, id: `loaded-${index}`, loaded: true })))
+      // A redo forks the session and owes the words: they go out now that the new
+      // session is the one this socket is speaking to.
+      if (pendingSend.current !== null) {
+        const owed = pendingSend.current
+        pendingSend.current = null
+        sendRef.current(owed)
+      }
       return
     }
     if (frame.type === 'error') { setNotice({ text: frame.message, error: true }); return }
@@ -138,17 +318,17 @@ export default function App() {
       return
     }
     if (frame.type === 'event') {
+      const event = frame.event
+      if (event.type === 'text-delta' || event.type === 'reasoning-delta') {
+        const buffered = pendingDeltas.current.get(frame.turnId) ?? { text: '', reasoning: '' }
+        if (event.type === 'text-delta') buffered.text += event.delta
+        else buffered.reasoning += event.delta
+        pendingDeltas.current.set(frame.turnId, buffered)
+        if (drawFrame.current === null) drawFrame.current = requestAnimationFrame(drawDeltas)
+        return
+      }
       setMessages((current) => current.map((message) => {
         if (message.id !== frame.turnId) return message
-        const event = frame.event
-        if (event.type === 'text-delta') {
-          // The first output ends the wait — tool lines arrive as text too, so
-          // this is the model talking after its last thought or its last tool.
-          const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-          const baseText = message.waitingSince && message.text ? closeParagraph(message.text) : message.text
-          return { ...message, text: baseText + event.delta, waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
-        }
-        if (event.type === 'reasoning-delta') return { ...message, reasoning: (message.reasoning ?? '') + event.delta }
         if (event.type === 'tool-start') {
           // Reasoning deltas do not end a wait — they are what fills it. A tool
           // call is an output of its own, and the wait before it was thinking.
@@ -170,6 +350,7 @@ export default function App() {
         if (event.type === 'error') return { ...message, status: `Error: ${event.message}` }
         if (event.type === 'aborted') return { ...message, status: 'Stopped · the partial reply was kept.' }
         if (event.type === 'done' && event.finishReason === 'length') return { ...message, status: 'The reply hit the output limit.' }
+        if (event.type === 'usage') return { ...message, tokens: { input: event.inputTokens, output: event.outputTokens } }
         return message
       }))
       return
@@ -225,6 +406,7 @@ export default function App() {
   }, [refreshSessions])
 
   const newChat = useCallback(async (): Promise<void> => {
+    editingTurn.current = null
     const nextConversationId = randomUUID()
     // Inside the click that asked for it, before any state moves: a focus handed
     // over a tick later is a focus the browser is free to drop. The counter is
@@ -250,6 +432,13 @@ export default function App() {
     // The empty state is a screen of its own: it stays at the top, so the hero
     // is never half-scrolled out of view when it is only slightly too tall.
     if (messages.length === 0) { container.scrollTop = 0; return }
+    // A session that just opened has no scroll position to respect: it lands at
+    // its end, in one go, rather than at the top of however long it has grown.
+    if (pinToEnd.current) {
+      pinToEnd.current = false
+      container.scrollTop = container.scrollHeight
+      return
+    }
     // Reading back through the thread is respected: a turn that arrives while the
     // person is up there does not yank them down. Sending is the exception, since
     // the message they just wrote is the thing they are looking for.
@@ -259,6 +448,27 @@ export default function App() {
       container.scrollTop = container.scrollHeight
     }
   }, [messages, pendingPermission])
+
+  /**
+   * The thread stays pinned to its own end. The effect above only runs when the
+   * messages change, and the height of the box changes after that — the keyboard
+   * settling, the composer growing with what is typed — which is what left the
+   * last message below the fold until the person scrolled it up themselves.
+   */
+  useEffect(() => {
+    const container = messagesRef.current
+    if (!container) return
+    const observer = new ResizeObserver(() => {
+      const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120
+      if (nearBottom || followSend.current) container.scrollTop = container.scrollHeight
+    })
+    observer.observe(container)
+    return () => observer.disconnect()
+  }, [])
+
+  useEffect(() => () => {
+    if (drawFrame.current !== null) cancelAnimationFrame(drawFrame.current)
+  }, [])
 
   useEffect(() => {
     const unsubscribe = socket.subscribe(handleFrame)
@@ -331,7 +541,15 @@ export default function App() {
    * screen pins the destination a routine it asks for is made for, when that is
    * not this chat — the sentence then does not have to say it.
    */
-  function send(text: string, intent: 'queue' | 'steer' = 'queue', target?: SendTarget): void {
+  const send = useCallback((text: string, intent: 'queue' | 'steer' = 'queue', target?: SendTarget): void => {
+    // An edit is a redo from the turn it was made on: the words go again with the
+    // session forked to before them, rather than a second copy piling on top.
+    if (editingTurn.current !== null) {
+      const upToTurn = editingTurn.current
+      editingTurn.current = null
+      void redo(text, upToTurn)
+      return
+    }
     followSend.current = true
     try {
       if (text.startsWith('/')) {
@@ -341,7 +559,9 @@ export default function App() {
       else socket.send({ type: 'send', text, intent, ...(target ? { target } : {}) })
       setNotice(null)
     } catch (error) { fail(error) }
-  }
+  }, [socket, fail, redo])
+
+  useEffect(() => { sendRef.current = send }, [send])
 
   /**
    * A routine asked for from the routines screen: always its own turn, and the
@@ -359,6 +579,7 @@ export default function App() {
   }
 
   const openSession = useCallback(async (id: string): Promise<void> => {
+    editingTurn.current = null
     const nextConversationId = randomUUID()
     try {
       await api('resume-session', { conversationId: nextConversationId, id })
@@ -373,6 +594,7 @@ export default function App() {
 
   const forkSession = useCallback(async (upToTurn: number): Promise<void> => {
     if (!sessionId) return
+    editingTurn.current = null
     const nextConversationId = randomUUID()
     composerRef.current?.focus()
     setComposerFocus((current) => current + 1)
@@ -405,12 +627,22 @@ export default function App() {
   }, [openSession, socket, fail])
 
   function handleSessionChange(id: string): void {
+    editingTurn.current = null
     setSessionId(id)
     socket.close()
     setMessages([])
     socket.connect(conversationId)
     setView('chat')
   }
+
+  /** Leaving the settings, which asks first when edits would be thrown away. */
+  const leaveSettings = useCallback((): void => {
+    if (settingsDirty && !window.confirm('Discard unsaved settings changes?')) return
+    setView('chat')
+    setSidebarOpen(false)
+  }, [settingsDirty])
+
+  const noteDirty = useCallback((dirty: boolean): void => { setSettingsDirty(dirty) }, [])
 
   async function exportSession(id = sessionId): Promise<void> {
     if (!id) return
@@ -464,8 +696,21 @@ export default function App() {
     .filter((session) => `${session.title ?? ''} ${session.preview} ${session.id}`.toLowerCase().includes(query))
     .sort((a, b) => b.updatedAt - a.updatedAt)
   const sessionGroups = groupSessions(visibleSessions)
+  const suggestions = useMemo(
+    () => buildSuggestions({ sessions, notes, currentId: sessionId }),
+    [sessions, notes, sessionId],
+  )
+  // The size of what the model last read is the size of the conversation, which is
+  // what the meter measures against the window.
+  const contextUsed = useMemo(() => {
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const tokens = messages[index]!.tokens
+      if (tokens) return tokens.input
+    }
+    return 0
+  }, [messages])
 
-  return <div className={`app-shell ${sidebarOpen ? 'drawer-open' : ''}`}>
+  return <div className={`app-shell ${sidebarOpen ? 'drawer-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
     {/* The colour iOS 26 Safari reads for its own bars; see the `.chrome-tint`
         rules. They sit off screen and take no pointer. */}
     <div className="chrome-tint top" aria-hidden="true" />
@@ -473,7 +718,7 @@ export default function App() {
     {sidebarOpen && <button className="sidebar-scrim" type="button" aria-label="Close menu" onClick={() => setSidebarOpen(false)} />}
     <aside className={`sidebar ${view === 'settings' ? 'settings-mode' : ''}`} aria-label="Main navigation">
       <div className="sidebar-chat-nav">
-        <div className="brand-row"><img className="brand-mark" src={miloAvatar} alt="" /><span className="brand-name" translate="no">Milo</span></div>
+        <div className="brand-row"><img className="brand-mark" src={miloAvatar} alt="" /><span className="brand-name" translate="no">Milo</span><button className="sidebar-toggle" type="button" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><Icon name="panel-left" size={17} /></button></div>
         <div className="sidebar-pad">
           <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={16} /><span>Routines</span></button>
           <div className="sidebar-controls">
@@ -501,7 +746,7 @@ export default function App() {
       </div>
       <div className="sidebar-settings-nav">
         <div className="settings-nav-heading"><h2>Settings</h2><p>For this installation</p></div>
-        <button className="settings-back" type="button" onClick={() => { setView('chat'); setSidebarOpen(false) }}><Icon name="arrow-left" /><span>Back to chat</span></button>
+        <button className="settings-back" type="button" onClick={leaveSettings}><Icon name="arrow-left" /><span>Back to chat</span></button>
         <nav className="settings-nav" aria-label="Settings sections">
           {settingsSections.map(([id, icon, label]) => <button type="button" key={id} className={`settings-nav-item ${settingsSection === id ? 'active' : ''}`} onClick={() => { setSettingsSection(id); setSidebarOpen(false) }}><Icon name={icon} /><span>{label}</span></button>)}
         </nav>
@@ -511,7 +756,7 @@ export default function App() {
     <main className={`main ${view === 'settings' ? 'has-settings-strip' : ''}`}>
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
-        {view === 'routines' && <button className="btn-secondary" type="button" onClick={() => setView('chat')}><span aria-hidden="true">←</span> Back to chat</button>}
+        <button className="sidebar-expand" type="button" aria-label="Show sidebar" title="Show sidebar" onClick={() => setSidebarCollapsed(false)}><Icon name="panel-left" size={17} /></button>
         <div className="topbar-title"><h1>{view === 'settings' ? 'Settings' : view === 'routines' ? 'Routines' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
         <div className="topbar-actions">
           {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>}
@@ -523,7 +768,7 @@ export default function App() {
           The arrow leads back to the chat — where the sessions are — since the
           menu button stands down here. */}
       {view === 'settings' && <div className="settings-mobile-nav">
-        <button className="settings-strip-back" type="button" aria-label="Back to chat" title="Back to chat" onClick={() => { setView('chat'); setSidebarOpen(false) }}><Icon name="arrow-left" size={17} /></button>
+        <button className="settings-strip-back" type="button" aria-label="Back to chat" title="Back to chat" onClick={leaveSettings}><Icon name="arrow-left" size={17} /></button>
         <nav className="settings-section-strip" aria-label="Settings sections">
           {settingsSections.map(([id, icon, label]) => <button
             type="button"
@@ -535,17 +780,20 @@ export default function App() {
         </nav>
       </div>}
       {view === 'settings'
-        ? <Settings section={settingsSection} conversationId={conversationId} sessionId={sessionId} onClose={() => setView('chat')} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} />
+        ? <Settings section={settingsSection} conversationId={conversationId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} onDirtyChange={noteDirty} />
         : view === 'routines'
         ? <Routines conversationId={conversationId} tick={routinesTick} chat={{ messages, thinking, busy, connection, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>
-            <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} />
+            <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} />
             {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
           </div>
           <div className={`scroll-blur top ${chatScrolled ? 'on' : ''}`} aria-hidden="true" />
           {notice && <div className={`notice ${notice.error ? 'error' : 'success'}`} role="alert">{notice.text}<button className="icon-button" type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}><Icon name="x" size={15} /></button></div>}
-          <Composer ref={composerRef} busy={busy} queued={queued} provider={identity.provider} model={identity.model} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} />
+          <div className="composer-dock">
+            {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
+            <Composer ref={composerRef} busy={busy} queued={queued} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextWindow && contextUsed > 0 ? { used: contextUsed, window: contextWindow } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} />
+          </div>
         </section>}
     </main>
   </div>

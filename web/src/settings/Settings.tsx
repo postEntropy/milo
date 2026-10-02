@@ -1,8 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
 import { formatBytes, formatWhen, message, splitNames } from '../lib/format.js'
+import { formatContext } from '../../../src/gateways/model-label.ts'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
+import { Select } from '../ui/Select.js'
+import { ModelPicker } from './ModelPicker.js'
 import { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from '@protocol'
 import { GOOGLE_SHORTCUT, GOOGLE_STEPS } from '../../../src/core/google/walkthrough.ts'
 
@@ -28,7 +31,7 @@ type SettingsConfig = {
 }
 type Skill = { name: string; description: string; origin?: string; installedAt?: string }
 type MemoryStats = { backend: string; location: string; scopes: number; facts: number; bytes: number }
-type ModelInfo = { id: string; name?: string }
+type ModelInfo = { id: string; name?: string; context?: number }
 type Note = { id: string; text: string; createdAt: number; tags?: string[] }
 type Browser = { id: string; name: string; path: string; version: string | null }
 type Profile = { id: string; name: string; dir: string; bytes: number }
@@ -52,7 +55,7 @@ type SettingsData = {
 type JobView = { id: string; kind: string; status: 'running' | 'done' | 'error'; lines: string[]; result?: Record<string, unknown>; error?: string }
 type Notice = { text: string; error: boolean }
 
-export function Settings({ section, conversationId, sessionId, onClose, onSessionChange, theme, onThemeChange }: {
+export function Settings({ section, conversationId, sessionId, onClose, onSessionChange, theme, onThemeChange, onDirtyChange }: {
   section: string
   conversationId: string
   sessionId: string
@@ -60,6 +63,8 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   onSessionChange(id: string): void
   theme: string
   onThemeChange(theme: string): void
+  /** Told when the draft holds edits, so leaving can ask before dropping them. */
+  onDirtyChange?(dirty: boolean): void
 }) {
   const [data, setData] = useState<SettingsData | null>(null)
   const [draft, setDraft] = useState<SettingsConfig | null>(null)
@@ -72,6 +77,8 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
   const [catalog, setCatalog] = useState<ModelInfo[] | null>(null)
+  /** The provider whose models the picker is showing; null means the draft's own. */
+  const [browsing, setBrowsing] = useState<string | null>(null)
   const [editingSecret, setEditingSecret] = useState<string | null>(null)
   const [notes, setNotes] = useState<Note[] | null>(null)
   const [browsers, setBrowsers] = useState<Browser[] | null>(null)
@@ -110,25 +117,26 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   const currentProvider = draft?.provider ?? ''
   const preset = data?.presets.find((item) => item.id === currentProvider)
   const models = preset?.models ?? []
+  const browsedProvider = browsing ?? currentProvider
 
   // What the provider itself reports, through the same call the composer's model
   // menu makes, so the two pickers cannot offer different models.
   useEffect(() => {
-    if (section !== 'provider' || !currentProvider) return
+    if (section !== 'provider' || !browsedProvider) return
     let live = true
     setCatalog(null)
-    void api<ModelInfo[]>('models', { provider: currentProvider })
+    void api<ModelInfo[]>('models', { provider: browsedProvider })
       .then((list) => { if (live) setCatalog(list) })
       .catch(() => { if (live) setCatalog([]) })
     return () => { live = false }
-  }, [section, currentProvider])
+  }, [section, browsedProvider])
 
   /** The catalog, the preset's own list, and whatever is set now, in that order. */
   const modelOptions = (() => {
-    const byId = new Map<string, string>()
-    for (const item of catalog ?? []) byId.set(item.id, item.name ?? item.id)
-    for (const item of models) if (!byId.has(item)) byId.set(item, item)
-    if (draft?.model && !byId.has(draft.model)) byId.set(draft.model, draft.model)
+    const byId = new Map<string, ModelInfo>()
+    for (const item of catalog ?? []) byId.set(item.id, item)
+    for (const item of models) if (!byId.has(item)) byId.set(item, { id: item })
+    if (draft?.model && !byId.has(draft.model)) byId.set(draft.model, { id: draft.model })
     return [...byId]
   })()
 
@@ -148,6 +156,34 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
     ...(JSON.stringify(draft.google) !== JSON.stringify(saved.google) ? ['Google tools'] : []),
   ]
   const requiresRestart = restartReasons.length > 0
+
+  useEffect(() => {
+    onDirtyChange?.(Boolean(draft && saved && JSON.stringify(draft) !== JSON.stringify(saved)))
+  }, [draft, saved, onDirtyChange])
+
+  /**
+   * Switching the provider carries its own details across — the endpoint it talks
+   * to and the key it expects — and lands on the first model it knows, since the
+   * one from the previous provider would be meaningless here.
+   */
+  function switchProvider(next: string): void {
+    const item = data?.presets.find((entry) => entry.id === next)
+    setBrowsing(null)
+    update(['provider'], next)
+    if (item) {
+      update(['providers', item.id], { name: item.name, baseURL: item.baseURL, wire: item.wire, ...(item.keyless ? { keyless: true } : { keyEnv: `${item.id.toUpperCase()}_API_KEY` }) })
+      if (item.models[0]) update(['model'], item.models[0])
+    }
+  }
+
+  /**
+   * Picking a model fixes the pair: browsing another provider and choosing a model
+   * from it moves the provider too, in the same act.
+   */
+  function pickModel(next: string): void {
+    if (browsing && browsing !== currentProvider) switchProvider(browsing)
+    update(['model'], next)
+  }
 
   function update(path: string[], value: unknown): void {
     setDraft((current) => {
@@ -256,16 +292,34 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
         {requiresRestart && <p className="notice restart-notice" role="status">Restart the web server to reach the chat with: {restartReasons.join(', ')}.</p>}
         <div className="settings-panel-stack">
         <Section title="Provider & model" description="Choose the service that produces the replies." active={section === 'provider'}>
-          <div className="form-grid">
-            <Field label="Provider"><select value={draft.provider} onChange={(event) => {
-              const next = data.presets.find((item) => item.id === event.target.value)
-              update(['provider'], event.target.value)
-              if (next) {
-                update(['providers', next.id], { name: next.name, baseURL: next.baseURL, wire: next.wire, ...(next.keyless ? { keyless: true } : { keyEnv: `${next.id.toUpperCase()}_API_KEY` }) })
-                if (next.models[0]) update(['model'], next.models[0])
-              }
-            }}>{data.presets.map((item) => <option value={item.id} key={item.id}>{item.name}</option>)}</select></Field>
-            <Field label="Model"><select value={draft.model} onChange={(event) => update(['model'], event.target.value)}>{modelOptions.map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select><small>{catalog === null ? 'Reading this provider’s models…' : catalog.length > 0 ? 'The models this provider reports.' : 'The models Milo knows for this provider.'}</small></Field>
+          {/* The pair is chosen through two dropdowns on a phone, and through the
+              two panes below wherever there is room for them. */}
+          <div className="form-grid model-pair">
+            <Field label="Provider"><Select
+              label="Provider"
+              value={draft.provider}
+              choices={data.presets.map((item) => ({ value: item.id, label: item.name }))}
+              onChange={switchProvider}
+            /></Field>
+            <Field label="Model"><Select
+              label="Model"
+              value={draft.model}
+              choices={modelOptions.map(([id, info]) => ({
+                value: id, label: id, ...(info.context ? { badge: formatContext(info.context) } : {}),
+              }))}
+              onChange={pickModel}
+            /></Field>
+          </div>
+          <ModelPicker
+            presets={data.presets}
+            provider={draft.provider}
+            model={draft.model}
+            browsing={browsedProvider}
+            catalog={catalog}
+            onBrowse={setBrowsing}
+            onPick={pickModel}
+          />
+          <div className="form-grid model-url">
             <Field className="full" label="API URL"><input value={draft.providers?.[currentProvider]?.baseURL ?? ''} onChange={(event) => update(['providers', currentProvider, 'baseURL'], event.target.value)} /></Field>
           </div>
         </Section>
@@ -287,7 +341,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
                     const slot = `${group}:${id}`
                     const editing = editingSecret === slot
                     const serviceName = group === 'providers'
-                      ? (data.presets.find((preset) => preset.id === id)?.name ?? id).replace(/\s*\(Provider API\)$/i, '')
+                      ? data.presets.find((preset) => preset.id === id)?.name ?? id
                       : id === 'exa' ? 'Exa' : id.charAt(0).toUpperCase() + id.slice(1)
                     return <div className={`secret-row${editing ? ' editing' : ''}`} key={slot}>
                       <div className="secret-identity">
@@ -354,7 +408,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           <p className="panel-note">Anything but loopback is reachable from the network, and that token is then the only thing between a stranger and this install.</p>
         </Section>
         <Section title="Tools" description="Optional capabilities Milo can use." active={section === 'tools'}>
-          <label className="field"><span>Web search</span><select value={draft.search?.provider ?? 'off'} onChange={(event) => update(['search'], event.target.value === 'off' ? undefined : { provider: event.target.value })}>{SEARCH_PROVIDERS.map((value) => <option key={value}>{value}</option>)}</select></label>
+          <Field label="Web search"><Select label="Web search" value={draft.search?.provider ?? 'off'} choices={SEARCH_PROVIDERS.map((value) => ({ value, label: value }))} onChange={(next) => update(['search'], next === 'off' ? undefined : { provider: next })} /></Field>
 
           <h3 className="section-label" style={{ paddingInline: 0 }}>Google</h3>
           {data?.google.kind === 'connected' ? (
@@ -418,11 +472,11 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
         </Section>
         <Section title="Permissions" description="The policy applies to tools that can cause effects." active={section === 'permissions'}>
           <div className="form-grid">
-            <Field label="Mode"><select value={draft.permissions.mode} onChange={(event) => update(['permissions', 'mode'], event.target.value)}>{PERMISSION_MODES.map((value) => <option key={value}>{value}</option>)}</select></Field>
+            <Field label="Mode"><Select label="Mode" value={draft.permissions.mode} choices={PERMISSION_MODES.map((value) => ({ value, label: value }))} onChange={(next) => update(['permissions', 'mode'], next)} /></Field>
             <Field label="Reviewer threshold"><input type="number" min="0" max="1" step="0.05" value={draft.permissions.jevThreshold} onChange={(event) => update(['permissions', 'jevThreshold'], Number(event.target.value))} /></Field>
             <Field label="Always-allowed tools"><input value={draft.permissions.allow.join(', ')} onChange={(event) => update(['permissions', 'allow'], splitNames(event.target.value))} /></Field>
             <Field label="Blocked tools"><input value={draft.permissions.deny.join(', ')} onChange={(event) => update(['permissions', 'deny'], splitNames(event.target.value))} /></Field>
-            <Field label="Classifier backend"><select value={draft.classifier.backend} onChange={(event) => update(['classifier', 'backend'], event.target.value)}>{CLASSIFIER_BACKENDS.map((value) => <option key={value}>{value}</option>)}</select><small>Hosted jev rides on the chat provider; a local Ollaya or a custom endpoint stands on its own. Applies on the next start.</small></Field>
+            <Field label="Classifier backend"><Select label="Classifier backend" value={draft.classifier.backend} choices={CLASSIFIER_BACKENDS.map((value) => ({ value, label: value }))} onChange={(next) => update(['classifier', 'backend'], next)} /><small>Hosted jev rides on the chat provider; a local Ollaya or a custom endpoint stands on its own. Applies on the next start.</small></Field>
             <Field label="Classifier model"><input value={draft.classifier.model ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'model'], event.target.value || undefined)} /></Field>
             <Field label="Classifier URL"><input value={draft.classifier.url ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'url'], event.target.value || undefined)} /></Field>
           </div>
@@ -430,10 +484,10 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
         </Section>
         <Section title="Display" description="Choose what shows in the chat and how much the model thinks." active={section === 'display'}>
           <div className="form-grid">
-            <Field label="Appearance"><select value={theme} onChange={(event) => onThemeChange(event.target.value)}><option value="system">System theme</option><option value="light">Light theme</option><option value="dark">Dark theme</option></select><small>Applies to this browser only.</small></Field>
-            <Field label="Tool detail"><select value={draft.display.tools} onChange={(event) => update(['display', 'tools'], event.target.value)}>{TOOL_LEVELS.map((value) => <option key={value}>{value}</option>)}</select></Field>
-            <Field label="Show reasoning"><select value={draft.display.thinking} onChange={(event) => update(['display', 'thinking'], event.target.value)}>{THINKING_LEVELS.map((value) => <option key={value}>{value}</option>)}</select></Field>
-            <Field label="Reasoning effort"><select value={draft.reasoningEffort} onChange={(event) => update(['reasoningEffort'], event.target.value)}>{EFFORT_LEVELS.map((value) => <option key={value}>{value}</option>)}</select></Field>
+            <Field label="Appearance"><Select label="Appearance" value={theme} choices={[{ value: 'system', label: 'System theme' }, { value: 'light', label: 'Light theme' }, { value: 'dark', label: 'Dark theme' }]} onChange={onThemeChange} /><small>Applies to this browser only.</small></Field>
+            <Field label="Tool detail"><Select label="Tool detail" value={draft.display.tools} choices={TOOL_LEVELS.map((value) => ({ value, label: value }))} onChange={(next) => update(['display', 'tools'], next)} /></Field>
+            <Field label="Show reasoning"><Select label="Show reasoning" value={draft.display.thinking} choices={THINKING_LEVELS.map((value) => ({ value, label: value }))} onChange={(next) => update(['display', 'thinking'], next)} /></Field>
+            <Field label="Reasoning effort"><Select label="Reasoning effort" value={draft.reasoningEffort} choices={EFFORT_LEVELS.map((value) => ({ value, label: value }))} onChange={(next) => update(['reasoningEffort'], next)} /></Field>
             <Field label="Output limit (tokens)"><input type="number" min="1" value={draft.maxTokens ?? ''} onChange={(event) => update(['maxTokens'], event.target.value ? Number(event.target.value) : undefined)} /></Field>
           </div>
         </Section>
@@ -443,7 +497,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             {data.skills[scope].length === 0 ? <p className="list-empty">No skills installed.</p> : data.skills[scope].map((skill) => <div className="skill-row" key={`${scope}-${skill.name}`}><div><div className="secret-name">{skill.name}</div><div className="secret-state">{skill.description}</div></div><span className="secret-state">{skill.origin ?? scope}</span><button className="button danger" type="button" onClick={() => void remove(skill.name, scope)}>Remove</button></div>)}
           </div>)}
           <div className="form-grid" style={{ marginTop: 12 }}>
-            <Field label="Install into"><select value={skillScope} onChange={(event) => setSkillScope(event.target.value as 'global' | 'project')}><option value="global">Every project</option><option value="project">This project</option></select></Field>
+            <Field label="Install into"><Select label="Install into" value={skillScope} choices={[{ value: 'global', label: 'Every project' }, { value: 'project', label: 'This project' }]} onChange={(next) => setSkillScope(next as 'global' | 'project')} /></Field>
             <Field label="Skill source"><input value={skillSource} onChange={(event) => { setSkillSource(event.target.value); setSkillChoice(null) }} placeholder="owner/repo, URL or local folder" /></Field>
           </div>
           <button className="button" type="button" disabled={!skillSource.trim()} onClick={() => void install(skillSource)}>Install skill</button>
@@ -475,7 +529,6 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
         </Section>
         </div>
         <div className="settings-save">
-          <span className="save-context">Changes apply to this Milo installation.</span>
           <div className="save-actions"><button className="button" type="button" onClick={onClose}>Cancel</button>
           <button className="button primary" type="button" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save changes'}</button></div>
         </div>

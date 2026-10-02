@@ -32,6 +32,8 @@
   --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, monospace;
   --motion-fast: 150ms;
   --motion-base: 220ms;
+  /* For a change meant to be read as it happens, not just noticed. */
+  --motion-slow: 320ms;
   /* The drawer is the one thing that travels a whole screen width, so it takes
      longer than a control's own change of state. */
   --motion-drawer: 360ms;
@@ -185,6 +187,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .topbar { position: relative; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 62px; background: var(--bg); padding: 10px 20px; }
 .mobile-menu, .topbar-new { display: none; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 10px; background: transparent; padding: 0; color: var(--fg-2); transition: background var(--motion-fast); }
 .mobile-menu:hover, .topbar-new:hover { background: var(--surface); }
+/* The sidebar's own fold control, in the brand bar. Folded, the sidebar is gone
+   entirely and the way back moves into the chat's own top bar — where the drawer's
+   menu button stands on a phone. The phone keeps its drawer and hides both. */
+.sidebar-toggle { display: none; width: 34px; height: 34px; flex: none; margin-inline-start: auto; place-items: center; border: 0; border-radius: 9px; background: transparent; padding: 0; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
+.sidebar-toggle:hover { background: var(--surface); color: var(--fg); }
+.sidebar-expand { display: none; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 10px; background: transparent; padding: 0; color: var(--fg-2); transition: background var(--motion-fast); }
+.sidebar-expand:hover { background: var(--surface); }
+@media (min-width: 901px) {
+  .sidebar-toggle { display: grid; }
+  .app-shell { transition: grid-template-columns var(--motion-base) var(--ease-standard); }
+  .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+  .app-shell.sidebar-collapsed .sidebar { visibility: hidden; }
+  .app-shell.sidebar-collapsed .sidebar-expand { display: grid; }
+}
 .topbar-title { position: absolute; left: 50%; transform: translateX(-50%); text-align: center; max-width: min(520px, 60vw); pointer-events: none; }
 .topbar-title h1 { overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 .topbar-title p { overflow: hidden; margin-top: 1px; color: var(--muted); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
@@ -207,7 +223,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .suggestion small { color: var(--muted); font-size: 12px; line-height: 1.35; }
 .suggestion-arrow { flex: none; color: var(--muted); }
 .message { display: flex; max-width: 940px; gap: 14px; margin: 0 auto; padding: 13px 0; }
-.message.user { justify-content: flex-end; }
+/* The person's own message is a bubble with its controls beneath it. On a pointer
+   they hang out of the flow, in the gap between messages, shown on hover — so the
+   bubble keeps no room for them and nothing shifts when they appear. */
+.message.user { position: relative; flex-direction: column; align-items: flex-end; gap: 2px; }
+.message-below { display: flex; align-items: center; }
+.message-below .message-toolbar { margin-top: 0; }
+.message-below .message-tool-btn { min-height: 26px; }
+@media (hover: hover) {
+  .message-below { position: absolute; inset-inline-end: 0; inset-block-start: calc(100% - 13px); opacity: 0; transition: opacity var(--motion-fast); }
+  .message.user:hover .message-below, .message-below:focus-within { opacity: 1; }
+}
 .message-content { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 10px; }
 .message.user .message-content { flex: initial; max-width: 82%; border: 0; border-radius: 16px; background: var(--surface); padding: 11px 15px; }
 .message-status { margin-top: 3px; color: var(--muted); font-size: 11px; }
@@ -223,13 +249,22 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-prose ul, .message-prose ol { padding-inline-start: 24px; }
 .message-prose li + li { margin-top: 4px; }
 .reasoning { overflow: hidden; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface-warm); }
-.reasoning summary { display: flex; min-height: 38px; align-items: center; gap: 8px; padding: 8px 12px; color: var(--fg-2); cursor: pointer; font-size: 13px; font-weight: 500; list-style: none; }
-.reasoning summary::-webkit-details-marker { display: none; }
-.reasoning summary:hover { background: var(--surface); }
+.reasoning-summary { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 8px; border: 0; background: transparent; padding: 8px 12px; color: var(--fg-2); cursor: pointer; font-size: 13px; font-weight: 500; text-align: start; }
+.reasoning-summary:hover { background: var(--surface); }
 .reasoning-chevron { margin-inline-start: auto; color: var(--muted); transition: transform var(--motion-base) var(--ease-standard); }
-.reasoning[open] .reasoning-chevron { transform: rotate(90deg); }
-.reasoning-body { padding: 2px 14px 13px; color: var(--muted); font-family: var(--font-display); font-size: 14px; font-style: italic; line-height: 1.6; white-space: pre-wrap; }
+.reasoning.open .reasoning-chevron { transform: rotate(90deg); }
+/* The body grows and folds by animating the row it sits in from zero to its own
+   height, so the thinking opens and closes rather than appearing all at once. */
+.reasoning-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--motion-base) var(--ease-standard); }
+.reasoning.open .reasoning-collapse { grid-template-rows: 1fr; }
+.reasoning-body { overflow: hidden; padding: 2px 14px 13px; color: var(--muted); font-family: var(--font-display); font-size: 14px; font-style: italic; line-height: 1.6; white-space: pre-wrap; }
 .reasoning-note { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
+/* The thought line when reasoning is hidden is a control: hovering it offers the
+   way to read what was thought, which is otherwise kept out of the thread. */
+.reasoning-reveal { border: 0; background: transparent; padding: 0; color: var(--muted); font-family: inherit; font-size: 12px; cursor: pointer; transition: color var(--motion-fast); }
+.reasoning-reveal:hover { color: var(--fg-2); }
+.reasoning-reveal-hint { color: var(--accent); opacity: 0; transition: opacity var(--motion-fast); }
+.reasoning-reveal:hover .reasoning-reveal-hint { opacity: 1; }
 /* The wait for the model's next output, before there is anything of its own to
    show: the glyph and the word the terminal uses while a turn runs, in the tone
    it uses there, with three dots breathing rather than a number ticking. An
@@ -243,7 +278,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @keyframes wait-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
 @keyframes wait-dot { 0%, 100% { opacity: .3; } 40% { opacity: 1; } }
 .tool-line { display: flex; align-items: center; justify-content: space-between; gap: 9px; min-height: 36px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); padding: 7px 12px; color: var(--fg-2); font-size: 12px; }
-.tool-line svg.icon { color: var(--muted); }
+/* Heavier than the rest of the set on purpose: at 14px a 1.8 stroke thins to about
+   a pixel, and the tool lines were reading as pencil. */
+.tool-line svg.icon { color: var(--muted); stroke-width: 2.5; }
 .message-content .tool-line code { overflow: hidden; color: var(--fg); font: 500 12px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
 /* The service's mark is a drawing on the text's baseline, not a character: it
    needs the nudge a glyph does not. */
@@ -251,19 +288,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tool-copy-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: none; border: 0; border-radius: 6px; background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
 .tool-line:hover .tool-copy-btn, .tool-copy-btn:focus-visible { opacity: 1; }
 .tool-copy-btn:hover { background: var(--surface-warm); color: var(--fg); }
-.message-toolbar { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-.message-tool-btn { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 8px; background: transparent; padding: 4px 7px; color: var(--muted); font-size: 12px; transition: background var(--motion-fast), color var(--motion-fast); }
-.message-tool-btn:hover { background: var(--surface-warm); color: var(--fg); }
+/* The buttons under a turn are always there, each showing only its mark; the word
+   comes out on hover. Pulled up against the answer — the content's own gap leaves
+   the space, and this trims the rest of it. */
+.message-toolbar { display: flex; align-items: center; gap: 0; margin-top: -4px; }
+.message-tool-btn { display: inline-flex; min-height: 32px; align-items: center; border: 0; border-radius: 9px; background: transparent; padding: 0 6px; color: var(--muted); font-size: 12px; transition: background var(--motion-fast), color var(--motion-fast); }
+.message-tool-btn:hover, .message-tool-btn:focus-visible { background: var(--surface-warm); color: var(--fg); }
+.message-tool-btn:disabled { color: var(--border); cursor: not-allowed; }
 .message-tool-label { font-size: 11px; font-weight: 500; }
+.message-tool-btn .message-tool-label { max-width: 0; margin-inline-start: 0; overflow: hidden; opacity: 0; white-space: nowrap; transition: max-width var(--motion-slow) var(--ease-standard), margin-inline-start var(--motion-slow) var(--ease-standard), opacity var(--motion-base); }
+.message-tool-btn:hover .message-tool-label, .message-tool-btn:focus-visible .message-tool-label, .message-tool-btn.failed .message-tool-label { max-width: 160px; margin-inline-start: 6px; opacity: 1; }
 /* A refused copy says so where the control is, and says it whether or not the
    pointer is on the control — the toolbar and the tool line are otherwise
    revealed on hover alone, which would hide the one answer worth reading. */
 .tool-copy-btn.failed { width: auto; gap: 5px; opacity: 1; padding: 0 7px; color: var(--danger); }
 .message-tool-btn.failed { color: var(--danger); }
-@media (hover: hover) {
-  .message-toolbar { opacity: 0; transition: opacity var(--motion-fast); }
-  .message:hover .message-toolbar, .message-toolbar:focus-within, .message-toolbar:has(.failed) { opacity: 1; }
-}
 .attachments { display: flex; flex-direction: column; gap: 8px; }
 .attachment-image { display: block; width: fit-content; max-width: 100%; }
 .attachment-image img { display: block; max-width: min(420px, 100%); max-height: 420px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); }
@@ -274,37 +313,82 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .notice { display: flex; align-items: center; gap: 12px; width: min(940px, calc(100% - 40px)); margin: 0 auto 10px; border: 1px solid var(--border); border-radius: 12px; padding: 11px 13px; font-size: 13px; }
 .notice.error { border-color: color-mix(in oklab, var(--danger) 30%, var(--border)); background: color-mix(in oklab, var(--danger) 7%, var(--surface)); color: var(--danger); }
 .notice button { margin-inline-start: auto; }
+/* The chat's notice lines up with the composer it sits above — the same column,
+   not a wider bar — and reads from the top, so a wrapped path does not centre its
+   close button against two lines of text. */
+.chat-view .notice { align-items: flex-start; width: min(780px, calc(100% - 56px)); margin: 0 auto 10px; }
 
 .composer-shell { width: 100%; background: var(--bg); padding: 6px 28px max(8px, env(safe-area-inset-bottom)); }
+/* The dock holds the composer and, floating just over it, the way back to the end
+   of the thread — centred, so it reads as the composer's own. */
+.composer-dock { position: relative; width: 100%; }
+/* Kept mounted and shown by class, so it can settle in and out rather than pop:
+   the fade-out finishes before the button stops taking a pointer. */
+.jump-latest { position: absolute; z-index: 3; bottom: calc(100% + 8px); left: 50%; display: grid; width: 34px; height: 34px; place-items: center; border: 0; border-radius: 50%; background: var(--surface); color: var(--fg-2); box-shadow: var(--shadow); opacity: 0; visibility: hidden; transform: translate(-50%, 6px); transition: opacity var(--motion-base) var(--ease-standard), transform var(--motion-base) var(--ease-standard), visibility 0s linear var(--motion-base); }
+.jump-latest.on { opacity: 1; visibility: visible; transform: translate(-50%, 0); transition: opacity var(--motion-base) var(--ease-standard), transform var(--motion-base) var(--ease-standard), visibility 0s; }
+.jump-latest.on:hover { background: var(--surface-warm); color: var(--fg); transform: translate(-50%, -1px); }
+/* Quote: what appears over a picked-out stretch of a reply, so the answer can
+   speak to exactly that. Fixed to the viewport, above the selection. */
+.quote-button { position: fixed; z-index: 40; display: inline-flex; min-height: 30px; align-items: center; gap: 6px; border: 0; border-radius: 999px; background: var(--surface); padding: 5px 11px; color: var(--fg-2); font-size: 12px; font-weight: 500; box-shadow: var(--shadow); transform: translate(-50%, calc(-100% - 8px)); transition: background var(--motion-fast), color var(--motion-fast); }
+.quote-button:hover { background: var(--surface-warm); color: var(--fg); }
 .composer-box { position: relative; width: min(780px, 100%); margin: 0 auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); transition: border-color var(--motion-fast), box-shadow var(--motion-fast); }
 .composer-box:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .composer-box textarea { display: block; width: 100%; min-height: 44px; max-height: 180px; resize: none; border: 0; outline: 0; background: none; padding: 12px 16px 4px; font-size: 14px; line-height: 1.55; }
 .composer-box textarea::placeholder { color: var(--muted); }
+/* The picked-out words, held at the head of the box until the reply is sent — a
+   filled strip with the quotation mark, what was picked, and the way to drop it. */
+.composer-quote { display: flex; align-items: flex-start; gap: 8px; margin: 10px 12px 0; border-radius: 10px; background: var(--surface-warm); padding: 7px 9px 7px 11px; }
+.composer-quote svg.icon { flex: none; margin-top: 1px; color: var(--accent); }
+.composer-quote-text { display: -webkit-box; flex: 1; overflow: hidden; color: var(--fg-2); font-size: 12px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; white-space: pre-wrap; }
+.composer-quote-remove { display: grid; width: 22px; height: 22px; flex: none; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
+.composer-quote-remove:hover { background: var(--surface); color: var(--fg); }
 .composer-toolbar { display: flex; min-height: 42px; align-items: center; gap: 8px; padding: 2px 9px 4px 14px; }
 .composer-model-wrap { position: relative; }
-.composer-model { display: flex; align-items: center; gap: 7px; max-width: 240px; border: 0; border-radius: 999px; background: var(--bg); padding: 5px 10px; font-size: 12px; font-weight: 500; transition: background var(--motion-fast); }
-.composer-model:hover { background: var(--surface-warm); }
-.composer-model-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-menu { position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 0; display: flex; width: min(320px, 78vw); max-height: 320px; flex-direction: column; gap: 2px; overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); padding: 6px; }
-.model-filter { position: sticky; top: 0; min-height: 34px; margin-bottom: 4px; border: 1px solid var(--border); border-radius: 9px; background: var(--bg); padding: 6px 9px; font-size: 12px; }
-.model-filter:focus { outline: 0; border-color: var(--accent); box-shadow: var(--focus-ring); }
-.model-option { display: flex; flex: none; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 9px; background: transparent; padding: 8px 10px; color: var(--fg-2); font-size: 13px; text-align: start; }
-.model-option:hover { background: var(--surface-warm); }
-.model-option.active { color: var(--fg); font-weight: 550; }
-.model-option-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.model-option small { flex: none; max-width: 45%; margin-inline-start: auto; overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.model-menu-note { padding: 9px 10px; color: var(--muted); font-size: 12px; }
-.model-menu-note.error { color: var(--danger); }
+/* The app's own dropdown, wherever a list of choices is offered. The trigger is
+   filled, like everything else the person presses; the menu is a panel, so it is
+   the one that carries the border. A long list gets a filter, held at the top. */
+.select { position: relative; }
+.select-trigger { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 8px; border: 0; border-radius: 11px; background: var(--surface); padding: 9px 12px; color: var(--fg); font-size: 13px; text-align: start; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
+.select-trigger:hover { background: var(--surface-warm); }
+.select.is-open .select-trigger { background: var(--surface); box-shadow: var(--focus-ring); }
+.select-value { overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
+.select-caret { flex: none; color: var(--muted); transition: transform var(--motion-fast) var(--ease-standard); }
+.select.is-open .select-caret { transform: rotate(90deg); }
+.select-menu { position: absolute; z-index: 30; inset-inline: 0; top: calc(100% + 6px); display: flex; max-height: 320px; flex-direction: column; gap: 2px; overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); padding: 6px; }
+.select-note { padding: 9px 10px; color: var(--muted); font-size: 12px; }
+/* The head of a menu — its title and its filter, when it has them — is what stays
+   in view while the rows scroll under it. */
+.select-head { position: sticky; z-index: 1; top: 0; display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; background: var(--surface); }
+.select-heading { padding: 2px 4px 0; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
+.select-search { display: flex; align-items: center; gap: 7px; border-radius: 9px; background: var(--bg); padding: 0 9px; color: var(--muted); }
+.select-search svg.icon { flex: none; }
+.select-search input { width: 100%; min-height: 34px; border: 0; background: none; padding: 6px 0; color: var(--fg); font-size: 12px; }
+.select-search input:focus { outline: 0; }
+.select-option { display: flex; flex: none; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 9px; background: transparent; padding: 8px 10px; color: var(--fg-2); font-size: 13px; text-align: start; }
+.select-option.active { background: var(--surface-warm); }
+.select-option.chosen { color: var(--fg); font-weight: 550; }
+.select-option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-option svg.icon { flex: none; color: var(--accent); }
+/* The composer's two pills — the model and the effort — are the Select trigger
+   wearing a pill: one height, radius, fill and type for both, and each carries
+   the caret that says it opens a menu. Declared after `.select-trigger` so the
+   pill's own compact size wins over the plain trigger's roomy field size. */
+.composer-pill { width: auto; max-width: 240px; min-height: 30px; gap: 6px; border-radius: 999px; background: var(--bg); padding: 5px 10px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
+.composer-pill:hover { background: var(--surface-warm); }
+.select.is-open .composer-pill { background: var(--bg); box-shadow: var(--focus-ring); }
+/* The composer's own menus open upwards: they sit at the foot of the screen. */
+.composer-model-wrap .select-menu, .composer-effort-wrap .select-menu { top: auto; bottom: calc(100% + 8px); inset-inline: 0 auto; width: min(320px, 78vw); }
+.composer-effort-wrap .select-menu { width: min(160px, 50vw); }
 .composer-effort-wrap { position: relative; }
-.composer-effort { display: flex; align-items: center; gap: 6px; border: 0; border-radius: 999px; background: var(--bg); padding: 5px 10px; font-size: 12px; font-weight: 500; text-transform: capitalize; transition: background var(--motion-fast); }
-.composer-effort:hover { background: var(--surface-warm); }
-.composer-effort-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.effort-menu { position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 0; display: flex; width: min(140px, 50vw); flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); padding: 6px; }
-.effort-option { display: flex; flex: none; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 9px; background: transparent; padding: 7px 10px; color: var(--fg-2); font-size: 13px; text-align: start; text-transform: capitalize; }
-.effort-option:hover { background: var(--surface-warm); }
-.effort-option.active { color: var(--fg); font-weight: 550; background: var(--surface-warm); }
-.effort-option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-spacer { flex: 1; }
+/* How full the model's window is, beside the send button: a thin ring that fills
+   as the conversation grows, and the count, so a compaction is never a surprise. */
+.composer-context { display: inline-flex; flex: none; align-items: center; gap: 7px; color: var(--muted); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.composer-context-ring { flex: none; transform: rotate(-90deg); }
+.composer-context-track { fill: none; stroke: var(--border-soft); stroke-width: 2.5; }
+.composer-context-arc { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; transition: stroke-dashoffset var(--motion-base) var(--ease-standard), stroke var(--motion-base); }
+.composer-context.full { color: var(--warn); }
+.composer-context.full .composer-context-arc { stroke: var(--warn); }
 .send-button { display: grid; width: 38px; height: 38px; place-items: center; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-on); box-shadow: 0 2px 10px color-mix(in oklab, var(--accent) 26%, transparent); transition: background var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .send-button:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); }
 .send-button:active:not(:disabled) { transform: none; }
@@ -334,8 +418,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    of the screen: sticky only pins it while the content runs past the view, and
    on a short section it would otherwise sit in the middle of the page. */
 .settings-inner { display: flex; flex: 1; width: min(1040px, 100%); flex-direction: column; margin: 0 auto; padding: 30px 32px 0; }
-.btn-secondary { display: inline-flex; min-height: 40px; align-items: center; gap: 7px; border: 0; border-radius: 11px; background: var(--surface-warm); padding: 8px 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; white-space: nowrap; transition: background var(--motion-fast); }
-.btn-secondary:hover { background: var(--border-soft); }
 .settings-panel-stack { flex: 1; }
 .settings-section { width: 100%; margin-bottom: 30px; }
 .settings-section[hidden] { display: none; }
@@ -365,6 +447,43 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .secret-row .secret-name { flex: none; min-width: 96px; }
 .secret-state { color: var(--muted); font: 11px var(--font-mono); }
 .secret-row .secret-state, .skill-row .secret-state { flex: none; }
+/* Which model answers, on a screen with room for it: the providers as a rail and
+   the models of the one being looked at beside them. The rail only moves the eye —
+   the choice is a model, which is what fixes the pair — so the row that is set
+   stays marked wherever the browsing goes. */
+.model-picker { display: none; }
+/* `min-height: 0` is what lets a pane be shorter than its list: a grid row is at
+   least as tall as its content, so without it a long list grows the row past the
+   height the picker is holding instead of scrolling inside it. */
+.model-picker-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 8px; border-radius: 12px; background: var(--surface); padding: 10px; }
+.model-picker-pane h3 { color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
+.model-picker-search { display: flex; align-items: center; gap: 7px; border-radius: 9px; background: var(--bg); padding: 0 9px; color: var(--muted); }
+.model-picker-search svg.icon { flex: none; }
+.model-picker-search input { width: 100%; min-height: 32px; border: 0; background: none; padding: 5px 0; color: var(--fg); font-size: 12px; }
+.model-picker-search input:focus { outline: 0; }
+/* The lists scroll inside a height the panes hold between them, so switching
+   provider does not make the section jump as the model list changes length. */
+.model-picker-list { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 2px; overflow: auto; }
+.model-picker-row { display: flex; flex: none; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 9px; background: transparent; padding: 7px 9px; color: var(--fg-2); font-size: 13px; text-align: start; transition: background var(--motion-fast); }
+.model-picker-row:hover, .model-picker-row.browsing { background: var(--surface-warm); }
+.model-picker-row.chosen { color: var(--fg); font-weight: 550; background: var(--accent-wash); }
+.model-picker-row svg.icon { flex: none; color: var(--accent); }
+/* The measure sits against the id it belongs to, and the mark that says this is
+   the one set waits at the other end, where it does not disturb the column of ids. */
+.model-picker-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-picker-tail { display: flex; min-width: 0; flex: none; align-items: center; gap: 8px; margin-inline-start: auto; }
+/* A measure that belongs to the name beside it — how much a model holds. Shared
+   by every list that shows one, so the badge cannot drift between them. */
+.size-badge { flex: none; border-radius: 6px; background: var(--bg); padding: 1px 6px; color: var(--muted); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.model-picker-note { padding: 8px 4px; color: var(--muted); font-size: 12px; }
+@media (min-width: 901px) {
+  .model-pair { display: none; }
+  /* Tall enough to read a catalog in, sized to the screen rather than to a number
+     I picked, and short enough that the section still fits beside the panel head,
+     the API URL and the save bar: past that the page starts scrolling for the
+     panes, which is the one thing they were meant to stop doing. */
+  .model-picker { display: grid; grid-template-columns: minmax(170px, 220px) minmax(0, 1fr); grid-template-rows: minmax(0, 1fr); gap: 14px; height: clamp(320px, 52vh, 620px); margin-bottom: 16px; }
+}
 .secret-groups { display: grid; gap: 26px; }
 .secret-group { min-width: 0; }
 .secret-group-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
@@ -385,8 +504,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-section .list-empty { padding: 18px; color: var(--muted); font-size: 13px; text-align: center; }
 /* Pinned to the foot of the screen, the content passing under it softening into
    a blur the way the sidebar's list does — no rule, and no text showing through. */
-.settings-save { position: sticky; z-index: 4; bottom: 0; display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 18px -8px 0; background: color-mix(in oklab, var(--bg) 84%, transparent); padding: 12px 8px; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
-.save-context { color: var(--muted); font-size: 12px; }
+.settings-save { position: sticky; z-index: 4; bottom: 0; display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 18px -8px 0; background: color-mix(in oklab, var(--bg) 84%, transparent); padding: 12px 8px; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .save-actions { display: flex; gap: 9px; }
 .button { display: inline-flex; flex: none; min-height: 40px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 11px; background: var(--surface-warm); padding: 8px 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .button:hover { background: var(--border-soft); }
@@ -409,9 +527,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .command-option.active { background: var(--surface-warm); }
 .command-name { flex: none; color: var(--fg); font: 12px var(--font-mono); }
 .command-option small { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.composer-hint { display: inline-flex; min-height: 30px; align-items: center; gap: 5px; border: 0; border-radius: 999px; background: var(--bg); padding: 5px 10px; color: var(--muted); font-size: 12px; transition: background var(--motion-fast); }
-.composer-hint:hover { background: var(--surface-warm); color: var(--fg-2); }
-
 /* A long setup job — a download, a profile copy, the embedding engine. */
 .job-panel { margin: 0 0 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 11px 13px; }
 .job-panel.error { border-color: color-mix(in oklab, var(--danger) 30%, var(--border)); }
@@ -465,8 +580,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .routine-count strong { color: var(--fg-2); font-size: 13px; font-variant-numeric: tabular-nums; }
 .routine-count-divider { width: 1px; height: 13px; margin-inline: 5px; background: var(--border-soft); }
 .routine-list { display: flex; flex-direction: column; gap: 5px; }
-.routine-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) minmax(140px, 200px) 16px; align-items: center; gap: 14px; width: 100%; min-height: 68px; border: 0; border-radius: 12px; background: var(--surface); padding: 12px 16px; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
+.routine-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 16px; align-items: center; gap: 14px; width: 100%; min-height: 68px; border: 0; border-radius: 12px; background: var(--surface); padding: 12px 16px; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .routine-row:hover { background: var(--surface-warm); }
+/* The part that opens the routine is its own control inside the card, so the row
+   keeps the whole width and the buttons beside it have a column of their own
+   rather than a layer over what the routine says. */
+.routine-row-open { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 200px); align-items: center; gap: 14px; min-width: 0; border: 0; border-radius: 10px; background: transparent; padding: 0; color: inherit; font: inherit; text-align: start; }
+.routine-row-actions { display: flex; flex: none; gap: 4px; }
+.routine-row-action { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 9px; background: var(--surface); color: var(--fg-2); box-shadow: var(--shadow-sm); opacity: 0; transition: background var(--motion-fast), color var(--motion-fast), opacity var(--motion-fast); }
+.routine-row-action:hover { background: var(--surface-warm); color: var(--fg); }
+.routine-row:hover .routine-row-action, .routine-row-action:focus-visible { opacity: 1; }
 .routine-row:active { transform: translateY(1px); }
 .routine-state-mark { display: block; width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--muted); }
 .routine-state-mark.enabled { background: var(--success); box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 12%, transparent); }
@@ -486,13 +609,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .routine-empty h3 { color: var(--fg); font-size: 16px; font-weight: 600; }
 .routine-empty p.routine-empty-copy { max-width: 360px; margin: 8px 0 20px; color: var(--muted); font-size: 13px; line-height: 1.55; }
 .routine-state { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; padding: 22px; color: var(--danger); font-size: 13px; text-align: center; }
-.routine-detail-head { max-width: 820px; }
+.routine-detail-head { max-width: none; }
+/* Tighter than the list's head: the prompt and the controls under it read as one
+   block, so the space between them is a gap, not a break. */
+.routines-section .routine-detail-head { padding-bottom: 10px; }
 .routine-detail-head .settings-back { width: fit-content; min-height: 36px; margin: 0 0 14px; background: transparent; padding: 6px 8px; box-shadow: none; color: var(--muted); }
 .routine-detail-head .settings-back:hover { background: var(--surface-warm); color: var(--fg); }
 .routine-detail-title-row { display: flex; align-items: center; gap: 11px; min-width: 0; }
 .routine-detail-heading { overflow-wrap: anywhere; }
-.routine-detail-head > p.routine-detail-prompt { max-width: 68ch; margin-top: 9px; overflow-wrap: anywhere; }
-.routine-overview { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; padding: 16px 0 20px; }
+/* The prompt is an instruction — often one long command — not prose: it takes the
+   width it is given rather than a reading measure, so it wraps where it has to. */
+.routine-detail-head > p.routine-detail-prompt { margin-top: 9px; overflow-wrap: anywhere; }
+.routine-overview { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; padding: 10px 0 20px; }
 .routine-overview-data { display: flex; flex-wrap: wrap; gap: 26px; }
 .routine-fact { display: flex; min-width: 112px; flex-direction: column; gap: 5px; }
 .routine-fact-label { color: var(--muted); font-size: 10px; letter-spacing: .05em; text-transform: uppercase; }
@@ -517,6 +645,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .routine-runs-count { display: grid; min-width: 28px; height: 28px; place-items: center; border-radius: 9px; background: var(--surface-warm); color: var(--fg-2); font: 11px var(--font-mono); }
 .routine-runs-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .run-list { display: flex; max-height: 520px; flex-direction: column; gap: 4px; overflow: auto; padding: 3px; }
+/* Zero content, one pixel tall: it exists only to be scrolled into view, and the
+   list asks for the next page when it is. */
+.run-list-sentinel { display: block; flex: none; height: 1px; }
 .run-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) 15px; align-items: center; gap: 10px; width: 100%; min-height: 62px; border: 0; border-radius: 11px; background: transparent; padding: 10px 11px; color: var(--fg-2); text-align: start; transition: background var(--motion-fast); }
 .run-row:hover { background: var(--surface-warm); }
 .run-row.active { background: var(--surface-warm); color: var(--fg); }
@@ -547,7 +678,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .routine-thread-subtitle { margin-top: 3px; color: var(--muted); font-size: 12px; }
 @media (max-width: 720px) {
   .settings-inner.routines-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 56px) 20px 24px; }
-  .routine-row { grid-template-columns: 10px minmax(0, 1fr) 15px; gap: 11px; }
+  .routine-row { grid-template-columns: 10px minmax(0, 1fr) auto 15px; gap: 11px; }
+  .routine-row-open { grid-template-columns: minmax(0, 1fr); }
   .routine-row-next { display: none; }
   .routine-overview { align-items: stretch; flex-direction: column; }
   .routine-overview-data { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 18px; }
@@ -572,7 +704,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .routine-detail-title-row .routine-state-mark { margin-top: 6px; }
   .routine-detail-title-row h2 { font-size: 17px; }
 }
-.routine-row:focus-visible, .run-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.routine-row-open:focus-visible, .run-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
 /* The settings sections, drawn from one list in two places: the drawer on a wide
    screen, the strip on a phone. Only one of the two is on screen at any width. */
@@ -628,6 +760,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   /* Hug the bottom: the browser's own bar already supplies the breathing room,
      and the safe area only pushes it up when that bar has scrolled away. */
   .composer-shell { padding: 10px 18px max(6px, env(safe-area-inset-bottom)); }
+  .chat-view .notice { width: min(780px, calc(100% - 36px)); }
   .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 48px) 20px 0; }
   /* This bar is the top of Settings, so the panel starts right under it. */
   .main.has-settings-strip .settings-inner { padding-top: 26px; }
@@ -667,8 +800,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .connection-status > span { width: 8px; height: 8px; }
   .message.user .message-content { max-width: 92%; }
   .empty-state { min-height: 58vh; padding: 30px 18px 42px; }
-  .settings-save { align-items: flex-end; flex-direction: column; margin-inline: -4px; }
-  .save-context { align-self: flex-start; }
+  .settings-save { margin-inline: -4px; }
   .save-actions { width: 100%; justify-content: flex-end; }
 }
 /* iOS Safari zooms the whole viewport when a focused field's text is under 16px,
@@ -677,7 +809,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @media (max-width: 640px) {
   .composer-box textarea,
   .field input, .field select, .field textarea,
-  .sidebar-search input, .session-rename-input, .secret-row input, .model-filter { font-size: 1rem; }
+  .sidebar-search input, .session-rename-input, .secret-row input, .select-search input { font-size: 1rem; }
 }
 @media (prefers-reduced-motion: reduce) {
   /* biome-ignore lint/complexity/noImportantStyles: turning motion off has to win against every component's own transition, and a universal selector can only do that with `!important` */

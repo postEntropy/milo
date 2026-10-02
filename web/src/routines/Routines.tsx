@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { PermissionRequest, SendTarget, TranscriptMessage } from '@protocol'
 import { api } from '../lib/api.js'
-import { formatWhen, message } from '../lib/format.js'
+import { formatIn, formatWhen, message } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
+import { Select } from '../ui/Select.js'
 import { MessageList, type ChatMessage } from '../chat/MessageList.js'
 import { Permissions } from '../chat/Permissions.js'
 
@@ -24,6 +25,12 @@ type Notice = { text: string; error: boolean }
 
 /** A run of a routine, as the history lists it. */
 type RunEntry = { id: string; at: number }
+
+/** How many runs a page of the history holds; the rest arrive as the list scrolls. */
+const RUN_PAGE = 20
+
+/** One run as the front page's timeline lists it, across every routine. */
+type FeedEntry = { id: string; runId: string; routine: string; at: number; answer: string }
 
 /**
  * The chat this screen makes routines through. The app owns the socket, so the
@@ -46,6 +53,7 @@ const GATEWAYS = [
   ['web', 'This web chat'],
   ['telegram', 'Telegram'],
   ['discord', 'Discord'],
+  ['none', 'Routines screen only'],
 ] as const
 
 /**
@@ -69,6 +77,23 @@ export function Routines({ conversationId, chat, tick }: { conversationId: strin
   }, [])
 
   useEffect(() => { void refresh() }, [refresh])
+
+  /** Run one now, straight from the list, without opening it. */
+  const runNow = useCallback(async (id: string): Promise<void> => {
+    try {
+      await api('routine-run', { id })
+      setNotice({ text: 'Ran it now — open it to read what it said.', error: false })
+      await refresh()
+    } catch (error) { setNotice({ text: message(error), error: true }) }
+  }, [refresh])
+
+  /** Pause or resume one, straight from the list. */
+  const toggle = useCallback(async (id: string, enabled: boolean): Promise<void> => {
+    try {
+      await api('routine-enable', { id, enabled })
+      await refresh()
+    } catch (error) { setNotice({ text: message(error), error: true }) }
+  }, [refresh])
   // biome-ignore lint/correctness/useExhaustiveDependencies: the counter is the trigger, not a value read here — the turn it counts may have just made a routine
   useEffect(() => { void refresh() }, [chat.turnEnds, refresh])
   // biome-ignore lint/correctness/useExhaustiveDependencies: the tick is the trigger, not a value read here — the server said a routine ran
@@ -106,6 +131,8 @@ export function Routines({ conversationId, chat, tick }: { conversationId: strin
     onOpen={(id, runId) => { setOpenedRun(runId); setRoutineId(id) }}
     onCompose={() => { setNotice(null); setComposing(true) }}
     onRetry={() => { setNotice(null); void refresh() }}
+    onRun={runNow}
+    onToggle={toggle}
   />
   
 }
@@ -135,6 +162,8 @@ function RoutineList({
   onOpen,
   onCompose,
   onRetry,
+  onRun,
+  onToggle,
 }: {
   /** Null until the list has been read once: "none" and "not yet" are not the same. */
   routines: RoutineSummary[] | null
@@ -145,6 +174,8 @@ function RoutineList({
   onOpen(id: string, runId: string): void
   onCompose(): void
   onRetry(): void
+  onRun(id: string): void
+  onToggle(id: string, enabled: boolean): void
 }) {
   const enabled = routines?.filter((routine) => routine.enabled).length ?? 0
   const [feed, setFeed] = useState<FeedEntry[]>([])
@@ -179,20 +210,26 @@ function RoutineList({
         <button className="button primary" type="button" onClick={onCompose}><Icon name="plus" size={15} /> New routine</button>
       </div>
       : <div className="routine-list">
-        {routines.map((routine) => <button key={routine.id} type="button" className="routine-row" onClick={() => onSelect(routine.id)}>
+        {routines.map((routine) => <div className="routine-row" key={routine.id}>
           <span className={`routine-state-mark ${routine.enabled ? 'enabled' : 'paused'}`} aria-hidden="true" />
-          <span className="routine-row-main">
-            <span className="routine-row-name">{routine.name ?? routine.prompt}</span>
-            <span className="routine-row-meta">{routine.whenLabel}<span className="routine-meta-separator">·</span>{routine.targetLabel}</span>
-          </span>
-          <span className="routine-row-next">
-            <span className="routine-row-next-label">{routine.lastRunAt ? 'Last run' : routine.enabled ? 'Next run' : 'Status'}</span>
-            <span className={`routine-row-state${routine.lastResult === 'error' ? ' failed' : ''}`}>
-              {routine.lastResult === 'error' ? 'Failed' : routine.enabled ? routine.lastRunAt ? formatWhen(routine.lastRunAt) : routine.nextRunAt ? formatWhen(routine.nextRunAt) : 'Enabled' : 'Paused'}
+          <button type="button" className="routine-row-open" onClick={() => onSelect(routine.id)}>
+            <span className="routine-row-main">
+              <span className="routine-row-name">{routine.name ?? routine.prompt}</span>
+              <span className="routine-row-meta">{routine.whenLabel}<span className="routine-meta-separator">·</span>{routine.targetLabel}</span>
             </span>
+            <span className="routine-row-next">
+              <span className="routine-row-next-label">{routine.lastRunAt ? 'Last run' : routine.enabled ? 'Next run' : 'Status'}</span>
+              <span className={`routine-row-state${routine.lastResult === 'error' ? ' failed' : ''}`}>
+                {routine.lastResult === 'error' ? 'Failed' : routine.enabled ? routine.lastRunAt ? formatWhen(routine.lastRunAt) : routine.nextRunAt ? formatIn(routine.nextRunAt) : 'Enabled' : 'Paused'}
+              </span>
+            </span>
+          </button>
+          <span className="routine-row-actions">
+            <button className="routine-row-action" type="button" title="Run now" aria-label={`Run ${routine.name ?? routine.prompt} now`} onClick={() => onRun(routine.id)}><Icon name="play" size={13} /></button>
+            <button className="routine-row-action" type="button" title={routine.enabled ? 'Pause' : 'Resume'} aria-label={routine.enabled ? `Pause ${routine.name ?? routine.prompt}` : `Resume ${routine.name ?? routine.prompt}`} onClick={() => onToggle(routine.id, !routine.enabled)}><Icon name={routine.enabled ? 'pause' : 'play'} size={13} /></button>
           </span>
           <Icon className="routine-row-chevron" name="chevron" size={16} />
-        </button>)}
+        </div>)}
       </div>}
     {feed.length > 0 && <section className="routine-feed" aria-labelledby="routine-feed-title">
       <div className="routine-section-head">
@@ -229,8 +266,12 @@ function RoutineDetail({
   onChanged(): void
 }) {
   const [runs, setRuns] = useState<RunEntry[] | null>(null)
-  const [keep, setKeep] = useState(0)
-  const [openRun, setOpenRun] = useState<string | null>(null)
+  const [total, setTotal] = useState(0)
+  const listRef = useRef<HTMLDivElement>(null)
+  const sentinelRef = useRef<HTMLSpanElement>(null)
+  /** Whether a page is in flight, so the observer cannot ask for the same one twice. */
+  const loadingMore = useRef(false)
+  const [openRun, setOpenRun] = useState<string | null>(initialRun ?? null)
   const [run, setRun] = useState<ChatMessage[] | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
   const [runsError, setRunsError] = useState<string | null>(null)
@@ -239,16 +280,45 @@ function RoutineDetail({
 
   const loadRuns = useCallback(async (): Promise<void> => {
     setRunsError(null)
-    const history = await api<{ runs: RunEntry[]; keep: number }>('routine-runs', { id: routine.id })
+    const history = await api<{ runs: RunEntry[]; total: number }>('routine-runs', { id: routine.id, limit: RUN_PAGE })
     setRuns(history.runs)
-    setKeep(history.keep)
+    setTotal(history.total)
     setOpenRun((current) => current ?? history.runs[0]?.id ?? null)
   }, [routine.id])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: the tick is the trigger, not a value read here — the server said a routine ran
   useEffect(() => {
     void loadRuns().catch((error) => setRunsError(message(error)))
-  }, [loadRuns])
+  }, [loadRuns, tick])
+
+  /** The next page, asked for as the list's end comes into view. */
+  const loadMoreRuns = useCallback(async (): Promise<void> => {
+    const loaded = runs?.length ?? 0
+    if (loadingMore.current || loaded === 0 || loaded >= total) return
+    loadingMore.current = true
+    try {
+      const page = await api<{ runs: RunEntry[]; total: number }>('routine-runs', { id: routine.id, offset: loaded, limit: RUN_PAGE })
+      setRuns((current) => [...(current ?? []), ...page.runs])
+      setTotal(page.total)
+    } catch {
+      // A page that failed is asked for again on the next scroll rather than said
+      // twice: the list already carries whatever it did load.
+    } finally {
+      loadingMore.current = false
+    }
+  }, [routine.id, runs?.length, total])
+
+  useEffect(() => {
+    const list = listRef.current
+    const sentinel = sentinelRef.current
+    if (!list || !sentinel || runs === null || runs.length >= total) return
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries.some((entry) => entry.isIntersecting)) void loadMoreRuns() },
+      { root: list },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [runs, total, loadMoreRuns])
 
   async function retryRuns(): Promise<void> {
     try { await loadRuns() }
@@ -341,14 +411,14 @@ function RoutineDetail({
 
     <section className="routine-runs" aria-labelledby="routine-runs-title">
       <div className="routine-section-head">
-        <div><h3 id="routine-runs-title">Runs</h3><p className="routine-section-subtitle">{runs === null ? 'Reading run history' : `${runs.length} of the last ${keep} runs`}</p></div>
+        <div><h3 id="routine-runs-title">Runs</h3><p className="routine-section-subtitle">{runs === null ? 'Reading run history' : runs.length >= total ? `${total} ${total === 1 ? 'run' : 'runs'}` : `${runs.length} of ${total} runs`}</p></div>
         {runs && runs.length > 0 && <span className="routine-runs-count">{runs.length}</span>}
       </div>
       {runsError ? <div className="routine-state"><p>Could not read run history: {runsError}</p><button className="button" type="button" onClick={() => void retryRuns()}>Try again</button></div>
         : runs === null ? <p className="list-empty">Reading runs…</p>
         : runs.length === 0 ? <div className="routine-runs-empty"><Icon name="clock" size={18} /><span>No runs yet. Run it now or wait for its next scheduled time.</span></div>
         : <div className="routine-runs-layout">
-          <div className="run-list">
+          <div className="run-list" ref={listRef}>
             {runs.map((entry, index) => <button
               key={entry.id}
               type="button"
@@ -357,9 +427,12 @@ function RoutineDetail({
               onClick={() => setOpenRun(entry.id)}
             >
               <span className="run-row-marker" aria-hidden="true" />
-              <span className="run-row-copy"><strong>{index === 0 ? 'Latest run' : `Run ${runs.length - index}`}</strong><span className="run-when">{formatWhen(entry.at, true)}</span></span>
+              <span className="run-row-copy"><strong>{index === 0 ? 'Latest run' : `Run ${total - index}`}</strong><span className="run-when">{formatWhen(entry.at, true)}</span></span>
               <Icon className="run-row-chevron" name="chevron" size={15} />
             </button>)}
+            {/* The last thing in the list is the ask for more: scrolled into view,
+                it brings the next page, so the history loads as it is read. */}
+            {runs.length < total && <span ref={sentinelRef} className="run-list-sentinel" aria-hidden="true" />}
           </div>
           <div className="run-output" aria-live="polite">
             <div className="run-output-head"><span>{selectedRun ? formatWhen(selectedRun.at, true) : 'Select a run'}</span>{selectedRun && <span>Run output</span>}</div>
@@ -393,7 +466,7 @@ function NewRoutine({ conversationId, chat, onBack }: { conversationId: string; 
     // Telegram even though the chat it was asked in is this one.
     chat.send(text, gateway === 'web'
       ? { gateway: 'web', conversationId }
-      : { gateway, conversationId: target.trim() })
+      : { gateway, conversationId: gateway === 'none' ? conversationId : target.trim() })
   }
 
   /** What has been asked here and answered here: nothing until the first ask. */
@@ -411,12 +484,17 @@ function NewRoutine({ conversationId, chat, onBack }: { conversationId: string; 
       <div className="routine-destination">
         <div className="routine-form-heading"><Icon name="globe" size={15} /><span>Delivery destination</span></div>
         <div className="form-grid">
-          <Field label="Service"><select value={gateway} onChange={(event) => {
-            const next = event.target.value as SendTarget['gateway']
-            setGateway(next)
-            setTarget(next === 'web' ? conversationId : '')
-          }}>{GATEWAYS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></Field>
-          <Field label="Conversation id"><input value={target} onChange={(event) => setTarget(event.target.value)} placeholder="a chat or channel id" disabled={gateway === 'web'} /><small>{gateway === 'web' ? 'This browser’s conversation.' : 'The chat to post into.'}</small></Field>
+          <Field label="Service"><Select
+            label="Service"
+            value={gateway}
+            choices={GATEWAYS.map(([value, label]) => ({ value, label }))}
+            onChange={(next) => {
+              const picked = next as SendTarget['gateway']
+              setGateway(picked)
+              setTarget(picked === 'web' ? conversationId : '')
+            }}
+          /></Field>
+          <Field label="Conversation id"><input value={target} onChange={(event) => setTarget(event.target.value)} placeholder="a chat or channel id" disabled={gateway === 'web' || gateway === 'none'} /><small>{gateway === 'web' ? 'This browser’s conversation.' : gateway === 'none' ? 'Kept on the Routines screen — no chat.' : 'The chat to post into.'}</small></Field>
         </div>
       </div>
       <div className="ask-actions">
