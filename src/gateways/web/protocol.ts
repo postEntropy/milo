@@ -82,7 +82,7 @@ export interface FrameAttachment {
 }
 
 export type ServerFrame =
-  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: 'on' | 'off'; provider: string; model: string; effort?: 'low' | 'medium' | 'high' }
+  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: 'on' | 'off'; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high' }
   | { type: 'turn-start'; id: string; text: string }
   | { type: 'event'; turnId: string; event: AgentEvent }
   | { type: 'permission'; id: string; request: PermissionRequest; expiresAt: number }

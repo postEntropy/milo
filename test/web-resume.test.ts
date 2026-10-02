@@ -59,3 +59,22 @@ describe('opening a past session in the web', () => {
     expect(ready?.messages.map((message) => message.text)).toContain('the thing we talked about')
   })
 })
+
+describe('the web handshake', () => {
+  it('names the provider it runs on, and keeps the id when it is not a known preset', async () => {
+    const runtime = build()
+    const known = new WebHub(runtime, { provider: 'commandcode', model: 'test-model' })
+    const frames: ServerFrame[] = []
+    await known.connect({ send: (frame) => frames.push(frame) }, NEXT_CONVERSATION)
+    expect(readyOf(frames)?.providerName).toBe('Command Code')
+
+    const unknown = new WebHub(runtime, { provider: 'not-a-preset', model: 'test-model' })
+    const other: ServerFrame[] = []
+    await unknown.connect({ send: (frame) => other.push(frame) }, PAST_CONVERSATION)
+    expect(readyOf(other)?.providerName).toBe('not-a-preset')
+  })
+})
+
+function readyOf(frames: ServerFrame[]): Extract<ServerFrame, { type: 'ready' }> | undefined {
+  return frames.find((frame): frame is Extract<ServerFrame, { type: 'ready' }> => frame.type === 'ready')
+}
