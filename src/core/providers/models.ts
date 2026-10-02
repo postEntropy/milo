@@ -3,7 +3,12 @@ import type { Wire } from './create.js'
 export interface ModelInfo {
   id: string
   name?: string
+  /** How much the model holds, when the catalog says: tokens, not bytes. */
+  context?: number
 }
+
+/** The names a catalog gives the size of a model's window, most common first. */
+const CONTEXT_KEYS = ['context_length', 'context_window', 'context_size', 'max_context_length', 'max_context', 'inputTokenLimit', 'max_input_tokens']
 
 export interface ListModelsOptions {
   baseURL: string
@@ -56,7 +61,12 @@ export function normalizeModels(json: unknown): ModelInfo[] {
     const id = firstString(record.id, record.model, record.slug)
     if (!id) continue
     const name = firstString(record.display_name, record.name)
-    byId.set(id, { id, name: name && name !== id ? name : undefined })
+    // OpenRouter keeps it one level down, under the provider that serves it.
+    const nested = record.top_provider && typeof record.top_provider === 'object'
+      ? record.top_provider as Record<string, unknown>
+      : {}
+    const context = firstNumber(CONTEXT_KEYS.map((key) => record[key]).concat(CONTEXT_KEYS.map((key) => nested[key])))
+    byId.set(id, { id, name: name && name !== id ? name : undefined, ...(context ? { context } : {}) })
   }
 
   return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
@@ -76,6 +86,15 @@ function pickArray(json: unknown): unknown[] {
 function firstString(...values: unknown[]): string | undefined {
   for (const value of values) {
     if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return undefined
+}
+
+/** The first value that is a count of something — a catalog may send `"128000"`. */
+function firstNumber(values: unknown[]): number | undefined {
+  for (const value of values) {
+    const number = typeof value === 'string' ? Number(value) : value
+    if (typeof number === 'number' && Number.isFinite(number) && number > 0) return number
   }
   return undefined
 }
