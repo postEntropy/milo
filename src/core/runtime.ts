@@ -315,6 +315,14 @@ export class AgentRuntime {
   }
 
   /**
+   * How much the running model holds, for a surface that draws a context bar.
+   * Same lookup a session does before compaction, so the two cannot disagree.
+   */
+  async contextWindow(): Promise<number | undefined> {
+    return this.options.lookupContextWindow?.(this.options.model)
+  }
+
+  /**
    * Moves the model the sessions after this one start on, leaving the ones
    * already open on the model they are running — work in progress is not
    * hijacked by a change to the install's default. This is what saving the
