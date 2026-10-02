@@ -13,6 +13,7 @@ import {
 import type { AgentRuntime } from '../../../core/runtime.js'
 import { formatWhen, type SessionStats } from '../../../core/sessions/index.js'
 import { formatSkillList } from '../../../core/skills/index.js'
+import type { TodoItem } from '../../../core/todos.js'
 import type {
   PermissionAsker,
   PermissionMode,
@@ -589,6 +590,10 @@ export function ChatScreen({
             // for: running the tool is not the model thinking.
             waitingSince = Date.now()
           },
+          // The plan is drawn as its own block, not a tool line, so it appears
+          // whatever the tool level is set to — the person watching a long turn
+          // wants to see it either way.
+          onTodo: (items) => push({ kind: 'todo', items }),
           onUsage: (total) => setTokens((value) => value + total),
           onCompacted: (ms) => {
             compactedMs = ms
@@ -929,6 +934,8 @@ interface EventHandlers {
   onReasoning: (delta: string) => void
   onToolStart: (name: string, args: unknown) => void
   onToolEnd: (name: string, isError: boolean) => void
+  /** The plan the model is keeping, in full, each time it changes. */
+  onTodo: (items: TodoItem[]) => void
   onUsage: (totalTokens: number) => void
   /** How long the compaction's own model call took, in ms. */
   onCompacted: (ms: number) => void
@@ -956,6 +963,9 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
       break
     case 'tool-end':
       handlers.onToolEnd(event.name, event.isError)
+      break
+    case 'todo':
+      handlers.onTodo(event.items)
       break
     case 'usage':
       handlers.onUsage(event.inputTokens + event.outputTokens)

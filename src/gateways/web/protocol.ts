@@ -1,4 +1,5 @@
 import type { Idea } from '../../core/ideas.js'
+import type { TodoItem } from '../../core/todos.js'
 
 export const PROTOCOL_VERSION = 1
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
@@ -21,6 +22,7 @@ export type AgentEvent =
   | { type: 'reasoning-delta'; delta: string }
   | { type: 'tool-start'; id: string; name: string; args: unknown }
   | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean }
+  | { type: 'todo'; items: TodoItem[] }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   | { type: 'compacted'; ms: number }
   | { type: 'rebased'; added: number; compacted: boolean }
@@ -117,6 +119,8 @@ export interface TranscriptMessage {
   reasoning?: string
   /** The tool calls this turn made, one line each, in the shared chat format. */
   tools?: ToolMark[]
+  /** The plan the turn was keeping, drawn as a checklist. */
+  todos?: TodoItem[]
   /** Files delivered into this conversation, still on disk and served by id. */
   attachments?: FrameAttachment[]
 }

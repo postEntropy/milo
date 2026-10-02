@@ -1,5 +1,6 @@
 import type { OutgoingFile } from '../../core/outgoing.js'
 import type { Message } from '../../core/providers/types.js'
+import { todosFromArgs } from '../../core/todos.js'
 import { showsToolCall, toolText } from '../tool-line.js'
 import type { FrameAttachment, TranscriptMessage } from './protocol.js'
 
@@ -32,6 +33,10 @@ export function transcriptOf(messages: Message[], register: RegisterFile): Trans
           ? [{ name: part.name, text: toolText(part.name, part.args) }]
           : [],
       )
+      // The plan rides on the `todo` call's own arguments, so it survives a
+      // reload the way any other part of the transcript does.
+      const todos = message.content.flatMap((part) => (part.type === 'tool-call' ? todosFromArgs(part.args) : []))
+
       const attachments = message.content.flatMap((part) =>
         part.type === 'file'
           ? [register({ path: part.path, name: part.name, mimeType: part.mimeType })]
@@ -44,6 +49,7 @@ export function transcriptOf(messages: Message[], register: RegisterFile): Trans
           text,
           ...(reasoning ? { reasoning } : {}),
           ...(tools.length > 0 ? { tools } : {}),
+          ...(todos.length > 0 ? { todos } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
         }
         transcript.push(currentAssistant)
@@ -57,6 +63,9 @@ export function transcriptOf(messages: Message[], register: RegisterFile): Trans
         if (tools.length > 0) {
           currentAssistant.tools = [...(currentAssistant.tools ?? []), ...tools]
         }
+        if (todos.length > 0) {
+          currentAssistant.todos = [...(currentAssistant.todos ?? []), ...todos]
+        }
         if (attachments.length > 0) {
           currentAssistant.attachments = [...(currentAssistant.attachments ?? []), ...attachments]
         }
@@ -67,6 +76,7 @@ export function transcriptOf(messages: Message[], register: RegisterFile): Trans
   return transcript.filter((message) =>
     message.text.trim() !== '' ||
     (message.tools?.length ?? 0) > 0 ||
+    (message.todos?.length ?? 0) > 0 ||
     (message.attachments?.length ?? 0) > 0 ||
     Boolean(message.reasoning),
   )

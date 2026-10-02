@@ -179,6 +179,9 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
           result: result.content,
           isError: Boolean(result.isError),
         }
+        // The plan is drawn by the surfaces and nothing the model needs told
+        // back, so it rides as its own event rather than into the transcript.
+        if (result.todos) yield { type: 'todo', items: result.todos }
         const images = await persistImages(result.images)
         messages.push({
           role: 'tool',

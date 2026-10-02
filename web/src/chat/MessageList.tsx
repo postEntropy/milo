@@ -2,6 +2,7 @@ import { memo, useEffect, useState } from 'react'
 import { useCopy, type CopyState } from '../lib/clipboard.js'
 import type { ActionRow, FrameAttachment, SessionCardItem, ToolMark, TranscriptMessage } from '@protocol'
 import { toolBrand } from '../../../src/gateways/tool-line.ts'
+import { todoMark, type TodoItem } from '../../../src/core/todos.ts'
 import { toolIconName } from '../ui/tool-icons.js'
 import { attachmentUrl } from '../lib/api.js'
 import { Markdown } from './Markdown.js'
@@ -75,6 +76,30 @@ function ToolLines({ id, tools }: { id: string; tools: ToolMark[] }) {
     seen.set(of, occurrence + 1)
     return <ToolLine key={`${id}-${of}-${occurrence}`} tool={tool} />
   })}</>
+}
+
+/**
+ * The plan the model is keeping, drawn whole each time it changes. The current
+ * step is the one in the accent colour, the eye's anchor in the list; a finished
+ * one is struck through rather than removed, so the progress is legible.
+ */
+function TodoList({ items }: { items: TodoItem[] }) {
+  const seen = new Map<string, number>()
+  return (
+    <ul className="todo-list">
+      {items.map((item) => {
+        const of = `${item.status}\u0000${item.content}`
+        const occurrence = seen.get(of) ?? 0
+        seen.set(of, occurrence + 1)
+        return (
+          <li key={`${of}-${occurrence}`} className={`todo-item todo-${item.status}`}>
+            <span className="todo-mark" aria-hidden="true">{todoMark(item.status)}</span>
+            <span className="todo-text">{item.content}</span>
+          </li>
+        )
+      })}
+    </ul>
+  )
 }
 
 function SessionCards({
@@ -282,6 +307,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
             ? <div className="reasoning-note"><Icon name="spark" size={14} /> {thoughtLabel(message.thoughtMs)}</div>
             : null}
       {message.tools && message.tools.length > 0 && <ToolLines id={message.id} tools={message.tools} />}
+      {message.todos && message.todos.length > 0 && <TodoList items={message.todos} />}
       {message.attachments && message.attachments.length > 0 && <Attachments items={message.attachments} />}
       {message.cards && message.cards.length > 0 ? (
         <SessionCards
@@ -451,6 +477,7 @@ function copyLabel(state: CopyState): string {
 function hasContent(message: ChatMessage, thinking: boolean): boolean {
   if (message.text?.trim()) return true
   if (message.tools && message.tools.length > 0) return true
+  if (message.todos && message.todos.length > 0) return true
   if (message.attachments && message.attachments.length > 0) return true
   if (message.cards && message.cards.length > 0) return true
   if (message.actions && message.actions.length > 0) return true

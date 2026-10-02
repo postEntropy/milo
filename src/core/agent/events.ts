@@ -1,8 +1,16 @@
+import type { TodoItem } from '../todos.js'
+
 export type AgentEvent =
   | { type: 'text-delta'; delta: string }
   | { type: 'reasoning-delta'; delta: string }
   | { type: 'tool-start'; id: string; name: string; args: unknown }
   | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean }
+  /**
+   * The plan the turn is keeping changed. A surface draws the whole list from
+   * this; it is never part of the transcript sent back to the model, because the
+   * model is the one that set it.
+   */
+  | { type: 'todo'; items: TodoItem[] }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   /**
    * The transcript was compacted just before this turn. A session-level event

@@ -4,6 +4,7 @@ import type { OutgoingFile } from '../outgoing.js'
 import type { ImageMime } from '../providers/types.js'
 import type { NewRoutine, Routine } from '../routines.js'
 import type { SessionSummary } from '../sessions/types.js'
+import type { TodoItem } from '../todos.js'
 
 /**
  * How a session hands a tool the ability to write to its memory. Injected
@@ -77,6 +78,12 @@ export interface ToolResult {
   content: string
   isError?: boolean
   images?: ToolImage[]
+  /**
+   * A plan the turn is keeping, when the tool is one that sets one. Not written
+   * into the transcript by the loop — it is display state, turned into an event
+   * for the surfaces and nothing the model needs told back.
+   */
+  todos?: TodoItem[]
 }
 
 export interface Tool<A = unknown> {

@@ -358,3 +358,42 @@ describe('runAgent — concurrent reads', () => {
   })
 })
 
+describe('runAgent — the plan', () => {
+  it('turns the plan a tool returns into a todo event', async () => {
+    const planTool: Tool<{ todos: { content: string; status: 'pending' | 'in_progress' | 'completed' }[] }> = {
+      name: 'todo',
+      description: 'plan',
+      schema: z.object({
+        todos: z.array(z.object({ content: z.string(), status: z.enum(['pending', 'in_progress', 'completed']) })),
+      }),
+      internal: true,
+      async execute(args) {
+        return { content: 'ok', todos: args.todos.map((todo) => ({ content: todo.content, status: todo.status })) }
+      },
+    }
+    const provider = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'todo', args: { todos: [{ content: 'Step', status: 'pending' }] } },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      [{ type: 'text', delta: 'done' }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const registry = new ToolRegistry([planTool])
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider,
+      model: 'm',
+      tools: registry.specs(),
+      registry,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'go' }] }],
+      context: { cwd: process.cwd(), signal: new AbortController().signal },
+    })) {
+      events.push(event)
+    }
+    expect(events.find((event) => event.type === 'todo')).toEqual({
+      type: 'todo',
+      items: [{ content: 'Step', status: 'pending' }],
+    })
+  })
+})
+

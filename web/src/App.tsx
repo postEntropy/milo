@@ -345,6 +345,7 @@ export default function App() {
             ? { ...message, tools: [...(message.tools ?? []), { name: event.name, text: `${toolText(event.name)} failed` }], waitingSince: Date.now() }
             : { ...message, waitingSince: Date.now() }
         }
+        if (event.type === 'todo') return { ...message, todos: event.items }
         if (event.type === 'waiting') return { ...message, status: 'Waiting for this session to free up…' }
         if (event.type === 'waited') return { ...message, status: `Session freed after ${formatMs(event.ms)}.` }
         if (event.type === 'compacted') return { ...message, status: `Tidying the context (${formatMs(event.ms)}).` }

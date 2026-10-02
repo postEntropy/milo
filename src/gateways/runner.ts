@@ -1,5 +1,6 @@
 import type { Session } from '../core/session.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
+import { formatTodos } from '../core/todos.js'
 import { errorMessage } from '../util/errors.js'
 import type { ChatSurface } from './surface.js'
 import { shellCommand, showsToolCall, toolLabel, toolLine } from './tool-line.js'
@@ -195,6 +196,15 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
           // A failure is always reported: hiding it is worse than the noise.
           if (event.isError) {
             await appendLine(`❌ ${toolLabel(event.name, true)} failed`, 'tool')
+          }
+          break
+        // The plan, drawn whole each time it changes. It is not a tool line, so
+        // the display level does not hide it — the person watching a long turn
+        // wants to see it whatever the tool lines are set to.
+        case 'todo':
+          if (event.items.length > 0) {
+            await flushReasoning()
+            await appendLine(formatTodos(event.items), 'prose')
           }
           break
         case 'waiting':

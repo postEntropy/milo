@@ -76,6 +76,7 @@ describe('tool permission gating', () => {
       routine: false,
       send_file: false,
       task: false,
+      todo: false,
       shell_command: false,
     })
   })

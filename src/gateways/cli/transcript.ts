@@ -1,5 +1,6 @@
 import { theme, type ThemeColor } from './theme.js'
 import { toolIcon } from '../tool-line.js'
+import { todoMark, type TodoItem } from '../../core/todos.js'
 
 export type LineColor = ThemeColor
 
@@ -40,6 +41,11 @@ export type Item =
    * same words run together as prose — `/stats` is the case that asked for it.
    */
   | { kind: 'fields'; rows: { label: string; value: string }[] }
+  /**
+   * The plan the model is keeping, drawn whole each time it changes. The current
+   * step is the one thing in the accent colour — the eye's anchor in the block.
+   */
+  | { kind: 'todo'; items: TodoItem[] }
 
 export function wrapText(text: string, width: number): string[] {
   const limit = Math.max(1, width)
@@ -142,6 +148,14 @@ export function buildLines(items: Item[], width: number): Line[] {
               segments: [{ text: label, color: theme.muted }, { text: `  ${text}` }],
             })
           })
+        }
+        break
+      }
+      case 'todo': {
+        for (const todo of item.items) {
+          const color =
+            todo.status === 'completed' ? theme.success : todo.status === 'in_progress' ? theme.accent : theme.muted
+          for (const text of wrapText(`${todoMark(todo.status)} ${todo.content}`, width)) push(text, { color })
         }
         break
       }

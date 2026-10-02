@@ -287,6 +287,7 @@ comes is skipped rather than stacked, and a routine cannot create routines.
 | `list_dir` | yes | One directory, not recursive. |
 | `glob` | yes | Files matching a pattern, most recently modified first. |
 | `grep` | yes | Regex over file contents, returning `path:line: text`. |
+| `todo` | — | Keeps the plan for a multi-step task: a short checklist drawn on every surface. Updates only Milo's own display, so it never asks. |
 | `git` | yes | Read a repository: `status`, `diff`, `log`, `show` and `blame`. |
 | `git_commit` | no | Stage files (or every tracked change) and commit them; asks for confirmation. |
 | `fetch_url` | yes | One http(s) URL, served back as text; a long page comes back in pages. |
@@ -346,7 +347,7 @@ classifier:
 | `yolo` | Everything runs, no prompts. |
 
 `deny` beats everything except `yolo`. Read-only tools never ask, and neither does a tool whose only
-side effect is on Milo's own state (`remember`). On a surface that cannot ask, an `ask` decision **fails
+side effect is on Milo's own state (`remember`, `todo`). On a surface that cannot ask, an `ask` decision **fails
 closed**.
 
 The deterministic rules cover two shapes, and only in `auto`: a catastrophic shell command (`rm -rf /`,
