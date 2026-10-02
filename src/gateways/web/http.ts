@@ -81,6 +81,8 @@ export interface RunningWebServer {
   urls: string[]
   /** Posts a message into a conversation with no turn behind it (a routine's answer). */
   deliver(conversationId: string, message: OutgoingMessage): Promise<void>
+  /** Tells every open page that a routine ran, so the history it shows re-reads. */
+  routinesChanged(): void
   stop(): Promise<void>
 }
 
@@ -179,6 +181,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     url,
     urls,
     deliver: (conversationId, message) => hub.deliver(conversationId, message),
+    routinesChanged: () => hub.routinesChanged(),
     stop: () => new Promise<void>((resolve, reject) => {
       hub.close()
       // A page left open holds a keep-alive connection and a websocket, and

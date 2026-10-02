@@ -55,7 +55,7 @@ const GATEWAYS = [
  * person's. It lives here rather than in Settings because a routine is a thing
  * you use, not a setting you configure.
  */
-export function Routines({ conversationId, chat }: { conversationId: string; chat: RoutinesChat }) {
+export function Routines({ conversationId, chat, tick }: { conversationId: string; chat: RoutinesChat; tick: number }) {
   const [routines, setRoutines] = useState<RoutineSummary[] | null>(null)
   const [routineId, setRoutineId] = useState<string | null>(null)
   const [composing, setComposing] = useState(false)
@@ -69,6 +69,8 @@ export function Routines({ conversationId, chat }: { conversationId: string; cha
   useEffect(() => { void refresh() }, [refresh])
   // biome-ignore lint/correctness/useExhaustiveDependencies: the counter is the trigger, not a value read here — the turn it counts may have just made a routine
   useEffect(() => { void refresh() }, [chat.turnEnds, refresh])
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the tick is the trigger, not a value read here — the server said a routine ran
+  useEffect(() => { void refresh() }, [tick, refresh])
 
   /** A routine that is gone leaves the page, rather than being drawn without one. */
   useEffect(() => {
@@ -88,12 +90,15 @@ export function Routines({ conversationId, chat }: { conversationId: string; cha
     key={routine.id}
     routine={routine}
     chat={chat}
+    tick={tick}
+    initialRun={openedRun ?? undefined}
     onBack={close}
     onChanged={() => void refresh()}
   />
   return <RoutineList
     routines={routines}
     notice={notice}
+    tick={tick}
     onSelect={setRoutineId}
     onCompose={() => { setNotice(null); setComposing(true) }}
     onRetry={() => { setNotice(null); void refresh() }}
@@ -121,6 +126,7 @@ function Shell({ head, notice, children }: { head?: ReactNode; notice?: Notice |
 function RoutineList({
   routines,
   notice,
+  tick,
   onSelect,
   onCompose,
   onRetry,
@@ -128,6 +134,7 @@ function RoutineList({
   /** Null until the list has been read once: "none" and "not yet" are not the same. */
   routines: RoutineSummary[] | null
   notice: Notice | null
+  tick: number
   onSelect(id: string): void
   onCompose(): void
   onRetry(): void
@@ -178,11 +185,16 @@ function RoutineList({
 function RoutineDetail({
   routine,
   chat,
+  tick,
+  initialRun,
   onBack,
   onChanged,
 }: {
   routine: RoutineSummary
   chat: RoutinesChat
+  tick: number
+  /** A run to open on arrival, when the front page's timeline named one. */
+  initialRun?: string
   onBack(): void
   onChanged(): void
 }) {
@@ -203,6 +215,7 @@ function RoutineDetail({
     setOpenRun((current) => current ?? history.runs[0]?.id ?? null)
   }, [routine.id])
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the tick is the trigger, not a value read here — the server said a routine ran
   useEffect(() => {
     void loadRuns().catch((error) => setRunsError(message(error)))
   }, [loadRuns])

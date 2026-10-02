@@ -6,6 +6,7 @@ import type { MemoryScope } from '../../core/memory/index.js'
 import { isImage, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
 import { setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { readDisplay } from '../../core/config/load.js'
+import { PRESETS } from '../../core/config/presets.js'
 import { handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
@@ -60,6 +61,7 @@ export class WebHub {
       messages: this.transcript(conversation.session),
       thinking: readDisplay().thinking,
       provider: this.identity.provider,
+      providerName: PRESETS.find((preset) => preset.id === this.identity.provider)?.name ?? this.identity.provider,
       model: this.runtime.model,
       effort: this.runtime.reasoningEffort,
     })
@@ -131,6 +133,18 @@ export class WebHub {
 
   close(): void {
     for (const id of this.conversations.keys()) this.turns.stop(id)
+  }
+
+  /**
+   * A routine ran. This is not about one conversation, so it goes to every client
+   * on the server: a Routines screen that is open anywhere is showing a history
+   * that just changed.
+   */
+  routinesChanged(): void {
+    const frame: ServerFrame = { type: 'routines-changed' }
+    for (const conversation of this.conversations.values()) {
+      for (const client of conversation.clients) client.send(frame)
+    }
   }
 
   /**

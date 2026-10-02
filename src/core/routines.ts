@@ -400,6 +400,8 @@ export interface RoutineSchedulerOptions {
   runtime: AgentRuntime
   /** Posts a finished run at the routine's target. Injected: the loop knows no gateway. */
   deliver: (routine: Routine, message: OutgoingMessage) => Promise<void>
+  /** Told after each run, so a surface showing the history can refresh itself. */
+  onRan?: (routine: Routine) => void
   log?: (line: string) => void
   now?: () => Date
   /** The longest the loop will sleep before looking again, so a new routine is seen soon. */
@@ -533,6 +535,11 @@ export class RoutineScheduler {
       this.log(`could not record the run of ${routine.id}: ${errorMessage(error)}`)
     }
     if (result.failure) this.log(`routine ${routine.id} failed: ${result.failure}`)
+
+    // A run just happened: a Routines screen that is open wants to know, whether
+    // or not the answer went anywhere. A listener that throws is not a reason to
+    // fail a run that already happened.
+    try { this.options.onRan?.(routine) } catch (error) { this.log(`onRan threw: ${errorMessage(error)}`) }
 
     // A routine that delivers nowhere is a log, not a message: its run is already
     // on the Routines screen, and there is no chat waiting to be posted into.

@@ -36,6 +36,8 @@ export default function App() {
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null)
   /** Counts finished turns: the routines screen re-reads its list when one ends. */
   const [turnEnds, setTurnEnds] = useState(0)
+  /** Bumped when the server says a routine ran, so the history on screen re-reads. */
+  const [routinesTick, setRoutinesTick] = useState(0)
   const [thinking, setThinking] = useState(true)
   const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium')
   const [identity, setIdentity] = useState({ provider: 'milo', model: '' })
@@ -122,6 +124,7 @@ export default function App() {
       return
     }
     if (frame.type === 'error') { setNotice({ text: frame.message, error: true }); return }
+    if (frame.type === 'routines-changed') { setRoutinesTick((current) => current + 1); return }
     if (frame.type === 'state') { setBusy(frame.busy); setQueued(frame.queued); return }
     if (frame.type === 'turn-start') {
       // The wait starts here and the turn says so on screen: the assistant
@@ -523,7 +526,7 @@ export default function App() {
       {view === 'settings'
         ? <Settings section={settingsSection} conversationId={conversationId} sessionId={sessionId} onClose={() => setView('chat')} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} />
         : view === 'routines'
-        ? <Routines conversationId={conversationId} chat={{ messages, thinking, busy, connection, turnEnds, pendingPermission, send: askRoutine, decide }} />
+        ? <Routines conversationId={conversationId} tick={routinesTick} chat={{ messages, thinking, busy, connection, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>
             <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} />

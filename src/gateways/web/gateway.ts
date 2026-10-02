@@ -68,4 +68,9 @@ export class WebGateway implements Gateway {
     if (!this.running) throw new Error('the web UI is not running')
     await this.running.deliver(conversationId, message)
   }
+
+  /** A routine ran: every page open on the web UI re-reads the history it shows. */
+  routinesChanged(): void {
+    this.running?.routinesChanged()
+  }
 }

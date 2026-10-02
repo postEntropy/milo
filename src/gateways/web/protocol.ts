@@ -90,6 +90,8 @@ export type ServerFrame =
   | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error' }
   | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; attachments?: FrameAttachment[]; actions?: ActionRow[]; messageId?: string; cards?: SessionCardItem[] }
   | { type: 'state'; busy: boolean; queued: number }
+  /** A routine ran somewhere in this install: re-read whatever shows the history. */
+  | { type: 'routines-changed' }
   | { type: 'error'; message: string }
 
 /**

@@ -53,21 +53,23 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   // Off only when the config says so or `--no-web` was passed; the port the flag
   // names wins over the one the config holds.
   const web = loaded.config.web
+  /** Kept so the scheduler can tell an open Routines screen that a run happened. */
+  let webUi: { routinesChanged(): void } | undefined
   if (!options.noWeb && web.enabled) {
     const { WebGateway } = await import('./web/gateway.js')
-    gateways.push(
-      new WebGateway({
-        runtime,
-        cwd: process.cwd(),
-        host: web.host,
-        port: options.webPort ?? web.port,
-        // A stored token (`auth.json` → `gateways.web`, or MILO_WEB_TOKEN) is
-        // what makes the URL survive a restart; with neither, the server mints a
-        // fresh one per run — the old behaviour, and still the default.
-        token: resolveGatewayToken('web', auth),
-        identity: { provider: loaded.provider.id, model: loaded.model },
-      }),
-    )
+    const gateway = new WebGateway({
+      runtime,
+      cwd: process.cwd(),
+      host: web.host,
+      port: options.webPort ?? web.port,
+      // A stored token (`auth.json` → `gateways.web`, or MILO_WEB_TOKEN) is
+      // what makes the URL survive a restart; with neither, the server mints a
+      // fresh one per run — the old behaviour, and still the default.
+      token: resolveGatewayToken('web', auth),
+      identity: { provider: loaded.provider.id, model: loaded.model },
+    })
+    webUi = gateway
+    gateways.push(gateway)
   }
 
   if (gateways.length === 0) {
@@ -96,6 +98,9 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
       if (!gateway?.deliver) throw new Error(`no ${routine.target.gateway} surface to deliver to`)
       await gateway.deliver(routine.target.conversationId, message)
     },
+    // The scheduler runs in this process, so a page showing the run history is
+    // told at once rather than left to poll for it.
+    onRan: () => webUi?.routinesChanged(),
     log: (line) => console.error(line),
   })
   scheduler.start()
