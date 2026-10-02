@@ -25,6 +25,7 @@ export const globTool: Tool<GlobArgs> = {
     'Find files whose path matches a glob pattern. Returns paths relative to the search root, most recently modified first. Directories are not returned — use list_dir for those.',
   schema,
   readOnly: true,
+  concurrent: true,
   async execute(args, ctx) {
     const root = resolveToolPath(ctx.cwd, args.path)
     const label = args.path?.trim() || root

@@ -86,6 +86,14 @@ export interface Tool<A = unknown> {
   /** Read-only tools never need confirmation; anything with side effects does by default. */
   readOnly?: boolean
   /**
+   * Whether a run of calls to this tool may overlap with each other. Off by
+   * default: two reads of different files are independent, but two calls into
+   * one browser session are not — the tool opts in only when it holds no shared
+   * mutable state. Read-only is not enough on its own, which is why this is its
+   * own flag rather than a synonym for `readOnly`.
+   */
+  concurrent?: boolean
+  /**
    * A side effect that stays inside Milo's own state — its memory store, not the
    * user's files or machine. Never asks: prompting to save a note would make
    * saving one not worth doing.

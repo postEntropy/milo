@@ -283,3 +283,78 @@ describe('runAgent — steering', () => {
     expect(steering).toEqual(['one more thing'])
   })
 })
+
+describe('runAgent — concurrent reads', () => {
+  /** A read tool that records how many of it run at once. */
+  function reader(name: string, opts: { concurrent?: boolean }, stats: { active: number; peak: number }) {
+    return {
+      name,
+      description: name,
+      schema: z.object({ path: z.string() }),
+      readOnly: true,
+      ...(opts.concurrent ? { concurrent: true } : {}),
+      async execute(args: { path: string }) {
+        stats.active += 1
+        stats.peak = Math.max(stats.peak, stats.active)
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        stats.active -= 1
+        return { content: `${name}:${args.path}` }
+      },
+    } satisfies Tool<{ path: string }>
+  }
+
+  async function runBoth(stats: { active: number; peak: number }, tools: Tool<{ path: string }>[]) {
+    const provider = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'read_a', args: { path: 'a' } },
+        { type: 'tool-call', id: 'c2', name: 'read_b', args: { path: 'b' } },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      [{ type: 'text', delta: 'done' }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const registry = new ToolRegistry(tools)
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'read both' }] }]
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider,
+      model: 'm',
+      tools: registry.specs(),
+      registry,
+      messages,
+      context: { cwd: process.cwd(), signal: new AbortController().signal },
+    })) {
+      events.push(event)
+    }
+    return { events, messages }
+  }
+
+  it('overlaps a run of concurrent reads', async () => {
+    const stats = { active: 0, peak: 0 }
+    await runBoth(stats, [reader('read_a', { concurrent: true }, stats), reader('read_b', { concurrent: true }, stats)])
+    expect(stats.peak).toBe(2)
+  })
+
+  it('keeps each start and end interleaved, in the order the model asked', async () => {
+    const stats = { active: 0, peak: 0 }
+    const { events } = await runBoth(stats, [
+      reader('read_a', { concurrent: true }, stats),
+      reader('read_b', { concurrent: true }, stats),
+    ])
+    const toolEvents = events
+      .filter((event) => event.type === 'tool-start' || event.type === 'tool-end')
+      .map((event) => `${event.type}:${event.name}`)
+    expect(toolEvents).toEqual([
+      'tool-start:read_a',
+      'tool-end:read_a',
+      'tool-start:read_b',
+      'tool-end:read_b',
+    ])
+  })
+
+  it('runs a read that did not opt in one at a time', async () => {
+    const stats = { active: 0, peak: 0 }
+    await runBoth(stats, [reader('read_a', {}, stats), reader('read_b', {}, stats)])
+    expect(stats.peak).toBe(1)
+  })
+})
+

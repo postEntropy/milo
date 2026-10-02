@@ -30,6 +30,7 @@ export const listDirTool: Tool<ListDirArgs> = {
     'List one directory (not recursive): directories with a trailing slash, files with their size. Build and dependency directories are summarized as a count instead of being expanded. Use glob to find files by pattern across a tree.',
   schema,
   readOnly: true,
+  concurrent: true,
   async execute(args, ctx) {
     const target = resolveToolPath(ctx.cwd, args.path)
     const label = args.path?.trim() || target

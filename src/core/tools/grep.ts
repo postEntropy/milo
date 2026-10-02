@@ -42,6 +42,7 @@ export const grepTool: Tool<GrepArgs> = {
     'Search file contents with a regular expression, returning `path:line: text`. Prefer it over shelling out to grep or rg: it skips build and dependency directories and reports its own truncation.',
   schema,
   readOnly: true,
+  concurrent: true,
   async execute(args, ctx) {
     const label = args.path?.trim() || ctx.cwd
 

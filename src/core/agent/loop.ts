@@ -10,7 +10,7 @@ import type {
   ReasoningEffort,
   ToolSpec,
 } from '../providers/types.js'
-import type { ToolContext, ToolImage, ToolRegistry } from '../tools/index.js'
+import type { ToolContext, ToolImage, ToolRegistry, ToolResult } from '../tools/index.js'
 import {
   summarizeToolCall,
   type PermissionAsker,
@@ -155,33 +155,45 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       return
     }
 
-    for (const call of toolCalls) {
-      yield { type: 'tool-start', id: call.id, name: call.name, args: call.args }
-      const blocked = await checkPermission(options.permission, registry, call.name, call.args)
-      const result = blocked
-        ? { content: blocked, isError: true }
-        : await registry.execute(call.name, call.args, context)
-      yield {
-        type: 'tool-end',
-        id: call.id,
-        name: call.name,
-        result: result.content,
-        isError: Boolean(result.isError),
+    for (let index = 0; index < toolCalls.length; ) {
+      // A run of calls that hold no shared state is started together, then read
+      // back in the order the model made them: the events stay exactly as a
+      // serial run's would — a start and its end for each call, in order — so
+      // every surface draws the same thing, while the wall time is the longest
+      // call rather than the sum of all of them. Anything else runs one at a
+      // time, which is what keeps an interactive confirmation from racing itself
+      // and two calls into one browser session from interleaving.
+      const run = toolCalls.slice(index, concurrentRunEnd(toolCalls, registry, index))
+      index += run.length
+      const pending =
+        run.length > 1 ? run.map((call) => executeCall(options.permission, registry, call, context)) : null
+
+      for (let at = 0; at < run.length; at += 1) {
+        const call = run[at]
+        yield { type: 'tool-start', id: call.id, name: call.name, args: call.args }
+        const result = pending ? await pending[at] : await executeCall(options.permission, registry, call, context)
+        yield {
+          type: 'tool-end',
+          id: call.id,
+          name: call.name,
+          result: result.content,
+          isError: Boolean(result.isError),
+        }
+        const images = await persistImages(result.images)
+        messages.push({
+          role: 'tool',
+          content: [
+            {
+              type: 'tool-result',
+              id: call.id,
+              name: call.name,
+              content: result.content,
+              isError: result.isError,
+              ...(images.length > 0 ? { images } : {}),
+            },
+          ],
+        })
       }
-      const images = await persistImages(result.images)
-      messages.push({
-        role: 'tool',
-        content: [
-          {
-            type: 'tool-result',
-            id: call.id,
-            name: call.name,
-            content: result.content,
-            isError: result.isError,
-            ...(images.length > 0 ? { images } : {}),
-          },
-        ],
-      })
     }
   }
 
@@ -236,6 +248,40 @@ async function persistImages(images: ToolImage[] | undefined): Promise<ImageRef[
     if (ref) saved.push(ref)
   }
   return saved
+}
+
+/** Runs one call: the permission decision first, then the tool if it is allowed. */
+async function executeCall(
+  permission: ToolPermission | undefined,
+  registry: ToolRegistry,
+  call: { id: string; name: string; args: unknown },
+  context: ToolContext,
+): Promise<ToolResult> {
+  const blocked = await checkPermission(permission, registry, call.name, call.args)
+  return blocked ? { content: blocked, isError: true } : registry.execute(call.name, call.args, context)
+}
+
+/**
+ * How far a run of calls that may overlap reaches from `start`.
+ *
+ * A tool opts in (`readOnly` *and* `concurrent`), so a tool that reads but holds
+ * shared state — the browser's own session — stays serial, as does anything
+ * with a side effect. A run of one is the ordinary serial case.
+ */
+function concurrentRunEnd(
+  toolCalls: { name: string }[],
+  registry: ToolRegistry,
+  start: number,
+): number {
+  if (!canOverlap(registry, toolCalls[start].name)) return start + 1
+  let end = start + 1
+  while (end < toolCalls.length && canOverlap(registry, toolCalls[end].name)) end += 1
+  return end
+}
+
+function canOverlap(registry: ToolRegistry, name: string): boolean {
+  const tool = registry.get(name)
+  return Boolean(tool?.readOnly && tool.concurrent)
 }
 
 /** Returns a block reason when the call must not run, or null when it may. */

@@ -21,6 +21,7 @@ export const readFileTool: Tool<ReadFileArgs> = {
     'Read a UTF-8 text file from disk and return its line-numbered contents. Use when the user points you at a file. A long file comes back in pages: the reply says where it stopped, and the offset that continues from there.',
   schema,
   readOnly: true,
+  concurrent: true,
   async execute(args, ctx) {
     const target = resolveToolPath(ctx.cwd, args.path)
     const shown = displayPath(ctx.cwd, target)
