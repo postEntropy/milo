@@ -421,17 +421,20 @@ export class WebSettings {
   }
 
   /**
-   * What a routine has produced, newest first. `keep` travels with the list so
-   * the surface can say how far back the history goes instead of the number
-   * living only in a constant nobody sees.
+   * What a routine has produced, newest first, a page at a time. The runs are
+   * kept for good now, so the surface asks for more as it scrolls rather than
+   * being handed a history nobody bounded.
    */
   private async routineRuns(body: Record<string, unknown>): Promise<unknown> {
     const id = optionalText(body.id)
     if (!id) throw new Error('A routine id is required.')
     if (!findRoutine(id)) throw new Error('No routine with that id.')
+    const all = await this.runtime.listRuns(id)
+    const offset = typeof body.offset === 'number' && body.offset > 0 ? Math.floor(body.offset) : 0
+    const limit = typeof body.limit === 'number' && body.limit > 0 ? Math.min(Math.floor(body.limit), 100) : 20
     return {
-      keep: MAX_RUNS_PER_ROUTINE,
-      runs: (await this.runtime.listRuns(id)).map((run) => ({ id: run.id, at: run.updatedAt })),
+      total: all.length,
+      runs: all.slice(offset, offset + limit).map((run) => ({ id: run.id, at: run.updatedAt })),
     }
   }
 

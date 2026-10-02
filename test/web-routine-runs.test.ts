@@ -88,9 +88,12 @@ describe('web Settings reads a routine’s runs', () => {
 
     const { runId } = await settings.handle('routine-run', { id: created.routine.id }) as { runId: string }
 
-    const history = await settings.handle('routine-runs', { id: created.routine.id }) as { keep: number; runs: { id: string; at: number }[] }
-    expect(history.keep).toBe(MAX_RUNS_PER_ROUTINE)
+    const history = await settings.handle('routine-runs', { id: created.routine.id }) as { total: number; runs: { id: string; at: number }[] }
+    expect(history.total).toBe(1)
     expect(history.runs.map((run) => run.id)).toEqual([runId])
+    // A page past the end is empty, which is how the list knows to stop asking.
+    const past = await settings.handle('routine-runs', { id: created.routine.id, offset: 1, limit: 20 }) as { runs: unknown[] }
+    expect(past.runs).toEqual([])
 
     const transcript = await settings.handle('run-transcript', { id: runId }) as TranscriptMessage[]
     expect(transcript[0]).toMatchObject({ role: 'user', text: 'look at the repo' })
