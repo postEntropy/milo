@@ -183,6 +183,15 @@ describe('the store', () => {
     expect(readRoutines()[0]!.target.gateway).toBe('web')
   })
 
+
+  it('reads an interval in seconds, held as a fraction of a minute', () => {
+    const when = parseWhen({ every: '30s' })
+    expect(when).toEqual({ kind: 'every', minutes: 0.5 })
+    expect(describeWhen(when!)).toBe('every 30s')
+    expect(parseWhen({ every: '1s' })).toEqual({ kind: 'every', minutes: 1 / 60 })
+    expect(parseWhen({ every: '0s' })).toBeNull()
+  })
+
   it('removes, enables and disables by id', async () => {
     await writeRoutines([])
     const added = await addRoutine(routine())

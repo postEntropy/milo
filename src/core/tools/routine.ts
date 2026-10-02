@@ -27,7 +27,7 @@ const schema = z.object({
   every: z
     .string()
     .optional()
-    .describe('An interval: "30m", "2h", "1d". Use when the person said "every …".'),
+    .describe('An interval: "30s", "30m", "2h", "1d". Use when the person said "every …".'),
   at: z
     .string()
     .optional()

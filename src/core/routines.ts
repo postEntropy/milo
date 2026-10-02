@@ -87,7 +87,7 @@ export const MAX_ROUTINES = 50
  */
 export const MAX_RUNS_PER_ROUTINE = 20
 
-const DURATION = /^(\d+)\s*(m|min|mins|minuto|minutos|h|hora|horas|d|dia|dias)?$/i
+const DURATION = /^(\d+)\s*(s|sec|secs|seg|segs|segundo|segundos|m|min|mins|minuto|minutos|h|hora|horas|d|dia|dias)?$/i
 const TIME = /^(\d{1,2}):?(\d{2})?$/
 
 /** How a day is written back to a person. Reads the same in either language. */
@@ -585,6 +585,9 @@ function parseEvery(value: string): number | null {
   const unit = (match[2] ?? 'm').toLowerCase()
   if (unit.startsWith('d')) return amount * 1440
   if (unit.startsWith('h')) return amount * 60
+  // Seconds are kept as a fraction of a minute: the one shape a routine's time is
+  // ever held in, so nothing downstream has to learn a second unit.
+  if (unit.startsWith('s')) return amount / 60
   return amount
 }
 
@@ -636,6 +639,7 @@ function normalize(value: string): string {
 }
 
 function describeMinutes(minutes: number): string {
+  if (minutes % 1 !== 0) return `${Math.round(minutes * 60)}s`
   if (minutes % 1440 === 0) return `${minutes / 1440}d`
   if (minutes % 60 === 0) return `${minutes / 60}h`
   return `${minutes}m`
