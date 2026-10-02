@@ -124,6 +124,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .scroll-blur.top { top: 0; -webkit-mask-image: linear-gradient(to bottom, #000 20%, transparent); mask-image: linear-gradient(to bottom, #000 20%, transparent); }
 .session-group + .session-group { margin-top: 8px; }
 .section-label { padding: 14px 8px 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
+/* What the past turns said about the search, over the matching sessions: the log
+   itself, so a word a tidied-up title dropped is still findable. */
+.history-hits { display: flex; flex-direction: column; gap: 2px; padding: 0 8px 10px; }
+.history-hit { display: flex; flex-direction: column; gap: 2px; width: 100%; border: 0; border-radius: 9px; background: transparent; padding: 7px 9px; text-align: start; transition: background var(--motion-fast); }
+.history-hit:hover { background: var(--surface); }
+.history-hit-text { display: -webkit-box; overflow: hidden; color: var(--fg-2); font-size: 12px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
+.history-hit-where { color: var(--muted); font: 11px var(--font-mono); }
 .session-item { position: relative; display: flex; align-items: center; width: 100%; margin: 2px 0; border-radius: 10px; background: transparent; transition: background var(--motion-fast) var(--ease-standard); }
 .session-item:hover, .session-item.menu-open { background: var(--surface); }
 .session-item.active { background: var(--surface); }

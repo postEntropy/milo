@@ -16,6 +16,8 @@ import { miloAvatar } from './ui/milo.js'
 type SessionSummary = { id: string; title?: string; preview: string; messageCount: number; updatedAt: number; recap?: string }
 type PendingPermission = { id: string; request: PermissionRequest; expiresAt: number }
 type SessionGroup = { label: string; sessions: SessionSummary[] }
+/** A past turn the search box found, with the session it belongs to. */
+type HistoryHit = { session: string; at: string; kind: string; text: string }
 type Notice = { text: string; error: boolean }
 
 const settingsSections = [
@@ -31,6 +33,8 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [search, setSearch] = useState('')
+  /** What the past turns said about the search, and null when nothing is searched. */
+  const [historyHits, setHistoryHits] = useState<HistoryHit[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [queued, setQueued] = useState(0)
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null)
@@ -479,6 +483,13 @@ export default function App() {
         </div>
         <div className="session-region">
           <nav className="session-list" aria-label="Sessions" ref={sessionListRef} onScroll={updateListTop}>
+            {historyHits && historyHits.length > 0 && <div className="history-hits">
+              <div className="section-label">In past turns</div>
+              {historyHits.map((hit) => <button className="history-hit" key={`${hit.session}-${hit.at}-${hit.text.slice(0, 32)}`} type="button" title={hit.session} onClick={() => void openSession(hit.session)}>
+                <span className="history-hit-text">{hit.text || `${hit.kind} turn`}</span>
+                <span className="history-hit-where">{hit.kind} · {hit.session}</span>
+              </button>)}
+            </div>}
             {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} onRename={renameSession} onExport={exportSession} onDelete={deleteSession} />)}</div>)}
             {visibleSessions.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
           </nav>

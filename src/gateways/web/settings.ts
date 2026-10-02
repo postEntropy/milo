@@ -44,7 +44,7 @@ import {
 import { skillsDirFor, listInstalled, removeSkill, installSkill } from '../../core/skills/install.js'
 import { fetchPopular } from '../../core/skills/catalog.js'
 import { resolveSource } from '../../core/skills/sources.js'
-import { readSession } from '../../core/history.js'
+import { readSession, searchHistory } from '../../core/history.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import { writeSessionExport } from '../../core/export.js'
 import { JobRegistry } from './jobs.js'
@@ -357,6 +357,24 @@ export class WebSettings {
     const id = sessionId(body.id)
     const summary = (await this.runtime.listSessions()).find((item) => item.id === id)
     return writeSessionExport({ id, title: summary?.title, format: body.format === 'json' ? 'json' : 'md' })
+  }
+
+  /**
+   * What the past turns said about a term, for the search box. The whole log, not
+   * the session list: a word that a tidied-up title dropped is still findable here.
+   */
+  private historySearch(body: Record<string, unknown>): unknown {
+    const query = typeof body.query === 'string' ? body.query.trim() : ''
+    if (!query) return { hits: [] }
+    const limit = typeof body.limit === 'number' && body.limit > 0 ? Math.min(body.limit, 50) : 20
+    return {
+      hits: searchHistory(query, { limit }).map((entry) => ({
+        session: entry.session,
+        at: entry.at,
+        kind: entry.kind,
+        text: (entry.text ?? entry.reasoning ?? entry.tool?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 240),
+      })),
+    }
   }
 
   private async memoryNotes(): Promise<unknown> {
