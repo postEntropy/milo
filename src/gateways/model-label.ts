@@ -25,11 +25,9 @@ export function formatContext(tokens: number): string {
 }
 
 /**
- * The second line of a model row: how much it holds, then what it is called. The
- * size leads because it is what tells two models of the same family apart, and
- * a row is read from its own edge inward.
+ * The second line of a model row: context size, image input, then its display name.
  */
-export function modelNote(model: { name?: string; context?: number }): string | undefined {
-  const parts = [model.context ? formatContext(model.context) : undefined, model.name].filter(Boolean)
+export function modelNote(model: { name?: string; context?: number; vision?: boolean }): string | undefined {
+  const parts = [model.context ? formatContext(model.context) : undefined, model.vision ? 'Vision' : undefined, model.name].filter(Boolean)
   return parts.length > 0 ? parts.join(' · ') : undefined
 }

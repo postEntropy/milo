@@ -3,12 +3,17 @@ import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
 import { formatTodos } from '../core/todos.js'
 import { errorMessage } from '../util/errors.js'
 import type { ChatSurface } from './surface.js'
+import type { AudioPart, ImagePart } from '../core/providers/types.js'
+import { prepareIncoming, type IncomingFile } from '../core/media.js'
 import { shellCommand, showsToolCall, toolLabel, toolLine } from './tool-line.js'
 
 export interface RunTurnOptions {
   session: Session
   conversationId: string
   text: string
+  images?: ImagePart[]
+  audio?: AudioPart[]
+  files?: IncomingFile[]
   surface: ChatSurface
   maxLength: number
   /** How much of the turn to show. Defaults to showing everything. */
@@ -40,9 +45,15 @@ const REASONING_LIMIT = 200
 export async function runTurns(options: RunTurnOptions): Promise<string | null> {
   const { steering, signal, ...turn } = options
   let pending = turn.text
+  let pendingFiles = turn.files
+  let pendingImages = turn.images
+  let pendingAudio = turn.audio
   try {
     do {
-      await runTurn({ ...turn, text: pending, steering, signal })
+      await runTurn({ ...turn, text: pending, files: pendingFiles, images: pendingImages, audio: pendingAudio, steering, signal })
+      pendingFiles = undefined
+      pendingImages = undefined
+      pendingAudio = undefined
       pending = signal?.aborted ? '' : (steering?.splice(0).join('\n\n') ?? '')
     } while (pending)
   } catch (error) {
@@ -57,7 +68,7 @@ export async function runTurns(options: RunTurnOptions): Promise<string | null> 
  * permission requests to the surface's inline prompt.
  */
 export async function runTurn(options: RunTurnOptions): Promise<void> {
-  const { session, conversationId, text, surface, maxLength } = options
+  const { session, conversationId, surface, maxLength } = options
   const flushMs = options.flushMs ?? DEFAULT_FLUSH_MS
   const display = options.display ?? DEFAULT_DISPLAY
 
@@ -67,6 +78,10 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   // does not say whether anything is happening. Stopped in the `finally` below,
   // the failing turn included.
   const stopTyping = surface.typing(conversationId)
+  let text = options.text
+  let images = options.images ?? []
+  let audio = options.audio ?? []
+  let mediaModel: string | undefined
   let output = ''
   let lastFlush = 0
   // Whether anything arrived in the answer channel, and how much came through
@@ -149,9 +164,19 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   }
 
   try {
+    if (options.files?.length) {
+      const prepared = await prepareIncoming(options.files, { model: session.model })
+      text = [text, options.files.map((file) => `Attached ${file.name}`).join('\n'), ...prepared.text].filter(Boolean).join('\n\n') || 'Please inspect the attached media.'
+      images = [...images, ...prepared.images]
+      audio = [...audio, ...prepared.audio]
+      mediaModel = prepared.model
+    }
     for await (const event of session.send(text, {
       signal: options.signal,
       steering: options.steering,
+      images,
+      audio,
+      ...(mediaModel ? { model: mediaModel } : {}),
       ask: async (request) => ({
         allowed: await surface.ask(conversationId, messageId, request),
       }),

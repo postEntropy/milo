@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
 import { formatBytes, formatWhen, message, splitNames } from '../lib/format.js'
-import { formatContext } from '../../../src/gateways/model-label.ts'
+import { normalizeModels, type ModelInfo } from '../../../src/core/providers/models.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Select } from '../ui/Select.js'
+import { ModelDetails } from '../ui/ModelDetails.js'
 import { ModelPicker } from './ModelPicker.js'
 import { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from '@protocol'
 import { GOOGLE_SHORTCUT, GOOGLE_STEPS } from '../../../src/core/google/walkthrough.ts'
@@ -20,6 +21,7 @@ type SettingsConfig = {
   gateways: Record<string, { enabled: boolean; allowlist: string[] }>
   web: { enabled: boolean; host: string; port: number }
   google: { enabled: boolean }
+  media?: { vision?: string; audio?: string; document?: string }
   permissions: { mode: 'ask' | 'auto' | 'yolo'; allow: string[]; deny: string[]; jevThreshold: number; jevTimeoutMs: number }
   classifier: { backend: 'commandcode' | 'ollaya' | 'custom'; model?: string; url?: string; keyEnv?: string; timeoutMs?: number }
   browser: { enabled: boolean; chromePath: string | null; headless: boolean; profileDir: string | null; cdpUrl: string | null; keepSnapshots: number }
@@ -31,7 +33,6 @@ type SettingsConfig = {
 }
 type Skill = { name: string; description: string; origin?: string; installedAt?: string }
 type MemoryStats = { backend: string; location: string; scopes: number; facts: number; bytes: number }
-type ModelInfo = { id: string; name?: string; context?: number }
 type Note = { id: string; text: string; createdAt: number; tags?: string[] }
 type Browser = { id: string; name: string; path: string; version: string | null }
 type Profile = { id: string; name: string; dir: string; bytes: number }
@@ -88,7 +89,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
     try {
       const result = await api<SettingsData>('overview')
       setData(result)
-      setDraft(structuredClone(result.config))
+      setDraft({ ...structuredClone(result.config), media: { audio: 'whisper-large-v3-turbo', ...result.config.media } })
     } catch (error) { setNotice({ text: message(error), error: true }) }
   }, [])
 
@@ -134,9 +135,12 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   /** The catalog, the preset's own list, and whatever is set now, in that order. */
   const modelOptions = (() => {
     const byId = new Map<string, ModelInfo>()
-    for (const item of catalog ?? []) byId.set(item.id, item)
-    for (const item of models) if (!byId.has(item)) byId.set(item, { id: item })
-    if (draft?.model && !byId.has(draft.model)) byId.set(draft.model, { id: draft.model })
+    for (const item of normalizeModels(catalog ?? [])) byId.set(item.id, item)
+    for (const item of normalizeModels(models)) if (!byId.has(item.id)) byId.set(item.id, item)
+    if (draft?.model && !byId.has(draft.model)) {
+      const [selected] = normalizeModels([draft.model])
+      if (selected) byId.set(selected.id, selected)
+    }
     return [...byId]
   })()
 
@@ -305,7 +309,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
               label="Model"
               value={draft.model}
               choices={modelOptions.map(([id, info]) => ({
-                value: id, label: id, ...(info.context ? { badge: formatContext(info.context) } : {}),
+                value: id, label: id, meta: <ModelDetails model={info} />,
               }))}
               onChange={pickModel}
             /></Field>
@@ -322,11 +326,16 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           <div className="form-grid model-url">
             <Field className="full" label="API URL"><input value={draft.providers?.[currentProvider]?.baseURL ?? ''} onChange={(event) => update(['providers', currentProvider, 'baseURL'], event.target.value)} /></Field>
           </div>
+          <div className="form-grid model-pair">
+            <Field label="Vision model"><input value={draft.media?.vision ?? ''} placeholder="Use the main model" onChange={(event) => update(['media', 'vision'], event.target.value || undefined)} /><small>Milo checks model metadata for image input support. Set a model here if its provider does not report that.</small></Field>
+            <Field label="Audio transcription model"><input value={draft.media?.audio ?? 'whisper-large-v3-turbo'} onChange={(event) => update(['media', 'audio'], event.target.value)} /><small>Groq Whisper. Add a Groq API key under API keys.</small></Field>
+            <Field label="Document model"><input value={draft.media?.document ?? ''} placeholder="Use the main model" onChange={(event) => update(['media', 'document'], event.target.value || undefined)} /></Field>
+          </div>
         </Section>
         <Section title="API keys" description="Stored keys stay hidden. Add or replace one, then save changes below." active={section === 'keys'}>
           <div className="secret-groups">
             {(['providers', 'search', 'gateways'] as const).map((group) => {
-              const ids = group === 'providers' ? [...new Set([...data.presets.map((item) => item.id), ...Object.keys(data.auth.providers)])] : group === 'search' ? ['tavily', 'exa', 'parallel'] : ['telegram', 'discord']
+              const ids = group === 'providers' ? [...new Set([...data.presets.map((item) => item.id), 'groq', ...Object.keys(data.auth.providers)])] : group === 'search' ? ['tavily', 'exa', 'parallel'] : ['telegram', 'discord']
               const label = group === 'providers' ? 'Providers' : group === 'search' ? 'Web search' : 'Gateways'
               const orderedIds = [...ids].sort((a, b) => Number(Boolean(data.auth[group]?.[b]?.set)) - Number(Boolean(data.auth[group]?.[a]?.set)))
               const configured = orderedIds.filter((id) => data.auth[group]?.[id]?.set).length
@@ -584,4 +593,3 @@ function useJob(onFinished: () => void): { job: JobView | null; run(kind: string
 function jobLabel(kind: string): string {
   return ({ 'browser-install': 'Chrome for Testing', 'profile-copy': 'Copying a profile', 'embed-provision': 'The embedding engine' })[kind] ?? kind
 }
-

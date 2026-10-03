@@ -1,9 +1,9 @@
 import { useState } from 'react'
-import { formatContext } from '../../../src/gateways/model-label.ts'
+import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { Icon } from '../ui/Icons.js'
+import { ModelDetails } from '../ui/ModelDetails.js'
 
 type Preset = { id: string; name: string; models: string[] }
-type Model = { id: string; name?: string; context?: number }
 
 /**
  * Choosing which model answers, on a screen wide enough for two columns: the
@@ -19,7 +19,7 @@ export function ModelPicker({ presets, provider, model, browsing, catalog, onBro
   model: string
   browsing: string
   /** Null until the looked-at provider's catalog has been read. */
-  catalog: Model[] | null
+  catalog: ModelInfo[] | null
   onBrowse(provider: string): void
   onPick(model: string): void
 }) {
@@ -60,7 +60,7 @@ export function ModelPicker({ presets, provider, model, browsing, catalog, onBro
               onClick={() => onPick(item.id)}
             >
               <span className="model-picker-name">{item.id}</span>
-              {item.context ? <span className="size-badge">{formatContext(item.context)}</span> : null}
+              <ModelDetails model={item} />
               <span className="model-picker-tail">
                 {item.id === model && browsing === provider ? <Icon name="check" size={14} /> : null}
               </span>

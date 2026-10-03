@@ -1,7 +1,8 @@
 import { parseSSE } from './sse.js'
 import { errorMessage } from '../../util/errors.js'
 import { logDebug } from '../../util/log.js'
-import { toolImages } from '../images.js'
+import { readImageBase64, toolImages } from '../images.js'
+import { readFileSync } from 'node:fs'
 import {
   parseToolArgs,
   type ChatRequest,
@@ -212,10 +213,25 @@ async function toOpenAIMessages(system: string | undefined, messages: Message[])
       continue
     }
 
+    const images = message.content.flatMap((part) => {
+      if (part.type !== 'image') return []
+      const data = readImageBase64({ mimeType: part.mimeType, path: part.path })
+      return data ? [{ mimeType: part.mimeType, data }] : []
+    })
+    const missingImages = message.content.filter((part) => part.type === 'image').length - images.length
+    const audio = message.content.flatMap((part) => {
+      if (part.type !== 'audio') return []
+      try {
+        const format = part.mimeType === 'audio/wav' || part.mimeType === 'audio/x-wav' ? 'wav' : 'mp3'
+        return [{ format, data: readFileSync(part.path).toString('base64') }]
+      } catch { return [] }
+    })
+    const missingAudio = message.content.filter((part) => part.type === 'audio').length - audio.length
     const text = message.content
       .filter((part) => part.type === 'text')
       .map((part) => (part as { text: string }).text)
-      .join('')
+      .join('') + (missingImages ? `\n[${missingImages} attached image(s) are unavailable]` : '')
+      + (missingAudio ? `\n[${missingAudio} attached audio file(s) are unavailable]` : '')
 
     if (message.role === 'assistant') {
       const calls = message.content.filter((part) => part.type === 'tool-call')
@@ -235,7 +251,14 @@ async function toOpenAIMessages(system: string | undefined, messages: Message[])
       }
       out.push(entry)
     } else {
-      out.push({ role: message.role, content: text })
+      const parts = [
+        ...(text ? [{ type: 'text', text }] : []),
+        ...images.map((image) => ({
+            type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.data}` },
+          })),
+        ...audio.map((item) => ({ type: 'input_audio', input_audio: { data: item.data, format: item.format } })),
+      ]
+      out.push({ role: message.role, content: parts.length ? parts : text })
     }
   }
 

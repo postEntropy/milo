@@ -5,6 +5,22 @@ export interface TextPart {
   text: string
 }
 
+/** An image attached to an incoming user message. Bytes stay outside session files. */
+export interface ImagePart {
+  type: 'image'
+  mimeType: ImageMime
+  path: string
+  name: string
+}
+
+/** An audio attachment kept beside the transcript and sent inline to capable models. */
+export interface AudioPart {
+  type: 'audio'
+  mimeType: string
+  path: string
+  name: string
+}
+
 /**
  * What the model thought before answering. It is kept with the transcript so a
  * session read back later still shows how the answer was reached, and it is not
@@ -68,7 +84,7 @@ export interface FilePart {
   mimeType: string
 }
 
-export type ContentPart = TextPart | ReasoningPart | ToolCallPart | ToolResultPart | FilePart
+export type ContentPart = TextPart | ImagePart | AudioPart | ReasoningPart | ToolCallPart | ToolResultPart | FilePart
 
 export interface Message {
   role: Role

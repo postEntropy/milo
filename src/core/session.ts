@@ -2,6 +2,7 @@ import { errorMessage } from '../util/errors.js'
 import { closeParagraph } from '../util/format.js'
 import { logDebug, logWarn } from '../util/log.js'
 import type { SessionsConfig } from './config/schema.js'
+import type { MediaModelsConfig } from './config/schema.js'
 import type { BrowserFacts } from './browser/index.js'
 import type { HistoryEntry, HistoryWriter } from './history.js'
 import { deriveFacts } from './memory/derive.js'
@@ -21,6 +22,7 @@ import {
   countTurns,
   digest,
   dropOldImages,
+  dropOldAudio,
   dropOldSnapshots,
   estimateText,
   estimateTokens,
@@ -67,6 +69,8 @@ function isAbort(error: unknown, signal?: AbortSignal): boolean {
 export interface SessionOptions {
   scope: MemoryScope
   provider: Provider
+  providerFor?: (model: string) => Provider
+  mediaModels?: MediaModelsConfig
   model: string
   system: string
   registry: ToolRegistry
@@ -149,6 +153,10 @@ export interface SendOptions {
    * caller runs it as its own turn instead of losing it.
    */
   steering?: string[]
+  /** Images attached to this message, persisted by path to keep the transcript light. */
+  images?: import('./providers/types.js').ImagePart[]
+  audio?: import('./providers/types.js').AudioPart[]
+  model?: string
 }
 
 export class Session {
@@ -228,6 +236,10 @@ export class Session {
    */
   setProvider(provider: Provider): void {
     this.options.provider = provider
+  }
+
+  setMediaModels(mediaModels: MediaModelsConfig | undefined): void {
+    this.options.mediaModels = mediaModels
   }
 
   /**
@@ -335,8 +347,6 @@ export class Session {
 
   private async *turn(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
     const {
-      provider,
-      model,
       system,
       registry,
       memory,
@@ -346,6 +356,10 @@ export class Session {
       temperature,
       permissionPolicy,
     } = this.options
+    const model = opts?.model ?? (opts?.images?.length ? this.options.mediaModels?.vision : undefined) ?? this.options.model
+    const provider = opts?.model || (opts?.images?.length && this.options.mediaModels?.vision)
+      ? this.options.providerFor?.(model) ?? this.options.provider
+      : this.options.provider
     const signal = opts?.signal
     const steering = opts?.steering
 
@@ -395,7 +409,7 @@ export class Session {
     const systemPrompt = buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() })
     this.lastSystemTokens = estimateText(systemPrompt)
 
-    this.messages.push({ role: 'user', content: [{ type: 'text', text: input }] })
+    this.messages.push({ role: 'user', content: [{ type: 'text', text: input }, ...(opts?.images ?? []), ...(opts?.audio ?? [])] })
     note({ kind: 'user', text: input })
 
     // The turn's one signal, one permission decision and one effort, shared by
@@ -781,6 +795,7 @@ export class Session {
     // a handful of turns can push over the ceiling on their own, and the oldest
     // of each is no longer what the next action is chosen from.
     dropOldImages(this.messages)
+    dropOldAudio(this.messages)
     dropOldSnapshots(this.messages, this.options.keepSnapshots)
 
     const cut = planCut(this.messages, config.keepTurns)
@@ -862,6 +877,7 @@ export class Session {
     // own, and the oldest of each is no longer what the next action is chosen
     // from.
     dropOldImages(this.messages)
+    dropOldAudio(this.messages)
     dropOldSnapshots(this.messages, this.options.keepSnapshots)
 
     // Everything a request carries that is not the transcript: the system

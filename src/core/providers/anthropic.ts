@@ -2,6 +2,7 @@ import { parseSSE } from './sse.js'
 import { errorMessage } from '../../util/errors.js'
 import { logDebug } from '../../util/log.js'
 import { toolImages } from '../images.js'
+import { readImageBase64 } from '../images.js'
 import {
   parseToolArgs,
   type ChatRequest,
@@ -228,6 +229,7 @@ async function toAnthropicMessages(messages: Message[]): Promise<unknown[]> {
     }
 
     const blocks: unknown[] = []
+    let missingImages = 0
     for (const part of message.content) {
       if (part.type === 'reasoning') {
         // A signed thought is replayed as a thinking block, ahead of the text and
@@ -238,6 +240,12 @@ async function toAnthropicMessages(messages: Message[]): Promise<unknown[]> {
         }
       } else if (part.type === 'text') {
         if (part.text) blocks.push({ type: 'text', text: part.text })
+      } else if (part.type === 'image') {
+        const data = readImageBase64({ mimeType: part.mimeType, path: part.path })
+        if (data) blocks.push({ type: 'image', source: { type: 'base64', media_type: part.mimeType, data } })
+        else missingImages += 1
+      } else if (part.type === 'audio') {
+        blocks.push({ type: 'text', text: `[Audio attachment ${part.name} is not supported by this model.]` })
       } else if (part.type === 'tool-call') {
         blocks.push({
           type: 'tool_use',
@@ -247,6 +255,7 @@ async function toAnthropicMessages(messages: Message[]): Promise<unknown[]> {
         })
       }
     }
+    if (missingImages) blocks.push({ type: 'text', text: `[${missingImages} attached image(s) are unavailable]` })
     push(message.role === 'assistant' ? 'assistant' : 'user', blocks)
   }
 

@@ -16,7 +16,7 @@ const { imagesDir } = await import('../src/core/config/paths.js')
 const { IMAGE_TOKENS, pruneImages, saveImage, toolImages } = await import('../src/core/images.js')
 const { AnthropicProvider } = await import('../src/core/providers/anthropic.js')
 const { OpenAIProvider } = await import('../src/core/providers/openai.js')
-const { dropOldImages, estimateTokens } = await import('../src/core/sessions/compact.js')
+const { dropOldAudio, dropOldImages, estimateTokens } = await import('../src/core/sessions/compact.js')
 
 const PNG = 'aGVsbG8=' // "hello", enough for a file
 
@@ -147,6 +147,33 @@ describe('dropOldImages', () => {
 
     expect((messages[0]!.content[0] as { content: string }).content).toBe(after)
   })
+
+  it('keeps recent incoming pictures and leaves a note for older ones', () => {
+    const messages: Message[] = ['a', 'b', 'c'].map((name) => ({
+      role: 'user', content: [
+        { type: 'text', text: `look at ${name}` },
+        { type: 'image', mimeType: 'image/png', path: `/img/${name}.png`, name: `${name}.png` },
+      ],
+    }))
+    dropOldImages(messages, 2)
+
+    expect(messages[0]!.content).toContainEqual({ type: 'text', text: '[Image a.png omitted to keep the request small]' })
+    expect(messages[1]!.content.some((part) => part.type === 'image')).toBe(true)
+    expect(messages[2]!.content.some((part) => part.type === 'image')).toBe(true)
+  })
+
+  it('keeps only the newest audio clip in the request history', () => {
+    const messages: Message[] = ['a', 'b'].map((name) => ({
+      role: 'user', content: [
+        { type: 'text', text: `listen to ${name}` },
+        { type: 'audio', mimeType: 'audio/wav', path: `/audio/${name}.wav`, name: `${name}.wav` },
+      ],
+    }))
+    dropOldAudio(messages)
+    expect(messages[0]!.content).toContainEqual({ type: 'text', text: '[Audio a.wav omitted to keep the request small]' })
+    expect(messages[1]!.content.some((part) => part.type === 'audio')).toBe(true)
+    expect(estimateTokens([messages[1]!])).toBeGreaterThan(1_000)
+  })
 })
 
 /** A provider whose only job is to capture the request it was handed. */
@@ -181,6 +208,47 @@ const stubStream = (chunks: string[]) => {
 }
 
 describe('the wires', () => {
+  it('sends an incoming picture with the user message on the OpenAI wire', async () => {
+    const ref = await saveImage({ mimeType: 'image/png', data: PNG })
+    stubStream(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', 'data: [DONE]\n\n'])
+    const provider = new CapturingProvider(new OpenAIProvider({ id: 'test', baseURL: 'https://x.test/v1' }))
+    for await (const _event of provider.stream({
+      model: 'm',
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: 'What is this?' },
+        { type: 'image', mimeType: 'image/png', path: ref!.path, name: 'photo.png' },
+      ] }],
+    })) { /* drain */ }
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body)) as {
+      messages: { role: string; content: unknown }[]
+    }
+    expect(body.messages[0]?.content).toEqual([
+      { type: 'text', text: 'What is this?' },
+      { type: 'image_url', image_url: { url: `data:image/png;base64,${PNG}` } },
+    ])
+  })
+
+  it('sends native audio with the user message on the OpenAI wire', async () => {
+    const audioPath = path.join(home, 'voice.wav')
+    writeFileSync(audioPath, Buffer.from('audio bytes'))
+    stubStream(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', 'data: [DONE]\n\n'])
+    const provider = new CapturingProvider(new OpenAIProvider({ id: 'test', baseURL: 'https://x.test/v1' }))
+    for await (const _event of provider.stream({
+      model: 'm',
+      messages: [{ role: 'user', content: [
+        { type: 'text', text: 'Transcribe this.' },
+        { type: 'audio', mimeType: 'audio/wav', path: audioPath, name: 'voice.wav' },
+      ] }],
+    })) { /* drain */ }
+    const body = JSON.parse(String(vi.mocked(fetch).mock.calls[0]?.[1]?.body)) as {
+      messages: { role: string; content: unknown }[]
+    }
+    expect(body.messages[0]?.content).toEqual([
+      { type: 'text', text: 'Transcribe this.' },
+      { type: 'input_audio', input_audio: { data: Buffer.from('audio bytes').toString('base64'), format: 'wav' } },
+    ])
+  })
+
   it('sends the picture with the tool result on the OpenAI wire', async () => {
     const ref = await saveImage({ mimeType: 'image/png', data: PNG })
     stubStream(['data: {"choices":[{"delta":{"content":"ok"}}]}\n\n', 'data: [DONE]\n\n'])

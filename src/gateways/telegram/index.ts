@@ -27,6 +27,8 @@ import { runTurns } from '../runner.js'
 import { TurnQueue } from '../turns.js'
 import type { ChatSurface } from '../surface.js'
 import type { Gateway } from '../types.js'
+import type { IncomingFile } from '../../core/media.js'
+import type { ImagePart } from '../../core/providers/types.js'
 import { TelegramMessenger, isNotModified } from './messenger.js'
 import { commandReplyParts } from './reply.js'
 import { toHtml } from './html.js'
@@ -190,6 +192,11 @@ export class TelegramGateway implements Gateway {
       this.startTurn(bot, ctx, chatId, text)
     })
 
+    bot.on('message:photo', (ctx) => { void this.receiveTelegramMedia(bot, ctx, ctx.msg.photo.at(-1)?.file_id, 'image/jpeg', 'photo.jpg') })
+    bot.on('message:document', (ctx) => { void this.receiveTelegramMedia(bot, ctx, ctx.msg.document.file_id, ctx.msg.document.mime_type ?? 'application/octet-stream', ctx.msg.document.file_name ?? 'document') })
+    bot.on('message:audio', (ctx) => { void this.receiveTelegramMedia(bot, ctx, ctx.msg.audio.file_id, ctx.msg.audio.mime_type ?? 'audio/mpeg', ctx.msg.audio.file_name ?? 'audio') })
+    bot.on('message:voice', (ctx) => { void this.receiveTelegramMedia(bot, ctx, ctx.msg.voice.file_id, ctx.msg.voice.mime_type ?? 'audio/ogg', 'voice.ogg') })
+
     this.bot = bot
     bot
       .start({ onStart: () => console.error('Telegram gateway running') })
@@ -208,6 +215,30 @@ export class TelegramGateway implements Gateway {
     )
   }
 
+  private async receiveTelegramMedia(bot: Bot, ctx: Context, fileId: string | undefined, mimeType: string, name: string): Promise<void> {
+    const chatId = String(ctx.chat?.id ?? '')
+    if (!fileId || !chatId) return
+    if (!isAllowed(this.options.allowlist, [ctx.from?.id, ctx.chat?.id])) {
+      await ctx.reply(denialMessage(ctx.from?.id ?? ctx.chat?.id ?? 'user'))
+      return
+    }
+    try {
+      const file = await bot.api.getFile(fileId)
+      if (!file.file_path) throw new Error('Telegram did not return a download path.')
+      const response = await fetch(`https://api.telegram.org/file/bot${this.options.token}/${file.file_path}`)
+      if (!response.ok) throw new Error(`Telegram download failed (${response.status}).`)
+      const incoming: IncomingFile[] = [{ name, mimeType, data: new Uint8Array(await response.arrayBuffer()) }]
+      const caption = ctx.msg && 'caption' in ctx.msg ? String(ctx.msg.caption ?? '') : ''
+      this.startMediaTurn(bot, ctx, chatId, caption || 'Please inspect the attached media.', incoming)
+    } catch (error) {
+      await ctx.reply(`Could not read that attachment: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  private startMediaTurn(bot: Bot, ctx: Context, chatId: string, text: string, files: IncomingFile[]): void {
+    this.turns.run(chatId, (steering, signal) => this.handleTurn(bot, ctx, chatId, text, steering, signal, [], files))
+  }
+
   private async handleTurn(
     bot: Bot,
     ctx: Context,
@@ -215,6 +246,8 @@ export class TelegramGateway implements Gateway {
     text: string,
     steering: string[],
     signal: AbortSignal,
+    images: ImagePart[] = [],
+    files?: IncomingFile[],
   ): Promise<void> {
     const scope: MemoryScope = { gateway: 'telegram', conversationId: chatId }
     const session = await this.options.runtime.sessionFor(scope)
@@ -222,7 +255,7 @@ export class TelegramGateway implements Gateway {
     const display = readDisplay()
     let command: Awaited<ReturnType<typeof handleCommand>>
     try {
-      command = await handleCommand(text, {
+      command = files?.length ? { handled: false } : await handleCommand(text, {
         policy: this.options.runtime.permissions,
         resetSession: () => session.clear(),
         persistMode: setPermissionMode,
@@ -301,6 +334,8 @@ export class TelegramGateway implements Gateway {
       display,
       steering,
       signal,
+      images,
+      files,
     })
     // A stop is not a failure, and it is already on screen as "🛑 stopped".
     if (failure) {

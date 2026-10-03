@@ -1,9 +1,13 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { listModels, normalizeModels } from '../src/core/providers/models.js'
+import { knownInputModalities, listModels, normalizeModels } from '../src/core/providers/models.js'
 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('normalizeModels', () => {
+  it('knows documented MiMo model IDs when the UI receives an older sparse catalog entry', () => {
+    expect(knownInputModalities('xiaomi/mimo-v2.6-flash')).toEqual(['image', 'audio'])
+  })
+
   it('handles { data: [objects] }', () => {
     expect(normalizeModels({ data: [{ id: 'b' }, { id: 'a', name: 'A' }] })).toEqual([
       { id: 'a', name: 'A' },
@@ -40,6 +44,39 @@ describe('normalizeModels', () => {
       { id: 'b', context: 128_000 },
       { id: 'c', context: 32_768 },
       { id: 'd', context: 200_000 },
+    ])
+  })
+
+  it('reads image input support only when the catalog gives modalities', () => {
+    expect(normalizeModels({ data: [
+      { id: 'has-vision', architecture: { input_modalities: ['text', 'image'] } },
+      { id: 'all-inputs', architecture: { input_modalities: ['text', 'image', 'audio', 'file'] } },
+      { id: 'text-only', architecture: { input_modalities: ['text'] } },
+      { id: 'unknown' },
+    ] })).toEqual([
+      { id: 'all-inputs', vision: true, inputModalities: ['image', 'audio', 'file'] },
+      { id: 'has-vision', vision: true, inputModalities: ['image'] },
+      { id: 'text-only', vision: false, inputModalities: [] },
+      { id: 'unknown' },
+    ])
+  })
+
+  it('recognizes documented MiMo V2.6 image and audio input when the catalog omits modalities', () => {
+    expect(normalizeModels({ data: [
+      { id: 'mimo-v2.6-pro' },
+      { id: 'mimo-v2.6-flash' },
+      { id: 'xiaomi/mimo-v2.6-pro-ultraspeed' },
+      { id: 'unrelated-model' },
+      { id: 'mimo-v2.6-text-only', architecture: { input_modalities: ['text'] } },
+    ] })).toEqual([
+      { id: 'mimo-v2.6-flash', vision: true, inputModalities: ['image', 'audio'] },
+      { id: 'mimo-v2.6-pro', vision: true, inputModalities: ['image', 'audio'] },
+      { id: 'mimo-v2.6-text-only', vision: false, inputModalities: [] },
+      { id: 'unrelated-model' },
+      { id: 'xiaomi/mimo-v2.6-pro-ultraspeed', vision: true, inputModalities: ['image', 'audio'] },
+    ])
+    expect(normalizeModels(['mimo-v2.6-pro'])).toEqual([
+      { id: 'mimo-v2.6-pro', vision: true, inputModalities: ['image', 'audio'] },
     ])
   })
 

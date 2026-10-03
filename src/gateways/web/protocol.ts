@@ -67,7 +67,7 @@ export interface SessionCardItem {
 
 export type ClientFrame =
   | { type: 'hello'; version: number; conversationId: string }
-  | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget }
+  | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[] }
   | { type: 'control'; action: 'stop' | 'allow' | 'deny'; id?: string }
   | { type: 'command'; text: string }
   | { type: 'action'; actionId: string; messageId?: string }
@@ -134,6 +134,7 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
   if (
     frame.type === 'send' &&
     typeof frame.text === 'string' &&
+    (frame.uploadIds === undefined || (Array.isArray(frame.uploadIds) && frame.uploadIds.every((id) => typeof id === 'string'))) &&
     (frame.intent === undefined || frame.intent === 'steer' || frame.intent === 'queue') &&
     (frame.target === undefined || isSendTarget(frame.target))
   ) {

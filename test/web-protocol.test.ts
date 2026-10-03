@@ -27,6 +27,12 @@ describe('web protocol', () => {
     expect(parseClientFrame({ type: 'send', text: 'plain' })).not.toHaveProperty('target')
   })
 
+  it('accepts staged file ids and refuses malformed ids', () => {
+    expect(parseClientFrame({ type: 'send', text: 'describe these', uploadIds: ['file-a', 'file-b'] }))
+      .toMatchObject({ uploadIds: ['file-a', 'file-b'] })
+    expect(parseClientFrame({ type: 'send', text: '', uploadIds: [1] })).toBeNull()
+  })
+
   it('sends tool calls as events, not folded into the reply text', () => {
     output.length = 0
     displayEvent({ type: 'tool-start', id: '1', name: 'read_file', args: { path: 'a.txt' } }, 'turn', { tools: 'full', thinking: 'on' }, send as never)

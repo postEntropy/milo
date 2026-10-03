@@ -7,6 +7,8 @@ export type Choice = {
   label: string
   /** A short measure that belongs to the label, e.g. how much a model holds. */
   badge?: string
+  /** Compact details for choices such as model input capabilities. */
+  meta?: ReactNode
 }
 
 /**
@@ -142,6 +144,7 @@ export function Select({
     >
       {icon && <Icon name={icon} size={13} />}
       <span className="select-value">{triggerLabel ?? current?.label ?? value}</span>
+      {current?.meta}
       {caret && <Icon className="select-caret" name="chevron" size={15} />}
     </button>
     {open && <div className="select-menu" role="listbox" aria-label={label}>
@@ -171,6 +174,7 @@ export function Select({
           onClick={() => pick(choice.value)}
         >
           <span className="select-option-label">{choice.label}</span>
+          {choice.meta}
           {choice.badge ? <span className="size-badge">{choice.badge}</span> : null}
           {choice.value === value ? <Icon name="check" size={14} /> : null}
         </button>)}

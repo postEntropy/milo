@@ -7,6 +7,7 @@ import { IMAGE_TOKENS } from '../images.js'
 export function estimateTokens(messages: Message[]): number {
   let chars = 0
   let images = 0
+  let audio = 0
   for (const message of messages) {
     for (const part of message.content) {
       switch (part.type) {
@@ -16,6 +17,12 @@ export function estimateTokens(messages: Message[]): number {
         case 'tool-result':
           chars += part.content.length
           images += part.images?.length ?? 0
+          break
+        case 'image':
+          images += 1
+          break
+        case 'audio':
+          audio += 1
           break
         case 'tool-call':
           chars += part.name.length + safeJson(part.args).length
@@ -35,7 +42,7 @@ export function estimateTokens(messages: Message[]): number {
   }
   // Pictures are priced by the pixel, not by their base64 length, and they are
   // the one part of a transcript that can be megabytes without any text in it.
-  return Math.ceil(chars / 4) + images * IMAGE_TOKENS
+  return Math.ceil(chars / 4) + images * IMAGE_TOKENS + audio * AUDIO_TOKENS
 }
 
 /** The same rough estimate for a plain string — a system prompt, say. */
@@ -122,12 +129,13 @@ export function planCutUnderBudget(
  * makes a loop like that slow.
  */
 export const KEEP_IMAGES_IN_CONTEXT = 4
+/** Audio is larger to replay than a picture; keep only the most recent clip. */
+export const KEEP_AUDIO_IN_CONTEXT = 1
+const AUDIO_TOKENS = 3000
 
 /**
- * Forgets the pictures in tool results older than the last `keep`. The tool
- * result keeps saying what happened; only the picture goes, replaced by a line
- * saying it was dropped — a transcript that silently lost a screenshot would
- * read as a tool that returned nothing.
+ * Forgets older pictures in tool results and incoming messages. Their text stays
+ * in place with a note, so the model never mistakes missing bytes for no image.
  *
  * Idempotent: the images are removed, so a second pass finds nothing to drop and
  * appends nothing.
@@ -137,12 +145,35 @@ export function dropOldImages(messages: Message[], keep = KEEP_IMAGES_IN_CONTEXT
   for (let index = messages.length - 1; index >= 0; index -= 1) {
     const message = messages[index]
     if (!message) continue
-    for (const part of message.content) {
+    for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.content[partIndex]
+      if (!part) continue
+      if (part.type === 'image') {
+        seen += 1
+        if (seen <= keep) continue
+        message.content.splice(partIndex, 1, { type: 'text', text: `[Image ${part.name} omitted to keep the request small]` })
+        continue
+      }
       if (part.type !== 'tool-result' || !part.images?.length) continue
       seen += part.images.length
       if (seen <= keep) continue
       delete part.images
       part.content = `${part.content}\n[screenshot dropped to keep the request small]`
+    }
+  }
+}
+
+/** Older audio stays named in the transcript but stops being resent every turn. */
+export function dropOldAudio(messages: Message[], keep = KEEP_AUDIO_IN_CONTEXT): void {
+  let seen = 0
+  for (let index = messages.length - 1; index >= 0; index -= 1) {
+    const message = messages[index]
+    if (!message) continue
+    for (let partIndex = message.content.length - 1; partIndex >= 0; partIndex -= 1) {
+      const part = message.content[partIndex]
+      if (part?.type !== 'audio') continue
+      seen += 1
+      if (seen > keep) message.content.splice(partIndex, 1, { type: 'text', text: `[Audio ${part.name} omitted to keep the request small]` })
     }
   }
 }

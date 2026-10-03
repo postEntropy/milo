@@ -43,6 +43,11 @@ export class MiloSocket {
     this.socket.send(JSON.stringify(frame))
   }
 
+  sendFor(conversationId: string, frame: ClientFrame): void {
+    if (this.conversationId !== conversationId) throw new Error('The active chat changed while files were uploading. Send them again.')
+    this.send(frame)
+  }
+
   subscribe(listener: (frame: ServerFrame) => void): () => void {
     this.listeners.add(listener)
     return () => this.listeners.delete(listener)

@@ -1,5 +1,5 @@
 import path from 'node:path'
-import { listModels } from '../../core/providers/models.js'
+import { listModels, normalizeModels } from '../../core/providers/models.js'
 import { PRESETS } from '../../core/config/presets.js'
 import { googleState } from '../../core/google/state.js'
 import { googleToolNames } from '../../core/tools/index.js'
@@ -169,6 +169,7 @@ export class WebSettings {
         threshold: next.permissions.jevThreshold,
       })
       this.runtime.setReasoningEffort(next.reasoningEffort)
+      this.runtime.setMediaModels(next.media)
       setPermissionMode(next.permissions.mode)
       setDisplay(next.display)
       setReasoningEffort(next.reasoningEffort)
@@ -258,7 +259,7 @@ export class WebSettings {
     }
     const apiKey = resolveApiKey(id, entry, readAuth())
     return listModels({ baseURL: entry.baseURL, wire: entry.wire, headers: entry.headers, apiKey })
-      .catch(() => PRESETS.find((preset) => preset.id === id)?.models.map((model) => ({ id: model })) ?? [])
+      .catch(() => normalizeModels(PRESETS.find((preset) => preset.id === id)?.models ?? []))
   }
 
   private skills(): unknown {

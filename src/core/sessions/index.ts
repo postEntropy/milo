@@ -8,6 +8,7 @@ export { pruneSessions } from './retention.js'
 export { generateNickname } from './nickname.js'
 export {
   digest,
+  dropOldAudio,
   dropOldImages,
   dropOldSnapshots,
   estimateText,

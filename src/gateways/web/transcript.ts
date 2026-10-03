@@ -23,7 +23,10 @@ export function transcriptOf(messages: Message[], register: RegisterFile): Trans
     const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
     if (message.role === 'user') {
       currentAssistant = null
-      if (text) transcript.push({ role: 'user', text })
+      const attachments = message.content.flatMap((part) => part.type === 'image'
+        ? [register({ path: part.path, name: part.name, mimeType: part.mimeType })]
+        : [])
+      if (text || attachments.length) transcript.push({ role: 'user', text, ...(attachments.length ? { attachments } : {}) })
       continue
     }
     if (message.role === 'assistant') {

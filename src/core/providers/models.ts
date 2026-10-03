@@ -5,7 +5,13 @@ export interface ModelInfo {
   name?: string
   /** How much the model holds, when the catalog says: tokens, not bytes. */
   context?: number
+  /** Whether the catalog explicitly says that image input is supported. */
+  vision?: boolean
+  /** Non-text input types explicitly listed by the provider catalog. */
+  inputModalities?: InputModality[]
 }
+
+export type InputModality = 'image' | 'audio' | 'file'
 
 /** The names a catalog gives the size of a model's window, most common first. */
 const CONTEXT_KEYS = ['context_length', 'context_window', 'context_size', 'max_context_length', 'max_context', 'inputTokenLimit', 'max_input_tokens']
@@ -53,7 +59,8 @@ export function normalizeModels(json: unknown): ModelInfo[] {
 
   for (const item of raw) {
     if (typeof item === 'string') {
-      byId.set(item, { id: item })
+      const modalities = knownInputModalities(item)
+      byId.set(item, { id: item, ...(modalities ? { vision: true, inputModalities: modalities } : {}) })
       continue
     }
     if (!item || typeof item !== 'object') continue
@@ -65,11 +72,31 @@ export function normalizeModels(json: unknown): ModelInfo[] {
     const nested = record.top_provider && typeof record.top_provider === 'object'
       ? record.top_provider as Record<string, unknown>
       : {}
+    const architecture = record.architecture && typeof record.architecture === 'object'
+      ? record.architecture as Record<string, unknown>
+      : {}
     const context = firstNumber(CONTEXT_KEYS.map((key) => record[key]).concat(CONTEXT_KEYS.map((key) => nested[key])))
-    byId.set(id, { id, name: name && name !== id ? name : undefined, ...(context ? { context } : {}) })
+    const inputModalities = arrayOfStrings(architecture.input_modalities ?? record.input_modalities)
+    const knownModalities = inputModalities?.filter((item): item is InputModality => ['image', 'audio', 'file'].includes(item))
+    const inferredModalities = inputModalities === undefined ? knownInputModalities(id) : undefined
+    const vision = inputModalities
+      ? inputModalities.includes('image')
+      : firstBoolean(record.supports_vision, record.supportsVision, record.vision) ?? inferredModalities?.includes('image')
+    byId.set(id, {
+      id,
+      name: name && name !== id ? name : undefined,
+      ...(context ? { context } : {}),
+      ...(vision !== undefined ? { vision } : {}),
+      ...(knownModalities !== undefined ? { inputModalities: knownModalities } : inferredModalities ? { inputModalities: inferredModalities } : {}),
+    })
   }
 
   return [...byId.values()].sort((a, b) => a.id.localeCompare(b.id))
+}
+
+/** Xiaomi's public catalog may omit modality fields for this documented family. */
+export function knownInputModalities(id: string): InputModality[] | undefined {
+  return /(?:^|\/)mimo-v2\.6(?:-|$)/i.test(id) ? ['image', 'audio'] : undefined
 }
 
 function pickArray(json: unknown): unknown[] {
@@ -97,4 +124,14 @@ function firstNumber(values: unknown[]): number | undefined {
     if (typeof number === 'number' && Number.isFinite(number) && number > 0) return number
   }
   return undefined
+}
+
+function arrayOfStrings(value: unknown): string[] | undefined {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string')
+    ? value.map((item) => (item as string).toLowerCase())
+    : undefined
+}
+
+function firstBoolean(...values: unknown[]): boolean | undefined {
+  return values.find((value): value is boolean => typeof value === 'boolean')
 }

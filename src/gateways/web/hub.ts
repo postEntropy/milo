@@ -17,6 +17,9 @@ import { displayEvent } from './turn.js'
 import { transcriptOf } from './transcript.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
+import { prepareIncoming } from '../../core/media.js'
+import type { IncomingFile } from '../../core/media.js'
+import type { ImagePart } from '../../core/providers/types.js'
 
 /**
  * How long the home's ideas are reused before they are asked for again. Short,
@@ -69,6 +72,7 @@ export class WebHub {
    * a hash of the path rather than a fresh token each time.
    */
   private readonly attachments = new Map<string, { path: string; name: string; mimeType: string }>()
+  private readonly stagedUploads = new Map<string, { file: IncomingFile; expires: number; timer: NodeJS.Timeout }>()
   /**
    * The ideas the home currently gets, and what they were drawn from. One slot,
    * not one per conversation: what grounds them — the notes and the recent
@@ -145,7 +149,18 @@ export class WebHub {
     }
 
     if (frame.type === 'send') {
-      if (!frame.text.trim()) return
+      let files: IncomingFile[] = []
+      try {
+        files = frame.uploadIds?.map((uploadId) => this.takeUpload(uploadId)) ?? []
+      } catch (error) {
+        client.send({ type: 'error', message: errorMessage(error) })
+        return
+      }
+      if (!frame.text.trim() && !files.length) return
+      if (files.length) {
+        this.startTurn(conversationId, frame.text, frame.target, [], files)
+        return
+      }
       if (frame.intent === 'steer') {
         const steered = this.turns.steer(conversationId, frame.text)
         if (steered) {
@@ -179,7 +194,38 @@ export class WebHub {
 
   close(): void {
     this.ideaWork?.controller.abort()
+    for (const staged of this.stagedUploads.values()) clearTimeout(staged.timer)
+    this.stagedUploads.clear()
     for (const id of this.conversations.keys()) this.turns.stop(id)
+  }
+
+  stageUpload(file: IncomingFile): string {
+    this.pruneStagedUploads()
+    const id = randomUUID()
+    const expires = Date.now() + 10 * 60_000
+    const timer = setTimeout(() => this.stagedUploads.delete(id), 10 * 60_000)
+    timer.unref()
+    this.stagedUploads.set(id, { file, expires, timer })
+    return id
+  }
+
+  private takeUpload(id: string): IncomingFile {
+    this.pruneStagedUploads()
+    const staged = this.stagedUploads.get(id)
+    if (!staged) throw new Error('An uploaded file expired. Attach it again and resend.')
+    this.stagedUploads.delete(id)
+    clearTimeout(staged.timer)
+    return staged.file
+  }
+
+  private pruneStagedUploads(): void {
+    const now = Date.now()
+    for (const [id, staged] of this.stagedUploads) {
+      if (staged.expires <= now) {
+        clearTimeout(staged.timer)
+        this.stagedUploads.delete(id)
+      }
+    }
   }
 
   /**
@@ -345,7 +391,7 @@ export class WebHub {
     }
   }
 
-  private startTurn(conversationId: string, text: string, target?: SendTarget): void {
+  private startTurn(conversationId: string, text: string, target?: SendTarget, images: ImagePart[] = [], files?: IncomingFile[]): void {
     // A person who is already typing does not want ideas. The call they started
     // is about to be wasted work, so it is cut here rather than left to finish
     // behind the turn and replace cards nobody is looking at any more.
@@ -363,17 +409,33 @@ export class WebHub {
       const id = randomUUID()
       const activeConversation = this.conversations.get(conversationId)
       if (activeConversation) activeConversation.activeTurnId = id
-      this.broadcast(conversationId, { type: 'turn-start', id, text })
+      this.broadcast(conversationId, { type: 'turn-start', id, text: files?.length
+        ? [text, files.map((file) => `Attached ${file.name}`).join(', ')].filter(Boolean).join('\n')
+        : text })
       let status: 'done' | 'stopped' | 'error' = 'done'
       const display = readDisplay()
+      let currentImages = images
+      let currentAudio: import('../../core/providers/types.js').AudioPart[] = []
+      let currentFiles = files
+      let currentModel: string | undefined
       try {
-        let currentText = text
+        let currentText = text || (currentFiles?.length ? 'Please inspect the attached media.' : '')
         while (currentText && !signal.aborted) {
           const conversation = this.conversations.get(conversationId)
           if (!conversation) return
           let session = await this.runtime.getSession(conversation.scope)
           conversation.session = session
-          const command = await handleCommand(currentText, this.commandContext(conversation, session, signal))
+          if (currentFiles?.length) {
+            const prepared = await prepareIncoming(currentFiles, { model: session.model })
+            currentText = [currentText, currentFiles.map((file) => `Attached ${file.name}`).join('\n'), ...prepared.text].filter(Boolean).join('\n\n') || 'Please inspect the attached media.'
+            currentImages = [...currentImages, ...prepared.images]
+            currentAudio = [...currentAudio, ...prepared.audio]
+            currentModel = prepared.model
+            currentFiles = undefined
+          }
+          const command = currentFiles?.length
+            ? { handled: false as const }
+            : await handleCommand(currentText, this.commandContext(conversation, session, signal))
           if (command.handled) {
             session = await this.runtime.getSession(conversation.scope)
             conversation.session = session
@@ -393,6 +455,9 @@ export class WebHub {
           for await (const event of session.send(currentText, {
             signal,
             steering: inbox,
+            ...(currentImages.length ? { images: currentImages } : {}),
+            ...(currentAudio.length ? { audio: currentAudio } : {}),
+            ...(currentModel ? { model: currentModel } : {}),
             // A screen may pin where this turn is addressing — the routines screen
             // names a routine's destination, and the tool takes it from here
             // rather than from the chat the turn happens to be running in.
@@ -414,6 +479,9 @@ export class WebHub {
             if (event.type === 'aborted') status = 'stopped'
             displayEvent(event, id, display, (frame) => this.broadcast(conversationId, frame))
           }
+          currentImages = []
+          currentAudio = []
+          currentModel = undefined
           // The files this turn asked to send, read once it is over. They go
           // through the delivery a routine's answer uses, so the transcript keeps
           // them and a reload serves them again.

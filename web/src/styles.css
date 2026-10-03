@@ -334,6 +334,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-box { position: relative; width: min(780px, 100%); margin: 0 auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); transition: border-color var(--motion-fast), box-shadow var(--motion-fast); }
 .composer-box:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .composer-box textarea { display: block; width: 100%; min-height: 44px; max-height: 180px; resize: none; border: 0; outline: 0; background: none; padding: 12px 16px 4px; font-size: 14px; line-height: 1.55; }
+.composer-files { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; }
+.composer-upload-error { padding: 8px 14px 0; color: var(--danger); font-size: 12px; }
+.composer-file { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 9px; background: var(--surface-warm); padding: 5px 8px; color: var(--muted); font-size: 12px; }
+.composer-file button { display: inline-flex; border: 0; border-radius: 50%; background: var(--surface); padding: 3px; color: var(--fg); cursor: pointer; }
+.attach-button { display: inline-flex; align-items: center; justify-content: center; border: 0; background: var(--surface-warm); }
 .composer-box textarea::placeholder { color: var(--muted); }
 /* The picked-out words, held at the head of the box until the reply is sent — a
    filled strip with the quotation mark, what was picked, and the way to drop it. */
@@ -475,6 +480,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* A measure that belongs to the name beside it — how much a model holds. Shared
    by every list that shows one, so the badge cannot drift between them. */
 .size-badge { flex: none; border-radius: 6px; background: var(--bg); padding: 1px 6px; color: var(--muted); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.model-details { display: inline-flex; flex: none; align-items: center; gap: 6px; }
+.model-modalities { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
+.model-modality { display: inline-flex; width: 20px; height: 20px; flex: none; align-items: center; justify-content: center; border-radius: 6px; background: var(--bg); color: var(--muted); }
+.model-modality svg.icon { color: currentColor; }
 .model-picker-note { padding: 8px 4px; color: var(--muted); font-size: 12px; }
 @media (min-width: 901px) {
   .model-pair { display: none; }

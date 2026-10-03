@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api } from './lib/api.js'
+import { api, uploadFile } from './lib/api.js'
 import { randomUUID } from './lib/uuid.js'
 import { MiloSocket, type ConnectionState } from './lib/ws.js'
 import { Composer, type ComposerHandle } from './chat/Composer.js'
@@ -545,25 +545,27 @@ export default function App() {
    * screen pins the destination a routine it asks for is made for, when that is
    * not this chat — the sentence then does not have to say it.
    */
-  const send = useCallback((text: string, intent: 'queue' | 'steer' = 'queue', target?: SendTarget): void => {
+  const send = useCallback((text: string, intent: 'queue' | 'steer' = 'queue', files?: File[], target?: SendTarget): void => {
+    const sendingConversation = conversationId
     // An edit is a redo from the turn it was made on: the words go again with the
     // session forked to before them, rather than a second copy piling on top.
-    if (editingTurn.current !== null) {
+    if (editingTurn.current !== null && !files?.length) {
       const upToTurn = editingTurn.current
       editingTurn.current = null
       void redo(text, upToTurn)
       return
     }
-    followSend.current = true
-    try {
-      if (text.startsWith('/')) {
+    editingTurn.current = null
+    void (async () => {
+      const uploadIds = files?.length ? await Promise.all(files.map(uploadFile)) : []
+      followSend.current = true
+      if (text.startsWith('/') && !uploadIds.length) {
         setMessages((current) => [...current, { id: `user-${randomUUID()}`, role: 'user', text }])
         socket.send({ type: 'command', text })
-      }
-      else socket.send({ type: 'send', text, intent, ...(target ? { target } : {}) })
+      } else socket.sendFor(sendingConversation, { type: 'send', text, intent, ...(target ? { target } : {}), ...(uploadIds.length ? { uploadIds } : {}) })
       setNotice(null)
-    } catch (error) { fail(error) }
-  }, [socket, fail, redo])
+    })().catch(fail)
+  }, [socket, fail, redo, conversationId])
 
   useEffect(() => { sendRef.current = send }, [send])
 
@@ -573,7 +575,7 @@ export default function App() {
    * to spell it out.
    */
   function askRoutine(text: string, target?: SendTarget): void {
-    send(text, 'queue', target)
+    send(text, 'queue', undefined, target)
   }
 
   /** The answer to a permission prompt, wherever on screen it is drawn. */

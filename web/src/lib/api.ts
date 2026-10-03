@@ -50,3 +50,18 @@ export async function api<T>(action: string, body: Record<string, unknown> = {})
   }
   return payload as T
 }
+
+export async function uploadFile(file: File): Promise<string> {
+  const response = await fetch('/upload', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${apiToken()}`,
+      'content-type': file.type || 'application/octet-stream',
+      'x-file-name': encodeURIComponent(file.name),
+    },
+    body: file,
+  })
+  const payload = await response.json() as { uploadId?: string; error?: string }
+  if (!response.ok || !payload.uploadId) throw new ApiError(payload.error ?? response.statusText, response.status)
+  return payload.uploadId
+}

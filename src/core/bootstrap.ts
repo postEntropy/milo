@@ -90,6 +90,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     // keeping the wire of the one it replaced.
     providerFor: (model) => createProvider(loaded.provider, model),
     model: loaded.model,
+    mediaModels: loaded.config.media,
     system: loaded.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     registry: createToolRegistry({ search, skills, browser, google }),
     browser,

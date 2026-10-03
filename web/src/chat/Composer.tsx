@@ -1,10 +1,12 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api } from '../lib/api.js'
 import { formatTokens } from '../lib/format.js'
-import { formatContext, shortModel } from '../../../src/gateways/model-label.ts'
+import { shortModel } from '../../../src/gateways/model-label.ts'
+import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { EFFORT_LEVELS } from '@protocol'
 import { Icon } from '../ui/Icons.js'
 import { Select } from '../ui/Select.js'
+import { ModelDetails } from '../ui/ModelDetails.js'
 
 interface Props {
   busy: boolean
@@ -20,13 +22,12 @@ interface Props {
   effort: 'low' | 'medium' | 'high'
   /** Bumped when something asks for the cursor, so the field takes the next keystroke. */
   focusSignal: number
-  onSend(text: string, intent: 'steer' | 'queue'): void
+  onSend(text: string, intent: 'steer' | 'queue', files?: File[]): void
   onStop(): void
   onModelChange(model: string): void
   onEffortChange(effort: 'low' | 'medium' | 'high'): void
 }
 
-type ModelInfo = { id: string; name?: string; context?: number }
 
 /** What the app may ask the composer to do from outside it. */
 export interface ComposerHandle {
@@ -77,6 +78,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const [quote, setQuote] = useState<string | null>(null)
   /** What was typed in each conversation, kept under the one it was typed in. */
   const drafts = useRef(new Map<string, string>())
+  const fileDrafts = useRef(new Map<string, File[]>())
   const shownKey = useRef(draftKey)
   const [models, setModels] = useState<ModelInfo[] | null>(null)
   const [loading, setLoading] = useState(false)
@@ -84,6 +86,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const [highlight, setHighlight] = useState(0)
   /** The draft Escape was pressed on; the palette stays closed for that text alone. */
   const [dismissed, setDismissed] = useState<string | null>(null)
+  const [files, setFiles] = useState<File[]>([])
+  const [uploadError, setUploadError] = useState('')
+  const uploadRef = useRef<HTMLInputElement>(null)
 
   const palette = useMemo(() => {
     if (!draft.startsWith('/') || draft.includes(' ') || dismissed === draft) return []
@@ -153,15 +158,19 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     if (shownKey.current === draftKey) return
     shownKey.current = draftKey
     setDraft(drafts.current.get(draftKey) ?? '')
+    setFiles(fileDrafts.current.get(draftKey) ?? [])
   }, [draftKey])
 
-  function submit(intent: 'steer' | 'queue'): void {
+  async function submit(intent: 'steer' | 'queue'): Promise<void> {
     const text = draft.trim()
-    if (!text) return
+    if (!text && files.length === 0) return
     // The picked-out words travel as a quotation ahead of the reply, so what was
     // answered is part of the message and not only in the reader's head.
     const quoted = quote ? `${quote.split('\n').map((line) => `> ${line}`).join('\n')}\n\n` : ''
-    onSend(quoted + text, intent)
+    setUploadError('')
+    onSend(quoted + text, intent, files)
+    setFiles([])
+    fileDrafts.current.delete(draftKey)
     editDraft('')
     setQuote(null)
   }
@@ -208,7 +217,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      submit(busy && (event.ctrlKey || event.metaKey) ? 'steer' : 'queue')
+      void submit(busy && (event.ctrlKey || event.metaKey) ? 'steer' : 'queue')
     }
   }
 
@@ -230,6 +239,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     <div className="composer-shell">
       <div className="queue-list" aria-live="polite">{queued > 0 && <div className="queue-chip"><Icon name="history" size={14} /> {queued} {queued === 1 ? 'message queued' : 'messages queued'}</div>}</div>
       <div className="composer-box">
+        {uploadError && <div className="composer-upload-error" role="alert">{uploadError}</div>}
+        {files.length > 0 && <div className="composer-files" aria-live="polite">{files.map((file, index) => <span className="composer-file" key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name}<button type="button" aria-label={`Remove ${file.name}`} title={`Remove ${file.name}`} onClick={() => setFiles((current) => { const next = current.filter((_, item) => item !== index); fileDrafts.current.set(draftKey, next); return next })}><Icon name="x" size={12} /></button></span>)}</div>}
         {palette.length > 0 && <div className="command-menu" role="listbox" aria-label="Commands">
           {palette.map((command, index) => <button className={`command-option ${index === highlight ? 'active' : ''}`} type="button" role="option" aria-selected={index === highlight} key={command.name} onMouseEnter={() => setHighlight(index)} onClick={() => choose(command.name)}><code className="command-name">/{command.name}</code><small>{command.hint}</small></button>)}
         </div>}
@@ -248,6 +259,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           onKeyDown={key}
         />
         <div className="composer-toolbar">
+          <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } fileDrafts.current.set(draftKey, next); return next }); event.target.value = '' }} />
+          <button className="composer-pill attach-button" type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={15} /></button>
           <div className="composer-model-wrap">
             <Select
               className="composer-pill"
@@ -257,7 +270,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               value={model}
               triggerLabel={model ? shortModel(model) : 'Model'}
               choices={(models ?? []).map((item) => ({
-                value: item.id, label: item.id, ...(item.context ? { badge: formatContext(item.context) } : {}),
+                value: item.id, label: item.id, meta: <ModelDetails model={item} />,
               }))}
               onChange={onModelChange}
               onOpen={() => void loadModels()}
@@ -284,7 +297,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           </span>}
           {busy
             ? <button className="send-button stop" type="button" title="Stop (Esc)" aria-label="Stop Milo" onClick={onStop}><Icon name="stop" size={16} /></button>
-            : <button className="send-button" type="button" title="Send (Enter)" aria-label="Send message" disabled={!draft.trim()} onClick={() => submit('queue')}><Icon name="send" size={17} /></button>}
+            : <button className="send-button" type="button" title="Send (Enter)" aria-label="Send message" disabled={!draft.trim() && files.length === 0} onClick={() => void submit('queue')}><Icon name="send" size={17} /></button>}
         </div>
       </div>
     </div>

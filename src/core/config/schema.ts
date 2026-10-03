@@ -289,6 +289,14 @@ export const GoogleSchema = z.object({ enabled: z.boolean().default(false) })
 export type GoogleConfig = z.infer<typeof GoogleSchema>
 export const DEFAULT_GOOGLE: GoogleConfig = { enabled: false }
 
+/** Optional model ids for image and document tasks, plus Groq's transcription model. */
+export const MediaModelsSchema = z.object({
+  vision: z.string().optional(),
+  audio: z.string().default('whisper-large-v3-turbo'),
+  document: z.string().optional(),
+})
+export type MediaModelsConfig = z.infer<typeof MediaModelsSchema>
+
 /**
  * The grant Milo holds: the OAuth app it is, and the access it was given.
  *
@@ -318,6 +326,7 @@ export const ConfigSchema = z.object({
   classifier: ClassifierSchema.default(DEFAULT_CLASSIFIER),
   browser: BrowserSchema.default(DEFAULT_BROWSER),
   google: GoogleSchema.default(DEFAULT_GOOGLE),
+  media: MediaModelsSchema.optional(),
   search: SearchSchema.optional(),
   systemPrompt: z.string().optional(),
   maxSteps: z.number().int().positive().optional(),

@@ -1,4 +1,4 @@
-import type { SessionsConfig } from './config/schema.js'
+import type { MediaModelsConfig, SessionsConfig } from './config/schema.js'
 import type { BrowserSession } from './browser/index.js'
 import type { HistoryWriter } from './history.js'
 import type { Memory, MemoryScope } from './memory/index.js'
@@ -31,6 +31,7 @@ export interface RuntimeOptions {
    */
   providerFor?: (model: string) => Provider
   model: string
+  mediaModels?: MediaModelsConfig
   system: string
   registry: ToolRegistry
   memory: Memory
@@ -341,6 +342,11 @@ export class AgentRuntime {
     this.installModel(model)
   }
 
+  setMediaModels(mediaModels: MediaModelsConfig | undefined): void {
+    this.options.mediaModels = mediaModels
+    for (const session of this.cache.values()) session.setMediaModels(mediaModels)
+  }
+
   /**
    * Switches the model for this install: the open sessions and the ones after.
    * The provider is built again where the runtime knows how — a model can
@@ -421,6 +427,8 @@ export class AgentRuntime {
     const session = new Session({
       scope,
       provider: this.options.provider,
+      providerFor: this.options.providerFor,
+      mediaModels: this.options.mediaModels,
       model: this.options.model,
       system: this.options.system,
       registry: this.options.registry,

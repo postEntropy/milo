@@ -14,6 +14,7 @@ import { logDebug } from '../util/log.js'
 import { imagesDir } from './config/paths.js'
 import { ensurePrivateDir, PRIVATE_FILE_MODE } from '../util/fs.js'
 import type { ImageMime, ImageRef } from './providers/types.js'
+import type { ImagePart } from './providers/types.js'
 
 /**
  * What a picture costs the model, whatever its size: every provider prices an
@@ -68,6 +69,14 @@ export async function saveImage(image: { mimeType: ImageMime; data: string }): P
     logDebug(`could not keep a screenshot: ${errorMessage(error)}`)
     return null
   }
+}
+
+/** Keep an incoming picture beside the transcript and return its small path reference. */
+export async function saveIncomingImage(input: { mimeType: string; data: Uint8Array; name: string }): Promise<ImagePart> {
+  const mimeType: ImageMime = input.mimeType === 'image/png' ? 'image/png' : 'image/jpeg'
+  const ref = await saveImage({ mimeType, data: Buffer.from(input.data).toString('base64') })
+  if (!ref) throw new Error(`Could not save image ${input.name}.`)
+  return { type: 'image', mimeType, path: ref.path, name: input.name }
 }
 
 /** The picture's bytes, base64, or null when it has been evicted meanwhile. */

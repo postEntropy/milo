@@ -44,6 +44,10 @@ export const CONFIG_NOTES: Record<string, string> = {
   gateways: 'The chat surfaces. The browser chat is served by `milo serve` and lives under `web`.',
   web: 'The browser chat: whether it is served, and where it listens.',
   google: 'Google (Gmail and Drive): off unless asked for. Connect with `milo google connect`.',
+  media: 'Optional model choices for incoming images, audio transcription, and documents.',
+  'media.audio': 'Groq Whisper model for audio transcription. Requires GROQ_API_KEY.',
+  'media.vision': 'Optional model id for images. Milo checks provider metadata when available; unknown models need an explicit choice here.',
+  'media.document': 'Optional document model id; absent, the main chat model is used.',
   'google.enabled':
     'Whether Milo may read your mail and files. The grant itself is a secret and lives in auth.json.',
   'web.enabled': 'false is `milo serve --no-web` written down.',

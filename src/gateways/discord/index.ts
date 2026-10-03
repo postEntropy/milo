@@ -22,6 +22,8 @@ import { chunk } from '../chunk.js'
 import { TurnQueue } from '../turns.js'
 import type { ChatSurface } from '../surface.js'
 import type { Gateway } from '../types.js'
+import type { IncomingFile } from '../../core/media.js'
+import type { ImagePart } from '../../core/providers/types.js'
 import {
   ActionRouter,
   buildSessionsList,
@@ -163,7 +165,7 @@ export class DiscordGateway implements Gateway {
     client.on(Events.MessageCreate, (message) => {
       if (message.author.bot) return
       const text = message.content.trim()
-      if (!text) return
+      if (!text && message.attachments.size === 0) return
 
       if (
         !isAllowed(this.options.allowlist, [message.author.id, message.channelId, message.guildId])
@@ -188,7 +190,12 @@ export class DiscordGateway implements Gateway {
       // turn at its next step boundary — after the tool call in flight — rather
       // than starting a second turn to race it over the same session. Commands
       // are never steered: they are not something to say to the model.
-      if (!text.startsWith('/') && this.turns.steer(message.channelId, text)) return
+      if (!text.startsWith('/') && text && this.turns.steer(message.channelId, text)) return
+
+      if (message.attachments.size) {
+        void this.receiveDiscordMedia(message, ask, text)
+        return
+      }
 
       this.startTurn(message, ask, text)
     })
@@ -242,10 +249,25 @@ export class DiscordGateway implements Gateway {
     message: Message,
     ask: ChannelAsk,
     text: string,
+    images: ImagePart[] = [],
+    files?: IncomingFile[],
   ): void {
     this.turns.run(message.channelId, (steering, signal) =>
-      this.handleTurn(message, text, ask, steering, signal),
+      this.handleTurn(message, text, ask, steering, signal, images, files),
     )
+  }
+
+  private async receiveDiscordMedia(message: Message, ask: ChannelAsk, caption: string): Promise<void> {
+    try {
+      const files = await Promise.all([...message.attachments.values()].map(async (attachment) => {
+        const response = await fetch(attachment.url)
+        if (!response.ok) throw new Error(`Discord download failed (${response.status}).`)
+        return { name: attachment.name ?? 'attachment', mimeType: attachment.contentType ?? 'application/octet-stream', data: new Uint8Array(await response.arrayBuffer()) }
+      }))
+      this.startTurn(message, ask, caption || 'Please inspect the attached media.', [], files)
+    } catch (error) {
+      await message.reply(`Could not read that attachment: ${error instanceof Error ? error.message : String(error)}`).catch(() => undefined)
+    }
   }
 
   private async handleTurn(
@@ -254,6 +276,8 @@ export class DiscordGateway implements Gateway {
     ask: ChannelAsk,
     steering: string[],
     signal: AbortSignal,
+    images: ImagePart[] = [],
+    files?: IncomingFile[],
   ): Promise<void> {
     const scope: MemoryScope = { gateway: 'discord', conversationId: message.channelId }
     const session = await this.options.runtime.sessionFor(scope)
@@ -261,7 +285,7 @@ export class DiscordGateway implements Gateway {
     const display = readDisplay()
     let command: Awaited<ReturnType<typeof handleCommand>>
     try {
-      command = await handleCommand(text, {
+      command = files?.length ? { handled: false } : await handleCommand(text, {
         policy: this.options.runtime.permissions,
         resetSession: () => session.clear(),
         persistMode: setPermissionMode,
@@ -333,6 +357,8 @@ export class DiscordGateway implements Gateway {
       display,
       steering,
       signal,
+      images,
+      files,
     })
     // A stop is not a failure, and it is already on screen as "🛑 stopped".
     if (failure) await message.reply(`[error] ${failure}`).catch(() => undefined)

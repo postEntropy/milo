@@ -198,6 +198,19 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
 async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, settings: WebSettings, hub: WebHub, boundHost: string): Promise<void> {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
   if (!sameOrigin(request, boundHost)) return json(response, 403, { error: 'Origin not allowed.' })
+  if (url.pathname === '/upload') {
+    if (!authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
+    if (request.method !== 'POST') return json(response, 405, { error: 'Use POST.' })
+    try {
+      const name = decodeURIComponent(String(request.headers['x-file-name'] ?? 'attachment'))
+      const mimeType = String(request.headers['content-type'] ?? 'application/octet-stream')
+      const data = await readRawBody(request)
+      if (data.length === 0) throw new Error('The selected file is empty.')
+      return json(response, 200, { uploadId: hub.stageUpload({ name, mimeType, data }) })
+    } catch (error) {
+      return json(response, 400, { error: error instanceof Error ? error.message : String(error) })
+    }
+  }
   if (url.pathname.startsWith('/api/')) {
     if (!authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
     if (request.method !== 'POST') return json(response, 405, { error: 'Use POST.' })
@@ -380,6 +393,12 @@ async function readBody(request: IncomingMessage): Promise<Record<string, unknow
   const parsed: unknown = JSON.parse(Buffer.concat(chunks).toString('utf8'))
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Expected a JSON object.')
   return parsed as Record<string, unknown>
+}
+
+async function readRawBody(request: IncomingMessage): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  return Buffer.concat(chunks)
 }
 
 function json(response: ServerResponse, status: number, value: unknown): void {
