@@ -383,6 +383,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .select.is-open .composer-pill { background: var(--bg); box-shadow: var(--focus-ring); }
 /* The composer's own menus open upwards: they sit at the foot of the screen. */
 .composer-model-wrap .select-menu, .composer-effort-wrap .select-menu { top: auto; bottom: calc(100% + 8px); inset-inline: 0 auto; width: min(320px, 78vw); }
+.composer-model-wrap .select-option-label { min-width: 0; flex: 1 1 auto; }
+.composer-model-wrap .select-trigger .model-details { display: none; }
+.composer-model-wrap .select-option .size-badge { order: -1; }
 .composer-effort-wrap .select-menu { width: min(160px, 50vw); }
 .composer-effort-wrap { position: relative; }
 .composer-spacer { flex: 1; }
