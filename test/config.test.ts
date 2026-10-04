@@ -1,16 +1,15 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { stringify } from 'yaml'
 
 // Point the app at a throwaway home *before* the config modules load.
 const home = mkdtempSync(path.join(tmpdir(), 'milo-config-'))
 process.env.MILO_HOME = home
 
-const { readConfig, readDisplay, saveConfig, setDisplay, setPermissionMode } = await import(
-  '../src/core/config/load.js'
-)
+const { listProviderModels, readConfig, readDisplay, saveConfig, setDisplay, setPermissionMode } =
+  await import('../src/core/config/load.js')
 const { ConfigSchema } = await import('../src/core/config/schema.js')
 
 const configFile = path.join(home, 'config.yml')
@@ -34,7 +33,48 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  vi.unstubAllGlobals()
   rmSync(configFile, { force: true })
+})
+
+describe('listProviderModels', () => {
+  it('returns the catalog the provider serves', async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ data: [{ id: 'deepseek/deepseek-v4-flash' }] }), { status: 200 }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const models = await listProviderModels('commandcode')
+
+    expect(models.map((model) => model.id)).toEqual(['deepseek/deepseek-v4-flash'])
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.commandcode.ai/provider/v1/models',
+      expect.anything(),
+    )
+  })
+
+  it("falls back to the preset's short list when the catalog call fails", async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('offline')
+    }))
+
+    const models = await listProviderModels('commandcode')
+
+    expect(models.map((model) => model.id)).toContain('deepseek/deepseek-v4-flash')
+  })
+
+  it('refuses a catalog URL that is neither HTTPS nor loopback', async () => {
+    writeFileSync(
+      configFile,
+      stringify({ ...base, providers: { custom: { baseURL: 'http://example.com/v1' } } }),
+    )
+
+    await expect(listProviderModels('custom')).rejects.toThrow('HTTPS')
+  })
+
+  it('says when the provider is not configured', async () => {
+    await expect(listProviderModels('nope')).rejects.toThrow('not configured')
+  })
 })
 
 describe('setPermissionMode', () => {

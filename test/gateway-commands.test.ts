@@ -12,6 +12,7 @@ import {
   handleTurnControl,
   memoryLockMessage,
   modeLockMessage,
+  modelLockMessage,
   parseTurnControl,
   providerLockMessage,
   sessionLockMessage,
@@ -267,6 +268,7 @@ describe('handleCommand', () => {
     expect(result.handled).toBe(true)
     expect(result.reply).toContain('/mode')
     expect(result.reply).toContain('/sessions')
+    expect(result.reply).toContain('/model')
   })
 
   it('treats /start as help (Telegram suggests it)', async () => {
@@ -529,9 +531,8 @@ describe('handleCommand', () => {
     expect((await handleCommand('/resume x-y-1', context)).reply).toBe('🔒 locked')
   })
 
-  it('points /setup and /model at the terminal', async () => {
+  it('points /setup at the terminal', async () => {
     expect((await handleCommand('/setup', {})).reply).toContain('milo setup')
-    expect((await handleCommand('/model', {})).reply).toContain('milo setup')
   })
 
   it('lists the display commands in help', async () => {
@@ -741,6 +742,101 @@ describe('/provider', () => {
   it('says when no provider with a key exists', async () => {
     const reply = (await handleCommand('/provider', { providers: [] })).reply ?? ''
     expect(reply).toContain('No provider with a key is configured')
+  })
+})
+
+describe('/model', () => {
+  const models = [
+    { id: 'deepseek/deepseek-v4-flash' },
+    { id: 'gpt-5.6-luna' },
+    { id: 'claude-sonnet-5' },
+  ]
+
+  it('lists the current provider models, marking the one in use', async () => {
+    const reply = (await handleCommand('/model', {
+      providers: [{ id: 'commandcode', name: 'Command Code' }],
+      currentProvider: 'commandcode',
+      currentModel: 'gpt-5.6-luna',
+      models: async () => models,
+    })).reply ?? ''
+    expect(reply).toContain('Models for Command Code (3)')
+    expect(reply).toContain('gpt-5.6-luna (current)')
+    expect(reply).toContain('Switch with /model <id>')
+  })
+
+  it('leads with the model in use, so a capped catalog still shows it', async () => {
+    const many = Array.from({ length: 30 }, (_, i) => ({ id: `model-${String(i).padStart(2, '0')}` }))
+    const reply = (await handleCommand('/model', {
+      currentProvider: 'commandcode',
+      currentModel: 'model-25',
+      models: async () => many,
+    })).reply ?? ''
+    expect(reply).toContain('Models for commandcode (30)')
+    expect(reply).toContain('model-25 (current)')
+    expect(reply).toContain('and 10 more')
+  })
+
+  it('switches and names the model it landed on', async () => {
+    const switched: string[] = []
+    const reply = (await handleCommand('/model claude-sonnet-5', {
+      persistModel: (id) => {
+        switched.push(id)
+        return { model: id }
+      },
+    })).reply ?? ''
+    expect(switched).toEqual(['claude-sonnet-5'])
+    expect(reply).toContain('claude-sonnet-5')
+  })
+
+  it('says when the provider lists nothing', async () => {
+    const reply = (await handleCommand('/model', {
+      currentProvider: 'openrouter',
+      models: async () => [],
+    })).reply ?? ''
+    expect(reply).toContain('No models listed for openrouter')
+  })
+
+  it('answers a catalog it could not read, rather than inventing a list', async () => {
+    const reply = (await handleCommand('/model', {
+      currentProvider: 'custom',
+      models: async () => {
+        throw new Error('Model catalog URLs must use HTTPS unless they point to localhost.')
+      },
+    })).reply ?? ''
+    expect(reply).toContain('HTTPS')
+  })
+
+  it('refuses a model change on a bot that answers several people', async () => {
+    const locked = modelLockMessage(['1', '2'])!
+    const reply = (await handleCommand('/model claude-sonnet-5', {
+      persistModel: () => ({ model: 'x' }),
+      modelLocked: locked,
+    })).reply
+    expect(reply).toBe(locked)
+  })
+
+  it('says it is unavailable on a surface that never wired it', async () => {
+    expect((await handleCommand('/model', {})).reply).toBe(
+      'Listing models is not available on this surface.',
+    )
+    expect((await handleCommand('/model claude-sonnet-5', {})).reply).toBe(
+      'Changing the model is not available on this surface.',
+    )
+  })
+})
+
+describe('modelLockMessage', () => {
+  it('leaves a single-person bot alone', () => {
+    expect(modelLockMessage(['42'])).toBeUndefined()
+  })
+
+  it('locks a bot that answers anyone', () => {
+    expect(modelLockMessage([])).toContain('anyone')
+    expect(modelLockMessage(undefined)).toContain('anyone')
+  })
+
+  it('locks a shared bot and says how many', () => {
+    expect(modelLockMessage(['42', '43'])).toContain('2 ids')
   })
 })
 

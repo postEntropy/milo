@@ -1,7 +1,7 @@
 import type { AgentRuntime } from '../core/runtime.js'
 import type { Session } from '../core/session.js'
 import type { MemoryScope } from '../core/memory/index.js'
-import { listProviders, readDisplay, setDisplay, setPermissionMode, setProvider, setReasoningEffort } from '../core/config/load.js'
+import { listProviderModels, listProviders, readDisplay, setDisplay, setPermissionMode, setModel, setProvider, setReasoningEffort } from '../core/config/load.js'
 import { describeExport, writeSessionExport, type ExportFormat } from '../core/export.js'
 import { formatStats, formatWhen } from '../core/sessions/index.js'
 import type { CompactResult, SessionStats, SessionSummary } from '../core/sessions/index.js'
@@ -12,6 +12,7 @@ import {
   REASONING_EFFORTS,
   type ReasoningEffort,
 } from '../core/providers/types.js'
+import type { ModelInfo } from '../core/providers/models.js'
 import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.js'
 import type { MemoryItem } from '../core/memory/index.js'
 import type { TurnQueue } from './turns.js'
@@ -46,6 +47,14 @@ export interface CommandContext {
   persistProvider?: (id: string) => { provider: string; name: string; model: string }
   /** Set when this surface may not change the provider; used as the reply. */
   providerLocked?: string
+  /** The current provider's models, for `/model`. */
+  models?: () => Promise<ModelInfo[]>
+  /** The model in use, so `/model` can mark it. */
+  currentModel?: string
+  /** Switches the model live and writes it down; returns what it landed on. */
+  persistModel?: (id: string) => { model: string }
+  /** Set when this surface may not change the model; used as the reply. */
+  modelLocked?: string
   /** Starts a fresh session and binds it to this conversation. */
   newSession?: (title?: string) => Promise<{ id: string }>
   /** Binds this conversation to an existing session. */
@@ -94,6 +103,7 @@ const HELP = [
   '/thinking on|off — show the model\'s reasoning (display only; /effort is what changes how it thinks)',
   "/effort low|medium|high — how hard the model thinks (the one that costs)",
   '/provider [id] — the provider the install answers with: list them, or switch to one',
+  "/model [id] — the model the install answers with: list the current provider's, or switch to one",
   '/new [title] — start a new session',
   '/sessions [page] — list saved sessions',
   '/resume <id> — switch to another session',
@@ -110,7 +120,7 @@ const HELP = [
   '/queue <text> — say it as its own turn, after the one running now',
   '/help — this message',
   'A plain message sent while Milo is working is a correction: it joins that turn at its next step instead of starting a second one. /queue is how you ask for it to be said afterwards.',
-  'Picking a model, or adding a provider or a key: run `milo setup` in a terminal.',
+  'Adding a provider or a key: run `milo setup` in a terminal.',
 ].join('\n')
 
 const TOOL_LEVELS = ['full', 'name', 'off'] as const
@@ -130,6 +140,32 @@ function describeProviders(providers: { id: string; name: string }[], current: s
     ...providers.map((item) => `  ${item.id} — ${item.name}${item.id === current ? ' (current)' : ''}`),
     '',
     'Switch with /provider <id>.',
+  ].join('\n')
+}
+
+/**
+ * How many models a chat names before it stops and the id takes over: a list is
+ * read on a phone, and a provider's catalog can run to hundreds.
+ */
+const MODEL_LIST_LIMIT = 20
+
+/** The models the provider serves, the one in use first and marked — what `/model` answers with. */
+function describeModels(provider: string, models: ModelInfo[], current: string | undefined): string {
+  if (models.length === 0) {
+    return `No models listed for ${provider}. Name one with /model <id>, or check the provider in \`milo setup\`.`
+  }
+  const ids = models.map((model) => model.id)
+  // The one in use leads, so a catalog longer than a chat will show is not the
+  // reason the model this install is running is the one missing from the list.
+  const ordered = current && ids.includes(current) ? [current, ...ids.filter((id) => id !== current)] : ids
+  const shown = ordered.slice(0, MODEL_LIST_LIMIT)
+  const rest = ordered.length - shown.length
+  return [
+    `Models for ${provider} (${ordered.length}):`,
+    ...shown.map((id) => `  ${id}${id === current ? ' (current)' : ''}`),
+    ...(rest > 0 ? [`  … and ${rest} more — /model <id> takes the exact id.`] : []),
+    '',
+    'Switch with /model <id>.',
   ].join('\n')
 }
 
@@ -183,6 +219,19 @@ export function providerLockMessage(allowlist: string[] | undefined): string | u
   return count === 0
     ? '🔒 /provider is locked while this bot answers anyone. Set the provider in `milo setup` on the terminal.'
     : `🔒 /provider is locked while this bot answers ${count} ids. Set the provider in \`milo setup\` on the terminal.`
+}
+
+/**
+ * The model decides which provider serves the answer and what it costs, and it
+ * is one value for the whole install — so, like `/provider`, only a bot that
+ * answers one person may change it from the chat.
+ */
+export function modelLockMessage(allowlist: string[] | undefined): string | undefined {
+  const count = allowlist?.length ?? 0
+  if (count === 1) return undefined
+  return count === 0
+    ? '🔒 /model is locked while this bot answers anyone. Set the model in `milo setup` on the terminal.'
+    : `🔒 /model is locked while this bot answers ${count} ids. Set the model in \`milo setup\` on the terminal.`
 }
 
 /**
@@ -250,6 +299,14 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
       return { provider: runtime.provider.id, name: runtime.providerName, model: runtime.model }
     },
     providerLocked: providerLockMessage(allowlist),
+    models: () => listProviderModels(runtime.provider.id),
+    currentModel: runtime.model,
+    persistModel: (id) => {
+      runtime.setModel(id)
+      setModel(runtime.model)
+      return { model: runtime.model }
+    },
+    modelLocked: modelLockMessage(allowlist),
     newSession: (title) => runtime.newSession(scope, title),
     resumeSession: async (id) => (await runtime.resumeSession(scope, id)) !== null,
     forkSession: async (targetId, opts) => {
@@ -589,12 +646,37 @@ export async function handleCommand(
             ` · effort: ${context.effort ?? DEFAULT_REASONING_EFFORT}`,
       }
 
-    case 'model':
-      return {
-        handled: true,
-        reply:
-          'Use /provider to switch provider. For a specific model, to add a provider or a key, run `milo setup` in a terminal.',
+    case 'model': {
+      if (context.modelLocked) return { handled: true, reply: context.modelLocked }
+      const asked = argument.trim()
+      if (!asked) {
+        if (!context.models) {
+          return { handled: true, reply: 'Listing models is not available on this surface.' }
+        }
+        const name =
+          context.providers?.find((item) => item.id === context.currentProvider)?.name ??
+          context.currentProvider ??
+          'this provider'
+        try {
+          return { handled: true, reply: describeModels(name, await context.models(), context.currentModel) }
+        } catch (error) {
+          return { handled: true, reply: errorMessage(error) }
+        }
       }
+      if (!context.persistModel) {
+        return { handled: true, reply: 'Changing the model is not available on this surface.' }
+      }
+      // The id is not checked against the catalog: the catalog is a network call,
+      // an id it does not list can still be served (a custom endpoint, a model
+      // added since the cache), and one that is wrong fails loudly on the turn
+      // that uses it — never a quiet fall back to a model nobody asked for.
+      try {
+        const landed = context.persistModel(asked)
+        return { handled: true, reply: `Model: ${landed.model} — now answering with it. Saved for every surface.` }
+      } catch (error) {
+        return { handled: true, reply: errorMessage(error) }
+      }
+    }
 
     case 'setup':
       return {

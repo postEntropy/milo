@@ -91,8 +91,9 @@ The Command Code Provider API needs a plan above Go (GOAT/Pro/Max/Team or the Pr
 the same API key as the CLI.
 
 `/provider` lists the presets that carry a key and switches the one in use — live, and saved for every
-surface. Adding a provider or a key, or picking a specific model, is still `milo setup` →
-**Provider & model**. On a bot that answers more than one person `/provider` is **locked**, like `/effort`.
+surface. `/model` does the same for the model: with no argument it lists the current provider's, with one
+it switches. Adding a provider or a key is still `milo setup` → **Provider & model**. On a bot that answers
+more than one person both are **locked**, like `/effort`.
 
 OpenCode Zen serves each family on its own endpoint, so the preset uses the same auto wire: Claude ids
 go to `/messages`, everything else to `/chat/completions`. Its GPT models live on `/responses`, which
@@ -157,10 +158,10 @@ it.
 
 Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/stats`, `/compact`, `/export`,
 `/skills`, `/mode ask|auto|yolo`, `/yolo`, `/tools full|name|off`, `/thinking on|off`,
-`/effort low|medium|high`, `/provider [id]`, `/clear`, `/status`. A mode change from a chat is written
-to `config.yml` and survives a restart; sessions are written to `~/.milo/sessions/` and survive too.
-The provider is switched with `/provider`; adding a provider or a key, or picking a model, still needs
-`milo setup`.
+`/effort low|medium|high`, `/provider [id]`, `/model [id]`, `/clear`, `/status`. A mode change from a
+chat is written to `config.yml` and survives a restart; sessions are written to `~/.milo/sessions/` and
+survive too. The provider and the model are switched with `/provider` and `/model`; adding a provider or
+a key still needs `milo setup`.
 
 Three commands are about the turn rather than the session, so they are answered **outside** the queue —
 a `/stop` that waited for the turn it stops would arrive after it:

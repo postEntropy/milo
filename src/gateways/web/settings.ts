@@ -5,15 +5,14 @@ import {
   removeSecret as coreRemoveSecret,
   type SecretGroup,
 } from '../../core/settings.js'
-import { listModels, normalizeModels } from '../../core/providers/models.js'
 import { PRESETS } from '../../core/config/presets.js'
 import { googleState } from '../../core/google/state.js'
 import { googleToolNames } from '../../core/tools/index.js'
 import {
   listProviders,
+  listProviderModels,
   readAuth,
   readConfig,
-  resolveApiKey,
   saveAuth,
   saveConfig,
   setDisplay,
@@ -264,17 +263,9 @@ export class WebSettings {
 
   private async models(body: Record<string, unknown>): Promise<unknown> {
     const id = typeof body.provider === 'string' ? body.provider : ''
-    const config = readConfig()
-    if (!config) throw new Error('Milo is not configured.')
-    const entry = config.providers[id] as ProviderEntry | undefined
-    if (!entry) throw new Error(`Provider "${id}" is not configured.`)
-    const modelUrl = new URL(entry.baseURL)
-    if (modelUrl.protocol !== 'https:' && !['localhost', '127.0.0.1', '::1'].includes(modelUrl.hostname)) {
-      throw new Error('Model catalog URLs must use HTTPS unless they point to localhost.')
-    }
-    const apiKey = resolveApiKey(id, entry, readAuth())
-    return listModels({ baseURL: entry.baseURL, wire: entry.wire, headers: entry.headers, apiKey })
-      .catch(() => normalizeModels(PRESETS.find((preset) => preset.id === id)?.models ?? []))
+    // The same catalog `/model` reads, so the picker and the chat command cannot
+    // come to disagree about what a configured provider serves.
+    return listProviderModels(id)
   }
 
   private skills(): unknown {

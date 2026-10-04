@@ -2,6 +2,7 @@ import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'n
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import { DEFAULT_SEARCH_KEY_ENV } from '../search/types.js'
+import { listModels, normalizeModels, type ModelInfo } from '../providers/models.js'
 import type { ReasoningEffort } from '../providers/types.js'
 import type { PermissionMode } from '../tools/permission.js'
 import { MILO_HOME, authFile, configFile } from './paths.js'
@@ -230,6 +231,27 @@ export function listProviders(): { id: string; name: string }[] {
   return Object.entries(config.providers)
     .filter(([id, entry]) => resolveApiKey(id, entry, auth) !== undefined)
     .map(([id, entry]) => ({ id, name: entry.name ?? findPreset(id)?.name ?? id }))
+}
+
+/**
+ * The models a configured provider serves, for a surface that lets someone pick
+ * one: the provider's own catalog when it answers, and the preset's short list
+ * when the call fails. Read from disk per call, so a provider configured since
+ * startup is found. A catalog URL that is neither HTTPS nor loopback is refused
+ * rather than sent the key in the clear.
+ */
+export async function listProviderModels(id: string): Promise<ModelInfo[]> {
+  const config = readConfig()
+  if (!config) throw new Error('Milo is not configured.')
+  const entry = config.providers[id]
+  if (!entry) throw new Error(`Provider "${id}" is not configured.`)
+  const modelUrl = new URL(entry.baseURL)
+  if (modelUrl.protocol !== 'https:' && !['localhost', '127.0.0.1', '::1'].includes(modelUrl.hostname)) {
+    throw new Error('Model catalog URLs must use HTTPS unless they point to localhost.')
+  }
+  const apiKey = resolveApiKey(id, entry, readAuth())
+  return listModels({ baseURL: entry.baseURL, wire: entry.wire, headers: entry.headers, apiKey })
+    .catch(() => normalizeModels(findPreset(id)?.models ?? []))
 }
 
 export function loadConfig(): LoadedConfig | null {
