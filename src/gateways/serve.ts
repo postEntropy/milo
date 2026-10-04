@@ -67,7 +67,6 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
       // what makes the URL survive a restart; with neither, the server mints a
       // fresh one per run — the old behaviour, and still the default.
       token: resolveGatewayToken('web', auth),
-      identity: { provider: loaded.provider.id, model: loaded.model },
     })
     webUi = gateway
     gateways.push(gateway)

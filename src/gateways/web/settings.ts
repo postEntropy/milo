@@ -10,6 +10,7 @@ import { PRESETS } from '../../core/config/presets.js'
 import { googleState } from '../../core/google/state.js'
 import { googleToolNames } from '../../core/tools/index.js'
 import {
+  listProviders,
   readAuth,
   readConfig,
   resolveApiKey,
@@ -18,6 +19,7 @@ import {
   setDisplay,
   setModel as persistModel,
   setPermissionMode,
+  setProvider as persistProvider,
   setReasoningEffort,
 } from '../../core/config/load.js'
 import { browserChromeDir, browserProfilesDir, embedEngineDir, memoryDir } from '../../core/config/paths.js'
@@ -84,6 +86,8 @@ export class WebSettings {
       case 'save-config': return this.saveConfig(body)
       case 'set-model': return this.setModel(body)
       case 'set-effort': return this.setEffort(body)
+      case 'providers': return listProviders()
+      case 'set-provider': return this.setProvider(body)
       case 'save-secret': return this.saveSecret(body)
       case 'remove-secret': return this.removeSecret(body)
       case 'models': return this.models(body)
@@ -179,11 +183,12 @@ export class WebSettings {
       setPermissionMode(next.permissions.mode)
       setDisplay(next.display)
       setReasoningEffort(next.reasoningEffort)
-      // The model the install saves for next time is the one the sessions after
-      // this one start on — the conversation in progress keeps the model it is
-      // running, so nothing is hijacked mid-turn. A provider change still waits
-      // for a restart, since its client is built from the config at startup.
-      if (next.model !== current.model && next.provider === current.provider) this.runtime.setDefaultModel(next.model)
+      // What the install saves is what the sessions after this one start on — the
+      // conversation in progress keeps what it is running, so nothing is hijacked
+      // mid-turn. A provider move is resolved from disk and applied live, the same
+      // switch the composer and `/provider` reach; no restart.
+      if (next.provider !== current.provider) this.runtime.setDefaultProvider(next.provider, next.model)
+      else if (next.model !== current.model) this.runtime.setDefaultModel(next.model)
       return { saved: true }
     })
   }
@@ -229,6 +234,22 @@ export class WebSettings {
     this.runtime.setModel(model)
     persistModel(model)
     return { model }
+  }
+
+  /**
+   * Moves the install onto another provider and writes the pair down. The switch
+   * is resolved from disk now and applied to the running runtime — the same
+   * `setProvider` the composer and `/provider` reach — so it needs no restart.
+   */
+  private setProvider(body: Record<string, unknown>): unknown {
+    const id = typeof body.provider === 'string' ? body.provider.trim() : ''
+    if (!id) throw new Error('A provider id is required.')
+    if (!listProviders().some((item) => item.id === id)) {
+      throw new Error(`Provider "${id}" is not configured or has no key.`)
+    }
+    this.runtime.setProvider(id)
+    persistProvider(this.runtime.provider.id, this.runtime.model)
+    return { provider: this.runtime.provider.id, providerName: this.runtime.providerName, model: this.runtime.model }
   }
 
   /** Switches the reasoning effort and writes it down, so the next turn uses it. */

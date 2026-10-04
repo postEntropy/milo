@@ -687,6 +687,14 @@ export default function App() {
     } catch (error) { fail(error) }
   }, [fail])
 
+  const changeProvider = useCallback(async (provider: string): Promise<void> => {
+    try {
+      const result = await api<{ provider: string; providerName: string; model: string }>('set-provider', { provider })
+      setIdentity({ provider: result.provider, providerName: result.providerName, model: result.model })
+      setNotice(null)
+    } catch (error) { fail(error) }
+  }, [fail])
+
   const changeEffort = useCallback(async (next: 'low' | 'medium' | 'high'): Promise<void> => {
     try {
       setEffort(next)
@@ -798,7 +806,7 @@ export default function App() {
           {notice && <div className={`notice ${notice.error ? 'error' : 'success'}`} role="alert">{notice.text}<button className="icon-button" type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}><Icon name="x" size={15} /></button></div>}
           <div className="composer-dock">
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextWindow && contextUsed > 0 ? { used: contextUsed, window: contextWindow } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} />
+            <Composer ref={composerRef} busy={busy} queued={queued} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextWindow && contextUsed > 0 ? { used: contextUsed, window: contextWindow } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={(provider) => void changeProvider(provider)} />
           </div>
         </section>}
     </main>

@@ -1,7 +1,7 @@
 import type { AgentRuntime } from '../core/runtime.js'
 import type { Session } from '../core/session.js'
 import type { MemoryScope } from '../core/memory/index.js'
-import { readDisplay, setDisplay, setPermissionMode, setReasoningEffort } from '../core/config/load.js'
+import { listProviders, readDisplay, setDisplay, setPermissionMode, setProvider, setReasoningEffort } from '../core/config/load.js'
 import { describeExport, writeSessionExport, type ExportFormat } from '../core/export.js'
 import { formatStats, formatWhen } from '../core/sessions/index.js'
 import type { CompactResult, SessionStats, SessionSummary } from '../core/sessions/index.js'
@@ -16,6 +16,7 @@ import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.
 import type { MemoryItem } from '../core/memory/index.js'
 import type { TurnQueue } from './turns.js'
 import { buildSessionsList, type ActionRow, type SessionCardItem } from './actions.js'
+import { errorMessage } from '../util/errors.js'
 
 export interface CommandContext {
   policy?: PermissionPolicy
@@ -37,6 +38,14 @@ export interface CommandContext {
   persistEffort?: (effort: ReasoningEffort) => void
   /** Set when this surface may not change how hard the model thinks; used as the reply. */
   effortLocked?: string
+  /** The providers this install can talk through, for `/provider`. */
+  providers?: { id: string; name: string }[]
+  /** The provider in use, so `/provider` can mark it. */
+  currentProvider?: string
+  /** Switches the provider live and writes it down; returns what it landed on. */
+  persistProvider?: (id: string) => { provider: string; name: string; model: string }
+  /** Set when this surface may not change the provider; used as the reply. */
+  providerLocked?: string
   /** Starts a fresh session and binds it to this conversation. */
   newSession?: (title?: string) => Promise<{ id: string }>
   /** Binds this conversation to an existing session. */
@@ -84,6 +93,7 @@ const HELP = [
   '/tools full|name|off — how much of each tool call to show',
   '/thinking on|off — show the model\'s reasoning (display only; /effort is what changes how it thinks)',
   "/effort low|medium|high — how hard the model thinks (the one that costs)",
+  '/provider [id] — the provider the install answers with: list them, or switch to one',
   '/new [title] — start a new session',
   '/sessions [page] — list saved sessions',
   '/resume <id> — switch to another session',
@@ -100,7 +110,7 @@ const HELP = [
   '/queue <text> — say it as its own turn, after the one running now',
   '/help — this message',
   'A plain message sent while Milo is working is a correction: it joins that turn at its next step instead of starting a second one. /queue is how you ask for it to be said afterwards.',
-  'Provider, model and keys: run `milo setup` in a terminal.',
+  'Picking a model, or adding a provider or a key: run `milo setup` in a terminal.',
 ].join('\n')
 
 const TOOL_LEVELS = ['full', 'name', 'off'] as const
@@ -108,6 +118,19 @@ const TOOL_LEVELS = ['full', 'name', 'off'] as const
 function describeDisplay(display: DisplayConfig | undefined): string {
   const settings = display ?? DEFAULT_DISPLAY
   return `Tools: ${settings.tools} · thinking display: ${settings.thinking}`
+}
+
+/** The providers available, the one in use marked — what `/provider` answers with. */
+function describeProviders(providers: { id: string; name: string }[], current: string | undefined): string {
+  if (providers.length === 0) {
+    return 'No provider with a key is configured. Add one in `milo setup` → Provider & model, on the terminal.'
+  }
+  return [
+    `Providers available (${providers.length}):`,
+    ...providers.map((item) => `  ${item.id} — ${item.name}${item.id === current ? ' (current)' : ''}`),
+    '',
+    'Switch with /provider <id>.',
+  ].join('\n')
 }
 
 /**
@@ -147,6 +170,19 @@ export function effortLockMessage(allowlist: string[] | undefined): string | und
   return count === 0
     ? '🔒 /effort is locked while this bot answers anyone. Set it in `milo setup` → Display, on the terminal.'
     : `🔒 /effort is locked while this bot answers ${count} ids. Set it in \`milo setup\` → Display on the terminal.`
+}
+
+/**
+ * The provider is one value for the whole install and it is where every answer
+ * is sent and billed, so — like `/effort` — only a bot that answers one person
+ * may change it from the chat.
+ */
+export function providerLockMessage(allowlist: string[] | undefined): string | undefined {
+  const count = allowlist?.length ?? 0
+  if (count === 1) return undefined
+  return count === 0
+    ? '🔒 /provider is locked while this bot answers anyone. Set the provider in `milo setup` on the terminal.'
+    : `🔒 /provider is locked while this bot answers ${count} ids. Set the provider in \`milo setup\` on the terminal.`
 }
 
 /**
@@ -206,6 +242,14 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
       setReasoningEffort(effort)
     },
     effortLocked: effortLockMessage(allowlist),
+    providers: listProviders(),
+    currentProvider: runtime.provider.id,
+    persistProvider: (id) => {
+      runtime.setProvider(id)
+      setProvider(runtime.provider.id, runtime.model)
+      return { provider: runtime.provider.id, name: runtime.providerName, model: runtime.model }
+    },
+    providerLocked: providerLockMessage(allowlist),
     newSession: (title) => runtime.newSession(scope, title),
     resumeSession: async (id) => (await runtime.resumeSession(scope, id)) !== null,
     forkSession: async (targetId, opts) => {
@@ -389,6 +433,30 @@ export async function handleCommand(
       }
     }
 
+    case 'provider': {
+      if (context.providerLocked) return { handled: true, reply: context.providerLocked }
+      const list = context.providers ?? []
+      const asked = argument.trim()
+      if (!asked) return { handled: true, reply: describeProviders(list, context.currentProvider) }
+      // An id it does not know answers with the valid ones, never a silent fall
+      // back to the provider already in use.
+      if (!list.some((item) => item.id === asked)) {
+        return { handled: true, reply: `No provider "${asked}".\n${describeProviders(list, context.currentProvider)}` }
+      }
+      if (!context.persistProvider) {
+        return { handled: true, reply: 'Changing the provider is not available on this surface.' }
+      }
+      try {
+        const landed = context.persistProvider(asked)
+        return {
+          handled: true,
+          reply: `Provider: ${landed.name} — now answering with ${landed.model}. Saved for every surface.`,
+        }
+      } catch (error) {
+        return { handled: true, reply: errorMessage(error) }
+      }
+    }
+
     case 'new': {
       if (context.sessionLocked) return { handled: true, reply: context.sessionLocked }
       if (!context.newSession) {
@@ -522,6 +590,12 @@ export async function handleCommand(
       }
 
     case 'model':
+      return {
+        handled: true,
+        reply:
+          'Use /provider to switch provider. For a specific model, to add a provider or a key, run `milo setup` in a terminal.',
+      }
+
     case 'setup':
       return {
         handled: true,

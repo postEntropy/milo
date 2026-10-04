@@ -13,6 +13,7 @@ import {
   memoryLockMessage,
   modeLockMessage,
   parseTurnControl,
+  providerLockMessage,
   sessionLockMessage,
   turnOf,
   type TurnControlTarget,
@@ -681,6 +682,65 @@ describe('modeLockMessage', () => {
 
   it('locks a shared bot and says how many', () => {
     expect(modeLockMessage(['42', '43'])).toContain('2 ids')
+  })
+})
+
+describe('/provider', () => {
+  const providers = [
+    { id: 'commandcode', name: 'Command Code' },
+    { id: 'openrouter', name: 'OpenRouter' },
+  ]
+
+  it('lists the providers available, marking the one in use', async () => {
+    const reply = (await handleCommand('/provider', { providers, currentProvider: 'commandcode' })).reply ?? ''
+    expect(reply).toContain('commandcode — Command Code (current)')
+    expect(reply).toContain('openrouter — OpenRouter')
+    expect(reply).toContain('Switch with /provider <id>')
+  })
+
+  it('switches and names the provider it landed on', async () => {
+    const switched: string[] = []
+    const reply = (await handleCommand('/provider openrouter', {
+      providers,
+      currentProvider: 'commandcode',
+      persistProvider: (id) => {
+        switched.push(id)
+        return { provider: id, name: 'OpenRouter', model: 'some/model' }
+      },
+    })).reply ?? ''
+    expect(switched).toEqual(['openrouter'])
+    expect(reply).toContain('OpenRouter')
+    expect(reply).toContain('some/model')
+  })
+
+  it('answers an unknown id with the valid ones, never a silent switch', async () => {
+    let switched = false
+    const reply = (await handleCommand('/provider nope', {
+      providers,
+      currentProvider: 'commandcode',
+      persistProvider: (id) => {
+        switched = true
+        return { provider: id, name: id, model: 'm' }
+      },
+    })).reply ?? ''
+    expect(switched).toBe(false)
+    expect(reply).toContain('No provider "nope"')
+    expect(reply).toContain('openrouter')
+  })
+
+  it('refuses a provider change on a bot that answers several people', async () => {
+    const locked = providerLockMessage(['1', '2'])!
+    const reply = (await handleCommand('/provider openrouter', {
+      providers,
+      persistProvider: () => ({ provider: 'x', name: 'x', model: 'm' }),
+      providerLocked: locked,
+    })).reply
+    expect(reply).toBe(locked)
+  })
+
+  it('says when no provider with a key exists', async () => {
+    const reply = (await handleCommand('/provider', { providers: [] })).reply ?? ''
+    expect(reply).toContain('No provider with a key is configured')
   })
 })
 

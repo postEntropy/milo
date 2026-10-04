@@ -5,6 +5,7 @@ import { DEFAULT_SEARCH_KEY_ENV } from '../search/types.js'
 import type { ReasoningEffort } from '../providers/types.js'
 import type { PermissionMode } from '../tools/permission.js'
 import { MILO_HOME, authFile, configFile } from './paths.js'
+import { findPreset } from './presets.js'
 import { applyConfig, readDocument, renderDocument } from './document.js'
 import {
   AuthSchema,
@@ -142,6 +143,18 @@ export function setModel(model: string): void {
 }
 
 /**
+ * Writes down the provider and its model together, so a switch made in a chat
+ * outlives the process. The two travel as a pair: a model id belongs to the
+ * provider that serves it, so persisting one without the other would leave the
+ * file inconsistent.
+ */
+export function setProvider(id: string, model: string): void {
+  const config = readConfigOrNull()
+  if (!config) return
+  saveConfig({ ...config, provider: id, model })
+}
+
+/**
  * The display settings as they are on disk. Read per turn by the bot gateways,
  * so a `/tools` typed in a chat takes effect without restarting `milo serve`.
  * A corrupt file falls back to the defaults rather than failing the turn.
@@ -185,26 +198,49 @@ export function resolveSearchKey(
   return undefined
 }
 
+/**
+ * A provider resolved from what is on disk: the config entry for `id` with the
+ * key it needs. The same shape `loadConfig` builds for the active one, so a
+ * surface that switches provider at runtime is handed exactly what a fresh start
+ * would have given it. Undefined when the id is not configured.
+ */
+export function resolveProvider(config: Config, auth: Auth, id: string): ResolvedProvider | undefined {
+  const entry = config.providers[id]
+  if (!entry) return undefined
+  return {
+    id,
+    name: entry.name,
+    baseURL: entry.baseURL,
+    wire: entry.wire,
+    headers: entry.headers,
+    apiKey: resolveApiKey(id, entry, auth),
+  }
+}
+
+/**
+ * The providers this install can actually talk through: the configured entries
+ * whose key resolves, or that need none. Every surface that lets someone switch
+ * provider draws its list from here, so they cannot disagree about what is
+ * available or what it is called.
+ */
+export function listProviders(): { id: string; name: string }[] {
+  const config = readConfigOrNull()
+  if (!config) return []
+  const auth = readAuth()
+  return Object.entries(config.providers)
+    .filter(([id, entry]) => resolveApiKey(id, entry, auth) !== undefined)
+    .map(([id, entry]) => ({ id, name: entry.name ?? findPreset(id)?.name ?? id }))
+}
+
 export function loadConfig(): LoadedConfig | null {
   const config = readConfig()
   if (!config) return null
 
-  const entry = config.providers[config.provider]
-  if (!entry) {
+  const auth = readAuth()
+  const provider = resolveProvider(config, auth, config.provider)
+  if (!provider) {
     throw new Error(`Provider "${config.provider}" is not configured in ${configFile()}`)
   }
 
-  const auth = readAuth()
-  return {
-    config,
-    model: config.model,
-    provider: {
-      id: config.provider,
-      name: entry.name,
-      baseURL: entry.baseURL,
-      wire: entry.wire,
-      headers: entry.headers,
-      apiKey: resolveApiKey(config.provider, entry, auth),
-    },
-  }
+  return { config, model: config.model, provider }
 }

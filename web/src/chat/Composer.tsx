@@ -26,6 +26,7 @@ interface Props {
   onStop(): void
   onModelChange(model: string): void
   onEffortChange(effort: 'low' | 'medium' | 'high'): void
+  onProviderChange(provider: string): void
 }
 
 
@@ -37,6 +38,28 @@ export interface ComposerHandle {
   insertQuote(text: string): void
   /** Put a message's own words back in the field, to edit and send again. */
   load(text: string): void
+}
+
+/** What each reasoning-effort level is called on screen. */
+const EFFORT_TEXT: Record<'low' | 'medium' | 'high', string> = { low: 'Low', medium: 'Medium', high: 'High' }
+
+/** The width at or under which the two toolbar pills fold into one menu. */
+const PHONE_QUERY = '(max-width: 520px)'
+
+/**
+ * Whether the composer is on a phone, where the model and effort pills do not
+ * both fit and become one control instead of two.
+ */
+function usePhone(): boolean {
+  const [phone, setPhone] = useState(() => window.matchMedia(PHONE_QUERY).matches)
+  useEffect(() => {
+    const media = window.matchMedia(PHONE_QUERY)
+    const update = (): void => setPhone(media.matches)
+    update()
+    media.addEventListener('change', update)
+    return () => media.removeEventListener('change', update)
+  }, [])
+  return phone
 }
 
 /**
@@ -69,7 +92,7 @@ const COMMANDS: Array<{ name: string; hint: string }> = [
 ]
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { busy, queued, provider, providerName, draftKey, model, context, effort, focusSignal, onSend, onStop, onModelChange, onEffortChange },
+  { busy, queued, provider, providerName, draftKey, model, context, effort, focusSignal, onSend, onStop, onModelChange, onEffortChange, onProviderChange },
   handle,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -81,6 +104,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const fileDrafts = useRef(new Map<string, File[]>())
   const shownKey = useRef(draftKey)
   const [models, setModels] = useState<ModelInfo[] | null>(null)
+  /** Which provider the loaded catalog belongs to, so a switch reloads it. */
+  const modelsFor = useRef<string | null>(null)
+  const [providers, setProviders] = useState<{ id: string; name: string }[] | null>(null)
+  const providersLoaded = useRef(false)
+  /** Whether the picker has been opened; before that a provider move spends no call. */
+  const pickerOpened = useRef(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [highlight, setHighlight] = useState(0)
@@ -89,6 +118,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const [files, setFiles] = useState<File[]>([])
   const [uploadError, setUploadError] = useState('')
   const uploadRef = useRef<HTMLInputElement>(null)
+  const phone = usePhone()
 
   const palette = useMemo(() => {
     if (!draft.startsWith('/') || draft.includes(' ') || dismissed === draft) return []
@@ -221,17 +251,43 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     }
   }
 
-  /** The provider's own catalog, read the first time the picker is opened. */
-  async function loadModels(): Promise<void> {
-    if (models || !provider) return
+  /** The provider's own catalog, read the first time the picker is opened, and
+   *  again when the provider moves so the list on screen follows it. */
+  const loadModels = useCallback(async (): Promise<void> => {
+    if (!provider || modelsFor.current === provider) return
+    const wanted = provider
+    modelsFor.current = wanted
     setLoading(true)
     setError('')
     try {
-      setModels(await api<ModelInfo[]>('models', { provider }))
+      const list = await api<ModelInfo[]>('models', { provider: wanted })
+      if (modelsFor.current !== wanted) return
+      setModels(list)
     } catch (err) {
+      if (modelsFor.current !== wanted) return
+      modelsFor.current = null
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      setLoading(false)
+      if (modelsFor.current === wanted) setLoading(false)
+    }
+  }, [provider])
+
+  // A provider switch reloads the catalog under the open menu; before the picker
+  // has ever opened there is nothing to refresh, so no call is spent.
+  useEffect(() => {
+    if (!pickerOpened.current) return
+    setModels(null)
+    void loadModels()
+  }, [loadModels])
+
+  /** The providers this install can talk through, read once when the picker opens. */
+  async function loadProviders(): Promise<void> {
+    if (providersLoaded.current) return
+    providersLoaded.current = true
+    try {
+      setProviders(await api<{ id: string; name: string }[]>('providers'))
+    } catch {
+      providersLoaded.current = false
     }
   }
 
@@ -264,36 +320,54 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           <div className="composer-model-wrap">
             <Select
               className="composer-pill"
-              label="Model"
+              label={phone ? 'Model and reasoning effort' : `${providerName} models`}
               icon="spark"
-              heading={providerName}
+              filterExtra={<div className="composer-provider">
+                <Select
+                  label="Provider"
+                  value={provider}
+                  triggerLabel={providerName}
+                  choices={(providers ?? []).map((item) => ({ value: item.id, label: item.name }))}
+                  onChange={onProviderChange}
+                  onOpen={() => void loadProviders()}
+                  note="No other provider with a key is configured."
+                />
+              </div>}
+              foot={phone ? <div className="composer-effort-seg">
+                {EFFORT_LEVELS.map((level) => <button
+                  key={level}
+                  type="button"
+                  aria-pressed={level === effort}
+                  onClick={() => onEffortChange(level)}
+                >{EFFORT_TEXT[level]}</button>)}
+              </div> : undefined}
               value={model}
-              triggerLabel={model ? shortModel(model) : 'Model'}
+              triggerLabel={phone && model ? `${shortModel(model)} · ${EFFORT_TEXT[effort]}` : model ? shortModel(model) : 'Model'}
               choices={(models ?? []).map((item) => ({
                 value: item.id, label: item.id, meta: <ModelDetails model={item} />,
               }))}
               onChange={onModelChange}
-              onOpen={() => void loadModels()}
+              onOpen={() => { pickerOpened.current = true; void loadProviders(); void loadModels() }}
               note={loading ? 'Loading models…' : error || 'No models found.'}
             />
           </div>
-          <div className="composer-effort-wrap">
+          {!phone && <div className="composer-effort-wrap">
             <Select
               className="composer-pill"
               label="Reasoning effort"
               icon="light"
               value={effort}
-              choices={EFFORT_LEVELS.map((level) => ({ value: level, label: level.charAt(0).toUpperCase() + level.slice(1) }))}
+              choices={EFFORT_LEVELS.map((level) => ({ value: level, label: EFFORT_TEXT[level] }))}
               onChange={(next) => onEffortChange(next as 'low' | 'medium' | 'high')}
             />
-          </div>
+          </div>}
           <span className="composer-spacer" />
           {context && context.window > 0 && <span className={`composer-context${context.used / context.window >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.window.toLocaleString()} tokens of context`}>
             <svg className="composer-context-ring" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
               <circle className="composer-context-track" cx="11" cy="11" r="9" />
               <circle className="composer-context-arc" cx="11" cy="11" r="9" strokeDasharray={RING_CIRCUMFERENCE} strokeDashoffset={RING_CIRCUMFERENCE * (1 - Math.min(1, context.used / context.window))} />
             </svg>
-            {formatTokens(context.used)} / {formatTokens(context.window)}
+            <span className="composer-context-count">{formatTokens(context.used)} / {formatTokens(context.window)}</span>
           </span>}
           {busy
             ? <button className="send-button stop" type="button" title="Stop (Esc)" aria-label="Stop Milo" onClick={onStop}><Icon name="stop" size={16} /></button>

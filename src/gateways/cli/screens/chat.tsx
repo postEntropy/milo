@@ -75,6 +75,7 @@ export interface ChatScreenProps {
 const HELP_TEXT = [
   'Commands:',
   '/model — change the provider and model',
+  '/provider — switch the provider (same picker)',
   '/setup — the settings hub (keys, display, gateways)',
   '/mode ask|auto|yolo — when a tool needs confirming',
   '/yolo — toggle yolo mode',
@@ -104,7 +105,7 @@ const HELP_TEXT = [
  * transcript it is writing into, or take over the screen its output goes to —
  * so they would fight the turn rather than wait behind it.
  */
-const BLOCKED_WHILE_BUSY = new Set(['new', 'resume', 'fork', 'clear', 'model', 'setup', 'compact'])
+const BLOCKED_WHILE_BUSY = new Set(['new', 'resume', 'fork', 'clear', 'model', 'provider', 'setup', 'compact'])
 
 /**
  * How many sent lines the arrows walk back through. Kept in memory, for this
@@ -281,6 +282,7 @@ export function ChatScreen({
     }
     switch (command) {
       case 'model':
+      case 'provider':
         onOpenModel()
         break
       case 'setup':

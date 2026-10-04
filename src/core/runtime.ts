@@ -20,6 +20,7 @@ import {
 } from './sessions/index.js'
 import { errorMessage } from '../util/errors.js'
 import { logWarn } from '../util/log.js'
+import { findPreset } from './config/presets.js'
 
 export interface RuntimeOptions {
   provider: Provider
@@ -30,6 +31,14 @@ export interface RuntimeOptions {
    * for. Absent on a runtime holding a fixed provider: a test, a script.
    */
   providerFor?: (model: string) => Provider
+  /**
+   * The install's providers, so the runtime can move between them live. `use`
+   * makes `id` the one later models resolve against (resolved from disk at that
+   * moment, so one added since startup is found) and reports whether it exists;
+   * `name` is what a surface calls it. Absent on a runtime holding a fixed
+   * provider: a test, a script.
+   */
+  providerSwitch?: { use(id: string): boolean; name(id: string): string | undefined }
   model: string
   mediaModels?: MediaModelsConfig
   system: string
@@ -320,6 +329,11 @@ export class AgentRuntime {
     return this.options.provider
   }
 
+  /** What the provider in use is called, for a surface that shows it. */
+  get providerName(): string {
+    return this.options.providerSwitch?.name(this.options.provider.id) ?? this.options.provider.id
+  }
+
   get permissions(): PermissionPolicy | undefined {
     return this.options.permissionPolicy
   }
@@ -363,6 +377,41 @@ export class AgentRuntime {
     for (const session of this.cache.values()) {
       session.setModel(model)
       if (provider) session.setProvider(provider)
+    }
+  }
+
+  /**
+   * Moves the install onto another provider, and onto that provider's model —
+   * the open sessions and the ones after, the same shape `setModel` has. The
+   * provider is resolved from disk at this moment, so one configured since
+   * startup is picked up without a restart. A model id belongs to a provider, so
+   * when none is named the provider's own default is used.
+   */
+  setProvider(id: string, model?: string): void {
+    this.installProvider(id, model, true)
+  }
+
+  /**
+   * The same move for the sessions after this one only: a conversation already
+   * open keeps what it is answering with. This is the config's own path.
+   */
+  setDefaultProvider(id: string, model?: string): void {
+    this.installProvider(id, model, false)
+  }
+
+  /** Puts another provider in place, and the model it landed on. */
+  private installProvider(id: string, model: string | undefined, current: boolean): void {
+    if (!this.options.providerSwitch?.use(id)) {
+      throw new Error(`Provider "${id}" is not configured or has no key.`)
+    }
+    const chosen = model?.trim() || findPreset(id)?.models[0] || this.options.model
+    const provider = this.options.providerFor?.(chosen)
+    this.options.model = chosen
+    if (provider) this.options.provider = provider
+    if (!current || !provider) return
+    for (const session of this.cache.values()) {
+      session.setModel(chosen)
+      session.setProvider(provider)
     }
   }
 

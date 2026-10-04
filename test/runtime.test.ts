@@ -344,6 +344,78 @@ describe('AgentRuntime model switch', () => {
   })
 })
 
+describe('AgentRuntime provider switch', () => {
+  it('moves the open and future sessions onto the new provider and its model', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const used: string[] = []
+    const active = { id: 'first' }
+    const providerFor = (model: string): Provider => ({
+      id: active.id,
+      async *stream(): AsyncGenerator<StreamEvent> {
+        used.push(`${active.id}:${model}`)
+        yield { type: 'text', delta: 'ok' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    })
+    const runtime = new AgentRuntime({
+      ...runtimeOptions(dir),
+      model: 'first-model',
+      provider: providerFor('first-model'),
+      providerFor,
+      providerSwitch: {
+        use: (id) => {
+          if (id !== 'second') return false
+          active.id = 'second'
+          return true
+        },
+        name: (id) => (id === 'second' ? 'Second' : id),
+      },
+    })
+
+    const session = await runtime.getSession(cli)
+    await drain(session.send('one'))
+    expect(used).toEqual(['first:first-model'])
+
+    runtime.setProvider('second', 'second-model')
+    expect(runtime.provider.id).toBe('second')
+    expect(runtime.providerName).toBe('Second')
+    expect(runtime.model).toBe('second-model')
+
+    // The session opened before the switch runs its next turn on the new pair.
+    await drain(session.send('two'))
+    expect(used).toEqual(['first:first-model', 'second:second-model'])
+    expect((await runtime.newSession(cli)).model).toBe('second-model')
+  })
+
+  it('leaves the conversation in progress when only the default provider moves', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const active = { id: 'first' }
+    const runtime = new AgentRuntime({
+      ...runtimeOptions(dir),
+      model: 'first-model',
+      provider: { id: 'first', stream: async function* () {} },
+      providerFor: () => ({ id: active.id, stream: async function* () {} }),
+      providerSwitch: { use: (id) => { active.id = id; return true }, name: (id) => id },
+    })
+
+    const started = await runtime.getSession(cli)
+    runtime.setDefaultProvider('second', 'second-model')
+
+    expect(started.model).toBe('first-model')
+    expect(runtime.model).toBe('second-model')
+    expect((await runtime.newSession(cli)).model).toBe('second-model')
+  })
+
+  it('refuses a provider it cannot resolve', () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const runtime = new AgentRuntime({
+      ...runtimeOptions(dir),
+      providerSwitch: { use: () => false, name: (id) => id },
+    })
+    expect(() => runtime.setProvider('nope')).toThrow(/not configured/)
+  })
+})
+
 describe('AgentRuntime close', () => {
   it('waits for the facts of a finished turn before closing', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))

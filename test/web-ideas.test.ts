@@ -79,7 +79,7 @@ const ideasOf = (frames: ServerFrame[]): Extract<ServerFrame, { type: 'suggestio
 describe.skip('ideas on the empty web home', () => {
   it('derives them in the background and pushes them to the page', async () => {
     const provider = new IdeaProvider()
-    const hub = new WebHub(build(provider), { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(build(provider))
     const frames: ServerFrame[] = []
 
     await hub.connect({ send: (frame) => frames.push(frame) }, EMPTY)
@@ -99,7 +99,7 @@ describe.skip('ideas on the empty web home', () => {
 
   it('reuses a fresh answer, so several empty chats cost one call', async () => {
     const provider = new IdeaProvider()
-    const hub = new WebHub(build(provider), { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(build(provider))
     const first: ServerFrame[] = []
     const second: ServerFrame[] = []
 
@@ -115,7 +115,7 @@ describe.skip('ideas on the empty web home', () => {
   it('holds to one call in the window, even when what Milo knows changes', async () => {
     const provider = new IdeaProvider()
     const notes = [{ id: 'n1', text: 'prefers concise answers', createdAt: 0 }]
-    const hub = new WebHub(build(provider, notes), { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(build(provider, notes))
     const first: ServerFrame[] = []
     const second: ServerFrame[] = []
 
@@ -136,7 +136,7 @@ describe.skip('ideas on the empty web home', () => {
 
   it('cuts the call off when a turn starts, so nothing lands behind the answer', async () => {
     const provider = new CancellableProvider()
-    const hub = new WebHub(build(provider), { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(build(provider))
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 

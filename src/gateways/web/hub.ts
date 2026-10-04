@@ -7,7 +7,6 @@ import { INSTALL_SCOPE, type MemoryScope } from '../../core/memory/index.js'
 import { isImage, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
 import { setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { readDisplay } from '../../core/config/load.js'
-import { PRESETS } from '../../core/config/presets.js'
 import { buildCommandContext, handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
@@ -86,10 +85,7 @@ export class WebHub {
   /** The generations still running; `flush()` waits for them, a shutdown does not. */
   private readonly pendingIdeas = new Set<Promise<void>>()
 
-  constructor(
-    private readonly runtime: AgentRuntime,
-    private readonly identity: { provider: string; model: string },
-  ) {}
+  constructor(private readonly runtime: AgentRuntime) {}
 
   async connect(client: WebClient, conversationId: string): Promise<void> {
     if (!/^[0-9a-f-]{36}$/i.test(conversationId)) throw new Error('Invalid conversation id.')
@@ -108,8 +104,10 @@ export class WebHub {
       sessionId: conversation.session.id,
       messages: this.transcript(conversation.session),
       thinking: readDisplay().thinking,
-      provider: this.identity.provider,
-      providerName: PRESETS.find((preset) => preset.id === this.identity.provider)?.name ?? this.identity.provider,
+      // Read from the runtime, not a startup snapshot: a provider switch made at
+      // runtime shows on the next connection without the page reconnecting.
+      provider: this.runtime.provider.id,
+      providerName: this.runtime.providerName,
       model: this.runtime.model,
       effort: this.runtime.reasoningEffort,
     })

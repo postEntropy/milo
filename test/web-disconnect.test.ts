@@ -94,7 +94,7 @@ describe('a client leaving a web conversation', () => {
   it('keeps the turn running when the last one goes', async () => {
     const provider = new HeldProvider()
     const runtime = build(provider)
-    const hub = new WebHub(runtime, { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(runtime)
     const frames: unknown[] = []
     const client = { send: (frame: unknown) => void frames.push(frame) }
 

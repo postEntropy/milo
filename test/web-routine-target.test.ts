@@ -78,7 +78,7 @@ describe('a routine asked for from the routines screen', () => {
    */
   it('pins the destination that rode the frame onto the turn', async () => {
     seen.length = 0
-    const hub = new WebHub(build(), { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(build())
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 
@@ -96,7 +96,7 @@ describe('a routine asked for from the routines screen', () => {
 
   it('stays in the chat the turn came from when the screen named none', async () => {
     seen.length = 0
-    const hub = new WebHub(build(), { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(build())
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 
@@ -110,7 +110,7 @@ describe('a routine asked for from the routines screen', () => {
 
   it('pins a destination of none, for a routine whose runs stay on the Routines screen', async () => {
     seen.length = 0
-    const hub = new WebHub(build(), { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(build())
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 

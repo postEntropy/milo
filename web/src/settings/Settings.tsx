@@ -149,7 +149,6 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   // says which setting is asking for the restart. The model is deliberately
   // absent: saving one moves the running model as well, so it needs none.
   const restartReasons: string[] = !draft || !saved ? [] : [
-    ...(draft.provider !== saved.provider ? ['Provider'] : []),
     ...(JSON.stringify(draft.browser) !== JSON.stringify(saved.browser) ? ['Browser'] : []),
     ...(JSON.stringify(draft.web) !== JSON.stringify(saved.web) ? ['Web host and port'] : []),
     // The reviewer is built once at startup, so which decision model it asks is

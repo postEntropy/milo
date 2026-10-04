@@ -36,7 +36,6 @@ export async function runWeb(args = process.argv.slice(2)): Promise<void> {
       // Stored once (`auth.json` → `gateways.web`, or MILO_WEB_TOKEN), the URL
       // outlives the process; without one it is minted per run.
       token: resolveGatewayToken('web', readAuth()),
-      identity: { provider: loaded.provider.id, model: loaded.model },
     })
   } catch (error) {
     await runtime.close()

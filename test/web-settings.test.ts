@@ -61,6 +61,39 @@ function build(memory: Record<string, unknown> = {}): InstanceType<typeof AgentR
   })
 }
 
+/** A runtime that can move between providers, like the one bootstrap wires. */
+function buildSwitchable(): InstanceType<typeof AgentRuntime> {
+  const active = { id: 'test' }
+  return new AgentRuntime({
+    provider: { id: 'test', stream: async function* () {} },
+    providerFor: () => ({ id: active.id, stream: async function* () {} }),
+    providerSwitch: { use: (id) => { active.id = id; return true }, name: (id) => id },
+    model: 'test-model',
+    system: '',
+    registry: { specs: () => [] } as never,
+    memory: {
+      remember: async () => undefined,
+      recall: async () => [],
+      list: async () => [],
+      forget: async () => false,
+    } as never,
+    cwd: home,
+  })
+}
+
+/** Two configured providers, each with a key, so a switch has somewhere to go. */
+function writeTwoProviders(): void {
+  writeFileSync(path.join(home, 'config.yml'), stringify({
+    provider: 'test',
+    model: 'test-model',
+    providers: {
+      test: { baseURL: 'https://provider.example/v1' },
+      other: { name: 'Other', baseURL: 'https://other.example/v1' },
+    },
+  }))
+  saveAuth({ providers: { test: 'k1', other: 'k2' }, gateways: {}, search: {} })
+}
+
 /** A note as the store returns it, for the tests that list and forget one. */
 const NOTE = { id: '11111111-2222-3333-4444-555555555555', text: 'prefers tabs', createdAt: 1_700_000_000_000 }
 
@@ -297,7 +330,7 @@ describe('web Settings config', () => {
     expect(readConfig()?.web).toEqual({ enabled: true, host: '0.0.0.0', port: 8123 })
   })
 
-  it('moves the running model on a save, so only a provider change needs a restart', async () => {
+  it('moves the running model on a save', async () => {
     writeConfig()
     const runtime = build({})
     const settings = new WebSettings(runtime, home)
@@ -319,5 +352,37 @@ describe('web Settings config', () => {
     expect(readConfig()?.reasoningEffort).toBe('high')
 
     await expect(settings.handle('set-effort', { effort: 'invalid' })).rejects.toThrow('Reasoning effort must be low, medium or high.')
+  })
+})
+
+describe('web provider switching', () => {
+  it('offers only the providers that have a key', async () => {
+    writeTwoProviders()
+    saveAuth({ providers: { test: 'k1' }, gateways: {}, search: {} })
+    const settings = new WebSettings(build({}), home)
+    expect(await settings.handle('providers')).toEqual([{ id: 'test', name: 'test' }])
+  })
+
+  it('switches the runtime live and writes provider and model down', async () => {
+    writeTwoProviders()
+    const runtime = buildSwitchable()
+    const settings = new WebSettings(runtime, home)
+
+    const result = await settings.handle('set-provider', { provider: 'other' }) as { provider: string; providerName: string; model: string }
+
+    expect(runtime.provider.id).toBe('other')
+    expect(result).toEqual({ provider: 'other', providerName: 'other', model: runtime.model })
+    expect(readConfig()?.provider).toBe('other')
+    expect(readConfig()?.model).toBe(runtime.model)
+  })
+
+  it('refuses a provider without a key, and leaves the runtime alone', async () => {
+    writeTwoProviders()
+    saveAuth({ providers: { test: 'k1' }, gateways: {}, search: {} })
+    const runtime = buildSwitchable()
+    const settings = new WebSettings(runtime, home)
+
+    await expect(settings.handle('set-provider', { provider: 'other' })).rejects.toThrow(/no key|not configured/)
+    expect(runtime.provider.id).toBe('test')
   })
 })

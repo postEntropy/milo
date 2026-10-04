@@ -16,7 +16,6 @@ export interface WebGatewayOptions {
   host: string
   port: number
   token?: string
-  identity: { provider: string; model: string }
 }
 
 /**
@@ -40,7 +39,6 @@ export class WebGateway implements Gateway {
         host: this.options.host,
         port: this.options.port,
         token: this.options.token,
-        identity: this.options.identity,
       })
     } catch (error) {
       // A port someone else holds must not take the daemon down with it: the bots

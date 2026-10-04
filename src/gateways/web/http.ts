@@ -66,7 +66,6 @@ export interface WebServerOptions {
   host: string
   port: number
   token?: string
-  identity?: { provider: string; model: string }
 }
 
 export interface RunningWebServer {
@@ -88,7 +87,7 @@ export interface RunningWebServer {
 
 export async function startWebServer(options: WebServerOptions): Promise<RunningWebServer> {
   const token = options.token ?? randomBytes(32).toString('base64url')
-  const hub = new WebHub(options.runtime, options.identity ?? { provider: 'milo', model: 'unknown' })
+  const hub = new WebHub(options.runtime)
   const settings = new WebSettings(options.runtime, options.cwd, hub)
   const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
   const server = createServer((request, response) => {

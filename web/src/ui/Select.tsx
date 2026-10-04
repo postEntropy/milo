@@ -29,7 +29,8 @@ export function Select({
   icon,
   caret = true,
   triggerLabel,
-  heading,
+  filterExtra,
+  foot,
   onOpen,
   onClose,
 }: {
@@ -51,8 +52,18 @@ export function Select({
   caret?: boolean
   /** What the trigger reads, when the chosen row's own label is not it. */
   triggerLabel?: string
-  /** A short title over the rows, inside the menu. */
-  heading?: ReactNode
+  /**
+   * A control that lives in the filter row, at its end — e.g. the composer's
+   * provider select, sharing the row with the search. It brings the row with it
+   * even when the list is short enough to have no filter of its own.
+   */
+  filterExtra?: ReactNode
+  /**
+   * Content pinned at the foot of the menu, under the scrolling rows — where a
+   * control that belongs to the same panel lives, e.g. the phone picker's row of
+   * reasoning-effort segments below the model list.
+   */
+  foot?: ReactNode
   onOpen?(): void
   onClose?(): void
 }) {
@@ -148,9 +159,8 @@ export function Select({
       {caret && <Icon className="select-caret" name="chevron" size={15} />}
     </button>
     {open && <div className="select-menu" role="listbox" aria-label={label}>
-      {(heading || choices.length >= searchFrom) && <div className="select-head">
-        {heading ? <div className="select-heading">{heading}</div> : null}
-        {choices.length >= searchFrom ? <label className="select-search">
+      {(filterExtra || choices.length >= searchFrom) && <div className="select-head">
+        {choices.length >= searchFrom && <label className="select-search">
           <Icon name="search" size={14} />
           <input
             ref={search}
@@ -160,24 +170,28 @@ export function Select({
             onChange={(event) => { setFilter(event.target.value); setHighlight(0) }}
             onKeyDown={key}
           />
-        </label> : null}
+        </label>}
+        {filterExtra}
       </div>}
-      {shown.length === 0
-        ? <div className="select-note">{note ?? 'Nothing here.'}</div>
-        : shown.map((choice, index) => <button
-          key={choice.value}
-          type="button"
-          role="option"
-          aria-selected={choice.value === value}
-          className={`select-option ${index === highlight ? 'active' : ''} ${choice.value === value ? 'chosen' : ''}`}
-          onMouseEnter={() => setHighlight(index)}
-          onClick={() => pick(choice.value)}
-        >
-          <span className="select-option-label">{choice.label}</span>
-          {choice.meta}
-          {choice.badge ? <span className="size-badge">{choice.badge}</span> : null}
-          {choice.value === value ? <Icon name="check" size={14} /> : null}
-        </button>)}
+      <div className="select-options">
+        {shown.length === 0
+          ? <div className="select-note">{note ?? 'Nothing here.'}</div>
+          : shown.map((choice, index) => <button
+            key={choice.value}
+            type="button"
+            role="option"
+            aria-selected={choice.value === value}
+            className={`select-option ${index === highlight ? 'active' : ''} ${choice.value === value ? 'chosen' : ''}`}
+            onMouseEnter={() => setHighlight(index)}
+            onClick={() => pick(choice.value)}
+          >
+            <span className="select-option-label">{choice.label}</span>
+            {choice.meta}
+            {choice.badge ? <span className="size-badge">{choice.badge}</span> : null}
+            {choice.value === value ? <Icon name="check" size={14} /> : null}
+          </button>)}
+      </div>
+      {foot}
     </div>}
   </div>
 }

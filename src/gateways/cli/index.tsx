@@ -20,6 +20,7 @@ import { ModelPicker } from './screens/model-picker.js'
 import { SettingsScreen } from './screens/settings.js'
 import { theme } from './theme.js'
 import { useTerminalSize } from './use-terminal-size.js'
+import { errorMessage } from '../../util/errors.js'
 import type { Item } from './transcript.js'
 
 type Screen = 'setup' | 'chat' | 'model' | 'settings'
@@ -58,14 +59,12 @@ export function Shell({
   const [busy, setBusy] = useState(false)
   const [items, setItems] = useState<Item[]>([])
 
-  // Rebuild the runtime only when the provider/model changes, so editing
-  // settings keeps the current conversation and its context.
-  const runtimeKey = loaded ? `${loaded.provider.id}:${loaded.model}` : null
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the key is the dependency — the runtime must survive settings edits; `loaded` is only its latest snapshot
-  const runtime = useMemo(
-    () => (loaded ? createRuntime(loaded, cwd) : null),
-    [runtimeKey, cwd],
-  )
+  // Built once there is a config, and kept. A provider or model change is applied
+  // to the running runtime (`afterSave` calls `setProvider`) rather than rebuilding
+  // everything, so the conversation and its context survive the switch.
+  const hasConfig = loaded !== null
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `loaded` is read only for the first build — later edits are applied to the runtime live
+  const runtime = useMemo(() => (loaded ? createRuntime(loaded, cwd) : null), [hasConfig, cwd])
 
   const [mode, setMode] = useState<PermissionMode>(
     () => initialMode ?? runtime?.permissions?.mode ?? 'ask',
@@ -131,14 +130,6 @@ export function Shell({
     })
   }, [runtime, loaded, mode])
 
-  const previousKey = useRef(runtimeKey)
-  useEffect(() => {
-    if (previousKey.current !== runtimeKey) {
-      setItems([])
-      previousKey.current = runtimeKey
-    }
-  }, [runtimeKey])
-
   // Set when a screen writes to disk, so leaving setup can say so.
   const wroteSettings = useRef(false)
 
@@ -185,8 +176,19 @@ export function Shell({
   }
 
   const afterSave = () => {
-    setLoaded(loadConfig())
+    const next = loadConfig()
+    setLoaded(next)
     setBusy(false)
+    // The picker writes the provider, model and key to disk; move the running
+    // runtime onto that pair live — the same switch every other surface uses —
+    // instead of rebuilding it, so the conversation survives.
+    if (next && runtime) {
+      try {
+        runtime.setProvider(next.provider.id, next.model)
+      } catch (error) {
+        setItems((previous) => [...previous, { kind: 'error', text: `Could not switch provider: ${errorMessage(error)}` }])
+      }
+    }
     // `milo setup` finishes the wizard and continues into the settings hub;
     // `milo model` is done once a model is picked, and a plain `milo` goes
     // straight to the chat.

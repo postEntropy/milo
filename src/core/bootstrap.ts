@@ -2,7 +2,8 @@ import path from 'node:path'
 import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
 import { BrowserSession } from './browser/index.js'
 import { browserProfileDir, DEFAULT_WORKING_DIRECTORY, embedEngineDir, historyDir, memoryDir, recapsDir, sessionsDir, skillsDir } from './config/paths.js'
-import { readAuth, resolveSearchKey, type LoadedConfig } from './config/load.js'
+import { readAuth, readConfig, resolveProvider, resolveSearchKey, type LoadedConfig, type ResolvedProvider } from './config/load.js'
+import { findPreset } from './config/presets.js'
 import { fileHistory } from './history.js'
 import { createMemory, embeddingKey, installMemory, TurnIndex } from './memory/index.js'
 import { engineOnDemand } from './memory/provision.js'
@@ -86,12 +87,29 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     logWarn(`could not prune old sessions: ${errorMessage(error)}`)
   })
 
+  // The provider in use, movable at runtime. A surface that switches provider
+  // resolves the id from what is on disk at that moment, so one configured since
+  // startup is found without rebuilding the runtime — and every later model
+  // resolves against whichever is active, not the one the process started on.
+  let activeProvider = loaded.provider
+  const resolveActive = (id: string): ResolvedProvider | undefined =>
+    resolveProvider(readConfig() ?? loaded.config, readAuth(), id)
+
   return new AgentRuntime({
     provider: createProvider(loaded.provider, loaded.model),
     // One entry, and the model it is on: `auto` picks its wire from the model
     // id, so a model switched later resolves a provider of its own instead of
     // keeping the wire of the one it replaced.
-    providerFor: (model) => createProvider(loaded.provider, model),
+    providerFor: (model) => createProvider(activeProvider, model),
+    providerSwitch: {
+      use: (id) => {
+        const next = resolveActive(id)
+        if (!next) return false
+        activeProvider = next
+        return true
+      },
+      name: (id) => resolveActive(id)?.name ?? findPreset(id)?.name ?? id,
+    },
     model: loaded.model,
     mediaModels: loaded.config.media,
     system: loaded.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,

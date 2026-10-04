@@ -89,7 +89,7 @@ async function attachments(runtime: InstanceType<typeof AgentRuntime>) {
 describe('a routine delivering into a web chat', () => {
   it('writes the message into the conversation and hands it to whoever is watching', async () => {
     const runtime = build()
-    const hub = new WebHub(runtime, { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(runtime)
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 
@@ -107,7 +107,7 @@ describe('a routine delivering into a web chat', () => {
 
   it('delivers a file alongside the answer and serves it back by id', async () => {
     const runtime = build()
-    const hub = new WebHub(runtime, { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(runtime)
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
     const shot = path.join(home, 'shot.png')
@@ -132,7 +132,7 @@ describe('a routine delivering into a web chat', () => {
 
   it('keeps it for a chat nobody is watching', async () => {
     const runtime = build()
-    const hub = new WebHub(runtime, { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(runtime)
 
     await hub.deliver(CONVERSATION, { text: 'nightly report' })
 
@@ -142,14 +142,14 @@ describe('a routine delivering into a web chat', () => {
   })
 
   it('refuses anything that is not a conversation id', async () => {
-    const hub = new WebHub(build(), { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(build())
     await expect(hub.deliver('not-a-uuid', { text: 'x' })).rejects.toThrow('not a web conversation id')
   })
 })
 
 describe('a turn in a web conversation', () => {
   it('ends with a state frame that says it is over, so the composer lets go', async () => {
-    const hub = new WebHub(build(), { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(build())
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 
@@ -175,7 +175,7 @@ describe('a turn in a web conversation', () => {
     const shot = path.join(home, 'shot.png')
     writeFileSync(shot, 'not really a png')
     const runtime = buildWith(new ShotProvider(shot))
-    const hub = new WebHub(runtime, { provider: 'test', model: 'test-model' })
+    const hub = new WebHub(runtime)
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 

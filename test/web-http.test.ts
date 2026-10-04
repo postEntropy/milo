@@ -15,7 +15,6 @@ describe('web server authentication', () => {
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
-      identity: { provider: 'test', model: 'test-model' },
     })
     running.push(server)
     const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/api/overview`, {
@@ -28,14 +27,14 @@ describe('web server authentication', () => {
   })
 
   it('requires its token for file uploads', async () => {
-    const server = await startWebServer({ runtime: {} as never, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token', identity: { provider: 'test', model: 'test-model' } })
+    const server = await startWebServer({ runtime: {} as never, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
     running.push(server)
     const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/upload`, { method: 'POST', body: 'file bytes' })
     expect(response.status).toBe(401)
   })
 
   it('accepts raw authenticated file uploads for a later chat send', async () => {
-    const server = await startWebServer({ runtime: {} as never, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token', identity: { provider: 'test', model: 'test-model' } })
+    const server = await startWebServer({ runtime: {} as never, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
     running.push(server)
     const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/upload`, {
       method: 'POST',
@@ -53,7 +52,6 @@ describe('web server authentication', () => {
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
-      identity: { provider: 'test', model: 'test-model' },
     })
     running.push(server)
     const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/api/overview?t=test-token`, {
@@ -73,7 +71,6 @@ describe('web server authentication', () => {
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
-      identity: { provider: 'test', model: 'test-model' },
     })
     running.push(server)
     const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/api/overview`, {
@@ -95,7 +92,6 @@ describe('web server authentication', () => {
       host: '0.0.0.0',
       port: 0,
       token: 'test-token',
-      identity: { provider: 'test', model: 'test-model' },
     })
     running.push(server)
 
@@ -120,7 +116,6 @@ describe('web server authentication', () => {
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
-      identity: { provider: 'test', model: 'test-model' },
     })
     running.push(server)
     expect(server.urls).toEqual([])
@@ -135,7 +130,6 @@ describe('web server static UI', () => {
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
-      identity: { provider: 'test', model: 'test-model' },
     })
     running.push(server)
     const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/manifest.webmanifest`)
@@ -182,7 +176,6 @@ describe('bindProblem', () => {
       host: '127.0.0.1',
       port: 0,
       token: 'test-token',
-      identity: { provider: 'test', model: 'test-model' },
     })
     running.push(first)
     const port = portOf(first.url)
@@ -193,7 +186,6 @@ describe('bindProblem', () => {
       host: '127.0.0.1',
       port,
       token: 'test-token',
-      identity: { provider: 'test', model: 'test-model' },
     }).then(
       () => null,
       (caught: unknown) => caught,

@@ -351,7 +351,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-quote-remove { display: grid; width: 22px; height: 22px; flex: none; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
 .composer-quote-remove:hover { background: var(--surface); color: var(--fg); }
 .composer-toolbar { display: flex; min-height: 42px; align-items: center; gap: 8px; padding: 2px 9px 4px 14px; }
-.composer-model-wrap { position: relative; }
+.composer-model-wrap { position: relative; min-width: 0; }
 /* The app's own dropdown, wherever a list of choices is offered. The trigger is
    filled, like everything else the person presses; the menu is a panel, so it is
    the one that carries the border. A long list gets a filter, held at the top. */
@@ -362,13 +362,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .select-value { overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
 .select-caret { flex: none; color: var(--muted); transition: transform var(--motion-fast) var(--ease-standard); }
 .select.is-open .select-caret { transform: rotate(90deg); }
-.select-menu { position: absolute; z-index: 30; inset-inline: 0; top: calc(100% + 6px); display: flex; max-height: 320px; flex-direction: column; gap: 2px; overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); padding: 6px; }
+/* Overflow is visible so a control nested in the head can open its own menu past
+   the panel; the rows themselves still clip to `.select-options`. */
+.select-menu { position: absolute; z-index: 30; inset-inline: 0; top: calc(100% + 6px); display: flex; max-height: 320px; flex-direction: column; gap: 4px; overflow: visible; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); padding: 6px; }
 .select-note { padding: 9px 10px; color: var(--muted); font-size: 12px; }
-/* The head of a menu — its title and its filter, when it has them — is what stays
-   in view while the rows scroll under it. */
-.select-head { position: sticky; z-index: 1; top: 0; display: flex; flex-direction: column; gap: 4px; margin-bottom: 4px; background: var(--surface); }
-.select-heading { padding: 2px 4px 0; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
-.select-search { display: flex; align-items: center; gap: 7px; border-radius: 9px; background: var(--bg); padding: 0 9px; color: var(--muted); }
+/* The head holds the filter and, beside it, whatever control shares the row; the
+   foot holds the panel's own control. Only the rows between them scroll, so
+   nothing ever slides under either one. */
+.select-head { display: flex; flex: none; align-items: center; gap: 6px; }
+.select-options { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; overflow: auto; }
+.select-search { display: flex; flex: 1; min-width: 0; align-items: center; gap: 7px; border-radius: 9px; background: var(--bg); padding: 0 9px; color: var(--muted); }
 .select-search svg.icon { flex: none; }
 .select-search input { width: 100%; min-height: 34px; border: 0; background: none; padding: 6px 0; color: var(--fg); font-size: 12px; }
 .select-search input:focus { outline: 0; }
@@ -390,7 +393,21 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-model-wrap .select-trigger .model-details { display: none; }
 .composer-model-wrap .select-option .size-badge { order: -1; }
 .composer-effort-wrap .select-menu { width: min(160px, 50vw); }
-.composer-effort-wrap { position: relative; }
+.composer-effort-wrap { position: relative; min-width: 0; }
+/* The provider control shares the filter row with the search: search two thirds,
+   provider the rest. Its own menu opens downward over the model rows and leftward
+   — its last, trailing edge pinned — so it never leaves the screen. Declared after
+   the composer's own upward menu so the nested one wins the position. */
+.composer-provider { flex: none; width: 34%; }
+.composer-provider .select .select-trigger { min-height: 34px; border-radius: 9px; background: var(--bg); padding: 6px 9px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
+.composer-provider .select .select-trigger:hover { background: var(--surface-warm); }
+.composer-provider .select .select-menu { top: calc(100% + 6px); bottom: auto; z-index: 40; inset-inline: auto 0; width: min(220px, 70vw); }
+/* The phone folds the two pills into one menu: the effort is a row of segments at
+   the foot of the panel, filled like every other control the person presses. */
+.composer-effort-seg { display: flex; gap: 4px; }
+.composer-effort-seg button { flex: 1; min-height: 28px; border: 0; border-radius: 8px; background: var(--bg); padding: 4px 8px; color: var(--fg-2); font-size: 11px; font-weight: 500; transition: background var(--motion-fast), color var(--motion-fast); }
+.composer-effort-seg button:hover { background: var(--surface-warm); }
+.composer-effort-seg button[aria-pressed='true'] { background: var(--accent); color: var(--accent-on); }
 .composer-spacer { flex: 1; }
 /* How full the model's window is, beside the send button: a thin ring that fills
    as the conversation grows, and the count, so a compaction is never a surprise. */
@@ -400,7 +417,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-context-arc { fill: none; stroke: var(--accent); stroke-width: 2.5; stroke-linecap: round; transition: stroke-dashoffset var(--motion-base) var(--ease-standard), stroke var(--motion-base); }
 .composer-context.full { color: var(--warn); }
 .composer-context.full .composer-context-arc { stroke: var(--warn); }
-.send-button { display: grid; width: 38px; height: 38px; place-items: center; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-on); box-shadow: 0 2px 10px color-mix(in oklab, var(--accent) 26%, transparent); transition: background var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
+/* On a phone the count has no room beside the two pills; the ring alone still
+   shows how full the window is, so the number — not the meter — yields there. */
+@media (max-width: 520px) {
+  .composer-context-count { display: none; }
+  /* One pill where there were two, so the toolbar can breathe a little less. */
+  .composer-toolbar { gap: 6px; }
+}
+.send-button { display: grid; width: 38px; height: 38px; flex: none; place-items: center; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-on); box-shadow: 0 2px 10px color-mix(in oklab, var(--accent) 26%, transparent); transition: background var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .send-button:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); }
 .send-button:active:not(:disabled) { transform: none; }
 .send-button:disabled { cursor: not-allowed; background: var(--surface-warm); color: var(--muted); box-shadow: none; }
