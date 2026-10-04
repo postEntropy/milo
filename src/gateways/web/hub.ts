@@ -8,7 +8,7 @@ import { isImage, type OutgoingFile, type OutgoingMessage } from '../../core/out
 import { setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { readDisplay } from '../../core/config/load.js'
 import { PRESETS } from '../../core/config/presets.js'
-import { handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
+import { buildCommandContext, handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
 import type { ClientFrame, FrameAttachment, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
@@ -541,28 +541,12 @@ export class WebHub {
   }
 
   private commandContext(conversation: Conversation, session: Session, signal: AbortSignal): CommandContext {
-    return {
-      policy: this.runtime.permissions,
-      resetSession: () => session.clear(),
-      persistMode: (mode) => { this.runtime.permissions?.setMode(mode); setPermissionMode(mode) },
-      display: readDisplay(),
-      persistDisplay: setDisplay,
-      effort: this.runtime.reasoningEffort,
-      persistEffort: (effort) => { this.runtime.setReasoningEffort(effort); setReasoningEffort(effort) },
-      newSession: (title) => this.runtime.newSession(conversation.scope, title),
-      resumeSession: async (id) => (await this.runtime.resumeSession(conversation.scope, id)) !== null,
-      forkSession: async (targetId, options) => {
-        const id = targetId ?? (await this.runtime.getSession(conversation.scope)).id
-        const forked = await this.runtime.forkSession(conversation.scope, id, options)
-        return forked ? { id: forked.id } : null
-      },
-      listSessions: () => this.runtime.listSessions(),
-      sessionStats: () => session.stats(),
-      compactSession: () => session.compact(signal),
-      skills: () => this.runtime.skills,
-      memories: (limit) => session.memories(limit),
-      forgetMemory: (id) => session.forget(id),
-    }
+    return buildCommandContext({
+      runtime: this.runtime,
+      scope: conversation.scope,
+      session,
+      signal,
+    })
   }
 
   private sendState(conversationId: string): void {

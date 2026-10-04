@@ -1,3 +1,7 @@
+import type { AgentRuntime } from '../core/runtime.js'
+import type { Session } from '../core/session.js'
+import type { MemoryScope } from '../core/memory/index.js'
+import { readDisplay, setDisplay, setPermissionMode, setReasoningEffort } from '../core/config/load.js'
 import { describeExport, writeSessionExport, type ExportFormat } from '../core/export.js'
 import { formatStats, formatWhen } from '../core/sessions/index.js'
 import type { CompactResult, SessionStats, SessionSummary } from '../core/sessions/index.js'
@@ -169,6 +173,56 @@ export function memoryLockMessage(allowlist: string[] | undefined): string | und
     ? '🔒 /memory is locked while this bot answers anyone. Run it in the terminal.'
     : `🔒 /memory is locked while this bot answers ${count} ids. Run it in the terminal.`
 }
+
+export interface BuildCommandContextOptions {
+  runtime: AgentRuntime
+  scope: MemoryScope
+  session: Session
+  allowlist?: string[]
+  signal?: AbortSignal
+}
+
+/**
+ * Builds the standard CommandContext for a gateway turn, unifying permission,
+ * session, display, and memory command handlers across Telegram, Discord, and Web.
+ */
+export function buildCommandContext(options: BuildCommandContextOptions): CommandContext {
+  const { runtime, scope, session, allowlist, signal } = options
+  return {
+    policy: runtime.permissions,
+    resetSession: () => session.clear(),
+    persistMode: (mode) => {
+      runtime.permissions?.setMode(mode)
+      setPermissionMode(mode)
+    },
+    modeLocked: modeLockMessage(allowlist),
+    sessionLocked: sessionLockMessage(allowlist),
+    display: readDisplay(),
+    persistDisplay: setDisplay,
+    displayLocked: displayLockMessage(allowlist),
+    effort: runtime.reasoningEffort,
+    persistEffort: (effort) => {
+      runtime.setReasoningEffort(effort)
+      setReasoningEffort(effort)
+    },
+    effortLocked: effortLockMessage(allowlist),
+    newSession: (title) => runtime.newSession(scope, title),
+    resumeSession: async (id) => (await runtime.resumeSession(scope, id)) !== null,
+    forkSession: async (targetId, opts) => {
+      const id = targetId ?? (await runtime.getSession(scope)).id
+      const forked = await runtime.forkSession(scope, id, opts)
+      return forked ? { id: forked.id } : null
+    },
+    listSessions: () => runtime.listSessions(),
+    skills: () => runtime.skills,
+    sessionStats: () => session.stats(),
+    compactSession: () => session.compact(signal),
+    memories: (limit) => session.memories(limit),
+    forgetMemory: (id) => session.forget(id),
+    memoryLocked: memoryLockMessage(allowlist),
+  }
+}
+
 
 /** Enough of a note's id to name it without pasting a whole uuid into a chat. */
 const MEMORY_ID_CHARS = 8

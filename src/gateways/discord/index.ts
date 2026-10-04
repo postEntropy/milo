@@ -3,18 +3,15 @@ import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
+import { logWarn } from '../../util/log.js'
 import type { OutgoingFile, OutgoingMessage } from '../../core/outgoing.js'
 import { readDisplay, setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
 import {
-  displayLockMessage,
-  effortLockMessage,
+  buildCommandContext,
   handleCommand,
   handleTurnControl,
-  memoryLockMessage,
-  modeLockMessage,
   parseTurnControl,
-  sessionLockMessage,
   turnOf,
 } from '../commands.js'
 import { runTurns } from '../runner.js'
@@ -282,40 +279,20 @@ export class DiscordGateway implements Gateway {
     const scope: MemoryScope = { gateway: 'discord', conversationId: message.channelId }
     const session = await this.options.runtime.sessionFor(scope)
 
-    const display = readDisplay()
     let command: Awaited<ReturnType<typeof handleCommand>>
     try {
-      command = files?.length ? { handled: false } : await handleCommand(text, {
-        policy: this.options.runtime.permissions,
-        resetSession: () => session.clear(),
-        persistMode: setPermissionMode,
-        modeLocked: modeLockMessage(this.options.allowlist),
-        sessionLocked: sessionLockMessage(this.options.allowlist),
-        display,
-        persistDisplay: setDisplay,
-        displayLocked: displayLockMessage(this.options.allowlist),
-        effort: this.options.runtime.reasoningEffort,
-        persistEffort: (effort) => {
-          // The running runtime first, so the next turn sends it, then the disk.
-          this.options.runtime.setReasoningEffort(effort)
-          setReasoningEffort(effort)
-        },
-        effortLocked: effortLockMessage(this.options.allowlist),
-        newSession: (title) => this.options.runtime.newSession(scope, title),
-        resumeSession: async (id) => (await this.options.runtime.resumeSession(scope, id)) !== null,
-        forkSession: async (targetId, options) => {
-          const id = targetId ?? (await this.options.runtime.getSession(scope)).id
-          const forked = await this.options.runtime.forkSession(scope, id, options)
-          return forked ? { id: forked.id } : null
-        },
-        listSessions: () => this.options.runtime.listSessions(),
-        skills: () => this.options.runtime.skills,
-        sessionStats: () => session.stats(),
-        compactSession: () => session.compact(signal),
-        memories: (limit) => session.memories(limit),
-        forgetMemory: (id) => session.forget(id),
-        memoryLocked: memoryLockMessage(this.options.allowlist),
-      })
+      command = files?.length
+        ? { handled: false }
+        : await handleCommand(
+            text,
+            buildCommandContext({
+              runtime: this.options.runtime,
+              scope,
+              session,
+              allowlist: this.options.allowlist,
+              signal,
+            }),
+          )
     } catch (error) {
       // A command that throws must not swallow the message it was answering.
       await message.reply(`⚠ ${errorMessage(error)}`).catch(() => undefined)
@@ -337,17 +314,29 @@ export class DiscordGateway implements Gateway {
       return
     }
 
+    let postedMessage: Message | null = null
     const surface: ChatSurface = {
-      post: async (_conversationId, placeholder) => (await message.reply(placeholder)).id,
+      post: async (_conversationId, placeholder) => {
+        postedMessage = await message.reply(placeholder)
+        return postedMessage.id
+      },
       edit: async (_conversationId, messageId, value) => {
-        const target = await message.channel.messages.fetch(messageId)
-        await target.edit(value)
+        try {
+          const target =
+            postedMessage && postedMessage.id === messageId
+              ? postedMessage
+              : await message.channel.messages.fetch(messageId)
+          await target.edit(value)
+        } catch (error) {
+          logWarn(`discord: could not edit message ${messageId}: ${errorMessage(error)}`)
+        }
       },
       ask: (_conversationId, _messageId, request) => ask(message, request, signal),
       files: (_conversationId, files) => this.postFiles(message.channelId, files),
       typing: () => this.typing(message.channel),
     }
 
+    const display = readDisplay()
     const failure = await runTurns({
       session,
       conversationId: message.channelId,
@@ -361,7 +350,11 @@ export class DiscordGateway implements Gateway {
       files,
     })
     // A stop is not a failure, and it is already on screen as "🛑 stopped".
-    if (failure) await message.reply(`[error] ${failure}`).catch(() => undefined)
+    if (failure) {
+      await message
+        .reply(`[error] ${failure}`)
+        .catch((err) => logWarn(`discord: failed to send error reply: ${errorMessage(err)}`))
+    }
   }
 
   /**

@@ -4,22 +4,19 @@ import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
+import { logWarn } from '../../util/log.js'
 import { isTelegramPhoto, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
 import { readDisplay, setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
 import { chunk } from '../chunk.js'
 import {
+  buildCommandContext,
   decodePermission,
   encodePermission,
-  effortLockMessage,
   handleCommand,
   handleTurnControl,
-  memoryLockMessage,
-  modeLockMessage,
   parseTurnControl,
-  sessionLockMessage,
   turnOf,
-  displayLockMessage,
   type CommandResult,
 } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
@@ -252,40 +249,20 @@ export class TelegramGateway implements Gateway {
     const scope: MemoryScope = { gateway: 'telegram', conversationId: chatId }
     const session = await this.options.runtime.sessionFor(scope)
 
-    const display = readDisplay()
     let command: Awaited<ReturnType<typeof handleCommand>>
     try {
-      command = files?.length ? { handled: false } : await handleCommand(text, {
-        policy: this.options.runtime.permissions,
-        resetSession: () => session.clear(),
-        persistMode: setPermissionMode,
-        modeLocked: modeLockMessage(this.options.allowlist),
-        sessionLocked: sessionLockMessage(this.options.allowlist),
-        display,
-        persistDisplay: setDisplay,
-        displayLocked: displayLockMessage(this.options.allowlist),
-        effort: this.options.runtime.reasoningEffort,
-        persistEffort: (effort) => {
-          // The running runtime first, so the next turn sends it, then the disk.
-          this.options.runtime.setReasoningEffort(effort)
-          setReasoningEffort(effort)
-        },
-        effortLocked: effortLockMessage(this.options.allowlist),
-        newSession: (title) => this.options.runtime.newSession(scope, title),
-        resumeSession: async (id) => (await this.options.runtime.resumeSession(scope, id)) !== null,
-        forkSession: async (targetId, options) => {
-          const id = targetId ?? (await this.options.runtime.getSession(scope)).id
-          const forked = await this.options.runtime.forkSession(scope, id, options)
-          return forked ? { id: forked.id } : null
-        },
-        listSessions: () => this.options.runtime.listSessions(),
-        skills: () => this.options.runtime.skills,
-        sessionStats: () => session.stats(),
-        compactSession: () => session.compact(signal),
-        memories: (limit) => session.memories(limit),
-        forgetMemory: (id) => session.forget(id),
-        memoryLocked: memoryLockMessage(this.options.allowlist),
-      })
+      command = files?.length
+        ? { handled: false }
+        : await handleCommand(
+            text,
+            buildCommandContext({
+              runtime: this.options.runtime,
+              scope,
+              session,
+              allowlist: this.options.allowlist,
+              signal,
+            }),
+          )
     } catch (error) {
       // A command that throws must not swallow the message it was answering.
       for (const part of chunk(`⚠ ${errorMessage(error)}`, MAX_LENGTH)) {
@@ -318,13 +295,16 @@ export class TelegramGateway implements Gateway {
       post: async (_conversationId, placeholder) =>
         String(await messenger.post(chatId, placeholder)),
       edit: async (_conversationId, messageId, value) => {
-        await messenger.edit(chatId, Number(messageId), value).catch(() => undefined)
+        await messenger.edit(chatId, Number(messageId), value).catch((error) => {
+          logWarn(`telegram: could not edit message ${messageId}: ${errorMessage(error)}`)
+        })
       },
       ask: (_conversationId, _messageId, request) => this.ask(bot, chatId, request, signal),
       files: (_conversationId, files) => this.postFiles(chatId, files),
       typing: () => this.typing(bot, chatId),
     }
 
+    const display = readDisplay()
     const failure = await runTurns({
       session,
       conversationId: chatId,
@@ -340,7 +320,9 @@ export class TelegramGateway implements Gateway {
     // A stop is not a failure, and it is already on screen as "🛑 stopped".
     if (failure) {
       for (const part of chunk(`[error] ${failure}`, MAX_LENGTH)) {
-        await ctx.reply(part).catch(() => undefined)
+        await ctx
+          .reply(part)
+          .catch((err) => logWarn(`telegram: failed to send error reply: ${errorMessage(err)}`))
       }
     }
   }
