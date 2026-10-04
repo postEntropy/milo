@@ -38,5 +38,7 @@ export const embedEngineDir = (): string => path.join(MILO_HOME, 'embed')
 export const exportsDir = (): string => path.join(MILO_HOME, 'exports')
 /** The prompts Milo runs on a timer, one list for the whole install. */
 export const routinesFile = (): string => path.join(MILO_HOME, 'routines.json')
+/** Named task lists shared by every session in this Milo install. */
+export const taskListsFile = (): string => path.join(MILO_HOME, 'task-lists.json')
 /** What was typed at the CLI's prompt, for the arrow keys to walk back through. */
 export const inputHistoryFile = (): string => path.join(MILO_HOME, 'input-history.json')

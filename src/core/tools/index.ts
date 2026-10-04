@@ -22,6 +22,7 @@ import { shellTool } from './shell.js'
 import { createReadSkillTool } from './read-skill.js'
 import { taskTool } from './task.js'
 import { todoTool } from './todo.js'
+import { taskListsTool } from './task-lists.js'
 import type { Tool } from './types.js'
 import { createWebSearchTool } from './web-search.js'
 import { writeFileTool } from './write-file.js'
@@ -46,6 +47,7 @@ export { sendFileTool } from './send-file.js'
 export { shellTool } from './shell.js'
 export { taskTool } from './task.js'
 export { todoTool } from './todo.js'
+export { taskListsTool } from './task-lists.js'
 export { createWebSearchTool } from './web-search.js'
 export { createReadSkillTool } from './read-skill.js'
 export { Classifier, createClassifier, dangerousReviewer } from '../classifier/index.js'
@@ -68,6 +70,7 @@ export const builtinTools = [
   sendFileTool,
   taskTool,
   todoTool,
+  taskListsTool,
   shellTool,
 ]
 

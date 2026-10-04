@@ -7,6 +7,7 @@ import { MessageList, type ChatMessage } from './chat/MessageList.js'
 import { buildSuggestions } from './chat/suggestions.js'
 import { Permissions } from './chat/Permissions.js'
 import { Routines } from './routines/Routines.js'
+import { TaskLists } from './tasks/TaskLists.js'
 import { Settings } from './settings/Settings.js'
 import type { ServerFrame, PermissionRequest, SendTarget } from '@protocol'
 import { toolText } from '../../src/gateways/tool-line.ts'
@@ -21,10 +22,10 @@ type SessionGroup = { label: string; sessions: SessionSummary[] }
 type HistoryHit = { session: string; at: string; kind: string; text: string }
 type Notice = { text: string; error: boolean }
 
-type View = 'chat' | 'settings' | 'routines'
+type View = 'chat' | 'settings' | 'routines' | 'tasks'
 
 /** The address each screen lives at, so a link can be shared and Back works. */
-const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', settings: '/settings' }
+const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', tasks: '/tasks', settings: '/settings' }
 
 /** Which screen a path names; anything that is not one of them is the chat. */
 function viewFromPath(pathname: string): View {
@@ -735,6 +736,7 @@ export default function App() {
         <div className="brand-row"><img className="brand-mark" src={miloAvatar} alt="" /><span className="brand-name" translate="no">Milo</span><button className="sidebar-toggle" type="button" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><Icon name="panel-left" size={17} /></button></div>
         <div className="sidebar-pad">
           <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={16} /><span>Routines</span></button>
+          <button className={`sidebar-tab ${view === 'tasks' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'tasks' ? 'chat' : 'tasks'); setSidebarOpen(false) }}><Icon name="list-check" size={16} /><span>Task lists</span></button>
           <div className="sidebar-controls">
             <label className="sidebar-search"><Icon name="search" size={16} /><input aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
             <button className="new-chat" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>
@@ -771,7 +773,7 @@ export default function App() {
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
         <button className="sidebar-expand" type="button" aria-label="Show sidebar" title="Show sidebar" onClick={() => setSidebarCollapsed(false)}><Icon name="panel-left" size={17} /></button>
-        <div className="topbar-title"><h1>{view === 'settings' ? 'Settings' : view === 'routines' ? 'Routines' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
+        <div className="topbar-title"><h1>{view === 'settings' ? 'Settings' : view === 'routines' ? 'Routines' : view === 'tasks' ? 'Task lists' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
         <div className="topbar-actions">
           {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>}
           {view === 'chat' && connection !== 'online' && <span className={`connection-status ${connection}`}><span />{connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
@@ -797,6 +799,8 @@ export default function App() {
         ? <Settings section={settingsSection} conversationId={conversationId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} onDirtyChange={noteDirty} />
         : view === 'routines'
         ? <Routines conversationId={conversationId} tick={routinesTick} chat={{ messages, thinking, busy, connection, turnEnds, pendingPermission, send: askRoutine, decide }} />
+        : view === 'tasks'
+        ? <TaskLists tick={turnEnds} />
         : <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>
             <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} />

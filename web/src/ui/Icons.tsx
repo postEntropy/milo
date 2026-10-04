@@ -11,6 +11,7 @@ const paths: Record<string, React.ReactNode> = {
   'panel-left': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></>,
   quote: <><path d="M8 7H5a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h3v1.5A2.5 2.5 0 0 1 5.5 16" /><path d="M18 7h-3a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h3v1.5A2.5 2.5 0 0 1 15.5 16" /></>,
   check: <><path d="m5 13 4 4L19 7" /></>,
+  'list-check': <><path d="m4 6 1.5 1.5L8 5" /><path d="M11 6h9M11 12h9M11 18h9" /><path d="m4 12 1.5 1.5L8 11m-4 7 1.5 1.5L8 17" /></>,
   x: <><path d="m6 6 12 12M18 6 6 18" /></>,
   shield: <><path d="m12 3 7 3v6c0 4.5-3 7.5-7 9-4-1.5-7-4.5-7-9V6z" /></>,
   key: <><circle cx="8" cy="15" r="4" /><path d="m11.5 12.5 8.5-8.5M17 4h3v3" /></>,

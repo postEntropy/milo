@@ -54,6 +54,8 @@ import { resolveSource } from '../../core/skills/sources.js'
 import { readSession, searchHistory } from '../../core/history.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import { writeSessionExport } from '../../core/export.js'
+import { readTaskLists } from '../../core/task-lists.js'
+import { taskListsTool } from '../../core/tools/task-lists.js'
 import { JobRegistry } from './jobs.js'
 import { transcriptOf, type RegisterFile } from './transcript.js'
 
@@ -108,6 +110,8 @@ export class WebSettings {
       case 'memory-notes': return this.memoryNotes()
       case 'forget-note': return this.forgetNote(body)
       case 'routines': return this.listRoutines()
+      case 'task-lists': return readTaskLists()
+      case 'task-list-action': return this.taskListAction(body)
       case 'routine-feed': return this.routineFeed()
       case 'routine-add': return this.addRoutine(body)
       case 'routine-remove': return this.removeRoutine(body)
@@ -121,6 +125,14 @@ export class WebSettings {
       case 'job-status': return this.jobStatus(body)
       default: throw new Error('Unknown Settings action.')
     }
+  }
+
+  private async taskListAction(body: Record<string, unknown>): Promise<unknown> {
+    const parsed = taskListsTool.schema.safeParse(body)
+    if (!parsed.success) throw new Error('Invalid task list action.')
+    const result = await taskListsTool.execute(parsed.data, { cwd: this.cwd, signal: new AbortController().signal })
+    if (result.isError) throw new Error(result.content)
+    return { result: result.content, lists: readTaskLists() }
   }
 
   private async overview(): Promise<unknown> {

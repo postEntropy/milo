@@ -77,6 +77,7 @@ describe('tool permission gating', () => {
       send_file: false,
       task: false,
       todo: false,
+      task_lists: false,
       shell_command: false,
     })
   })
@@ -90,7 +91,7 @@ describe('tool permission gating', () => {
   it('never asks for a tool whose side effect is Milo\'s own state', () => {
     const internal = builtinTools.filter((tool) => tool.internal).map((tool) => tool.name)
 
-    expect(internal).toEqual(['remember', 'todo'])
+    expect(internal).toEqual(['remember', 'todo', 'task_lists'])
   })
 
   it('runs the tool when allowed', async () => {
