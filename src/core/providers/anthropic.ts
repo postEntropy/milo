@@ -1,4 +1,5 @@
 import { parseSSE } from './sse.js'
+import { fetchWithRetry } from './retry.js'
 import { errorMessage } from '../../util/errors.js'
 import { logDebug } from '../../util/log.js'
 import { toolImages } from '../images.js'
@@ -31,7 +32,13 @@ interface Block {
 interface AnthropicStreamEvent {
   type?: string
   index: number
-  message?: { usage?: { input_tokens?: number } }
+  message?: {
+    usage?: {
+      input_tokens?: number
+      cache_creation_input_tokens?: number
+      cache_read_input_tokens?: number
+    }
+  }
   content_block?: { type?: string; id?: string; name?: string }
   delta?: {
     type?: string
@@ -74,24 +81,43 @@ export class AnthropicProvider implements Provider {
       stream: true,
       messages: await toAnthropicMessages(req.messages),
     }
-    if (req.system) body.system = req.system
-    if (req.tools?.length) body.tools = req.tools.map(toAnthropicTool)
+    if (req.system) {
+      body.system = [
+        {
+          type: 'text',
+          text: req.system,
+          cache_control: { type: 'ephemeral' },
+        },
+      ]
+    }
+    if (req.tools?.length) {
+      const tools = req.tools.map(toAnthropicTool)
+      tools[tools.length - 1] = {
+        ...tools[tools.length - 1],
+        cache_control: { type: 'ephemeral' },
+      }
+      body.tools = tools
+    }
     // Thinking is only compatible with the default temperature, so a configured
     // one is left off rather than sent to be rejected.
     if (typeof req.temperature === 'number' && !thinking) body.temperature = req.temperature
     if (thinking) body.thinking = thinking
 
-    const response = await fetch(`${this.baseURL}/messages`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        'anthropic-version': ANTHROPIC_VERSION,
-        ...(this.apiKey ? { 'x-api-key': this.apiKey } : {}),
-        ...this.headers,
+    const response = await fetchWithRetry(
+      `${this.baseURL}/messages`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'anthropic-version': ANTHROPIC_VERSION,
+          ...(this.apiKey ? { 'x-api-key': this.apiKey } : {}),
+          ...this.headers,
+        },
+        body: JSON.stringify(body),
+        signal: req.signal,
       },
-      body: JSON.stringify(body),
-      signal: req.signal,
-    })
+      { signal: req.signal },
+    )
 
     if (!response.ok || !response.body) {
       throw new Error(await httpError(response))
@@ -114,7 +140,11 @@ export class AnthropicProvider implements Provider {
 
       switch (event.type) {
         case 'message_start': {
-          inputTokens = event.message?.usage?.input_tokens ?? 0
+          const usage = event.message?.usage
+          inputTokens =
+            (usage?.input_tokens ?? 0) +
+            (usage?.cache_read_input_tokens ?? 0) +
+            (usage?.cache_creation_input_tokens ?? 0)
           break
         }
         case 'content_block_start': {
@@ -257,6 +287,15 @@ async function toAnthropicMessages(messages: Message[]): Promise<unknown[]> {
     }
     if (missingImages) blocks.push({ type: 'text', text: `[${missingImages} attached image(s) are unavailable]` })
     push(message.role === 'assistant' ? 'assistant' : 'user', blocks)
+  }
+
+  // Mark the last block of the second-to-last turn with cache_control for conversational cache reuse.
+  if (out.length >= 2) {
+    const targetTurn = out[out.length - 2]
+    const lastBlock = targetTurn.content[targetTurn.content.length - 1] as Record<string, unknown> | undefined
+    if (lastBlock && typeof lastBlock === 'object') {
+      lastBlock.cache_control = { type: 'ephemeral' }
+    }
   }
 
   return out

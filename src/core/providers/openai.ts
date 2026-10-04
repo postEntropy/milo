@@ -1,4 +1,5 @@
 import { parseSSE } from './sse.js'
+import { fetchWithRetry } from './retry.js'
 import { errorMessage } from '../../util/errors.js'
 import { logDebug } from '../../util/log.js'
 import { readImageBase64, toolImages } from '../images.js'
@@ -68,16 +69,20 @@ export class OpenAIProvider implements Provider {
     if (typeof req.maxTokens === 'number') body.max_tokens = req.maxTokens
     if (req.reasoningEffort) body.reasoning_effort = req.reasoningEffort
 
-    const response = await fetch(`${this.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'content-type': 'application/json',
-        ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
-        ...this.headers,
+    const response = await fetchWithRetry(
+      `${this.baseURL}/chat/completions`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+          ...this.headers,
+        },
+        body: JSON.stringify(body),
+        signal: req.signal,
       },
-      body: JSON.stringify(body),
-      signal: req.signal,
-    })
+      { signal: req.signal },
+    )
 
     if (!response.ok || !response.body) {
       throw new Error(await httpError(response))
