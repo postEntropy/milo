@@ -168,7 +168,16 @@ export function applyConfig(doc: Document, config: unknown): void {
   // or one the value changed away from. Left alone it would come back on the next
   // read as a default, so the file is made to say what the config says.
   for (const leaf of leaves(doc.toJS())) {
-    if (!wanted.has(leaf.path.join('.'))) doc.deleteIn(leaf.path)
+    if (!wanted.has(leaf.path.join('.'))) {
+      doc.deleteIn(leaf.path)
+      if (leaf.path.length > 1) {
+        const parentPath = leaf.path.slice(0, -1)
+        const parent = doc.getIn(parentPath)
+        if (isMap(parent) && parent.items.length === 0) {
+          doc.deleteIn(parentPath)
+        }
+      }
+    }
   }
   spaceSections(doc)
 }

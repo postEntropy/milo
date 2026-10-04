@@ -16,11 +16,13 @@ import {
   type ProfileOrigin,
   type ProfileSource,
 } from '../../../core/browser/index.js'
-import { readAuth, readConfig, saveAuth, saveConfig } from '../../../core/config/load.js'
+import { mutateConfig, mutateAuth } from '../../../core/settings.js'
+import { readAuth } from '../../../core/config/load.js'
 import {
   browserChromeDir,
   browserProfileDir,
   browserProfilesDir,
+  DEFAULT_WORKING_DIRECTORY,
   embedEngineDir,
   historyDir,
   memoryDir,
@@ -349,7 +351,7 @@ export function SettingsScreen({
 
   /** The profile in use, and whether the browser will refuse to open it. */
   const profilePath = config.browser.profileDir
-    ? resolveToolPath(process.cwd(), config.browser.profileDir)
+    ? resolveToolPath(DEFAULT_WORKING_DIRECTORY, config.browser.profileDir)
     : browserProfileDir()
   const profileBlocked = isDefaultProfile(profilePath)
 
@@ -480,7 +482,7 @@ export function SettingsScreen({
       setBusy(`Installing ${row.title}…`)
       try {
         for (const skill of await row.install!()) {
-          await installSkill(skill, skillsDirFor('global', process.cwd()))
+          await installSkill(skill, skillsDirFor('global', DEFAULT_WORKING_DIRECTORY))
         }
         added.push(row.title)
       } catch (error) {
@@ -541,8 +543,16 @@ export function SettingsScreen({
    * what the previous step saved, not on a possibly stale `config` prop.
    */
   const updateConfig = (mutate: (current: Config) => Config) => {
-    saveConfig(mutate(readConfig() ?? config))
+    const result = mutateConfig((current) => {
+      const updated = mutate(current)
+      Object.assign(current, updated)
+    })
+    if (!result.ok) {
+      setNotices([{ text: `Could not save settings: ${result.error}`, tone: 'danger' }])
+      return false
+    }
     onSaved()
+    return true
   }
 
   const patchConfig = (patch: Partial<Config>) => {
@@ -625,20 +635,24 @@ export function SettingsScreen({
 
   /** Back to words alone. The notes stay; only how they are found changes. */
   const disableEmbeddings = () => {
-    updateConfig((current) => {
+    const saved = updateConfig((current) => {
       const memory = { ...current.memory }
       delete memory.embedding
       return { ...current, memory }
     })
+    if (!saved) return
     setNotices([{ text: 'Embeddings off — recall matches by words only.', tone: 'success' }])
     go({ kind: 'memory' })
   }
 
   const patchAuth = (mutate: (auth: Auth) => void) => {
-    const current = readAuth()
-    mutate(current)
-    saveAuth(current)
+    const result = mutateAuth(mutate)
+    if (!result.ok) {
+      setNotices([{ text: `Could not save credentials: ${result.error}`, tone: 'danger' }])
+      return false
+    }
     onSaved()
+    return true
   }
 
   const home = process.env.HOME ?? ''
@@ -1157,7 +1171,9 @@ export function SettingsScreen({
         label: `${entry.repo}/${entry.name}`,
         hintParts: parts.length > 0 ? parts : [{ text: 'most installed', color: theme.muted }],
         install:
-          root === undefined ? () => resolveSource(entry.source, { cwd: process.cwd() }) : undefined,
+          root === undefined
+            ? () => resolveSource(entry.source, { cwd: DEFAULT_WORKING_DIRECTORY })
+            : undefined,
       }
     }),
     // A skill put there by `milo skills add`, or by hand, is still one to remove
@@ -1595,7 +1611,7 @@ export function SettingsScreen({
       if (field === 'chromePath') {
         void probeBrowser(trimmed || null)
       } else if (field === 'profileDir' && trimmed) {
-        const expanded = resolveToolPath(process.cwd(), trimmed)
+        const expanded = resolveToolPath(DEFAULT_WORKING_DIRECTORY, trimmed)
         setNotices([
           isDefaultProfile(expanded)
             ? {
@@ -2377,14 +2393,11 @@ function Menu({ items, index }: { items: MenuItem[]; index: number }) {
 }
 
 /**
- * What is on disk in both scopes, so setup can offer a removal for anything —
- * a project skill wins a name it shares with a global one.
+ * What is installed globally. A project scope appears only after a project is
+ * selected; launching Milo from a directory does not select one.
  */
 function readInstalled(): InstalledSkill[] {
-  return [
-    ...listInstalled(skillsDirFor('global', process.cwd())),
-    ...listInstalled(skillsDirFor('project', process.cwd())),
-  ]
+  return listInstalled(skillsDirFor('global', DEFAULT_WORKING_DIRECTORY))
 }
 
 /**

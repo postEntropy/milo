@@ -1,4 +1,10 @@
 import path from 'node:path'
+import {
+  mutateConfig,
+  saveSecret as coreSaveSecret,
+  removeSecret as coreRemoveSecret,
+  type SecretGroup,
+} from '../../core/settings.js'
 import { listModels, normalizeModels } from '../../core/providers/models.js'
 import { PRESETS } from '../../core/config/presets.js'
 import { googleState } from '../../core/google/state.js'
@@ -189,42 +195,30 @@ export class WebSettings {
    */
   private patchConfig(mutate: (config: Config) => void): Promise<Config> {
     return this.serialize(() => {
-      const current = readConfig()
-      if (!current) throw new Error('Milo is not configured.')
-      const next = structuredClone(current)
-      mutate(next)
-      const parsed = ConfigSchema.parse(next)
-      saveConfig(parsed)
-      return parsed
+      const res = mutateConfig(mutate)
+      if (!res.ok) throw new Error(res.error)
+      return res.value
     })
   }
 
   private async saveSecret(body: Record<string, unknown>): Promise<unknown> {
     return this.serialize(async () => {
-      const group = body.group
-      const id = body.id
-      const value = body.value
-      if (!['providers', 'search', 'gateways'].includes(String(group)) || typeof id !== 'string' || typeof value !== 'string') {
-        throw new Error('Invalid secret update.')
-      }
-      const auth = readAuth()
-      const record = auth[group as keyof Auth] as Record<string, string>
-      if (!value.trim()) return { saved: false }
-      record[id] = value.trim()
-      saveAuth(auth)
-      return { saved: true }
+      const group = body.group as SecretGroup
+      const id = typeof body.id === 'string' ? body.id : ''
+      const value = typeof body.value === 'string' ? body.value : ''
+      const res = coreSaveSecret(group, id, value)
+      if (!res.ok) throw new Error(res.error)
+      return { saved: res.value }
     })
   }
 
   private async removeSecret(body: Record<string, unknown>): Promise<unknown> {
     return this.serialize(() => {
-      const group = body.group
-      const id = body.id
-      if (!['providers', 'search', 'gateways'].includes(String(group)) || typeof id !== 'string') throw new Error('Invalid secret update.')
-      const auth = readAuth()
-      delete (auth[group as keyof Auth] as Record<string, string>)[id]
-      saveAuth(auth)
-      return { removed: true }
+      const group = body.group as SecretGroup
+      const id = typeof body.id === 'string' ? body.id : ''
+      const res = coreRemoveSecret(group, id)
+      if (!res.ok) throw new Error(res.error)
+      return { removed: res.value }
     })
   }
 
