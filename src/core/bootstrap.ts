@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
 import { BrowserSession } from './browser/index.js'
-import { browserProfileDir, embedEngineDir, historyDir, memoryDir, recapsDir, sessionsDir, skillsDir } from './config/paths.js'
+import { browserProfileDir, DEFAULT_WORKING_DIRECTORY, embedEngineDir, historyDir, memoryDir, recapsDir, sessionsDir, skillsDir } from './config/paths.js'
 import { readAuth, resolveSearchKey, type LoadedConfig } from './config/load.js'
 import { fileHistory } from './history.js'
 import { createMemory, embeddingKey, installMemory, TurnIndex } from './memory/index.js'
@@ -40,10 +40,13 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   // one of the same name, and the index of all of them rides along with every
   // request — the bodies stay on disk.
   ensureSkillsDir()
-  const skills = discoverSkills([
-    { dir: skillsDir(), source: 'global' },
-    { dir: path.join(cwd, '.milo', 'skills'), source: 'project' },
-  ])
+  const skillSources = [{ dir: skillsDir(), source: 'global' }]
+  // A machine-wide launch uses the stable home directory, not an implicit
+  // project. Project skills enter only when a caller supplies a project cwd.
+  if (path.resolve(cwd) !== path.resolve(DEFAULT_WORKING_DIRECTORY)) {
+    skillSources.push({ dir: path.join(cwd, '.milo', 'skills'), source: 'project' })
+  }
+  const skills = discoverSkills(skillSources)
 
   // Only built when the feature is on: the browser is a process with a lifetime
   // and three tools in the catalog, and neither should exist for an install that

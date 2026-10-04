@@ -3,6 +3,9 @@ import path from 'node:path'
 
 export const MILO_HOME = process.env.MILO_HOME?.trim() || path.join(os.homedir(), '.milo')
 
+/** Stable default for relative tool paths when no project has been selected. */
+export const DEFAULT_WORKING_DIRECTORY = os.homedir()
+
 export const configFile = (): string => path.join(MILO_HOME, 'config.yml')
 export const authFile = (): string => path.join(MILO_HOME, 'auth.json')
 export const memoryDir = (): string => path.join(MILO_HOME, 'memory')

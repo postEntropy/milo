@@ -178,10 +178,10 @@ describe('system prompt', () => {
 
     expect(prompt).toContain('## Skills')
     expect(prompt).toContain('- deploy: How to deploy')
-    // The index says it is the whole set, and where it was read from, so the
-    // model answers "what do you have?" from context instead of going to look.
+    // The index says it is the whole set, without exposing machine paths, so
+    // the model answers "what do you have?" from context instead of going to look.
     expect(prompt).toContain('the whole inventory')
-    expect(prompt).toContain(path.join('/tmp', '.milo', 'skills'))
+    expect(prompt).not.toContain(path.join('/tmp', '.milo', 'skills'))
     expect(prompt).toContain('other agents do not count')
   })
 

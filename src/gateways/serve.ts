@@ -1,5 +1,6 @@
 import process from 'node:process'
 import { createRuntime } from '../core/bootstrap.js'
+import { DEFAULT_WORKING_DIRECTORY } from '../core/config/paths.js'
 import { loadConfig, readAuth, resolveGatewayToken } from '../core/config/load.js'
 import { MILO_HOME } from '../core/config/paths.js'
 import { readRoutines, RoutineScheduler } from '../core/routines.js'
@@ -20,7 +21,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     return
   }
 
-  const runtime = createRuntime(loaded, process.cwd())
+  const runtime = createRuntime(loaded, DEFAULT_WORKING_DIRECTORY)
   const auth = readAuth()
   const gateways: Gateway[] = []
   const config = loaded.config.gateways
@@ -59,7 +60,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     const { WebGateway } = await import('./web/gateway.js')
     const gateway = new WebGateway({
       runtime,
-      cwd: process.cwd(),
+      cwd: DEFAULT_WORKING_DIRECTORY,
       host: web.host,
       port: options.webPort ?? web.port,
       // A stored token (`auth.json` → `gateways.web`, or MILO_WEB_TOKEN) is

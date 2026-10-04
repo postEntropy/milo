@@ -1,5 +1,4 @@
-import path from 'node:path'
-import { skillsDir } from '../config/paths.js'
+import { DEFAULT_WORKING_DIRECTORY } from '../config/paths.js'
 import type { MemoryItem } from '../memory/index.js'
 import type { ToolSpec } from '../providers/types.js'
 import type { SkillSummary } from '../skills/index.js'
@@ -166,9 +165,13 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
       environment.push("- Your tools run on the machine hosting Milo, not on the user's device")
     }
   }
-  environment.push(`- Working directory: ${input.cwd}`)
   environment.push(`- Today: ${localDate(input.now ?? new Date())}`)
   environment.push(`- Model: ${input.provider}/${input.model}`)
+  environment.push(
+    input.cwd === DEFAULT_WORKING_DIRECTORY
+      ? '- No project is selected; you can work across this machine.'
+      : '- A project is selected; use it as the default context for project work.',
+  )
   sections.push(`## Environment\n${environment.join('\n')}`)
 
   sections.push(setupSection(input))
@@ -199,7 +202,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
       [
         '## Skills',
         'Procedures you can load on demand with the `read_skill` tool — that is also how you read a skill the user asks about. This list is every skill installed and available to you: the whole inventory, so answer questions about your skills from it rather than going to look, and load one before you start when a task matches.',
-        `They are read from ${skillsDir()} (everywhere) and ${path.join(input.cwd, '.milo', 'skills')} (this project, where one overrides a global skill of the same name). No other directory is read: skill folders belonging to other agents do not count.`,
+        'Global skills are available everywhere. Project skills apply only when a project is selected; do not infer a project from the process launch location. Skill folders belonging to other agents do not count.',
         ...list,
       ].join('\n'),
     )

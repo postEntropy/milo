@@ -2,6 +2,7 @@
 import process from 'node:process'
 import { pathToFileURL } from 'node:url'
 import { createRuntime } from '../core/bootstrap.js'
+import { DEFAULT_WORKING_DIRECTORY } from '../core/config/paths.js'
 import { loadConfig, readAuth, resolveGatewayToken } from '../core/config/load.js'
 import { MILO_HOME } from '../core/config/paths.js'
 import { bindProblem, startWebServer, webReachLines } from '../gateways/web/http.js'
@@ -24,12 +25,12 @@ export async function runWeb(args = process.argv.slice(2)): Promise<void> {
   if (!host || !Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error('Host must be non-empty and port must be between 0 and 65535.')
   }
-  const runtime = createRuntime(loaded, process.cwd())
+  const runtime = createRuntime(loaded, DEFAULT_WORKING_DIRECTORY)
   let web: Awaited<ReturnType<typeof startWebServer>>
   try {
     web = await startWebServer({
       runtime,
-      cwd: process.cwd(),
+      cwd: DEFAULT_WORKING_DIRECTORY,
       host,
       port,
       // Stored once (`auth.json` → `gateways.web`, or MILO_WEB_TOKEN), the URL

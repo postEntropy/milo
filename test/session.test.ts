@@ -90,7 +90,8 @@ describe('Session', () => {
   it('builds a system prompt with environment and tools', async () => {
     const { provider } = await run('hello there')
     expect(provider.lastSystem).toContain('## Environment')
-    expect(provider.lastSystem).toContain(`Working directory: ${process.cwd()}`)
+    expect(provider.lastSystem).not.toContain(process.cwd())
+    expect(provider.lastSystem).toContain('A project is selected')
     expect(provider.lastSystem).toContain('## Available tools')
     expect(provider.lastSystem).toContain('read_file(path, offset?, limit?)')
   })

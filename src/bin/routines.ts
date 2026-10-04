@@ -1,6 +1,7 @@
 import process from 'node:process'
 import { createInterface } from 'node:readline/promises'
 import { createRuntime } from '../core/bootstrap.js'
+import { DEFAULT_WORKING_DIRECTORY } from '../core/config/paths.js'
 import { loadConfig } from '../core/config/load.js'
 import {
   addRoutine,
@@ -292,7 +293,7 @@ async function run(argv: string[], out: RoutineIo['out'], err: RoutineIo['err'])
     return 1
   }
 
-  const runtime = createRuntime(loaded, process.cwd())
+  const runtime = createRuntime(loaded, DEFAULT_WORKING_DIRECTORY)
   try {
     const { answer, failure, files } = await runRoutineOnce(runtime, routine)
     if (failure) err(`⚠ ${failure}`)

@@ -15,6 +15,7 @@ import { enterMouseTracking, enterTui, exitTui } from '../gateways/cli/ansi.js'
 import { mouseStdin } from '../gateways/cli/mouse.js'
 import { Shell } from '../gateways/cli/index.js'
 import type { PermissionMode } from '../core/tools/permission.js'
+import { DEFAULT_WORKING_DIRECTORY } from '../core/config/paths.js'
 
 import { parseArgs, type Args } from './args.js'
 import { resolveCommand, resolveInitialMode, validateArgs } from './dispatch.js'
@@ -90,7 +91,7 @@ async function runTui(
     const app = render(
       createElement(Shell, {
         initial: loaded,
-        cwd: process.cwd(),
+        cwd: DEFAULT_WORKING_DIRECTORY,
         startScreen: screen,
         standalone,
         initialMode,

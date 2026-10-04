@@ -31,7 +31,8 @@ describe('buildSystemPrompt', () => {
     })
 
     expect(prompt).toContain('BASE')
-    expect(prompt).toContain('Working directory: /tmp/x')
+    expect(prompt).not.toContain('/tmp/x')
+    expect(prompt).toContain('A project is selected')
     expect(prompt).toContain('Today: 2026-09-22')
     expect(prompt).toContain('Model: commandcode/some-model')
     expect(prompt).toContain('read_file(path, limit?) — Read a file')
