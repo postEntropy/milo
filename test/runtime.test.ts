@@ -153,7 +153,35 @@ describe('AgentRuntime sessions', () => {
     expect(discord.id).toBe(telegram.id)
     expect(discord.messages.length).toBeGreaterThan(0)
   })
+
+  it('evicts idle sessions when cache capacity is exceeded', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const runtime = new AgentRuntime({ ...runtimeOptions(dir), maxCachedSessions: 2 })
+
+    const s1 = await runtime.newSession({ gateway: 'cli', conversationId: '1' })
+    await runtime.newSession({ gateway: 'cli', conversationId: '2' })
+    expect(runtime.sessionCount).toBe(2)
+
+    await runtime.newSession({ gateway: 'cli', conversationId: '3' })
+    expect(runtime.sessionCount).toBe(2)
+
+    // s1 was evicted from memory, but still exists in the store and can be reloaded
+    const reloaded = await runtime.resumeSession({ gateway: 'cli', conversationId: '1' }, s1.id)
+    expect(reloaded?.id).toBe(s1.id)
+  })
+
+  it('evicts a routine session immediately when it becomes idle', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const runtime = new AgentRuntime(runtimeOptions(dir))
+
+    const routineSession = await runtime.newSession({ gateway: 'routine', conversationId: 'daily' })
+    expect(runtime.sessionCount).toBe(1)
+    await drain(routineSession.send('run routine'))
+    // Once the turn completes and work is idle, it is removed from the in-memory cache
+    expect(runtime.sessionCount).toBe(0)
+  })
 })
+
 
 describe('AgentRuntime recaps', () => {
   it('recaps the session it leaves, so /sessions can say what it was about', async () => {

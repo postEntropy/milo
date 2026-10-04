@@ -134,6 +134,12 @@ export interface SessionOptions {
   keepSnapshots?: number
   /** What the browser is right now, read per turn. Absent when there is none. */
   browser?: () => BrowserFacts | null
+  /**
+   * Called when this copy's last piece of work in flight ends — a turn, or the
+   * fact extraction after one. The runtime uses it to let go of a session that
+   * no conversation is bound to any more.
+   */
+  onIdle?: (session: Session) => void
 }
 
 export interface SendOptions {
@@ -186,6 +192,8 @@ export class Session {
    * the same one the turn holds for as long as it runs.
    */
   private outgoing: OutgoingFile[] = []
+  /** Turns of this copy in flight, the wait for the lease included. */
+  private sending = 0
 
   constructor(options: SessionOptions) {
     this.options = options
@@ -272,6 +280,15 @@ export class Session {
   }
 
   /**
+   * Whether this copy still has work in flight: a turn (or its wait for the
+   * lease), or a turn being read for facts. A copy that is busy must stay the
+   * one the runtime hands out, or a second copy would race it.
+   */
+  get busy(): boolean {
+    return this.sending > 0 || this.deriving.size > 0
+  }
+
+  /**
    * Renames the session and writes it down. Under the lease, for the reason
    * `clear` gives: a rename sent from a copy the file has already moved past would
    * be refused at best, and would write back a transcript that dropped the turns
@@ -305,6 +322,7 @@ export class Session {
   async *send(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
     const signal = opts?.signal
     let lease: SessionLease | null = null
+    this.sending += 1
     try {
       const free = await this.store.tryAcquire(this.id)
       if (free) {
@@ -341,8 +359,18 @@ export class Session {
       if (rebound) yield { type: 'rebased', ...rebound }
       yield* this.turn(input, opts)
     } finally {
-      await lease?.release()
+      try {
+        await lease?.release()
+      } finally {
+        this.sending -= 1
+        this.notifyIfIdle()
+      }
     }
+  }
+
+  /** Tells the owner this copy has nothing left in flight; see `busy`. */
+  private notifyIfIdle(): void {
+    if (!this.busy) this.options.onIdle?.(this)
   }
 
   private async *turn(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
@@ -386,9 +414,11 @@ export class Session {
     const surface = asSurface(this.scope.gateway)
     const canSendFiles = this.options.deliverTo !== undefined || receivesFiles(surface)
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
-    const recalled = await memory.recall(this.scope, input, {
-      limit: this.options.recallLimit ?? DEFAULT_RECALL_LIMIT,
-    })
+    const recalled = (
+      await memory.recall(this.scope, input, {
+        limit: this.options.recallLimit ?? DEFAULT_RECALL_LIMIT,
+      })
+    ).sort((a, b) => a.text.localeCompare(b.text))
     const prompt = {
       base: system,
       surface,
@@ -564,6 +594,7 @@ export class Session {
       this.deriving.add(work)
       void work.finally(() => {
         this.deriving.delete(work)
+        this.notifyIfIdle()
       })
     }
   }

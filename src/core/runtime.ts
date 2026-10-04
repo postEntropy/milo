@@ -69,7 +69,12 @@ export interface RuntimeOptions {
   browser?: BrowserSession | null
   /** How many page snapshots a request may carry; from the browser's config. */
   keepSnapshots?: number
+  /** Maximum number of idle sessions kept in memory before older ones are evicted. */
+  maxCachedSessions?: number
 }
+
+const DEFAULT_MAX_CACHED_SESSIONS = 16
+
 
 /** What a caller may pin on a fresh session, beyond the scope it talks to. */
 export interface NewSessionOptions {
@@ -108,7 +113,7 @@ export class AgentRuntime {
       const cached = this.cache.get(bound)
       if (cached) {
         cached.scope = scope
-        return cached
+        return this.touch(bound, cached)
       }
       const record = await this.store.load(bound)
       // A binding whose record is gone falls through to a fresh session.
@@ -162,7 +167,7 @@ export class AgentRuntime {
       cached.scope = scope
       await this.store.setBinding(scopeKey(scope), id)
       this.opened.add(scopeKey(scope))
-      return cached
+      return this.touch(id, cached)
     }
     const record = await this.store.load(id)
     if (!record) return null
@@ -422,7 +427,7 @@ export class AgentRuntime {
     const cached = this.cache.get(record.id)
     if (cached) {
       cached.scope = scope
-      return cached
+      return this.touch(record.id, cached)
     }
     const session = new Session({
       scope,
@@ -457,8 +462,41 @@ export class AgentRuntime {
       // A getter, not the value: `/effort` changes what the next turn sends
       // without the runtime having to be rebuilt around it.
       reasoningEffort: () => this.reasoningEffort,
+      onIdle: (idleSession) => this.onSessionIdle(idleSession),
     })
-    this.cache.set(record.id, session)
+    this.cacheSession(record.id, session)
     return session
+  }
+
+  private touch(id: string, session: Session): Session {
+    this.cache.delete(id)
+    this.cache.set(id, session)
+    return session
+  }
+
+  private cacheSession(id: string, session: Session): void {
+    this.cache.delete(id)
+    this.cache.set(id, session)
+    this.pruneCache()
+  }
+
+  private onSessionIdle(session: Session): void {
+    // Routine sessions run once and are never resumed interactively.
+    if (session.scope.gateway === ROUTINE_GATEWAY) {
+      this.cache.delete(session.id)
+    } else {
+      this.pruneCache()
+    }
+  }
+
+  private pruneCache(): void {
+    const limit = this.options.maxCachedSessions ?? DEFAULT_MAX_CACHED_SESSIONS
+    if (this.cache.size <= limit) return
+    for (const [id, session] of this.cache.entries()) {
+      if (this.cache.size <= limit) break
+      if (!session.busy) {
+        this.cache.delete(id)
+      }
+    }
   }
 }
