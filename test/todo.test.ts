@@ -8,9 +8,9 @@ const ctx = { cwd: process.cwd(), signal: new AbortController().signal }
 
 describe('todo', () => {
   it('marks each status with its own glyph', () => {
-    expect(todoMark('pending')).toBe('☐')
-    expect(todoMark('in_progress')).toBe('▸')
-    expect(todoMark('completed')).toBe('✔')
+    expect(todoMark('pending')).toBe('[ ]')
+    expect(todoMark('in_progress')).toBe('[>]')
+    expect(todoMark('completed')).toBe('[x]')
   })
 
   it('draws the checklist with one step per line', () => {
@@ -19,7 +19,7 @@ describe('todo', () => {
       { content: 'Write the parser', status: 'in_progress' },
       { content: 'Add tests', status: 'pending' },
     ]
-    expect(formatTodos(items)).toBe('✔ Read the spec\n▸ Write the parser\n☐ Add tests')
+    expect(formatTodos(items)).toBe('[x] Read the spec\n[>] Write the parser\n[ ] Add tests')
   })
 
   it('returns the plan as both text and items, for the surfaces', async () => {
@@ -32,7 +32,7 @@ describe('todo', () => {
       },
       ctx,
     )
-    expect(result.content).toBe('▸ Step one\n☐ Step two')
+    expect(result.content).toBe('[>] Step one\n[ ] Step two')
     expect(result.todos).toEqual([
       { content: 'Step one', status: 'in_progress' },
       { content: 'Step two', status: 'pending' },
@@ -73,7 +73,7 @@ describe('transcriptOf — the plan survives a reload', () => {
           { type: 'tool-call', id: 'c1', name: 'todo', args: { todos: [{ content: 'Step', status: 'in_progress' }] } },
         ],
       },
-      { role: 'tool', content: [{ type: 'tool-result', id: 'c1', name: 'todo', content: '▸ Step' }] },
+      { role: 'tool', content: [{ type: 'tool-result', id: 'c1', name: 'todo', content: '[>] Step' }] },
     ]
     const transcript = transcriptOf(messages, (file) => ({
       id: file.path,

@@ -3,6 +3,7 @@ import { readFileSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import lockfile from 'proper-lockfile'
 import { taskListsFile } from './config/paths.js'
+import { todoMark } from './todos.js'
 import { writePrivateFile } from '../util/fs.js'
 import { errorMessage } from '../util/errors.js'
 import { logWarn } from '../util/log.js'
@@ -106,7 +107,7 @@ export async function manageTaskLists(input: TaskListAction): Promise<string> {
       return { result: `Deleted list "${list.name}".`, write: true }
     }
     if (input.action === 'show') {
-      return { result: list.items.length ? list.items.map((item) => `${item.completed ? '✔' : '☐'} [${item.id.slice(0, 8)}] ${item.content}`).join('\n') : `List "${list.name}" is empty.` }
+      return { result: list.items.length ? list.items.map((item) => `${todoMark(item.completed ? 'completed' : 'pending')} [${item.id.slice(0, 8)}] ${item.content}`).join('\n') : `List "${list.name}" is empty.` }
     }
     if (input.action === 'add') {
       const content = input.item.trim()

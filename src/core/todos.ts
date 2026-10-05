@@ -13,11 +13,19 @@ export interface TodoItem {
   status: TodoStatus
 }
 
-/** The one mark a status wears, wherever a checklist is drawn as text. */
+/**
+ * The one mark a status wears, wherever a checklist is drawn as text — a task
+ * list as much as a plan.
+ *
+ * ASCII brackets rather than a ballot box or a tick: those are typographic
+ * glyphs, and the font a surface happens to use does not always carry them — the
+ * unchecked `☐` arrived as a plain square no one could tell from a missing
+ * glyph. Brackets are drawn by every font there is.
+ */
 export function todoMark(status: TodoStatus): string {
-  if (status === 'completed') return '✔'
-  if (status === 'in_progress') return '▸'
-  return '☐'
+  if (status === 'completed') return '[x]'
+  if (status === 'in_progress') return '[>]'
+  return '[ ]'
 }
 
 /**

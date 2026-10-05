@@ -25,7 +25,7 @@ describe('persistent task lists', () => {
     const added = await manageTaskLists({ action: 'add', name: 'mIlO', item: 'Ship task lists' })
     const id = added.match(/\[([a-f0-9-]{8})\]/)?.[1]
     expect(id).toBeTruthy()
-    expect(await manageTaskLists({ action: 'show', name: 'Milo' })).toContain('☐')
+    expect(await manageTaskLists({ action: 'show', name: 'Milo' })).toContain('[ ]')
     expect(await manageTaskLists({ action: 'complete', name: 'Milo', itemId: id! })).toContain('Completed')
     expect(await manageTaskLists({ action: 'list' })).toContain('Milo (0 open)')
     expect(await manageTaskLists({ action: 'remove', name: 'Milo', itemId: id! })).toContain('Removed')
