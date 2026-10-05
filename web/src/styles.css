@@ -475,8 +475,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-preview .message { padding-inline: 0; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
 /* A grid's own gap spaces its columns, not the next block: two stacked grids
-   would otherwise sit flush against each other. */
-.form-grid + .form-grid { margin-top: 14px; }
+   would otherwise sit flush against each other. A general sibling rather than an
+   adjacent one, because whatever sits between them (the model picker on a phone)
+   is not a grid and would otherwise break the spacing. */
+.form-grid ~ .form-grid { margin-top: 14px; }
 .field { display: grid; align-content: start; min-width: 0; gap: 6px; }
 .field.full { grid-column: 1 / -1; }
 .settings-section .field > label, .settings-section .field > span { font-size: 13px; font-weight: 500; }
@@ -860,12 +862,26 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 /* iOS Safari zooms the whole viewport when a focused field's text is under 16px,
    which is every field above when the screen is narrow. The fix is the field's
-   own size — not `maximum-scale=1`, which would take pinch-zoom from everyone. */
+   own size — not `maximum-scale=1`, which would take pinch-zoom from everyone.
+   The settings take the tighter size instead, spelled out in the block below. */
 @media (max-width: 640px) {
   .composer-box textarea,
   .field input, .field select, .field textarea,
   .sidebar-search input, .session-rename-input, .secret-row input, .select-search input,
   .tasklist-input { font-size: 1rem; }
+  /* Settings' own size on a phone: one value for the labels and every control, so
+     a dropdown is the same size as the text field beside it. Deliberately below the
+     16px that keeps iOS from zooming on a focused field — the compact screen is the
+     trade. The key editor needs its own selector to outrank the desktop rule. */
+  .settings-section .field > label,
+  .settings-section .field > span,
+  .settings-section .field input, .settings-section .field select, .settings-section .field textarea,
+  .settings-section .select-trigger,
+  .settings-section .select-option,
+  .settings-section .select-search input,
+  .settings-section .secret-row input,
+  .settings-section .secret-group .secret-editor input,
+  .settings-section .check-row { font-size: 14px; }
 }
 @media (prefers-reduced-motion: reduce) {
   /* biome-ignore lint/complexity/noImportantStyles: turning motion off has to win against every component's own transition, and a universal selector can only do that with `!important` */
