@@ -42,10 +42,10 @@ const IDEAS_NOTES_LIMIT = 200
 const IDEAS_SESSIONS = 5
 
 /**
- * Whether an empty home asks for ideas. Off for now: the generation is written and
- * tested, but the web app could not be reached past the token/URL fragility, and
- * that is what has to be settled first — see `worklog.md`. Flip this to `true` and
- * un-skip `test/web-ideas.test.ts` to bring it back; nothing else changes.
+ * Whether an empty home asks for ideas. Off at the owner's request: a product
+ * decision to keep the standing four and not spend the call — not the token/URL
+ * fragility that was once credited here. Flip this to `true` and un-skip
+ * `test/web-ideas.test.ts` to bring it back; nothing else changes.
  */
 const IDEAS_ENABLED = false
 
