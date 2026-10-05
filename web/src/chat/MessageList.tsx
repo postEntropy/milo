@@ -446,7 +446,7 @@ function Reasoning({ text, thoughtMs, animateIn = false }: { text: string; thoug
     <button className="reasoning-summary" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
       <Icon name="spark" size={15} /> {thoughtLabel(thoughtMs)} <Icon className="reasoning-chevron" name="chevron" size={14} />
     </button>
-    <div className="reasoning-collapse"><div className="reasoning-body">{text}</div></div>
+    <div className="reasoning-collapse"><div className="reasoning-clip"><div className="reasoning-body">{text}</div></div></div>
   </div>
 }
 

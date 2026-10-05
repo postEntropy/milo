@@ -257,10 +257,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .reasoning-chevron { margin-inline-start: auto; color: var(--muted); transition: transform var(--motion-base) var(--ease-standard); }
 .reasoning.open .reasoning-chevron { transform: rotate(90deg); }
 /* The body grows and folds by animating the row it sits in from zero to its own
-   height, so the thinking opens and closes rather than appearing all at once. */
+   height, so the thinking opens and closes rather than appearing all at once.
+   The clip carries no padding of its own: padding on a grid item is a floor its
+   row cannot shrink past, which is how a folded thought used to keep a sliver. */
 .reasoning-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--motion-base) var(--ease-standard); }
 .reasoning.open .reasoning-collapse { grid-template-rows: 1fr; }
-.reasoning-body { overflow: hidden; padding: 2px 14px 13px; color: var(--muted); font-family: var(--font-display); font-size: 14px; font-style: italic; line-height: 1.6; white-space: pre-wrap; }
+.reasoning-clip { overflow: hidden; }
+.reasoning-body { padding: 2px 14px 13px; color: var(--muted); font-family: var(--font-display); font-size: 14px; font-style: italic; line-height: 1.6; white-space: pre-wrap; }
 .reasoning-note { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12px; }
 /* The thought line when reasoning is hidden is a control: hovering it offers the
    way to read what was thought, which is otherwise kept out of the thread. */
