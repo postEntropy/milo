@@ -7,6 +7,7 @@ import { Icon } from '../ui/Icons.js'
 import { Select } from '../ui/Select.js'
 import { ModelDetails } from '../ui/ModelDetails.js'
 import { ModelPicker } from './ModelPicker.js'
+import { DisplayPreview } from './DisplayPreview.js'
 import { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from '@protocol'
 import { GOOGLE_SHORTCUT, GOOGLE_STEPS } from '../../../src/core/google/walkthrough.ts'
 
@@ -55,6 +56,10 @@ type SettingsData = {
 }
 type JobView = { id: string; kind: string; status: 'running' | 'done' | 'error'; lines: string[]; result?: Record<string, unknown>; error?: string }
 type Notice = { text: string; error: boolean }
+
+/** The display levels as a person reads them; the stored value stays the short form. */
+const TOOL_DETAIL_LABELS: Record<(typeof TOOL_LEVELS)[number], string> = { full: 'Full detail', name: 'Name only', off: 'Hidden' }
+const REASONING_LABELS: Record<(typeof THINKING_LEVELS)[number], string> = { on: 'Shown', off: 'Hidden' }
 
 export function Settings({ section, conversationId, sessionId, onClose, onSessionChange, theme, onThemeChange, onDirtyChange }: {
   section: string
@@ -330,6 +335,10 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             <Field label="Audio transcription model"><input value={draft.media?.audio ?? 'whisper-large-v3-turbo'} onChange={(event) => update(['media', 'audio'], event.target.value)} /><small>Groq Whisper. Add a Groq API key under API keys.</small></Field>
             <Field label="Document model"><input value={draft.media?.document ?? ''} placeholder="Use the main model" onChange={(event) => update(['media', 'document'], event.target.value || undefined)} /></Field>
           </div>
+          <div className="form-grid">
+            <Field label="Reasoning effort"><Select label="Reasoning effort" value={draft.reasoningEffort} choices={EFFORT_LEVELS.map((value) => ({ value, label: value }))} onChange={(next) => update(['reasoningEffort'], next)} /></Field>
+            <Field label="Output limit (tokens)"><input type="number" min="1" value={draft.maxTokens ?? ''} onChange={(event) => update(['maxTokens'], event.target.value ? Number(event.target.value) : undefined)} /></Field>
+          </div>
         </Section>
         <Section title="API keys" description="Stored keys stay hidden. Add or replace one, then save changes below." active={section === 'keys'}>
           <div className="secret-groups">
@@ -491,12 +500,11 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           <p>“yolo” runs actions without asking for confirmation. Use it only if that is what you want.</p>
         </Section>
         <Section title="Display" description="Choose what shows in the chat and how much the model thinks." active={section === 'display'}>
+          <DisplayPreview tools={draft.display.tools} thinking={draft.display.thinking} />
           <div className="form-grid">
             <Field label="Appearance"><Select label="Appearance" value={theme} choices={[{ value: 'system', label: 'System theme' }, { value: 'light', label: 'Light theme' }, { value: 'dark', label: 'Dark theme' }]} onChange={onThemeChange} /><small>Applies to this browser only.</small></Field>
-            <Field label="Tool detail"><Select label="Tool detail" value={draft.display.tools} choices={TOOL_LEVELS.map((value) => ({ value, label: value }))} onChange={(next) => update(['display', 'tools'], next)} /></Field>
-            <Field label="Show reasoning"><Select label="Show reasoning" value={draft.display.thinking} choices={THINKING_LEVELS.map((value) => ({ value, label: value }))} onChange={(next) => update(['display', 'thinking'], next)} /></Field>
-            <Field label="Reasoning effort"><Select label="Reasoning effort" value={draft.reasoningEffort} choices={EFFORT_LEVELS.map((value) => ({ value, label: value }))} onChange={(next) => update(['reasoningEffort'], next)} /></Field>
-            <Field label="Output limit (tokens)"><input type="number" min="1" value={draft.maxTokens ?? ''} onChange={(event) => update(['maxTokens'], event.target.value ? Number(event.target.value) : undefined)} /></Field>
+            <Field label="Tool detail"><Select label="Tool detail" value={draft.display.tools} choices={TOOL_LEVELS.map((value) => ({ value, label: TOOL_DETAIL_LABELS[value] }))} onChange={(next) => update(['display', 'tools'], next)} /></Field>
+            <Field label="Reasoning"><Select label="Reasoning" value={draft.display.thinking} choices={THINKING_LEVELS.map((value) => ({ value, label: REASONING_LABELS[value] }))} onChange={(next) => update(['display', 'thinking'], next)} /></Field>
           </div>
         </Section>
         <Section title="Skills" description="Skills are instructions the model can run. Install only what you have read and trust." active={section === 'skills'}>

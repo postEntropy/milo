@@ -215,7 +215,7 @@ export function MessageList({
         />
       ))}
     </div>
-    <QuoteButton onQuote={onQuote} />
+    {onQuote && <QuoteButton onQuote={onQuote} />}
   </>
 }
 
