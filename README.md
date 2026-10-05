@@ -45,7 +45,8 @@ On the first run an onboarding wizard asks for a provider, API key and model, an
   stays and the turn reads *stopped*, not an error. With nothing running, it exits.
 - `↑`/`↓` walk back and forward through what was sent, kept in `~/.milo/input-history.json` — the input
   line history, a different thing from the turn log the model can search (see [History](#history)).
-- `/new`, `/resume`, `/clear`, `/model` and `/setup` are refused while a turn runs.
+- `/new`, `/resume`, `/fork`, `/clear`, `/model`, `/provider`, `/setup` and `/compact` are refused while a
+  turn runs.
 - A turn that takes a second or more to produce output shows `✻ Thought for 8.2s` — or
   `✻ Thought for 12s (4.2s compacting)` when a summary call ran first — measured from the question to
   the first visible output.
@@ -156,12 +157,12 @@ for everyone else, and a blocked sender is told their own id. `milo setup` → G
 token → access → enable. The allowlist is read when `milo serve` starts, so restart it after changing
 it.
 
-Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/stats`, `/compact`, `/export`,
-`/skills`, `/mode ask|auto|yolo`, `/yolo`, `/tools full|name|off`, `/thinking on|off`,
-`/effort low|medium|high`, `/provider [id]`, `/model [id]`, `/clear`, `/status`. A mode change from a
-chat is written to `config.yml` and survives a restart; sessions are written to `~/.milo/sessions/` and
-survive too. The provider and the model are switched with `/provider` and `/model`; adding a provider or
-a key still needs `milo setup`.
+Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/fork`, `/stats`, `/compact`,
+`/export`, `/skills`, `/memory`, `/mode ask|auto|yolo`, `/yolo`, `/tools full|name|off`,
+`/thinking on|off`, `/effort low|medium|high`, `/provider [id]`, `/model [id]`, `/clear`, `/status`.
+A mode change from a chat is written to `config.yml` and survives a restart; sessions are written to
+`~/.milo/sessions/` and survive too. The provider and the model are switched with `/provider` and
+`/model`; adding a provider or a key still needs `milo setup`.
 
 Three commands are about the turn rather than the session, so they are answered **outside** the queue —
 a `/stop` that waited for the turn it stops would arrive after it:
@@ -590,6 +591,7 @@ save built from a stale copy is refused instead of overwriting a newer one.
 | `/new [title]` | Starts a fresh session and binds this conversation to it. |
 | `/sessions` | Lists the saved sessions, most recent first. |
 | `/resume <id>` | Binds this conversation to an existing session. |
+| `/fork [id] [turn]` | Branches into a new session from this or a named one. |
 | `/stats` | Name, timestamps, message/turn counts and context size for the current session. |
 | `/clear` | Forgets the current session's transcript (destructive). |
 
