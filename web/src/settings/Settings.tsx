@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
 import { formatBytes, formatWhen, message, splitNames } from '../lib/format.js'
+import { CLASSIFIER_LABELS, EFFORT_LABELS, PERMISSION_LABELS, SEARCH_LABELS } from '../lib/labels.js'
 import { normalizeModels, type ModelInfo } from '../../../src/core/providers/models.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
@@ -337,8 +338,8 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             <Field label="Document model"><input value={draft.media?.document ?? ''} placeholder="Use the main model" onChange={(event) => update(['media', 'document'], event.target.value || undefined)} /></Field>
           </div>
           <div className="form-grid">
-            <Field label="Reasoning effort"><Select label="Reasoning effort" value={draft.reasoningEffort} choices={EFFORT_LEVELS.map((value) => ({ value, label: value }))} onChange={(next) => update(['reasoningEffort'], next)} /></Field>
-            <Field label="Output limit (tokens)"><input type="number" min="1" value={draft.maxTokens ?? ''} onChange={(event) => update(['maxTokens'], event.target.value ? Number(event.target.value) : undefined)} /></Field>
+            <Field label="Reasoning effort"><Select label="Reasoning effort" value={draft.reasoningEffort} choices={EFFORT_LEVELS.map((value) => ({ value, label: EFFORT_LABELS[value] }))} onChange={(next) => update(['reasoningEffort'], next)} /><small>How hard the model thinks before it answers; every request carries it.</small></Field>
+            <Field label="Output limit (tokens)"><input type="number" min="1" value={draft.maxTokens ?? ''} onChange={(event) => update(['maxTokens'], event.target.value ? Number(event.target.value) : undefined)} /><small>Most tokens one reply may use. Empty, the provider’s own limit applies.</small></Field>
           </div>
         </Section>
         <Section title="API keys" description="Stored keys stay hidden. Add or replace one, then save changes below." active={section === 'keys'}>
@@ -426,7 +427,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           <p className="panel-note">Anything but loopback is reachable from the network, and that token is then the only thing between a stranger and this install.</p>
         </Section>
         <Section title="Tools" description="Optional capabilities Milo can use." active={section === 'tools'}>
-          <Field label="Web search"><Select label="Web search" value={draft.search?.provider ?? 'off'} choices={SEARCH_PROVIDERS.map((value) => ({ value, label: value }))} onChange={(next) => update(['search'], next === 'off' ? undefined : { provider: next })} /></Field>
+          <Field label="Web search"><Select label="Web search" value={draft.search?.provider ?? 'off'} choices={SEARCH_PROVIDERS.map((value) => ({ value, label: SEARCH_LABELS[value] }))} onChange={(next) => update(['search'], next === 'off' ? undefined : { provider: next })} /><small>Which service answers a search. Off, the web search tool is not offered at all.</small></Field>
 
           <h3 className="section-label" style={{ paddingInline: 0 }}>Google</h3>
           {data?.google.kind === 'connected' ? (
@@ -470,8 +471,8 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           <div className="form-grid">
             <Field className="full" label="Browser binary"><input value={draft.browser.chromePath ?? ''} onChange={(event) => update(['browser', 'chromePath'], event.target.value || null)} placeholder="auto — the first one found" /></Field>
             <Field className="full" label="Profile directory"><input value={draft.browser.profileDir ?? ''} onChange={(event) => update(['browser', 'profileDir'], event.target.value || null)} placeholder="its own profile" /></Field>
-            <Field label="Attach to (CDP URL)"><input value={draft.browser.cdpUrl ?? ''} onChange={(event) => update(['browser', 'cdpUrl'], event.target.value || null)} placeholder="host:port" /></Field>
-            <Field label="Page snapshots kept"><input type="number" min="0" value={draft.browser.keepSnapshots} onChange={(event) => update(['browser', 'keepSnapshots'], Number(event.target.value))} /></Field>
+            <Field label="Attach to (CDP URL)"><input value={draft.browser.cdpUrl ?? ''} onChange={(event) => update(['browser', 'cdpUrl'], event.target.value || null)} placeholder="host:port" /><small>Drive a browser already running with remote debugging. Empty, Milo starts its own.</small></Field>
+            <Field label="Page snapshots kept"><input type="number" min="0" value={draft.browser.keepSnapshots} onChange={(event) => update(['browser', 'keepSnapshots'], Number(event.target.value))} /><small>Page snapshots kept in context; the oldest are dropped past this.</small></Field>
           </div>
           <div className="button-row">
             <button className="button" type="button" onClick={async () => { try { setBrowsers(await api('browsers')) } catch (error) { setNotice({ text: message(error), error: true }) } }}>Find browsers</button>
@@ -490,15 +491,14 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
         </Section>
         <Section title="Permissions" description="The policy applies to tools that can cause effects." active={section === 'permissions'}>
           <div className="form-grid">
-            <Field label="Mode"><Select label="Mode" value={draft.permissions.mode} choices={PERMISSION_MODES.map((value) => ({ value, label: value }))} onChange={(next) => update(['permissions', 'mode'], next)} /></Field>
-            <Field label="Reviewer threshold"><input type="number" min="0" max="1" step="0.05" value={draft.permissions.jevThreshold} onChange={(event) => update(['permissions', 'jevThreshold'], Number(event.target.value))} /></Field>
-            <Field label="Always-allowed tools"><input value={draft.permissions.allow.join(', ')} onChange={(event) => update(['permissions', 'allow'], splitNames(event.target.value))} /></Field>
-            <Field label="Blocked tools"><input value={draft.permissions.deny.join(', ')} onChange={(event) => update(['permissions', 'deny'], splitNames(event.target.value))} /></Field>
-            <Field label="Classifier backend"><Select label="Classifier backend" value={draft.classifier.backend} choices={CLASSIFIER_BACKENDS.map((value) => ({ value, label: value }))} onChange={(next) => update(['classifier', 'backend'], next)} /><small>Hosted jev rides on the chat provider; a local Ollaya or a custom endpoint stands on its own. Applies on the next start.</small></Field>
-            <Field label="Classifier model"><input value={draft.classifier.model ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'model'], event.target.value || undefined)} /></Field>
-            <Field label="Classifier URL"><input value={draft.classifier.url ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'url'], event.target.value || undefined)} /></Field>
+            <Field label="Mode"><Select label="Mode" value={draft.permissions.mode} choices={PERMISSION_MODES.map((value) => ({ value, label: PERMISSION_LABELS[value] }))} onChange={(next) => update(['permissions', 'mode'], next)} /><small>Ask confirms every tool that can cause an effect. Auto lets a reviewing model allow the safe ones. YOLO runs everything without asking.</small></Field>
+            <Field label="Reviewer threshold"><input type="number" min="0" max="1" step="0.05" value={draft.permissions.jevThreshold} onChange={(event) => update(['permissions', 'jevThreshold'], Number(event.target.value))} /><small>Danger score the reviewer tolerates: below it the tool runs, at or above it asks. Default 0.35.</small></Field>
+            <Field label="Always-allowed tools"><input value={draft.permissions.allow.join(', ')} onChange={(event) => update(['permissions', 'allow'], splitNames(event.target.value))} /><small>Tool names never asked about. Beats the rules, so it is a blanket yes.</small></Field>
+            <Field label="Blocked tools"><input value={draft.permissions.deny.join(', ')} onChange={(event) => update(['permissions', 'deny'], splitNames(event.target.value))} /><small>Tool names refused outright. Outranked only by YOLO.</small></Field>
+            <Field label="Classifier backend"><Select label="Classifier backend" value={draft.classifier.backend} choices={CLASSIFIER_BACKENDS.map((value) => ({ value, label: CLASSIFIER_LABELS[value] }))} onChange={(next) => update(['classifier', 'backend'], next)} /><small>Hosted rides on the chat provider; a local Ollaya or a custom endpoint stands on its own. Applies on the next start.</small></Field>
+            <Field label="Classifier model"><input value={draft.classifier.model ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'model'], event.target.value || undefined)} /><small>The model to ask, e.g. winnow:e4b, laya, typesafe/jev. Empty uses the backend’s default.</small></Field>
+            <Field label="Classifier URL"><input value={draft.classifier.url ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'url'], event.target.value || undefined)} /><small>For Ollaya or Custom: a TypeSafe-compatible base URL. Empty uses Ollaya on 127.0.0.1:11435.</small></Field>
           </div>
-          <p>“yolo” runs actions without asking for confirmation. Use it only if that is what you want.</p>
         </Section>
         <Section title="Display" description="Choose what shows in the chat and how much the model thinks." active={section === 'display'}>
           <DisplayPreview tools={draft.display.tools} thinking={draft.display.thinking} />
@@ -525,10 +525,10 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
         <Section title="Sessions" description="Saved sessions, and how the transcript is kept." active={section === 'sessions'}>
           <div className="form-grid">
             <Field label="Compact when the context is (%)"><input type="number" min="1" max="100" value={Math.round(draft.sessions.compactAt * 100)} onChange={(event) => update(['sessions', 'compactAt'], Number(event.target.value) / 100)} /><small>Share of the model’s window that triggers a fold.</small></Field>
-            <Field label="Turns kept verbatim"><input type="number" min="1" value={draft.sessions.keepTurns} onChange={(event) => update(['sessions', 'keepTurns'], Number(event.target.value))} /></Field>
+            <Field label="Turns kept verbatim"><input type="number" min="1" value={draft.sessions.keepTurns} onChange={(event) => update(['sessions', 'keepTurns'], Number(event.target.value))} /><small>Turns kept word for word when compacting; older ones are summarized.</small></Field>
             <Field label="Fallback budget (tokens)"><input type="number" min="1024" value={draft.sessions.maxInputTokens} onChange={(event) => update(['sessions', 'maxInputTokens'], Number(event.target.value))} /><small>Used only when the model’s window is unknown.</small></Field>
             <Field label="Context window (tokens)"><input type="number" min="1024" value={draft.sessions.contextWindow ?? ''} onChange={(event) => update(['sessions', 'contextWindow'], event.target.value ? Number(event.target.value) : undefined)} /><small>Overrides the catalog, for a model it does not know.</small></Field>
-            <Field label="Sessions kept"><input type="number" min="1" value={draft.sessions.maxSessions} onChange={(event) => update(['sessions', 'maxSessions'], Number(event.target.value))} /></Field>
+            <Field label="Sessions kept"><input type="number" min="1" value={draft.sessions.maxSessions} onChange={(event) => update(['sessions', 'maxSessions'], Number(event.target.value))} /><small>How many sessions stay on disk.</small></Field>
           </div>
           <label className="check-row"><input type="checkbox" checked={draft.sessions.compaction} onChange={(event) => update(['sessions', 'compaction'], event.target.checked)} /> Compact long sessions automatically</label>
 

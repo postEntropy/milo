@@ -1,6 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api } from '../lib/api.js'
 import { formatTokens } from '../lib/format.js'
+import { EFFORT_LABELS } from '../lib/labels.js'
 import { shortModel } from '../../../src/gateways/model-label.ts'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { EFFORT_LEVELS } from '@protocol'
@@ -39,9 +40,6 @@ export interface ComposerHandle {
   /** Put a message's own words back in the field, to edit and send again. */
   load(text: string): void
 }
-
-/** What each reasoning-effort level is called on screen. */
-const EFFORT_TEXT: Record<'low' | 'medium' | 'high', string> = { low: 'Low', medium: 'Medium', high: 'High' }
 
 /** The width at or under which the two toolbar pills fold into one menu. */
 const PHONE_QUERY = '(max-width: 520px)'
@@ -339,10 +337,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                   type="button"
                   aria-pressed={level === effort}
                   onClick={() => onEffortChange(level)}
-                >{EFFORT_TEXT[level]}</button>)}
+                >{EFFORT_LABELS[level]}</button>)}
               </div> : undefined}
               value={model}
-              triggerLabel={phone && model ? `${shortModel(model)} · ${EFFORT_TEXT[effort]}` : model ? shortModel(model) : 'Model'}
+              triggerLabel={phone && model ? `${shortModel(model)} · ${EFFORT_LABELS[effort]}` : model ? shortModel(model) : 'Model'}
               choices={(models ?? []).map((item) => ({
                 value: item.id, label: item.id, meta: <ModelDetails model={item} />,
               }))}
@@ -357,7 +355,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               label="Reasoning effort"
               icon="light"
               value={effort}
-              choices={EFFORT_LEVELS.map((level) => ({ value: level, label: EFFORT_TEXT[level] }))}
+              choices={EFFORT_LEVELS.map((level) => ({ value: level, label: EFFORT_LABELS[level] }))}
               onChange={(next) => onEffortChange(next as 'low' | 'medium' | 'high')}
             />
           </div>}
