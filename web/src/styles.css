@@ -660,7 +660,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .routine-empty-mark { display: grid; width: 52px; height: 52px; place-items: center; margin-bottom: 18px; border-radius: 16px; background: var(--surface-warm); color: var(--accent); }
 .routine-empty h3 { color: var(--fg); font-size: 16px; font-weight: 600; }
 .routine-empty p.routine-empty-copy { max-width: 360px; margin: 8px 0 20px; color: var(--muted); font-size: 13px; line-height: 1.55; }
-.routine-state { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; padding: 22px; color: var(--danger); font-size: 13px; text-align: center; }
+.panel-state { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; padding: 22px; color: var(--danger); font-size: 13px; text-align: center; }
 .routine-detail-head { max-width: none; }
 /* Tighter than the list's head: the prompt and the controls under it read as one
    block, so the space between them is a gap, not a break. */

@@ -12,6 +12,7 @@ import { Settings } from './settings/Settings.js'
 import type { ServerFrame, PermissionRequest, SendTarget, TranscriptPart } from '@protocol'
 import { toolText } from '../../src/gateways/tool-line.ts'
 import { Icon } from './ui/Icons.js'
+import { Notice, useAutoDismiss } from './ui/Notice.js'
 import { miloAvatar } from './ui/milo.js'
 
 type SessionSummary = { id: string; title?: string; preview: string; messageCount: number; updatedAt: number; recap?: string }
@@ -19,7 +20,6 @@ type PendingPermission = { id: string; request: PermissionRequest; expiresAt: nu
 type SessionGroup = { label: string; sessions: SessionSummary[] }
 /** A past turn the search box found, with the session it belongs to. */
 type HistoryHit = { session: string; at: string; kind: string; text: string }
-type Notice = { text: string; error: boolean }
 
 type View = 'chat' | 'settings' | 'routines' | 'tasks'
 
@@ -76,6 +76,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('milo-sidebar') === 'collapsed')
   const [theme, setTheme] = useState(() => localStorage.getItem('milo-theme') ?? 'system')
   const [notice, setNotice] = useState<Notice | null>(null)
+  useAutoDismiss(notice, setNotice)
   /** Bumped to hand the cursor to the composer, e.g. once a new session opens. */
   const [composerFocus, setComposerFocus] = useState(0)
   const socket = useMemo(() => new MiloSocket(), [])
@@ -158,14 +159,6 @@ export default function App() {
     // from the token rather than repeated here, so the two cannot drift.
     document.querySelector('meta[name=theme-color]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim())
   }, [conversationId, theme, sidebarCollapsed])
-
-  // A notice is not a thing to keep: it says what just happened and then gets out
-  // of the way. An error holds longer, since it is the one worth reading.
-  useEffect(() => {
-    if (!notice) return
-    const timer = window.setTimeout(() => setNotice(null), notice.error ? 9000 : 5000)
-    return () => window.clearTimeout(timer)
-  }, [notice])
 
   /**
    * The screen is in the address bar: a session, the routines and the settings are
@@ -811,7 +804,7 @@ export default function App() {
             {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
           </div>
           <div className={`scroll-blur top ${chatScrolled ? 'on' : ''}`} aria-hidden="true" />
-          {notice && <div className={`notice ${notice.error ? 'error' : 'success'}`} role="alert">{notice.text}<button className="icon-button" type="button" aria-label="Dismiss notice" onClick={() => setNotice(null)}><Icon name="x" size={15} /></button></div>}
+          <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock">
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
             <Composer ref={composerRef} busy={busy} queued={queued} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextWindow && contextUsed > 0 ? { used: contextUsed, window: contextWindow } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={(provider) => void changeProvider(provider)} />

@@ -5,6 +5,7 @@ import type { ConnectionState } from '../lib/connection.js'
 import { formatIn, formatWhen, message } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
+import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { Select } from '../ui/Select.js'
 import { MessageList, type ChatMessage } from '../chat/MessageList.js'
 import { Permissions } from '../chat/Permissions.js'
@@ -21,8 +22,6 @@ export type RoutineSummary = {
   lastRunAt?: number
   lastResult?: 'ok' | 'error'
 }
-
-type Notice = { text: string; error: boolean }
 
 /** A run of a routine, as the history lists it. */
 type RunEntry = { id: string; at: number }
@@ -71,6 +70,7 @@ export function Routines({ conversationId, chat, tick }: { conversationId: strin
   const [openedRun, setOpenedRun] = useState<string | null>(null)
   const [composing, setComposing] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
+  useAutoDismiss(notice, setNotice)
 
   const refresh = useCallback(async (): Promise<void> => {
     try { setRoutines(await api<RoutineSummary[]>('routines')) }
@@ -127,6 +127,7 @@ export function Routines({ conversationId, chat, tick }: { conversationId: strin
   return <RoutineList
     routines={routines}
     notice={notice}
+    onDismiss={() => setNotice(null)}
     tick={tick}
     onSelect={setRoutineId}
     onOpen={(id, runId) => { setOpenedRun(runId); setRoutineId(id) }}
@@ -139,14 +140,14 @@ export function Routines({ conversationId, chat, tick }: { conversationId: strin
 }
 
 /** The main area's frame, so every state of this view sits in the same place. */
-function Shell({ head, notice, children }: { head?: ReactNode; notice?: Notice | null; children: ReactNode }) {
+function Shell({ head, notice, onDismiss, children }: { head?: ReactNode; notice?: Notice | null; onDismiss?(): void; children: ReactNode }) {
   return <main className="settings-workspace routines-workspace">
     <div className="settings-inner routines-inner">
       <div className="settings-panel-stack">
         <section className="settings-section routines-section">
           {head}
+          <Notice notice={notice ?? null} onDismiss={onDismiss ?? ((): void => {})} />
           <div className="panel-body">
-            {notice && <p className={`notice ${notice.error ? 'error' : 'success'}`} role="status">{notice.text}</p>}
             {children}
           </div>
         </section>
@@ -158,6 +159,7 @@ function Shell({ head, notice, children }: { head?: ReactNode; notice?: Notice |
 function RoutineList({
   routines,
   notice,
+  onDismiss,
   tick,
   onSelect,
   onOpen,
@@ -169,6 +171,7 @@ function RoutineList({
   /** Null until the list has been read once: "none" and "not yet" are not the same. */
   routines: RoutineSummary[] | null
   notice: Notice | null
+  onDismiss(): void
   tick: number
   onSelect(id: string): void
   /** Open one routine on one of its runs, which is what a timeline row points at. */
@@ -193,6 +196,7 @@ function RoutineList({
   }, [tick, routines])
   return <Shell
     notice={notice}
+    onDismiss={onDismiss}
     head={<div className="panel-head routine-page-head">
       <div>
         <h2>Routines</h2>
@@ -202,7 +206,7 @@ function RoutineList({
     </div>}
   >
     {routines === null ? notice?.error
-      ? <div className="routine-state"><p>Could not read routines.</p><button className="button" type="button" onClick={onRetry}>Try again</button></div>
+      ? <div className="panel-state"><p>Could not read routines.</p><button className="button" type="button" onClick={onRetry}>Try again</button></div>
       : <p className="list-empty">Reading routines…</p>
       : routines.length === 0 ? <div className="routine-empty">
         <span className="routine-empty-mark"><Icon name="repeat" size={22} /></span>
@@ -278,6 +282,7 @@ function RoutineDetail({
   const [runsError, setRunsError] = useState<string | null>(null)
   const [working, setWorking] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
+  useAutoDismiss(notice, setNotice)
 
   const loadRuns = useCallback(async (): Promise<void> => {
     setRunsError(null)
@@ -387,6 +392,7 @@ function RoutineDetail({
 
   return <Shell
     notice={notice}
+    onDismiss={() => setNotice(null)}
     head={<div className="panel-head routine-detail-head">
       <button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Routines</span></button>
       <div className="routine-detail-title-row">
@@ -415,7 +421,7 @@ function RoutineDetail({
         <div><h3 id="routine-runs-title">Runs</h3><p className="routine-section-subtitle">{runs === null ? 'Reading run history' : runs.length >= total ? `${total} ${total === 1 ? 'run' : 'runs'}` : `${runs.length} of ${total} runs`}</p></div>
         {runs && runs.length > 0 && <span className="routine-runs-count">{runs.length}</span>}
       </div>
-      {runsError ? <div className="routine-state"><p>Could not read run history: {runsError}</p><button className="button" type="button" onClick={() => void retryRuns()}>Try again</button></div>
+      {runsError ? <div className="panel-state"><p>Could not read run history: {runsError}</p><button className="button" type="button" onClick={() => void retryRuns()}>Try again</button></div>
         : runs === null ? <p className="list-empty">Reading runs…</p>
         : runs.length === 0 ? <div className="routine-runs-empty"><Icon name="clock" size={18} /><span>No runs yet. Run it now or wait for its next scheduled time.</span></div>
         : <div className="routine-runs-layout">
@@ -437,7 +443,7 @@ function RoutineDetail({
           </div>
           <div className="run-output" aria-live="polite">
             <div className="run-output-head"><span>{selectedRun ? formatWhen(selectedRun.at, true) : 'Select a run'}</span>{selectedRun && <span>Run output</span>}</div>
-            {runError ? <div className="routine-state"><p>Could not read this run: {runError}</p></div>
+            {runError ? <div className="panel-state"><p>Could not read this run: {runError}</p></div>
               : run === null ? <p className="list-empty">Reading run…</p>
               : run.length > 0
                 ? <div className="routines-thread"><MessageList messages={run} thinking={chat.thinking} /></div>

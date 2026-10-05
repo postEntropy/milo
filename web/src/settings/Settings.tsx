@@ -4,6 +4,7 @@ import { formatBytes, formatWhen, message, splitNames } from '../lib/format.js'
 import { normalizeModels, type ModelInfo } from '../../../src/core/providers/models.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
+import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { Select } from '../ui/Select.js'
 import { ModelDetails } from '../ui/ModelDetails.js'
 import { ModelPicker } from './ModelPicker.js'
@@ -55,7 +56,6 @@ type SettingsData = {
   google: GoogleReport
 }
 type JobView = { id: string; kind: string; status: 'running' | 'done' | 'error'; lines: string[]; result?: Record<string, unknown>; error?: string }
-type Notice = { text: string; error: boolean }
 
 /** The display levels as a person reads them; the stored value stays the short form. */
 const TOOL_DETAIL_LABELS: Record<(typeof TOOL_LEVELS)[number], string> = { full: 'Full detail', name: 'Name only', off: 'Hidden' }
@@ -82,6 +82,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   const [busy, setBusy] = useState(true)
   const [saving, setSaving] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
+  useAutoDismiss(notice, setNotice)
   const [catalog, setCatalog] = useState<ModelInfo[] | null>(null)
   /** The provider whose models the picker is showing; null means the draft's own. */
   const [browsing, setBrowsing] = useState<string | null>(null)
@@ -295,7 +296,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
       {busy && <p role="status">Reading Milo’s settings…</p>}
       {!busy && !data && <div className="notice error">{notice?.text ?? 'Could not open settings.'} <button className="button" type="button" onClick={() => void load()}>Try again</button></div>}
       {data && draft && <>
-        {notice && <p className={`notice ${notice.error ? 'error' : 'success'}`} role="status">{notice.text}</p>}
+        <Notice notice={notice} onDismiss={() => setNotice(null)} />
         {job.job && <JobLog job={job.job} onClose={() => job.clear()} />}
         {requiresRestart && <p className="notice restart-notice" role="status">Restart the web server to reach the chat with: {restartReasons.join(', ')}.</p>}
         <div className="settings-panel-stack">
