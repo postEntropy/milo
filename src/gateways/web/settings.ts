@@ -143,6 +143,9 @@ export class WebSettings {
       config: sanitizeConfig(config),
       auth: {
         providers: maskRecord(auth.providers),
+        // The Groq transcription key is a provider key filed on its own: the web
+        // lists it under Audio, and `media.ts` still reads it from providers.groq.
+        audio: maskRecord({ groq: auth.providers.groq ?? '' }),
         search: maskRecord(auth.search),
         gateways: maskRecord(auth.gateways),
       },
@@ -219,10 +222,14 @@ export class WebSettings {
 
   private async saveSecret(body: Record<string, unknown>): Promise<unknown> {
     return this.serialize(async () => {
-      const group = body.group as SecretGroup
+      const group = typeof body.group === 'string' ? body.group : ''
       const id = typeof body.id === 'string' ? body.id : ''
       const value = typeof body.value === 'string' ? body.value : ''
-      const res = coreSaveSecret(group, id, value)
+      // Audio is the Groq transcription key: it is stored where `media.ts` reads
+      // it, under providers, and only the heading it is listed under differs.
+      const res = group === 'audio'
+        ? coreSaveSecret('providers', 'groq', value)
+        : coreSaveSecret(group as SecretGroup, id, value)
       if (!res.ok) throw new Error(res.error)
       return { saved: res.value }
     })
@@ -230,9 +237,11 @@ export class WebSettings {
 
   private async removeSecret(body: Record<string, unknown>): Promise<unknown> {
     return this.serialize(() => {
-      const group = body.group as SecretGroup
+      const group = typeof body.group === 'string' ? body.group : ''
       const id = typeof body.id === 'string' ? body.id : ''
-      const res = coreRemoveSecret(group, id)
+      const res = group === 'audio'
+        ? coreRemoveSecret('providers', 'groq')
+        : coreRemoveSecret(group as SecretGroup, id)
       if (!res.ok) throw new Error(res.error)
       return { removed: res.value }
     })

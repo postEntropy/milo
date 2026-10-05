@@ -342,9 +342,9 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
         </Section>
         <Section title="API keys" description="Stored keys stay hidden. Add or replace one, then save changes below." active={section === 'keys'}>
           <div className="secret-groups">
-            {(['providers', 'search', 'gateways'] as const).map((group) => {
-              const ids = group === 'providers' ? [...new Set([...data.presets.map((item) => item.id), 'groq', ...Object.keys(data.auth.providers)])] : group === 'search' ? ['tavily', 'exa', 'parallel'] : ['telegram', 'discord']
-              const label = group === 'providers' ? 'Providers' : group === 'search' ? 'Web search' : 'Gateways'
+            {(['providers', 'audio', 'search', 'gateways'] as const).map((group) => {
+              const ids = group === 'providers' ? [...new Set([...data.presets.map((item) => item.id), ...Object.keys(data.auth.providers)])].filter((id) => id !== 'groq') : group === 'audio' ? ['groq'] : group === 'search' ? ['tavily', 'exa', 'parallel'] : ['telegram', 'discord']
+              const label = group === 'providers' ? 'Providers' : group === 'audio' ? 'Audio' : group === 'search' ? 'Web search' : 'Gateways'
               const orderedIds = [...ids].sort((a, b) => Number(Boolean(data.auth[group]?.[b]?.set)) - Number(Boolean(data.auth[group]?.[a]?.set)))
               const configured = orderedIds.filter((id) => data.auth[group]?.[id]?.set).length
               return <section className="secret-group" key={group} aria-labelledby={`keys-${group}`}>
