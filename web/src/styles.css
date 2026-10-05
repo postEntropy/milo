@@ -849,6 +849,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .secret-group .secret-row .secret-editor { grid-column: 1 / -1; grid-row: 2; }
   .secret-group-head h3 { font-size: 13px; }
   .connection-status { font-size: 0; }
+  /* A refusal is terminal, unlike the reconnecting states the dot alone stands
+     in for: the word stays, so the state that will not clear itself is read. */
+  .connection-status.refused { font-size: 11px; }
   .connection-status > span { width: 8px; height: 8px; }
   .message.user .message-content { max-width: 92%; }
   .empty-state { min-height: 58vh; padding: 30px 18px 42px; }

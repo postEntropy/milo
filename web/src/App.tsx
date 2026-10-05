@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, uploadFile } from './lib/api.js'
 import { randomUUID } from './lib/uuid.js'
-import { MiloSocket, type ConnectionState } from './lib/ws.js'
+import { MiloSocket, type ConnectionStatus } from './lib/ws.js'
 import { Composer, type ComposerHandle } from './chat/Composer.js'
 import { MessageList, type ChatMessage } from './chat/MessageList.js'
 import { buildSuggestions } from './chat/suggestions.js'
@@ -66,7 +66,7 @@ export default function App() {
   const [thinking, setThinking] = useState(true)
   const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium')
   const [identity, setIdentity] = useState({ provider: 'milo', providerName: 'Milo', model: '' })
-  const [connection, setConnection] = useState<ConnectionState>('connecting')
+  const [connection, setConnection] = useState<ConnectionStatus>({ state: 'connecting' })
   const [view, setView] = useState<View>(() => viewFromPath(location.pathname))
   const [settingsSection, setSettingsSection] = useState('provider')
   /** Whether the settings hold edits that were never saved. */
@@ -290,7 +290,7 @@ export default function App() {
     if (!(frame.type === 'event' && (frame.event.type === 'text-delta' || frame.event.type === 'reasoning-delta'))) drawDeltas()
 
     if (frame.type === 'ready') {
-      setConnection('online')
+      setConnection({ state: 'online' })
       setSessionId(frame.sessionId)
       setThinking(frame.thinking === 'on')
       if (frame.effort) setEffort(frame.effort)
@@ -476,7 +476,12 @@ export default function App() {
 
   useEffect(() => {
     const unsubscribe = socket.subscribe(handleFrame)
-    const unsubscribeStatus = socket.subscribeStatus(setConnection)
+    // A refusal never resolves on its own, so it is said once, in full, where the
+    // person is looking — the chip that stays on screen keeps only the short form.
+    const unsubscribeStatus = socket.subscribeStatus((status) => {
+      setConnection(status)
+      if (status.state === 'refused') setNotice({ text: status.reason ?? 'Milo refused this page.', error: true })
+    })
     socket.connect(conversationId)
     void refreshSessions()
     return () => { unsubscribe(); unsubscribeStatus(); socket.close() }
@@ -775,7 +780,7 @@ export default function App() {
         <div className="topbar-title"><h1>{view === 'settings' ? 'Settings' : view === 'routines' ? 'Routines' : view === 'tasks' ? 'Task lists' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
         <div className="topbar-actions">
           {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>}
-          {view === 'chat' && connection !== 'online' && <span className={`connection-status ${connection}`}><span />{connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
+          {view === 'chat' && connection.state !== 'online' && <span className={`connection-status ${connection.state}`} title={connection.reason}><span />{connection.state === 'refused' ? 'Disconnected' : connection.state === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
         </div>
       </header>
       {/* On a phone the sections ride in a strip under the topbar instead of the
@@ -797,7 +802,7 @@ export default function App() {
       {view === 'settings'
         ? <Settings section={settingsSection} conversationId={conversationId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} onDirtyChange={noteDirty} />
         : view === 'routines'
-        ? <Routines conversationId={conversationId} tick={routinesTick} chat={{ messages, thinking, busy, connection, turnEnds, pendingPermission, send: askRoutine, decide }} />
+        ? <Routines conversationId={conversationId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
         : <section className="chat-view">

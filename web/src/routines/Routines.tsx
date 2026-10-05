@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { PermissionRequest, SendTarget, TranscriptMessage } from '@protocol'
 import { api } from '../lib/api.js'
+import type { ConnectionState } from '../lib/connection.js'
 import { formatIn, formatWhen, message } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
@@ -41,7 +42,7 @@ export interface RoutinesChat {
   messages: ChatMessage[]
   thinking: boolean
   busy: boolean
-  connection: 'connecting' | 'online' | 'offline'
+  connection: ConnectionState
   /** Bumped when a turn ends, so the list is re-read from disk. */
   turnEnds: number
   pendingPermission: { id: string; request: PermissionRequest; expiresAt: number } | null
@@ -499,7 +500,7 @@ function NewRoutine({ conversationId, chat, onBack }: { conversationId: string; 
       </div>
       <div className="ask-actions">
         <button className="button primary" type="button" disabled={!ask.trim() || chat.busy || chat.connection !== 'online'} onClick={create}>{chat.busy ? 'Milo is on it…' : 'Create routine'}</button>
-        {chat.connection !== 'online' && <span className={`connection-status ${chat.connection}`}><span />{chat.connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
+        {chat.connection !== 'online' && <span className={`connection-status ${chat.connection}`}><span />{chat.connection === 'refused' ? 'Disconnected' : chat.connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
       </div>
     </div>
     {thread.length > 0 && <div className="routines-thread">
