@@ -56,8 +56,9 @@ On the first run an onboarding wizard asks for a provider, API key and model, an
 - `~/.milo/config.yml` — provider, model, `maxTokens`, reasoning effort, memory, sessions, display,
   permissions, browser, the web UI and enabled gateways. YAML so it can carry comments; every surface
   rewrites it, and a line you add survives any write that does not touch the key above it.
-- `~/.milo/auth.json` — API keys and bot tokens (`0600`).
+- `~/.milo/auth.json` — API keys, bot tokens and the Google grant (`0600`).
 - `~/.milo/input-history.json` — what was typed at the CLI's prompt, for `↑`/`↓`.
+- `~/.milo/task-lists.json` — the named task lists, shared by every session (see [Task lists](#task-lists)).
 - `~/.milo/sessions/` — one JSON file per session, one binding file per address, one recap per session
   left behind (see [Sessions](#sessions)).
 - `~/.milo/memory/` — the memory store, `memory.db` (SQLite) (see [Memory](#memory)).
@@ -231,7 +232,7 @@ to change.
 The chat is the terminal's turn model: messages stream in, reasoning folds under its question, tool
 lines appear as they run, a confirmation is an Allow/Deny card, `Enter` queues and `Ctrl+Enter` steers,
 and `/` opens the command palette. Export and Clear sit in the top bar; sessions can be searched,
-resumed and deleted.
+resumed and deleted. **Task lists** is a view of its own, showing the lists the `task_lists` tool keeps.
 
 **Settings** (the sidebar's last row) is `milo setup` in the browser — provider and model, API keys,
 memory, routines, gateways, tools and the browser, permissions, display, skills and sessions. The long
@@ -295,6 +296,7 @@ comes is skipped rather than stacked, and a routine cannot create routines.
 | `glob` | yes | Files matching a pattern, most recently modified first. |
 | `grep` | yes | Regex over file contents, returning `path:line: text`. |
 | `todo` | — | Keeps the plan for a multi-step task: a short checklist drawn on every surface. Updates only Milo's own display, so it never asks. |
+| `task_lists` | — | Named task lists kept across every session and surface; only touches Milo's own state, so it never asks. |
 | `git` | yes | Read a repository: `status`, `diff`, `log`, `show` and `blame`. |
 | `git_commit` | no | Stage files (or every tracked change) and commit them; asks for confirmation. |
 | `fetch_url` | yes | One http(s) URL, served back as text; a long page comes back in pages. |
@@ -307,6 +309,10 @@ comes is skipped rather than stacked, and a routine cannot create routines.
 | `send_file` | no | Sends a file to the chat a turn is talking in — the live chat, or a routine's target — as a picture when it is an image. Asks; in a routine it needs a grant to run unattended. Not offered on the terminal, and its call is not drawn as a tool line. |
 | `web_search` | yes | Registered only when a search provider is configured. |
 | `read_skill` | yes | Loads a skill's instructions on demand; registered only when a skill is installed. |
+| `gmail_search` | yes | Search the connected Gmail account; registered only when Google is on. |
+| `gmail_read` | yes | One message in full, by the id `gmail_search` returned. |
+| `drive_search` | yes | Search the connected Drive. |
+| `drive_read` | yes | One Drive file as text; Docs and Sheets come back exported. |
 | `task` | — | Runs a subtask in its own context; only the report comes back. Only on request; never asks itself. |
 | `browser_open` | yes | Opens an http(s) URL and returns the page as numbered elements. Only when the browser is on. |
 | `browser_snapshot` | yes | The current page again: its elements, its text, or a picture of the viewport for the model. |
@@ -565,6 +571,27 @@ The key comes from `TAVILY_API_KEY`, `EXA_API_KEY` or `PARALLEL_API_KEY`, or fro
 keys; each provider has its own slot in `auth.json`. Without a configured provider, `web_search` is
 simply not registered.
 
+### Google (Gmail & Drive)
+
+Off until it is turned on, and connected to an OAuth app of **your own** — Milo ships no Google
+identity. `milo google connect` walks it: an OAuth client of the type **Desktop app**, from a Cloud
+project of yours with the Gmail and Drive APIs enabled, then the browser consent, which has to happen
+at the machine that runs Milo. `milo google status` says what is connected and what is still missing,
+and `milo google forget` drops the grant while keeping the app identity. The same flow is `milo setup`
+→ **Tools** → **Google**, and Settings → Google in the web UI.
+
+```yaml
+google:
+  enabled: true
+```
+
+Turning it on registers four tools, all read-only: `gmail_search` / `gmail_read` and `drive_search` /
+`drive_read`. The grant is `gmail.readonly` plus `drive.readonly`, so nothing here can send, archive,
+label or delete mail, and nothing writes to Drive — there is no tool that could, and no write scope is
+ever asked for. A Google Doc or Sheet comes back as exported text; a file Milo cannot read as text
+says so by type instead of pretending. `milo google status` names the tools a connection actually
+bought, taken from the same factories that answer, so the line cannot drift from what is registered.
+
 ### Subagents
 
 `task` hands a self-contained piece of work to a subagent: it runs the same loop with a **fresh
@@ -607,6 +634,14 @@ Memory is keyed to the install, not the session or the conversation: a `/new` ne
 remembers. Leaving a session writes a short **recap** in the model's own words, kept out of the session
 file in `sessions/recaps/<id>.json` and shown by `/sessions`. On Telegram and Discord, `/new`,
 `/sessions` and `/resume` only work on a single-person bot (exactly one id in the allowlist).
+
+### Task lists
+
+The other thing that outlives a session. The `task_lists` tool keeps named checklists for the person —
+`list`, `create`, `show`, `add`, `complete`, `remove`, `rename`, `delete` — in
+`~/.milo/task-lists.json`, shared by every session and surface, so a list started in the terminal is
+the one the web's **Task lists** view shows. It is Milo's own state, so it never asks; it is not the
+`todo` checklist, which is the plan for the task at hand and lives only as long as that task.
 
 ### Compaction
 
@@ -813,6 +848,7 @@ exported in your shell, npm treats every install as `--omit=dev` and **prunes th
   - `skills/` — `SKILL.md` discovery, frontmatter parsing, and the loader behind the `read_skill` tool.
   - `browser/` — the CDP client, finding and starting Chrome, copying a profile out of another browser,
     the page observer, and the three tools.
+  - `google/` — the OAuth flow, the token source the tools read, and the Gmail and Drive clients.
   - `sessions/` — `SessionStore` interface + `FileSessionStore` / `MemorySessionStore`, the recaps kept
     out of a transcript (`RecapStore`) and their ranking (`rankSessions`), nickname generation,
     compaction (`estimateTokens` / `planCut` / `planCutUnderBudget` / `summarize`), retention
@@ -823,5 +859,5 @@ exported in your shell, npm treats every install as `--omit=dev` and **prunes th
   WebSocket server, the hub that drives turns, the settings actions and the job registry).
 - `web/` — the browser frontend (React + Vite), built into `web/dist` and served by `src/gateways/web/`.
 - `src/bin/` — `cli.ts` (`milo`), `serve.ts` (`milo serve`), `web.ts` (`milo web`), and the plain
-  terminal commands `skills.ts` (`milo skills`), `history.ts` (`milo history`) and `routines.ts`
-  (`milo routines`).
+  terminal commands `skills.ts` (`milo skills`), `history.ts` (`milo history`), `routines.ts`
+  (`milo routines`) and `google.ts` (`milo google`).
