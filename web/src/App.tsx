@@ -514,13 +514,12 @@ export default function App() {
 
   /**
    * The drawer's own gestures, one for each direction: a rightward swipe that
-   * starts at the left edge opens it, and a leftward swipe across the chat closes
+   * starts on the left half opens it, and a leftward swipe across the chat closes
    * it again, the way every other panel on the phone works. The listeners stay
    * passive, so a swipe in the page still scrolls it.
    */
   useEffect(() => {
     const narrow = window.matchMedia('(max-width: 900px)')
-    const EDGE = 24
     const OPEN_AT = 88
     const CLOSE_AT = 64
     let from: { x: number; y: number } | null = null
@@ -528,8 +527,8 @@ export default function App() {
     const start = (event: TouchEvent) => {
       if (!narrow.matches || event.touches.length !== 1) return
       const touch = event.touches[0]
-      // Opening begins at the edge; closing begins anywhere on the revealed chat.
-      const wanted = sidebarOpen ? true : touch.clientX <= EDGE
+      // Opening begins anywhere on the left half; closing begins anywhere on the revealed chat.
+      const wanted = sidebarOpen ? true : touch.clientX <= window.innerWidth / 2
       from = wanted ? { x: touch.clientX, y: touch.clientY } : null
     }
     const move = (event: TouchEvent) => {
