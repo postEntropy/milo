@@ -1,5 +1,5 @@
 import { apiToken } from './api.js'
-import type { ClientFrame, ServerFrame } from '@protocol'
+import { PROTOCOL_VERSION, type ClientFrame, type ServerFrame } from '@protocol'
 
 /** `online` only once the server has answered the handshake; the rest are shown. */
 export type ConnectionState = 'connecting' | 'online' | 'offline'
@@ -74,7 +74,7 @@ export class MiloSocket {
     socket.addEventListener('open', () => {
       if (this.socket !== socket) return
       this.retry = 0
-      socket.send(JSON.stringify({ type: 'hello', version: 1, conversationId }))
+      socket.send(JSON.stringify({ type: 'hello', version: PROTOCOL_VERSION, conversationId }))
     })
     socket.addEventListener('message', (event) => {
       if (this.socket !== socket) return

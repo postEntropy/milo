@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { ServerFrame } from '../src/gateways/web/protocol.js'
+import { proseOf, type ServerFrame } from '../src/gateways/web/protocol.js'
 
 const home = mkdtempSync(path.join(os.tmpdir(), 'milo-web-resume-'))
 process.env.MILO_HOME = home
@@ -59,7 +59,7 @@ describe('opening a past session in the web', () => {
 
     const ready = frames.find((frame): frame is Extract<ServerFrame, { type: 'ready' }> => frame.type === 'ready')
     expect(ready?.sessionId).toBe(past.id)
-    expect(ready?.messages.map((message) => message.text)).toContain('the thing we talked about')
+    expect(ready?.messages.map(proseOf)).toContain('the thing we talked about')
   })
 })
 

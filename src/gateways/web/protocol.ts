@@ -1,7 +1,7 @@
 import type { Idea } from '../../core/ideas.js'
 import type { TodoItem } from '../../core/todos.js'
 
-export const PROTOCOL_VERSION = 1
+export const PROTOCOL_VERSION = 2
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 export const PERMISSION_MODES = ['ask', 'auto', 'yolo'] as const
@@ -113,16 +113,27 @@ export interface ToolMark {
   text: string
 }
 
+/** One piece of a turn as the page draws it, in the order it happened. */
+export type TranscriptPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'reasoning'; text: string }
+  | { kind: 'tool'; tool: ToolMark }
+  | { kind: 'todo'; items: TodoItem[] }
+
 export interface TranscriptMessage {
   role: 'user' | 'assistant'
-  text: string
-  reasoning?: string
-  /** The tool calls this turn made, one line each, in the shared chat format. */
-  tools?: ToolMark[]
-  /** The plan the turn was keeping, drawn as a checklist. */
-  todos?: TodoItem[]
+  /** The turn's pieces — prose, thinking, tool lines and the plan — in order. */
+  parts: TranscriptPart[]
   /** Files delivered into this conversation, still on disk and served by id. */
   attachments?: FrameAttachment[]
+}
+
+/** The words of a message, everything that is not prose left out. */
+export function proseOf(message: { parts: TranscriptPart[] }): string {
+  return message.parts
+    .filter((part): part is { kind: 'text'; text: string } => part.kind === 'text')
+    .map((part) => part.text)
+    .join('\n\n')
 }
 
 export function parseClientFrame(value: unknown): ClientFrame | null {

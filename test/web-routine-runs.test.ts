@@ -95,8 +95,8 @@ describe('web Settings reads a routine’s runs', () => {
     expect(past.runs).toEqual([])
 
     const transcript = await settings.handle('run-transcript', { id: runId }) as TranscriptMessage[]
-    expect(transcript[0]).toMatchObject({ role: 'user', text: 'look at the repo' })
-    expect(transcript.at(-1)).toMatchObject({ role: 'assistant', text: 'nothing moved' })
+    expect(transcript[0]).toMatchObject({ role: 'user', parts: [{ kind: 'text', text: 'look at the repo' }] })
+    expect(transcript.at(-1)).toMatchObject({ role: 'assistant', parts: [{ kind: 'text', text: 'nothing moved' }] })
   })
 
   it('draws the file a run sent, through the server’s own registry', async () => {

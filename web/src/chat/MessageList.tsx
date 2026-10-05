@@ -1,6 +1,7 @@
 import { memo, useEffect, useState } from 'react'
 import { useCopy, type CopyState } from '../lib/clipboard.js'
 import type { ActionRow, FrameAttachment, SessionCardItem, ToolMark, TranscriptMessage } from '@protocol'
+import { proseOf } from '@protocol'
 import { toolBrand } from '../../../src/gateways/tool-line.ts'
 import { todoMark, type TodoItem } from '../../../src/core/todos.ts'
 import { toolIconName } from '../ui/tool-icons.js'
@@ -66,16 +67,6 @@ function ToolLine({ tool }: { tool: ToolMark }) {
       </button>
     </div>
   )
-}
-
-function ToolLines({ id, tools }: { id: string; tools: ToolMark[] }) {
-  const seen = new Map<string, number>()
-  return <>{tools.map((tool) => {
-    const of = `${tool.name}\u0000${tool.text}`
-    const occurrence = seen.get(of) ?? 0
-    seen.set(of, occurrence + 1)
-    return <ToolLine key={`${id}-${of}-${occurrence}`} tool={tool} />
-  })}</>
 }
 
 /**
@@ -199,11 +190,11 @@ export function MessageList({
   let lastAssistant: ChatMessage | undefined
   let lastUser: ChatMessage | undefined
   for (const message of messages) {
-    if (message.role === 'assistant' && message.text && message.waitingSince === undefined) lastAssistant = message
+    if (message.role === 'assistant' && proseOf(message) && message.waitingSince === undefined) lastAssistant = message
     if (message.role === 'user') lastUser = message
   }
   const regen = !busy && lastAssistant && lastUser
-    ? { id: lastAssistant.id, prompt: lastUser.text, upToTurn: (messageTurns.get(lastUser.id) ?? 1) - 1 }
+    ? { id: lastAssistant.id, prompt: proseOf(lastUser), upToTurn: (messageTurns.get(lastUser.id) ?? 1) - 1 }
     : undefined
 
   return <>
@@ -294,29 +285,48 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
   regenUpToTurn?: number
 }) {
   const [revealed, setRevealed] = useState(false)
+  const parts = message.parts
+  const hasReasoning = parts.some((part) => part.kind === 'reasoning')
+  const showReasoning = thinking || revealed
+  const firstReasoning = parts.findIndex((part) => part.kind === 'reasoning')
+  // A part's place is its identity: parts only ever append, so a running count
+  // per kind names each one for as long as the turn streams.
+  const seen = new Map<string, number>()
+  const keyed = parts.map((part) => {
+    const occurrence = seen.get(part.kind) ?? 0
+    seen.set(part.kind, occurrence + 1)
+    return { part, key: `${part.kind}-${occurrence}` }
+  })
+  const prose = proseOf(message)
   return <article className={`message ${message.role}${message.loaded ? ' is-loaded' : ''}`}>
     <div className="message-content">
-      {message.reasoning && (thinking || revealed)
-        ? <Reasoning text={message.reasoning} thoughtMs={message.thoughtMs} animateIn={!thinking} />
-        : message.reasoning && message.thoughtMs !== undefined && message.thoughtMs >= 1000
-          ? <button className="reasoning-note reasoning-reveal" type="button" title="Show thinking" onClick={() => setRevealed(true)}>
-              <Icon name="spark" size={14} /> {thoughtLabel(message.thoughtMs)}
-              <span className="reasoning-reveal-hint">Show thinking</span>
-            </button>
-          : message.thoughtMs !== undefined && message.thoughtMs >= 1000
-            ? <div className="reasoning-note"><Icon name="spark" size={14} /> {thoughtLabel(message.thoughtMs)}</div>
-            : null}
-      {message.tools && message.tools.length > 0 && <ToolLines id={message.id} tools={message.tools} />}
-      {message.todos && message.todos.length > 0 && <TodoList items={message.todos} />}
-      {message.attachments && message.attachments.length > 0 && <Attachments items={message.attachments} />}
+      {hasReasoning && !showReasoning && (message.thoughtMs ?? 0) >= 1000 && (
+        <button className="reasoning-note reasoning-reveal" type="button" title="Show thinking" onClick={() => setRevealed(true)}>
+          <Icon name="spark" size={14} /> {thoughtLabel(message.thoughtMs)}
+          <span className="reasoning-reveal-hint">Show thinking</span>
+        </button>
+      )}
+      {!hasReasoning && message.thoughtMs !== undefined && message.thoughtMs >= 1000 && (
+        <div className="reasoning-note"><Icon name="spark" size={14} /> {thoughtLabel(message.thoughtMs)}</div>
+      )}
       {message.cards && message.cards.length > 0 ? (
         <SessionCards
           cards={message.cards}
           onSelect={(id) => onAction?.(`resume:${id}`, message.id)}
         />
       ) : (
-        message.text && <Markdown text={message.text} />
+        keyed.map(({ part, key }, index) => {
+          if (part.kind === 'reasoning') {
+            return showReasoning
+              ? <Reasoning key={key} text={part.text} thoughtMs={index === firstReasoning ? message.thoughtMs : undefined} animateIn={!thinking} />
+              : null
+          }
+          if (part.kind === 'text') return <Markdown key={key} text={part.text} />
+          if (part.kind === 'tool') return <ToolLine key={key} tool={part.tool} />
+          return <TodoList key={key} items={part.items} />
+        })
       )}
+      {message.attachments && message.attachments.length > 0 && <Attachments items={message.attachments} />}
       {message.actions && message.actions.length > 0 && (
         <div className="message-actions">
           {message.actions.map((row) => (
@@ -358,9 +368,9 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
           ))}
         </div>
       )}
-      {message.role === 'assistant' && message.text && message.waitingSince === undefined && (
+      {message.role === 'assistant' && prose && message.waitingSince === undefined && (
         <div className="message-toolbar">
-          <CopyButton text={message.text} />
+          <CopyButton text={prose} />
           {onFork && (
             <button
               className="message-tool-btn"
@@ -394,9 +404,9 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
     </div>
     {/* The person's own message is a filled bubble: its controls sit under it, not
         inside it, the way the model's sit under its answer. */}
-    {message.role === 'user' && message.text && onEdit && <div className="message-below">
+    {message.role === 'user' && prose && onEdit && <div className="message-below">
       <div className="message-toolbar">
-        <button className="message-tool-btn" type="button" title="Edit this message" aria-label="Edit this message" onClick={() => onEdit(message.text, turn - 1)}>
+        <button className="message-tool-btn" type="button" title="Edit this message" aria-label="Edit this message" onClick={() => onEdit(prose, turn - 1)}>
           <Icon name="edit" size={15} />
           <span className="message-tool-label">Edit</span>
         </button>
@@ -475,13 +485,12 @@ function copyLabel(state: CopyState): string {
 }
 
 function hasContent(message: ChatMessage, thinking: boolean): boolean {
-  if (message.text?.trim()) return true
-  if (message.tools && message.tools.length > 0) return true
-  if (message.todos && message.todos.length > 0) return true
+  if (message.parts.some((part) => part.kind === 'text' && part.text.trim())) return true
+  if (message.parts.some((part) => part.kind === 'tool' || part.kind === 'todo')) return true
+  if (thinking && message.parts.some((part) => part.kind === 'reasoning')) return true
   if (message.attachments && message.attachments.length > 0) return true
   if (message.cards && message.cards.length > 0) return true
   if (message.actions && message.actions.length > 0) return true
-  if (message.reasoning && thinking) return true
   if (message.waitingSince !== undefined) return true
   if (message.status) return true
   return false

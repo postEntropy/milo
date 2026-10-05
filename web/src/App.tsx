@@ -9,9 +9,8 @@ import { Permissions } from './chat/Permissions.js'
 import { Routines } from './routines/Routines.js'
 import { TaskLists } from './tasks/TaskLists.js'
 import { Settings } from './settings/Settings.js'
-import type { ServerFrame, PermissionRequest, SendTarget } from '@protocol'
+import type { ServerFrame, PermissionRequest, SendTarget, TranscriptPart } from '@protocol'
 import { toolText } from '../../src/gateways/tool-line.ts'
-import { closeParagraph } from '../../src/util/format.ts'
 import { Icon } from './ui/Icons.js'
 import { miloAvatar } from './ui/milo.js'
 
@@ -280,10 +279,9 @@ export default function App() {
         let next = message
         if (add.text) {
           const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-          const baseText = message.waitingSince && message.text ? closeParagraph(message.text) : message.text
-          next = { ...next, text: baseText + add.text, waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
+          next = { ...next, parts: withText(next.parts, add.text), waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
         }
-        if (add.reasoning) next = { ...next, reasoning: (next.reasoning ?? '') + add.reasoning }
+        if (add.reasoning) next = { ...next, parts: withReasoning(next.parts, add.reasoning) }
         return next
       }))
     }
@@ -317,7 +315,7 @@ export default function App() {
     if (frame.type === 'turn-start') {
       // The wait starts here and the turn says so on screen: the assistant
       // message carries it, so the line appears where the reply will.
-      setMessages((current) => [...current, { id: `user-${frame.id}`, role: 'user', text: frame.text }, { id: frame.id, role: 'assistant', text: '', waitingSince: Date.now() }])
+      setMessages((current) => [...current, { id: `user-${frame.id}`, role: 'user', parts: [{ kind: 'text', text: frame.text }] }, { id: frame.id, role: 'assistant', parts: [], waitingSince: Date.now() }])
       setBusy(true)
       return
     }
@@ -337,16 +335,17 @@ export default function App() {
           // Reasoning deltas do not end a wait — they are what fills it. A tool
           // call is an output of its own, and the wait before it was thinking.
           const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-          const text = closeParagraph(message.text)
-          return { ...message, text, tools: [...(message.tools ?? []), { name: event.name, text: toolText(event.name, event.args) }], waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
+          return { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name, event.args) } }], waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
         }
         if (event.type === 'tool-end') {
           // The result is in: the model is thinking again about what to do with it.
           return event.isError
-            ? { ...message, tools: [...(message.tools ?? []), { name: event.name, text: `${toolText(event.name)} failed` }], waitingSince: Date.now() }
+            ? { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: `${toolText(event.name)} failed` } }], waitingSince: Date.now() }
             : { ...message, waitingSince: Date.now() }
         }
-        if (event.type === 'todo') return { ...message, todos: event.items }
+        if (event.type === 'todo') return event.items.length > 0
+          ? { ...message, parts: [...message.parts, { kind: 'todo', items: event.items }] }
+          : message
         if (event.type === 'waiting') return { ...message, status: 'Waiting for this session to free up…' }
         if (event.type === 'waited') return { ...message, status: `Session freed after ${formatMs(event.ms)}.` }
         if (event.type === 'compacted') return { ...message, status: `Tidying the context (${formatMs(event.ms)}).` }
@@ -381,7 +380,7 @@ export default function App() {
           if (exists) {
             return current.map((msg) => msg.id === frame.messageId ? {
               ...msg,
-              text: frame.markdown ?? frame.reply,
+              parts: [{ kind: 'text', text: frame.markdown ?? frame.reply }],
               ...(frame.attachments?.length ? { attachments: frame.attachments } : {}),
               actions: frame.actions?.length ? frame.actions : undefined,
               cards: frame.cards?.length ? frame.cards : undefined,
@@ -390,7 +389,7 @@ export default function App() {
           return [...current, {
             id: randomUUID(),
             role: 'assistant',
-            text: frame.markdown ?? frame.reply,
+            parts: [{ kind: 'text', text: frame.markdown ?? frame.reply }],
             ...(frame.attachments?.length ? { attachments: frame.attachments } : {}),
             ...(frame.actions?.length ? { actions: frame.actions } : {}),
             ...(frame.cards?.length ? { cards: frame.cards } : {}),
@@ -400,7 +399,7 @@ export default function App() {
         setMessages((current) => [...current, {
           id: randomUUID(),
           role: 'assistant',
-          text: frame.markdown ?? frame.reply,
+          parts: [{ kind: 'text', text: frame.markdown ?? frame.reply }],
           ...(frame.attachments?.length ? { attachments: frame.attachments } : {}),
           ...(frame.actions?.length ? { actions: frame.actions } : {}),
           ...(frame.cards?.length ? { cards: frame.cards } : {}),
@@ -561,7 +560,7 @@ export default function App() {
       const uploadIds = files?.length ? await Promise.all(files.map(uploadFile)) : []
       followSend.current = true
       if (text.startsWith('/') && !uploadIds.length) {
-        setMessages((current) => [...current, { id: `user-${randomUUID()}`, role: 'user', text }])
+        setMessages((current) => [...current, { id: `user-${randomUUID()}`, role: 'user', parts: [{ kind: 'text', text }] }])
         socket.send({ type: 'command', text })
       } else socket.sendFor(sendingConversation, { type: 'send', text, intent, ...(target ? { target } : {}), ...(uploadIds.length ? { uploadIds } : {}) })
       setNotice(null)
@@ -961,6 +960,26 @@ function SessionRow({
 
 function formatMs(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`
+}
+
+/**
+ * Appends a token to the trailing prose part, or opens a new one. A tool line
+ * between two stretches of prose leaves the second its own part, so the page
+ * draws them as the separate paragraphs they were said as.
+ */
+function withText(parts: TranscriptPart[], delta: string): TranscriptPart[] {
+  const last = parts[parts.length - 1]
+  return last?.kind === 'text'
+    ? [...parts.slice(0, -1), { ...last, text: last.text + delta }]
+    : [...parts, { kind: 'text', text: delta }]
+}
+
+/** The same for a thought, so a turn's reasoning stays one block per step. */
+function withReasoning(parts: TranscriptPart[], delta: string): TranscriptPart[] {
+  const last = parts[parts.length - 1]
+  return last?.kind === 'reasoning'
+    ? [...parts.slice(0, -1), { ...last, text: last.text + delta }]
+    : [...parts, { kind: 'reasoning', text: delta }]
 }
 
 /**

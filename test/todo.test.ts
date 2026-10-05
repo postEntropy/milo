@@ -83,8 +83,11 @@ describe('transcriptOf — the plan survives a reload', () => {
       image: false,
     }))
     const assistant = transcript.find((message) => message.role === 'assistant')
-    expect(assistant?.todos).toEqual([{ content: 'Step', status: 'in_progress' }])
-    // The plan call is not drawn as a tool line beside its own checklist.
-    expect(assistant?.tools).toBeUndefined()
+    // The plan rides in place, as a todo part; the call that carried it is not
+    // also drawn as a tool line beside its own checklist.
+    expect(assistant?.parts).toEqual([
+      { kind: 'text', text: 'on it' },
+      { kind: 'todo', items: [{ content: 'Step', status: 'in_progress' }] },
+    ])
   })
 })
