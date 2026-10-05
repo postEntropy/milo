@@ -628,9 +628,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-inner.routines-inner { width: min(1120px, 100%); padding: 36px 32px 28px; }
 .routines-section .panel-head { padding-bottom: 22px; }
 .routine-page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
-.routine-count { display: flex; align-items: baseline; gap: 6px; padding-bottom: 2px; color: var(--muted); font-size: 12px; white-space: nowrap; }
-.routine-count strong { color: var(--fg-2); font-size: 13px; font-variant-numeric: tabular-nums; }
-.routine-count-divider { width: 1px; height: 13px; margin-inline: 5px; background: var(--border-soft); }
+.panel-count { display: flex; align-items: baseline; gap: 6px; padding-bottom: 2px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.panel-count strong { color: var(--fg-2); font-size: 13px; font-variant-numeric: tabular-nums; }
+.panel-count-divider { width: 1px; height: 13px; margin-inline: 5px; background: var(--border-soft); }
 .routine-list { display: flex; flex-direction: column; gap: 5px; }
 .routine-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 16px; align-items: center; gap: 14px; width: 100%; min-height: 68px; border: 0; border-radius: 12px; background: var(--surface); padding: 12px 16px; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .routine-row:hover { background: var(--surface-warm); }
@@ -656,10 +656,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .routine-row-state.failed, .routine-fact strong.failed { color: var(--danger); }
 .routine-row-chevron { color: var(--muted); }
 .routine-list-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; color: var(--muted); font-size: 12px; }
-.routine-empty { display: flex; min-height: 300px; flex-direction: column; align-items: center; justify-content: center; padding: 36px 20px; text-align: center; }
-.routine-empty-mark { display: grid; width: 52px; height: 52px; place-items: center; margin-bottom: 18px; border-radius: 16px; background: var(--surface-warm); color: var(--accent); }
-.routine-empty h3 { color: var(--fg); font-size: 16px; font-weight: 600; }
-.routine-empty p.routine-empty-copy { max-width: 360px; margin: 8px 0 20px; color: var(--muted); font-size: 13px; line-height: 1.55; }
+.panel-empty { display: flex; min-height: 300px; flex-direction: column; align-items: center; justify-content: center; padding: 36px 20px; text-align: center; }
+.panel-empty-mark { display: grid; width: 52px; height: 52px; place-items: center; margin-bottom: 18px; border-radius: 16px; background: var(--surface-warm); color: var(--accent); }
+.panel-empty h3 { color: var(--fg); font-size: 16px; font-weight: 600; }
+.panel-empty p.panel-empty-copy { max-width: 360px; margin: 8px 0 20px; color: var(--muted); font-size: 13px; line-height: 1.55; }
 .panel-state { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; padding: 22px; color: var(--danger); font-size: 13px; text-align: center; }
 .routine-detail-head { max-width: none; }
 /* Tighter than the list's head: the prompt and the controls under it read as one
@@ -746,7 +746,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @media (max-width: 520px) {
   .settings-inner.routines-inner { padding-inline: 16px; }
   .routine-page-head { align-items: flex-start; flex-direction: column; gap: 10px; }
-  .routine-count { padding: 0; }
+  .panel-count { padding: 0; }
   .routine-row { min-height: 66px; padding-inline: 12px; }
   .routine-list-footer { align-items: flex-end; }
   .routine-overview-data { grid-template-columns: minmax(0, 1fr); }
@@ -864,7 +864,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @media (max-width: 640px) {
   .composer-box textarea,
   .field input, .field select, .field textarea,
-  .sidebar-search input, .session-rename-input, .secret-row input, .select-search input { font-size: 1rem; }
+  .sidebar-search input, .session-rename-input, .secret-row input, .select-search input,
+  .tasklist-input { font-size: 1rem; }
 }
 @media (prefers-reduced-motion: reduce) {
   /* biome-ignore lint/complexity/noImportantStyles: turning motion off has to win against every component's own transition, and a universal selector can only do that with `!important` */
@@ -924,103 +925,59 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .suggestion:nth-child(3) { animation-delay: 110ms; }
 .suggestion:nth-child(4) { animation-delay: 150ms; }
 
-/* Shared task lists: a calm index rail beside the list Milo and the person edit. */
-.tasklists-workspace .tasklists-inner { width: min(1120px, 100%); flex: 1; margin: 0 auto; padding: 42px 34px 32px; }
-.tasklists-workspace .tasklists-heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; margin-bottom: 28px; }
-.tasklists-workspace .tasklists-heading-copy { min-width: 0; }
-.tasklists-workspace .tasklists-eyebrow { color: var(--secondary); font-size: 10px; font-weight: 650; letter-spacing: .12em; }
-.tasklists-workspace .tasklists-heading h2 { margin-top: 7px; font-family: var(--font-display); font-size: 30px; font-weight: 500; letter-spacing: -.025em; }
-.tasklists-workspace .tasklists-heading p { margin-top: 5px; color: var(--muted); font-size: 13px; line-height: 1.5; }
-.tasklists-workspace .tasklists-total { display: flex; align-items: baseline; gap: 7px; flex: none; padding: 9px 13px; border-radius: 12px; background: var(--surface-warm); color: var(--muted); font-size: 12px; }
-.tasklists-workspace .tasklists-heading .tasklists-total strong { color: var(--fg); font-size: 16px; font-weight: 600; }
-.tasklists-workspace .tasklists-layout { display: grid; grid-template-columns: minmax(220px, 270px) minmax(0, 1fr); min-height: min(620px, calc(100vh - 210px)); overflow: hidden; border-radius: 20px; background: var(--surface); box-shadow: var(--shadow-sm); }
-.tasklists-workspace .tasklists-rail { display: flex; min-width: 0; flex-direction: column; border-radius: 20px 0 0 20px; background: var(--surface-warm); padding: 20px 14px 14px; }
-.tasklists-workspace .tasklists-rail-head { display: flex; justify-content: space-between; padding: 2px 8px 12px; color: var(--muted); font-size: 10px; font-weight: 650; letter-spacing: .09em; }
-.tasklists-workspace .tasklists-rail-head span:last-child { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0; }
-.tasklists-workspace .tasklists-nav { display: flex; flex-direction: column; gap: 4px; }
-.tasklists-workspace .tasklists-nav-item { display: flex; align-items: center; gap: 10px; min-height: 43px; border: 0; border-radius: 11px; background: transparent; padding: 7px 9px; color: var(--fg-2); text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
-.tasklists-workspace .tasklists-nav-item:hover { background: color-mix(in oklab, var(--surface) 65%, transparent); }
-.tasklists-workspace .tasklists-nav-item.active { background: var(--surface); color: var(--fg); box-shadow: var(--shadow-sm); }
-.tasklists-workspace .tasklists-nav-mark { display: grid; width: 25px; height: 25px; flex: none; place-items: center; border-radius: 8px; background: var(--surface); color: var(--secondary); }
-.tasklists-workspace .tasklists-nav-item.active .tasklists-nav-mark { background: var(--secondary); color: white; }
-.tasklists-workspace .tasklists-nav-name { overflow: hidden; flex: 1; font-size: 12.5px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.tasklists-workspace .tasklists-nav-count { display: grid; min-width: 22px; height: 22px; place-items: center; border-radius: 7px; background: color-mix(in oklab, var(--surface) 72%, transparent); color: var(--muted); font: 10px var(--font-mono); }
-.tasklists-workspace .tasklists-create { display: flex; align-items: center; gap: 6px; margin-top: 14px; border-radius: 11px; background: var(--surface); padding: 5px; }
-.tasklists-workspace .tasklists-create input { width: 100%; min-width: 0; min-height: 34px; border: 0; border-radius: 8px; outline: 0; background: transparent; padding: 7px 8px; font-size: 12px; }
-.tasklists-workspace .tasklists-create input:focus { box-shadow: var(--focus-ring); }
-.tasklists-workspace .tasklists-create button { display: grid; width: 34px; height: 34px; flex: none; place-items: center; border: 0; border-radius: 9px; background: var(--surface-warm); color: var(--fg-2); }
-.tasklists-workspace .tasklists-create button:hover:not(:disabled) { background: var(--border-soft); }
-.tasklists-workspace .tasklists-create button:disabled { opacity: .45; }
-.tasklists-workspace .tasklists-rail-foot { margin: auto 6px 2px; padding-top: 24px; color: var(--muted); font-size: 11px; line-height: 1.5; }
-.tasklists-workspace .tasklist-detail { min-width: 0; padding: 26px 30px 30px; }
-.tasklists-workspace .tasklist-detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding-bottom: 22px; }
-.tasklists-workspace .tasklist-title-wrap { display: flex; min-width: 0; align-items: flex-start; gap: 12px; }
-.tasklists-workspace .tasklist-title-mark { display: grid; width: 36px; height: 36px; flex: none; place-items: center; border-radius: 12px; background: var(--accent-wash); color: var(--accent); }
-.tasklists-workspace .tasklist-title-wrap h3 { overflow-wrap: anywhere; font-family: var(--font-display); font-size: 23px; font-weight: 500; line-height: 1.3; }
-.tasklists-workspace .tasklist-title-wrap p { margin-top: 4px; color: var(--muted); font-size: 11.5px; }
-.tasklists-workspace .tasklist-actions { display: flex; flex: none; align-items: center; gap: 4px; }
-.tasklists-workspace .tasklist-action { display: inline-flex; min-height: 32px; align-items: center; gap: 6px; border: 0; border-radius: 9px; background: transparent; padding: 0 9px; color: var(--muted); font-size: 11px; }
-.tasklists-workspace .tasklist-action:hover { background: var(--surface-warm); color: var(--fg); }
-.tasklists-workspace .tasklist-action.danger:hover { background: color-mix(in oklab, var(--danger) 10%, var(--surface)); color: var(--danger); }
-.tasklists-workspace .tasklist-rename { display: flex; align-items: center; gap: 2px; }
-.tasklists-workspace .tasklist-rename input { width: min(280px, 45vw); min-height: 34px; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); padding: 6px 9px; font-size: 14px; }
-.tasklists-workspace .tasklist-rename .icon-button { width: 30px; height: 30px; }
-.tasklists-workspace .tasklist-add { display: flex; align-items: center; gap: 10px; margin: 0 0 22px; border-radius: 13px; background: var(--surface-warm); padding: 6px 7px 6px 12px; }
-.tasklists-workspace .tasklist-add-plus { display: grid; width: 29px; height: 29px; flex: none; place-items: center; border-radius: 9px; background: var(--surface); color: var(--secondary); }
-.tasklists-workspace .tasklist-add input { width: 100%; min-width: 0; min-height: 34px; border: 0; outline: 0; background: transparent; color: var(--fg); font-size: 12.5px; }
-.tasklists-workspace .tasklist-add input::placeholder { color: var(--muted); }
-.tasklists-workspace .tasklist-add input:focus-visible { outline: 0; }
-.tasklists-workspace .tasklist-add .button { min-height: 34px; flex: none; border: 0; border-radius: 9px; padding: 0 13px; font-size: 11px; }
-.tasklists-workspace .tasklist-items { display: flex; flex-direction: column; }
-.tasklists-workspace .tasklist-group-label { display: flex; align-items: center; gap: 8px; margin: 5px 0 7px; color: var(--muted); font-size: 9.5px; font-weight: 650; letter-spacing: .09em; }
-.tasklists-workspace .tasklist-group-label span { color: var(--secondary); font: 10px var(--font-mono); letter-spacing: 0; }
-.tasklists-workspace .tasklist-group-label.completed-label { margin-top: 27px; }
-.tasklists-workspace .tasklist-row { display: flex; min-height: 47px; align-items: center; gap: 11px; border-radius: 10px; padding: 5px 8px; transition: background var(--motion-fast); }
-.tasklists-workspace .tasklist-row:hover { background: var(--bg); }
-.tasklists-workspace .tasklist-check { display: grid; width: 20px; height: 20px; flex: none; place-items: center; border: 0; border-radius: 7px; background: var(--surface-warm); color: white; }
-.tasklists-workspace .tasklist-check:not(:disabled):hover { background: var(--secondary); }
-.tasklists-workspace .tasklist-row.completed .tasklist-check { background: var(--success); }
-.tasklists-workspace .tasklist-row-text { min-width: 0; flex: 1; color: var(--fg-2); font-size: 12.5px; line-height: 1.55; overflow-wrap: anywhere; }
-.tasklists-workspace .tasklist-row.completed .tasklist-row-text { color: var(--muted); text-decoration: line-through; }
-.tasklists-workspace .tasklist-row-remove { display: grid; width: 29px; height: 29px; flex: none; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); opacity: 0; transition: background var(--motion-fast), color var(--motion-fast), opacity var(--motion-fast); }
-.tasklists-workspace .tasklist-row:hover .tasklist-row-remove, .tasklists-workspace .tasklist-row-remove:focus-visible { opacity: 1; }
-.tasklists-workspace .tasklist-row-remove:hover { background: color-mix(in oklab, var(--danger) 10%, var(--surface)); color: var(--danger); }
-.tasklists-workspace .tasklist-empty { display: flex; min-height: 240px; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; }
-.tasklists-workspace .tasklist-empty-check { display: grid; width: 45px; height: 45px; place-items: center; border-radius: 15px; background: var(--accent-wash); color: var(--accent); }
-.tasklists-workspace .tasklist-empty h4 { margin-top: 15px; font-family: var(--font-display); font-size: 19px; font-weight: 500; }
-.tasklists-workspace .tasklist-empty p { max-width: 300px; margin-top: 5px; color: var(--muted); font-size: 12px; line-height: 1.55; }
-.tasklists-workspace .tasklists-welcome { display: flex; min-height: min(500px, calc(100vh - 230px)); flex-direction: column; align-items: center; justify-content: center; border-radius: 20px; background: var(--surface); padding: 36px 24px; box-shadow: var(--shadow-sm); text-align: center; }
-.tasklists-workspace .tasklists-welcome-art { display: flex; width: 86px; height: 86px; flex-direction: column; align-items: center; justify-content: center; gap: 4px; transform: rotate(-5deg); border-radius: 25px; background: var(--accent-wash); color: var(--accent); box-shadow: 12px 9px 0 color-mix(in oklab, var(--secondary) 13%, var(--surface)); font-size: 17px; }
-.tasklists-workspace .tasklists-welcome-art span:first-child { display: grid; width: 32px; height: 32px; place-items: center; border-radius: 11px; background: var(--surface); font-size: 20px; }
-.tasklists-workspace .tasklists-welcome h3 { margin-top: 27px; font-family: var(--font-display); font-size: 25px; font-weight: 500; }
-.tasklists-workspace .tasklists-welcome > p { max-width: 420px; margin-top: 8px; color: var(--muted); font-size: 13px; line-height: 1.6; }
-.tasklists-workspace .tasklists-create-first { width: min(480px, 100%); margin-top: 24px; background: var(--bg); padding: 7px; }
-.tasklists-workspace .tasklists-create-first input { padding-inline: 11px; font-size: 12.5px; }
-.tasklists-workspace .tasklists-create-first .button { min-height: 37px; flex: none; border: 0; border-radius: 9px; padding: 0 14px; font-size: 11px; }
-.tasklists-workspace .tasklists-loading { padding: 60px 20px; color: var(--muted); text-align: center; }
-.tasklists-workspace .tasklists-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: -12px 0 14px; border-radius: 11px; background: var(--accent-wash); padding: 10px 12px; color: var(--fg-2); font-size: 12px; }
-.tasklists-workspace .tasklists-notice.error { background: color-mix(in oklab, var(--danger) 9%, var(--surface)); color: var(--danger); }
-.tasklists-workspace .tasklists-notice button { display: grid; width: 25px; height: 25px; flex: none; place-items: center; border: 0; border-radius: 7px; background: transparent; color: currentColor; }
-.tasklists-workspace .tasklists-notice button:hover { background: color-mix(in oklab, currentColor 10%, transparent); }
-@media (max-width: 760px) {
-.tasklists-workspace .tasklists-inner { padding: 26px 18px; }
-.tasklists-workspace .tasklists-heading { align-items: flex-start; margin-bottom: 19px; }
-.tasklists-workspace .tasklists-heading h2 { font-size: 26px; }
-.tasklists-workspace .tasklists-total { padding: 7px 9px; font-size: 10px; }
-.tasklists-workspace .tasklists-layout { grid-template-columns: minmax(0, 1fr); overflow: visible; background: transparent; box-shadow: none; }
-.tasklists-workspace .tasklists-rail { border-radius: 15px; padding: 12px; }
-.tasklists-workspace .tasklists-nav { flex-direction: row; overflow: auto; padding-bottom: 3px; }
-.tasklists-workspace .tasklists-nav-item { min-width: max-content; }
-.tasklists-workspace .tasklists-nav-count, .tasklists-workspace .tasklists-rail-foot { display: none; }
-.tasklists-workspace .tasklists-rail .tasklists-create { max-width: none; margin-top: 10px; }
-.tasklists-workspace .tasklist-detail { margin-top: 12px; border-radius: 16px; background: var(--surface); padding: 19px 15px 22px; box-shadow: var(--shadow-sm); }
-.tasklists-workspace .tasklist-detail-head { gap: 8px; padding-bottom: 16px; }
-.tasklists-workspace .tasklist-actions { gap: 0; }
-.tasklists-workspace .tasklist-action { width: 32px; justify-content: center; padding: 0; }
-.tasklists-workspace .tasklist-action span { display: none; }
-.tasklists-workspace .tasklist-title-wrap h3 { font-size: 21px; }
-.tasklists-workspace .tasklist-add { gap: 7px; padding-inline-start: 8px; }
-.tasklists-workspace .tasklist-add .button { padding-inline: 9px; }
-.tasklists-workspace .tasklist-row-remove { opacity: 1; }
-.tasklists-workspace .tasklists-welcome { min-height: 390px; padding: 26px 18px; }
+/* Task lists: the lists as a panel, and one list's own page a level in — drawn
+   with the same panel, rows and empty state as every other workspace view. */
+.tasklists-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
+.tasklist-list { display: flex; flex-direction: column; gap: 5px; }
+.tasklist-card { display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: 14px; width: 100%; min-height: 68px; border: 0; border-radius: 12px; background: var(--surface); padding: 12px 16px; color: inherit; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
+.tasklist-card:hover { background: var(--surface-warm); }
+.tasklist-card:active { transform: translateY(1px); }
+.tasklist-card-main { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
+.tasklist-card-name { overflow: hidden; color: var(--fg); font-size: 13.5px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.tasklist-card-meta { overflow: hidden; color: var(--muted); font-size: 11.5px; text-overflow: ellipsis; white-space: nowrap; }
+.tasklist-card-count { display: flex; align-items: baseline; gap: 5px; color: var(--muted); font-size: 11px; white-space: nowrap; }
+.tasklist-open { color: var(--fg-2); font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.tasklist-card-chevron { color: var(--muted); }
+.tasklist-footer { display: flex; margin-top: 18px; }
+.tasklist-new { display: flex; align-items: center; gap: 8px; width: min(430px, 100%); }
+/* The one field both the create row and the add-task row wear. */
+.tasklist-input { width: 100%; min-width: 0; min-height: 42px; border: 0; border-radius: 11px; background: var(--surface); padding: 9px 12px; color: var(--fg); font-size: 13px; transition: box-shadow var(--motion-fast); }
+.tasklist-input:focus { outline: 0; box-shadow: var(--focus-ring); }
+.tasklist-input::placeholder { color: var(--muted); }
+.panel-empty .tasklist-new { width: min(470px, 100%); }
+.tasklist-detail-head { max-width: none; }
+.tasklist-detail-head .settings-back { width: fit-content; min-height: 36px; margin: 0 0 14px; background: transparent; padding: 6px 8px; box-shadow: none; color: var(--muted); }
+.tasklist-detail-head .settings-back:hover { background: var(--surface-warm); color: var(--fg); }
+.tasklist-detail-title { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.tasklist-detail-heading { overflow-wrap: anywhere; }
+.tasklist-actions { display: flex; flex: none; flex-wrap: wrap; gap: 8px; }
+.tasklist-rename { display: flex; align-items: flex-end; gap: 10px; margin-bottom: 18px; }
+.tasklist-rename .field { flex: 1; max-width: 420px; }
+.tasklist-rename .save-actions { flex: none; }
+.tasklist-add { display: flex; align-items: center; gap: 10px; margin-bottom: 20px; }
+.tasklist-group + .tasklist-group { margin-top: 22px; }
+.tasklist-group .section-label { display: flex; align-items: center; gap: 8px; padding-top: 0; }
+.tasklist-group .section-label span { color: var(--muted); font: 11px var(--font-mono); letter-spacing: 0; font-variant-numeric: tabular-nums; }
+.tasklist-row { display: flex; align-items: center; gap: 11px; min-height: 46px; border-radius: 10px; padding: 5px 8px; transition: background var(--motion-fast); }
+.tasklist-row:hover { background: var(--surface-warm); }
+/* An empty box has to read as a control on the page's own background, which
+   `--surface` is too close to: the neutral `--border` is what shows. */
+.tasklist-check { display: grid; width: 20px; height: 20px; flex: none; place-items: center; border: 0; border-radius: 7px; background: var(--border); color: var(--accent-on); transition: background var(--motion-fast); }
+.tasklist-check:not(:disabled):hover { background: var(--secondary); }
+.tasklist-row.completed .tasklist-check { background: var(--success); }
+.tasklist-row-text { min-width: 0; flex: 1; color: var(--fg-2); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.tasklist-row.completed .tasklist-row-text { color: var(--muted); text-decoration: line-through; }
+.tasklist-row-remove { color: var(--muted); opacity: 0; }
+.tasklist-row:hover .tasklist-row-remove, .tasklist-row-remove:focus-visible { opacity: 1; }
+.tasklist-row-remove:hover { background: color-mix(in oklab, var(--danger) 10%, var(--surface)); color: var(--danger); }
+@media (max-width: 620px) {
+  .tasklists-head { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .tasklist-footer, .tasklist-new { width: 100%; }
+  .tasklist-card { padding-inline: 13px; }
+  .tasklist-detail-title { flex-direction: column; gap: 12px; }
+  .tasklist-actions { width: 100%; }
+  .tasklist-actions .button { flex: 1; }
+  .tasklist-rename { align-items: stretch; flex-direction: column; }
+  .tasklist-rename .field { max-width: none; }
+  .tasklist-row-remove { opacity: 1; }
 }

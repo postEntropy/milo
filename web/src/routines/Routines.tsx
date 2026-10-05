@@ -202,16 +202,16 @@ function RoutineList({
         <h2>Routines</h2>
         <p>Scheduled work, with each run kept here to read back.</p>
       </div>
-      {routines && routines.length > 0 && <div className="routine-count"><strong>{enabled}</strong><span>active</span><span className="routine-count-divider" /><strong>{routines.length}</strong><span>total</span></div>}
+      {routines && routines.length > 0 && <div className="panel-count"><strong>{enabled}</strong><span>active</span><span className="panel-count-divider" /><strong>{routines.length}</strong><span>total</span></div>}
     </div>}
   >
     {routines === null ? notice?.error
       ? <div className="panel-state"><p>Could not read routines.</p><button className="button" type="button" onClick={onRetry}>Try again</button></div>
       : <p className="list-empty">Reading routines…</p>
-      : routines.length === 0 ? <div className="routine-empty">
-        <span className="routine-empty-mark"><Icon name="repeat" size={22} /></span>
+      : routines.length === 0 ? <div className="panel-empty">
+        <span className="panel-empty-mark"><Icon name="repeat" size={22} /></span>
         <h3>No routines yet</h3>
-        <p className="routine-empty-copy">Describe a task and when to run it. Milo will work out the schedule.</p>
+        <p className="panel-empty-copy">Describe a task and when to run it. Milo will work out the schedule.</p>
         <button className="button primary" type="button" onClick={onCompose}><Icon name="plus" size={15} /> New routine</button>
       </div>
       : <div className="routine-list">
