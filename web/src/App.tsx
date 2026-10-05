@@ -26,21 +26,28 @@ type View = 'chat' | 'settings' | 'routines' | 'tasks'
 /** The address each screen lives at, so a link can be shared and Back works. */
 const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', tasks: '/tasks', settings: '/settings' }
 
-/** Which screen a path names; anything that is not one of them is the chat. */
-function viewFromPath(pathname: string): View {
-  const path = pathname.replace(/\/+$/, '') || '/'
-  for (const [view, at] of Object.entries(VIEW_PATH) as Array<[View, string]>) {
-    if (at === path) return view
-  }
-  return 'chat'
-}
-
 const settingsSections = [
   ['provider', 'cpu', 'Provider & model'], ['keys', 'key', 'API keys'], ['memory', 'database', 'Memory'],
   ['gateways', 'server', 'Gateways'], ['web', 'globe', 'Web'],
   ['tools', 'settings', 'Tools'], ['permissions', 'shield', 'Permissions'], ['display', 'eye', 'Display'],
   ['skills', 'spark', 'Skills'], ['sessions', 'history', 'Sessions'],
 ] as const
+
+/** The section a settings path names, e.g. `/settings/display`; null for a plain `/settings`. */
+function settingsSectionFromPath(pathname: string): string | null {
+  const id = /^\/settings\/([a-z]+)\/?$/.exec(pathname)?.[1]
+  return id && settingsSections.some(([section]) => section === id) ? id : null
+}
+
+/** Which screen a path names; anything that is not one of them is the chat. */
+function viewFromPath(pathname: string): View {
+  const path = pathname.replace(/\/+$/, '') || '/'
+  if (path === VIEW_PATH.settings || settingsSectionFromPath(path)) return 'settings'
+  for (const [view, at] of Object.entries(VIEW_PATH) as Array<[View, string]>) {
+    if (at === path) return view
+  }
+  return 'chat'
+}
 
 export default function App() {
   const [conversationId, setConversationId] = useState(() => localStorage.getItem('milo-conversation') || randomUUID())
@@ -68,7 +75,7 @@ export default function App() {
   const [identity, setIdentity] = useState({ provider: 'milo', providerName: 'Milo', model: '' })
   const [connection, setConnection] = useState<ConnectionStatus>({ state: 'connecting' })
   const [view, setView] = useState<View>(() => viewFromPath(location.pathname))
-  const [settingsSection, setSettingsSection] = useState('provider')
+  const [settingsSection, setSettingsSection] = useState(() => settingsSectionFromPath(location.pathname) ?? 'provider')
   /** Whether the settings hold edits that were never saved. */
   const [settingsDirty, setSettingsDirty] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -161,16 +168,29 @@ export default function App() {
   }, [conversationId, theme, sidebarCollapsed])
 
   /**
-   * The screen is in the address bar: a session, the routines and the settings are
-   * each a place, so a link can be shared and the browser's own Back goes where it
-   * says. Changing screen pushes a step; the Back button reads the path back.
+   * The screen is in the address bar: a session, the routines, and each settings
+   * section are a place of their own (`/settings/display`), so a link can be
+   * shared and the browser's own Back goes where it says. Changing screen or
+   * section pushes a step; the Back button reads the path back.
    */
   useEffect(() => {
-    if (location.pathname !== VIEW_PATH[view]) window.history.pushState(null, '', VIEW_PATH[view])
-  }, [view])
+    const target = view === 'settings' ? `/settings/${settingsSection}` : VIEW_PATH[view]
+    if (location.pathname === target) return
+    // A bare `/settings` is the provider section written shorter: normalize it in
+    // place, so Back never lands on a sectionless URL that would push again.
+    if (view === 'settings' && location.pathname.replace(/\/+$/, '') === '/settings') {
+      window.history.replaceState(null, '', target)
+      return
+    }
+    window.history.pushState(null, '', target)
+  }, [view, settingsSection])
 
   useEffect(() => {
-    const fromPath = (): void => setView(viewFromPath(location.pathname))
+    const fromPath = (): void => {
+      setView(viewFromPath(location.pathname))
+      const section = settingsSectionFromPath(location.pathname)
+      if (section) setSettingsSection(section)
+    }
     window.addEventListener('popstate', fromPath)
     return () => window.removeEventListener('popstate', fromPath)
   }, [])
