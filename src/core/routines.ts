@@ -25,12 +25,19 @@ export const ROUTINE_GATEWAY = 'routine'
 
 /**
  * When a routine fires, in the two shapes its time is ever kept in: an interval
- * measured from the last run, or a wall-clock time on the days that allow it.
- * Wall-clock means local time, which is the clock the person reading it is on.
+ * measured from the last run, or a wall-clock time on the days, dates and months
+ * that allow it. Wall-clock means local time, which is the clock the person
+ * reading it is on.
+ *
+ * The wall-clock shape is the whole of a five-field cron minus the wildcard: the
+ * time is the minute and the hour, and it fires on the days of the week (`days`)
+ * or the days of the month (`dayOfMonth`) that match, in the months (`month`)
+ * that match. The two day fields are mutually exclusive — a schedule counts down
+ * the week or down the month, never both.
  */
 export type RoutineWhen =
   | { kind: 'every'; minutes: number }
-  | { kind: 'at'; time: string; days?: number[] }
+  | { kind: 'at'; time: string; days?: number[]; dayOfMonth?: number[]; month?: number[] }
 
 /**
  * Where a routine's answer goes: a surface that can receive a message out of
@@ -69,8 +76,12 @@ export interface WhenInput {
   every?: string
   /** A wall-clock time: `08:00`, `8:00` or `8h`. */
   at?: string
-  /** Days for `at`: `seg,ter`, `mon-fri`, `1-5`. */
+  /** Days of the week for `at`: `seg,ter`, `mon-fri`, `1-5`. */
   days?: string[]
+  /** Days of the month for `at`: `1`, `15`, `1-15`. Not with `days`. */
+  dayOfMonth?: string[]
+  /** Months for `at`: numbers or names in either language, `12`, `dec`, `jul-set`. */
+  month?: string[]
 }
 
 /** What it takes to make a routine, before the store gives it an id and a timestamp. */
@@ -81,6 +92,13 @@ export type NewRoutine = Omit<Routine, 'id' | 'createdAt'>
  * grow the file without bound. Well past what a person writes by hand.
  */
 export const MAX_ROUTINES = 50
+
+/**
+ * The farthest a wall-clock schedule is walked to find its next time. A lone
+ * `29 February` is the one schedule that can be more than a year out, and its own
+ * leap cycle bounds it — a few years covers every schedule the parser accepts.
+ */
+const AT_WALK_DAYS = 1461
 
 const DURATION = /^(\d+)\s*(s|sec|secs|seg|segs|segundo|segundos|m|min|mins|minuto|minutos|h|hora|horas|d|dia|dias)?$/i
 const TIME = /^(\d{1,2}):?(\d{2})?$/
@@ -100,6 +118,35 @@ const DAY_NAMES: Record<string, number> = {
   sab: 6, sat: 6, saturday: 6, sabado: 6,
 }
 
+/** How a month is written back to a person, in the one language the display uses. */
+const MONTH_LABELS = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
+
+const MONTH_NAMES: Record<string, number> = {
+  // Read in either language, like the days above.
+  jan: 1, january: 1, janeiro: 1,
+  feb: 2, fev: 2, february: 2, fevereiro: 2,
+  mar: 3, march: 3, marco: 3,
+  apr: 4, abr: 4, april: 4, abril: 4,
+  may: 5, mai: 5, maio: 5,
+  jun: 6, june: 6, junho: 6,
+  jul: 7, july: 7, julho: 7,
+  aug: 8, ago: 8, august: 8, agosto: 8,
+  sep: 9, set: 9, september: 9, setembro: 9,
+  oct: 10, out: 10, october: 10, outubro: 10,
+  nov: 11, november: 11, novembro: 11,
+  dec: 12, dez: 12, december: 12, dezembro: 12,
+}
+
+/**
+ * The days each month can hold, February on its longest (leap) reading: a
+ * schedule is checked against the calendar by its most generous month, so a
+ * `29` of February is a real date and a `30` is not.
+ */
+const DAYS_IN_MONTH = [31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+
 /**
  * Turns what the person said — already read and split by the model or parsed off
  * the command line — into the one shape a routine's time is kept in. Null means
@@ -108,15 +155,33 @@ const DAY_NAMES: Record<string, number> = {
  */
 export function parseWhen(input: WhenInput): RoutineWhen | null {
   if (input.every && input.at) return null
-  // Days belong to a clock time; an interval has no day to speak of.
-  if (input.days?.length && !input.at) return null
+  const hasDays = Boolean(input.days?.length)
+  const hasDates = Boolean(input.dayOfMonth?.length || input.month?.length)
+  // A date belongs to a clock time; an interval has no day or month to speak of.
+  if ((hasDays || hasDates) && !input.at) return null
+  // A schedule counts down the week or down the month, never both.
+  if (hasDays && input.dayOfMonth?.length) return null
 
   if (input.at) {
     const time = parseTime(input.at)
     if (!time) return null
     const days = input.days?.length ? parseDays(input.days) : null
     if (input.days?.length && !days) return null
-    return days ? { kind: 'at', time, days } : { kind: 'at', time }
+    const dayOfMonth = input.dayOfMonth?.length ? parseNumberRange(input.dayOfMonth, 1, 31) : null
+    if (input.dayOfMonth?.length && !dayOfMonth) return null
+    const month = input.month?.length ? parseNumberRange(input.month, 1, 12, MONTH_NAMES) : null
+    if (input.month?.length && !month) return null
+    // A day of the month no month can hold (the 31st of February) never fires:
+    // refused here, said out loud, rather than left to a scheduler that would only
+    // ever skip it.
+    if (!scheduleFits(dayOfMonth ?? undefined, month ?? undefined)) return null
+    return {
+      kind: 'at',
+      time,
+      ...(days ? { days } : {}),
+      ...(dayOfMonth ? { dayOfMonth } : {}),
+      ...(month ? { month } : {}),
+    }
   }
 
   if (input.every) {
@@ -136,28 +201,46 @@ export function nextRunAt(when: RoutineWhen, from: Date): Date {
 
   const hour = Number(when.time.slice(0, 2))
   const minute = Number(when.time.slice(3, 5))
-  const days = when.days?.length ? when.days : [0, 1, 2, 3, 4, 5, 6]
 
-  // At most a week's walk: every allowed day is within it, so one of these lands.
-  for (let offset = 0; offset <= 7; offset += 1) {
+  // At most a few years' walk: every allowed month, day and weekday is within it,
+  // so one of these lands. The ceiling is a lone 29 February's own cycle.
+  for (let offset = 0; offset <= AT_WALK_DAYS; offset += 1) {
     const candidate = new Date(from)
     candidate.setDate(from.getDate() + offset)
     candidate.setHours(hour, minute, 0, 0)
-    if (!days.includes(candidate.getDay())) continue
-    if (candidate.getTime() > from.getTime()) return candidate
+    if (candidate.getTime() <= from.getTime()) continue
+    if (when.days?.length && !when.days.includes(candidate.getDay())) continue
+    if (when.dayOfMonth?.length && !when.dayOfMonth.includes(candidate.getDate())) continue
+    if (when.month?.length && !when.month.includes(candidate.getMonth() + 1)) continue
+    return candidate
   }
-  // Unreachable while `days` is non-empty — a guard so this never returns null.
+  // Unreachable for a schedule `parseWhen` accepted — a guard so this never
+  // returns null. The next day at the time, rather than a silently wrong hour.
   const fallback = new Date(from)
-  fallback.setDate(from.getDate() + 7)
+  fallback.setDate(from.getDate() + 1)
   fallback.setHours(hour, minute, 0, 0)
   return fallback
 }
 
-/** `every 2h`, `08:00, mon-fri` — the resolved time, said plainly. */
+/** `every 2h`, `08:00, mon-fri`, `09:00, day 25 of December` — the time, said plainly. */
 export function describeWhen(when: RoutineWhen): string {
   if (when.kind === 'every') return `every ${describeMinutes(when.minutes)}`
-  if (!when.days || when.days.length === 7) return `${when.time}, every day`
-  return `${when.time}, ${describeDays(when.days)}`
+  return `${when.time}, ${describeDayPart(when)}`
+}
+
+/** The days, dates or months a wall-clock time fires on, as one phrase. */
+function describeDayPart(when: Extract<RoutineWhen, { kind: 'at' }>): string {
+  const days = when.days?.length === 7 ? undefined : when.days
+  const months = when.month?.length ? describeMonths(when.month) : null
+  if (when.dayOfMonth?.length) {
+    const dates = `${when.dayOfMonth.length > 1 ? 'days' : 'day'} ${when.dayOfMonth.join(', ')}`
+    return months ? `${dates} of ${months}` : `${dates} of every month`
+  }
+  if (months) {
+    return days?.length ? `${describeDays(days)} in ${months}` : `every day in ${months}`
+  }
+  if (days?.length) return describeDays(days)
+  return 'every day'
 }
 
 export function describeTarget(target: RoutineTarget): string {
@@ -620,6 +703,53 @@ function parseDays(tokens: string[]): number[] | null {
   return days.size > 0 ? [...days].sort((a, b) => a - b) : null
 }
 
+/**
+ * Reads a list of numbers and ranges — `1`, `15`, `1-15` — bounded to a field's
+ * own range, with names for the month field. Mirrors `parseDays`, minus the
+ * weekend wrap a weekday range needs and a calendar field never does.
+ */
+function parseNumberRange(
+  tokens: string[],
+  min: number,
+  max: number,
+  names?: Record<string, number>,
+): number[] | null {
+  const values = new Set<number>()
+  for (const raw of tokens) {
+    const token = normalize(raw)
+    if (!token) continue
+    const [start, end] = token.split('-')
+    if (end !== undefined) {
+      const from = numberFor(start!, min, max, names)
+      const to = numberFor(end, min, max, names)
+      if (from === undefined || to === undefined || from > to) return null
+      for (let value = from; value <= to; value += 1) values.add(value)
+      continue
+    }
+    const single = numberFor(token, min, max, names)
+    if (single === undefined) return null
+    values.add(single)
+  }
+  return values.size > 0 ? [...values].sort((a, b) => a - b) : null
+}
+
+function numberFor(token: string, min: number, max: number, names?: Record<string, number>): number | undefined {
+  const value = Number(token)
+  if (Number.isInteger(value) && value >= min && value <= max) return value
+  return names?.[token]
+}
+
+/**
+ * Whether a day of the month and a month can ever meet. Nothing to check when
+ * there is no date; otherwise one (month, day) pair has to exist in a real
+ * calendar — the 29th of February does, the 31st of February does not.
+ */
+function scheduleFits(dayOfMonth: number[] | undefined, month: number[] | undefined): boolean {
+  if (!dayOfMonth) return true
+  const months = month?.length ? month : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+  return months.some((entry) => dayOfMonth.some((day) => day <= DAYS_IN_MONTH[entry - 1]!))
+}
+
 function dayOf(token: string): number | undefined {
   const numeric = Number(token)
   if (Number.isInteger(numeric) && numeric >= 0 && numeric <= 6) return numeric
@@ -648,6 +778,10 @@ function describeDays(days: number[]): string {
   return sorted.map((day) => DAY_LABELS[day]!).join(', ')
 }
 
+function describeMonths(months: number[]): string {
+  return [...months].sort((a, b) => a - b).map((month) => MONTH_LABELS[month - 1]!).join(', ')
+}
+
 function isRoutine(value: unknown): value is Routine {
   if (!value || typeof value !== 'object') return false
   const routine = value as Record<string, unknown>
@@ -664,8 +798,25 @@ function isWhen(value: unknown): value is RoutineWhen {
   if (!value || typeof value !== 'object') return false
   const when = value as Record<string, unknown>
   if (when.kind === 'every') return typeof when.minutes === 'number' && when.minutes > 0
-  if (when.kind === 'at') return typeof when.time === 'string' && /^\d{2}:\d{2}$/.test(when.time)
-  return false
+  if (when.kind !== 'at') return false
+  if (typeof when.time !== 'string' || !/^\d{2}:\d{2}$/.test(when.time)) return false
+  if (!isNumberList(when.days, 0, 6)) return false
+  if (!isNumberList(when.dayOfMonth, 1, 31)) return false
+  if (!isNumberList(when.month, 1, 12)) return false
+  const days = Array.isArray(when.days) ? (when.days as number[]) : undefined
+  const dayOfMonth = Array.isArray(when.dayOfMonth) ? (when.dayOfMonth as number[]) : undefined
+  const month = Array.isArray(when.month) ? (when.month as number[]) : undefined
+  // A file edited by hand gets the same rules the parser keeps: one day field,
+  // and a date its month can actually hold.
+  if (days?.length && dayOfMonth?.length) return false
+  return scheduleFits(dayOfMonth, month)
+}
+
+/** A field is either absent, or a non-empty list of whole numbers in its range. */
+function isNumberList(value: unknown, min: number, max: number): boolean {
+  if (value === undefined) return true
+  if (!Array.isArray(value) || value.length === 0) return false
+  return value.every((item) => typeof item === 'number' && Number.isInteger(item) && item >= min && item <= max)
 }
 
 function isTarget(value: unknown): value is RoutineTarget {

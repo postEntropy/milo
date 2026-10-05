@@ -49,6 +49,7 @@ const USAGE = [
   'Usage:',
   '  milo routines                              list the routines',
   '  milo routines add "<prompt>" --at 08:00 [--days mon-fri] --gateway telegram --to <chat id>',
+  '  milo routines add "<prompt>" --at 09:00 --day-of-month 25 --month dec --gateway telegram --to <chat id>',
   '  milo routines add "<prompt>" --every 2h --gateway discord --to <channel id>',
   '  milo routines add "<prompt>" --every 6h --gateway web --to <conversation id>',
   '  milo routines remove <id>                  delete a routine',
@@ -58,7 +59,9 @@ const USAGE = [
   'A routine fires only while `milo serve` is running, and delivers its answer to',
   'the chat named by --gateway/--to (telegram, discord or web — a web conversation',
   'is the id in the browser\'s address). Times are local; `--days` takes mon,wed or',
-  'a range like mon-fri.',
+  'a range like mon-fri, `--day-of-month` takes 1,15 or 1-15, and `--month` takes',
+  'dec or 12. A clock time is scheduled by day of the week or by day of the month,',
+  'never both.',
   '',
   'A routine may also deliver files — a screenshot, a report — with its send_file',
   'tool, which posts the file to the same chat as its answer.',
@@ -140,6 +143,8 @@ interface AddFlags {
   every?: string
   at?: string
   days?: string[]
+  dayOfMonth?: string[]
+  month?: string[]
   gateway?: RoutineGateway | 'none'
   conversationId?: string
   allow?: string[]
@@ -161,6 +166,9 @@ function parseAdd(argv: string[]): AddFlags {
     else if (token === '--every') flags.every = value()
     else if (token === '--at') flags.at = value()
     else if (token === '--days') flags.days = value().split(',').map((day) => day.trim()).filter(Boolean)
+    else if (token === '--day-of-month') {
+      flags.dayOfMonth = value().split(',').map((day) => day.trim()).filter(Boolean)
+    } else if (token === '--month') flags.month = value().split(',').map((month) => month.trim()).filter(Boolean)
     else if (token === '--allow') {
       flags.allow = value().split(',').map((name) => name.trim()).filter(Boolean)
     } else if (token === '--yes' || token === '-y') flags.yes = true
@@ -186,9 +194,15 @@ async function add(argv: string[], context: Required<RoutineIo>): Promise<number
     return 1
   }
 
-  const when = parseWhen({ every: flags.every, at: flags.at, days: flags.days })
+  const when = parseWhen({
+    every: flags.every,
+    at: flags.at,
+    days: flags.days,
+    dayOfMonth: flags.dayOfMonth,
+    month: flags.month,
+  })
   if (!when) {
-    context.err('add needs --every 2h, or --at 08:00 (with optional --days mon-fri).')
+    context.err('add needs --every 2h, or --at 08:00 with an optional --days mon-fri, --day-of-month 1,15, or --month dec.')
     context.err(USAGE)
     return 1
   }

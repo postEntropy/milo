@@ -458,8 +458,10 @@ export class WebSettings {
       every: optionalText(body.every),
       at: optionalText(body.at),
       days: stringList(body.days),
+      dayOfMonth: stringList(body.dayOfMonth),
+      month: stringList(body.month),
     })
-    if (!when) throw new Error('Set a time: an interval like "2h", or a clock time like "08:00" with optional days.')
+    if (!when) throw new Error('Set a time: an interval like "2h", or a clock time like "08:00" with optional days, a day of the month, or a month.')
     const allow = stringList(body.allow)
     const routine = await addRoutine({
       prompt,

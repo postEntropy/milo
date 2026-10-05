@@ -58,6 +58,49 @@ describe('parseWhen', () => {
     expect(parseWhen({ at: '08:00', days: ['sábado', 'domingo'] })).toEqual(at('08:00', [0, 6]))
   })
 
+  it('reads a day of the month and a month, as numbers, names or ranges', () => {
+    expect(parseWhen({ at: '09:00', dayOfMonth: ['1'] })).toEqual({ kind: 'at', time: '09:00', dayOfMonth: [1] })
+    expect(parseWhen({ at: '09:00', dayOfMonth: ['1', '15'] })).toEqual({ kind: 'at', time: '09:00', dayOfMonth: [1, 15] })
+    expect(parseWhen({ at: '09:00', dayOfMonth: ['1-15'] })).toEqual({
+      kind: 'at', time: '09:00', dayOfMonth: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15],
+    })
+    expect(parseWhen({ at: '09:00', month: ['dec'] })).toEqual({ kind: 'at', time: '09:00', month: [12] })
+    expect(parseWhen({ at: '09:00', month: ['12'] })).toEqual({ kind: 'at', time: '09:00', month: [12] })
+    expect(parseWhen({ at: '09:00', month: ['jul', 'ago'] })).toEqual({ kind: 'at', time: '09:00', month: [7, 8] })
+    // Read in either language, like the days.
+    expect(parseWhen({ at: '09:00', month: ['dezembro'] })).toEqual({ kind: 'at', time: '09:00', month: [12] })
+    expect(parseWhen({ at: '09:00', dayOfMonth: ['25'], month: ['dec'] })).toEqual({
+      kind: 'at', time: '09:00', dayOfMonth: [25], month: [12],
+    })
+    // A month narrows the weekdays rather than replacing them.
+    expect(parseWhen({ at: '09:00', days: ['mon'], month: ['jul'] })).toEqual({
+      kind: 'at', time: '09:00', days: [1], month: [7],
+    })
+  })
+
+  it('refuses a date it cannot read, or one that can never happen', () => {
+    // A date needs a clock time, like the days do.
+    expect(parseWhen({ month: ['dec'] })).toBeNull()
+    expect(parseWhen({ dayOfMonth: ['1'] })).toBeNull()
+    // A schedule is by day of the week or by day of the month, never both.
+    expect(parseWhen({ at: '09:00', days: ['mon'], dayOfMonth: ['1'] })).toBeNull()
+    // Out of range.
+    expect(parseWhen({ at: '09:00', dayOfMonth: ['0'] })).toBeNull()
+    expect(parseWhen({ at: '09:00', dayOfMonth: ['32'] })).toBeNull()
+    expect(parseWhen({ at: '09:00', month: ['13'] })).toBeNull()
+    expect(parseWhen({ at: '09:00', dayOfMonth: ['15-1'] })).toBeNull()
+    // A day no month can hold.
+    expect(parseWhen({ at: '09:00', dayOfMonth: ['31'], month: ['feb'] })).toBeNull()
+    expect(parseWhen({ at: '09:00', dayOfMonth: ['31'], month: ['apr'] })).toBeNull()
+    // ...but the 29th of February is real, and a day one of the months holds is kept.
+    expect(parseWhen({ at: '09:00', dayOfMonth: ['29'], month: ['feb'] })).toEqual({
+      kind: 'at', time: '09:00', dayOfMonth: [29], month: [2],
+    })
+    expect(parseWhen({ at: '09:00', dayOfMonth: ['31'], month: ['mar', 'apr'] })).toEqual({
+      kind: 'at', time: '09:00', dayOfMonth: [31], month: [3, 4],
+    })
+  })
+
   it('refuses what it cannot read rather than guessing', () => {
     expect(parseWhen({})).toBeNull()
     expect(parseWhen({ every: '0m' })).toBeNull()
@@ -96,6 +139,31 @@ describe('nextRunAt', () => {
     const today = nextRunAt(at('08:00', [from.getDay()]), from)
     expect(today).toEqual(new Date(2026, 8, 25, 8, 0, 0))
   })
+
+  it('lands on the day of the month, in the month it names', () => {
+    const from = new Date(2026, 8, 25, 7, 0, 0)
+
+    // Day 10 of every month: the next is next month's.
+    expect(nextRunAt({ kind: 'at', time: '09:00', dayOfMonth: [10] }, from))
+      .toEqual(new Date(2026, 9, 10, 9, 0, 0))
+
+    // The 25th of December this year is still ahead.
+    expect(nextRunAt({ kind: 'at', time: '09:00', dayOfMonth: [25], month: [12] }, from))
+      .toEqual(new Date(2026, 11, 25, 9, 0, 0))
+    // Once it is behind us, it waits for next year.
+    expect(nextRunAt({ kind: 'at', time: '09:00', dayOfMonth: [25], month: [12] }, new Date(2026, 11, 26, 7, 0, 0)))
+      .toEqual(new Date(2027, 11, 25, 9, 0, 0))
+
+    // Only December: the first of it.
+    expect(nextRunAt({ kind: 'at', time: '09:00', month: [12] }, from))
+      .toEqual(new Date(2026, 11, 1, 9, 0, 0))
+  })
+
+  it('finds a lone 29 February within its own leap cycle', () => {
+    const from = new Date(2026, 0, 1, 7, 0, 0)
+    expect(nextRunAt({ kind: 'at', time: '09:00', dayOfMonth: [29], month: [2] }, from))
+      .toEqual(new Date(2028, 1, 29, 9, 0, 0))
+  })
 })
 
 describe('describeWhen', () => {
@@ -110,6 +178,17 @@ describe('describeWhen', () => {
     // Days are read in either language; they are written back in one.
     expect(describeWhen(at('08:00', [1, 2, 3, 4, 5]))).toBe('08:00, mon–fri')
     expect(describeWhen(at('08:00', [1, 3, 5]))).toBe('08:00, mon, wed, fri')
+  })
+
+  it('says a date or a month, in the display language', () => {
+    expect(describeWhen({ kind: 'at', time: '09:00', dayOfMonth: [25], month: [12] }))
+      .toBe('09:00, day 25 of December')
+    expect(describeWhen({ kind: 'at', time: '09:00', dayOfMonth: [1, 15] }))
+      .toBe('09:00, days 1, 15 of every month')
+    expect(describeWhen({ kind: 'at', time: '09:00', month: [12] }))
+      .toBe('09:00, every day in December')
+    expect(describeWhen({ kind: 'at', time: '09:00', days: [1, 3, 5], month: [7] }))
+      .toBe('09:00, mon, wed, fri in July')
   })
 })
 
@@ -157,6 +236,21 @@ describe('the store', () => {
       ]),
     )
     expect(readRoutines().map((entry) => entry.id)).toEqual(['ok-otter-1'])
+  })
+
+  it('drops a routine whose date can never be scheduled', () => {
+    writeFileSync(
+      routinesFile(),
+      JSON.stringify([
+        // A day of the week and a day of the month in one schedule.
+        { id: 'both-days-1', prompt: 'x', when: { kind: 'at', time: '09:00', days: [1], dayOfMonth: [1] }, target: { gateway: 'telegram', conversationId: '1' } },
+        // The 31st of a month that has 30 days, and February's own impossible 31st.
+        { id: 'bad-date-1', prompt: 'x', when: { kind: 'at', time: '09:00', dayOfMonth: [31], month: [2] }, target: { gateway: 'telegram', conversationId: '1' } },
+        // The 29th of February is a real date.
+        { id: 'ok-date-1', prompt: 'x', when: { kind: 'at', time: '09:00', dayOfMonth: [29], month: [2] }, target: { gateway: 'telegram', conversationId: '1' } },
+      ]),
+    )
+    expect(readRoutines().map((entry) => entry.id)).toEqual(['ok-date-1'])
   })
 
   it('treats a missing `enabled` as on', () => {

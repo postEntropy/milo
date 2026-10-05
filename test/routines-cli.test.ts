@@ -90,6 +90,44 @@ describe('milo routines', () => {
     })
   })
 
+  it('adds a routine on a day of the month, and says it back', async () => {
+    const { lines, code } = await run(
+      'add',
+      'resumo',
+      '--at',
+      '09:00',
+      '--day-of-month',
+      '25',
+      '--month',
+      'dec',
+      '--gateway',
+      'none',
+    )
+
+    expect(code).toBe(0)
+    expect(lines.join('\n')).toContain('09:00, day 25 of December')
+    expect(readRoutines()[0]!.when).toEqual({ kind: 'at', time: '09:00', dayOfMonth: [25], month: [12] })
+  })
+
+  it('refuses a weekday and a day of the month together', async () => {
+    const { code, errors } = await run(
+      'add',
+      'x',
+      '--at',
+      '09:00',
+      '--days',
+      'mon',
+      '--day-of-month',
+      '1',
+      '--gateway',
+      'none',
+    )
+
+    expect(code).toBe(1)
+    expect(errors.join('\n')).toContain('--every 2h')
+    expect(readRoutines()).toEqual([])
+  })
+
   it('adds a routine from an interval', async () => {
     const { code } = await run('add', 'status', '--every', '2h', '--gateway', 'discord', '--to', '42')
 

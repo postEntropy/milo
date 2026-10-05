@@ -61,6 +61,29 @@ describe('the routine tool', () => {
     expect(result.content).toContain('08:00, mon–fri')
   })
 
+  it('reads a date, and says the day and the month back', async () => {
+    const { ctx, added } = harness({ origin: { gateway: 'telegram', conversationId: '123' } })
+
+    const result = await routineTool.execute(
+      { prompt: 'briefing', at: '9h', dayOfMonth: ['25'], month: ['dec'] },
+      ctx,
+    )
+
+    expect(result.isError).toBeFalsy()
+    expect(added[0]!.when).toEqual({ kind: 'at', time: '09:00', dayOfMonth: [25], month: [12] })
+    expect(result.content).toContain('09:00, day 25 of December')
+  })
+
+  it('refuses a weekday and a day of the month together, and says the valid shapes', async () => {
+    const { ctx, added } = harness({ origin: { gateway: 'telegram', conversationId: '123' } })
+
+    const result = await routineTool.execute({ prompt: 'x', at: '9h', days: ['mon'], dayOfMonth: ['1'] }, ctx)
+
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('not a time I can set')
+    expect(added).toEqual([])
+  })
+
   it('carries the tools a writing routine needs, and says what it was granted', async () => {
     const { ctx, added } = harness({ origin: { gateway: 'telegram', conversationId: '123' } })
 

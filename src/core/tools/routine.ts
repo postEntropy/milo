@@ -35,7 +35,15 @@ const schema = z.object({
   days: z
     .array(z.string())
     .optional()
-    .describe('Days for `at`, e.g. ["mon","tue","wed"] or ["mon-fri"]. Absent means every day.'),
+    .describe('Days of the week for `at`, e.g. ["mon","tue","wed"] or ["mon-fri"]. Absent means every day. Not with `dayOfMonth`.'),
+  dayOfMonth: z
+    .array(z.string())
+    .optional()
+    .describe('Days of the month for `at`, e.g. ["1"] or ["1","15"] or ["1-15"]. Use for "the 1st of each month"; not with `days`.'),
+  month: z
+    .array(z.string())
+    .optional()
+    .describe('Months for `at`, e.g. ["dec"] or ["jul","aug"]. Use for "every December". Combines with `days` or `dayOfMonth`.'),
   gateway: z
     .enum(['telegram', 'discord', 'web', 'none'])
     .optional()
@@ -57,7 +65,7 @@ export type RoutineArgs = z.infer<typeof schema>
 export const routineTool: Tool<RoutineArgs> = {
   name: 'routine',
   description:
-    'Create a routine: a prompt Milo runs on a timer and delivers to a chat — or to no chat at all — with nobody there when it fires. What the person says comes in natural language and this turns it into a routine — "every two hours" is `every: "2h"`, "every 30 seconds" is `every: "30s"` (seconds and minutes are both fine — the shortest is one second), "every day at 8" is `at: "08:00"`, "every Monday at 9" is `at: "09:00"` with `days: ["mon"]`, "weekdays at 8" is `at: "08:00"` with `days: ["mon-fri"]`. A routine fires at its next time and every time after; it does not run while `milo serve` is down, and a time missed that way is skipped rather than caught up. It delivers to the chat the request came from when that chat can receive messages; from a surface that cannot (the CLI), name `gateway` and `conversationId` — ask the person which chat, do not guess. A routine may also deliver nowhere: `gateway: "none"` (what the web UI calls "Routines screen only") keeps every run on the Routines screen and posts to no chat — reach for it whenever the person does not want the answer in a chat, and say that back to them. Its answer is text, and it can also deliver files with `send_file` — a picture as a picture, anything else as a document. That is the only thing that makes a picture a picture: the file lands on the run\'s own record, which is what the Routines screen draws, so a routine whose output IS an image must `send_file` it even when it delivers nowhere — a path in the answer is text. So "every morning, screenshot the screen and send it" is `shell_command` plus `send_file`, both named in `allow`. A routine runs with nobody to confirm anything: reading needs no permission, but anything that writes, runs a command or sends a file has to be named in `allow`, and the person is asked to approve those tools before the routine exists. Ask them in the conversation rather than deciding for them, and keep the list to what the prompt actually needs. Always say the name, the time, the destination and the granted tools back, so they can correct it before it ever fires.',
+    'Create a routine: a prompt Milo runs on a timer and delivers to a chat — or to no chat at all — with nobody there when it fires. What the person says comes in natural language and this turns it into a routine — "every two hours" is `every: "2h"`, "every 30 seconds" is `every: "30s"` (seconds and minutes are both fine — the shortest is one second), "every day at 8" is `at: "08:00"`, "every Monday at 9" is `at: "09:00"` with `days: ["mon"]`, "weekdays at 8" is `at: "08:00"` with `days: ["mon-fri"]`, "the 1st of each month at 9" is `at: "09:00"` with `dayOfMonth: ["1"]`, "every 25 December" is `at: "09:00"` with `month: ["dec"]` and `dayOfMonth: ["25"]`, and "every Monday in July" is `at: "09:00"` with `days: ["mon"]` and `month: ["jul"]` — a day of the week and a day of the month are never combined, so pick one. A routine fires at its next time and every time after; it does not run while `milo serve` is down, and a time missed that way is skipped rather than caught up. It delivers to the chat the request came from when that chat can receive messages; from a surface that cannot (the CLI), name `gateway` and `conversationId` — ask the person which chat, do not guess. A routine may also deliver nowhere: `gateway: "none"` (what the web UI calls "Routines screen only") keeps every run on the Routines screen and posts to no chat — reach for it whenever the person does not want the answer in a chat, and say that back to them. Its answer is text, and it can also deliver files with `send_file` — a picture as a picture, anything else as a document. That is the only thing that makes a picture a picture: the file lands on the run\'s own record, which is what the Routines screen draws, so a routine whose output IS an image must `send_file` it even when it delivers nowhere — a path in the answer is text. So "every morning, screenshot the screen and send it" is `shell_command` plus `send_file`, both named in `allow`. A routine runs with nobody to confirm anything: reading needs no permission, but anything that writes, runs a command or sends a file has to be named in `allow`, and the person is asked to approve those tools before the routine exists. Ask them in the conversation rather than deciding for them, and keep the list to what the prompt actually needs. Always say the name, the time, the destination and the granted tools back, so they can correct it before it ever fires.',
   schema,
   asksWhen: (args) => (args.allow?.length ?? 0) > 0,
   async execute(args, ctx) {
@@ -65,11 +73,17 @@ export const routineTool: Tool<RoutineArgs> = {
       return { content: 'Routines are not available in this session.', isError: true }
     }
 
-    const when = parseWhen({ every: args.every, at: args.at, days: args.days })
+    const when = parseWhen({
+      every: args.every,
+      at: args.at,
+      days: args.days,
+      dayOfMonth: args.dayOfMonth,
+      month: args.month,
+    })
     if (!when) {
       return {
         content:
-          'That is not a time I can set. Say it as an interval ("every 30 minutes") or a time ("every day at 8"), and I will make it a routine.',
+          'That is not a time I can set. Say it as an interval ("every 30 minutes"), a time ("every day at 8"), or a date ("the 1st of each month", "every 25 December", "weekdays in July"), and I will make it a routine.',
         isError: true,
       }
     }

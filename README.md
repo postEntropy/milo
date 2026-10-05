@@ -256,6 +256,7 @@ said it in — or on the terminal:
 ```bash
 milo routines add "look at the repo and tell me what moved" --name "daily briefing" \
   --at 08:00 --days mon-fri --gateway telegram --to 123456789
+milo routines add "monthly report" --at 09:00 --day-of-month 1 --gateway telegram --to 123456789
 milo routines add "deploy status" --every 6h --gateway discord --to 987654321
 milo routines list
 milo routines disable calm-otter-7
@@ -268,8 +269,12 @@ in `milo routines list` and signs the message in the chat. The id (`calm-otter-7
 commands. The list is `~/.milo/routines.json`, editable by hand, reread on every tick, up to 50.
 
 A routine's time is an interval (`every 30m`, `every 2h`) counted from the last run, or a wall-clock
-time (`08:00`, `8h`) with optional days (`mon-fri`, `mon,wed,fri`, `1-5`). Times are **local**. Day
-names are read in English or Portuguese and written back in English. There is no five-field cron yet.
+time (`08:00`, `8h`) on the days, dates or months that allow it: days of the week (`--days mon-fri`,
+`mon,wed,fri`, `1-5`), a day of the month (`--day-of-month 1,15`, `1-15`), or a month (`--month dec`,
+`12`, `jul-set`). A month narrows the weekdays — `mon` in `jul` is every Monday in July — and a day of
+the week is never combined with a day of the month. The time is an exact clock time: for "every so
+often" use the interval. Times are **local**, and day and month names are read in English or
+Portuguese and written back in English.
 
 Three things to know before relying on one:
 
