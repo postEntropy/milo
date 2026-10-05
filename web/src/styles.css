@@ -489,14 +489,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .check-row { display: flex; min-height: 44px; align-items: center; gap: 9px; color: var(--fg-2); font-size: 13px; }
 .check-row input { width: 16px; height: 16px; accent-color: var(--accent); }
 .section-label { padding: 14px 0 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
-.secret-row, .skill-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; transition: background var(--motion-fast); }
-.secret-row:hover, .skill-row:hover, .entry-row:hover { background: var(--surface-warm); }
+.secret-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; transition: background var(--motion-fast); }
+.secret-row:hover, .entry-row:hover { background: var(--surface-warm); }
 .secret-row input { flex: 1; min-width: 0; min-height: 40px; border: 0; border-radius: 11px; background: var(--surface); padding: 8px 11px; font-size: 13px; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
 .secret-row input:focus { outline: 0; background: var(--surface); box-shadow: var(--focus-ring); }
 .secret-name { font-size: 13px; font-weight: 500; }
 .secret-row .secret-name { flex: none; min-width: 96px; }
 .secret-state { color: var(--muted); font: 11px var(--font-mono); }
-.secret-row .secret-state, .skill-row .secret-state { flex: none; }
+.secret-row .secret-state { flex: none; }
 /* Which model answers, on a screen with room for it: the providers as a rail and
    the models of the one being looked at beside them. The rail only moves the eye —
    the choice is a model, which is what fixes the pair — so the row that is set
@@ -591,9 +591,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 /* A list row with its own actions: routines, notes, browsers, sessions. */
 .entry-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 12px; transition: background var(--motion-fast); }
-.entry-row > div:first-child, .skill-row > div:first-child { flex: 1; min-width: 0; }
+.entry-row > div:first-child { flex: 1; min-width: 0; }
 .entry-row .secret-state { overflow-wrap: anywhere; }
 .row-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
+.row-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .button-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .message-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .action-row { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px; background: var(--surface); border: 0; border-radius: 10px; box-shadow: var(--shadow-sm); width: fit-content; }

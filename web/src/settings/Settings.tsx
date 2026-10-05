@@ -508,14 +508,28 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           </div>
         </Section>
         <Section title="Skills" description="Skills are instructions the model can run. Install only what you have read and trust." active={section === 'skills'}>
-          {data.skills.length === 0 ? <p className="list-empty">No skills installed.</p> : data.skills.map((skill) => <div className="skill-row" key={skill.name}><div><div className="secret-name">{skill.name}</div><div className="secret-state">{skill.description}</div></div><span className="secret-state">{skillOriginLabel(skill.origin)}</span><button className="button danger" type="button" onClick={() => void remove(skill.name)}>Remove</button></div>)}
-          <div className="form-grid" style={{ marginTop: 12 }}>
-            <Field className="full" label="Skill source"><input value={skillSource} onChange={(event) => { setSkillSource(event.target.value); setSkillChoice(null) }} placeholder="owner/repo, URL or local folder" /></Field>
+          <h3 className="section-label" style={{ paddingInline: 0 }}>Installed</h3>
+          {data.skills.length === 0 ? <p className="list-empty">No skills installed.</p> : data.skills.map((skill) => <div className="entry-row" key={skill.name}>
+            <div><div className="secret-name">{skill.name}</div><div className="secret-state">{skill.description ? `${skillOriginLabel(skill.origin)} · ${skill.description}` : skillOriginLabel(skill.origin)}</div></div>
+            <div className="row-actions"><button className="button danger" type="button" onClick={() => void remove(skill.name)}>Remove</button></div>
+          </div>)}
+          <h3 className="section-label" style={{ paddingInline: 0 }}>Add a skill</h3>
+          <Field label="Skill source"><input value={skillSource} onChange={(event) => { setSkillSource(event.target.value); setSkillChoice(null) }} placeholder="owner/repo, URL or local folder" /></Field>
+          <div className="button-row">
+            <button className="button" type="button" disabled={!skillSource.trim()} onClick={() => void install(skillSource)}><Icon name="download" size={14} /> Install skill</button>
+            <button className="button" type="button" onClick={() => void refreshPopular()}>Browse popular</button>
           </div>
-          <button className="button" type="button" disabled={!skillSource.trim()} onClick={() => void install(skillSource)}>Install skill</button>
-          <button className="button" type="button" onClick={() => void refreshPopular()}>Browse popular</button>
           {skillChoice && <div className="button-row">{skillChoice.map((name) => <button className="button" type="button" key={name} onClick={() => void install(skillSource, name)}>Install {name}</button>)}</div>}
-          {popular.map((skill) => <div className="skill-row" key={`${skill.repo}-${skill.name}`}><div><div className="secret-name">{skill.name}</div><div className="secret-state">{skill.description ?? skill.repo}</div></div><span className="secret-state">{skill.installs ?? ''}</span><button className="button" type="button" onClick={() => void install(`${skill.repo}/${skill.name}`)}>View / install</button></div>)}
+          {popular.length > 0 && <>
+            <h3 className="section-label" style={{ paddingInline: 0 }}>Popular</h3>
+            {popular.map((skill) => <div className="entry-row" key={`${skill.repo}-${skill.name}`}>
+              <div><div className="secret-name">{skill.name}</div><div className="secret-state">{skill.description ?? skill.repo}</div></div>
+              <div className="row-actions">
+                {skill.installs ? <span className="row-count">{skill.installs} install{skill.installs === 1 ? '' : 's'}</span> : null}
+                <button className="button" type="button" onClick={() => void install(`${skill.repo}/${skill.name}`)}>Install</button>
+              </div>
+            </div>)}
+          </>}
         </Section>
         <Section title="Sessions" description="Saved sessions, and how the transcript is kept." active={section === 'sessions'}>
           <div className="form-grid">
