@@ -330,7 +330,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           <div className="form-grid model-url">
             <Field className="full" label="API URL"><input value={draft.providers?.[currentProvider]?.baseURL ?? ''} onChange={(event) => update(['providers', currentProvider, 'baseURL'], event.target.value)} /></Field>
           </div>
-          <div className="form-grid model-pair">
+          <div className="form-grid">
             <Field label="Vision model"><input value={draft.media?.vision ?? ''} placeholder="Use the main model" onChange={(event) => update(['media', 'vision'], event.target.value || undefined)} /><small>Milo checks model metadata for image input support. Set a model here if its provider does not report that.</small></Field>
             <Field label="Audio transcription model"><input value={draft.media?.audio ?? 'whisper-large-v3-turbo'} onChange={(event) => update(['media', 'audio'], event.target.value)} /><small>Groq Whisper. Add a Groq API key under API keys.</small></Field>
             <Field label="Document model"><input value={draft.media?.document ?? ''} placeholder="Use the main model" onChange={(event) => update(['media', 'document'], event.target.value || undefined)} /></Field>

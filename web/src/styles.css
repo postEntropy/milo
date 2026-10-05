@@ -474,6 +474,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-preview .thread-inner { padding: 0; }
 .settings-preview .message { padding-inline: 0; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+/* A grid's own gap spaces its columns, not the next block: two stacked grids
+   would otherwise sit flush against each other. */
+.form-grid + .form-grid { margin-top: 14px; }
 .field { display: grid; align-content: start; min-width: 0; gap: 6px; }
 .field.full { grid-column: 1 / -1; }
 .settings-section .field > label, .settings-section .field > span { font-size: 13px; font-weight: 500; }
