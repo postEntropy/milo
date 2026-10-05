@@ -1,7 +1,6 @@
-import path from 'node:path'
 import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
 import { BrowserSession } from './browser/index.js'
-import { browserProfileDir, DEFAULT_WORKING_DIRECTORY, embedEngineDir, historyDir, memoryDir, recapsDir, sessionsDir, skillsDir } from './config/paths.js'
+import { browserProfileDir, embedEngineDir, historyDir, memoryDir, recapsDir, sessionsDir, skillsDir } from './config/paths.js'
 import { readAuth, readConfig, resolveProvider, resolveSearchKey, type LoadedConfig, type ResolvedProvider } from './config/load.js'
 import { findPreset } from './config/presets.js'
 import { fileHistory } from './history.js'
@@ -37,17 +36,10 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   )
   const permissions = loaded.config.permissions
   // Somewhere to put a skill, made from the first run: the directory is Milo's
-  // to create, and nothing else ever would. A project skill overrides a global
-  // one of the same name, and the index of all of them rides along with every
-  // request — the bodies stay on disk.
+  // to create, and nothing else ever would. The index of what it holds rides
+  // along with every request — the bodies stay on disk.
   ensureSkillsDir()
-  const skillSources = [{ dir: skillsDir(), source: 'global' }]
-  // A machine-wide launch uses the stable home directory, not an implicit
-  // project. Project skills enter only when a caller supplies a project cwd.
-  if (path.resolve(cwd) !== path.resolve(DEFAULT_WORKING_DIRECTORY)) {
-    skillSources.push({ dir: path.join(cwd, '.milo', 'skills'), source: 'project' })
-  }
-  const skills = discoverSkills(skillSources)
+  const skills = discoverSkills(skillsDir())
 
   // Only built when the feature is on: the browser is a process with a lifetime
   // and three tools in the catalog, and neither should exist for an install that

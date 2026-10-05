@@ -53,7 +53,6 @@ import {
   installSkill,
   listInstalled,
   removeSkill,
-  skillsDirFor,
   type InstalledSkill,
 } from '../../../core/skills/install.js'
 import { resolveSource, type ResolvedSkill } from '../../../core/skills/sources.js'
@@ -482,7 +481,7 @@ export function SettingsScreen({
       setBusy(`Installing ${row.title}…`)
       try {
         for (const skill of await row.install!()) {
-          await installSkill(skill, skillsDirFor('global', DEFAULT_WORKING_DIRECTORY))
+          await installSkill(skill, skillsDir())
         }
         added.push(row.title)
       } catch (error) {
@@ -2252,8 +2251,7 @@ export function SettingsScreen({
                 </Text>
               ) : null}
               <Text color={theme.muted}>
-                A skill here applies everywhere; .milo/skills in a project applies to that project
-                alone, and a new one is read at startup.
+                A new skill is read at startup; an edit to one already installed is read per call.
               </Text>
               <Text color={theme.muted}>
                 Ranked by installs, not reviewed: a skill is instructions Milo will obey and cannot
@@ -2392,12 +2390,9 @@ function Menu({ items, index }: { items: MenuItem[]; index: number }) {
   )
 }
 
-/**
- * What is installed globally. A project scope appears only after a project is
- * selected; launching Milo from a directory does not select one.
- */
+/** What is installed. */
 function readInstalled(): InstalledSkill[] {
-  return listInstalled(skillsDirFor('global', DEFAULT_WORKING_DIRECTORY))
+  return listInstalled(skillsDir())
 }
 
 /**

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
 import { formatBytes, formatWhen, message, splitNames } from '../lib/format.js'
-import { CLASSIFIER_LABELS, EFFORT_LABELS, PERMISSION_LABELS, SEARCH_LABELS } from '../lib/labels.js'
+import { CLASSIFIER_LABELS, EFFORT_LABELS, PERMISSION_LABELS, SEARCH_LABELS, skillOriginLabel } from '../lib/labels.js'
 import { normalizeModels, type ModelInfo } from '../../../src/core/providers/models.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
@@ -50,7 +50,7 @@ type SettingsData = {
   config: SettingsConfig
   auth: Record<string, Record<string, { set: boolean; masked?: string }>>
   presets: ProviderPreset[]
-  skills: { global: Skill[]; project: Skill[] }
+  skills: Skill[]
   sessions: Array<{ id: string; title?: string; preview: string; updatedAt: number; messageCount: number }>
   memoryStats: MemoryStats
   live: { model: string; effort: string; permissionMode: string; skills: Skill[]; browser: boolean }
@@ -77,7 +77,6 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   const [draft, setDraft] = useState<SettingsConfig | null>(null)
   const [secrets, setSecrets] = useState<Record<string, string>>({})
   const [skillSource, setSkillSource] = useState('')
-  const [skillScope, setSkillScope] = useState<'global' | 'project'>('global')
   const [skillChoice, setSkillChoice] = useState<string[] | null>(null)
   const [popular, setPopular] = useState<Array<{ name: string; repo: string; installs?: number; description?: string }>>([])
   const [busy, setBusy] = useState(true)
@@ -249,7 +248,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   async function install(source: string, skill?: string): Promise<void> {
     if (!skill && !window.confirm(`Install skill instructions from this source?\n\n${source}\n\nRead the skill before trusting it.`)) return
     try {
-      const result = await api<{ needChoice?: string[] }>('install-skill', { source, scope: skillScope, skill })
+      const result = await api<{ needChoice?: string[] }>('install-skill', { source, skill })
       if (result.needChoice) {
         setSkillChoice(result.needChoice)
         setNotice({ text: 'That source holds several skills — pick one.', error: false })
@@ -262,9 +261,9 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
     } catch (error) { setNotice({ text: message(error), error: true }) }
   }
 
-  async function remove(name: string, scope: 'global' | 'project'): Promise<void> {
-    if (!window.confirm(`Remove the skill “${name}” from ${scope === 'global' ? 'all projects' : 'this project'}?`)) return
-    try { await api('remove-skill', { name, scope }); await load(); setNotice({ text: 'Skill removed.', error: false }) }
+  async function remove(name: string): Promise<void> {
+    if (!window.confirm(`Remove the skill “${name}”?`)) return
+    try { await api('remove-skill', { name }); await load(); setNotice({ text: 'Skill removed.', error: false }) }
     catch (error) { setNotice({ text: message(error), error: true }) }
   }
 
@@ -509,13 +508,9 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           </div>
         </Section>
         <Section title="Skills" description="Skills are instructions the model can run. Install only what you have read and trust." active={section === 'skills'}>
-          {(['global', 'project'] as const).map((scope) => <div key={scope}>
-            <h3 className="section-label" style={{ paddingInline: 0 }}>{scope === 'global' ? 'In this Milo' : 'In this project'}</h3>
-            {data.skills[scope].length === 0 ? <p className="list-empty">No skills installed.</p> : data.skills[scope].map((skill) => <div className="skill-row" key={`${scope}-${skill.name}`}><div><div className="secret-name">{skill.name}</div><div className="secret-state">{skill.description}</div></div><span className="secret-state">{skill.origin ?? scope}</span><button className="button danger" type="button" onClick={() => void remove(skill.name, scope)}>Remove</button></div>)}
-          </div>)}
+          {data.skills.length === 0 ? <p className="list-empty">No skills installed.</p> : data.skills.map((skill) => <div className="skill-row" key={skill.name}><div><div className="secret-name">{skill.name}</div><div className="secret-state">{skill.description}</div></div><span className="secret-state">{skillOriginLabel(skill.origin)}</span><button className="button danger" type="button" onClick={() => void remove(skill.name)}>Remove</button></div>)}
           <div className="form-grid" style={{ marginTop: 12 }}>
-            <Field label="Install into"><Select label="Install into" value={skillScope} choices={[{ value: 'global', label: 'Every project' }, { value: 'project', label: 'This project' }]} onChange={(next) => setSkillScope(next as 'global' | 'project')} /></Field>
-            <Field label="Skill source"><input value={skillSource} onChange={(event) => { setSkillSource(event.target.value); setSkillChoice(null) }} placeholder="owner/repo, URL or local folder" /></Field>
+            <Field className="full" label="Skill source"><input value={skillSource} onChange={(event) => { setSkillSource(event.target.value); setSkillChoice(null) }} placeholder="owner/repo, URL or local folder" /></Field>
           </div>
           <button className="button" type="button" disabled={!skillSource.trim()} onClick={() => void install(skillSource)}>Install skill</button>
           <button className="button" type="button" onClick={() => void refreshPopular()}>Browse popular</button>

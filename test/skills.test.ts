@@ -24,9 +24,7 @@ describe('parseSkill', () => {
   it('reads the name, the description and the body', () => {
     const skill = parseSkill(skillFile('deploy', 'How to deploy'), {
       fallbackName: 'ignored',
-      path: '/skills/deploy/SKILL.md',
-      source: 'global',
-    })
+      path: '/skills/deploy/SKILL.md' })
 
     expect(skill).not.toBeNull()
     expect(skill!.name).toBe('deploy')
@@ -37,9 +35,7 @@ describe('parseSkill', () => {
   it('falls back to the directory name when the frontmatter omits one', () => {
     const skill = parseSkill('---\ndescription: no name here\n---\nbody', {
       fallbackName: 'from-dir',
-      path: '/x/SKILL.md',
-      source: 'project',
-    })
+      path: '/x/SKILL.md' })
 
     expect(skill!.name).toBe('from-dir')
   })
@@ -47,9 +43,7 @@ describe('parseSkill', () => {
   it('strips quotes around a value', () => {
     const skill = parseSkill('---\nname: "quoted"\ndescription: \'also quoted\'\n---\nbody', {
       fallbackName: 'x',
-      path: '/x/SKILL.md',
-      source: 'global',
-    })
+      path: '/x/SKILL.md' })
 
     expect(skill!.name).toBe('quoted')
     expect(skill!.description).toBe('also quoted')
@@ -58,9 +52,7 @@ describe('parseSkill', () => {
   it('drops a skill with no description — it cannot be indexed', () => {
     const skill = parseSkill('---\nname: nameless\n---\nbody', {
       fallbackName: 'x',
-      path: '/x/SKILL.md',
-      source: 'global',
-    })
+      path: '/x/SKILL.md' })
 
     expect(skill).toBeNull()
   })
@@ -68,9 +60,7 @@ describe('parseSkill', () => {
   it('treats an unterminated frontmatter as body, not a header', () => {
     const skill = parseSkill('---\nname: x\ndescription: y\nbody with no closing fence', {
       fallbackName: 'x',
-      path: '/x/SKILL.md',
-      source: 'global',
-    })
+      path: '/x/SKILL.md' })
 
     expect(skill).toBeNull()
   })
@@ -83,26 +73,9 @@ describe('discoverSkills', () => {
       'global/beta/SKILL.md': skillFile('beta', 'the second'),
     })
 
-    const skills = discoverSkills([{ dir: path.join(tree.root, 'global'), source: 'global' }])
+    const skills = discoverSkills(path.join(tree.root, 'global'))
 
     expect(skills.map(nameOf)).toEqual(['alpha', 'beta'])
-    expect(skills[0]?.source).toBe('global')
-  })
-
-  it('lets a later source win a name it shares with an earlier one', () => {
-    tree = makeTree({
-      'global/alpha/SKILL.md': skillFile('alpha', 'from global'),
-      'project/alpha/SKILL.md': skillFile('alpha', 'from project'),
-    })
-
-    const skills = discoverSkills([
-      { dir: path.join(tree.root, 'global'), source: 'global' },
-      { dir: path.join(tree.root, 'project'), source: 'project' },
-    ])
-
-    expect(skills).toHaveLength(1)
-    expect(skills[0]?.description).toBe('from project')
-    expect(skills[0]?.source).toBe('project')
   })
 
   it('skips a directory with no SKILL.md and one with no description', () => {
@@ -111,20 +84,20 @@ describe('discoverSkills', () => {
       'global/nameless/SKILL.md': '---\nname: nameless\n---\nbody',
     })
 
-    const skills = discoverSkills([{ dir: path.join(tree.root, 'global'), source: 'global' }])
+    const skills = discoverSkills(path.join(tree.root, 'global'))
 
     expect(skills).toEqual([])
   })
 
   it('is not an error when the directory does not exist', () => {
-    expect(discoverSkills([{ dir: '/nope/definitely/missing', source: 'global' }])).toEqual([])
+    expect(discoverSkills('/nope/definitely/missing')).toEqual([])
   })
 })
 
 describe('read_skill tool', () => {
   function oneSkill(): Skill {
     tree = makeTree({ 'global/deploy/SKILL.md': skillFile('deploy', 'How to deploy', 'Run the pipeline.') })
-    return discoverSkills([{ dir: path.join(tree.root, 'global'), source: 'global' }])[0]!
+    return discoverSkills(path.join(tree.root, 'global'))[0]!
   }
 
   it('returns the instructions by name', async () => {
@@ -201,7 +174,6 @@ describe('createToolRegistry', () => {
       description: 'How to deploy',
       body: 'x',
       path: '/x/SKILL.md',
-      source: 'global',
     }
     expect(createToolRegistry({ skills: [skill] }).has('read_skill')).toBe(true)
   })

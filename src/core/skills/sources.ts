@@ -188,7 +188,7 @@ async function fromUrl(url: string, signal?: AbortSignal): Promise<ResolvedSkill
 
 /** Parses what was fetched, and refuses anything that is not a skill. */
 function skillFrom(markdown: string, fallbackName: string, origin: string): ResolvedSkill {
-  const parsed = parseSkill(markdown, { fallbackName, path: origin, source: 'imported' })
+  const parsed = parseSkill(markdown, { fallbackName, path: origin })
   if (!parsed) {
     throw new Error(`${origin} has no description in its frontmatter, so it is not a skill.`)
   }

@@ -41,9 +41,8 @@ description has to say **when** to reach for the skill, not just what it contain
 
 ## Where it goes
 
-\`~/.milo/skills/<name>/SKILL.md\` applies everywhere; \`<project>/.milo/skills/<name>/SKILL.md\`
-applies to one project and wins a name it shares with a global one. A new skill is picked
-up on the next start — an edited body is not.`
+\`~/.milo/skills/<name>/SKILL.md\`. A new skill is picked up on the next start — an edited
+body is not.`
 
 const RELEASE_NOTES = `# Release notes from git history
 

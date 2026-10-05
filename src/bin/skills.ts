@@ -1,15 +1,14 @@
 import path from 'node:path'
 import process from 'node:process'
 import { createInterface } from 'node:readline/promises'
+import { skillsDir } from '../core/config/paths.js'
 import { BUILTIN_SKILLS, SUGGESTED_SOURCES } from '../core/skills/builtin.js'
 import { SKILLS_DIRECTORY, fetchLeaderboard, type PopularSkill } from '../core/skills/catalog.js'
 import {
   installSkill,
   listInstalled,
   removeSkill,
-  skillsDirFor,
   type InstalledSkill,
-  type SkillScope,
 } from '../core/skills/install.js'
 import { resolveSource, type ResolvedSkill } from '../core/skills/sources.js'
 import { errorMessage } from '../util/errors.js'
@@ -31,7 +30,6 @@ const USAGE = [
   '',
   'Options:',
   '  --skill <name>   take one skill from a source that holds several',
-  '  --project        use <cwd>/.milo/skills instead of ~/.milo/skills',
   '  --yes            skip the confirmation',
 ].join('\n')
 
@@ -59,16 +57,15 @@ export async function runSkills(argv: string[], io: Partial<SkillsIo> = {}): Pro
     return 1
   }
 
-  const scope: SkillScope = parsed.project ? 'project' : 'global'
-  const dir = skillsDirFor(scope, cwd)
+  const dir = skillsDir()
   const [command, ...rest] = parsed.positionals
 
   try {
     switch (command ?? 'list') {
       case 'list':
-        return list(out, cwd, parsed.project)
+        return list(out, dir)
       case 'available':
-        return available(out, cwd)
+        return available(out)
       case 'find':
         return await find(rest[0], out, err)
       case 'add':
@@ -93,17 +90,15 @@ export async function runSkills(argv: string[], io: Partial<SkillsIo> = {}): Pro
 interface Parsed {
   positionals: string[]
   yes: boolean
-  project: boolean
   skill?: string
 }
 
 function parseFlags(argv: string[]): Parsed {
-  const parsed: Parsed = { positionals: [], yes: false, project: false }
+  const parsed: Parsed = { positionals: [], yes: false }
 
   for (let i = 0; i < argv.length; i += 1) {
     const token = argv[i]!
     if (token === '--yes' || token === '-y') parsed.yes = true
-    else if (token === '--project' || token === '-p') parsed.project = true
     else if (token === '--skill' || token === '-s') {
       const value = argv[++i]
       if (!value) throw new Error('--skill needs a name.')
@@ -114,27 +109,18 @@ function parseFlags(argv: string[]): Parsed {
   return parsed
 }
 
-function list(out: SkillsIo['out'], cwd: string, projectOnly: boolean): number {
-  const scopes: SkillScope[] = projectOnly ? ['project'] : ['global', 'project']
-  let total = 0
+function list(out: SkillsIo['out'], dir: string): number {
+  const skills = listInstalled(dir)
 
-  for (const scope of scopes) {
-    const dir = skillsDirFor(scope, cwd)
-    const skills = listInstalled(dir)
-    total += skills.length
-    out(`${scope === 'global' ? 'global' : 'this project'} — ${dir}`)
-    if (skills.length === 0) {
-      out('  (none)')
-      continue
-    }
-    for (const skill of skills) for (const line of describe(skill)) out(line)
-  }
-
-  if (total === 0) {
+  out(dir)
+  if (skills.length === 0) {
+    out('  (none)')
     out('')
     out('Nothing installed. `milo skills available` lists the ones that ship with Milo;')
     out(`browse ${SKILLS_DIRECTORY} and \`milo skills add <page-url>\` for anything else.`)
+    return 0
   }
+  for (const skill of skills) for (const line of describe(skill)) out(line)
   return 0
 }
 
@@ -151,12 +137,8 @@ function describe(skill: InstalledSkill): string[] {
   return lines
 }
 
-function available(out: SkillsIo['out'], cwd: string): number {
-  const installed = new Set(
-    (['global', 'project'] as SkillScope[])
-      .flatMap((scope) => listInstalled(skillsDirFor(scope, cwd)))
-      .map((skill) => skill.name),
-  )
+function available(out: SkillsIo['out']): number {
+  const installed = new Set(listInstalled(skillsDir()).map((skill) => skill.name))
 
   out('Ships with Milo:')
   for (const skill of BUILTIN_SKILLS) {

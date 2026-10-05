@@ -748,11 +748,10 @@ with the recall-by-meaning line.
 ## Skills
 
 A skill is a **procedure** the model can pick up on demand: a `SKILL.md` that says how to do something.
-Two places are searched, and a name in the second overrides the same name in the first:
+They live in one directory:
 
 ```
-~/.milo/skills/<name>/SKILL.md            # every project
-<project>/.milo/skills/<name>/SKILL.md    # this project only
+~/.milo/skills/<name>/SKILL.md
 ```
 
 The file opens with a small frontmatter block and then the instructions:
@@ -774,18 +773,18 @@ Only the **index** — each skill's name and its one-line description — rides 
 the instructions are loaded by the `read_skill` tool **only when a task matches**, and that tool is not
 registered at all when no skill is installed. Skills are read once at startup, so adding one means
 restarting `milo`; editing the body of one that exists does not, since the tool re-reads it per call.
-`/skills` lists what was found and where each one came from.
+`/skills` lists what was found.
 
-`~/.milo/skills/` is created at startup and when `milo setup` opens its **Skills** section. A project's
-`.milo/skills/` is not. The directory is Milo's own; it does not read `~/.commandcode/skills`, though a
-symlink across is all it takes to share them.
+`~/.milo/skills/` is created at startup and when `milo setup` opens its **Skills** section. The
+directory is Milo's own; it does not read `~/.commandcode/skills`, though a symlink across is all it
+takes to share them.
 
 ### Installing skills
 
-`milo skills` is what fills those directories:
+`milo skills` is what fills that directory:
 
 ```bash
-milo skills                 # what is installed, in both scopes
+milo skills                 # what is installed
 milo skills available       # the skills that ship with Milo
 milo skills find [query]    # the most-installed in the directory
 milo skills add <source>    # a local path, an http(s) URL, or owner/repo
@@ -794,10 +793,9 @@ milo skills remove <name>   # delete one
 
 A `<source>` is a local directory holding a `SKILL.md`, a direct URL to one, `owner/repo` on GitHub, or
 a **`skills.sh` page** (whose address encodes the same `owner/repo`, so a copied link installs). A
-repository holding several skills makes you pick with `--skill <name>`, and `--project` installs into
-`<cwd>/.milo/skills`. The same `SKILL.md` format is what every other agent reads, so a skill from
-`npx skills` works here unchanged. `milo skills find` reads the directory's ranking live, with each
-row's install count.
+repository holding several skills makes you pick with `--skill <name>`. The same `SKILL.md` format is
+what every other agent reads, so a skill from `npx skills` works here unchanged. `milo skills find`
+reads the directory's ranking live, with each row's install count.
 
 `milo setup` → **Skills** shows the same top five next to the bundled pair, each row with the repository
 and install count plus the one-line summary. `Space` **picks** rows (several at once) and `Enter`

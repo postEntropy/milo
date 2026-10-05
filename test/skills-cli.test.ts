@@ -24,12 +24,6 @@ function makeSource(markdown: string): string {
   return dir
 }
 
-function makeDir(): string {
-  const dir = mkdtempSync(path.join(tmpdir(), 'milo-skill-proj-'))
-  temps.push(dir)
-  return dir
-}
-
 interface Capture {
   out: string[]
   err: string[]
@@ -79,7 +73,7 @@ describe('milo skills', () => {
     expect(await runSkills(['skills', 'list'], run.io)).toBe(0)
 
     const text = run.text()
-    expect(text).toContain('global —')
+    expect(text).toContain(path.join(home, 'skills'))
     expect(text).toContain('Nothing installed')
     expect(text).toContain('milo skills available')
   })
@@ -132,17 +126,6 @@ describe('milo skills', () => {
     expect(existsSync(globalSkill('deploy'))).toBe(false)
     // The bare-Enter case is a no: the prompt showed what it was asking about.
     expect(run.text()).toContain('How to deploy')
-  })
-
-  it('keeps a project install out of the global directory', async () => {
-    const project = makeDir()
-    const source = makeSource(skillFile('deploy', 'How to deploy'))
-    const run = capture([], project)
-
-    expect(await runSkills(['skills', 'add', source, '--project', '--yes'], run.io)).toBe(0)
-
-    expect(existsSync(path.join(project, '.milo', 'skills', 'deploy', 'SKILL.md'))).toBe(true)
-    expect(existsSync(globalSkill('deploy'))).toBe(false)
   })
 
   it('removes one, and refuses a name that is not there', async () => {

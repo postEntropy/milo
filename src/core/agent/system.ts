@@ -206,7 +206,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
       [
         '## Skills',
         'Procedures you can load on demand with the `read_skill` tool — that is also how you read a skill the user asks about. This list is every skill installed and available to you: the whole inventory, so answer questions about your skills from it rather than going to look, and load one before you start when a task matches.',
-        'Global skills are available everywhere. Project skills apply only when a project is selected; do not infer a project from the process launch location. Skill folders belonging to other agents do not count.',
+        'Skills live in one directory on this machine. Skill folders belonging to other agents do not count.',
         ...list,
       ].join('\n'),
     )

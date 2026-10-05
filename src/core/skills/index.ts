@@ -19,27 +19,15 @@ export interface Skill extends SkillSummary {
   body: string
   /** The `SKILL.md` it was read from, so the body can be re-read per call. */
   path: string
-  /** Where it came from (`global` or `project`), for `/skills` and precedence. */
-  source: string
-}
-
-/** One directory to search, and the label its skills carry. */
-export interface SkillSource {
-  dir: string
-  source: string
 }
 
 const SKILL_FILE = 'SKILL.md'
 
 /**
- * Makes sure Milo's own skills directory exists, so there is somewhere to drop a
+ * Makes sure Milo's skills directory exists, so there is somewhere to drop a
  * `SKILL.md`. An empty directory nobody knows about is the same as no feature —
  * which is why this runs at startup and when setup opens, not only on the first
  * write.
- *
- * Only the global one. A project's `.milo/skills` is created by whoever wants a
- * project skill, never by Milo: making it on every run would leave a stray
- * `.milo/` in every repository Milo is pointed at.
  */
 export function ensureSkillsDir(): void {
   try {
@@ -60,7 +48,7 @@ export function ensureSkillsDir(): void {
  */
 export function parseSkill(
   markdown: string,
-  options: { fallbackName: string; path: string; source: string },
+  options: { fallbackName: string; path: string },
 ): Skill | null {
   const { frontmatter, body } = splitFrontmatter(markdown)
   const meta = parseFrontmatter(frontmatter)
@@ -69,23 +57,17 @@ export function parseSkill(
   // Without a description the skill cannot be indexed — the model would have a
   // name and no way to tell whether it applies — so it is not a skill yet.
   if (!name || !description) return null
-  return { name, description, body: body.trim(), path: options.path, source: options.source }
+  return { name, description, body: body.trim(), path: options.path }
 }
 
 /**
- * Finds the skills under each source, one level deep (`<dir>/<name>/SKILL.md`).
- *
- * Sources are applied in order, so a later one wins a name it shares with an
- * earlier one — which is how a project skill overrides a global one. A source
- * that does not exist is not an error (most installs have no skills), and a file
- * that cannot be parsed is skipped with a warning rather than failing the boot.
+ * Finds the skills in a directory, one level deep (`<dir>/<name>/SKILL.md`). A
+ * directory that does not exist is not an error (most installs have no skills),
+ * and a file that cannot be parsed is skipped with a warning rather than failing
+ * the boot.
  */
-export function discoverSkills(sources: SkillSource[]): Skill[] {
-  const found = new Map<string, Skill>()
-  for (const { dir, source } of sources) {
-    for (const skill of readSkillsIn(dir, source)) found.set(skill.name, skill)
-  }
-  return [...found.values()].sort((a, b) => a.name.localeCompare(b.name))
+export function discoverSkills(dir: string): Skill[] {
+  return readSkillsIn(dir).sort((a, b) => a.name.localeCompare(b.name))
 }
 
 /** Re-reads a discovered skill from disk, so an edit takes effect without a restart. */
@@ -96,27 +78,23 @@ export function reloadSkill(skill: Skill): Skill | null {
   } catch {
     return null
   }
-  return parseSkill(markdown, {
-    fallbackName: skill.name,
-    path: skill.path,
-    source: skill.source,
-  })
+  return parseSkill(markdown, { fallbackName: skill.name, path: skill.path })
 }
 
-/** The list `/skills` prints: what is available and where each one came from. */
+/** The list `/skills` prints. */
 export function formatSkillList(skills: SkillSummary[]): string {
   if (skills.length === 0) {
     return [
       'No skills found.',
-      'Add one at ~/.milo/skills/<name>/SKILL.md (everywhere) or <project>/.milo/skills/<name>/SKILL.md (this project),',
-      'with a `name` and a `description` in the frontmatter. Restart to pick it up.',
+      'Add one at ~/.milo/skills/<name>/SKILL.md, with a `name` and a `description` in the frontmatter.',
+      'Restart to pick it up.',
     ].join('\n')
   }
   const lines = skills.map((skill) => `- ${skill.name} — ${skill.description}`)
   return ['Skills:', ...lines].join('\n')
 }
 
-function readSkillsIn(dir: string, source: string): Skill[] {
+function readSkillsIn(dir: string): Skill[] {
   let entries: string[]
   try {
     entries = readdirSync(dir)
@@ -135,7 +113,7 @@ function readSkillsIn(dir: string, source: string): Skill[] {
       // Not a skill directory (no SKILL.md, or not a directory at all).
       continue
     }
-    const skill = parseSkill(markdown, { fallbackName: entry, path: file, source })
+    const skill = parseSkill(markdown, { fallbackName: entry, path: file })
     if (!skill) {
       logWarn(`${file} has no description, so it was skipped — a skill needs one to be indexed.`)
       continue

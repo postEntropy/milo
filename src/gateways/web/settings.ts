@@ -21,7 +21,7 @@ import {
   setProvider as persistProvider,
   setReasoningEffort,
 } from '../../core/config/load.js'
-import { browserChromeDir, browserProfilesDir, embedEngineDir, memoryDir } from '../../core/config/paths.js'
+import { browserChromeDir, browserProfilesDir, embedEngineDir, memoryDir, skillsDir } from '../../core/config/paths.js'
 import {
   ConfigSchema,
   DEFAULT_LOCAL_EMBED_MODEL,
@@ -48,7 +48,7 @@ import {
   type RoutineGateway,
   type RoutineTarget,
 } from '../../core/routines.js'
-import { skillsDirFor, listInstalled, removeSkill, installSkill } from '../../core/skills/install.js'
+import { listInstalled, removeSkill, installSkill } from '../../core/skills/install.js'
 import { fetchPopular } from '../../core/skills/catalog.js'
 import { resolveSource } from '../../core/skills/sources.js'
 import { readSession, searchHistory } from '../../core/history.js'
@@ -290,10 +290,7 @@ export class WebSettings {
   }
 
   private skills(): unknown {
-    return {
-      global: listInstalled(skillsDirFor('global', this.cwd)),
-      project: listInstalled(skillsDirFor('project', this.cwd)),
-    }
+    return listInstalled(skillsDir())
   }
 
   /**
@@ -303,22 +300,20 @@ export class WebSettings {
    */
   private async install(body: Record<string, unknown>): Promise<unknown> {
     const source = body.source
-    const scope = body.scope === 'project' ? 'project' : 'global'
     const explicitSkill = typeof body.skill === 'string' ? body.skill : undefined
     if (typeof source !== 'string' || !source.trim()) throw new Error('Enter a skill source first.')
     const resolved = await resolveSource(source.trim(), { cwd: this.cwd, skill: explicitSkill })
     if (resolved.length === 0) throw new Error('No skill was found at that source.')
     if (resolved.length > 1) return { needChoice: resolved.map((skill) => skill.name) }
     const skill = resolved[0]!
-    const written = await this.serialize(() => installSkill({ name: skill.name, markdown: skill.markdown, origin: skill.origin }, skillsDirFor(scope, this.cwd)))
-    return { installed: skill.name, scope, replaced: written.replaced }
+    const written = await this.serialize(() => installSkill({ name: skill.name, markdown: skill.markdown, origin: skill.origin }, skillsDir()))
+    return { installed: skill.name, replaced: written.replaced }
   }
 
   private remove(body: Record<string, unknown>): unknown {
     const name = body.name
-    const scope = body.scope === 'project' ? 'project' : 'global'
     if (typeof name !== 'string' || !SAFE_ID.test(name) || name.includes('..')) throw new Error('Invalid skill name.')
-    return removeSkill(name, skillsDirFor(scope, this.cwd))
+    return removeSkill(name, skillsDir())
   }
 
   private async newSession(body: Record<string, unknown>): Promise<unknown> {

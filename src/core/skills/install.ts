@@ -1,18 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { writeFileAtomic } from '../../util/fs.js'
-import { skillsDir } from '../config/paths.js'
 import { parseSkill } from './index.js'
-
-export type SkillScope = 'global' | 'project'
 
 /** The file a skill directory carries its provenance in. Discovery skips files. */
 export const SOURCE_FILE = '.milo.json'
-
-/** Where a skill installed in this scope goes. */
-export function skillsDirFor(scope: SkillScope, cwd: string): string {
-  return scope === 'project' ? path.join(cwd, '.milo', 'skills') : skillsDir()
-}
 
 /**
  * A skill name becomes a directory name, so it is checked before it is used as
@@ -99,7 +91,7 @@ export function listInstalled(dir: string): InstalledSkill[] {
     } catch {
       continue
     }
-    const skill = parseSkill(markdown, { fallbackName: entry, path: file, source: 'global' })
+    const skill = parseSkill(markdown, { fallbackName: entry, path: file })
     if (!skill) continue
     const sourced = readSource(path.join(dir, entry, SOURCE_FILE))
     skills.push({
@@ -119,11 +111,4 @@ function readSource(file: string): { source?: string; installedAt?: string } | n
   } catch {
     return null
   }
-}
-
-/** The names installed in either scope, for a caller that only needs the set. */
-export function installedSkillNames(cwd: string): string[] {
-  return (['global', 'project'] as SkillScope[])
-    .flatMap((scope) => listInstalled(skillsDirFor(scope, cwd)))
-    .map((skill) => skill.name)
 }

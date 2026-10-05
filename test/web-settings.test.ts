@@ -292,15 +292,15 @@ describe('web Settings skills', () => {
     writeConfig()
     const settings = new WebSettings(build({}), home)
 
-    expect(await settings.handle('install-skill', { source: 'local/skill', scope: 'global' }))
-      .toMatchObject({ installed: 'solo', scope: 'global' })
+    expect(await settings.handle('install-skill', { source: 'local/skill' }))
+      .toMatchObject({ installed: 'solo' })
     expect(readFileSync(path.join(home, 'skills', 'solo', 'SKILL.md'), 'utf8')).toContain('one skill')
 
     // Several skills are not guessed at: the names come back for the person to pick.
     expect(await settings.handle('install-skill', { source: 'multi/repo' })).toEqual({ needChoice: ['one', 'two'] })
-    expect(await settings.handle('install-skill', { source: 'multi/repo', skill: 'two', scope: 'project' }))
-      .toMatchObject({ installed: 'two', scope: 'project' })
-    expect(readFileSync(path.join(home, '.milo', 'skills', 'two', 'SKILL.md'), 'utf8')).toContain('second')
+    expect(await settings.handle('install-skill', { source: 'multi/repo', skill: 'two' }))
+      .toMatchObject({ installed: 'two' })
+    expect(readFileSync(path.join(home, 'skills', 'two', 'SKILL.md'), 'utf8')).toContain('second')
   })
 })
 
