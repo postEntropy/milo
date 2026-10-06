@@ -889,16 +889,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
 }
 
-/* The plan the model is keeping: a plain checklist, the current step in the
-   accent so the eye lands on it, a finished step struck through. */
-.todo-list { display: flex; flex-direction: column; gap: 3px; margin: 0; padding: 9px 12px; border-radius: 12px; background: var(--surface); list-style: none; }
-.todo-item { display: flex; align-items: baseline; gap: 8px; color: var(--fg-2); font-size: 12.5px; }
-.todo-mark { flex: none; color: var(--muted); font-size: 12px; }
-.todo-item.todo-in_progress { color: var(--fg); }
+/* The plan the model is keeping: a card that names itself and how far it has got.
+   A shape per state — an empty ring, a ring with a centre dot, a check — so a
+   step reads without leaning on colour, and the current one wears the accent. */
+.todo-card { display: flex; flex-direction: column; gap: 8px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); padding: 11px 13px; }
+.todo-head { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.todo-head svg.icon { flex: none; }
+.todo-count { margin-inline-start: auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; letter-spacing: normal; }
+.todo-count-done { color: var(--fg-2); font-weight: 600; }
+.todo-list { display: flex; flex-direction: column; gap: 5px; margin: 0; padding: 0; list-style: none; }
+.todo-item { display: flex; align-items: flex-start; gap: 8px; color: var(--fg-2); font-size: 12.5px; }
+.todo-text { min-width: 0; }
+.todo-mark { flex: none; margin-top: 2px; color: var(--muted); stroke-width: 2.2; }
+.todo-item.todo-in_progress { color: var(--fg); font-weight: 500; }
 .todo-item.todo-in_progress .todo-mark { color: var(--accent); }
 .todo-item.todo-completed { color: var(--muted); }
 .todo-item.todo-completed .todo-mark { color: var(--success); }
 .todo-item.todo-completed .todo-text { text-decoration: line-through; }
+/* A state carried by a shape has to be said in words too. */
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 
 /* ── Motion: what appears settles in, it does not pop ────────────────
    The house effect for anything that arrives — a message, a tool line, the
@@ -920,7 +929,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .message:not(.is-loaded),
 .message:not(.is-loaded) .tool-line,
-.message:not(.is-loaded) .todo-list,
+.message:not(.is-loaded) .todo-card,
 .message:not(.is-loaded) .reasoning,
 .message:not(.is-loaded) .wait-line,
 .approval,

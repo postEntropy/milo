@@ -3,11 +3,11 @@ import { useCopy, type CopyState } from '../lib/clipboard.js'
 import type { ActionRow, FrameAttachment, SessionCardItem, ToolMark, TranscriptMessage } from '@protocol'
 import { proseOf } from '@protocol'
 import { toolBrand } from '../../../src/gateways/tool-line.ts'
-import { todoMark, type TodoItem } from '../../../src/core/todos.ts'
+import type { TodoItem, TodoStatus } from '../../../src/core/todos.ts'
 import { toolIconName } from '../ui/tool-icons.js'
 import { attachmentUrl } from '../lib/api.js'
 import { Markdown } from './Markdown.js'
-import { Icon } from '../ui/Icons.js'
+import { Icon, type IconName } from '../ui/Icons.js'
 import { miloAvatar } from '../ui/milo.js'
 import { defaultSuggestions, type Suggestion } from './suggestions.js'
 
@@ -69,27 +69,50 @@ function ToolLine({ tool }: { tool: ToolMark }) {
   )
 }
 
+/** A shape per state, so the step is told apart without leaning on colour. */
+const TODO_MARK: Record<TodoStatus, IconName> = {
+  pending: 'circle',
+  in_progress: 'circle-dot',
+  completed: 'check',
+}
+
+/** The same three states in words, for whoever cannot see the mark. */
+const TODO_STATUS_LABEL: Record<TodoStatus, string> = {
+  pending: 'Pending',
+  in_progress: 'In progress',
+  completed: 'Completed',
+}
+
 /**
- * The plan the model is keeping, drawn whole each time it changes. The current
- * step is the one in the accent colour, the eye's anchor in the list; a finished
- * one is struck through rather than removed, so the progress is legible.
+ * The plan the model is keeping, drawn whole each time it changes: a card that
+ * names itself and how far it has got, the current step in the accent so the
+ * eye lands on it, a finished one struck through rather than removed.
  */
 function TodoList({ items }: { items: TodoItem[] }) {
   const seen = new Map<string, number>()
+  const done = items.filter((item) => item.status === 'completed').length
   return (
-    <ul className="todo-list">
-      {items.map((item) => {
-        const of = `${item.status}\u0000${item.content}`
-        const occurrence = seen.get(of) ?? 0
-        seen.set(of, occurrence + 1)
-        return (
-          <li key={`${of}-${occurrence}`} className={`todo-item todo-${item.status}`}>
-            <span className="todo-mark" aria-hidden="true">{todoMark(item.status)}</span>
-            <span className="todo-text">{item.content}</span>
-          </li>
-        )
-      })}
-    </ul>
+    <div className="todo-card">
+      <div className="todo-head">
+        <Icon name="list-check" size={14} />
+        <span>Plan</span>
+        <span className="todo-count"><strong className="todo-count-done">{done}</strong>/{items.length}</span>
+      </div>
+      <ul className="todo-list">
+        {items.map((item) => {
+          const of = `${item.status}\u0000${item.content}`
+          const occurrence = seen.get(of) ?? 0
+          seen.set(of, occurrence + 1)
+          return (
+            <li key={`${of}-${occurrence}`} className={`todo-item todo-${item.status}`}>
+              <Icon className="todo-mark" name={TODO_MARK[item.status]} size={14} />
+              <span className="sr-only">{TODO_STATUS_LABEL[item.status]}</span>
+              <span className="todo-text">{item.content}</span>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }
 
