@@ -103,35 +103,50 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     // is that it is sent again on every step that follows it.
     dropOldSnapshots(messages, options.keepSnapshots)
 
-    for await (const event of provider.stream({
-      model: options.model,
-      messages,
-      system: options.system,
-      tools: options.tools.length > 0 ? options.tools : undefined,
-      temperature: options.temperature,
-      maxTokens: options.maxTokens,
-      reasoningEffort: options.reasoningEffort,
-      // Read off the effort, so the two wires mean the same thing by it: OpenAI
-      // takes the level, Anthropic takes a token budget. Absent effort means
-      // neither asks to think.
-      thinkingBudget: options.reasoningEffort ? thinkingBudgetFor(options.reasoningEffort) : undefined,
-      signal: options.signal,
-    })) {
-      if (event.type === 'text') {
-        text += event.delta
-        yield { type: 'text-delta', delta: event.delta }
-      } else if (event.type === 'reasoning') {
-        reasoning += event.delta
-        yield { type: 'reasoning-delta', delta: event.delta }
-      } else if (event.type === 'reasoning-signature') {
-        signature = event.signature
-      } else if (event.type === 'tool-call') {
-        toolCalls.push({ id: event.id, name: event.name, args: event.args })
-      } else if (event.type === 'usage') {
-        yield event
-      } else if (event.type === 'done') {
-        finish = event.finishReason
+    try {
+      for await (const event of provider.stream({
+        model: options.model,
+        messages,
+        system: options.system,
+        tools: options.tools.length > 0 ? options.tools : undefined,
+        temperature: options.temperature,
+        maxTokens: options.maxTokens,
+        reasoningEffort: options.reasoningEffort,
+        // Read off the effort, so the two wires mean the same thing by it: OpenAI
+        // takes the level, Anthropic takes a token budget. Absent effort means
+        // neither asks to think.
+        thinkingBudget: options.reasoningEffort ? thinkingBudgetFor(options.reasoningEffort) : undefined,
+        signal: options.signal,
+      })) {
+        if (event.type === 'text') {
+          text += event.delta
+          yield { type: 'text-delta', delta: event.delta }
+        } else if (event.type === 'reasoning') {
+          reasoning += event.delta
+          yield { type: 'reasoning-delta', delta: event.delta }
+        } else if (event.type === 'reasoning-signature') {
+          signature = event.signature
+        } else if (event.type === 'tool-call') {
+          toolCalls.push({ id: event.id, name: event.name, args: event.args })
+        } else if (event.type === 'usage') {
+          yield event
+        } else if (event.type === 'done') {
+          finish = event.finishReason
+        }
       }
+    } catch (error) {
+      // The stream died after the surface had already drawn part of it. What was
+      // shown goes into the transcript before the failure is reported: the next
+      // request must not be missing words the person has just read. A tool call
+      // that half-arrived is left out — a call without its result is a request the
+      // Anthropic wire refuses — and the turn ends in the error either way.
+      const shown: ContentPart[] = []
+      if (reasoning) {
+        shown.push({ type: 'reasoning', text: reasoning, ...(signature ? { signature } : {}) })
+      }
+      if (text) shown.push({ type: 'text', text })
+      if (shown.length > 0) messages.push({ role: 'assistant', content: shown })
+      throw error
     }
 
     // The thought comes first because that is how it arrived; it stays in the

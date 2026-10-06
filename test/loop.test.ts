@@ -22,6 +22,18 @@ class ScriptedProvider implements Provider {
   }
 }
 
+/** A provider whose stream dies after part of an answer has already gone out. */
+class DyingProvider implements Provider {
+  readonly id = 'dying'
+
+  async *stream(): AsyncGenerator<StreamEvent> {
+    yield { type: 'reasoning', delta: 'thinking about it' }
+    yield { type: 'text', delta: 'I was saying that ' }
+    yield { type: 'tool-call', id: 'c1', name: 'fake_read', args: { path: 'a.txt' } }
+    throw new Error('socket hang up')
+  }
+}
+
 const fakeTool: Tool<{ path: string }> = {
   name: 'fake_read',
   description: 'fake read',
@@ -80,6 +92,35 @@ describe('runAgent', () => {
       type: 'tool-result',
       content: 'FILE:a.txt',
     })
+  })
+
+  it('keeps what was already shown when the provider dies mid-answer', async () => {
+    // A body that fails after the 200: the surface has drawn part of the answer
+    // already, and the transcript has to agree with what the person read.
+    const provider = new DyingProvider()
+    const registry = new ToolRegistry([fakeTool])
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]
+
+    await expect(async () => {
+      for await (const _event of runAgent({
+        provider,
+        model: 'm',
+        tools: registry.specs(),
+        registry,
+        messages,
+        context: { cwd: process.cwd(), signal: new AbortController().signal },
+      })) {
+        // drain
+      }
+    }).rejects.toThrow('socket hang up')
+
+    const assistant = messages.at(-1)!
+    expect(assistant.role).toBe('assistant')
+    expect(assistant.content).toContainEqual({ type: 'text', text: 'I was saying that ' })
+    expect(assistant.content).toContainEqual({ type: 'reasoning', text: 'thinking about it' })
+    // A call that half-arrived is dropped: without its result it is a request the
+    // Anthropic wire refuses, and the turn ended in the error anyway.
+    expect(assistant.content.some((part) => part.type === 'tool-call')).toBe(false)
   })
 
   it('hands the reasoning effort to the provider', async () => {
