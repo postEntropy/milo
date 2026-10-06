@@ -35,6 +35,7 @@ Usage:
   milo history               What the history log costs (status | trim)
   milo routines              The prompts Milo runs on a timer (list | add | remove | enable | run)
   milo google                Connect a Google account, read-only (connect | status | forget)
+  milo mcp                   The external tool servers (list | check | enable | disable)
   milo serve                 Run the enabled bot gateways and the web UI
   milo web                   Run only the web UI (opens the browser)
   milo serve --no-web        Run the bot gateways without the web UI
@@ -171,6 +172,11 @@ async function main(): Promise<void> {
     case 'routines': {
       const { runRoutines } = await import('./routines.js')
       process.exitCode = await runRoutines(process.argv.slice(2))
+      return
+    }
+    case 'mcp': {
+      const { runMcp } = await import('./mcp.js')
+      process.exitCode = await runMcp(process.argv.slice(2))
       return
     }
     case 'google': {

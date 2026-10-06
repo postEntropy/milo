@@ -11,6 +11,7 @@ export type Command =
   | 'history'
   | 'routines'
   | 'google'
+  | 'mcp'
   | 'web'
 
 /** What the command line asks for, or the message to say instead of running. */
@@ -42,6 +43,7 @@ export function resolveCommand(command: string): Command | null {
     case 'history':
     case 'routines':
     case 'google':
+    case 'mcp':
     case 'web':
     case 'chat':
       return command
