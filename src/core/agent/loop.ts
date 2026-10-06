@@ -57,7 +57,7 @@ export interface RunAgentOptions {
   keepSnapshots?: number
 }
 
-const DEFAULT_MAX_STEPS = 25
+const DEFAULT_MAX_STEPS = 75
 
 /**
  * What the model is told when the steps run out.
