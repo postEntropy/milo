@@ -41,8 +41,8 @@ description has to say **when** to reach for the skill, not just what it contain
 
 ## Where it goes
 
-\`~/.milo/skills/<name>/SKILL.md\`. A new skill is picked up on the next start — an edited
-body is not.`
+\`~/.milo/skills/<name>/SKILL.md\`. The body is re-read every time the skill is loaded, so
+an edit lands without a restart.`
 
 const RELEASE_NOTES = `# Release notes from git history
 

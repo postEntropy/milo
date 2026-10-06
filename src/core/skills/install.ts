@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import path from 'node:path'
 import { writeFileAtomic } from '../../util/fs.js'
-import { parseSkill } from './index.js'
+import { readSkillFolders } from './index.js'
 
 /** The file a skill directory carries its provenance in. Discovery skips files. */
 export const SOURCE_FILE = '.milo.json'
@@ -75,34 +75,20 @@ export function removeSkill(name: string, dir: string): boolean {
  * nothing recorded one.
  */
 export function listInstalled(dir: string): InstalledSkill[] {
-  let entries: string[]
-  try {
-    entries = readdirSync(dir)
-  } catch {
-    return []
-  }
-
-  const skills: InstalledSkill[] = []
-  for (const entry of entries) {
-    const file = path.join(dir, entry, 'SKILL.md')
-    let markdown: string
-    try {
-      markdown = readFileSync(file, 'utf8')
-    } catch {
-      continue
-    }
-    const skill = parseSkill(markdown, { fallbackName: entry, path: file })
-    if (!skill) continue
-    const sourced = readSource(path.join(dir, entry, SOURCE_FILE))
-    skills.push({
-      name: skill.name,
-      description: skill.description,
-      dir: path.join(dir, entry),
-      origin: sourced?.source,
-      installedAt: sourced?.installedAt,
+  // The same walk that feeds the index, projected with the provenance a
+  // `milo skills add` leaves in the sidecar — one reader, two shapes.
+  return readSkillFolders(dir)
+    .map(({ skill, folder }) => {
+      const sourced = readSource(path.join(folder, SOURCE_FILE))
+      return {
+        name: skill.name,
+        description: skill.description,
+        dir: folder,
+        origin: sourced?.source,
+        installedAt: sourced?.installedAt,
+      }
     })
-  }
-  return skills.sort((a, b) => a.name.localeCompare(b.name))
+    .sort((a, b) => a.name.localeCompare(b.name))
 }
 
 function readSource(file: string): { source?: string; installedAt?: string } | null {

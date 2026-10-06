@@ -1,8 +1,14 @@
 import path from 'node:path'
-import { writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { afterEach, describe, expect, it } from 'vitest'
 import { buildSystemPrompt } from '../src/core/agent/system.js'
-import { discoverSkills, formatSkillList, parseSkill, type Skill } from '../src/core/skills/index.js'
+import {
+  discoverSkills,
+  formatSkillList,
+  parseSkill,
+  SkillLibrary,
+  type Skill,
+} from '../src/core/skills/index.js'
 import { createReadSkillTool } from '../src/core/tools/read-skill.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
 import { makeTree, type Tree } from './tree.js'
@@ -94,14 +100,45 @@ describe('discoverSkills', () => {
   })
 })
 
+describe('SkillLibrary', () => {
+  it('serves a skill installed after it was built, without a restart', () => {
+    tree = makeTree({ 'global/deploy/SKILL.md': skillFile('deploy', 'How to deploy') })
+    const dir = path.join(tree.root, 'global')
+    const library = new SkillLibrary(dir)
+
+    expect(library.list().map(nameOf)).toEqual(['deploy'])
+
+    mkdirSync(path.join(dir, 'review'), { recursive: true })
+    writeFileSync(path.join(dir, 'review', 'SKILL.md'), skillFile('review', 'How to review'))
+
+    expect(library.list().map(nameOf)).toEqual(['deploy', 'review'])
+    expect(library.find('review')?.description).toBe('How to review')
+  })
+
+  it('drops one removed from the directory', () => {
+    tree = makeTree({
+      'global/deploy/SKILL.md': skillFile('deploy', 'How to deploy'),
+      'global/review/SKILL.md': skillFile('review', 'How to review'),
+    })
+    const dir = path.join(tree.root, 'global')
+    const library = new SkillLibrary(dir)
+
+    rmSync(path.join(dir, 'review'), { recursive: true, force: true })
+
+    expect(library.list().map(nameOf)).toEqual(['deploy'])
+    expect(library.find('review')).toBeUndefined()
+  })
+})
+
 describe('read_skill tool', () => {
-  function oneSkill(): Skill {
+  function oneSkill(): { skill: Skill; library: SkillLibrary } {
     tree = makeTree({ 'global/deploy/SKILL.md': skillFile('deploy', 'How to deploy', 'Run the pipeline.') })
-    return discoverSkills(path.join(tree.root, 'global'))[0]!
+    const dir = path.join(tree.root, 'global')
+    return { skill: discoverSkills(dir)[0]!, library: new SkillLibrary(dir) }
   }
 
   it('returns the instructions by name', async () => {
-    const tool = createReadSkillTool([oneSkill()])
+    const tool = createReadSkillTool(oneSkill().library)
 
     const result = await tool.execute({ name: 'deploy' }, { cwd: '.', signal: new AbortController().signal })
 
@@ -110,7 +147,7 @@ describe('read_skill tool', () => {
   })
 
   it('lists what is available when the name is unknown', async () => {
-    const tool = createReadSkillTool([oneSkill()])
+    const tool = createReadSkillTool(oneSkill().library)
 
     const result = await tool.execute({ name: 'nope' }, { cwd: '.', signal: new AbortController().signal })
 
@@ -119,8 +156,8 @@ describe('read_skill tool', () => {
   })
 
   it('re-reads the body from disk, so an edit lands without a restart', async () => {
-    const skill = oneSkill()
-    const tool = createReadSkillTool([skill])
+    const { skill, library } = oneSkill()
+    const tool = createReadSkillTool(library)
     writeFileSync(skill.path, skillFile('deploy', 'How to deploy', 'A brand new body.'))
 
     const result = await tool.execute({ name: 'deploy' }, { cwd: '.', signal: new AbortController().signal })
@@ -128,8 +165,21 @@ describe('read_skill tool', () => {
     expect(result.content).toContain('A brand new body.')
   })
 
+  it('reads a skill installed after the tool was built', async () => {
+    const { library } = oneSkill()
+    const tool = createReadSkillTool(library)
+    const dir = path.dirname(path.dirname(library.find('deploy')!.path))
+    mkdirSync(path.join(dir, 'review'), { recursive: true })
+    writeFileSync(path.join(dir, 'review', 'SKILL.md'), skillFile('review', 'How to review', 'Read the diff.'))
+
+    const result = await tool.execute({ name: 'review' }, { cwd: '.', signal: new AbortController().signal })
+
+    expect(result.isError).toBeFalsy()
+    expect(result.content).toContain('Read the diff.')
+  })
+
   it('is read-only, so it never asks for confirmation', () => {
-    expect(createReadSkillTool([oneSkill()]).readOnly).toBe(true)
+    expect(createReadSkillTool(oneSkill().library).readOnly).toBe(true)
   })
 })
 
@@ -165,17 +215,17 @@ describe('system prompt', () => {
 })
 
 describe('createToolRegistry', () => {
-  it('registers `read_skill` only when skills are present', () => {
-    expect(createToolRegistry().has('read_skill')).toBe(false)
-    expect(createToolRegistry({ skills: [] }).has('read_skill')).toBe(false)
+  it('registers `read_skill` only when a skill is installed', () => {
+    tree = makeTree({ 'global/.keep': '' })
+    const dir = path.join(tree.root, 'global')
 
-    const skill: Skill = {
-      name: 'deploy',
-      description: 'How to deploy',
-      body: 'x',
-      path: '/x/SKILL.md',
-    }
-    expect(createToolRegistry({ skills: [skill] }).has('read_skill')).toBe(true)
+    expect(createToolRegistry().has('read_skill')).toBe(false)
+    expect(createToolRegistry({ skills: new SkillLibrary(dir) }).has('read_skill')).toBe(false)
+
+    mkdirSync(path.join(dir, 'deploy'), { recursive: true })
+    writeFileSync(path.join(dir, 'deploy', 'SKILL.md'), skillFile('deploy', 'How to deploy'))
+
+    expect(createToolRegistry({ skills: new SkillLibrary(dir) }).has('read_skill')).toBe(true)
   })
 })
 

@@ -1,5 +1,5 @@
 import type { SearchProvider } from '../search/index.js'
-import type { Skill } from '../skills/index.js'
+import type { SkillLibrary } from '../skills/index.js'
 import type { BrowserSession } from '../browser/index.js'
 import { createBrowserTools } from '../browser/index.js'
 import type { GoogleAccount } from '../config/schema.js'
@@ -87,8 +87,8 @@ export function googleToolNames(account: GoogleAccount | null): string[] {
 
 export interface ToolRegistryOptions {
   search?: SearchProvider | null
-  /** Skills found at startup; `skill` is only registered when there are any. */
-  skills?: Skill[]
+  /** The skills directory, live; `read_skill` is only registered when it holds one. */
+  skills?: SkillLibrary
   /** The browser, when one is configured — its three tools ride along with it. */
   browser?: BrowserSession | null
   /**
@@ -101,14 +101,18 @@ export interface ToolRegistryOptions {
 
 /**
  * `web_search` is only registered when a search provider is configured, and
- * `skill` only when a skill was found — the model never sees a tool it has
- * nothing to use on. The browser tools follow the same rule: off in the config
- * means absent from the catalog, not present and failing.
+ * `skill` only when a skill is found at startup — the model never sees a tool it
+ * has nothing to use on. The browser tools follow the same rule: off in the
+ * config means absent from the catalog, not present and failing.
+ *
+ * What the registry is handed for skills is the library, not a list: which skills
+ * exist is answered when the tool is called, so one installed while Milo runs is
+ * served from the next turn on.
  */
 export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegistry {
   const tools: Tool<unknown>[] = [...builtinTools]
   if (options.search) tools.push(createWebSearchTool(options.search))
-  if (options.skills && options.skills.length > 0) tools.push(createReadSkillTool(options.skills))
+  if (options.skills && options.skills.list().length > 0) tools.push(createReadSkillTool(options.skills))
   if (options.browser) tools.push(...createBrowserTools(options.browser))
   if (options.google) {
     tools.push(...createGmailTools(options.google.account))

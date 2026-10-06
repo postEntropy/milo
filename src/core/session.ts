@@ -78,8 +78,12 @@ export interface SessionOptions {
   registry: ToolRegistry
   memory: Memory
   cwd: string
-  /** The skills to index in the system prompt; the bodies load on demand. */
-  skills?: SkillSummary[]
+  /**
+   * Reads the skills to index in the system prompt, once per prompt; the bodies
+   * load on demand. A getter rather than a list, so a skill installed while Milo
+   * is running is indexed on the next turn.
+   */
+  skills?: () => SkillSummary[]
   maxSteps?: number
   maxTokens?: number
   temperature?: number
@@ -428,7 +432,7 @@ export class Session {
       provider: provider.id,
       model,
       tools,
-      skills: this.options.skills,
+      skills: this.options.skills?.(),
       memories: recalled,
     }
 
@@ -510,7 +514,7 @@ export class Session {
               model,
               registry,
               cwd,
-              skills: this.options.skills,
+              skills: this.options.skills?.(),
               signal: abort,
               permission,
               maxSteps,

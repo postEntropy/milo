@@ -12,7 +12,7 @@ import { lookupContextWindow } from './providers/context.js'
 import { AgentRuntime } from './runtime.js'
 import { FileRecapStore, FileSessionStore, pruneSessions } from './sessions/index.js'
 import { createSearchProvider } from './search/index.js'
-import { discoverSkills, ensureSkillsDir } from './skills/index.js'
+import { ensureSkillsDir, SkillLibrary } from './skills/index.js'
 import { createClassifier, dangerousReviewer } from './classifier/index.js'
 import { OLLAYA_DEFAULT_MODEL, OLLAYA_URL } from './config/schema.js'
 import { resolveToolPath } from './tools/walk.js'
@@ -39,7 +39,10 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   // to create, and nothing else ever would. The index of what it holds rides
   // along with every request — the bodies stay on disk.
   ensureSkillsDir()
-  const skills = discoverSkills(skillsDir())
+  // Read through the library, not once: the index it feeds is rebuilt when the
+  // directory moves, so a skill installed from a settings screen is served from
+  // the next turn on. The bodies stay on disk.
+  const skills = new SkillLibrary(skillsDir())
 
   // Only built when the feature is on: the browser is a process with a lifetime
   // and three tools in the catalog, and neither should exist for an install that

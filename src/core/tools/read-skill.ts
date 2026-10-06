@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { reloadSkill, type Skill } from '../skills/index.js'
+import { reloadSkill, type SkillLibrary } from '../skills/index.js'
 import type { Tool } from './types.js'
 
 const schema = z.object({
@@ -11,17 +11,19 @@ const schema = z.object({
 export type SkillArgs = z.infer<typeof schema>
 
 /**
- * Built over the skills found at startup. The index reaches the model through
- * the system prompt; this is what hands over the full instructions, which is
- * what keeps a skill's body out of every request until it is actually needed.
+ * Reads the library, not a snapshot of it: the names it offers and the body it
+ * returns are both asked for at call time, so a skill installed while Milo is
+ * running can be loaded without a restart.
+ *
+ * The index reaches the model through the system prompt; this is what hands over
+ * the full instructions, which is what keeps a skill's body out of every request
+ * until it is actually needed.
  *
  * Named `read_skill` and not `skill`: it returns a skill's text, the way
  * `read_file` returns a file's, and a bare noun reads as anything but "call me
  * to see this" — the model reached for `read_file` on the real path instead.
  */
-export function createReadSkillTool(skills: Skill[]): Tool<SkillArgs> {
-  const byName = new Map(skills.map((skill) => [skill.name, skill]))
-
+export function createReadSkillTool(skills: SkillLibrary): Tool<SkillArgs> {
   return {
     name: 'read_skill',
     description:
@@ -29,9 +31,9 @@ export function createReadSkillTool(skills: Skill[]): Tool<SkillArgs> {
     schema,
     readOnly: true,
     async execute(args) {
-      const skill = byName.get(args.name)
+      const skill = skills.find(args.name)
       if (!skill) {
-        const available = [...byName.keys()]
+        const available = skills.list().map((installed) => installed.name)
         return {
           content: available.length
             ? `No skill named "${args.name}". Available: ${available.join(', ')}.`

@@ -4,7 +4,7 @@ import type { HistoryWriter } from './history.js'
 import type { Memory, MemoryScope } from './memory/index.js'
 import { scopeKey } from './memory/index.js'
 import { DEFAULT_REASONING_EFFORT, type Provider, type ReasoningEffort } from './providers/types.js'
-import type { Skill } from './skills/index.js'
+import type { Skill, SkillLibrary } from './skills/index.js'
 import type { PermissionPolicy } from './tools/index.js'
 import type { RoutineFn, ToolRegistry } from './tools/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
@@ -46,8 +46,8 @@ export interface RuntimeOptions {
   registry: ToolRegistry
   memory: Memory
   cwd: string
-  /** Skills found at startup, indexed in every session's system prompt. */
-  skills?: Skill[]
+  /** The skills directory, read live, so the index in every prompt stays current. */
+  skills?: SkillLibrary
   maxSteps?: number
   maxTokens?: number
   temperature?: number
@@ -313,7 +313,7 @@ export class AgentRuntime {
 
   /** The skills on this install, for `/skills`. */
   get skills(): Skill[] {
-    return this.options.skills ?? []
+    return this.options.skills?.list() ?? []
   }
 
   /** The install's memory store, for a surface that lists or drops notes. */
@@ -493,7 +493,9 @@ export class AgentRuntime {
       registry: this.options.registry,
       memory: this.options.memory,
       cwd: this.options.cwd,
-      skills: this.options.skills,
+      // A getter, not the list: the system prompt is built per turn, and a skill
+      // installed since the last one belongs in it.
+      skills: this.options.skills ? () => this.options.skills!.list() : undefined,
       maxSteps: this.options.maxSteps,
       maxTokens: this.options.maxTokens,
       temperature: this.options.temperature,
