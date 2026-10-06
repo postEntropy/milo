@@ -21,6 +21,8 @@ export interface ChatMessage extends TranscriptMessage {
   /** When the turn's wait for its next output began: what the thought time is
    *  measured from, and that its own line belongs on screen. */
   waitingSince?: number
+  /** The tool call running right now, so the wait is shown while it executes. */
+  runningTool?: string
   /** Already on screen when the session was opened, so it does not settle in again. */
   loaded?: boolean
   actions?: ActionRow[]
@@ -423,6 +425,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
         </div>
       )}
       {message.waitingSince !== undefined && <WaitLine />}
+      {message.runningTool !== undefined && <WaitLine label={`${message.runningTool}…`} />}
       {message.status && <div className="message-status">{message.status}</div>}
     </div>
     {/* The person's own message is a filled bubble: its controls sit under it, not
@@ -441,12 +444,13 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
 /**
  * The wait for the model's next output: a glyph, the word and three dots, so a
  * turn that has nothing to show yet still says it is running. Whatever arrives
- * next takes this line's place.
+ * next takes this line's place. The same line stands for a tool call while it
+ * executes, named so the wait is attributed to what is actually running.
  */
-function WaitLine() {
+function WaitLine({ label = 'thinking' }: { label?: string }) {
   return <div className="wait-line">
     <Icon name="spark" size={14} />
-    <span>thinking</span>
+    <span>{label}</span>
     {/* Motion rather than something to read: out of the accessibility tree. */}
     <span className="wait-dots" aria-hidden="true"><span className="wait-dot" /><span className="wait-dot" /><span className="wait-dot" /></span>
   </div>

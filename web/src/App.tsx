@@ -352,14 +352,15 @@ export default function App() {
         if (event.type === 'tool-start') {
           // Reasoning deltas do not end a wait — they are what fills it. A tool
           // call is an output of its own, and the wait before it was thinking.
+          // From here the wait belongs to the tool, and is named after it.
           const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-          return { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name, event.args) } }], waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
+          return { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name, event.args) } }], waitingSince: undefined, runningTool: event.name, ...(thoughtMsFor(waited, message)) }
         }
         if (event.type === 'tool-end') {
           // The result is in: the model is thinking again about what to do with it.
           return event.isError
-            ? { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: `${toolText(event.name)} failed` } }], waitingSince: Date.now() }
-            : { ...message, waitingSince: Date.now() }
+            ? { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: `${toolText(event.name)} failed` } }], waitingSince: Date.now(), runningTool: undefined }
+            : { ...message, waitingSince: Date.now(), runningTool: undefined }
         }
         if (event.type === 'todo') return event.items.length > 0
           ? { ...message, parts: [...message.parts, { kind: 'todo', items: event.items }] }
@@ -369,8 +370,8 @@ export default function App() {
         if (event.type === 'compacted') return { ...message, status: `Tidying the context (${formatMs(event.ms)}).` }
         if (event.type === 'rebased') return { ...message, status: `Session updated by another surface (${event.added} new ${event.added === 1 ? 'message' : 'messages'}).` }
         if (event.type === 'steer') return { ...message, status: 'Correction received by Milo.' }
-        if (event.type === 'error') return { ...message, status: `Error: ${event.message}` }
-        if (event.type === 'aborted') return { ...message, status: 'Stopped · the partial reply was kept.' }
+        if (event.type === 'error') return { ...message, status: `Error: ${event.message}`, runningTool: undefined }
+        if (event.type === 'aborted') return { ...message, status: 'Stopped · the partial reply was kept.', runningTool: undefined }
         if (event.type === 'done' && event.finishReason === 'length') return { ...message, status: 'The reply hit the output limit.' }
         if (event.type === 'usage') return { ...message, tokens: { input: event.inputTokens, output: event.outputTokens } }
         return message
@@ -381,7 +382,7 @@ export default function App() {
     if (frame.type === 'permission-result') { setPendingPermission((current) => current?.id === frame.id ? null : current); return }
     if (frame.type === 'turn-end') {
       setMessages((current) => current.map((message) => message.id === frame.id
-        ? { ...message, waitingSince: undefined, ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
+        ? { ...message, waitingSince: undefined, runningTool: undefined, ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
         : message))
       setPendingPermission(null)
       setTurnEnds((current) => current + 1)
