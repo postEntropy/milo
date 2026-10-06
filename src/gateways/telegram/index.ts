@@ -36,6 +36,7 @@ import {
   toTelegramKeyboard,
   type ActionContext,
 } from '../actions.js'
+import { toolDisplayName } from '../tool-line.js'
 
 export interface TelegramGatewayOptions {
   runtime: AgentRuntime
@@ -389,7 +390,7 @@ export class TelegramGateway implements Gateway {
     const id = randomUUID()
     let promptId: number | undefined
     try {
-      const prompt = await bot.api.sendMessage(chatId, `⚠ Allow ${request.tool}?\n\n${request.summary}`, {
+      const prompt = await bot.api.sendMessage(chatId, `⚠ Allow ${toolDisplayName(request.tool)}?\n\n${request.summary}`, {
         reply_markup: {
           inline_keyboard: [
             [

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { toolBrand, toolIcon, toolLine, toolText } from '../src/gateways/tool-line.js'
+import { isExternalTool, toolBrand, toolDisplayName, toolIcon, toolLine, toolText } from '../src/gateways/tool-line.js'
 
 describe('toolLine', () => {
   it('shows a shell command like any other tool, with the command beside it', () => {
@@ -113,5 +113,29 @@ describe('toolText', () => {
     expect(toolText('gmail_search', { query: 'is:unread' })).toBe('gmail_search is:unread')
     expect(toolText('read_file')).toBe('read_file')
     expect(toolText('read_file', { path: 'a.txt' }, { markdown: true })).toBe('**read_file** a.txt')
+  })
+})
+
+describe('a tool from an external server', () => {
+  it('reads as its server and its own name, with the plug for an icon', () => {
+    expect(toolLine('mcp__github__create_issue', { query: 'leak' })).toBe('🔌 github: create_issue leak')
+    expect(toolIcon('mcp__github__create_issue')).toBe('🔌')
+  })
+
+  it('is named the same wherever a name is read', () => {
+    expect(toolDisplayName('mcp__github__create_issue')).toBe('github: create_issue')
+    expect(toolDisplayName('read_file')).toBe('read_file')
+    // Markdown emphasis wraps the whole name, not the prefix alone.
+    expect(toolText('mcp__notes__append', undefined, { markdown: true })).toBe('**notes: append**')
+  })
+
+  it('knows which names came from outside', () => {
+    expect(isExternalTool('mcp__github__create_issue')).toBe(true)
+    expect(isExternalTool('read_file')).toBe(false)
+    expect(isExternalTool('anything')).toBe(false)
+  })
+
+  it('splits at the delimiter even when the tool’s own name carries underscores', () => {
+    expect(toolDisplayName('mcp__srv__a__b')).toBe('srv: a__b')
   })
 })

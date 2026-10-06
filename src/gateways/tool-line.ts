@@ -60,6 +60,29 @@ const TOOLS: Record<string, { icon: string; brand?: ToolBrand }> = {
 const FALLBACK = '🔧'
 
 /**
+ * An MCP tool's name is `mcp__<server>__<tool>` by construction, and what a
+ * person reads is `<server>: <tool>`. The prefix is the origin, and that is worth
+ * keeping — a call that leaves the machine should look like one — but not at the
+ * price of the name being unreadable.
+ *
+ * The server half admits only single separators (`config.ts` enforces the same),
+ * so the first `__` is the delimiter however many underscores the tool's own name
+ * carries.
+ */
+const MCP_NAME = /^mcp__([a-z0-9]+(?:[_-][a-z0-9]+)*)__(.+)$/
+
+/** The name a person reads for a tool, on any surface that names one. */
+export function toolDisplayName(name: string): string {
+  const mcp = MCP_NAME.exec(name)
+  return mcp ? `${mcp[1]}: ${mcp[2]}` : name
+}
+
+/** The plug, for a tool that runs on someone else's server. */
+export function isExternalTool(name: string): boolean {
+  return MCP_NAME.test(name)
+}
+
+/**
  * Tools whose own activity is not drawn. Reaching for one should read as the
  * answer itself, not as a call: `send_file` is the case — the file lands in the
  * chat, and a line announcing it is a line between the person and the picture —
@@ -75,7 +98,7 @@ export function showsToolCall(name: string): boolean {
 
 /** The icon alone, for surfaces that draw their own line (the CLI). */
 export function toolIcon(name: string): string {
-  return TOOLS[name]?.icon ?? FALLBACK
+  return TOOLS[name]?.icon ?? (isExternalTool(name) ? '🔌' : FALLBACK)
 }
 
 /**
@@ -116,7 +139,8 @@ export function toolLine(
  * with colour instead and asks for the plain name.
  */
 export function toolLabel(name: string, markdown: boolean): string {
-  return markdown ? `**${name}**` : name
+  const label = toolDisplayName(name)
+  return markdown ? `**${label}**` : label
 }
 
 /**

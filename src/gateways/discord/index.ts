@@ -28,6 +28,7 @@ import {
   type ActionContext,
   type DiscordBuilders,
 } from '../actions.js'
+import { toolDisplayName } from '../tool-line.js'
 
 export interface DiscordGatewayOptions {
   runtime: AgentRuntime
@@ -121,7 +122,7 @@ export class DiscordGateway implements Gateway {
       )
 
       const prompt = await target.reply({
-        content: `⚠ Allow ${request.tool}?\n\n${request.summary}`,
+        content: `⚠ Allow ${toolDisplayName(request.tool)}?\n\n${request.summary}`,
         components: [row],
       })
 
