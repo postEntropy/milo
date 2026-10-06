@@ -3,17 +3,20 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
-import { runAgent } from '../src/core/agent/loop.js'
 import type { ChatRequest, Message, Provider, StreamEvent } from '../src/core/providers/types.js'
-import { ToolRegistry } from '../src/core/tools/registry.js'
 import type { Tool } from '../src/core/tools/types.js'
 
 // Point the app at a throwaway home *before* the modules that read it load.
 const home = mkdtempSync(path.join(tmpdir(), 'milo-images-'))
 process.env.MILO_HOME = home
 
+// Everything below is imported after the home is pointed at a throwaway
+// directory: a static import would be hoisted above the line that sets it and
+// read the real one, writing into and pruning the person's own images.
+const { runAgent } = await import('../src/core/agent/loop.js')
 const { imagesDir } = await import('../src/core/config/paths.js')
 const { IMAGE_TOKENS, pruneImages, saveImage, toolImages } = await import('../src/core/images.js')
+const { ToolRegistry } = await import('../src/core/tools/registry.js')
 const { AnthropicProvider } = await import('../src/core/providers/anthropic.js')
 const { OpenAIProvider } = await import('../src/core/providers/openai.js')
 const { dropOldAudio, dropOldImages, estimateTokens } = await import('../src/core/sessions/compact.js')
