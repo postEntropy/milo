@@ -140,7 +140,13 @@ export function ChatScreen({
   const [input, setInput] = useState('')
   /** Messages typed while a turn was running, still waiting for it. */
   const [queued, setQueued] = useState(0)
-  const [tokens, setTokens] = useState(0)
+  /**
+   * How big the last request was, as the provider counted it: the transcript, the
+   * memories and the tool catalog it was handed, in tokens. It is the session's
+   * size, not a running total — summing the input of every step of a turn would
+   * count the same transcript once per step.
+   */
+  const [contextTokens, setContextTokens] = useState(0)
   const [lastDuration, setLastDuration] = useState<number | null>(null)
   const [scrollOffset, setScrollOffset] = useState(0)
   const [startedAt, setStartedAt] = useState(0)
@@ -379,6 +385,8 @@ export function ChatScreen({
       case 'new': {
         const session = await runtime.newSession(scope, argument || undefined)
         onSessionChange?.(session.id)
+        // The size of a session is only known once a turn has been sent in it.
+        setContextTokens(0)
         push({ kind: 'info', text: `New session: ${session.id}` })
         break
       }
@@ -421,6 +429,7 @@ export function ChatScreen({
           break
         }
         onSessionChange?.(session.id)
+        setContextTokens(0)
         push({ kind: 'info', text: `Switched to session ${session.id}.` })
         break
       }
@@ -433,6 +442,7 @@ export function ChatScreen({
           break
         }
         onSessionChange?.(forked.id)
+        setContextTokens(0)
         push({ kind: 'info', text: `Branched into session ${forked.id}.` })
         break
       }
@@ -604,7 +614,7 @@ export function ChatScreen({
           // whatever the tool level is set to — the person watching a long turn
           // wants to see it either way.
           onTodo: (items) => push({ kind: 'todo', items }),
-          onUsage: (total) => setTokens((value) => value + total),
+          onUsage: (inputTokens) => setContextTokens(inputTokens),
           onCompacted: (ms) => {
             compactedMs = ms
           },
@@ -897,7 +907,7 @@ export function ChatScreen({
   const idleText = idleFull.length + 2 <= columns ? idleFull : scrolled || idleHint
   const counters = [
     !busy && lastDuration !== null ? `last ${formatSeconds(lastDuration)}` : '',
-    tokens > 0 ? `${formatTokens(tokens)} tok` : '',
+    contextTokens > 0 ? `${formatTokens(contextTokens)} tok` : '',
   ]
     .filter(Boolean)
     .join(' · ')
@@ -977,7 +987,8 @@ interface EventHandlers {
   onToolEnd: (name: string, isError: boolean) => void
   /** The plan the model is keeping, in full, each time it changes. */
   onTodo: (items: TodoItem[]) => void
-  onUsage: (totalTokens: number) => void
+  /** What the last request cost in input tokens: the size of the session as sent. */
+  onUsage: (inputTokens: number) => void
   /** How long the compaction's own model call took, in ms. */
   onCompacted: (ms: number) => void
   /** Another Milo holds this session; the turn has not started yet. */
@@ -1009,7 +1020,7 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
       handlers.onTodo(event.items)
       break
     case 'usage':
-      handlers.onUsage(event.inputTokens + event.outputTokens)
+      handlers.onUsage(event.inputTokens)
       break
     case 'compacted':
       handlers.onCompacted(event.ms)
