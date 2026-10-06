@@ -2,11 +2,9 @@ import { readAuth, readConfig, saveAuth, saveConfig } from './config/load.js'
 import {
   ConfigSchema,
   type Auth,
-  type BrowserConfig,
   type ClassifierBackend,
   type ClassifierConfig,
   type Config,
-  type DisplayConfig,
   type PermissionsConfig,
 } from './config/schema.js'
 import type { ReasoningEffort } from './providers/types.js'

@@ -303,7 +303,7 @@ describe('runAgent — concurrent reads', () => {
     } satisfies Tool<{ path: string }>
   }
 
-  async function runBoth(stats: { active: number; peak: number }, tools: Tool<{ path: string }>[]) {
+  async function runBoth(tools: Tool<{ path: string }>[]) {
     const provider = new ScriptedProvider([
       [
         { type: 'tool-call', id: 'c1', name: 'read_a', args: { path: 'a' } },
@@ -330,13 +330,13 @@ describe('runAgent — concurrent reads', () => {
 
   it('overlaps a run of concurrent reads', async () => {
     const stats = { active: 0, peak: 0 }
-    await runBoth(stats, [reader('read_a', { concurrent: true }, stats), reader('read_b', { concurrent: true }, stats)])
+    await runBoth([reader('read_a', { concurrent: true }, stats), reader('read_b', { concurrent: true }, stats)])
     expect(stats.peak).toBe(2)
   })
 
   it('keeps each start and end interleaved, in the order the model asked', async () => {
     const stats = { active: 0, peak: 0 }
-    const { events } = await runBoth(stats, [
+    const { events } = await runBoth([
       reader('read_a', { concurrent: true }, stats),
       reader('read_b', { concurrent: true }, stats),
     ])
@@ -353,7 +353,7 @@ describe('runAgent — concurrent reads', () => {
 
   it('runs a read that did not opt in one at a time', async () => {
     const stats = { active: 0, peak: 0 }
-    await runBoth(stats, [reader('read_a', {}, stats), reader('read_b', {}, stats)])
+    await runBoth([reader('read_a', {}, stats), reader('read_b', {}, stats)])
     expect(stats.peak).toBe(1)
   })
 })

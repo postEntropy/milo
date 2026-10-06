@@ -13,7 +13,6 @@ import {
   listProviderModels,
   readAuth,
   readConfig,
-  saveAuth,
   saveConfig,
   setDisplay,
   setModel as persistModel,
@@ -25,7 +24,6 @@ import { browserChromeDir, browserProfilesDir, embedEngineDir, memoryDir, skills
 import {
   ConfigSchema,
   DEFAULT_LOCAL_EMBED_MODEL,
-  type Auth,
   type Config,
   type ProviderEntry,
 } from '../../core/config/schema.js'

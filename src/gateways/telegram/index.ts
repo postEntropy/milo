@@ -6,7 +6,7 @@ import type { PermissionRequest } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import { isTelegramPhoto, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
-import { readDisplay, setDisplay, setPermissionMode, setReasoningEffort } from '../../core/config/load.js'
+import { readDisplay } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
 import { chunk } from '../chunk.js'
 import {
