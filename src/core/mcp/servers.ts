@@ -1,5 +1,6 @@
 import { errorMessage } from '../../util/errors.js'
 import { logDebug, logWarn } from '../../util/log.js'
+import { mcpFile } from '../config/paths.js'
 import type { Tool, ToolRegistry } from '../tools/index.js'
 import { readMcpCache, writeMcpCache, type McpCache, type CachedServer } from './cache.js'
 import { McpClient } from './client.js'
@@ -69,6 +70,33 @@ export interface McpServerStatus {
   era?: 'modern' | 'legacy'
   /** Why it is in the state it is in, in words — a failure's own message. */
   error?: string
+}
+
+/**
+ * What a surface reports about the servers: the CLI, the settings screen and the
+ * line the system prompt carries. One shape, drawn from the manager, so the three
+ * cannot describe the same install differently.
+ *
+ * Cheap by construction — it is state the manager already holds, and it starts no
+ * process. That is also why it is the answer to "do I have MCP", where the tool
+ * catalog is not: a server that is off, or that failed, registers no tools and
+ * would be missing from the catalog exactly when naming it is the answer.
+ */
+export interface McpFacts {
+  /** Where the servers are written, so a surface can say where to add one. */
+  file: string
+  /** Why there is no server list at all, when the file could not be read. */
+  error?: string
+  servers: McpServerStatus[]
+}
+
+/** The install's MCP servers as they are, for a surface that has to report them. */
+export function mcpFacts(mcp: McpServers | null | undefined): McpFacts {
+  return {
+    file: mcpFile(),
+    ...(mcp?.configError ? { error: mcp.configError } : {}),
+    servers: mcp?.status() ?? [],
+  }
 }
 
 interface RefreshState {

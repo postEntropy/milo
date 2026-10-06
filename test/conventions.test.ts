@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
+import { buildSystemPrompt } from '../src/core/agent/system.js'
 import { findOutlinedControls, findPortugueseCopy, sourceFiles, type Hit } from './conventions.js'
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
@@ -85,5 +86,57 @@ describe('interactive controls are filled, not outlined', () => {
     expect(hits).toHaveLength(1)
     expect(hits[0]?.line).toBe(3)
     expect(hits[0]?.text).toBe('.model-option')
+  })
+})
+
+describe('a capability the registry can add is named in the prompt', () => {
+  // What `createToolRegistry` switches on, read from the source rather than typed
+  // out again. Adding an `options.something` there grows this list, and the marker
+  // below has to cover it — which is the point: forgetting that second edit, one
+  // file away, is exactly how MCP and then Google arrived unannounced.
+  const registrySource = readFileSync(path.join(repoRoot, 'src/core/tools/index.ts'), 'utf8')
+  const switchedOn = [...new Set([...registrySource.matchAll(/options\.(\w+)/g)].map((match) => match[1]!))].sort()
+
+  /** How each capability is named in "Your own setup". */
+  const MARKER: Record<string, string> = {
+    browser: 'Browser right now',
+    google: 'Google (Gmail and Drive)',
+    mcp: 'External tool servers (MCP)',
+    search: 'On right now: web search',
+    skills: '1 skill installed',
+  }
+
+  it('reads the capabilities the registry actually switches on', () => {
+    // If this fails because registration was refactored, put the two back in sync:
+    // a guard that reads nothing guards nothing.
+    expect(switchedOn).toEqual(['browser', 'google', 'mcp', 'search', 'skills'])
+  })
+
+  it('has a marker for every capability it reads', () => {
+    // A capability added to the registry fails here until it is named — which is
+    // the second edit the harness kept forgetting.
+    expect(Object.keys(MARKER).sort()).toEqual(switchedOn)
+  })
+
+  it('names each one in the prompt, so none arrives unannounced', () => {
+    const prompt = buildSystemPrompt({
+      base: 'BASE',
+      cwd: '/tmp/x',
+      provider: 'commandcode',
+      model: 'm',
+      memories: [],
+      tools: [
+        { name: 'web_search', description: 'Search the web', parameters: { type: 'object', properties: {} } },
+        { name: 'browser_open', description: 'Open a page', parameters: { type: 'object', properties: {} } },
+      ],
+      skills: [{ name: 'demo', description: 'x' }],
+      browser: { binary: 'chromium', headless: true, profile: 'its own', running: false, port: null },
+      google: { kind: 'connected', email: 'me@example.com', enabled: true },
+      mcp: { file: '/home/x/.milo/mcp.json', servers: [] },
+    })
+    const unnamed = Object.entries(MARKER)
+      .filter(([, marker]) => !prompt.includes(marker))
+      .map(([capability]) => capability)
+    expect(unnamed).toEqual([])
   })
 })

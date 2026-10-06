@@ -4,6 +4,7 @@ import { browserProfileDir, embedEngineDir, historyDir, memoryDir, recapsDir, se
 import { readAuth, readConfig, resolveProvider, resolveSearchKey, type LoadedConfig, type ResolvedProvider } from './config/load.js'
 import { findPreset } from './config/presets.js'
 import { fileHistory } from './history.js'
+import { googleState } from './google/state.js'
 import { createMcpServers } from './mcp/servers.js'
 import { createMemory, embeddingKey, installMemory, TurnIndex } from './memory/index.js'
 import { engineOnDemand } from './memory/provision.js'
@@ -119,6 +120,10 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     system: loaded.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
     registry,
     mcp,
+    // The grant as this run sees it, from the same function the CLI, the setup
+    // screen and the web panel read — so the prompt cannot describe the
+    // connection a fourth way. A grant made later needs a restart anyway.
+    google: googleState(loaded.config, auth),
     browser,
     keepSnapshots: loaded.config.browser.keepSnapshots,
     memory: installMemory(

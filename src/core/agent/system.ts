@@ -3,6 +3,8 @@ import type { MemoryItem } from '../memory/index.js'
 import type { ToolSpec } from '../providers/types.js'
 import type { SkillSummary } from '../skills/index.js'
 import type { BrowserFacts } from '../browser/index.js'
+import type { GoogleState } from '../google/state.js'
+import type { McpFacts } from '../mcp/servers.js'
 import { plural } from '../../util/format.js'
 
 export type SurfaceKind = 'cli' | 'telegram' | 'discord' | 'web'
@@ -83,6 +85,10 @@ export interface SystemPromptInput {
   summary?: string
   /** What the browser is right now; absent when this install has none. */
   browser?: BrowserFacts | null
+  /** The external tool servers as they are; absent only when this install has none built in. */
+  mcp?: McpFacts | null
+  /** The Google grant, as this run sees it; absent only when the runtime was built without it. */
+  google?: GoogleState | null
   now?: Date
 }
 
@@ -95,6 +101,13 @@ export interface SystemPromptInput {
  * sentence. The capabilities are read off the registered tools rather than a
  * second list, because `web_search` and the browser tools are only registered
  * when there is something to use them on: the catalog *is* the state.
+ *
+ * The external tool servers and the Google grant are what the catalog cannot speak
+ * for. A server that is off, or that failed, registers no tools, so a
+ * catalog-derived line would omit it exactly when naming it is the answer; and
+ * Google's tools are in the catalog while saying nothing about whether an account
+ * is connected or how to connect one. Both come from the report a surface already
+ * draws — `McpFacts`, and `googleState`.
  */
 /** The browser, as it is: which one, whether it is up, and on which port. */
 function browserLine(facts: BrowserFacts): string {
@@ -103,6 +116,62 @@ function browserLine(facts: BrowserFacts): string {
     : 'not started yet — it starts on the first browser call'
   const profile = facts.profile.startsWith('its own') || facts.profile.length === 0 ? 'its own profile' : `profile ${facts.profile}`
   return `- Browser right now: ${facts.binary}, ${facts.headless ? 'headless' : 'with a window'}, ${profile}, ${state}.`
+}
+
+/**
+ * The external tool servers, as they are.
+ *
+ * Read from the manager's report and not from the tool catalog: a server that is
+ * off, or that failed to start, contributes no tools, so it is missing from the
+ * catalog exactly when a question about MCP is asking about it. The file, the
+ * servers and their state are what a surface reports, so this line and the
+ * settings screen cannot disagree.
+ */
+function mcpLine(facts: McpFacts): string {
+  if (facts.error) {
+    return `- External tool servers (MCP): \`${facts.file}\` could not be read — ${facts.error}`
+  }
+  if (facts.servers.length === 0) {
+    return (
+      `- External tool servers (MCP): none configured. They are written in \`${facts.file}\` — a server is a ` +
+      'command line — and `milo mcp` reports them.'
+    )
+  }
+  const described = facts.servers.map((server) => {
+    if (!server.enabled) return `${server.name} (off)`
+    const tools = plural(server.tools, 'tool')
+    return server.error ? `${server.name} (${tools}, failed — ${server.error})` : `${server.name} (${tools})`
+  })
+  return (
+    `- External tool servers (MCP) right now: ${described.join(', ')}. Their tools arrive as ` +
+    '`mcp__<server>__<tool>`; a server that is off or failed contributes none, which the tool catalog alone cannot ' +
+    `show. Written in \`${facts.file}\`; \`milo mcp\` lists, checks and toggles them.`
+  )
+}
+
+/**
+ * The Google grant, as this run sees it.
+ *
+ * The tools are in the catalog whenever Google is on, so their presence says
+ * nothing about whether an account was ever connected — and a `gmail_search` that
+ * answers "not connected" is a state, not a tool to discover by calling. The
+ * wording is `milo google status`'s, and the state is `googleState`'s: the same
+ * function the CLI, the setup screen and the web panel read.
+ */
+function googleLine(state: GoogleState): string {
+  if (state.kind === 'off') {
+    return '- Google (Gmail and Drive): off — `milo google connect` turns it on and connects an account.'
+  }
+  if (state.kind === 'wanted') {
+    return (
+      '- Google (Gmail and Drive): on in the config, but no account is connected — its tools answer "not ' +
+      'connected" until `milo google connect` is run in a terminal.'
+    )
+  }
+  return (
+    `- Google (Gmail and Drive) right now: connected${state.email ? ` as ${state.email}` : ''}, read-only. ` +
+    'The grant lives in `~/.milo/auth.json`; `milo google status` reports it.'
+  )
 }
 
 function setupSection(input: SystemPromptInput): string {
@@ -124,8 +193,9 @@ function setupSection(input: SystemPromptInput): string {
     '  **Gateways** (the bot surfaces), **Web** (the browser chat: on or off, its address and port),',
     '  **Memory**, **Skills**.',
     '- The same settings, in a browser, are the web UI\'s **Settings** screen — the page `milo serve`',
-    '  prints the URL of. It covers everything `milo setup` does, and runs the setup jobs (the browser',
-    '  download, the embedding engine) with their output on screen.',
+    '  prints the URL of. It covers everything `milo setup` does, plus the external tool servers under',
+    '  **Tools**, and runs the setup jobs (the browser download, the embedding engine) with their output',
+    '  on screen.',
     '- Settings live in `~/.milo/config.yml`, secrets in `~/.milo/auth.json`. `/export` writes the',
     '  conversation so far to `~/.milo/exports/`; `/stats`, `/sessions`, `/compact` are about it.',
     '- Routines are the prompts you run on a timer and deliver to a chat — or to no chat at all, which is a',
@@ -153,6 +223,8 @@ function setupSection(input: SystemPromptInput): string {
     '  use, and Milo runs on the copy — which is worth saying plainly before it happens, because it',
     '  means acting as that person. Someone who would rather not simply keeps it on its own profile,',
     '  signed in nowhere.',
+    ...(input.mcp ? [mcpLine(input.mcp)] : []),
+    ...(input.google ? [googleLine(input.google)] : []),
     `- On right now: ${on.length > 0 ? on.join(', ') : 'no optional capability'}, and ${plural(skills, 'skill')} installed.`,
   ].join('\n')
 }

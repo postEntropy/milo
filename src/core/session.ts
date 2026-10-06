@@ -4,6 +4,8 @@ import { logDebug, logWarn } from '../util/log.js'
 import type { SessionsConfig } from './config/schema.js'
 import type { MediaModelsConfig } from './config/schema.js'
 import type { BrowserFacts } from './browser/index.js'
+import type { GoogleState } from './google/state.js'
+import type { McpFacts } from './mcp/servers.js'
 import type { HistoryEntry, HistoryWriter } from './history.js'
 import { deriveFacts } from './memory/derive.js'
 import { scopeKey, DEFAULT_RECALL_LIMIT, type Memory, type MemoryInput, type MemoryItem, type MemoryScope } from './memory/index.js'
@@ -140,6 +142,10 @@ export interface SessionOptions {
   keepSnapshots?: number
   /** What the browser is right now, read per turn. Absent when there is none. */
   browser?: () => BrowserFacts | null
+  /** The external tool servers as they are, read per turn. Absent when there are none. */
+  mcp?: () => McpFacts | null
+  /** The Google grant as this run sees it. Absent when the runtime was built without it. */
+  google?: GoogleState | null
   /**
    * Called when this copy's last piece of work in flight ends — a turn, or the
    * fact extraction after one. The runtime uses it to let go of a session that
@@ -279,6 +285,15 @@ export class Session {
    */
   private browserFacts(): BrowserFacts | null {
     return this.options.browser?.() ?? null
+  }
+
+  /**
+   * Unlike the browser, this is not derivable from the tool catalog: a server
+   * that is off or failed registers no tools, so the manager's own report is the
+   * only place its name and its reason survive. Read live, per prompt build.
+   */
+  private mcpFacts(): McpFacts | null {
+    return this.options.mcp?.() ?? null
   }
 
   get title(): string | undefined {
@@ -442,7 +457,13 @@ export class Session {
     const compaction = await this.compactIfNeeded(prompt, signal)
     if (compaction) yield { type: 'compacted', ms: compaction.ms }
 
-    const systemPrompt = buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() })
+    const systemPrompt = buildSystemPrompt({
+      ...prompt,
+      summary: this.summary,
+      browser: this.browserFacts(),
+      mcp: this.mcpFacts(),
+      google: this.options.google ?? null,
+    })
     // What every request carries besides the transcript: the prompt, and the tool
     // schemas the wire sends beside it. The transcript count is measured against
     // this, so leaving the catalog out said a request fitted while it did not.
@@ -515,6 +536,11 @@ export class Session {
               registry,
               cwd,
               skills: this.options.skills?.(),
+              // The same live state the parent's prompt carries, so a delegated
+              // task can answer about the browser, the servers and Google too.
+              browser: this.browserFacts(),
+              mcp: this.mcpFacts(),
+              google: this.options.google ?? null,
               signal: abort,
               permission,
               maxSteps,
@@ -937,7 +963,7 @@ export class Session {
     // and reused, because folding changes only the transcript and the summary's
     // own length — and this reading already has the summary in it.
     const fixed =
-      estimateText(buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() })) +
+      estimateText(buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts(), mcp: this.mcpFacts(), google: this.options.google ?? null })) +
       estimateTools(prompt.tools)
     if (estimateTokens(this.messages) + fixed <= ceiling) return null
 
@@ -979,7 +1005,7 @@ export class Session {
     // No second call — this is a report, not a retry.
     const after =
       estimateTokens(this.messages) +
-      estimateText(buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() })) +
+      estimateText(buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts(), mcp: this.mcpFacts(), google: this.options.google ?? null })) +
       estimateTools(prompt.tools)
     if (after > ceiling) logDebug(`compaction left the request over its ceiling (${after} > ${ceiling})`)
 

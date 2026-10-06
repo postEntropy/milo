@@ -9,7 +9,7 @@ import type { ToolContext } from '../src/core/tools/types.js'
 const home = mkdtempSync(path.join(tmpdir(), 'milo-mcp-servers-'))
 process.env.MILO_HOME = home
 
-const { createMcpServers } = await import('../src/core/mcp/servers.js')
+const { createMcpServers, mcpFacts } = await import('../src/core/mcp/servers.js')
 const { writeMcpCache } = await import('../src/core/mcp/cache.js')
 const { ToolRegistry } = await import('../src/core/tools/registry.js')
 const { createRuntime } = await import('../src/core/bootstrap.js')
@@ -376,6 +376,39 @@ describe('the catalog before anything is started', () => {
     } finally {
       await manager.close()
     }
+  })
+})
+
+describe('the report every surface draws from', () => {
+  it('names the file, and each server with what it holds', async () => {
+    writeServers({ github: server({ MCP_ERA: 'modern' }), notes: { command: 'node', enabled: false } })
+    const manager = createMcpServers(cwd)
+    try {
+      await manager.check('github')
+      const facts = mcpFacts(manager)
+      expect(facts.file).toBe(mcpFile())
+      expect(facts.servers).toEqual([
+        expect.objectContaining({ name: 'github', enabled: true, tools: 2 }),
+        expect.objectContaining({ name: 'notes', enabled: false, tools: 0 }),
+      ])
+    } finally {
+      await manager.close()
+    }
+  })
+
+  it('carries the reason when the file itself could not be read', async () => {
+    writeFileSync(mcpFile(), '{ "servers": { "github": { "command": "npx", "comand": "typo" } } }')
+    const manager = createMcpServers(cwd)
+    try {
+      expect(mcpFacts(manager).file).toBe(mcpFile())
+      expect(mcpFacts(manager).error).toMatch(/has no field named "comand"/)
+    } finally {
+      await manager.close()
+    }
+  })
+
+  it('says there is nothing when the runtime was built without MCP at all', () => {
+    expect(mcpFacts(null)).toEqual({ file: mcpFile(), servers: [] })
   })
 })
 

@@ -1,6 +1,7 @@
 import type { MediaModelsConfig, SessionsConfig } from './config/schema.js'
 import type { BrowserSession } from './browser/index.js'
-import type { McpServers } from './mcp/servers.js'
+import type { GoogleState } from './google/state.js'
+import { mcpFacts, type McpServers } from './mcp/servers.js'
 import type { HistoryWriter } from './history.js'
 import type { Memory, MemoryScope } from './memory/index.js'
 import { scopeKey } from './memory/index.js'
@@ -84,6 +85,12 @@ export interface RuntimeOptions {
    * machine to reap.
    */
   mcp?: McpServers | null
+  /**
+   * The Google grant as this run sees it. A value, not a getter: connecting an
+   * account needs a restart for the tools to appear, so the line that describes
+   * them is fixed for the life of the process with it.
+   */
+  google?: GoogleState | null
   /** How many page snapshots a request may carry; from the browser's config. */
   keepSnapshots?: number
   /** Maximum number of idle sessions kept in memory before older ones are evicted. */
@@ -528,6 +535,13 @@ export class AgentRuntime {
       // A getter, so the prompt says what the browser is now rather than what it
       // was when the runtime was built.
       browser: () => this.browser?.facts() ?? null,
+      // Likewise the servers, and for the reason the catalog cannot cover: a
+      // server toggled, reloaded or reconnected since the runtime was built is in
+      // the report, and one that is off or failed is in it too.
+      mcp: () => (this.mcp ? mcpFacts(this.mcp) : null),
+      // A plain value: the grant does not move under a running process — a new
+      // one needs a restart for its tools to appear, and this says the same.
+      google: this.options.google ?? null,
       // A getter, not the value: `/effort` changes what the next turn sends
       // without the runtime having to be rebuilt around it.
       reasoningEffort: () => this.reasoningEffort,

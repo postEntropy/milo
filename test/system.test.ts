@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SYSTEM_PROMPT, buildSystemPrompt, formatToolSignature } from '../src/core/agent/system.js'
 import type { ToolSpec } from '../src/core/providers/types.js'
+import type { McpFacts } from '../src/core/mcp/servers.js'
+import type { GoogleState } from '../src/core/google/state.js'
 
 const tool: ToolSpec = {
   name: 'read_file',
@@ -137,7 +139,7 @@ describe('buildSystemPrompt', () => {
 })
 
 describe('what Milo knows about its own setup', () => {
-  const build = (tools: ToolSpec[], skills = 0) =>
+  const build = (tools: ToolSpec[], skills = 0, mcp?: McpFacts, google?: GoogleState) =>
     buildSystemPrompt({
       base: 'BASE',
       surface: 'cli',
@@ -151,6 +153,8 @@ describe('what Milo knows about its own setup', () => {
         dir: `/y/${index}`,
       })),
       memories: [],
+      ...(mcp ? { mcp } : {}),
+      ...(google ? { google } : {}),
     })
 
   it('is always there, so a question about Milo is answerable without going to look', () => {
@@ -191,6 +195,53 @@ describe('what Milo knows about its own setup', () => {
   it('counts the skills it has', () => {
     expect(build([tool], 1)).toContain('1 skill installed')
     expect(build([tool], 3)).toContain('3 skills installed')
+  })
+
+  it('names the external tool servers, so it is not answered by reading its own source', () => {
+    // Off and failed servers register no tools, so the catalog cannot name them —
+    // and the question "do I have MCP" is exactly about those two states.
+    const some = build([tool], 0, {
+      file: '/home/x/.milo/mcp.json',
+      servers: [
+        { name: 'github', command: 'npx -y server-github', enabled: true, state: 'ready', tools: 12, readOnly: [] },
+        { name: 'notes', command: 'node notes.js', enabled: false, state: 'idle', tools: 0, readOnly: [] },
+        {
+          name: 'slack',
+          command: 'npx server-slack',
+          enabled: true,
+          state: 'failed',
+          tools: 3,
+          readOnly: [],
+          error: 'could not start "npx"',
+        },
+      ],
+    })
+    expect(some).toContain('External tool servers (MCP) right now')
+    expect(some).toContain('github (12 tools)')
+    expect(some).toContain('notes (off)')
+    expect(some).toContain('slack (3 tools, failed — could not start "npx")')
+    expect(some).toContain('mcp__<server>__<tool>')
+    expect(some).toContain('/home/x/.milo/mcp.json')
+  })
+
+  it('says MCP is not set up rather than leaving it unspoken', () => {
+    const prompt = build([tool], 0, { file: '/home/x/.milo/mcp.json', servers: [] })
+    expect(prompt).toContain('External tool servers (MCP): none configured')
+    expect(prompt).toContain('/home/x/.milo/mcp.json')
+  })
+
+  it('reports a servers file it could not read, with the reason', () => {
+    const prompt = build([tool], 0, { file: '/home/x/.milo/mcp.json', error: 'is not valid JSON', servers: [] })
+    expect(prompt).toContain('could not be read — is not valid JSON')
+  })
+
+  it('says whether the Google account is connected, and how to connect it', () => {
+    expect(build([tool], 0, undefined, { kind: 'off' })).toContain('Google (Gmail and Drive): off')
+    expect(build([tool], 0, undefined, { kind: 'wanted' })).toContain('no account is connected')
+
+    const connected = build([tool], 0, undefined, { kind: 'connected', email: 'me@example.com', enabled: true })
+    expect(connected).toContain('connected as me@example.com')
+    expect(connected).toContain('milo google status')
   })
 
   it('knows how a routine runs, so it is not answered by reading its own source', () => {

@@ -21,7 +21,7 @@ import {
   setReasoningEffort,
 } from '../../core/config/load.js'
 import { browserChromeDir, browserProfilesDir, embedEngineDir, memoryDir, skillsDir } from '../../core/config/paths.js'
-import { mcpFile } from '../../core/config/paths.js'
+import { mcpFacts } from '../../core/mcp/servers.js'
 import { toolDisplayName } from '../tool-line.js'
 import {
   ConfigSchema,
@@ -145,12 +145,7 @@ export class WebSettings {
    * because it can take seconds.
    */
   private mcpReport(): unknown {
-    const mcp = this.runtime.mcp
-    return {
-      file: mcpFile(),
-      ...(mcp?.configError ? { error: mcp.configError } : {}),
-      servers: mcp?.status() ?? [],
-    }
+    return mcpFacts(this.runtime.mcp)
   }
 
   /**

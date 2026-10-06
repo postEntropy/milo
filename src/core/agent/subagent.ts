@@ -2,6 +2,9 @@ import { closeParagraph } from '../../util/format.js'
 import type { Message, Provider, ReasoningEffort } from '../providers/types.js'
 import type { SkillSummary } from '../skills/index.js'
 import type { ToolContext, ToolRegistry, ToolResult } from '../tools/index.js'
+import type { BrowserFacts } from '../browser/index.js'
+import type { GoogleState } from '../google/state.js'
+import type { McpFacts } from '../mcp/servers.js'
 import { runAgent, type ToolPermission } from './loop.js'
 import { buildSystemPrompt, SUBAGENT_SYSTEM_PROMPT } from './system.js'
 
@@ -11,6 +14,15 @@ export interface SubagentRun {
   registry: ToolRegistry
   cwd: string
   skills?: SkillSummary[]
+  /**
+   * The live state the setup section carries. A subagent is handed the parent's
+   * whole catalog, so the browser, the external servers and the Google grant are
+   * tools it can call — and it must be able to read their state the same way the
+   * parent does, or "the catalog is the state" leaves it guessing.
+   */
+  browser?: BrowserFacts | null
+  mcp?: McpFacts | null
+  google?: GoogleState | null
   signal: AbortSignal
   /** The parent turn's policy and prompt, so the subagent's actions ask the same way. */
   permission?: ToolPermission
@@ -45,6 +57,9 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     model: options.model,
     tools,
     skills: options.skills,
+    browser: options.browser ?? null,
+    mcp: options.mcp ?? null,
+    google: options.google ?? null,
     memories: [],
   })
   const messages: Message[] = [
