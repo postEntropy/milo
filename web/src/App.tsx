@@ -59,8 +59,8 @@ export default function App() {
   const [notes, setNotes] = useState<{ text: string }[] | null>(null)
   /** Ideas the model drew for the empty home; null until they arrive. */
   const [ideas, setIdeas] = useState<{ title: string; prompt: string }[] | null>(null)
-  /** How much the running model holds, for the context meter; null until read. */
-  const [contextWindow, setContextWindow] = useState<number | null>(null)
+  /** The budget the request is measured against, for the meter; null until read. */
+  const [contextBudget, setContextBudget] = useState<number | null>(null)
   const [search, setSearch] = useState('')
   /** What the past turns said about the search, and null when nothing is searched. */
   const [historyHits, setHistoryHits] = useState<HistoryHit[] | null>(null)
@@ -225,14 +225,16 @@ export default function App() {
     return () => { live = false }
   }, [messages.length, notes])
 
-  // How much the running model holds. Read once per model; a lookup that fails is
+  // The budget the request is measured against — the window times the share that
+  // makes Milo fold — read once per model. Same rule the core folds by, so the
+  // ring fills at the point the oldest turns actually go. A lookup that fails is
   // no meter, not a broken chat, so the failure is quiet.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the model is the trigger, not a value read here — a new model is a new window
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the model is the trigger, not a value read here — a new model is a new budget
   useEffect(() => {
     let live = true
-    void api<{ window?: number }>('context-window')
-      .then((result) => { if (live) setContextWindow(result.window ?? null) })
-      .catch(() => { if (live) setContextWindow(null) })
+    void api<{ budget?: number }>('context-budget')
+      .then((result) => { if (live) setContextBudget(result.budget ?? null) })
+      .catch(() => { if (live) setContextBudget(null) })
     return () => { live = false }
   }, [identity.model])
 
@@ -832,7 +834,7 @@ export default function App() {
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock">
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextWindow && contextUsed > 0 ? { used: contextUsed, window: contextWindow } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={(provider) => void changeProvider(provider)} />
+            <Composer ref={composerRef} busy={busy} queued={queued} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={(provider) => void changeProvider(provider)} />
           </div>
         </section>}
     </main>

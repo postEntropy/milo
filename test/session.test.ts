@@ -244,9 +244,10 @@ describe('Session', () => {
     expect(stats.turns).toBe(1)
     expect(stats.tokens).toBeGreaterThan(0)
     expect(stats.compacted).toBe(false)
-    // The system prompt is counted too: it goes with every request and the
-    // transcript number alone would understate what the provider receives.
-    expect(stats.systemTokens).toBeGreaterThan(0)
+    // What the request carries besides the transcript is counted too: the prompt
+    // and the tool schemas both go with every request, and the transcript number
+    // alone understates what the provider receives.
+    expect(stats.fixedTokens).toBeGreaterThan(0)
   })
 
   it('clears the transcript but keeps the session identity', async () => {

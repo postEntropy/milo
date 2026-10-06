@@ -1083,7 +1083,7 @@ function formatSeconds(value: number): string {
  * shown as a zero.
  */
 function statsRows(stats: SessionStats): { label: string; value: string }[] {
-  const used = stats.tokens + (stats.systemTokens ?? 0)
+  const used = stats.tokens + (stats.fixedTokens ?? 0)
   const budget = stats.maxInputTokens ? ` of ${formatTokens(stats.maxInputTokens)}` : ''
   const rows = [
     { label: 'session', value: stats.title ? `${stats.id} — ${stats.title}` : stats.id },

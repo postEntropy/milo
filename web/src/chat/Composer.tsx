@@ -18,8 +18,11 @@ interface Props {
   /** The conversation the draft belongs to, so each one keeps its own. */
   draftKey: string
   model: string
-  /** How much of the model's window the last turn filled, when it is known. */
-  context?: { used: number; window: number }
+  /**
+   * How much of the context budget the last turn filled, when it is known. The
+   * budget is where Milo tidies the oldest turns, not the model's raw window.
+   */
+  context?: { used: number; budget: number }
   effort: 'low' | 'medium' | 'high'
   /** Bumped when something asks for the cursor, so the field takes the next keystroke. */
   focusSignal: number
@@ -360,12 +363,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             />
           </div>}
           <span className="composer-spacer" />
-          {context && context.window > 0 && <span className={`composer-context${context.used / context.window >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.window.toLocaleString()} tokens of context`}>
+          {context && context.budget > 0 && <span className={`composer-context${context.used / context.budget >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.budget.toLocaleString()} tokens — Milo tidies the oldest turns at ${context.budget.toLocaleString()}`}>
             <svg className="composer-context-ring" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
               <circle className="composer-context-track" cx="11" cy="11" r="9" />
-              <circle className="composer-context-arc" cx="11" cy="11" r="9" strokeDasharray={RING_CIRCUMFERENCE} strokeDashoffset={RING_CIRCUMFERENCE * (1 - Math.min(1, context.used / context.window))} />
+              <circle className="composer-context-arc" cx="11" cy="11" r="9" strokeDasharray={RING_CIRCUMFERENCE} strokeDashoffset={RING_CIRCUMFERENCE * (1 - Math.min(1, context.used / context.budget))} />
             </svg>
-            <span className="composer-context-count">{formatTokens(context.used)} / {formatTokens(context.window)}</span>
+            <span className="composer-context-count">{formatTokens(context.used)} / {formatTokens(context.budget)}</span>
           </span>}
           {busy
             ? <button className="send-button stop" type="button" title="Stop (Esc)" aria-label="Stop Milo" onClick={onStop}><Icon name="stop" size={16} /></button>

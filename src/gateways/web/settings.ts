@@ -103,7 +103,7 @@ export class WebSettings {
       case 'popular-skills': return fetchPopular(20)
       case 'install-skill': return this.install(body)
       case 'remove-skill': return this.remove(body)
-      case 'context-window': return { window: await this.runtime.contextWindow() }
+      case 'context-budget': return { budget: await this.runtime.contextBudget() }
       case 'history-search': return this.historySearch(body)
       case 'memory-notes': return this.memoryNotes()
       case 'forget-note': return this.forgetNote(body)

@@ -1,4 +1,5 @@
-import type { Message, Provider, ReasoningEffort, ToolResultPart } from '../providers/types.js'
+import type { Message, Provider, ReasoningEffort, ToolResultPart, ToolSpec } from '../providers/types.js'
+import type { SessionsConfig } from '../config/schema.js'
 import { errorMessage } from '../../util/errors.js'
 import { logDebug, logWarn } from '../../util/log.js'
 import { IMAGE_TOKENS } from '../images.js'
@@ -48,6 +49,39 @@ export function estimateTokens(messages: Message[]): number {
 /** The same rough estimate for a plain string — a system prompt, say. */
 export function estimateText(text: string): number {
   return Math.ceil(text.length / 4)
+}
+
+/**
+ * What the tool catalog costs a request.
+ *
+ * The wire sends each tool's JSON Schema, and the schemas are the larger half of
+ * the catalog — several times the one-line signatures the system prompt shows.
+ * Leaving them out of the count was what let the budget say a request fitted
+ * while the same request was over the model's window.
+ */
+export function estimateTools(tools: ToolSpec[]): number {
+  if (tools.length === 0) return 0
+  return Math.ceil(JSON.stringify(tools).length / 4)
+}
+
+/**
+ * The budget a request is measured against: the model's window times `compactAt`,
+ * so the fold happens while there is still room to answer in, floored so a window
+ * that turns out tiny is not squeezed to nothing — or `maxInputTokens` when
+ * nothing knows the window (and nothing to measure against at all when
+ * compaction is off).
+ *
+ * One rule, read by the session that folds and by the surface that draws the
+ * meter. Two answers there would say a request fits while it is over, or fill a
+ * bar that nothing acts on.
+ */
+export function contextBudget(
+  config: SessionsConfig | undefined,
+  window: number | undefined,
+): number | undefined {
+  if (!config?.compaction) return undefined
+  if (!window) return config.maxInputTokens
+  return Math.max(1024, Math.floor(window * config.compactAt))
 }
 
 /**

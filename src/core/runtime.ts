@@ -10,6 +10,7 @@ import type { RoutineFn, ToolRegistry } from './tools/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
 import { Session } from './session.js'
 import {
+  contextBudget,
   MemoryRecapStore,
   MemorySessionStore,
   type RecapStore,
@@ -344,11 +345,15 @@ export class AgentRuntime {
   }
 
   /**
-   * How much the running model holds, for a surface that draws a context bar.
-   * Same lookup a session does before compaction, so the two cannot disagree.
+   * The budget a request is measured against, for a surface that draws a context
+   * meter: the model's window times `compactAt`, from the same rule the session
+   * folds by. The raw window would fill the bar at 100% while the oldest turns
+   * were already being summarized at 70% of it — two answers to one question.
    */
-  async contextWindow(): Promise<number | undefined> {
-    return this.options.lookupContextWindow?.(this.options.model)
+  async contextBudget(): Promise<number | undefined> {
+    const config = this.options.sessions
+    const window = config?.contextWindow ?? (await this.options.lookupContextWindow?.(this.options.model))
+    return contextBudget(config, window)
   }
 
   /**

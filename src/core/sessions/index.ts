@@ -7,12 +7,14 @@ export { rankSessions, withRecaps } from './recall.js'
 export { pruneSessions } from './retention.js'
 export { generateNickname } from './nickname.js'
 export {
+  contextBudget,
   digest,
   dropOldAudio,
   dropOldImages,
   dropOldSnapshots,
   estimateText,
   estimateTokens,
+  estimateTools,
   planCut,
   planCutUnderBudget,
   sliceMessagesUpToTurn,

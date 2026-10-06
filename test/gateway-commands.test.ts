@@ -494,7 +494,7 @@ describe('handleCommand', () => {
         messages: 4,
         turns: 2,
         tokens: 100,
-        systemTokens: 20,
+        fixedTokens: 20,
         // The ceiling the compaction is measured against, resolved from the
         // model's window: the count is only worth reading beside it.
         maxInputTokens: 70_000,

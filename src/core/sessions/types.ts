@@ -55,10 +55,13 @@ export interface SessionStats {
   messages: number
   turns: number
   tokens: number
-  /** Estimated size of the system prompt, which `tokens` does not include. */
-  systemTokens?: number
   /**
-   * The context budget `tokens` and `systemTokens` are measured against — the
+   * Estimated size of what every request carries besides the transcript: the
+   * system prompt **and** the tool schemas, which the wire sends whole.
+   */
+  fixedTokens?: number
+  /**
+   * The context budget `tokens` and `fixedTokens` are measured against — the
    * point where the oldest turns get summarized. Without it a token count says
    * nothing about whether the session is anywhere near that.
    */

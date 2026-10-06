@@ -6,14 +6,17 @@ import { SqliteMemory } from '../src/core/memory/sqlite.js'
 import type { ChatRequest, Message, Provider, ReasoningEffort, StreamEvent } from '../src/core/providers/types.js'
 import { Session } from '../src/core/session.js'
 import {
+  contextBudget,
   digest,
+  estimateText,
   estimateTokens,
+  estimateTools,
   planCut,
   planCutUnderBudget,
   summarize,
 } from '../src/core/sessions/compact.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
-import { createToolRegistry } from '../src/core/tools/index.js'
+import { createToolRegistry, ToolRegistry } from '../src/core/tools/index.js'
 
 const text = (role: 'user' | 'assistant' | 'tool', value: string): Message => ({
   role,
@@ -75,6 +78,8 @@ async function compactingSession(
     lookup?: (model: string) => Promise<number | undefined>
     maxInputTokens?: number
     keepTurns?: number
+    /** The catalog the turn is sent with; the full one unless a test says otherwise. */
+    registry?: ToolRegistry
   } = {},
 ) {
   const provider = new ScriptedProvider()
@@ -88,7 +93,7 @@ async function compactingSession(
     provider,
     model: 'm',
     system: 'BASE',
-    registry: createToolRegistry(),
+    registry: options.registry ?? createToolRegistry(),
     memory: new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
     cwd: process.cwd(),
     record,
@@ -241,6 +246,40 @@ describe('estimateTokens', () => {
   })
 })
 
+describe('estimateTools', () => {
+  it('prices the schemas that go on the wire, not the signatures', () => {
+    const specs = createToolRegistry().specs()
+
+    expect(estimateTools([])).toBe(0)
+    // The schemas are the larger half of the catalog: the prose index in the
+    // system prompt carries the same descriptions and is counted separately.
+    expect(estimateTools(specs)).toBeGreaterThan(estimateText(specs.map((tool) => tool.description).join('')))
+  })
+})
+
+describe('contextBudget', () => {
+  const sessions = {
+    compactAt: 0.7,
+    maxInputTokens: 12_000,
+    keepTurns: 8,
+    compaction: true,
+    maxSessions: 50,
+  }
+
+  it('takes a share of the window, and the fallback when nothing knows it', () => {
+    expect(contextBudget(sessions, 100_000)).toBe(70_000)
+    expect(contextBudget(sessions, undefined)).toBe(12_000)
+  })
+
+  it('leaves room to answer when the window turns out tiny', () => {
+    expect(contextBudget({ ...sessions, compactAt: 0.7 }, 1000)).toBe(1024)
+  })
+
+  it('has no budget at all when compaction is off', () => {
+    expect(contextBudget({ ...sessions, compaction: false }, 100_000)).toBeUndefined()
+  })
+})
+
 describe('planCut', () => {
   it('cuts on a user turn boundary', () => {
     const messages = longSeed()
@@ -372,9 +411,10 @@ describe('digest', () => {
 describe('Session compaction', () => {
   it('summarizes the dropped turns and keeps them out of the transcript', async () => {
     // The ceiling is named rather than left to the default: folding needs room
-    // above the fixed cost of the prompt (the tool list is most of it), and this
-    // test is about folding a transcript, not about how big the tools happen to be.
-    const { provider, session } = await compactingSession(longSeed(), { maxInputTokens: 3200 })
+    // above the fixed cost of a request — the system prompt *and* the tool
+    // schemas that go beside it — and this test is about folding a transcript,
+    // not about how big the catalog happens to be.
+    const { provider, session } = await compactingSession(longSeed(), { maxInputTokens: 8600 })
 
     expect(provider.systems.some((system) => system.includes('compress a conversation'))).toBe(true)
 
@@ -392,7 +432,7 @@ describe('Session compaction', () => {
   })
 
   it('still fits the request when the summary call fails', async () => {
-    const { provider, session, events } = await compactingSession(longSeed(), { failing: true, maxInputTokens: 3200 })
+    const { provider, session, events } = await compactingSession(longSeed(), { failing: true, maxInputTokens: 8600 })
 
     const system = provider.systems.at(-1)!
     expect(system).not.toContain('## Earlier in this conversation')
@@ -403,7 +443,7 @@ describe('Session compaction', () => {
   })
 
   it('reports what the summary cost, before the turn produces anything', async () => {
-    const { events } = await compactingSession(longSeed(), { maxInputTokens: 3200 })
+    const { events } = await compactingSession(longSeed(), { maxInputTokens: 8600 })
 
     const at = events.findIndex((event) => event.type === 'compacted')
     expect(at).toBeGreaterThanOrEqual(0)
@@ -497,8 +537,8 @@ describe('Session compaction', () => {
 
   it('recuses past the keepTurns floor instead of summarizing every turn', async () => {
     // The last two turns are asked to stay, but the big one beside the last does
-    // not fit the ceiling — so it is folded too, rather than riding the request
-    // over the budget and being summarized again on the next turn.
+    // not fit above what every request carries — so it is folded too, rather than
+    // riding the request over the budget and being summarized again next turn.
     const big = text('user', `big ${'w'.repeat(20_000)}`)
     const seed = [
       text('user', 'first'),
@@ -507,7 +547,7 @@ describe('Session compaction', () => {
       text('assistant', 'r'),
       text('user', 'last'),
     ]
-    const { session, events } = await compactingSession(seed, { maxInputTokens: 4000, keepTurns: 2 })
+    const { session, events } = await compactingSession(seed, { maxInputTokens: 9000, keepTurns: 2 })
 
     expect(events.some((event) => event.type === 'compacted')).toBe(true)
     // Only the last user turn survived ahead of the new question; the floor would
@@ -531,5 +571,22 @@ describe('Session compaction', () => {
     expect(provider.systems.some((system) => system.includes('compress a conversation'))).toBe(false)
     // Nothing was folded: the transcript is the seed, the question and the answer.
     expect(session.messages.length).toBe(before + 2)
+  })
+
+  it('counts the tool schemas in what every request carries', async () => {
+    // The same seed and ceiling twice; only the catalog differs. The schemas are
+    // the larger half of what a request carries, and they used to sit outside the
+    // count — which is how a request was measured as fitting while it was over.
+    const empty = await compactingSession(longSeed(), {
+      maxInputTokens: 100_000,
+      registry: new ToolRegistry([]),
+    })
+    const full = await compactingSession(longSeed(), { maxInputTokens: 100_000 })
+    const catalog = estimateTools(createToolRegistry().specs())
+
+    expect(catalog).toBeGreaterThan(0)
+    expect(
+      full.session.stats().fixedTokens! - empty.session.stats().fixedTokens!,
+    ).toBeGreaterThanOrEqual(catalog)
   })
 })

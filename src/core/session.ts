@@ -18,6 +18,7 @@ import { runAgent } from './agent/loop.js'
 import { runSubagent } from './agent/subagent.js'
 import { buildSystemPrompt, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import {
+  contextBudget,
   countMessages,
   countTurns,
   digest,
@@ -26,6 +27,7 @@ import {
   dropOldSnapshots,
   estimateText,
   estimateTokens,
+  estimateTools,
   MemoryRecapStore,
   planCut,
   planCutUnderBudget,
@@ -178,8 +180,11 @@ export class Session {
   private summary: string | undefined
   /** The revision this session's copy of the transcript was built from. */
   private baseVersion: number
-  /** Size of the last system prompt sent, which the transcript count omits. */
-  private lastSystemTokens: number | undefined
+  /**
+   * Size of everything the last request carried besides the transcript — the
+   * system prompt and the tool schemas — which the transcript count omits.
+   */
+  private lastFixedTokens: number | undefined
   /** The ceiling the transcript is measured against, once the window is known. */
   private ceiling: number | undefined
   /** The lookup in flight: a turn waits on it only if it has not finished. */
@@ -251,8 +256,8 @@ export class Session {
   }
 
   /**
-   * The ceiling a request is measured against: the model's context window times
-   * `compactAt`, or `maxInputTokens` when nothing knows the window.
+   * The ceiling a request is measured against. The rule lives in one place, so
+   * the surface that draws a context meter fills the same bar the fold acts on.
    */
   private async computeCeiling(): Promise<number | undefined> {
     const config = this.options.sessions
@@ -260,10 +265,7 @@ export class Session {
     // Nothing is asked for unless a caller wired a lookup in: a session that
     // reached the network on its own would make every test a network test.
     const window = config.contextWindow ?? (await this.options.lookupContextWindow?.(this.options.model))
-    if (!window) return config.maxInputTokens
-    // Never below a floor: a share of a window that turns out tiny would
-    // otherwise compact down to a request with no room to answer in.
-    return Math.max(1024, Math.floor(window * config.compactAt))
+    return contextBudget(config, window)
   }
 
   /**
@@ -437,7 +439,10 @@ export class Session {
     if (compaction) yield { type: 'compacted', ms: compaction.ms }
 
     const systemPrompt = buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() })
-    this.lastSystemTokens = estimateText(systemPrompt)
+    // What every request carries besides the transcript: the prompt, and the tool
+    // schemas the wire sends beside it. The transcript count is measured against
+    // this, so leaving the catalog out said a request fitted while it did not.
+    this.lastFixedTokens = estimateText(systemPrompt) + estimateTools(tools)
 
     this.messages.push({ role: 'user', content: [{ type: 'text', text: input }, ...(opts?.images ?? []), ...(opts?.audio ?? [])] })
     note({ kind: 'user', text: input })
@@ -773,7 +778,7 @@ export class Session {
       messages: countMessages(this.messages),
       turns: countTurns(this.messages),
       tokens: estimateTokens(this.messages),
-      systemTokens: this.lastSystemTokens,
+      fixedTokens: this.lastFixedTokens,
       // Absent when compaction is off, in which case there is no budget to
       // report rather than an infinite one. The resolved ceiling, not the
       // fallback: `/stats` showing 12k for a model that holds a million would be
@@ -865,7 +870,7 @@ export class Session {
     // ceiling — the turns it kept were too big to get under — the caller is told
     // instead of reading a `/compact` that quietly did not do what it promised.
     const ceiling = this.ceiling ?? config.maxInputTokens
-    const remaining = estimateTokens(this.messages) + (this.lastSystemTokens ?? 0)
+    const remaining = estimateTokens(this.messages) + (this.lastFixedTokens ?? 0)
 
     return {
       folded: countTurns(dropped),
@@ -916,12 +921,12 @@ export class Session {
     dropOldSnapshots(this.messages, this.options.keepSnapshots)
 
     // Everything a request carries that is not the transcript: the system
-    // prompt, the tool list, the memories and the running summary. Read once and
-    // reused, because folding changes only the transcript and the summary's own
-    // length — and this reading already has the summary in it.
-    const fixed = estimateText(
-      buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() }),
-    )
+    // prompt, the tool schemas, the memories and the running summary. Read once
+    // and reused, because folding changes only the transcript and the summary's
+    // own length — and this reading already has the summary in it.
+    const fixed =
+      estimateText(buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() })) +
+      estimateTools(prompt.tools)
     if (estimateTokens(this.messages) + fixed <= ceiling) return null
 
     // The floor is a preference, not a promise: when the turns it protects are
@@ -962,7 +967,8 @@ export class Session {
     // No second call — this is a report, not a retry.
     const after =
       estimateTokens(this.messages) +
-      estimateText(buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() }))
+      estimateText(buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts() })) +
+      estimateTools(prompt.tools)
     if (after > ceiling) logDebug(`compaction left the request over its ceiling (${after} > ${ceiling})`)
 
     return { ms: Date.now() - startedAt }

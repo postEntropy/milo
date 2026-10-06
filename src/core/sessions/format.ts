@@ -109,7 +109,7 @@ export function formatStats(stats: SessionStats): string {
   // The ceiling the request is measured against, so the count means something:
   // the CLI shows the same pair, and a token number with no ceiling says nothing
   // about whether the session is anywhere near compaction.
-  const used = stats.tokens + (stats.systemTokens ?? 0)
+  const used = stats.tokens + (stats.fixedTokens ?? 0)
   const ceiling = stats.maxInputTokens ? ` of ${stats.maxInputTokens}` : ''
   const lines = [
     `Session ${name}`,
