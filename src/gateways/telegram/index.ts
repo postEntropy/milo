@@ -28,7 +28,7 @@ import type { IncomingFile } from '../../core/media.js'
 import type { ImagePart } from '../../core/providers/types.js'
 import { TelegramMessenger, isNotModified } from './messenger.js'
 import { commandReplyParts } from './reply.js'
-import { toHtml } from './html.js'
+import { toHtml, toPlain } from './html.js'
 import {
   ActionRouter,
   DISABLED_CALLBACK,
@@ -260,6 +260,9 @@ export class TelegramGateway implements Gateway {
               scope,
               session,
               allowlist: this.options.allowlist,
+              // Who is asking decides whether the single-person lock opens: an
+              // allowlist naming this chat is a room, and a room is not one person.
+              userId: ctx.from?.id === undefined ? undefined : String(ctx.from.id),
               signal,
             }),
           )
@@ -330,37 +333,36 @@ export class TelegramGateway implements Gateway {
   /**
    * Most command replies are plain text. A few — `/sessions` — also come with a
    * Markdown rendering, which goes out as an ordinary message in HTML and falls
-   * back to the plain text when the API refuses it. Either way it is split to
+   * back to the words alone when the API refuses it. Either way it is split to
    * the message limit, because a command reply can outgrow one message.
+   *
+   * The fallback resumes at the part that failed. Sending the whole reply again
+   * as plain would repeat every part already delivered, which is what the person
+   * sees as the same paragraphs arriving twice.
    */
   private async reply(
     bot: Bot,
     chatId: string,
     command: CommandResult,
   ): Promise<void> {
-    const { html, plain } = commandReplyParts(command, MAX_LENGTH)
+    const { parts, markdown } = commandReplyParts(command, MAX_LENGTH)
     const replyMarkup = toTelegramKeyboard(command.actions)
-    if (html.length > 0) {
-      try {
-        for (let i = 0; i < html.length; i++) {
-          const part = html[i]
-          const isLast = i === html.length - 1
-          await bot.api.sendMessage(chatId, part, {
-            parse_mode: 'HTML',
-            reply_markup: isLast && replyMarkup ? replyMarkup : undefined,
-          })
+    let html = markdown
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]
+      const isLast = i === parts.length - 1
+      const reply_markup = isLast && replyMarkup ? replyMarkup : undefined
+      if (html) {
+        try {
+          await bot.api.sendMessage(chatId, toHtml(part), { parse_mode: 'HTML', reply_markup })
+          continue
+        } catch {
+          // The API refused the markup. What already went out stays as it is; the
+          // rest of the reply goes as the words alone, never raw Markdown.
+          html = false
         }
-        return
-      } catch {
-        // Fall through to the plain text, which never trips on Markdown syntax.
       }
-    }
-    for (let i = 0; i < plain.length; i++) {
-      const part = plain[i]
-      const isLast = i === plain.length - 1
-      await bot.api.sendMessage(chatId, part, {
-        reply_markup: isLast && replyMarkup ? replyMarkup : undefined,
-      })
+      await bot.api.sendMessage(chatId, toPlain(part), { reply_markup })
     }
   }
 
