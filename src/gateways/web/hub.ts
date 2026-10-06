@@ -487,17 +487,20 @@ export class WebHub {
             try {
               await this.deliver(conversationId, { files })
             } catch (error) {
-              this.broadcast(conversationId, { type: 'error', message: error instanceof Error ? error.message : String(error) })
+              this.reportTurnFailure(conversationId, id, errorMessage(error))
             }
           }
           currentText = inbox.shift() ?? ''
         }
       } catch (error) {
-        status = signal.aborted ? 'stopped' : 'error'
-        this.broadcast(conversationId, {
-          type: 'error',
-          message: error instanceof Error ? error.message : String(error),
-        })
+        // A stop is the person's own doing and needs no explaining; anything else
+        // ended a turn that was working, and has to say so where the work was.
+        if (signal.aborted) {
+          status = 'stopped'
+        } else {
+          status = 'error'
+          this.reportTurnFailure(conversationId, id, errorMessage(error))
+        }
       } finally {
         this.broadcast(conversationId, { type: 'turn-end', id, status })
         const endedConversation = this.conversations.get(conversationId)
@@ -505,6 +508,21 @@ export class WebHub {
       }
     }, () => this.sendState(conversationId))
     this.sendState(conversationId)
+  }
+
+  /**
+   * A turn that died says so where the turn is: on its own message, and written
+   * into the session so a reload still shows why. It is not a transient notice —
+   * that shape is for a frame the server refused, and work that stopped halfway
+   * vanishing without a reason is what makes it look like nothing happened.
+   */
+  private reportTurnFailure(conversationId: string, turnId: string, reason: string): void {
+    this.broadcast(conversationId, { type: 'event', turnId, event: { type: 'error', message: reason } })
+    logWarn(`turn failed on web:${conversationId}: ${reason}`)
+    const session = this.conversations.get(conversationId)?.session
+    void session?.appendNotice(`⚠ the turn failed: ${reason}`).catch((error: unknown) => {
+      logWarn(`could not write down a failed turn: ${errorMessage(error)}`)
+    })
   }
 
   private async command(client: WebClient, conversation: Conversation, text: string, messageId?: string): Promise<void> {

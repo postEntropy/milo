@@ -566,6 +566,10 @@ export class Session {
         yield { type: 'aborted' }
       } else {
         errored = true
+        // One line at the boundary of a turn that did not answer, the daemon
+        // operator's only record of it. A stop is not logged: it is the person's
+        // own doing, and the surfaces already say so.
+        logWarn(`turn failed on ${scopeKey(this.scope)}: ${errorMessage(error)}`)
         yield { type: 'error', message: errorMessage(error) }
       }
     } finally {
