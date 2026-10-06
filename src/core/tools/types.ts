@@ -90,6 +90,16 @@ export interface Tool<A = unknown> {
   name: string
   description: string
   schema: z.ZodType<A>
+  /**
+   * The JSON Schema the model is shown, when it is not derived from `schema`.
+   *
+   * A tool that comes from outside Milo — an MCP server — arrives with its own
+   * schema, and it is sent exactly as it came: converting it into a zod shape to
+   * convert it back would put Milo's reading of someone else's contract in front
+   * of the model. `schema` is then only the local gate on what reaches
+   * `execute`, and this is what the wire carries.
+   */
+  parameters?: Record<string, unknown>
   /** Read-only tools never need confirmation; anything with side effects does by default. */
   readOnly?: boolean
   /**

@@ -14,6 +14,15 @@ export class ToolRegistry {
     this.tools.set(tool.name, tool)
   }
 
+  /**
+   * Takes a tool back out. A tool source whose catalog can change while Milo
+   * runs — an MCP server that restarted with fewer tools — has to be able to
+   * withdraw one, or the model keeps being offered something that is gone.
+   */
+  unregister(name: string): void {
+    this.tools.delete(name)
+  }
+
   get(name: string): Tool<unknown> | undefined {
     return this.tools.get(name)
   }
@@ -30,7 +39,8 @@ export class ToolRegistry {
     return this.list().map((tool) => ({
       name: tool.name,
       description: tool.description,
-      parameters: toJsonSchema(tool.schema),
+      // A tool that brought its own schema keeps it: see `Tool.parameters`.
+      parameters: tool.parameters ?? toJsonSchema(tool.schema),
     }))
   }
 

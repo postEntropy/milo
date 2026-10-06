@@ -3,6 +3,7 @@ import type { SkillLibrary } from '../skills/index.js'
 import type { BrowserSession } from '../browser/index.js'
 import { createBrowserTools } from '../browser/index.js'
 import type { GoogleAccount } from '../config/schema.js'
+import type { McpServers } from '../mcp/servers.js'
 import { editFileTool } from './edit-file.js'
 import { createGmailTools } from './gmail.js'
 import { createDriveTools } from './drive.js'
@@ -97,6 +98,12 @@ export interface ToolRegistryOptions {
    * thing the person can act on — an absent tool is only a silence.
    */
   google?: { account: GoogleAccount | null } | null
+  /**
+   * The external servers, when any are configured. What is registered from them
+   * is the cache of what they last said — the connection is the manager's own
+   * business, started in the background and never waited for here.
+   */
+  mcp?: McpServers | null
 }
 
 /**
@@ -118,5 +125,10 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
     tools.push(...createGmailTools(options.google.account))
     tools.push(...createDriveTools(options.google.account))
   }
-  return new ToolRegistry(tools)
+  const registry = new ToolRegistry(tools)
+  // Added after the built-ins, so the cache the servers bring lands in a registry
+  // that already holds everything Milo ships. No name can collide anyway: every
+  // MCP tool is prefixed `mcp__`.
+  options.mcp?.register(registry)
+  return registry
 }

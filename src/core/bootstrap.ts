@@ -4,6 +4,7 @@ import { browserProfileDir, embedEngineDir, historyDir, memoryDir, recapsDir, se
 import { readAuth, readConfig, resolveProvider, resolveSearchKey, type LoadedConfig, type ResolvedProvider } from './config/load.js'
 import { findPreset } from './config/presets.js'
 import { fileHistory } from './history.js'
+import { createMcpServers } from './mcp/servers.js'
 import { createMemory, embeddingKey, installMemory, TurnIndex } from './memory/index.js'
 import { engineOnDemand } from './memory/provision.js'
 import { addRoutine } from './routines.js'
@@ -72,6 +73,12 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     windowDays: loaded.config.history.windowDays,
   })
 
+  // The external tool servers. The file and the cache of what they last said are
+  // read here, and registering their tools is part of building the registry
+  // below — so the catalog is complete before the first turn without a
+  // subprocess existing yet. `warm()` is what connects them, and nothing waits.
+  const mcp = createMcpServers(cwd)
+
   const store = new FileSessionStore({ dir: sessionsDir() })
   const recaps = new FileRecapStore({ dir: recapsDir() })
   // A run leaves a session behind once it is spoken in, so the directory is
@@ -90,7 +97,9 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   const resolveActive = (id: string): ResolvedProvider | undefined =>
     resolveProvider(readConfig() ?? loaded.config, readAuth(), id)
 
-  return new AgentRuntime({
+  const registry = createToolRegistry({ search, skills, browser, google, mcp })
+
+  const runtime = new AgentRuntime({
     provider: createProvider(loaded.provider, loaded.model),
     // One entry, and the model it is on: `auto` picks its wire from the model
     // id, so a model switched later resolves a provider of its own instead of
@@ -108,7 +117,8 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     model: loaded.model,
     mediaModels: loaded.config.media,
     system: loaded.config.systemPrompt ?? DEFAULT_SYSTEM_PROMPT,
-    registry: createToolRegistry({ search, skills, browser, google }),
+    registry,
+    mcp,
     browser,
     keepSnapshots: loaded.config.browser.keepSnapshots,
     memory: installMemory(
@@ -148,6 +158,14 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
       cwd,
     }),
   })
+
+  // Connecting the servers is not startup work: the first turn already has their
+  // tools from the cache, and an `npx` server takes seconds to answer. The warm
+  // is started here and never awaited, which is the whole reason a configured MCP
+  // server costs nothing at boot.
+  void mcp.warm()
+
+  return runtime
 }
 
 /**

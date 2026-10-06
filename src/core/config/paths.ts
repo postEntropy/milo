@@ -42,3 +42,15 @@ export const routinesFile = (): string => path.join(MILO_HOME, 'routines.json')
 export const taskListsFile = (): string => path.join(MILO_HOME, 'task-lists.json')
 /** What was typed at the CLI's prompt, for the arrow keys to walk back through. */
 export const inputHistoryFile = (): string => path.join(MILO_HOME, 'input-history.json')
+/**
+ * The external tool servers Milo may talk to, one entry each, hand-edited like
+ * the routine list: a server is a command line, which a file says better than a
+ * form does.
+ */
+export const mcpFile = (): string => path.join(MILO_HOME, 'mcp.json')
+/**
+ * What each MCP server last said its tools were. Read at startup, so the catalog
+ * is complete before anything is spawned, and rewritten after every listing that
+ * came back. Derived: deleting it costs one round trip and nothing else.
+ */
+export const mcpCacheFile = (): string => path.join(MILO_HOME, 'mcp-cache.json')

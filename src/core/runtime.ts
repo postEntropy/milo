@@ -1,5 +1,6 @@
 import type { MediaModelsConfig, SessionsConfig } from './config/schema.js'
 import type { BrowserSession } from './browser/index.js'
+import type { McpServers } from './mcp/servers.js'
 import type { HistoryWriter } from './history.js'
 import type { Memory, MemoryScope } from './memory/index.js'
 import { scopeKey } from './memory/index.js'
@@ -77,6 +78,12 @@ export interface RuntimeOptions {
    * the machine to reap.
    */
   browser?: BrowserSession | null
+  /**
+   * The external tool servers. They are processes with lifetimes, like the
+   * browser, so they are let go on the way out instead of being left for the
+   * machine to reap.
+   */
+  mcp?: McpServers | null
   /** How many page snapshots a request may carry; from the browser's config. */
   keepSnapshots?: number
   /** Maximum number of idle sessions kept in memory before older ones are evicted. */
@@ -304,6 +311,12 @@ export class AgentRuntime {
     // failure in one is not a reason to leave the rest of the way out undone.
     await Promise.allSettled([...this.cache.values()].map((session) => session.settle()))
     await this.options.browser?.close()
+    await this.options.mcp?.close()
+  }
+
+  /** The external tool servers, for the surfaces that report them. */
+  get mcp(): McpServers | null {
+    return this.options.mcp ?? null
   }
 
   /** The browser Milo drives, when one is configured. */
