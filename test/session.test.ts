@@ -550,7 +550,7 @@ describe('a session another writer has moved on from', () => {
 
     // Not refused: the stored transcript was taken as the base, and the surface
     // is told it answers from more than it has shown.
-    expect(events).toContainEqual({ type: 'rebased', added: 1, compacted: false })
+    expect(events).toContainEqual({ type: 'rebased', added: 1, removed: 0, compacted: false })
     expect(events.some((event) => event.type === 'error')).toBe(false)
     // And the turn it wrote builds on top of that, rather than replacing it.
     expect((await store.load(record.id))!.messages).toEqual([
@@ -694,7 +694,46 @@ describe('a session another writer summarized away', () => {
     for await (const event of session.send('hello there')) events.push(event)
 
     // Nothing was added, and the context is still not what the screen shows.
-    expect(events).toContainEqual({ type: 'rebased', added: 0, compacted: true })
+    expect(events).toContainEqual({ type: 'rebased', added: 0, removed: 0, compacted: true })
+  })
+
+  it('says the transcript is gone when another writer cleared it', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+    const store = new FileSessionStore({ dir: path.join(dir, 'sessions') })
+    const record = await store.create()
+    record.messages = [
+      { role: 'user', content: [{ type: 'text', text: 'first' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    ]
+    await store.save(record, record.version)
+
+    const provider = new CapturingProvider()
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new SqliteMemory({ dir }),
+      store,
+      scope: { gateway: 'cli', conversationId: 'cleared' },
+      record,
+      cwd: process.cwd(),
+      provider,
+      maxSteps: 4,
+    })
+
+    // The other writer cleared the session while this copy still showed it.
+    const other = (await store.load(record.id))!
+    other.messages = []
+    await store.save(other, other.version)
+
+    const events: AgentEvent[] = []
+    for await (const event of session.send('hello there')) events.push(event)
+
+    // A transcript that shrank is said as plainly as one that grew: the answer
+    // is drawn from less than the screen shows, and silence there leaves the
+    // person reading a conversation the model can no longer see.
+    expect(events).toContainEqual({ type: 'rebased', added: 0, removed: 2, compacted: false })
+    expect(session.messages[0]).toMatchObject({ content: [{ type: 'text', text: 'hello there' }] })
   })
 })
 
@@ -802,7 +841,7 @@ describe('one turn per session', () => {
 
     expect(started).toBe(2)
     // The second turn picked up what the first wrote before answering.
-    expect(secondEvents).toContainEqual({ type: 'rebased', added: 2, compacted: false })
+    expect(secondEvents).toContainEqual({ type: 'rebased', added: 2, removed: 0, compacted: false })
     // It waited, and the wait is bounded: announced before it started, over
     // before the turn was handed anything written elsewhere.
     const kinds = secondEvents.map((event) => event.type)

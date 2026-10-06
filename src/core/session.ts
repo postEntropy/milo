@@ -641,12 +641,18 @@ export class Session {
 
   /**
    * Takes the record read under the lease as the transcript to build on, and
-   * reports how the screen's copy differs: messages it has not shown, and
-   * whether the turns that are gone were summarized away rather than only added
-   * to. Null when nothing visible changed — the ordinary case of one process on
-   * one session, and the reason a turn does not work to reload against itself.
+   * reports how the screen's copy differs: messages it has not shown, messages it
+   * showed and that are gone, and whether the turns that went were summarized
+   * away rather than only added to. Null when this copy is the one on disk — the
+   * ordinary case of one process on one session, and the reason a turn does not
+   * work to reload against itself.
+   *
+   * A transcript that *shrank* is reported as loudly as one that grew. It is the
+   * answer being drawn from less than the screen shows — another terminal's
+   * `/clear`, a fold — and saying nothing there leaves a person reading a
+   * conversation the model can no longer see.
    */
-  private adoptLatest(latest: SessionRecord): { added: number; compacted: boolean } | null {
+  private adoptLatest(latest: SessionRecord): { added: number; removed: number; compacted: boolean } | null {
     if (latest.version === this.baseVersion) return null
     const before = this.messages.length
     // Compared before `summary` is replaced: a summary that was not there, or
@@ -661,8 +667,10 @@ export class Session {
     this.record.updatedAt = Math.max(this.record.updatedAt, latest.updatedAt)
     this.baseVersion = latest.version
     this.record.version = latest.version
-    const added = Math.max(0, this.messages.length - before)
-    return added > 0 || compacted ? { added, compacted } : null
+    const after = this.messages.length
+    const added = Math.max(0, after - before)
+    const removed = Math.max(0, before - after)
+    return added > 0 || removed > 0 || compacted ? { added, removed, compacted } : null
   }
 
   /** Forgets the transcript (and any summary) but keeps the session's identity. */

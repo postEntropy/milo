@@ -2,6 +2,27 @@ import type { SessionStats, SessionSummary } from './types.js'
 
 export const DEFAULT_PAGE_SIZE = 5
 
+/**
+ * What another holder of this session left in it, as one clause every surface
+ * draws: turns that arrived, turns that are gone, and whether the older ones were
+ * summarized. The one that is gone is said as plainly as the one that arrived —
+ * a transcript that shrank in silence is a person reading a conversation the
+ * model can no longer see.
+ */
+export function describeRebase(event: {
+  added: number
+  removed: number
+  compacted: boolean
+}): string {
+  const says: string[] = []
+  if (event.added > 0) says.push(`${event.added} new message${event.added === 1 ? '' : 's'}`)
+  if (event.removed > 0) {
+    says.push(`${event.removed} message${event.removed === 1 ? '' : 's'} dropped elsewhere`)
+  }
+  if (event.compacted) says.push('the earlier turns are summarized')
+  return says.join(' and ')
+}
+
 export interface SessionListStyle {
   /** Render for a surface that understands Markdown (Telegram, Discord). */
   markdown?: boolean

@@ -97,7 +97,7 @@ describe('runTurn', () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'waiting' }
       yield { type: 'waited', ms: 1200 }
-      yield { type: 'rebased', added: 1, compacted: false }
+      yield { type: 'rebased', added: 1, removed: 0, compacted: false }
       yield { type: 'text-delta', delta: 'answer' }
       yield { type: 'done', finishReason: 'stop' }
     }
@@ -117,7 +117,7 @@ describe('runTurn', () => {
 
   it('says when the turns it cannot see were summarized away, not only added to', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
-      yield { type: 'rebased', added: 0, compacted: true }
+      yield { type: 'rebased', added: 0, removed: 0, compacted: true }
       yield { type: 'text-delta', delta: 'answer' }
       yield { type: 'done', finishReason: 'stop' }
     }

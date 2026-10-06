@@ -12,6 +12,7 @@ import { TaskLists } from './tasks/TaskLists.js'
 import { Settings } from './settings/Settings.js'
 import type { ServerFrame, PermissionRequest, SendTarget, TranscriptPart } from '@protocol'
 import { toolText } from '../../src/gateways/tool-line.ts'
+import { describeRebase } from '../../src/core/sessions/format.ts'
 import { Icon } from './ui/Icons.js'
 import { Notice, useAutoDismiss } from './ui/Notice.js'
 import { miloAvatar } from './ui/milo.js'
@@ -370,7 +371,7 @@ export default function App() {
         if (event.type === 'waiting') return { ...message, status: 'Waiting for this session to free up…' }
         if (event.type === 'waited') return { ...message, status: `Session freed after ${formatMs(event.ms)}.` }
         if (event.type === 'compacted') return { ...message, status: `Tidying the context (${formatMs(event.ms)}).` }
-        if (event.type === 'rebased') return { ...message, status: `Session updated by another surface (${event.added} new ${event.added === 1 ? 'message' : 'messages'}).` }
+        if (event.type === 'rebased') return { ...message, status: `Session updated by another surface (${describeRebase(event)}).` }
         if (event.type === 'steer') return { ...message, status: 'Correction received by Milo.' }
         if (event.type === 'error') return { ...message, status: `Error: ${event.message}`, runningTool: undefined }
         if (event.type === 'aborted') return { ...message, status: 'Stopped · the partial reply was kept.', runningTool: undefined }

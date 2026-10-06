@@ -20,4 +20,11 @@ export {
   sliceMessagesUpToTurn,
   summarize,
 } from './compact.js'
-export { DEFAULT_PAGE_SIZE, formatSessionList, formatStats, formatWhen, summarizeRecap } from './format.js'
+export {
+  DEFAULT_PAGE_SIZE,
+  describeRebase,
+  formatSessionList,
+  formatStats,
+  formatWhen,
+  summarizeRecap,
+} from './format.js'

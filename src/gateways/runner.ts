@@ -1,6 +1,7 @@
 import type { Session } from '../core/session.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
 import { formatTodos } from '../core/todos.js'
+import { describeRebase } from '../core/sessions/index.js'
 import { errorMessage } from '../util/errors.js'
 import type { ChatSurface } from './surface.js'
 import type { AudioPart, ImagePart } from '../core/providers/types.js'
@@ -236,10 +237,11 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
           await appendLine('⏳ another Milo is using this session — waiting for it to finish', 'prose')
           break
         // Turns taken elsewhere are in the model's context but not on this
-        // screen — and turns summarized there are in neither. Saying which is
-        // what keeps the answer from reading as if it knew what nobody here saw.
+        // screen — and turns dropped or summarized there are in neither. Saying
+        // which is what keeps the answer from reading as if it knew what nobody
+        // here saw.
         case 'rebased':
-          await appendLine(`↺ another Milo has used this session: ${rebased(event)}`, 'prose')
+          await appendLine(`↺ another Milo has used this session: ${describeRebase(event)}`, 'prose')
           break
         case 'done':
           // A capped answer otherwise looks like a complete one.
@@ -279,14 +281,6 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   // what the first one sent.
   const files = session.takeOutgoing()
   if (files.length > 0) await surface.files(conversationId, files)
-}
-
-/** What another Milo left in this session, as one clause. */
-function rebased(event: { added: number; compacted: boolean }): string {
-  const says: string[] = []
-  if (event.added > 0) says.push(`${event.added} new message${event.added === 1 ? '' : 's'}`)
-  if (event.compacted) says.push('the earlier turns are summarized')
-  return says.join(' and ')
 }
 
 /** The first non-empty line of a thought, flattened. */

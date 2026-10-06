@@ -152,7 +152,7 @@ describe('ChatScreen', () => {
       yield { type: 'waiting' }
       await gate
       yield { type: 'waited', ms: 1200 }
-      yield { type: 'rebased', added: 2, compacted: false }
+      yield { type: 'rebased', added: 2, removed: 0, compacted: false }
       yield { type: 'text-delta', delta: 'carrying on' }
       yield { type: 'done', finishReason: 'stop' }
     }

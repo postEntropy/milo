@@ -25,7 +25,7 @@ export type AgentEvent =
   | { type: 'todo'; items: TodoItem[] }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   | { type: 'compacted'; ms: number }
-  | { type: 'rebased'; added: number; compacted: boolean }
+  | { type: 'rebased'; added: number; removed: number; compacted: boolean }
   | { type: 'waiting' }
   | { type: 'waited'; ms: number }
   | { type: 'steer'; text: string }

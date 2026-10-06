@@ -16,7 +16,7 @@ import {
 import type { AgentRuntime } from '../../../core/runtime.js'
 import { prepareIncoming } from '../../../core/media.js'
 import type { ImagePart } from '../../../core/providers/types.js'
-import { formatWhen, type SessionStats } from '../../../core/sessions/index.js'
+import { describeRebase, formatWhen, type SessionStats } from '../../../core/sessions/index.js'
 import { formatSkillList } from '../../../core/skills/index.js'
 import type { TodoItem } from '../../../core/todos.js'
 import type {
@@ -626,8 +626,8 @@ export function ChatScreen({
             setPhase('thinking')
             push({ kind: 'info', text: `⏳ waited ${formatSeconds(ms / 1000)} for another Milo.` })
           },
-          onRebased: (added, compacted) => {
-            push({ kind: 'info', text: `↺ another Milo has used this session: ${rebased(added, compacted)}.` })
+          onRebased: (event) => {
+            push({ kind: 'info', text: `↺ another Milo has used this session: ${describeRebase(event)}.` })
           },
           onDone: (finishReason) => {
             // A capped answer otherwise looks like a complete one.
@@ -995,8 +995,8 @@ interface EventHandlers {
   onWaiting: () => void
   /** The wait is over, and how long it was. The turn starts here. */
   onWaited: (ms: number) => void
-  /** Turns written elsewhere were loaded into the transcript being answered from. */
-  onRebased: (added: number, compacted: boolean) => void
+  /** The session was not as this copy had it: turns arrived, or went, elsewhere. */
+  onRebased: (event: { added: number; removed: number; compacted: boolean }) => void
   onDone: (finishReason: string) => void
   onAborted: () => void
   onError: (message: string) => void
@@ -1032,7 +1032,7 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
       handlers.onWaited(event.ms)
       break
     case 'rebased':
-      handlers.onRebased(event.added, event.compacted)
+      handlers.onRebased(event)
       break
     case 'done':
       handlers.onDone(event.finishReason)
@@ -1046,14 +1046,6 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
     default:
       break
   }
-}
-
-/** What another Milo left in this session, as one clause. */
-function rebased(added: number, compacted: boolean): string {
-  const says: string[] = []
-  if (added > 0) says.push(`${added} new message${added === 1 ? '' : 's'}`)
-  if (compacted) says.push('the earlier turns are summarized')
-  return says.join(' and ')
 }
 
 function formatTokens(value: number): string {

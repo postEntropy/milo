@@ -22,11 +22,13 @@ export type AgentEvent =
    * This session was not as this copy had it: another Milo used it in between —
    * the same conversation reached from a second terminal, or a daemon — and what
    * it left is now the base of this turn's transcript. `added` counts the
-   * messages the screen has not shown; `compacted` says the turns that are gone
-   * were summarized away rather than only appended to. Nothing is lost quietly:
-   * the surface can say the answer is drawn from more — or less — than it showed.
+   * messages the screen has not shown, `removed` the ones that were on it and are
+   * no longer there (a `/clear` or a fold from elsewhere), and `compacted` says
+   * the turns that are gone were summarized away rather than only appended to.
+   * Nothing is lost quietly: the answer is drawn from more — or less — than the
+   * screen showed, and the surface says which.
    */
-  | { type: 'rebased'; added: number; compacted: boolean }
+  | { type: 'rebased'; added: number; removed: number; compacted: boolean }
   /**
    * Another holder has this session and the turn is waiting for it. Said before
    * the wait, so the quiet is attributed to the wait and not to the model.
