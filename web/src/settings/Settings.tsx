@@ -53,10 +53,35 @@ type SettingsData = {
   skills: Skill[]
   sessions: Array<{ id: string; title?: string; preview: string; updatedAt: number; messageCount: number }>
   memoryStats: MemoryStats
+  mcp: McpReport
   live: { model: string; effort: string; permissionMode: string; skills: Skill[]; browser: boolean }
   google: GoogleReport
 }
 type JobView = { id: string; kind: string; status: 'running' | 'done' | 'error'; lines: string[]; result?: Record<string, unknown>; error?: string }
+/** A server Milo may call tools on, as the screen reports it. The shape is the core's own. */
+type McpServer = {
+  name: string
+  command: string
+  enabled: boolean
+  state: 'idle' | 'connecting' | 'ready' | 'failed'
+  tools: number
+  readOnly: string[]
+  listingAt?: number
+  era?: 'modern' | 'legacy'
+  error?: string
+}
+type McpReport = { file: string; error?: string; servers: McpServer[] }
+
+/** What a server is doing, in one line: the count, and where it came from. */
+function describeMcpServer(server: McpServer): string {
+  if (!server.enabled) return 'Off — its tools are out of the catalog.'
+  const tools = `${server.tools} tool${server.tools === 1 ? '' : 's'}`
+  const listed = server.listingAt ? ` · last listed ${formatWhen(server.listingAt)}` : ''
+  if (server.state === 'ready') return `Connected · ${tools}`
+  if (server.state === 'connecting') return `Connecting… · ${tools} so far`
+  if (server.state === 'failed') return `Not running · ${tools} from the last listing`
+  return server.listingAt ? `${tools} from the last listing${listed}` : 'Not connected yet — Check connects it now.'
+}
 
 /** The display levels as a person reads them; the stored value stays the short form. */
 const TOOL_DETAIL_LABELS: Record<(typeof TOOL_LEVELS)[number], string> = { full: 'Full detail', name: 'Name only', off: 'Hidden' }
@@ -88,6 +113,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   const [browsing, setBrowsing] = useState<string | null>(null)
   const [editingSecret, setEditingSecret] = useState<string | null>(null)
   const [notes, setNotes] = useState<Note[] | null>(null)
+  const [mcp, setMcp] = useState<McpReport | null>(null)
   const [browsers, setBrowsers] = useState<Browser[] | null>(null)
   const [profiles, setProfiles] = useState<Profile[] | null>(null)
 
@@ -120,6 +146,24 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   }, [])
 
   useEffect(() => { if (section === 'memory') void refreshNotes() }, [section, refreshNotes])
+
+  // The report rides along with the overview, and a toggle answers with the new
+  // one — so this only seeds the screen, it never asks a server anything.
+  useEffect(() => { if (data) setMcp(data.mcp) }, [data])
+
+  const reloadMcp = useCallback(async (): Promise<void> => {
+    try {
+      setMcp(await api<McpReport>('mcp-reload'))
+      setNotice({ text: 'mcp.json read again.', error: false })
+    } catch (error) { setNotice({ text: message(error), error: true }) }
+  }, [])
+
+  const toggleMcpServer = useCallback(async (name: string, enabled: boolean): Promise<void> => {
+    try {
+      setMcp(await api<McpReport>('mcp-toggle', { name, enabled }))
+      setNotice({ text: `${enabled ? 'Enabled' : 'Disabled'} ${name}.`, error: false })
+    } catch (error) { setNotice({ text: message(error), error: true }) }
+  }, [])
 
   const currentProvider = draft?.provider ?? ''
   const preset = data?.presets.find((item) => item.id === currentProvider)
@@ -487,6 +531,31 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             <button className="button" type="button" disabled={saving} onClick={() => void startJob('profile-copy', { id: profile.id, dir: profile.dir })}>Copy and use</button>
           </div>))}
           <p className="panel-note">Copying a profile carries the sign-in from the browser you use, so Milo then acts as you on those sites. Close that browser first — a profile in use cannot be copied.</p>
+
+          <h3 className="section-label" style={{ paddingInline: 0 }}>MCP servers</h3>
+          {mcp?.error ? <p className="panel-note">{mcp.error}</p> : null}
+          {!mcp
+            ? <p className="list-empty">Reading…</p>
+            : mcp.servers.length === 0
+              ? <p className="panel-note">No external tool servers. A server is a command line, written in <code className="mono">{mcp.file}</code>.</p>
+              : mcp.servers.map((server) => (
+                <div className="entry-row" key={server.name}>
+                  <div>
+                    <div className="secret-name">{server.name}</div>
+                    <div className="secret-state">{server.command}</div>
+                    <div className="secret-state">{describeMcpServer(server)}</div>
+                    {server.error ? <div className="secret-state">{server.error}</div> : null}
+                  </div>
+                  <div className="button-row">
+                    <button className="button" type="button" disabled={!server.enabled} onClick={() => void startJob('mcp-check', { name: server.name })}>Check</button>
+                    <button className="button" type="button" onClick={() => void toggleMcpServer(server.name, !server.enabled)}>{server.enabled ? 'Disable' : 'Enable'}</button>
+                  </div>
+                </div>
+              ))}
+          <div className="button-row">
+            <button className="button" type="button" onClick={() => void reloadMcp()}>Re-read mcp.json</button>
+          </div>
+          <p className="panel-note">Every tool a server offers arrives as <code className="mono">mcp__server__tool</code>, and it asks before it runs unless the file declares it read-only. Milo starts with what each server last said its tools were and connects in the background, so a server that never answers costs nothing at startup. <span className="mono">{mcp?.file ?? '~/.milo/mcp.json'}</span> is the file; Save below does not touch it.</p>
         </Section>
         <Section title="Permissions" description="The policy applies to tools that can cause effects." active={section === 'permissions'}>
           <div className="form-grid">

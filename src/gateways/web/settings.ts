@@ -21,6 +21,7 @@ import {
   setReasoningEffort,
 } from '../../core/config/load.js'
 import { browserChromeDir, browserProfilesDir, embedEngineDir, memoryDir, skillsDir } from '../../core/config/paths.js'
+import { mcpFile } from '../../core/config/paths.js'
 import {
   ConfigSchema,
   DEFAULT_LOCAL_EMBED_MODEL,
@@ -119,6 +120,9 @@ export class WebSettings {
       case 'run-transcript': return this.runTranscript(body)
       case 'browsers': return this.browsers()
       case 'profiles': return this.profiles()
+      case 'mcp': return this.mcpReport()
+      case 'mcp-reload': return this.mcpReload()
+      case 'mcp-toggle': return this.mcpToggle(body)
       case 'job-start': return this.jobStart(body)
       case 'job-status': return this.jobStatus(body)
       default: throw new Error('Unknown Settings action.')
@@ -131,6 +135,47 @@ export class WebSettings {
     const result = await taskListsTool.execute(parsed.data, { cwd: this.cwd, signal: new AbortController().signal })
     if (result.isError) throw new Error(result.content)
     return { result: result.content, lists: readTaskLists() }
+  }
+
+  /**
+   * The external tool servers as they are right now. Cheap by construction: it
+   * reports state the manager already holds, and starts no process — what a
+   * server is *doing* is asked for by `mcp-check`, which is a job precisely
+   * because it can take seconds.
+   */
+  private mcpReport(): unknown {
+    const mcp = this.runtime.mcp
+    return {
+      file: mcpFile(),
+      ...(mcp?.configError ? { error: mcp.configError } : {}),
+      servers: mcp?.status() ?? [],
+    }
+  }
+
+  /**
+   * Reads `mcp.json` again and connects what is new in it. For an edit made by
+   * hand — which is how a server is added — so the tools arrive without a restart.
+   */
+  private mcpReload(): unknown {
+    const mcp = this.runtime.mcp
+    if (!mcp) throw new Error('This Milo was built without MCP support.')
+    mcp.reload()
+    return this.mcpReport()
+  }
+
+  /**
+   * Turns one server on or off. An immediate write, not a draft: `mcp.json` is
+   * the file, this is the same edit made from here, and Save at the bottom of
+   * the screen belongs to `config.yml`.
+   */
+  private async mcpToggle(body: Record<string, unknown>): Promise<unknown> {
+    const name = optionalText(body.name) ?? ''
+    const enabled = body.enabled === true
+    const mcp = this.runtime.mcp
+    if (!mcp) throw new Error('This Milo was built without MCP support.')
+    if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) throw new Error('Invalid server name.')
+    await mcp.setEnabled(name, enabled)
+    return this.mcpReport()
   }
 
   private async overview(): Promise<unknown> {
@@ -151,6 +196,9 @@ export class WebSettings {
       skills: this.skills(),
       sessions: await this.runtime.listSessions(),
       memoryStats: memoryStatus(memoryDir()),
+      // Reported with everything else, so a server that failed to start is
+      // visible when the screen opens rather than only when it is asked about.
+      mcp: this.mcpReport(),
       live: {
         model: this.runtime.model,
         effort: this.runtime.reasoningEffort,
@@ -576,6 +624,22 @@ export class WebSettings {
           config.browser.enabled = true
         })
         return { profileDir: result.dir, bytes: result.bytes, parts: result.parts, restart: true }
+      }) }
+    }
+
+    if (kind === 'mcp-check') {
+      const name = optionalText(body.name) ?? ''
+      if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) throw new Error('Invalid server name.')
+      const mcp = this.runtime.mcp
+      if (!mcp) throw new Error('This Milo was built without MCP support.')
+      return { id: this.jobs.start(kind, async (say) => {
+        say(`Connecting to ${name}…`)
+        const tools = await mcp.check(name)
+        for (const tool of tools) {
+          const first = tool.description?.split('\n')[0]?.trim()
+          say(`${name}.${tool.name}${first ? ` — ${first}` : ''}`)
+        }
+        return { tools: tools.length, names: tools.map((tool) => tool.name), checkedAt: Date.now() }
       }) }
     }
 

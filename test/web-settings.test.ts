@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { McpServers } from '../src/core/mcp/servers.js'
 import { stringify } from 'yaml'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
@@ -25,6 +26,8 @@ vi.mock('../src/core/skills/sources.js', () => ({
 }))
 
 const { WebSettings } = await import('../src/gateways/web/settings.js')
+const { createMcpServers } = await import('../src/core/mcp/servers.js')
+const { mcpFile } = await import('../src/core/config/paths.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { saveAuth, readConfig } = await import('../src/core/config/load.js')
 
@@ -44,7 +47,10 @@ function writeConfig(): void {
   }))
 }
 
-function build(memory: Record<string, unknown> = {}): InstanceType<typeof AgentRuntime> {
+function build(
+  memory: Record<string, unknown> = {},
+  mcp: McpServers | null = null,
+): InstanceType<typeof AgentRuntime> {
   return new AgentRuntime({
     provider: { id: 'test', stream: async function* () {} },
     model: 'test-model',
@@ -58,6 +64,7 @@ function build(memory: Record<string, unknown> = {}): InstanceType<typeof AgentR
       ...memory,
     } as never,
     cwd: home,
+    mcp,
   })
 }
 
@@ -384,5 +391,80 @@ describe('web provider switching', () => {
 
     await expect(settings.handle('set-provider', { provider: 'other' })).rejects.toThrow(/no key|not configured/)
     expect(runtime.provider.id).toBe('test')
+  })
+})
+
+async function until(condition: () => boolean, ms = 4_000): Promise<void> {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline) {
+    if (condition()) return
+    await new Promise((resolve) => setTimeout(resolve, 25))
+  }
+  throw new Error('the condition never became true')
+}
+
+describe('web Settings MCP servers', () => {
+  const writeMcp = (servers: Record<string, unknown>): void => {
+    writeFileSync(mcpFile(), JSON.stringify({ servers }, null, 2))
+  }
+
+  it('reports the servers the file names, and the file itself', async () => {
+    writeConfig()
+    writeMcp({ notes: { command: 'node', args: ['notes.js'] }, off: { command: 'npx', enabled: false } })
+    const settings = new WebSettings(build({}, createMcpServers(home)), home)
+    const overview = (await settings.handle('overview')) as {
+      mcp: { file: string; servers: Array<{ name: string; command: string; enabled: boolean }> }
+    }
+    expect(overview.mcp.file).toBe(mcpFile())
+    expect(overview.mcp.servers).toEqual([
+      { name: 'notes', command: 'node notes.js', enabled: true, state: 'idle', tools: 0, readOnly: [] },
+      { name: 'off', command: 'npx', enabled: false, state: 'idle', tools: 0, readOnly: [] },
+    ])
+  })
+
+  it('turns a server off in the file from the screen, and answers with the new state', async () => {
+    writeConfig()
+    writeMcp({ notes: { command: 'node' } })
+    const settings = new WebSettings(build({}, createMcpServers(home)), home)
+    const result = (await settings.handle('mcp-toggle', { name: 'notes', enabled: false })) as {
+      servers: Array<{ enabled: boolean }>
+    }
+    expect(result.servers[0]?.enabled).toBe(false)
+    const written = JSON.parse(readFileSync(mcpFile(), 'utf8')) as { servers: Record<string, { enabled: boolean }> }
+    expect(written.servers.notes?.enabled).toBe(false)
+  })
+
+  it('reads the file again, so a server added by hand arrives without a restart', async () => {
+    writeConfig()
+    const entry = (env: Record<string, string>) => ({
+      command: process.execPath,
+      args: [path.join(process.cwd(), 'test', 'fixtures', 'mcp-server.mjs')],
+      env,
+    })
+    writeMcp({ one: entry({ MCP_TOOLS: JSON.stringify([{ name: 'first', description: 'One tool.' }]) }) })
+    const manager = createMcpServers(home)
+    const settings = new WebSettings(build({}, manager), home)
+    try {
+      writeMcp({
+        one: entry({ MCP_TOOLS: JSON.stringify([{ name: 'first', description: 'One tool.' }]) }),
+        two: entry({ MCP_TOOLS: JSON.stringify([{ name: 'a' }, { name: 'b' }, { name: 'c' }]) }),
+      })
+      const result = (await settings.handle('mcp-reload')) as { servers: Array<{ name: string }> }
+      // Reading the file is immediate; connecting is the background warm, so the
+      // new server is listed at once and ready a moment later.
+      expect(result.servers.map((server) => server.name)).toEqual(['one', 'two'])
+      await until(() => manager.status().some((server) => server.name === 'two' && server.tools === 3))
+    } finally {
+      await manager.close()
+    }
+  })
+
+  it('reports a config it cannot read instead of an empty list', async () => {
+    writeConfig()
+    writeFileSync(mcpFile(), '{ "servers": { "notes": { "command": "node", "comand": "typo" } } }')
+    const settings = new WebSettings(build({}, createMcpServers(home)), home)
+    const overview = (await settings.handle('overview')) as { mcp: { error?: string; servers: unknown[] } }
+    expect(overview.mcp.error).toMatch(/has no field named "comand"/)
+    expect(overview.mcp.servers).toEqual([])
   })
 })
