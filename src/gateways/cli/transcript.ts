@@ -1,5 +1,5 @@
 import { theme, type ThemeColor } from './theme.js'
-import { toolIcon } from '../tool-line.js'
+import { toolDisplayName, toolIcon } from '../tool-line.js'
 import { todoMark, type TodoItem } from '../../core/todos.js'
 
 export type LineColor = ThemeColor
@@ -99,12 +99,13 @@ export function buildLines(items: Item[], width: number): Line[] {
         // The same shape as the chat surfaces: icon, name, and the one value
         // worth showing — no JSON dump, and nothing when there is nothing
         // (`/tools name`).
-        const call = item.detail ? `${item.name} ${item.detail}` : item.name
+        const name = toolDisplayName(item.name)
+        const call = item.detail ? `${name} ${item.detail}` : name
         const head = item.ok ? toolIcon(item.name) : '✗'
         for (const text of wrapText(`${head} ${call}`, width)) {
           push(text, {
             color: item.ok ? theme.muted : theme.danger,
-            segments: boldName(text, item.name),
+            segments: boldName(text, name),
           })
         }
         break

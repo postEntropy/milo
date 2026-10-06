@@ -1,3 +1,4 @@
+import { isExternalTool } from '../../../src/gateways/tool-line.ts'
 import type { IconName } from './Icons.js'
 
 /**
@@ -34,5 +35,8 @@ const TOOL_ICONS: Record<string, IconName> = {
 
 /** A tool's mark, and a plain one for a tool this table has never heard of. */
 export function toolIconName(name: string): IconName {
+  // A tool that runs on someone else's server wears the server mark on every
+  // surface that can draw one — the text surfaces wear the plug, per `tool-line.ts`.
+  if (isExternalTool(name)) return 'server'
   return TOOL_ICONS[name] ?? 'settings'
 }

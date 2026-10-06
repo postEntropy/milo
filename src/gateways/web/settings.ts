@@ -22,6 +22,7 @@ import {
 } from '../../core/config/load.js'
 import { browserChromeDir, browserProfilesDir, embedEngineDir, memoryDir, skillsDir } from '../../core/config/paths.js'
 import { mcpFile } from '../../core/config/paths.js'
+import { toolDisplayName } from '../tool-line.js'
 import {
   ConfigSchema,
   DEFAULT_LOCAL_EMBED_MODEL,
@@ -441,7 +442,7 @@ export class WebSettings {
         session: entry.session,
         at: entry.at,
         kind: entry.kind,
-        text: (entry.text ?? entry.reasoning ?? entry.tool?.name ?? '').replace(/\s+/g, ' ').trim().slice(0, 240),
+        text: (entry.text ?? entry.reasoning ?? (entry.tool ? toolDisplayName(entry.tool.name) : '')).replace(/\s+/g, ' ').trim().slice(0, 240),
       })),
     }
   }

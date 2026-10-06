@@ -57,6 +57,17 @@ describe('buildLines', () => {
     expect(lines.map((line) => line.text)).toEqual(['📄 read_file'])
   })
 
+  it('names a tool from an external server by its server and its own name', () => {
+    const lines = buildLines(
+      [{ kind: 'tool', name: 'mcp__github__create_issue', detail: 'leak', ok: true }],
+      40,
+    )
+
+    const line = lines.find((entry) => entry.text.includes('create_issue'))!
+    expect(line.text).toBe('🔌 github: create_issue leak')
+    expect(line.segments?.find((segment) => segment.bold)?.text).toBe('github: create_issue')
+  })
+
   it('bolds the tool name so it does not read as the start of the arguments', () => {
     const lines = buildLines([{ kind: 'tool', name: 'read_file', detail: 'a.txt', ok: true }], 40)
     const line = lines.find((entry) => entry.text.includes('read_file'))!

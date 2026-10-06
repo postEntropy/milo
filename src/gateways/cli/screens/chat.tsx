@@ -37,7 +37,7 @@ import {
 import { isCtrlC, isSteerKey } from '../keys.js'
 import { readInputHistory, saveInputHistory } from '../input-history.js'
 import { theme } from '../theme.js'
-import { showsToolCall, toolDetail } from '../../tool-line.js'
+import { showsToolCall, toolDetail, toolDisplayName } from '../../tool-line.js'
 import { buildLines, padToBottom, visibleWindow, type Item, type Line } from '../transcript.js'
 import { useElapsed } from '../use-elapsed.js'
 import { useTerminalSize } from '../use-terminal-size.js'
@@ -934,7 +934,7 @@ export function ChatScreen({
 
       {permission ? (
         <Box flexDirection="column" paddingX={1}>
-          <Text color={theme.warning}>⚠ Milo wants to run {permission.tool}:</Text>
+          <Text color={theme.warning}>⚠ Milo wants to run {toolDisplayName(permission.tool)}:</Text>
           <Text color={theme.warning}>  {permission.summary}</Text>
           <Text color={theme.muted}>[y] allow · [n] deny</Text>
         </Box>
