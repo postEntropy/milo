@@ -17,6 +17,7 @@ import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.
 import type { MemoryItem } from '../core/memory/index.js'
 import type { TurnQueue } from './turns.js'
 import { buildSessionsList, type ActionRow, type SessionCardItem } from './actions.js'
+import { normalize } from './access.js'
 import { errorMessage } from '../util/errors.js'
 
 export interface CommandContext {
@@ -170,93 +171,104 @@ function describeModels(provider: string, models: ModelInfo[], current: string |
 }
 
 /**
- * A bot that answers several people must not let one of them turn off
- * confirmations for the others. An empty allowlist means anyone, which is the
- * most exposed case of all, so only a single-person bot may switch.
+ * Who is asking, and what this surface answers: the two facts the lock needs.
  */
-export function modeLockMessage(allowlist: string[] | undefined): string | undefined {
-  const count = allowlist?.length ?? 0
-  if (count === 1) return undefined
-  return count === 0
-    ? '🔒 /mode is locked while this bot answers anyone. Add your id in `milo setup` → Gateways, or set the mode there.'
-    : `🔒 /mode is locked while this bot answers ${count} ids. Set the mode in \`milo setup\` on the terminal.`
+export interface LockOptions {
+  /**
+   * The ids this bot accepts, or absent on a surface that has no allowlist at all
+   * — the web chat, whose token is the whole of the authorization.
+   */
+  allowlist?: string[]
+  /** The sender's own id, when the surface has one. */
+  userId?: string
 }
 
 /**
- * Display settings are one value for the whole install, so on a bot that
- * answers several people one of them would be changing what the others see.
- * Same rule as `/mode`: only a single-person bot may do it from the chat.
+ * Whether this caller may change an install-wide setting from the chat, and what
+ * to say when they may not.
+ *
+ * Only a bot that answers **exactly one person** may — and the entry has to be
+ * that person's own id. A list of one that names a room is still a room: everyone
+ * in it passes `isAllowed`, so one member could turn off confirmations or read
+ * the others' sessions. A bot that answers anyone is the most exposed case of all,
+ * and a surface with no allowlist is not a bot and is never locked this way.
  */
-export function displayLockMessage(allowlist: string[] | undefined): string | undefined {
-  const count = allowlist?.length ?? 0
-  if (count === 1) return undefined
-  return count === 0
-    ? '🔒 /tools and /thinking are locked while this bot answers anyone. Set them in `milo setup` → Display.'
-    : `🔒 /tools and /thinking are locked while this bot answers ${count} ids. Set them in \`milo setup\` → Display.`
+function lockedTo(command: string, where: string, options: LockOptions): string | undefined {
+  if (!options.allowlist) return undefined
+  const allowed = normalize(options.allowlist)
+  if (options.userId !== undefined && allowed.size === 1 && allowed.has(options.userId)) {
+    return undefined
+  }
+  const answers =
+    allowed.size === 0
+      ? 'this bot answers anyone'
+      : allowed.size === 1
+        ? 'this bot answers a room rather than one person'
+        : `this bot answers ${allowed.size} ids`
+  return `🔒 ${command} is locked while ${answers}. ${where}`
 }
 
-/**
- * How hard the model thinks is one value for the whole install, and it is what
- * an answer costs — a bill one person raises for everybody. Locked by the same
- * rule as `/mode`: only a bot that answers one person may change it.
- */
-export function effortLockMessage(allowlist: string[] | undefined): string | undefined {
-  const count = allowlist?.length ?? 0
-  if (count === 1) return undefined
-  return count === 0
-    ? '🔒 /effort is locked while this bot answers anyone. Set it in `milo setup` → Display, on the terminal.'
-    : `🔒 /effort is locked while this bot answers ${count} ids. Set it in \`milo setup\` → Display on the terminal.`
+/** One policy for every surface; only the person the bot answers may change it from a chat. */
+export function modeLockMessage(options: LockOptions): string | undefined {
+  return lockedTo(
+    '/mode',
+    'Set the mode in `milo setup` on the terminal, or allow only your own id under Gateways.',
+    options,
+  )
 }
 
-/**
- * The provider is one value for the whole install and it is where every answer
- * is sent and billed, so — like `/effort` — only a bot that answers one person
- * may change it from the chat.
- */
-export function providerLockMessage(allowlist: string[] | undefined): string | undefined {
-  const count = allowlist?.length ?? 0
-  if (count === 1) return undefined
-  return count === 0
-    ? '🔒 /provider is locked while this bot answers anyone. Set the provider in `milo setup` on the terminal.'
-    : `🔒 /provider is locked while this bot answers ${count} ids. Set the provider in \`milo setup\` on the terminal.`
+/** Display settings are one value for the whole install, so one person would change what the others see. */
+export function displayLockMessage(options: LockOptions): string | undefined {
+  return lockedTo(
+    '/tools and /thinking',
+    'Set them in `milo setup` → Display, or allow only your own id under Gateways.',
+    options,
+  )
 }
 
-/**
- * The model decides which provider serves the answer and what it costs, and it
- * is one value for the whole install — so, like `/provider`, only a bot that
- * answers one person may change it from the chat.
- */
-export function modelLockMessage(allowlist: string[] | undefined): string | undefined {
-  const count = allowlist?.length ?? 0
-  if (count === 1) return undefined
-  return count === 0
-    ? '🔒 /model is locked while this bot answers anyone. Set the model in `milo setup` on the terminal.'
-    : `🔒 /model is locked while this bot answers ${count} ids. Set the model in \`milo setup\` on the terminal.`
+/** Effort is what an answer costs — a bill one person raises for everybody. */
+export function effortLockMessage(options: LockOptions): string | undefined {
+  return lockedTo(
+    '/effort',
+    'Set it in `milo setup` → Display on the terminal, or allow only your own id under Gateways.',
+    options,
+  )
 }
 
-/**
- * Sessions are per-person: on a bot that answers several people (or anyone),
- * letting one of them list or switch sessions would expose the others'.
- */
-export function sessionLockMessage(allowlist: string[] | undefined): string | undefined {
-  const count = allowlist?.length ?? 0
-  if (count === 1) return undefined
-  return count === 0
-    ? '🔒 /new, /sessions and /resume are locked while this bot answers anyone. Add your id in `milo setup` → Gateways.'
-    : `🔒 /new, /sessions and /resume are locked while this bot answers ${count} ids. Manage sessions from the CLI.`
+/** The provider is where every answer is sent and billed. */
+export function providerLockMessage(options: LockOptions): string | undefined {
+  return lockedTo(
+    '/provider',
+    'Set the provider in `milo setup` on the terminal, or allow only your own id under Gateways.',
+    options,
+  )
 }
 
-/**
- * Memory is one store for the whole install, so on a bot that answers several
- * people one of them could read — or delete — what the owner told Milo
- * elsewhere. Same rule as `/sessions`: one person, or the terminal.
- */
-export function memoryLockMessage(allowlist: string[] | undefined): string | undefined {
-  const count = allowlist?.length ?? 0
-  if (count === 1) return undefined
-  return count === 0
-    ? '🔒 /memory is locked while this bot answers anyone. Run it in the terminal.'
-    : `🔒 /memory is locked while this bot answers ${count} ids. Run it in the terminal.`
+/** The model decides which provider serves the answer and what it costs. */
+export function modelLockMessage(options: LockOptions): string | undefined {
+  return lockedTo(
+    '/model',
+    'Set the model in `milo setup` on the terminal, or allow only your own id under Gateways.',
+    options,
+  )
+}
+
+/** Sessions are per-person: one member listing or switching them would expose the others'. */
+export function sessionLockMessage(options: LockOptions): string | undefined {
+  return lockedTo(
+    '/new, /sessions and /resume',
+    'Manage sessions from the terminal, or allow only your own id under Gateways.',
+    options,
+  )
+}
+
+/** Memory is one store for the whole install: one member could read — or delete — what the owner told Milo. */
+export function memoryLockMessage(options: LockOptions): string | undefined {
+  return lockedTo(
+    '/memory',
+    'Run it in the terminal, or allow only your own id under Gateways.',
+    options,
+  )
 }
 
 export interface BuildCommandContextOptions {
@@ -264,6 +276,8 @@ export interface BuildCommandContextOptions {
   scope: MemoryScope
   session: Session
   allowlist?: string[]
+  /** The sender, when the surface knows them: what the single-person lock is decided on. */
+  userId?: string
   signal?: AbortSignal
 }
 
@@ -272,7 +286,8 @@ export interface BuildCommandContextOptions {
  * session, display, and memory command handlers across Telegram, Discord, and Web.
  */
 export function buildCommandContext(options: BuildCommandContextOptions): CommandContext {
-  const { runtime, scope, session, allowlist, signal } = options
+  const { runtime, scope, session, allowlist, userId, signal } = options
+  const lock: LockOptions = { allowlist, userId }
   return {
     policy: runtime.permissions,
     resetSession: () => session.clear(),
@@ -280,17 +295,17 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
       runtime.permissions?.setMode(mode)
       setPermissionMode(mode)
     },
-    modeLocked: modeLockMessage(allowlist),
-    sessionLocked: sessionLockMessage(allowlist),
+    modeLocked: modeLockMessage(lock),
+    sessionLocked: sessionLockMessage(lock),
     display: readDisplay(),
     persistDisplay: setDisplay,
-    displayLocked: displayLockMessage(allowlist),
+    displayLocked: displayLockMessage(lock),
     effort: runtime.reasoningEffort,
     persistEffort: (effort) => {
       runtime.setReasoningEffort(effort)
       setReasoningEffort(effort)
     },
-    effortLocked: effortLockMessage(allowlist),
+    effortLocked: effortLockMessage(lock),
     providers: listProviders(),
     currentProvider: runtime.provider.id,
     persistProvider: (id) => {
@@ -298,7 +313,7 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
       setProvider(runtime.provider.id, runtime.model)
       return { provider: runtime.provider.id, name: runtime.providerName, model: runtime.model }
     },
-    providerLocked: providerLockMessage(allowlist),
+    providerLocked: providerLockMessage(lock),
     models: () => listProviderModels(runtime.provider.id),
     currentModel: runtime.model,
     persistModel: (id) => {
@@ -306,7 +321,7 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
       setModel(runtime.model)
       return { model: runtime.model }
     },
-    modelLocked: modelLockMessage(allowlist),
+    modelLocked: modelLockMessage(lock),
     newSession: (title) => runtime.newSession(scope, title),
     resumeSession: async (id) => (await runtime.resumeSession(scope, id)) !== null,
     forkSession: async (targetId, opts) => {
@@ -320,7 +335,7 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
     compactSession: () => session.compact(signal),
     memories: (limit) => session.memories(limit),
     forgetMemory: (id) => session.forget(id),
-    memoryLocked: memoryLockMessage(allowlist),
+    memoryLocked: memoryLockMessage(lock),
   }
 }
 

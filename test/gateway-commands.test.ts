@@ -84,7 +84,7 @@ describe('/memory', () => {
   it('is locked on a bot that answers more than one person', async () => {
     const result = await handleCommand('/memory', {
       memories: async () => notes,
-      memoryLocked: memoryLockMessage(['1', '2']),
+      memoryLocked: memoryLockMessage({ allowlist: ['1', '2'] }),
     })
     expect(result.reply).toContain('locked')
   })
@@ -620,7 +620,7 @@ describe('handleCommand', () => {
 
   it('refuses an effort change on a bot that answers several people', async () => {
     const saved: ReasoningEffort[] = []
-    const locked = effortLockMessage(['1', '2'])!
+    const locked = effortLockMessage({ allowlist: ['1', '2'] })!
     const context = {
       effort: 'low' as const,
       persistEffort: (effort: ReasoningEffort) => saved.push(effort),
@@ -639,7 +639,7 @@ describe('handleCommand', () => {
 
   it('refuses them on a bot that answers several people', async () => {
     const saved: Partial<DisplayConfig>[] = []
-    const locked = displayLockMessage(['1', '2'])!
+    const locked = displayLockMessage({ allowlist: ['1', '2'] })!
     const context = {
       display: { tools: 'full' as const, thinking: 'on' as const },
       persistDisplay: (patch: Partial<DisplayConfig>) => saved.push(patch),
@@ -651,11 +651,27 @@ describe('handleCommand', () => {
     expect(saved).toEqual([])
   })
 
-  it('leaves them open for a single allowed id, and for the terminal', () => {
-    expect(displayLockMessage(['1'])).toBeUndefined()
-    expect(displayLockMessage(undefined)).toBeDefined()
-    expect(displayLockMessage([])).toContain('answers anyone')
-    expect(displayLockMessage(['1', '2'])).toContain('answers 2 ids')
+  it('leaves them open for the one person the bot answers', () => {
+    expect(displayLockMessage({ allowlist: ['1'], userId: '1' })).toBeUndefined()
+  })
+
+  it('locks a list that names a room, because everyone in it passes the gate', () => {
+    expect(displayLockMessage({ allowlist: ['-100123'], userId: '1' })).toContain(
+      'a room rather than one person',
+    )
+  })
+
+  it('locks when the caller is not identified', () => {
+    expect(displayLockMessage({ allowlist: ['1'] })).toContain('a room rather than one person')
+  })
+
+  it('locks a bot that answers anyone, and one that answers several', () => {
+    expect(displayLockMessage({ allowlist: [] })).toContain('answers anyone')
+    expect(displayLockMessage({ allowlist: ['1', '2'], userId: '1' })).toContain('answers 2 ids')
+  })
+
+  it('leaves a surface with no allowlist open: its token is the authorization', () => {
+    expect(displayLockMessage({})).toBeUndefined()
   })
 
   it('reports display settings in /status', async () => {
@@ -672,17 +688,28 @@ describe('handleCommand', () => {
 })
 
 describe('modeLockMessage', () => {
-  it('leaves a single-person bot alone', () => {
-    expect(modeLockMessage(['42'])).toBeUndefined()
+  it('leaves the person the bot answers alone', () => {
+    expect(modeLockMessage({ allowlist: ['42'], userId: '42' })).toBeUndefined()
+  })
+
+  it('locks a one-entry list that names a room', () => {
+    // One allowed chat is not one allowed person: every member of it passes
+    // `isAllowed`, so the mode — confirmations, for all of them — stays put.
+    const locked = modeLockMessage({ allowlist: ['-100123'], userId: '42' })
+    expect(locked).toContain('a room rather than one person')
+    expect(locked).toContain('🔒 /mode')
   })
 
   it('locks a bot that answers anyone', () => {
-    expect(modeLockMessage([])).toContain('anyone')
-    expect(modeLockMessage(undefined)).toContain('anyone')
+    expect(modeLockMessage({ allowlist: [] })).toContain('anyone')
   })
 
   it('locks a shared bot and says how many', () => {
-    expect(modeLockMessage(['42', '43'])).toContain('2 ids')
+    expect(modeLockMessage({ allowlist: ['42', '43'], userId: '42' })).toContain('2 ids')
+  })
+
+  it('leaves a surface with no allowlist open', () => {
+    expect(modeLockMessage({})).toBeUndefined()
   })
 })
 
@@ -730,7 +757,7 @@ describe('/provider', () => {
   })
 
   it('refuses a provider change on a bot that answers several people', async () => {
-    const locked = providerLockMessage(['1', '2'])!
+    const locked = providerLockMessage({ allowlist: ['1', '2'] })!
     const reply = (await handleCommand('/provider openrouter', {
       providers,
       persistProvider: () => ({ provider: 'x', name: 'x', model: 'm' }),
@@ -807,7 +834,7 @@ describe('/model', () => {
   })
 
   it('refuses a model change on a bot that answers several people', async () => {
-    const locked = modelLockMessage(['1', '2'])!
+    const locked = modelLockMessage({ allowlist: ['1', '2'] })!
     const reply = (await handleCommand('/model claude-sonnet-5', {
       persistModel: () => ({ model: 'x' }),
       modelLocked: locked,
@@ -826,32 +853,33 @@ describe('/model', () => {
 })
 
 describe('modelLockMessage', () => {
-  it('leaves a single-person bot alone', () => {
-    expect(modelLockMessage(['42'])).toBeUndefined()
+  it('leaves the person the bot answers alone', () => {
+    expect(modelLockMessage({ allowlist: ['42'], userId: '42' })).toBeUndefined()
   })
 
-  it('locks a bot that answers anyone', () => {
-    expect(modelLockMessage([])).toContain('anyone')
-    expect(modelLockMessage(undefined)).toContain('anyone')
+  it('locks a list that names a room, and one that names anyone', () => {
+    expect(modelLockMessage({ allowlist: ['-100123'], userId: '42' })).toContain('a room')
+    expect(modelLockMessage({ allowlist: [] })).toContain('anyone')
   })
 
   it('locks a shared bot and says how many', () => {
-    expect(modelLockMessage(['42', '43'])).toContain('2 ids')
+    expect(modelLockMessage({ allowlist: ['42', '43'], userId: '42' })).toContain('2 ids')
   })
 })
 
 describe('sessionLockMessage', () => {
-  it('leaves a single-person bot alone', () => {
-    expect(sessionLockMessage(['42'])).toBeUndefined()
+  it('leaves the person the bot answers alone', () => {
+    expect(sessionLockMessage({ allowlist: ['42'], userId: '42' })).toBeUndefined()
   })
 
-  it('locks a bot that answers anyone', () => {
-    expect(sessionLockMessage([])).toContain('anyone')
-    expect(sessionLockMessage(undefined)).toContain('anyone')
+  it('locks a list that names a room, and one that names anyone', () => {
+    // One member listing or switching sessions would read the others'.
+    expect(sessionLockMessage({ allowlist: ['-100123'], userId: '42' })).toContain('a room')
+    expect(sessionLockMessage({ allowlist: [] })).toContain('anyone')
   })
 
   it('locks a shared bot and says how many', () => {
-    expect(sessionLockMessage(['42', '43'])).toContain('2 ids')
+    expect(sessionLockMessage({ allowlist: ['42', '43'], userId: '42' })).toContain('2 ids')
   })
 })
 

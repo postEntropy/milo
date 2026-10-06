@@ -560,6 +560,10 @@ export class WebHub {
       runtime: this.runtime,
       scope: conversation.scope,
       session,
+      // No allowlist, deliberately: this surface is not a bot answering a room.
+      // Whoever holds the token *is* the owner, so the single-person lock — which
+      // exists to keep one member of a chat from changing what the others get —
+      // has nothing to protect here and every setting command stays open.
       signal,
     })
   }

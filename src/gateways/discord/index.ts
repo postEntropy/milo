@@ -290,6 +290,9 @@ export class DiscordGateway implements Gateway {
               scope,
               session,
               allowlist: this.options.allowlist,
+              // Who is asking decides whether the single-person lock opens: an
+              // allowlist naming this channel is a room, and a room is not one person.
+              userId: message.author.id,
               signal,
             }),
           )
