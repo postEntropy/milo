@@ -79,13 +79,22 @@
 
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; }
-body { min-width: 320px; overflow: hidden; }
+/* Fixed, not merely `overflow: hidden`: a phone lets the page scroll itself to
+   bring a focused field out from under the keyboard, and that scroll is a second
+   lift on top of the shell's own shrink — the composer ends up above the keys.
+   With the page pinned, the visual viewport is the only thing that moves, and
+   `--app-height`/`--app-top` are the whole of the correction. */
+body { position: fixed; inset: 0; min-width: 320px; overflow: hidden; }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .45; }
 button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
-.app-shell { position: relative; display: grid; grid-template-columns: 286px minmax(0, 1fr); height: 100dvh; background: var(--bg); }
+/* The shell is the phone's visible area. While the keyboard is up, `--app-height`
+   and `--app-top` are set from the visual viewport (see `lib/viewport.ts`) so the
+   shell shortens with the keys and follows the browser's pan; the moment it closes
+   they are dropped, and `100dvh` at the top of the screen is the shell again. */
+.app-shell { position: relative; inset-block-start: var(--app-top, 0); display: grid; grid-template-columns: 286px minmax(0, 1fr); height: var(--app-height, 100dvh); background: var(--bg); }
 /* iOS 26 Safari stopped reading `theme-color` and now takes the colour of its own
    status bar and address bar from the page: it samples a `position: fixed`
    element that reaches within a few pixels of the viewport edge, is at least 80%

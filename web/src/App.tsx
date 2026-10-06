@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, uploadFile } from './lib/api.js'
 import { randomUUID } from './lib/uuid.js'
+import { trackVisualViewport } from './lib/viewport.js'
 import { MiloSocket, type ConnectionStatus } from './lib/ws.js'
 import { Composer, type ComposerHandle } from './chat/Composer.js'
 import { MessageList, type ChatMessage } from './chat/MessageList.js'
@@ -138,6 +139,10 @@ export default function App() {
     window.addEventListener('resize', updateMessagesTop)
     return () => window.removeEventListener('resize', updateMessagesTop)
   }, [updateMessagesTop])
+
+  // The shell is the phone's visible area, so the keyboard never leaves the
+  // composer stranded above a gap once it closes; see `trackVisualViewport`.
+  useEffect(() => trackVisualViewport(), [])
 
   /** The end of the thread, brought back into view rather than jumped to. */
   const jumpToEnd = useCallback((): void => {
