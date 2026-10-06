@@ -4,6 +4,7 @@ import { DEFAULT_WORKING_DIRECTORY } from '../core/config/paths.js'
 import { loadConfig, readAuth, resolveGatewayToken } from '../core/config/load.js'
 import { MILO_HOME } from '../core/config/paths.js'
 import { readRoutines, RoutineScheduler } from '../core/routines.js'
+import { errorMessage } from '../util/errors.js'
 import type { Gateway } from './types.js'
 
 export interface ServeOptions {
@@ -126,18 +127,78 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   )
 
   let shuttingDown = false
-  const shutdown = async (): Promise<void> => {
-    // A second Ctrl+C is the person insisting: stop waiting for a clean exit.
-    if (shuttingDown) process.exit(0)
-    shuttingDown = true
+  /** Puts the terminal back the way it was found, once we have taken it. */
+  let releaseKeys: (() => void) | undefined
+
+  /** Lets go of everything this run holds. The port is free once it returns. */
+  const stop = async (): Promise<void> => {
+    releaseKeys?.()
+    releaseKeys = undefined
     scheduler.stop()
     for (const gateway of gateways) {
       await gateway.stop().catch(() => undefined)
     }
     // Whatever the runtime still owns goes with it — the recaps in flight.
     await runtime.close().catch(() => undefined)
+  }
+
+  const shutdown = async (): Promise<void> => {
+    // A second Ctrl+C is the person insisting: stop waiting for a clean exit.
+    if (shuttingDown) process.exit(0)
+    shuttingDown = true
+    await stop()
     process.exit(0)
   }
+
+  /**
+   * Starts the run over as a new process — the same node, the same loader (`tsx`
+   * while developing) and the same flags, rebuilt from how this one was started.
+   * Rebuilding the gateways in place would reload the config but keep the code
+   * already loaded, so a source change would not come through; only a fresh
+   * process is a restart that picks one up.
+   */
+  const restart = async (): Promise<void> => {
+    if (shuttingDown) return
+    shuttingDown = true
+    console.error('Restarting…')
+    // The terminal is handed over only once the replacement is up, so a spawn
+    // that fails still leaves this run alive to say so.
+    const { spawn } = await import('node:child_process')
+    const child = spawn(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
+      stdio: 'inherit',
+      env: process.env,
+    })
+    child.once('spawn', () => process.exit(0))
+    child.on('error', (error: unknown) => {
+      console.error(`Could not restart: ${errorMessage(error)}`)
+      process.exit(1)
+    })
+    await stop()
+  }
+
   process.on('SIGINT', () => void shutdown())
   process.on('SIGTERM', () => void shutdown())
+
+  // `r` restarts, while there is a terminal to type into and a person at it. Off
+  // a TTY — a service, a pipe, CI — there is nobody to press it, and raw mode
+  // would only take the terminal away from whoever is reading the log.
+  if (process.stdin.isTTY) {
+    const stdin = process.stdin
+    const wasRaw = stdin.isRaw
+    const onKey = (chunk: Buffer): void => {
+      const key = chunk.toString('utf8')
+      // Raw mode delivers Ctrl+C as a byte rather than as the signal.
+      if (key === '\u0003') void shutdown()
+      else if (/^r$/i.test(key)) void restart()
+    }
+    stdin.setRawMode?.(true)
+    stdin.resume()
+    stdin.on('data', onKey)
+    releaseKeys = () => {
+      stdin.removeListener('data', onKey)
+      stdin.setRawMode?.(wasRaw ?? false)
+      stdin.pause()
+    }
+    console.error('Press r to restart · Ctrl+C to stop')
+  }
 }
