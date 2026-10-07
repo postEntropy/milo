@@ -359,9 +359,9 @@ permissions:
   jevThreshold: 0.35
 
 classifier:
-  backend: commandcode              # commandcode · ollaya · custom
+  backend: commandcode              # commandcode · openai · openrouter · ollaya · custom
   model: typesafe/jev               # absent → the backend's own default
-  url: http://127.0.0.1:11435/v1    # ollaya/custom; the hosted one rides on the provider
+  url: http://127.0.0.1:11435/v1    # ollaya/custom, or an OpenAI/OpenRouter base; the hosted jev rides on the provider
 ```
 
 | Mode | Behavior |
@@ -397,6 +397,14 @@ probability in a single forward pass, no generated text (`dangerous`, against `j
 
 - **`commandcode`** (default) — the hosted `typesafe/jev`, riding on the chat provider. It only exists
   where that provider is a Command Code one; anywhere else `auto` degrades to `ask`.
+- **`openai`** — OpenAI's [Decisions API](https://developers.openai.com/api/docs/guides/decisions), a
+  hosted classifier asked with `gpt-6-luna` (the only model it serves today). It needs a key —
+  `OPENAI_API_KEY`, or the same OpenAI key stored in `milo setup` — and stands on its own, independent
+  of the chat provider. Defaults to `https://api.openai.com/v1`.
+- **`openrouter`** — OpenRouter serves the same TypeSafe decision models (`liquid/d1`, `typesafe/jev`)
+  over the same `/v1/systemone` wire, so it needs no wire of its own. Defaults to
+  `https://openrouter.ai/api/v1` with `typesafe/jev-latest`, and to `OPENROUTER_API_KEY` (or the
+  OpenRouter key stored in `milo setup`).
 - **`ollaya`** — [Ollaya](https://ollaya.dev), a local runtime for open decision models
   (`ollaya serve`, then `backend: ollaya` and a model like `winnow:e4b`, or `laya` on a CPU). Same
   `/v1/systemone` wire, so nothing leaves the machine. Defaults to `http://127.0.0.1:11435/v1`.

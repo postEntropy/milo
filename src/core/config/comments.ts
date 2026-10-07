@@ -60,10 +60,11 @@ export const CONFIG_NOTES: Record<string, string> = {
   'permissions.deny': 'Tools refused outright. Outranked only by yolo.',
   'permissions.jevTimeoutMs': 'Superseded by classifier.timeoutMs; kept so an older file still loads.',
 
-  classifier: 'The decision model an auto-mode review is asked of: hosted jev, a local Ollaya, or your own.',
-  'classifier.backend': 'commandcode (hosted, on the chat provider), ollaya (local, TypeSafe-compatible), or custom.',
-  'classifier.model': 'The model to ask, e.g. winnow:e4b, laya, typesafe/jev. Absent, the backend default.',
-  'classifier.url': 'For ollaya/custom: a TypeSafe-compatible base URL. Absent, Ollaya on 127.0.0.1:11435.',
+  classifier: 'The decision model an auto-mode review is asked of: the hosted jev, OpenAI Decisions, OpenRouter, a local Ollaya, or your own.',
+  'classifier.backend': 'commandcode (hosted, on the chat provider), openai (the Decisions API), openrouter (the same wire, through OpenRouter), ollaya (local, TypeSafe-compatible), or custom.',
+  'classifier.model': 'The model to ask, e.g. typesafe/jev, gpt-6-luna, winnow:e4b, laya. Absent, the backend default.',
+  'classifier.url': 'An endpoint of your own. Absent, the backend default: Ollaya on 127.0.0.1:11435, or the OpenAI or OpenRouter API.',
+  'classifier.keyEnv': 'Which environment variable holds the key. Absent, OPENAI_API_KEY or OPENROUTER_API_KEY, matching the backend.',
   'classifier.timeoutMs': 'Abort a review after this long, then fail closed to asking.',
 
   browser: 'The Chromium Milo drives for its browser tools. Off until it is turned on.',

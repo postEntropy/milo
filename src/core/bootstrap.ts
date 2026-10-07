@@ -1,7 +1,7 @@
 import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
 import { BrowserSession } from './browser/index.js'
 import { browserProfileDir, embedEngineDir, historyDir, memoryDir, recapsDir, sessionsDir, skillsDir } from './config/paths.js'
-import { readAuth, readConfig, resolveProvider, resolveSearchKey, type LoadedConfig, type ResolvedProvider } from './config/load.js'
+import { readAuth, readConfig, resolveClassifierKey, resolveProvider, resolveSearchKey, type LoadedConfig, type ResolvedProvider } from './config/load.js'
 import { findPreset } from './config/presets.js'
 import { fileHistory } from './history.js'
 import { googleState } from './google/state.js'
@@ -16,7 +16,7 @@ import { FileRecapStore, FileSessionStore, pruneSessions } from './sessions/inde
 import { createSearchProvider } from './search/index.js'
 import { ensureSkillsDir, SkillLibrary } from './skills/index.js'
 import { createClassifier, dangerousReviewer } from './classifier/index.js'
-import { OLLAYA_DEFAULT_MODEL, OLLAYA_URL } from './config/schema.js'
+import { OLLAYA_DEFAULT_MODEL, OLLAYA_URL, OPENAI_DECISIONS_MODEL, OPENAI_DECISIONS_URL, OPENROUTER_DECISIONS_MODEL, OPENROUTER_URL, type Auth } from './config/schema.js'
 import { resolveToolPath } from './tools/walk.js'
 import {
   DefaultPermissionPolicy,
@@ -159,7 +159,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
       allow: permissions.allow,
       deny: permissions.deny,
       threshold: permissions.jevThreshold,
-      reviewer: createReviewer(loaded),
+      reviewer: createReviewer(loaded, auth),
       cwd,
     }),
   })
@@ -175,11 +175,12 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
 
 /**
  * The danger reviewer, from whichever decision model the install points at. The
- * hosted one still rides on the chat provider, so it exists only where that model
- * is; a local Ollaya or a custom endpoint stands on its own, independent of the
- * provider the conversation runs on. Absent, `auto` degrades to asking.
+ * hosted jev still rides on the chat provider, so it exists only where that model
+ * is; the OpenAI Decisions API, a local Ollaya or a custom endpoint stands on its
+ * own, independent of the provider the conversation runs on. Absent, `auto`
+ * degrades to asking.
  */
-function createReviewer(loaded: LoadedConfig): DangerReviewer | null {
+function createReviewer(loaded: LoadedConfig, auth: Auth): DangerReviewer | null {
   const config = loaded.config.classifier
   // The classifier's own timeout wins; a file that only set the old permission
   // key keeps working, hence the fallback.
@@ -201,18 +202,49 @@ function createReviewer(loaded: LoadedConfig): DangerReviewer | null {
     )
   }
 
-  // ollaya | custom: a TypeSafe-compatible endpoint of its own, so the reviewer
-  // no longer has to live where the chat does.
-  const baseURL = config.url ?? (config.backend === 'ollaya' ? OLLAYA_URL : undefined)
+  // openai: the Decisions API, a hosted classifier of its own, on the OpenAI
+  // wire. It needs a key even though it does not ride on the chat provider.
+  if (config.backend === 'openai') {
+    const apiKey = resolveClassifierKey(config, auth)
+    if (!apiKey) return null
+
+    return dangerousReviewer(
+      createClassifier({
+        baseURL: config.url ?? OPENAI_DECISIONS_URL,
+        apiKey,
+        model: config.model ?? OPENAI_DECISIONS_MODEL,
+        wire: 'openai',
+        timeoutMs,
+      }),
+    )
+  }
+
+  // openrouter | ollaya | custom: a TypeSafe-compatible endpoint of its own, so
+  // the reviewer no longer has to live where the chat does. OpenRouter serves its
+  // decision models over the same wire, so it is a preset over this branch.
+  const baseURL =
+    config.url ??
+    (config.backend === 'openrouter'
+      ? OPENROUTER_URL
+      : config.backend === 'ollaya'
+        ? OLLAYA_URL
+        : undefined)
   if (!baseURL) return null
-  const key = config.keyEnv ? process.env[config.keyEnv]?.trim() : undefined
+
+  const defaultModel =
+    config.backend === 'openrouter'
+      ? OPENROUTER_DECISIONS_MODEL
+      : config.backend === 'ollaya'
+        ? OLLAYA_DEFAULT_MODEL
+        : undefined
 
   return dangerousReviewer(
     createClassifier({
       baseURL,
       // Ollaya accepts any value; it is a local daemon, not a keyed service.
-      apiKey: key || (config.backend === 'ollaya' ? 'local' : undefined),
-      model: config.model ?? (config.backend === 'ollaya' ? OLLAYA_DEFAULT_MODEL : undefined),
+      apiKey:
+        resolveClassifierKey(config, auth) || (config.backend === 'ollaya' ? 'local' : undefined),
+      model: config.model ?? defaultModel,
       timeoutMs,
     }),
   )

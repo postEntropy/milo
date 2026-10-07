@@ -1109,7 +1109,11 @@ describe('SettingsScreen', () => {
     await press(app, '\r')
     await waitFor(app, 'Backend')
 
-    // commandcode → ollaya: the local decision model, no key and no round trip.
+    // commandcode → openai → openrouter → ollaya: the local decision model, no key and no round trip.
+    await press(app, '\r')
+    await waitUntil(() => readData('config.yml').classifier?.backend === 'openai')
+    await press(app, '\r')
+    await waitUntil(() => readData('config.yml').classifier?.backend === 'openrouter')
     await press(app, '\r')
     await waitUntil(() => readData('config.yml').classifier?.backend === 'ollaya')
 

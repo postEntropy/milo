@@ -73,10 +73,18 @@ export const DEFAULT_MEMORY: MemoryConfig = MemorySchema.parse({})
 /**
  * The decision model a review is asked of, and how to reach it. Same shape as
  * `memory.embedding`: a provider, a url, a model. `commandcode` rides on the chat
- * provider (the hosted `typesafe/jev`); `ollaya` and `custom` are a TypeSafe-compatible
- * endpoint of their own, so the classifier no longer has to live where the chat does.
+ * provider (the hosted `typesafe/jev`); `openai` is the Decisions API, a hosted
+ * classifier of its own; `openrouter` is the same TypeSafe wire reached through
+ * OpenRouter; `ollaya` and `custom` are a TypeSafe-compatible endpoint of their
+ * own, so the classifier no longer has to live where the chat does.
  */
-export const CLASSIFIER_BACKENDS = ['commandcode', 'ollaya', 'custom'] as const
+export const CLASSIFIER_BACKENDS = [
+  'commandcode',
+  'openai',
+  'openrouter',
+  'ollaya',
+  'custom',
+] as const
 export type ClassifierBackend = (typeof CLASSIFIER_BACKENDS)[number]
 
 /** The local decision-model daemon (Ollaya), TypeSafe-compatible on this base. */
@@ -84,14 +92,22 @@ export const OLLAYA_URL = 'http://127.0.0.1:11435/v1'
 /** The recommended local model when there is a GPU; `laya` is the CPU one. */
 export const OLLAYA_DEFAULT_MODEL = 'winnow:e4b'
 
+/** OpenAI's Decisions API, a hosted classifier on the OpenAI wire. */
+export const OPENAI_DECISIONS_URL = 'https://api.openai.com/v1'
+/** The only model the Decisions API serves today. */
+export const OPENAI_DECISIONS_MODEL = 'gpt-6-luna'
+
+/** OpenRouter serves decision models over the same `/v1/systemone` wire. */
+export const OPENROUTER_DECISIONS_MODEL = 'typesafe/jev-latest'
+
 export const ClassifierSchema = z.object({
   /** Where the decision model lives. `commandcode` rides on the chat provider. */
   backend: z.enum(CLASSIFIER_BACKENDS).default('commandcode'),
   /** The model to ask. Absent, each backend's own default. */
   model: z.string().optional(),
-  /** For `ollaya`/`custom`: a TypeSafe-compatible base URL. Absent, Ollaya's default. */
+  /** An endpoint of your own, overriding the backend's default base URL. */
   url: z.string().optional(),
-  /** For `custom`: the env var holding the key. Ollaya needs any value. */
+  /** Which env var holds the key. Absent, OPENAI_API_KEY on the `openai` backend. */
   keyEnv: z.string().optional(),
   /** Abort the review after this long, then fail closed to asking. */
   timeoutMs: z.number().int().positive().optional(),

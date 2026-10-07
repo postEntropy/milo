@@ -14,6 +14,8 @@ import {
   DEFAULT_DISPLAY,
   emptyAuth,
   type Auth,
+  type ClassifierBackend,
+  type ClassifierConfig,
   type Config,
   type DisplayConfig,
   type ProviderEntry,
@@ -196,6 +198,28 @@ export function resolveSearchKey(
   if (fromEnv?.trim()) return fromEnv.trim()
   const stored = auth.search[search.provider]
   if (stored?.trim()) return stored.trim()
+  return undefined
+}
+
+/** The env var each backend falls back to when the config names none. */
+const CLASSIFIER_KEY_ENV: Partial<Record<ClassifierBackend, string>> = {
+  openai: 'OPENAI_API_KEY',
+  openrouter: 'OPENROUTER_API_KEY',
+}
+
+/**
+ * The key the classifier asks with: the named env var (or the backend's own
+ * default one) first, then what the install has stored — the same order a chat
+ * provider's key is resolved, so one OpenAI or OpenRouter key serves chat and
+ * decisions alike. Ollaya is a local daemon, not a keyed service, and takes none
+ * here.
+ */
+export function resolveClassifierKey(classifier: ClassifierConfig, auth: Auth): string | undefined {
+  const envName = classifier.keyEnv ?? CLASSIFIER_KEY_ENV[classifier.backend]
+  const fromEnv = envName ? process.env[envName]?.trim() : undefined
+  if (fromEnv) return fromEnv
+  if (classifier.backend === 'openai') return auth.providers.openai?.trim() || undefined
+  if (classifier.backend === 'openrouter') return auth.providers.openrouter?.trim() || undefined
   return undefined
 }
 

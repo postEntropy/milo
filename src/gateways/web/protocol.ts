@@ -5,7 +5,7 @@ export const PROTOCOL_VERSION = 2
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 export const PERMISSION_MODES = ['ask', 'auto', 'yolo'] as const
-export const CLASSIFIER_BACKENDS = ['commandcode', 'ollaya', 'custom'] as const
+export const CLASSIFIER_BACKENDS = ['commandcode', 'openai', 'openrouter', 'ollaya', 'custom'] as const
 export const TOOL_LEVELS = ['full', 'name', 'off'] as const
 export const THINKING_LEVELS = ['on', 'off'] as const
 export const EFFORT_LEVELS = ['low', 'medium', 'high'] as const

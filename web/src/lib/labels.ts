@@ -8,7 +8,7 @@ import type { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVI
 export const EFFORT_LABELS: Record<(typeof EFFORT_LEVELS)[number], string> = { low: 'Low', medium: 'Medium', high: 'High' }
 export const SEARCH_LABELS: Record<(typeof SEARCH_PROVIDERS)[number], string> = { off: 'Off', tavily: 'Tavily', exa: 'Exa', parallel: 'Parallel' }
 export const PERMISSION_LABELS: Record<(typeof PERMISSION_MODES)[number], string> = { ask: 'Ask', auto: 'Auto', yolo: 'YOLO' }
-export const CLASSIFIER_LABELS: Record<(typeof CLASSIFIER_BACKENDS)[number], string> = { commandcode: 'Hosted', ollaya: 'Ollaya', custom: 'Custom' }
+export const CLASSIFIER_LABELS: Record<(typeof CLASSIFIER_BACKENDS)[number], string> = { commandcode: 'Hosted', openai: 'OpenAI', openrouter: 'OpenRouter', ollaya: 'Ollaya', custom: 'Custom' }
 
 /**
  * Where an installed skill came from, as a person reads it: a bundled one is

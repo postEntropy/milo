@@ -26,7 +26,7 @@ type SettingsConfig = {
   google: { enabled: boolean }
   media?: { vision?: string; audio?: string; document?: string }
   permissions: { mode: 'ask' | 'auto' | 'yolo'; allow: string[]; deny: string[]; jevThreshold: number; jevTimeoutMs: number }
-  classifier: { backend: 'commandcode' | 'ollaya' | 'custom'; model?: string; url?: string; keyEnv?: string; timeoutMs?: number }
+  classifier: { backend: 'commandcode' | 'openai' | 'openrouter' | 'ollaya' | 'custom'; model?: string; url?: string; keyEnv?: string; timeoutMs?: number }
   browser: { enabled: boolean; chromePath: string | null; headless: boolean; profileDir: string | null; cdpUrl: string | null; keepSnapshots: number }
   search?: { provider: 'tavily' | 'exa' | 'parallel'; keyEnv?: string }
   systemPrompt?: string
@@ -579,9 +579,9 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             <Field label="Reviewer threshold"><input type="number" min="0" max="1" step="0.05" value={draft.permissions.jevThreshold} onChange={(event) => update(['permissions', 'jevThreshold'], Number(event.target.value))} /><small>Danger score the reviewer tolerates: below it the tool runs, at or above it asks. Default 0.35.</small></Field>
             <Field label="Always-allowed tools"><input value={draft.permissions.allow.join(', ')} onChange={(event) => update(['permissions', 'allow'], splitNames(event.target.value))} /><small>Tool names never asked about. Beats the rules, so it is a blanket yes.</small></Field>
             <Field label="Blocked tools"><input value={draft.permissions.deny.join(', ')} onChange={(event) => update(['permissions', 'deny'], splitNames(event.target.value))} /><small>Tool names refused outright. Outranked only by YOLO.</small></Field>
-            <Field label="Classifier backend"><Select label="Classifier backend" value={draft.classifier.backend} choices={CLASSIFIER_BACKENDS.map((value) => ({ value, label: CLASSIFIER_LABELS[value] }))} onChange={(next) => update(['classifier', 'backend'], next)} /><small>Hosted rides on the chat provider; a local Ollaya or a custom endpoint stands on its own. Applies on the next start.</small></Field>
-            <Field label="Classifier model"><input value={draft.classifier.model ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'model'], event.target.value || undefined)} /><small>The model to ask, e.g. winnow:e4b, laya, typesafe/jev. Empty uses the backend’s default.</small></Field>
-            <Field label="Classifier URL"><input value={draft.classifier.url ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'url'], event.target.value || undefined)} /><small>For Ollaya or Custom: a TypeSafe-compatible base URL. Empty uses Ollaya on 127.0.0.1:11435.</small></Field>
+            <Field label="Classifier backend"><Select label="Classifier backend" value={draft.classifier.backend} choices={CLASSIFIER_BACKENDS.map((value) => ({ value, label: CLASSIFIER_LABELS[value] }))} onChange={(next) => update(['classifier', 'backend'], next)} /><small>Hosted rides on the chat provider; OpenAI, OpenRouter, a local Ollaya or a custom endpoint stands on its own. Applies on the next start.</small></Field>
+            <Field label="Classifier model"><input value={draft.classifier.model ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'model'], event.target.value || undefined)} /><small>The model to ask, e.g. typesafe/jev, gpt-6-luna, winnow:e4b, laya. Empty uses the backend’s default.</small></Field>
+            <Field label="Classifier URL"><input value={draft.classifier.url ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'url'], event.target.value || undefined)} /><small>An endpoint of your own. Empty uses the backend default: Ollaya on 127.0.0.1:11435, or the OpenAI or OpenRouter API.</small></Field>
           </div>
         </Section>
         <Section title="Display" description="Choose what shows in the chat and how much the model thinks." active={section === 'display'}>

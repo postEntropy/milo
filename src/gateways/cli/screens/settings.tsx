@@ -46,6 +46,10 @@ import {
   DEFAULT_LOCAL_EMBED_MODEL,
   OLLAYA_DEFAULT_MODEL,
   OLLAYA_URL,
+  OPENAI_DECISIONS_MODEL,
+  OPENAI_DECISIONS_URL,
+  OPENROUTER_DECISIONS_MODEL,
+  OPENROUTER_URL,
   type Auth,
   type ClassifierBackend,
   type Config,
@@ -114,6 +118,8 @@ const GATEWAYS: GatewayId[] = ['telegram', 'discord']
 /** What a backend answers with when no model is named. */
 function defaultClassifierModel(backend: ClassifierBackend): string {
   if (backend === 'ollaya') return `${OLLAYA_DEFAULT_MODEL} (default)`
+  if (backend === 'openai') return `${OPENAI_DECISIONS_MODEL} (default)`
+  if (backend === 'openrouter') return `${OPENROUTER_DECISIONS_MODEL} (default)`
   if (backend === 'custom') return '—'
   return 'typesafe/jev (default)'
 }
@@ -121,6 +127,8 @@ function defaultClassifierModel(backend: ClassifierBackend): string {
 /** Where a backend reaches its decision model when no url is named. */
 function defaultClassifierUrl(backend: ClassifierBackend): string {
   if (backend === 'ollaya') return `${OLLAYA_URL} (default)`
+  if (backend === 'openai') return `${OPENAI_DECISIONS_URL} (default)`
+  if (backend === 'openrouter') return `${OPENROUTER_URL} (default)`
   // The hosted one rides on the chat provider's own URL.
   return backend === 'custom' ? '— set one' : 'from the provider'
 }
@@ -952,14 +960,14 @@ export function SettingsScreen({
   ]
 
   /**
-   * Where the decision model lives. Only the hosted backend rides on the chat
-   * provider; a local Ollaya or a custom endpoint stands on its own, which is why
-   * this is not a field of the provider.
+   * Where the decision model lives. Only the hosted commandcode backend rides on
+   * the chat provider; OpenAI, OpenRouter, a local Ollaya or a custom endpoint
+   * stands on its own, which is why this is not a field of the provider.
    */
   const classifierItems: MenuItem[] = [
     {
       label: 'Backend',
-      hint: `${config.classifier.backend} (commandcode → ollaya → custom)`,
+      hint: `${config.classifier.backend} (commandcode → openai → openrouter → ollaya → custom)`,
       hintColor: theme.accent,
     },
     {
@@ -1841,8 +1849,8 @@ export function SettingsScreen({
             <Box marginTop={1}>
               <Text color={theme.muted}>
                 The decision model an auto-mode review is asked of. The hosted jev rides on the
-                chat provider; a local Ollaya or a custom endpoint stands on its own. A switch
-                takes effect when Milo next starts.
+                chat provider; OpenAI, OpenRouter, a local Ollaya or a custom endpoint stands on
+                its own. A switch takes effect when Milo next starts.
               </Text>
             </Box>
             <Notices notices={notices} />

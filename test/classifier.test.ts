@@ -46,6 +46,120 @@ describe('Classifier', () => {
     expect(body.model).toBe('winnow:e4b')
   })
 
+  it('speaks the OpenAI Decisions wire when asked to', async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({ answers: [{ type: 'predicate', name: 'dangerous', probability: 0.87 }] }),
+          { status: 200 },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const classifier = new Classifier({
+      baseURL: 'https://api.openai.com/v1',
+      apiKey: 'k',
+      wire: 'openai',
+    })
+    expect(await classifier.reviewDanger('rm -rf /')).toBeCloseTo(0.87)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.openai.com/v1/decisions',
+      expect.objectContaining({
+        headers: expect.objectContaining({ authorization: 'Bearer k' }),
+      }),
+    )
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(body.model).toBe('gpt-6-luna')
+    expect(body.input).toContain('rm -rf /')
+    expect(body.questions).toEqual([
+      { type: 'predicate', name: 'dangerous', instructions: expect.any(String) },
+    ])
+  })
+
+  it('lists a choice question and its options for the Decisions API', async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({
+            answers: [{ type: 'choice', name: 'department', choice: 'billing', confidence: 0.9 }],
+          }),
+          { status: 200 },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const answers = await new Classifier({ baseURL: 'https://x.test/v1', wire: 'openai' }).ask(
+      'a complaint',
+      {
+        department: {
+          type: 'choice',
+          instructions: 'Which department?',
+          criteria: { billing: 'Payments.', shipping: 'Delivery.' },
+        },
+      },
+    )
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(body.questions[0]).toEqual({
+      type: 'choice',
+      name: 'department',
+      instructions: 'Which department?',
+      choices: [
+        { value: 'billing', description: 'Payments.' },
+        { value: 'shipping', description: 'Delivery.' },
+      ],
+    })
+    expect(answers.department).toMatchObject({ choice: 'billing' })
+  })
+
+  it('lists a score question and its ordered levels for the Decisions API', async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({ answers: [{ type: 'score', name: 'urgency', score: 1.4 }] }),
+          { status: 200 },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const answers = await new Classifier({ baseURL: 'https://x.test/v1', wire: 'openai' }).ask(
+      'a ticket',
+      {
+        urgency: {
+          type: 'score',
+          instructions: 'How urgent is this?',
+          criteria: ['can wait', 'this week', 'blocking'],
+        },
+      },
+    )
+
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+    expect(body.questions[0]).toEqual({
+      type: 'score',
+      name: 'urgency',
+      instructions: 'How urgent is this?',
+      levels: [{ label: 'can wait' }, { label: 'this week' }, { label: 'blocking' }],
+    })
+    expect(answers.urgency).toMatchObject({ score: 1.4 })
+  })
+
+  it('fails closed when the decision model refuses to answer', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify({ answers: [{ type: 'refusal', name: 'dangerous' }] }), {
+            status: 200,
+          }),
+      ),
+    )
+
+    await expect(
+      new Classifier({ baseURL: 'https://x.test/v1', wire: 'openai' }).reviewDanger('s'),
+    ).rejects.toThrow(/refused/)
+  })
+
   it('sends no authorization header without a key', async () => {
     const fetchMock = answering(0.1)
     vi.stubGlobal('fetch', fetchMock)

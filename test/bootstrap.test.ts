@@ -113,6 +113,78 @@ describe('createRuntime', () => {
     expect(body.model).toBe('winnow:e4b')
   })
 
+  it('reviews with OpenAI Decisions when its key is set', async () => {
+    const fetchMock = vi.fn(
+      async (_input: string | URL, _init?: RequestInit) =>
+        new Response(
+          JSON.stringify({ answers: [{ type: 'predicate', name: 'dangerous', probability: 0.1 }] }),
+          { status: 200 },
+        ),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+    process.env.MILO_TEST_DECISIONS_KEY = 'sk-test'
+    try {
+      const runtime = createRuntime(
+        loadedConfig('https://api.openai.com/v1', false, false, {
+          backend: 'openai',
+          keyEnv: 'MILO_TEST_DECISIONS_KEY',
+        }),
+        process.cwd(),
+      )
+      expect(await runtime.permissions?.decide(writeTool, { command: 'npm test' })).toBe('allow')
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://api.openai.com/v1/decisions',
+        expect.anything(),
+      )
+      const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+      expect(body.model).toBe('gpt-6-luna')
+      expect(body.questions[0].type).toBe('predicate')
+    } finally {
+      delete process.env.MILO_TEST_DECISIONS_KEY
+    }
+  })
+
+  it('has no OpenAI reviewer without a key', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const runtime = createRuntime(
+      loadedConfig('https://api.openai.com/v1', 'k', false, {
+        backend: 'openai',
+        keyEnv: 'MILO_TEST_NO_SUCH_KEY',
+      }),
+      process.cwd(),
+    )
+    expect(await runtime.permissions?.decide(writeTool, { command: 'npm test' })).toBe('ask')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('reviews through OpenRouter on the same TypeSafe wire', async () => {
+    const fetchMock = noul(0.1)
+    vi.stubGlobal('fetch', fetchMock)
+    process.env.MILO_TEST_OPENROUTER_KEY = 'sk-or'
+    try {
+      const runtime = createRuntime(
+        loadedConfig('https://api.openai.com/v1', false, false, {
+          backend: 'openrouter',
+          keyEnv: 'MILO_TEST_OPENROUTER_KEY',
+        }),
+        process.cwd(),
+      )
+      expect(await runtime.permissions?.decide(writeTool, { command: 'npm test' })).toBe('allow')
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        'https://openrouter.ai/api/v1/systemone',
+        expect.anything(),
+      )
+      const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))
+      expect(body.model).toBe('typesafe/jev-latest')
+    } finally {
+      delete process.env.MILO_TEST_OPENROUTER_KEY
+    }
+  })
+
   it('honors an explicit custom endpoint and model', async () => {
     const fetchMock = noul(0.2)
     vi.stubGlobal('fetch', fetchMock)

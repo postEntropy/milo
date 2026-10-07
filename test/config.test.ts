@@ -144,6 +144,12 @@ describe('the classifier', () => {
 
     expect(readConfig()?.classifier).toMatchObject({ backend: 'ollaya', timeoutMs: 800 })
   })
+
+  it('accepts the OpenAI Decisions backend', () => {
+    writeFileSync(configFile, stringify({ ...base, classifier: { backend: 'openai' } }))
+
+    expect(readConfig()?.classifier.backend).toBe('openai')
+  })
 })
 
 describe('display settings', () => {
