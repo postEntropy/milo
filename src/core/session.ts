@@ -13,7 +13,7 @@ import type { SkillSummary } from './skills/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
 import { describeOutgoing, type OutgoingFile } from './outgoing.js'
 import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
-import type { PermissionAsker, PermissionPolicy, RoutineFn, SendFileFn, ToolRegistry } from './tools/index.js'
+import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, ToolRegistry } from './tools/index.js'
 import { withGrants } from './tools/index.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent } from './agent/loop.js'
@@ -106,11 +106,11 @@ export interface SessionOptions {
   /** Where a turn is written down for later recall. Absent: nothing is logged. */
   history?: HistoryWriter
   /**
-   * Where a routine created in this conversation is filed. Absent on a caller
-   * that cannot make routines — and a routine's own run never gets one, so it
-   * cannot make more.
+   * The install's routine list, for a turn that may read it and change it. Absent
+   * on a caller that cannot touch routines — and a routine's own run never gets
+   * one, so it cannot make, change or drop another.
    */
-  routine?: RoutineFn
+  routine?: RoutineStore
   /**
    * The chat this session's turns deliver files to, when it is not the chat they
    * are already in. Set on a routine's own run, whose target was named when it
@@ -484,8 +484,9 @@ export class Session {
     const remember = (items: MemoryInput[]) => memory.remember(this.scope, items)
     const recall = (query: string, options?: { limit?: number }) =>
       this.recallSessions(query, options)
-    // A routine's own run is the one conversation that must not make routines:
-    // without this, a routine could add routines every time it fires.
+    // A routine's own run is the one conversation that must not touch routines:
+    // without this, a routine could add, change or drop routines every time it
+    // fires.
     const routine = this.scope.gateway === ROUTINE_GATEWAY ? undefined : this.options.routine
     // What this turn asks to send, and whether it has a chat to send it to: the
     // live surface it is talking through, or a routine's named target. A delivery

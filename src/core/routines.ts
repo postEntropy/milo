@@ -370,6 +370,32 @@ export async function addRoutine(input: NewRoutine): Promise<Routine> {
   })
 }
 
+/**
+ * Changes a routine in place and returns it, or undefined when no routine has that
+ * id. The id and the creation time are the store's — a patch cannot move them — and
+ * anything the patch leaves out is kept as it was. `when` and `target` arrive already
+ * resolved, so the caller owns what a schedule or a destination means and this owns
+ * only the file.
+ */
+export async function updateRoutine(
+  id: string,
+  patch: Partial<Omit<Routine, 'id' | 'createdAt'>>,
+): Promise<Routine | undefined> {
+  return changeRoutines((routines) => {
+    const target = routines.find((routine) => routine.id === id)
+    if (!target) return { result: undefined }
+    if (patch.prompt !== undefined) target.prompt = patch.prompt
+    // A name that was set to nothing falls back to the prompt's first words, the
+    // same rule `addRoutine` keeps — so clearing one is a rename, not a lost name.
+    if (patch.name !== undefined) target.name = patch.name.trim() || nameFor(patch.prompt ?? target.prompt)
+    if (patch.when !== undefined) target.when = patch.when
+    if (patch.target !== undefined) target.target = patch.target
+    if (patch.allow !== undefined) target.allow = patch.allow.length > 0 ? patch.allow : undefined
+    if (patch.enabled !== undefined) target.enabled = patch.enabled
+    return { result: target, next: routines }
+  })
+}
+
 export async function removeRoutine(id: string): Promise<boolean> {
   return changeRoutines((routines) => {
     const kept = routines.filter((routine) => routine.id !== id)

@@ -8,7 +8,12 @@ import { googleState } from './google/state.js'
 import { createMcpServers } from './mcp/servers.js'
 import { createMemory, embeddingKey, installMemory, TurnIndex } from './memory/index.js'
 import { engineOnDemand } from './memory/provision.js'
-import { addRoutine } from './routines.js'
+import {
+  addRoutine,
+  readRoutines,
+  removeRoutineWithRuns,
+  updateRoutine,
+} from './routines.js'
 import { createProvider } from './providers/create.js'
 import { lookupContextWindow } from './providers/context.js'
 import { AgentRuntime } from './runtime.js'
@@ -22,6 +27,7 @@ import {
   DefaultPermissionPolicy,
   createToolRegistry,
   type DangerReviewer,
+  type RoutineStore,
 } from './tools/index.js'
 import { errorMessage } from '../util/errors.js'
 import { logWarn } from '../util/log.js'
@@ -100,7 +106,19 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
 
   const registry = createToolRegistry({ search, skills, browser, google, mcp })
 
-  const runtime = new AgentRuntime({
+  // The install's routine list, as the `routine` tool sees it. A removal takes the
+  // runs the routine left behind with it — they are reachable only through it —
+  // which needs the runtime that owns the session store. `runtime` is assigned on
+  // the next statement and the closure reads it when a removal happens, long after.
+  let runtime: AgentRuntime
+  const routines: RoutineStore = {
+    list: readRoutines,
+    create: addRoutine,
+    update: updateRoutine,
+    remove: (id) => removeRoutineWithRuns(runtime, id),
+  }
+
+  runtime = new AgentRuntime({
     provider: createProvider(loaded.provider, loaded.model),
     // One entry, and the model it is on: `auto` picks its wire from the model
     // id, so a model switched later resolves a provider of its own instead of
@@ -142,9 +160,9 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     store,
     recaps,
     history: fileHistory,
-    // A routine the model makes is filed here, not in the session: the list
-    // belongs to the install, and `milo serve` is what runs it.
-    routine: addRoutine,
+    // The routine list the model reads and changes, backed by the install's file;
+    // `milo serve` is what runs it.
+    routine: routines,
     skills,
     sessions: loaded.config.sessions,
     // Where the compaction ceiling comes from: a model's window is not in the

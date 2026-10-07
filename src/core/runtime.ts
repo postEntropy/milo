@@ -8,7 +8,7 @@ import { scopeKey } from './memory/index.js'
 import { DEFAULT_REASONING_EFFORT, type Provider, type ReasoningEffort } from './providers/types.js'
 import type { Skill, SkillLibrary } from './skills/index.js'
 import type { PermissionPolicy } from './tools/index.js'
-import type { RoutineFn, ToolRegistry } from './tools/index.js'
+import type { RoutineStore, ToolRegistry } from './tools/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
 import { Session } from './session.js'
 import {
@@ -65,10 +65,11 @@ export interface RuntimeOptions {
   /** Where turns are logged for later recall; absent means nothing is logged. */
   history?: HistoryWriter
   /**
-   * How a routine is filed when the model makes one. Absent on a runtime that
-   * cannot make routines, in which case the `routine` tool fails cleanly.
+   * The install's routine list, for the model to read and change. Absent on a
+   * runtime that cannot touch routines, in which case the `routine` tool fails
+   * cleanly.
    */
-  routine?: RoutineFn
+  routine?: RoutineStore
   /** Where a model's context window comes from, for the compaction ceiling. */
   lookupContextWindow?: (model: string) => Promise<number | undefined>
   /** How hard the model should think; `medium` unless the config was changed. */

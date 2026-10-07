@@ -23,8 +23,18 @@ export type RecallFn = (query: string, opts?: { limit?: number }) => Promise<Ses
  */
 export type TaskFn = (input: { description: string; prompt: string }) => Promise<ToolResult>
 
-/** How a session hands a tool the ability to add a routine to the install's list. */
-export type RoutineFn = (input: NewRoutine) => Promise<Routine>
+/**
+ * How a session hands a tool the install's routine list: read it, make one, change
+ * one, drop one. One object rather than four functions, so the gate that keeps a
+ * routine's own run out of the list is a single thing to withhold.
+ */
+export interface RoutineStore {
+  list(): Routine[]
+  create(input: NewRoutine): Promise<Routine>
+  /** Absent from the result when no routine has that id; the caller says so. */
+  update(id: string, patch: Partial<Omit<Routine, 'id' | 'createdAt'>>): Promise<Routine | undefined>
+  remove(id: string): Promise<boolean>
+}
 
 /**
  * How a session hands a tool the ability to send a file to the chat this turn
@@ -51,10 +61,10 @@ export interface ToolContext {
    */
   origin?: MemoryScope
   /**
-   * Absent on a context that cannot make routines. A routine's own run is one of
-   * them, so a routine cannot create more routines.
+   * Absent on a context that cannot touch routines. A routine's own run is one of
+   * them, so a routine cannot make, change or drop another.
    */
-  routine?: RoutineFn
+  routine?: RoutineStore
   /**
    * Absent on a context with no chat to send to — the terminal. Present on a
    * live surface, where a file goes to the chat the turn is talking in, and on a

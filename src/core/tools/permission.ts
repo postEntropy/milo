@@ -216,6 +216,18 @@ export function summarizeToolCall(args: unknown): string {
       return `${record.message.trim()}${staging}`
     }
     if (typeof record.path === 'string') return writePreview(record) ?? record.path
+    // Changing or dropping a routine: the id is what it acts on, and a standing
+    // grant is still the half that has to be seen before it is approved.
+    if (record.action === 'remove') {
+      return `Remove routine ${typeof record.id === 'string' ? record.id : ''}`.trim()
+    }
+    if (record.action === 'update') {
+      const granted =
+        Array.isArray(record.allow) && record.allow.length > 0
+          ? `\nUnattended: ${record.allow.join(', ')}`
+          : ''
+      return `Update routine ${typeof record.id === 'string' ? record.id : ''}${granted}`.trim()
+    }
     // A routine: what will be run, and what it may touch with nobody there —
     // approving one without seeing either is not a decision.
     if (typeof record.prompt === 'string' && (record.every !== undefined || record.at !== undefined)) {

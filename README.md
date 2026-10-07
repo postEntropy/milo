@@ -254,7 +254,8 @@ Two things to know before pointing a browser at it:
 A prompt Milo runs on a timer and delivers to a chat, with nobody there when it fires. It opens its own
 conversation, runs the prompt, and posts the answer to the chat you named. Made in chat, in your own
 words — the `routine` tool turns the sentence into one and defaults the destination to the chat you
-said it in — or on the terminal:
+said it in, and the same tool lists them and moves, renames, pauses or removes one by its id — or on
+the terminal:
 
 ```bash
 milo routines add "look at the repo and tell me what moved" --name "daily briefing" \

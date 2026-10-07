@@ -26,6 +26,7 @@ const {
   removeRoutine,
   RoutineScheduler,
   setEnabled,
+  updateRoutine,
   writeRoutines,
 } = await import('../src/core/routines.js')
 const { routinesFile } = await import('../src/core/config/paths.js')
@@ -310,6 +311,42 @@ describe('the store', () => {
 
     expect(await removeRoutine(added.id)).toBe(true)
     expect(findRoutine(added.id)).toBeUndefined()
+  })
+
+  it('changes a routine in place, keeping its id and creation time', async () => {
+    await writeRoutines([])
+    const added = await addRoutine(routine({ name: 'briefing' }))
+
+    const updated = await updateRoutine(added.id, {
+      when: at('09:00', [1, 2, 3, 4, 5]),
+      target: { gateway: 'discord', conversationId: '999' },
+      enabled: false,
+    })
+
+    expect(updated?.id).toBe(added.id)
+    expect(updated?.createdAt).toBe(added.createdAt)
+    expect(updated?.when).toEqual(at('09:00', [1, 2, 3, 4, 5]))
+    expect(updated?.target).toEqual({ gateway: 'discord', conversationId: '999' })
+    expect(updated?.enabled).toBe(false)
+    // What the patch left out is kept as it was.
+    expect(findRoutine(added.id)).toMatchObject({ prompt: 'look at the repo', name: 'briefing' })
+  })
+
+  it('renames, clears the grants, and says nothing about an id it does not have', async () => {
+    await writeRoutines([])
+    const added = await addRoutine({ ...routine(), allow: ['shell_command'] })
+
+    expect((await updateRoutine(added.id, { name: '  the briefing  ' }))?.name).toBe('the briefing')
+    // An empty list clears the grants: the field is gone, not left as [].
+    expect((await updateRoutine(added.id, { allow: [] }))?.allow).toBeUndefined()
+    expect(await updateRoutine('nobody-here-1', { enabled: false })).toBeUndefined()
+  })
+
+  it('falls back to the prompt for a name cleared to nothing', async () => {
+    await writeRoutines([])
+    const added = await addRoutine(routine({ name: 'briefing' }))
+
+    expect((await updateRoutine(added.id, { name: '   ' }))?.name).toBe('look at the repo')
   })
 
   it('writes down the run so a restart can tell', async () => {
