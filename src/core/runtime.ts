@@ -1,5 +1,6 @@
 import type { MediaModelsConfig, SessionsConfig } from './config/schema.js'
 import type { BrowserSession } from './browser/index.js'
+import type { Classifier } from './classifier/index.js'
 import type { GoogleState } from './google/state.js'
 import { mcpFacts, type McpServers } from './mcp/servers.js'
 import type { HistoryWriter } from './history.js'
@@ -57,6 +58,13 @@ export interface RuntimeOptions {
   /** Whether each finished turn is read for facts worth keeping. */
   derive?: boolean
   permissionPolicy?: PermissionPolicy
+  /**
+   * The decision model's client, for a surface that asks it a question of its own —
+   * the inbox sorting mail into labels, say. The permission layer is handed the same
+   * instance through its own reviewer, so the two cannot disagree about the backend.
+   * Absent when no classifier is configured.
+   */
+  classifier?: Classifier | null
   /** Defaults to an in-memory store, which keeps tests off the disk. */
   store?: SessionStore
   /** Where a session's recap is kept, out of its transcript. In-memory by default. */
@@ -358,6 +366,14 @@ export class AgentRuntime {
 
   get permissions(): PermissionPolicy | undefined {
     return this.options.permissionPolicy
+  }
+
+  /**
+   * The decision model's client, for a surface that asks it its own questions. Null
+   * when none is configured, which a caller reads as "no labels today".
+   */
+  get classifier(): Classifier | null {
+    return this.options.classifier ?? null
   }
 
   /** The model the next turn runs on, read per turn by every session. */

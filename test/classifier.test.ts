@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { Classifier, createClassifier, dangerousReviewer } from '../src/core/classifier/index.js'
+import { Classifier, DANGER_QUESTION, createClassifier, dangerousReviewer } from '../src/core/classifier/index.js'
 
 afterEach(() => {
   vi.unstubAllGlobals()
@@ -226,6 +226,21 @@ describe('Classifier', () => {
 
     const classifier = new Classifier({ baseURL: 'https://x.test/v1', timeoutMs: 20 })
     await expect(classifier.reviewDanger('slow')).rejects.toThrow()
+  })
+
+  it('lets one call override the instance timeout', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 30))
+        return new Response(JSON.stringify({ answers: { dangerous: { noul: 0.5 } } }), { status: 200 })
+      }),
+    )
+
+    // The instance would abort at 5ms; this call asks for longer and gets its answer.
+    const classifier = new Classifier({ baseURL: 'https://x.test/v1', timeoutMs: 5 })
+    const answers = await classifier.ask('slow-ish', { dangerous: DANGER_QUESTION }, undefined, 1_000)
+    expect(answers.dangerous).toMatchObject({ noul: 0.5 })
   })
 
   it('hands the permission layer a one-number reviewer', async () => {

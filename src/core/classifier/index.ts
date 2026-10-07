@@ -89,6 +89,7 @@ export class Classifier {
     state: string,
     questions: Record<string, ClassifierQuestion>,
     signal?: AbortSignal,
+    timeoutMs?: number,
   ): Promise<ClassifierAnswers> {
     const key = this.keyFor(state, questions)
     const cached = this.cacheEnabled ? this.cache.get(key) : undefined
@@ -101,7 +102,7 @@ export class Classifier {
     const controller = new AbortController()
     const timeout = setTimeout(
       () => controller.abort(new Error('classifier review timed out')),
-      this.options.timeoutMs ?? DEFAULT_TIMEOUT,
+      timeoutMs ?? this.options.timeoutMs ?? DEFAULT_TIMEOUT,
     )
     const onAbort = () => controller.abort()
     signal?.addEventListener('abort', onAbort, { once: true })
