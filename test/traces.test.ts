@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const home = mkdtempSync(path.join(os.tmpdir(), 'milo-traces-'))
 process.env.MILO_HOME = home
 
-const { fileTraces, TracedProvider, readTraces, traceStatus, trimTraces } = await import(
+const { fileTraces, followTraces, TracedProvider, readTraces, traceStatus, trimTraces } = await import(
   '../src/core/traces.js'
 )
 const { DANGER_QUESTION, Classifier } = await import('../src/core/classifier/index.js')
@@ -134,6 +134,36 @@ describe('TracedProvider', () => {
     ).rejects.toThrow('boom')
 
     expect(seen[0]).toMatchObject({ event: 'model.request', ok: false, error: 'boom', purpose: 'chat' })
+  })
+})
+
+describe('following the log', () => {
+  it('prints the backlog, then each new event as it lands', async () => {
+    fileTraces.record({ at: at('2026-06-01'), event: 'turn', ok: true, ms: 1 })
+    const lines: string[] = []
+    const controller = new AbortController()
+    const running = followTraces({
+      out: (line) => lines.push(line),
+      backlog: 1,
+      intervalMs: 5,
+      signal: controller.signal,
+    })
+
+    await vi.waitFor(() => expect(lines).toHaveLength(1))
+
+    fileTraces.record({ at: at('2026-06-02'), event: 'tool.call', ok: true, ms: 2, tool: 'read_file' })
+    await vi.waitFor(() => expect(lines).toHaveLength(2))
+
+    controller.abort()
+    await running
+    expect(lines.map((line) => JSON.parse(line).event)).toEqual(['turn', 'tool.call'])
+  })
+
+  it('stops when the signal aborts', async () => {
+    const controller = new AbortController()
+    const running = followTraces({ out: () => {}, intervalMs: 5, signal: controller.signal })
+    controller.abort()
+    await expect(running).resolves.toBeUndefined()
   })
 })
 

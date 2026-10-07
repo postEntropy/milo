@@ -818,7 +818,8 @@ at each caller. The classifier is a client of its own and is timed where it runs
 
 The log is on by default (`traces.enabled`); `false` turns it off and nothing else changes. It is never
 trimmed on its own — `milo log` reports what it holds (`status`), shows the last few events (`tail [n]`),
-and `milo log trim --older-than <days>` (or `--before <date>`) drops the old ones.
+follows new ones live (`milo log -f [n]`, Ctrl+C to stop), and `milo log trim --older-than <days>` (or
+`--before <date>`) drops the old ones.
 
 ## Memory
 

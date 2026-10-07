@@ -1,4 +1,4 @@
-import { appendFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { errorMessage } from '../util/errors.js'
 import { logWarn } from '../util/log.js'
@@ -204,4 +204,97 @@ function parseLines(raw: string): TraceEvent[] {
     }
   }
   return events
+}
+
+export interface FollowOptions {
+  /** Called with each event, as a JSON line: the backlog first, then the new ones. */
+  out(line: string): void
+  /** How many recent events to print before following. Zero means follow only. */
+  backlog?: number
+  /** How often the file is checked for new lines. Defaults to 400ms. */
+  intervalMs?: number
+  /** Stops the follow. `milo log -f` passes the one Ctrl+C aborts. */
+  signal?: AbortSignal
+}
+
+const DEFAULT_FOLLOW_INTERVAL_MS = 400
+
+/**
+ * Prints the log as it grows, the way `tail -f` does: the backlog `limit` events
+ * first, then every line appended after that, until `signal` aborts.
+ *
+ * Polled rather than watched: the file is append-only and quoted by size, so a
+ * read from the last offset is exact, and a rewrite (`milo log trim`, which
+ * shrinks it) is noticed where `fs.watch` would only fire unreliably and
+ * differently on each platform. A half-written line is held back until the rest
+ * of it lands, so a torn read never prints half an event.
+ */
+export async function followTraces(options: FollowOptions): Promise<void> {
+  const file = tracesFile()
+  const backlog = options.backlog ?? 0
+  if (backlog > 0) for (const event of readTraces({ limit: backlog })) options.out(JSON.stringify(event))
+
+  const interval = options.intervalMs ?? DEFAULT_FOLLOW_INTERVAL_MS
+  let offset = sizeOf(file)
+  let leftover = ''
+
+  await new Promise<void>((resolve) => {
+    const timer = setInterval(() => {
+      const size = sizeOf(file)
+      // Shrunk means it was rewritten under us: the new content is what is left
+      // after a trim, so start past it rather than reprinting what was seen.
+      if (size < offset) {
+        offset = size
+        leftover = ''
+        return
+      }
+      if (size <= offset) return
+      const chunk = readFrom(file, offset)
+      offset = chunk.next
+      const lines = (leftover + chunk.text).split('\n')
+      leftover = lines.pop() ?? ''
+      for (const line of lines) if (line.trim() !== '') options.out(line)
+    }, interval)
+
+    const stop = () => {
+      clearInterval(timer)
+      options.signal?.removeEventListener('abort', stop)
+      resolve()
+    }
+    options.signal?.addEventListener('abort', stop, { once: true })
+    if (options.signal?.aborted) stop()
+  })
+}
+
+/** The file's size, or zero when it is not there yet. */
+function sizeOf(file: string): number {
+  try {
+    return statSync(file).size
+  } catch {
+    return 0
+  }
+}
+
+/** The bytes from `offset` to the current end, decoded. Empty when there are none. */
+function readFrom(file: string, offset: number): { text: string; next: number } {
+  let fd: number
+  try {
+    fd = openSync(file, 'r')
+  } catch {
+    return { text: '', next: offset }
+  }
+  try {
+    const { size } = fstatSync(fd)
+    if (size <= offset) return { text: '', next: offset }
+    const buffer = Buffer.alloc(size - offset)
+    let read = 0
+    while (read < buffer.length) {
+      const n = readSync(fd, buffer, read, buffer.length - read, offset + read)
+      if (n <= 0) break
+      read += n
+    }
+    return { text: buffer.subarray(0, read).toString('utf8'), next: offset + read }
+  } finally {
+    closeSync(fd)
+  }
 }

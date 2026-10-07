@@ -2,7 +2,7 @@ import process from 'node:process'
 import { createInterface } from 'node:readline/promises'
 import { tracesFile } from '../core/config/paths.js'
 import { dayOf } from '../core/history.js'
-import { readTraces, traceStatus, trimTraces, type TraceEvent } from '../core/traces.js'
+import { followTraces, readTraces, traceStatus, trimTraces, type TraceEvent } from '../core/traces.js'
 import { errorMessage } from '../util/errors.js'
 import { humanSize, shortenPath } from '../util/format.js'
 
@@ -16,11 +16,13 @@ const USAGE = [
   'Usage:',
   '  milo log                              what the execution log holds',
   '  milo log tail [n]                     the last n events (20 by default)',
+  '  milo log -f [n]                       print new events as they land, then follow',
   '  milo log trim --older-than <days>     drop events from before that',
   '  milo log trim --before <YYYY-MM-DD>   drop events from before that day',
   '',
   'Options:',
-  '  --yes   skip the confirmation',
+  '  -f, --follow   print new events as they land (Ctrl+C to stop)',
+  '  --yes          skip the confirmation',
 ].join('\n')
 
 /**
@@ -34,9 +36,17 @@ export async function runLog(argv: string[], io: Partial<LogIo> = {}): Promise<n
   const confirm = io.confirm ?? askOnTty
 
   const args = argv[0] === 'log' ? argv.slice(1) : argv
-  const [command, ...rest] = args
+  // `-f` is an option, not a subcommand, and it may sit anywhere: `milo log -f 20`
+  // and `milo log tail -f 20` mean the same — the last 20, then follow.
+  const cleaned = args.filter((token) => token !== '-f' && token !== '--follow')
+  const flagged = cleaned.length !== args.length
+  const [command, ...rest] = cleaned
 
   try {
+    if (flagged || command === 'follow') {
+      const backlog = Number(cleaned.find((token) => /^\d+$/.test(token)) ?? 0)
+      return await follow(backlog, out, err)
+    }
     switch (command ?? 'status') {
       case 'status':
       case 'list':
@@ -57,6 +67,23 @@ export async function runLog(argv: string[], io: Partial<LogIo> = {}): Promise<n
     err(errorMessage(error))
     return 1
   }
+}
+
+/** `milo log -f`: the backlog, then each new event, until Ctrl+C stops it. */
+async function follow(backlog: number, out: LogIo['out'], err: LogIo['err']): Promise<number> {
+  // The notice goes to stderr, so `milo log -f | jq` sees nothing but events.
+  err(`Following ${shortenPath(tracesFile(), process.env.HOME ?? '')} — Ctrl+C to stop.`)
+  const controller = new AbortController()
+  const stop = (): void => controller.abort()
+  process.once('SIGINT', stop)
+  process.once('SIGTERM', stop)
+  try {
+    await followTraces({ backlog, out, signal: controller.signal })
+  } finally {
+    process.removeListener('SIGINT', stop)
+    process.removeListener('SIGTERM', stop)
+  }
+  return 0
 }
 
 function status(out: LogIo['out']): number {

@@ -33,7 +33,7 @@ Usage:
   milo model                 Choose the provider/model (setup wizard)
   milo skills                Install, list and remove skills (list | available | find | add | remove)
   milo history               What the history log costs (status | trim)
-  milo log                   What the execution log holds (status | tail | trim)
+  milo log                   What the execution log holds (status | tail | follow | trim)
   milo routines              The prompts Milo runs on a timer (list | add | remove | enable | run)
   milo google                Connect a Google account, read-only (connect | status | forget)
   milo mcp                   The external tool servers (list | check | enable | disable)
