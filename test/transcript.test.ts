@@ -13,7 +13,7 @@ describe('wrapText', () => {
 })
 
 describe('buildLines', () => {
-  it('prefixes user lines and colors tool/error lines', () => {
+  it("wraps user lines in the composer's band, and colors tool/error lines", () => {
     const lines = buildLines(
       [
         { kind: 'user', text: 'hi' },
@@ -23,7 +23,9 @@ describe('buildLines', () => {
       40,
     )
 
-    expect(lines[0]).toMatchObject({ text: '› hi', color: theme.accent })
+    // The person's own line is a filled stripe, like the composer: the surface
+    // behind it, and the text drawn on that surface.
+    expect(lines[0]).toMatchObject({ text: '› hi', color: theme.surfaceText, background: theme.surface })
     expect(lines.find((line) => line.text.includes('read_file'))).toMatchObject({
       color: theme.muted,
     })
