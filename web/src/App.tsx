@@ -9,6 +9,7 @@ import { buildSuggestions } from './chat/suggestions.js'
 import { Permissions } from './chat/Permissions.js'
 import { Routines } from './routines/Routines.js'
 import { TaskLists } from './tasks/TaskLists.js'
+import { Email } from './email/Email.js'
 import { Settings } from './settings/Settings.js'
 import type { ServerFrame, PermissionRequest, SendTarget, TranscriptPart } from '@protocol'
 import { toolText } from '../../src/gateways/tool-line.ts'
@@ -23,10 +24,10 @@ type SessionGroup = { label: string; sessions: SessionSummary[] }
 /** A past turn the search box found, with the session it belongs to. */
 type HistoryHit = { session: string; at: string; kind: string; text: string }
 
-type View = 'chat' | 'settings' | 'routines' | 'tasks'
+type View = 'chat' | 'settings' | 'routines' | 'tasks' | 'email'
 
 /** The address each screen lives at, so a link can be shared and Back works. */
-const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', tasks: '/tasks', settings: '/settings' }
+const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', tasks: '/tasks', email: '/email', settings: '/settings' }
 
 const settingsSections = [
   ['provider', 'cpu', 'Provider & model'], ['keys', 'key', 'API keys'], ['memory', 'database', 'Memory'],
@@ -45,10 +46,23 @@ function settingsSectionFromPath(pathname: string): string | null {
 function viewFromPath(pathname: string): View {
   const path = pathname.replace(/\/+$/, '') || '/'
   if (path === VIEW_PATH.settings || settingsSectionFromPath(path)) return 'settings'
+  if (path === VIEW_PATH.email || path.startsWith(`${VIEW_PATH.email}/`)) return 'email'
   for (const [view, at] of Object.entries(VIEW_PATH) as Array<[View, string]>) {
     if (at === path) return view
   }
   return 'chat'
+}
+
+/**
+ * What the Email screen is showing, from its own path: null is the inbox, `new`
+ * the composer, anything else a thread id. It lives in the address bar so the
+ * browser's Back leaves a thread for the inbox instead of leaving the app.
+ */
+function emailRouteFromPath(pathname: string): string | null {
+  const path = pathname.replace(/\/+$/, '') || '/'
+  if (path === VIEW_PATH.email) return null
+  const match = /^\/email\/(.+)$/.exec(path)
+  return match ? decodeURIComponent(match[1]!) : null
 }
 
 export default function App() {
@@ -77,6 +91,8 @@ export default function App() {
   const [identity, setIdentity] = useState({ provider: 'milo', providerName: 'Milo', model: '' })
   const [connection, setConnection] = useState<ConnectionStatus>({ state: 'connecting' })
   const [view, setView] = useState<View>(() => viewFromPath(location.pathname))
+  /** The Email screen's place within its own path: null inbox, `new` compose, else a thread. */
+  const [emailRoute, setEmailRoute] = useState<string | null>(() => emailRouteFromPath(location.pathname))
   const [settingsSection, setSettingsSection] = useState(() => settingsSectionFromPath(location.pathname) ?? 'provider')
   /** Whether the settings hold edits that were never saved. */
   const [settingsDirty, setSettingsDirty] = useState(false)
@@ -180,7 +196,11 @@ export default function App() {
    * section pushes a step; the Back button reads the path back.
    */
   useEffect(() => {
-    const target = view === 'settings' ? `/settings/${settingsSection}` : VIEW_PATH[view]
+    const target = view === 'settings'
+      ? `/settings/${settingsSection}`
+      : view === 'email' && emailRoute
+        ? `${VIEW_PATH.email}/${encodeURIComponent(emailRoute)}`
+        : VIEW_PATH[view]
     if (location.pathname === target) return
     // A bare `/settings` is the provider section written shorter: normalize it in
     // place, so Back never lands on a sectionless URL that would push again.
@@ -189,13 +209,14 @@ export default function App() {
       return
     }
     window.history.pushState(null, '', target)
-  }, [view, settingsSection])
+  }, [view, settingsSection, emailRoute])
 
   useEffect(() => {
     const fromPath = (): void => {
       setView(viewFromPath(location.pathname))
       const section = settingsSectionFromPath(location.pathname)
       if (section) setSettingsSection(section)
+      setEmailRoute(emailRouteFromPath(location.pathname))
     }
     window.addEventListener('popstate', fromPath)
     return () => window.removeEventListener('popstate', fromPath)
@@ -762,6 +783,7 @@ export default function App() {
         <div className="sidebar-pad">
           <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={16} /><span>Routines</span></button>
           <button className={`sidebar-tab ${view === 'tasks' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'tasks' ? 'chat' : 'tasks'); setSidebarOpen(false) }}><Icon name="list-check" size={16} /><span>Task lists</span></button>
+          <button className={`sidebar-tab ${view === 'email' ? 'active' : ''}`} type="button" onClick={() => { setEmailRoute(null); setView(view === 'email' ? 'chat' : 'email'); setSidebarOpen(false) }}><Icon name="mail" size={16} /><span>Email</span></button>
           <div className="sidebar-controls">
             <label className="sidebar-search"><Icon name="search" size={16} /><input aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
             <button className="new-chat" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>
@@ -798,7 +820,7 @@ export default function App() {
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
         <button className="sidebar-expand" type="button" aria-label="Show sidebar" title="Show sidebar" onClick={() => setSidebarCollapsed(false)}><Icon name="panel-left" size={17} /></button>
-        <div className="topbar-title"><h1>{view === 'settings' ? 'Settings' : view === 'routines' ? 'Routines' : view === 'tasks' ? 'Task lists' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
+        <div className="topbar-title"><h1>{view === 'settings' ? 'Settings' : view === 'routines' ? 'Routines' : view === 'tasks' ? 'Task lists' : view === 'email' ? 'Email' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
         <div className="topbar-actions">
           {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>}
           {view === 'chat' && connection.state !== 'online' && <span className={`connection-status ${connection.state}`} title={connection.reason}><span />{connection.state === 'refused' ? 'Disconnected' : connection.state === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
@@ -826,6 +848,8 @@ export default function App() {
         ? <Routines conversationId={conversationId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
+        : view === 'email'
+        ? <Email route={emailRoute} onRoute={setEmailRoute} />
         : <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>
             <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} />

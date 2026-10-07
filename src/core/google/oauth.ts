@@ -10,18 +10,39 @@ import { createHash, randomBytes } from 'node:crypto'
 import { createServer } from 'node:http'
 import type { GoogleAccount } from '../config/schema.js'
 import { errorMessage } from '../../util/errors.js'
+import type { GoogleAccess } from './tiers.js'
 
 export const AUTH_ENDPOINT = 'https://accounts.google.com/o/oauth2/v2/auth'
 export const TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token'
 
 /**
- * The narrowest scopes that still do the job. `gmail.metadata` is narrower and
- * cannot take a `q`; `drive.metadata.readonly` would list files without reading
- * one. Nothing here writes, and no write scope is ever asked for.
+ * The scopes, by what each buys. Reading is the base — `gmail.metadata` is
+ * narrower and cannot take a `q`, and `drive.metadata.readonly` would list files
+ * without reading one — and the write scopes are added one tier at a time, so a
+ * grant never asks for more than the person chose. `scopesFor` is the only place
+ * the list is assembled, and it has no default: nothing can request a grant
+ * without naming the level.
  */
 export const GMAIL_READONLY = 'https://www.googleapis.com/auth/gmail.readonly'
 export const DRIVE_READONLY = 'https://www.googleapis.com/auth/drive.readonly'
-export const GOOGLE_SCOPES = [GMAIL_READONLY, DRIVE_READONLY]
+export const GMAIL_MODIFY = 'https://www.googleapis.com/auth/gmail.modify'
+export const GMAIL_COMPOSE = 'https://www.googleapis.com/auth/gmail.compose'
+export const GMAIL_SEND = 'https://www.googleapis.com/auth/gmail.send'
+
+/** The read-only base every grant starts from: mail and files, nothing changed. */
+export const GOOGLE_READ_SCOPES = [GMAIL_READONLY, DRIVE_READONLY]
+
+/** The scopes a grant at `access` asks Google for, cumulatively. */
+export function scopesFor(access: GoogleAccess): string[] {
+  const scopes = [...GOOGLE_READ_SCOPES]
+  if (access === 'none') return scopes
+  scopes.push(GMAIL_MODIFY)
+  if (access === 'modify') return scopes
+  scopes.push(GMAIL_COMPOSE)
+  if (access === 'compose') return scopes
+  scopes.push(GMAIL_SEND)
+  return scopes
+}
 
 export interface GoogleTokens {
   accessToken: string
@@ -46,12 +67,17 @@ export function newVerifier(): string {
 }
 
 /** Where the person is sent to say yes — the state parameter is not, the PKCE verifier is. */
-export function consentUrl(request: { clientId: string; redirectUri: string; verifier: string }): string {
+export function consentUrl(request: {
+  clientId: string
+  redirectUri: string
+  verifier: string
+  access: GoogleAccess
+}): string {
   const url = new URL(AUTH_ENDPOINT)
   url.searchParams.set('client_id', request.clientId)
   url.searchParams.set('redirect_uri', request.redirectUri)
   url.searchParams.set('response_type', 'code')
-  url.searchParams.set('scope', GOOGLE_SCOPES.join(' '))
+  url.searchParams.set('scope', scopesFor(request.access).join(' '))
   url.searchParams.set('code_challenge', challengeFor(request.verifier))
   url.searchParams.set('code_challenge_method', 'S256')
   // `offline` is what asks for a refresh token at all, and `consent` is what makes
@@ -80,6 +106,7 @@ const FAILED_PAGE = `<!doctype html><meta charset="utf-8"><title>Milo</title>
 export async function awaitCode(request: {
   clientId: string
   verifier: string
+  access: GoogleAccess
   onUrl(url: string): void
   timeoutMs?: number
 }): Promise<GoogleOutcome<{ code: string; redirectUri: string }>> {
@@ -120,7 +147,7 @@ export async function awaitCode(request: {
         if (code) finish({ ok: true, value: code })
         else finish({ ok: false, error: `Google refused the consent: ${refused ?? 'no code came back'}` })
       })
-      request.onUrl(consentUrl({ clientId: request.clientId, redirectUri, verifier: request.verifier }))
+      request.onUrl(consentUrl({ clientId: request.clientId, redirectUri, verifier: request.verifier, access: request.access }))
     })
     if (!answer.ok) return answer
     return { ok: true, value: { code: answer.value, redirectUri } }
@@ -232,10 +259,14 @@ export async function refreshAccessToken(account: GoogleAccount): Promise<Google
  * the grant has expired is written once — the same 401 answers Gmail and Drive,
  * and only the URL differs between them.
  */
-async function request(tokens: GoogleTokens, url: URL): Promise<GoogleOutcome<Response>> {
+async function request(tokens: GoogleTokens, url: URL, init: RequestInit = {}): Promise<GoogleOutcome<Response>> {
+  // The token is set last, so a caller's own header can never displace it.
+  const headers = new Headers(init.headers)
+  headers.set('authorization', `Bearer ${tokens.accessToken}`)
+
   let response: Response
   try {
-    response = await fetch(url, { headers: { authorization: `Bearer ${tokens.accessToken}` } })
+    response = await fetch(url, { ...init, headers })
   } catch (error) {
     return { ok: false, error: `could not reach Google: ${errorMessage(error)}` }
   }
@@ -253,9 +284,13 @@ async function request(tokens: GoogleTokens, url: URL): Promise<GoogleOutcome<Re
   return { ok: true, value: response }
 }
 
-/** The JSON of a call, or why it could not be read. */
-export async function authorizedJson(tokens: GoogleTokens, url: URL): Promise<GoogleOutcome<unknown>> {
-  const response = await request(tokens, url)
+/** The JSON of a call, or why it could not be read. `init` carries a POST body when there is one. */
+export async function authorizedJson(
+  tokens: GoogleTokens,
+  url: URL,
+  init: RequestInit = {},
+): Promise<GoogleOutcome<unknown>> {
+  const response = await request(tokens, url, init)
   if (!response.ok) return response
   const text = await response.value.text()
   try {

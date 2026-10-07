@@ -6,12 +6,13 @@
  * so a fourth surface cannot invent a fourth answer.
  */
 import type { Auth, Config } from '../config/schema.js'
+import { accessOf, type GoogleAccess } from './tiers.js'
 
 export type GoogleState =
   | { kind: 'off' }
   /** Wanted in the config, but no account has been granted. */
   | { kind: 'wanted' }
-  | { kind: 'connected'; email?: string; connectedAt?: string; enabled: boolean }
+  | { kind: 'connected'; email?: string; connectedAt?: string; enabled: boolean; access: GoogleAccess }
 
 export function googleState(config: Config | null, auth: Auth): GoogleState {
   const account = auth.google
@@ -24,5 +25,6 @@ export function googleState(config: Config | null, auth: Auth): GoogleState {
     ...(account.email ? { email: account.email } : {}),
     ...(account.connectedAt ? { connectedAt: account.connectedAt } : {}),
     enabled,
+    access: accessOf(account),
   }
 }

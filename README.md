@@ -587,9 +587,12 @@ simply not registered.
 Off until it is turned on, and connected to an OAuth app of **your own** — Milo ships no Google
 identity. `milo google connect` walks it: an OAuth client of the type **Desktop app**, from a Cloud
 project of yours with the Gmail and Drive APIs enabled, then the browser consent, which has to happen
-at the machine that runs Milo. `milo google status` says what is connected and what is still missing,
-and `milo google forget` drops the grant while keeping the app identity. The same flow is `milo setup`
-→ **Tools** → **Google**, and Settings → Google in the web UI.
+at the machine that runs Milo. It **asks how much access to allow** — `none` (read), `modify` (archive,
+mark read), `compose` (drafts) or `send` — and there is no default: a run with no terminal to ask on
+stops and lists the levels rather than picking one. Google grants access one level at a time and
+cannot widen it later, so more access means reconnecting. `milo google status` says what is connected
+and at which level, and `milo google forget` drops the grant while keeping the app identity. The same
+flow is `milo setup` → **Tools** → **Google**, and Settings → Google in the web UI.
 
 ```yaml
 google:
@@ -597,11 +600,13 @@ google:
 ```
 
 Turning it on registers four tools, all read-only: `gmail_search` / `gmail_read` and `drive_search` /
-`drive_read`. The grant is `gmail.readonly` plus `drive.readonly`, so nothing here can send, archive,
-label or delete mail, and nothing writes to Drive — there is no tool that could, and no write scope is
-ever asked for. A Google Doc or Sheet comes back as exported text; a file Milo cannot read as text
-says so by type instead of pretending. `milo google status` names the tools a connection actually
-bought, taken from the same factories that answer, so the line cannot drift from what is registered.
+`drive_read`. The agent never writes, whatever the grant allows — the write actions live in the web
+app's **Email** screen (inbox → thread → compose), which is web-only by design (see `AGENTS.md`). The
+scopes follow the level: `gmail.readonly` + `drive.readonly` are the base, and `gmail.modify`,
+`gmail.compose` and `gmail.send` are added as the level rises, never before. A Google Doc or Sheet comes
+back as exported text; a file Milo cannot read as text says so by type instead of pretending.
+`milo google status` names the tools a connection actually bought, taken from the same factories that
+answer, so the line cannot drift from what is registered.
 
 ### MCP servers
 

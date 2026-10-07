@@ -6,7 +6,22 @@ import {
   type SecretGroup,
 } from '../../core/settings.js'
 import { PRESETS } from '../../core/config/presets.js'
+import { tokenSource, type TokenSource } from '../../core/google/access.js'
+import { ASSIST_MODES, emailAssist, type AssistMode } from '../../core/google/assist.js'
+import {
+  archive,
+  createDraft,
+  listInbox,
+  read as readMail,
+  readThread,
+  search as searchMail,
+  sendMessage,
+  setRead,
+  type DraftInput,
+} from '../../core/google/gmail.js'
+import type { GoogleOutcome, GoogleTokens } from '../../core/google/oauth.js'
 import { googleState } from '../../core/google/state.js'
+import { GOOGLE_TIERS, accessOf, type GoogleAccess } from '../../core/google/tiers.js'
 import { googleToolNames } from '../../core/tools/index.js'
 import {
   listProviders,
@@ -70,6 +85,13 @@ export class WebSettings {
   private readonly jobs = new JobRegistry()
 
   /**
+   * The mail grant the running server holds, rebuilt when the grant changes. One
+   * token source per grant, so a page of inbox rows refreshes the access token
+   * once rather than once per row.
+   */
+  private mail: { refreshToken: string; source: TokenSource } | null = null
+
+  /**
    * The browser is handed the running server's file registry, so a past run's
    * delivered files are served by the same `/attachment/<id>` a chat message's
    * are. Absent for a caller that serves no attachments — a test reading the
@@ -126,8 +148,132 @@ export class WebSettings {
       case 'mcp-toggle': return this.mcpToggle(body)
       case 'job-start': return this.jobStart(body)
       case 'job-status': return this.jobStatus(body)
+      case 'email-status': return this.emailStatus()
+      case 'email-inbox': return this.emailInbox(body)
+      case 'email-message': return this.emailMessage(body)
+      case 'email-thread': return this.emailThread(body)
+      case 'email-modify': return this.emailModify(body)
+      case 'email-draft': return this.emailDraft(body)
+      case 'email-send': return this.emailSend(body)
+      case 'email-assist': return this.emailAssist(body)
       default: throw new Error('Unknown Settings action.')
     }
+  }
+
+  /**
+   * What the Email screen needs to draw itself: the state of the grant and the
+   * levels it could have been made at. The same `googleState` every surface reads.
+   */
+  private emailStatus(): unknown {
+    return {
+      ...googleState(readConfig(), readAuth()),
+      tiers: GOOGLE_TIERS.map(({ id, label, description }) => ({ id, label, description })),
+    }
+  }
+
+  private emailInbox(body: Record<string, unknown>): Promise<unknown> {
+    const pageToken = optionalText(body.pageToken)
+    const limit = typeof body.limit === 'number' && body.limit > 0 ? Math.min(Math.floor(body.limit), 50) : 20
+    return this.mailCall((tokens) => listInbox(tokens, { ...(pageToken ? { pageToken } : {}), limit }))
+  }
+
+  private emailMessage(body: Record<string, unknown>): Promise<unknown> {
+    const id = googleId(body.id)
+    return this.mailCall((tokens) => readMail(tokens, id))
+  }
+
+  private emailThread(body: Record<string, unknown>): Promise<unknown> {
+    const id = googleId(body.threadId ?? body.id)
+    return this.mailCall((tokens) => readThread(tokens, id))
+  }
+
+  /** What a message answers to: out of the inbox, and read or unread. */
+  private emailModify(body: Record<string, unknown>): Promise<unknown> {
+    const id = googleId(body.id)
+    const op = optionalText(body.op) ?? ''
+    const actions: Record<
+      string,
+      (tokens: GoogleTokens, access: GoogleAccess) => Promise<GoogleOutcome<{ id: string }>>
+    > = {
+      archive: (tokens, access) => archive(tokens, access, id),
+      read: (tokens, access) => setRead(tokens, access, id, true),
+      unread: (tokens, access) => setRead(tokens, access, id, false),
+    }
+    // An argument it does not know answers with the ones it does.
+    const run = actions[op]
+    if (!run) throw new Error(`Unknown mail action "${op || '(none)'}" — one of ${Object.keys(actions).join(', ')}.`)
+    return this.mailCall(run)
+  }
+
+  private emailDraft(body: Record<string, unknown>): Promise<unknown> {
+    const draft = draftInput(body.draft)
+    return this.mailCall((tokens, access) => createDraft(tokens, access, draft))
+  }
+
+  private emailSend(body: Record<string, unknown>): Promise<unknown> {
+    const mail = draftInput(body.draft)
+    return this.mailCall((tokens, access) => sendMessage(tokens, access, mail))
+  }
+
+  /**
+   * The agentic reading: the model is asked about mail the server has already
+   * fetched. Triage reads the unread; summarize and draft read one thread. The
+   * answer is text, and a draft is only a body — the screen puts the recipient
+   * and subject on it, from the message it is looking at.
+   */
+  private async emailAssist(body: Record<string, unknown>): Promise<unknown> {
+    const mode = optionalText(body.mode) ?? ''
+    if (!(ASSIST_MODES as string[]).includes(mode)) {
+      throw new Error(`Unknown mail assistance "${mode || '(none)'}" — one of ${ASSIST_MODES.join(', ')}.`)
+    }
+
+    if (mode === 'triage') {
+      const found = await this.mailCall((tokens) => searchMail(tokens, 'is:unread newer_than:3d', 20))
+      if (found.length === 0) return { text: 'Nothing unread in the last three days.' }
+      const mail = found
+        .map((message) => `- ${message.from ?? '(unknown sender)'} — ${message.subject ?? '(no subject)'}${message.snippet ? ` — ${message.snippet}` : ''}`)
+        .join('\n')
+      return { text: await this.askModel('triage', mail) }
+    }
+
+    const id = googleId(body.threadId)
+    const thread = await this.mailCall((tokens) => readThread(tokens, id))
+    if (thread.messages.length === 0) throw new Error('That thread has no messages to read.')
+    const mail = thread.messages
+      .map((message) => `From: ${message.from ?? '(unknown)'}\nDate: ${message.date ?? '(no date)'}\nSubject: ${message.subject ?? '(no subject)'}\n\n${message.text}`)
+      .join('\n\n---\n\n')
+    return { text: await this.askModel(mode as AssistMode, mail) }
+  }
+
+  private async askModel(mode: AssistMode, mail: string): Promise<string> {
+    const answer = await emailAssist({ provider: this.runtime.provider, model: this.runtime.model, mode, mail })
+    if (!answer.ok) throw new Error(answer.error)
+    return answer.text
+  }
+
+  private mailToken(): TokenSource {
+    const account = readAuth().google
+    const refresh = account?.refreshToken ?? ''
+    if (this.mail?.refreshToken !== refresh) {
+      this.mail = { refreshToken: refresh, source: tokenSource(account ?? null) }
+    }
+    return this.mail.source
+  }
+
+  /**
+   * One Gmail call, with the two things every one of them needs done first: a
+   * token, and the level the grant was made at. A failure that is the flow's own —
+   * not connected, or above the grant — leaves here as the sentence the screen
+   * shows, never as a bare 403.
+   */
+  private async mailCall<T>(
+    work: (tokens: GoogleTokens, access: GoogleAccess) => Promise<GoogleOutcome<T>>,
+  ): Promise<T> {
+    const tokens = await this.mailToken()()
+    if (!tokens.ok) throw new Error(tokens.error)
+    const got = await work(tokens.value, accessOf(readAuth().google))
+    if (!got.ok) throw new Error(got.error)
+    return got.value
   }
 
   private async taskListAction(body: Record<string, unknown>): Promise<unknown> {
@@ -208,6 +354,7 @@ export class WebSettings {
       google: {
         ...googleState(config, auth),
         tools: googleToolNames(auth.google ?? null),
+        tiers: GOOGLE_TIERS.map(({ id, label, description }) => ({ id, label, description })),
       },
     }
   }
@@ -713,6 +860,30 @@ function optionalText(value: unknown): string | undefined {
 function stringList(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined
   return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())
+}
+
+/** A Gmail id as the page sends it: the shape the API takes, and nothing path-shaped. */
+function googleId(value: unknown): string {
+  const id = optionalText(value)
+  if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('Invalid mail id.')
+  return id
+}
+
+/** A message body out of the page, with what Gmail needs to carry it. */
+function draftInput(value: unknown): DraftInput {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('A message is required.')
+  const draft = value as Record<string, unknown>
+  const to = optionalText(draft.to)
+  const body = typeof draft.body === 'string' ? draft.body : ''
+  if (!to) throw new Error('A recipient is required.')
+  if (!body.trim()) throw new Error('An empty message is not worth sending.')
+  const threadId = optionalText(draft.threadId)
+  return {
+    to,
+    subject: typeof draft.subject === 'string' ? draft.subject : '',
+    body,
+    ...(threadId ? { threadId } : {}),
+  }
 }
 
 function routineTarget(value: unknown): RoutineTarget {

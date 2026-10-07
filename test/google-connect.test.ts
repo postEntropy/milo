@@ -64,6 +64,7 @@ describe('the connect flow both surfaces drive', () => {
     const flow = connectGoogle({
       clientId: 'cid',
       clientSecret: 'shh',
+      access: 'modify',
       onUrl: (url) => {
         consent = url
       },
@@ -79,9 +80,13 @@ describe('the connect flow both surfaces drive', () => {
     if (!connected.ok) return
     expect(connected.value.account.refreshToken).toBe('rt')
     expect(connected.value.account.email).toBe('ana@exemplo')
+    // The level the person chose is what gets stored — `none` would be a grant
+    // nobody asked for.
+    expect(connected.value.account.access).toBe('modify')
     expect(connected.value.enabledInConfig).toBe(true)
 
     expect(readAuth().google?.email).toBe('ana@exemplo')
+    expect(readAuth().google?.access).toBe('modify')
     expect(readConfig()?.google.enabled).toBe(true)
   })
 
@@ -96,6 +101,7 @@ describe('the connect flow both surfaces drive', () => {
     const flow = connectGoogle({
       clientId: 'cid',
       clientSecret: 'shh',
+      access: 'none',
       onUrl: (url) => {
         consent = url
       },
@@ -126,6 +132,7 @@ describe('the connect flow both surfaces drive', () => {
     const flow = connectGoogle({
       clientId: 'cid',
       clientSecret: 'shh',
+      access: 'none',
       onUrl: (url) => {
         consent = url
       },

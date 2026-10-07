@@ -217,10 +217,28 @@ describe('the Google section', () => {
     expect(before).toContain('Connect')
 
     await press(app, '\r')
-    await waitFor(app, 'Step 1 of 3')
+    await waitFor(app, 'Step 1 of 4')
     const field = flatFrame(app)
     expect(field).toContain('the client id of your OAuth app')
     expect(field).toContain('.apps.googleusercontent.com')
+  })
+
+  it('asks how much access to allow before the secret', async () => {
+    const app = renderSettings()
+    await openGoogle(app)
+    await press(app, '\r')
+    await waitFor(app, 'Step 1 of 4')
+    app.stdin.write('cid.apps.googleusercontent.com')
+    await tick(20)
+    app.stdin.write('\r')
+
+    await waitFor(app, 'Step 2 of 4')
+    const choice = flatFrame(app)
+    expect(choice).toContain('how much access?')
+    // The levels, and what each permits — the person picks one; nothing is assumed.
+    expect(choice).toContain('Read only')
+    expect(choice).toContain('Send mail')
+    expect(choice).toContain('Nothing in the account is changed')
   })
 
   it('connects, and says the tools need a restart to appear', async () => {
@@ -233,6 +251,7 @@ describe('the Google section', () => {
           refreshToken: 'rt',
           email: 'ana@exemplo',
           connectedAt: '2026-09-30T12:00:00.000Z',
+          access: 'none',
         },
         enabledInConfig: true,
       },
@@ -241,18 +260,22 @@ describe('the Google section', () => {
     const app = renderSettings()
     await openGoogle(app)
     await press(app, '\r')
-    await waitFor(app, 'Step 1 of 3')
+    await waitFor(app, 'Step 1 of 4')
     app.stdin.write('cid.apps.googleusercontent.com')
     await tick(20)
     app.stdin.write('\r')
-    await waitFor(app, 'Step 2 of 3')
+    // The access menu. Enter takes the highlighted level — the read-only base.
+    await waitFor(app, 'Step 2 of 4')
+    await press(app, '\r')
+    await waitFor(app, 'Step 3 of 4')
     app.stdin.write('shh')
     await tick(20)
     app.stdin.write('\r')
 
-    await waitFor(app, 'restart Milo')
+    await waitFor(app, 'Restart Milo')
     const done = flatFrame(app)
     expect(done).toContain('Connected as ana@exemplo')
+    expect(done).toContain('access: Read only')
     expect(done).toContain('drive_search')
     expect(done).toContain('`google.enabled` turned on in the config')
   })
@@ -263,17 +286,19 @@ describe('the Google section', () => {
     const app = renderSettings()
     await openGoogle(app)
     await press(app, '\r')
-    await waitFor(app, 'Step 1 of 3')
+    await waitFor(app, 'Step 1 of 4')
     app.stdin.write('cid')
     await tick(20)
     app.stdin.write('\r')
-    await waitFor(app, 'Step 2 of 3')
+    await waitFor(app, 'Step 2 of 4')
+    await press(app, '\r')
+    await waitFor(app, 'Step 3 of 4')
     app.stdin.write('wrong')
     await tick(20)
     app.stdin.write('\r')
 
     await waitFor(app, 'did not recognise')
-    expect(flatFrame(app)).toContain('Step 2 of 3')
+    expect(flatFrame(app)).toContain('Step 3 of 4')
   })
 })
 

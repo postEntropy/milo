@@ -41,14 +41,15 @@ describe('what `milo google status` reports', () => {
   it('names every tool the grant covers, the Drive ones included', async () => {
     const lines = await statusLines()
     expect(lines[0]).toBe(
-      'Connected as ana@exemplo since 2026-09-30. Read-only: gmail_search, gmail_read, drive_search, drive_read — nothing writes.',
+      'Connected as ana@exemplo since 2026-09-30. Access: Read only — Search and read mail and files. Nothing in the account is changed.',
     )
+    expect(lines[1]).toBe('  Reading tools: gmail_search, gmail_read, drive_search, drive_read.')
   })
 
   it('says the tools are off when the config turned them off', async () => {
     mocks.config = configWith(false)
     const lines = await statusLines()
-    expect(lines[1]).toContain('not registered')
+    expect(lines.at(-1)).toContain('not registered')
   })
 
   it('says no account is connected when there is no grant', async () => {

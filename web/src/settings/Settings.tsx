@@ -39,12 +39,19 @@ type MemoryStats = { backend: string; location: string; scopes: number; facts: n
 type Note = { id: string; text: string; createdAt: number; tags?: string[] }
 type Browser = { id: string; name: string; path: string; version: string | null }
 type Profile = { id: string; name: string; dir: string; bytes: number }
-/** The three states the server reports for the grant, with the tools it buys. */
+/** The access level a grant was made at, as the server names and describes it. */
+type GoogleTier = { id: 'none' | 'modify' | 'compose' | 'send'; label: string; description: string }
+/** The three states the server reports for the grant, with the tools it buys and the levels on offer. */
 type GoogleReport = (
   | { kind: 'off' }
   | { kind: 'wanted' }
-  | { kind: 'connected'; email?: string; connectedAt?: string; enabled: boolean }
-) & { tools: string[] }
+  | { kind: 'connected'; email?: string; connectedAt?: string; enabled: boolean; access: GoogleTier['id'] }
+) & { tools: string[]; tiers: GoogleTier[] }
+
+/** The tier a level names, from the list the server sends, so the screen never guesses a label. */
+function tierOf(tiers: GoogleTier[], id: GoogleTier['id']): GoogleTier | undefined {
+  return tiers.find((tier) => tier.id === id)
+}
 
 type SettingsData = {
   config: SettingsConfig
@@ -474,21 +481,30 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
 
           <h3 className="section-label" style={{ paddingInline: 0 }}>Google</h3>
           {data?.google.kind === 'connected' ? (
-            <p className="panel-note">
-              Connected as <code className="mono">{data.google.email ?? 'an account Gmail would not name'}</code>
-              {data.google.connectedAt ? ` since ${data.google.connectedAt.slice(0, 10)}` : ''}. Read-only:{' '}
-              {data.google.tools.join(', ')}.
-            </p>
+            <>
+              <p className="panel-note">
+                Connected as <code className="mono">{data.google.email ?? 'an account Gmail would not name'}</code>
+                {data.google.connectedAt ? ` since ${data.google.connectedAt.slice(0, 10)}` : ''}. Access:{' '}
+                <code className="mono">{tierOf(data.google.tiers, data.google.access)?.label ?? data.google.access}</code> —{' '}
+                {tierOf(data.google.tiers, data.google.access)?.description}
+              </p>
+              <p className="panel-note">
+                Reading tools: <code className="mono">{data.google.tools.join(', ')}</code>. The write
+                actions — archive, mark read, draft, send — live in the Email screen, and only as far as
+                this access allows. To widen it, run <code className="mono">milo google connect</code>{' '}
+                again: Google grants access only on a fresh consent.
+              </p>
+            </>
           ) : data?.google.kind === 'wanted' ? (
             <p className="panel-note">
               The tools are on in the config, but no account has been allowed yet. Run{' '}
-              <code className="mono">milo google connect</code> on the machine Milo runs on — it walks
-              these steps and opens the browser there:
+              <code className="mono">milo google connect</code> on the machine Milo runs on — it asks
+              how much access to allow and opens the browser there:
             </p>
           ) : (
-            <p className="panel-note">The connection is yours: you make an app in Google&rsquo;s console, once, and allow it on this machine. Milo keeps read access only — it can never write to your mail or your files.</p>
+            <p className="panel-note">The connection is yours: you make an app in Google&rsquo;s console, once, and allow it on this machine. You choose how much access to give — reading is the base, and nothing is written without a level you picked.</p>
           )}
-          <label className="check-row"><input type="checkbox" checked={draft.google.enabled} onChange={(event) => update(['google', 'enabled'], event.target.checked)} /> Read Gmail and Drive (restart to apply)</label>
+          <label className="check-row"><input type="checkbox" checked={draft.google.enabled} onChange={(event) => update(['google', 'enabled'], event.target.checked)} /> Enable Gmail and Drive (restart to apply)</label>
           {data?.google.kind === 'connected' ? (
             <p className="panel-note">
               To disconnect, run <code className="mono">milo google forget</code> on the machine Milo

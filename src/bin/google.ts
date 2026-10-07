@@ -11,6 +11,13 @@ import { createInterface } from 'node:readline/promises'
 import { readAuth, readConfig, saveAuth } from '../core/config/load.js'
 import { connectGoogle } from '../core/google/connect.js'
 import { googleState } from '../core/google/state.js'
+import {
+  GOOGLE_TIERS,
+  GoogleAccessSchema,
+  accessLabel,
+  describeAccess,
+  type GoogleAccess,
+} from '../core/google/tiers.js'
 import { GOOGLE_SHORTCUT, googleStepsInWords } from '../core/google/walkthrough.js'
 import { googleToolNames } from '../core/tools/index.js'
 import { errorMessage } from '../util/errors.js'
@@ -20,13 +27,17 @@ const CLOUD = 'https://console.cloud.google.com/apis/credentials'
 
 const USAGE = [
   'Usage:',
-  '  milo google connect [--client-id <id>] [--client-secret <secret>] [--credentials <file>]',
+  '  milo google connect [--access <level>] [--client-id <id>] [--client-secret <secret>] [--credentials <file>]',
   '  milo google status         what is connected, or what is missing',
   '  milo google forget         drop the grant, keeping the app identity',
   '',
   '`connect` needs an OAuth client of the type "Desktop app" from a Cloud project',
   'of your own, with the Gmail and Drive APIs enabled — run it without arguments',
   'and it prints the steps, with the links.',
+  '',
+  `\`--access\` picks how much Milo may do: ${GOOGLE_TIERS.map((tier) => tier.id).join(', ')}.`,
+  'Without it, connect asks — and a run with no terminal to ask on stops rather',
+  'than choosing a level on its own.',
   '',
   'The shortcut Google documents creates the project, enables the Workspace APIs',
   `and downloads a credentials.json: ${GOOGLE_SHORTCUT}`,
@@ -99,10 +110,11 @@ function status(out: GoogleIo['out']): number {
   }
   const who = state.email ? ` as ${state.email}` : ''
   const when = state.connectedAt ? ` since ${state.connectedAt.slice(0, 10)}` : ''
+  out(`Connected${who}${when}. Access: ${accessLabel(state.access)} — ${describeAccess(state.access)}`)
   // The tool names come off the factories that will actually answer, so this line
   // cannot go on naming one service after the grant has grown another.
   const tools = googleToolNames(auth.google ?? null)
-  out(`Connected${who}${when}. Read-only: ${tools.join(', ')} — nothing writes.`)
+  out(`  Reading tools: ${tools.join(', ')}.`)
   if (!state.enabled) out('…but the config says `google.enabled: false`, so the tools are not registered.')
   return 0
 }
@@ -177,11 +189,17 @@ async function connect(argv: string[], io: Required<GoogleIo>): Promise<number> 
     return 1
   }
 
+  // Asked, never assumed: the level is a decision and there is no default. A run
+  // with no terminal answers nothing, and that stops rather than choosing.
+  const access = await chooseAccess(argv, existing?.access, io)
+  if (!access) return 1
+
   const connected = await connectGoogle({
     clientId,
     clientSecret,
+    access,
     onUrl: (url) => {
-      io.out('Open this in a browser and allow the read-only Gmail access:')
+      io.out('Open this in a browser and allow the access Milo asked for:')
       io.out(`  ${hyperlink(url)}`)
       io.out('(waiting for Google to answer on this machine…)')
     },
@@ -194,13 +212,49 @@ async function connect(argv: string[], io: Required<GoogleIo>): Promise<number> 
   if (connected.value.enabledInConfig) io.out('Turned `google.enabled` on in the config.')
 
   const who = connected.value.account.email
-  io.out(`Connected${who ? ` as ${who}` : ''}.`)
-  io.out('  gmail_search/gmail_read for mail, drive_search/drive_read for files. Nothing here writes.')
+  io.out(`Connected${who ? ` as ${who}` : ''} — access: ${accessLabel(access)}.`)
+  io.out(`  ${describeAccess(access)}`)
+  io.out('  gmail_search/gmail_read for mail, drive_search/drive_read for files.')
   io.out(
     '  If it stops working in about a week, the Cloud app is still in "Testing": publishing it ' +
       `(OAuth consent screen, at ${CLOUD}) stops the seven-day expiry.`,
   )
   return 0
+}
+
+/**
+ * The access level for this connection: `--access` when it was given, otherwise a
+ * question. An answer that is neither is refused with the valid ones listed — a
+ * default picked silently here would be a grant nobody chose.
+ */
+async function chooseAccess(
+  argv: string[],
+  current: GoogleAccess | undefined,
+  io: Required<GoogleIo>,
+): Promise<GoogleAccess | null> {
+  const given = flag(argv, '--access')
+  if (given !== undefined) {
+    const parsed = GoogleAccessSchema.safeParse(given)
+    if (parsed.success) return parsed.data
+    io.err(`Unknown access level: ${given}`)
+    io.err(`Valid levels: ${GOOGLE_TIERS.map((tier) => tier.id).join(', ')}`)
+    return null
+  }
+
+  io.out('')
+  io.out('How much should Milo be allowed to do with this account?')
+  for (const [index, tier] of GOOGLE_TIERS.entries()) {
+    const marker = tier.id === current ? '  (current)' : ''
+    io.out(`  ${index + 1}. ${tier.label} — ${tier.description}${marker}`)
+  }
+  const answer = (await io.ask(`Access level (1-${GOOGLE_TIERS.length}, or the name): `)).trim().toLowerCase()
+  const byNumber = /^\d+$/.test(answer) ? GOOGLE_TIERS[Number(answer) - 1]?.id : undefined
+  const parsed = GoogleAccessSchema.safeParse(byNumber ?? answer)
+  if (parsed.success) return parsed.data
+
+  io.err('No access level was chosen.')
+  io.err(`Pick one of: ${GOOGLE_TIERS.map((tier) => tier.id).join(', ')}`)
+  return null
 }
 
 async function askOnTty(question: string): Promise<string> {

@@ -239,9 +239,13 @@ describe('what Milo knows about its own setup', () => {
     expect(build([tool], 0, undefined, { kind: 'off' })).toContain('Google (Gmail and Drive): off')
     expect(build([tool], 0, undefined, { kind: 'wanted' })).toContain('no account is connected')
 
-    const connected = build([tool], 0, undefined, { kind: 'connected', email: 'me@example.com', enabled: true })
+    const connected = build([tool], 0, undefined, { kind: 'connected', email: 'me@example.com', enabled: true, access: 'none' })
     expect(connected).toContain('connected as me@example.com')
     expect(connected).toContain('milo google status')
+    // The grant may allow more than the agent's own tools do: the model must not
+    // offer to send mail from a chat when all it holds is the read tools.
+    expect(connected).toContain('account access: Read only')
+    expect(connected).toContain('read-only whatever the account allows')
   })
 
   it('knows how a routine runs, so it is not answered by reading its own source', () => {

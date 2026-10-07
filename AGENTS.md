@@ -20,6 +20,10 @@ form of the author's own taste notes, which live outside the repo in
   list is `buildSessionsList` in `src/gateways/actions.ts`.
 - A capability belongs to the whole class it belongs to, not to the surface that asked
   for it: touching one gateway means touching the CLI, Telegram, Discord and web.
+- The exception is a surface that **is** the product. Email is web-only: reading stays a
+  shared capability, but the write actions (archive, mark read, draft, send) live only in the
+  web app, reached through the same core implementation every surface would use. This is a
+  deliberate decision, not a missing surface — a new one still has to be argued for.
 - Same data, same meaning everywhere. Something that is not actionable is marked
   `disabled` in the model and drawn inert on every surface — never guessed at.
 

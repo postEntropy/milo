@@ -4,6 +4,7 @@ import type { ToolSpec } from '../providers/types.js'
 import type { SkillSummary } from '../skills/index.js'
 import type { BrowserFacts } from '../browser/index.js'
 import type { GoogleState } from '../google/state.js'
+import { accessLabel } from '../google/tiers.js'
 import type { McpFacts } from '../mcp/servers.js'
 import { plural } from '../../util/format.js'
 
@@ -169,8 +170,9 @@ function googleLine(state: GoogleState): string {
     )
   }
   return (
-    `- Google (Gmail and Drive) right now: connected${state.email ? ` as ${state.email}` : ''}, read-only. ` +
-    'The grant lives in `~/.milo/auth.json`; `milo google status` reports it.'
+    `- Google (Gmail and Drive) right now: connected${state.email ? ` as ${state.email}` : ''}, account access: ` +
+    `${accessLabel(state.access)}. Your own Gmail and Drive tools are read-only whatever the account allows — the ` +
+    'write actions live in the web Email screen. The grant lives in `~/.milo/auth.json`; `milo google status` reports it.'
   )
 }
 

@@ -88,6 +88,28 @@ function buildSwitchable(): InstanceType<typeof AgentRuntime> {
   })
 }
 
+/** A runtime whose model answers with `answer`, for the mail assistant. */
+function buildModel(answer: string): InstanceType<typeof AgentRuntime> {
+  return new AgentRuntime({
+    provider: {
+      id: 'test',
+      stream: async function* () {
+        yield { type: 'text', delta: answer }
+      },
+    },
+    model: 'test-model',
+    system: '',
+    registry: { specs: () => [] } as never,
+    memory: {
+      remember: async () => undefined,
+      recall: async () => [],
+      list: async () => [],
+      forget: async () => false,
+    } as never,
+    cwd: home,
+  })
+}
+
 /** Two configured providers, each with a key, so a switch has somewhere to go. */
 function writeTwoProviders(): void {
   writeFileSync(path.join(home, 'config.yml'), stringify({
@@ -466,5 +488,154 @@ describe('web Settings MCP servers', () => {
     const overview = (await settings.handle('overview')) as { mcp: { error?: string; servers: unknown[] } }
     expect(overview.mcp.error).toMatch(/has no field named "comand"/)
     expect(overview.mcp.servers).toEqual([])
+  })
+})
+
+describe('web Settings mail', () => {
+  const json = (body: unknown, status = 200): Response =>
+    new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+
+  const grantAt = (access: string): void => {
+    saveAuth({
+      providers: {},
+      gateways: {},
+      search: {},
+      google: { clientId: 'cid', clientSecret: 'cs', refreshToken: 'rt', email: 'ana@exemplo', access: access as never },
+    })
+  }
+
+  /** Gmail behind a stubbed fetch: the token refresh is answered, the rest is handed on. */
+  const gmail = (handler: (url: string, init?: RequestInit) => Response): void => {
+    vi.stubGlobal('fetch', async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = String(input)
+      if (url.includes('oauth2.googleapis.com/token')) return json({ access_token: 'at', expires_in: 3600 })
+      return handler(url, init)
+    })
+  }
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  it('reports the grant and the levels it could have been made at', async () => {
+    writeConfig()
+    grantAt('modify')
+    const settings = new WebSettings(build({}), home)
+    const status = (await settings.handle('email-status')) as { kind: string; access: string; tiers: { id: string }[] }
+    expect(status.kind).toBe('connected')
+    expect(status.access).toBe('modify')
+    expect(status.tiers.map((tier) => tier.id)).toEqual(['none', 'modify', 'compose', 'send'])
+  })
+
+  it('lists the inbox through the grant', async () => {
+    writeConfig()
+    grantAt('none')
+    const asked: string[] = []
+    gmail((url) => {
+      asked.push(url)
+      if (url.includes('/messages?')) return json({ messages: [{ id: 'm1', threadId: 't1' }], nextPageToken: 'cursor' })
+      return json({
+        id: 'm1',
+        threadId: 't1',
+        payload: { headers: [{ name: 'From', value: 'ana@exemplo' }, { name: 'Subject', value: 'a nota' }] },
+      })
+    })
+
+    const settings = new WebSettings(build({}), home)
+    const page = (await settings.handle('email-inbox', { limit: 5 })) as {
+      messages: { subject?: string }[]
+      nextPageToken?: string
+    }
+    expect(page.nextPageToken).toBe('cursor')
+    expect(page.messages[0]?.subject).toBe('a nota')
+    expect(decodeURIComponent(asked.join('\n')).replace(/\+/g, ' ')).toContain('in:inbox')
+  })
+
+  it('refuses a send the grant does not cover, saying how to widen it', async () => {
+    writeConfig()
+    grantAt('compose')
+    gmail(() => json({}))
+    const settings = new WebSettings(build({}), home)
+    await expect(settings.handle('email-send', { draft: { to: 'a@b', subject: 's', body: 'x' } }))
+      .rejects.toThrow('--access send')
+  })
+
+  it('sends at the send level, with the message as RFC 822', async () => {
+    writeConfig()
+    grantAt('send')
+    let raw = ''
+    gmail((url, init) => {
+      if (url.includes('/messages/send')) {
+        raw = JSON.parse(String(init?.body ?? '{}')).raw
+        return json({ id: 'm9' })
+      }
+      return json({})
+    })
+
+    const settings = new WebSettings(build({}), home)
+    const sent = (await settings.handle('email-send', {
+      draft: { to: 'ana@exemplo', subject: 'oi', body: 'texto' },
+    })) as { id: string }
+    expect(sent.id).toBe('m9')
+    expect(Buffer.from(raw, 'base64url').toString('utf8')).toContain('To: ana@exemplo')
+  })
+
+  it('answers an unknown mail action with the ones it knows', async () => {
+    writeConfig()
+    grantAt('modify')
+    const settings = new WebSettings(build({}), home)
+    await expect(settings.handle('email-modify', { id: 'm1', op: 'delete' })).rejects.toThrow(/archive/)
+  })
+
+  it('refuses an id that is not one', async () => {
+    writeConfig()
+    grantAt('modify')
+    const settings = new WebSettings(build({}), home)
+    await expect(settings.handle('email-message', { id: '../../etc/passwd' })).rejects.toThrow('Invalid mail id')
+  })
+
+  it('summarizes a thread through the model, over mail it fetched itself', async () => {
+    writeConfig()
+    grantAt('none')
+    gmail((url) => {
+      if (url.includes('/threads/')) {
+        return json({
+          id: 't1',
+          messages: [{
+            id: 'm1',
+            threadId: 't1',
+            payload: {
+              mimeType: 'text/plain',
+              headers: [{ name: 'Subject', value: 'a nota' }],
+              body: { data: Buffer.from('oi, tudo bem?').toString('base64url') },
+            },
+          }],
+        })
+      }
+      return json({})
+    })
+    const settings = new WebSettings(buildModel('It asks how you are.'), home)
+    const result = (await settings.handle('email-assist', { mode: 'summarize', threadId: 't1' })) as { text: string }
+    expect(result.text).toBe('It asks how you are.')
+  })
+
+  it('triages the unread mail', async () => {
+    writeConfig()
+    grantAt('none')
+    gmail((url) => {
+      if (url.includes('/messages?')) return json({ messages: [{ id: 'm1', threadId: 't1' }] })
+      if (url.includes('/messages/m1')) {
+        return json({ id: 'm1', threadId: 't1', payload: { headers: [{ name: 'From', value: 'ana@exemplo' }, { name: 'Subject', value: 'a nota' }] } })
+      }
+      return json({})
+    })
+    const settings = new WebSettings(buildModel('Answer Ana.'), home)
+    const result = (await settings.handle('email-assist', { mode: 'triage' })) as { text: string }
+    expect(result.text).toBe('Answer Ana.')
+  })
+
+  it('answers an unknown assistance with the ones it knows', async () => {
+    writeConfig()
+    grantAt('none')
+    const settings = new WebSettings(build({}), home)
+    await expect(settings.handle('email-assist', { mode: 'translate' })).rejects.toThrow(/triage/)
   })
 })

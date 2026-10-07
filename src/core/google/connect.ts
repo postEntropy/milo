@@ -12,6 +12,7 @@ import { readAuth, readConfig, saveAuth, saveConfig } from '../config/load.js'
 import type { GoogleAccount } from '../config/schema.js'
 import { profile } from './gmail.js'
 import { awaitCode, exchangeCode, newVerifier, type GoogleOutcome } from './oauth.js'
+import type { GoogleAccess } from './tiers.js'
 
 export interface ConnectResult {
   account: GoogleAccount
@@ -25,6 +26,12 @@ export async function connectGoogle(request: {
   clientId: string
   clientSecret: string
   /**
+   * The level the person chose. Required and never defaulted: the consent is the
+   * one moment the grant is decided, and a flow that picked a level on its own
+   * would be deciding something that is not its to decide.
+   */
+  access: GoogleAccess
+  /**
    * Where the person is sent. The caller prints it, because a terminal and a
    * screen show an address differently — one wraps it in a clickable link.
    */
@@ -35,6 +42,7 @@ export async function connectGoogle(request: {
   const answered = await awaitCode({
     clientId: request.clientId,
     verifier,
+    access: request.access,
     onUrl: request.onUrl,
     ...(request.timeoutMs ? { timeoutMs: request.timeoutMs } : {}),
   })
@@ -69,6 +77,7 @@ export async function connectGoogle(request: {
     refreshToken: tokens.value.refreshToken,
     ...(who.ok ? { email: who.value } : {}),
     connectedAt: new Date().toISOString(),
+    access: request.access,
   }
   const auth = readAuth()
   auth.google = account

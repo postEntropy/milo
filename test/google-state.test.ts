@@ -28,6 +28,14 @@ describe('the state of the Google connection', () => {
       email: 'ana@exemplo',
       connectedAt: '2026-09-30T12:00:00.000Z',
       enabled: true,
+      access: 'none',
+    })
+  })
+
+  it('carries the access level the grant was made at', () => {
+    expect(googleState(config(true), auth({ ...granted, access: 'send' }))).toMatchObject({
+      kind: 'connected',
+      access: 'send',
     })
   })
 
@@ -37,6 +45,7 @@ describe('the state of the Google connection', () => {
       email: 'ana@exemplo',
       connectedAt: '2026-09-30T12:00:00.000Z',
       enabled: false,
+      access: 'none',
     })
   })
 
@@ -51,6 +60,7 @@ describe('the state of the Google connection', () => {
       email: 'ana@exemplo',
       connectedAt: '2026-09-30T12:00:00.000Z',
       enabled: false,
+      access: 'none',
     })
   })
 })

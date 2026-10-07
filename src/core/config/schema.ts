@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { REASONING_EFFORTS, DEFAULT_REASONING_EFFORT } from '../providers/types.js'
+import { GoogleAccessSchema } from '../google/tiers.js'
 
 export const WireSchema = z.enum(['openai', 'anthropic', 'auto'])
 export type WireInput = z.infer<typeof WireSchema>
@@ -302,6 +303,11 @@ export type MediaModelsConfig = z.infer<typeof MediaModelsSchema>
  *
  * `email` and `connectedAt` are notes for the person — `milo google status` says
  * who is connected without spending a call to find out.
+ *
+ * `access` is the level chosen when connecting; it is what every write checks
+ * against. Absent means a grant made before the choice existed, whose scopes were
+ * read-only — so it reads as `none`. That is a migration rule, not a default for
+ * a new connection: the connect flow always picks a level and always stores it.
  */
 export const GoogleAccountSchema = z.object({
   clientId: z.string(),
@@ -309,6 +315,7 @@ export const GoogleAccountSchema = z.object({
   refreshToken: z.string().optional(),
   email: z.string().optional(),
   connectedAt: z.string().optional(),
+  access: GoogleAccessSchema.optional(),
 })
 export type GoogleAccount = z.infer<typeof GoogleAccountSchema>
 

@@ -30,6 +30,12 @@ import {
 } from '../../../core/config/paths.js'
 import { connectGoogle } from '../../../core/google/connect.js'
 import { googleState } from '../../../core/google/state.js'
+import {
+  GOOGLE_TIERS,
+  accessLabel,
+  describeAccess as describeGoogleAccess,
+  type GoogleAccess,
+} from '../../../core/google/tiers.js'
 import { googleStepsInWords } from '../../../core/google/walkthrough.js'
 import { historyStatus } from '../../../core/history.js'
 import { DEFAULT_RECALL_LIMIT, memoryStatus } from '../../../core/memory/index.js'
@@ -184,14 +190,14 @@ interface Notice {
 type FlowStep = 'token' | 'access' | 'enable'
 
 /**
- * The three things the Google flow does here: name the app, hand over its secret,
- * then wait while the browser answers. The console steps a person does first are
- * a different list, shown whole — counting the two together is what makes a setup
- * feel longer than it is.
+ * The four things the Google flow does here: name the app, choose how much access
+ * to ask for, hand over the secret, then wait while the browser answers. The
+ * console steps a person does first are a different list, shown whole — counting
+ * the two together is what makes a setup feel longer than it is.
  */
-type GoogleFlowStep = 'id' | 'secret' | 'waiting'
+type GoogleFlowStep = 'id' | 'access' | 'secret' | 'waiting'
 
-const GOOGLE_FLOW: GoogleFlowStep[] = ['id', 'secret', 'waiting']
+const GOOGLE_FLOW: GoogleFlowStep[] = ['id', 'access', 'secret', 'waiting']
 
 type View =
   | { kind: 'menu' }
@@ -279,6 +285,7 @@ export function SettingsScreen({
   // The credentials wait here until there is a grant to write them with: a client
   // id on its own is an app identity, not a connection.
   const [googleClientId, setGoogleClientId] = useState('')
+  const [googleAccess, setGoogleAccess] = useState<GoogleAccess>('none')
   const [googleUrl, setGoogleUrl] = useState('')
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-read triggers, not closure values — auth is re-read from disk on navigation and after a save refreshes the config
@@ -1026,19 +1033,25 @@ export function SettingsScreen({
   const startGoogleFlow = () => {
     setNotices([])
     const stored = auth.google
+    const current = stored?.access ?? 'none'
+    setGoogleAccess(current)
     if (stored?.clientId && stored.clientSecret) {
-      void runGoogleConnect(stored.clientId, stored.clientSecret)
+      // Reconnecting: the app identity is already stored, so only the access level
+      // and the secret are asked again. Google widens an existing grant only on a
+      // fresh consent, which is what this flow is.
+      go({ kind: 'googleFlow', step: 'access' })
+      setIndex(Math.max(0, GOOGLE_TIERS.findIndex((tier) => tier.id === current)))
       return
     }
     go({ kind: 'googleFlow', step: 'id' }, stored?.clientId ?? '')
   }
 
-  const runGoogleConnect = async (clientId: string, clientSecret: string) => {
+  const runGoogleConnect = async (clientId: string, clientSecret: string, access: GoogleAccess) => {
     go({ kind: 'googleFlow', step: 'waiting' })
     setGoogleUrl('')
     setBusy('waiting for Google to answer on this machine…')
 
-    const connected = await connectGoogle({ clientId, clientSecret, onUrl: setGoogleUrl })
+    const connected = await connectGoogle({ clientId, clientSecret, access, onUrl: setGoogleUrl })
     setBusy(null)
 
     if (!connected.ok) {
@@ -1058,7 +1071,7 @@ export function SettingsScreen({
         // Said here because it is true here: the tools are registered when the
         // runtime starts, so a connection made in this screen is not in the
         // catalog yet.
-        text: `Connected${account.email ? ` as ${account.email}` : ''} — restart Milo for the tools to appear`,
+        text: `Connected${account.email ? ` as ${account.email}` : ''} — access: ${accessLabel(access)}. Restart Milo for the tools to appear`,
         tone: 'success' as const,
       },
       ...(enabledInConfig
@@ -1524,7 +1537,21 @@ export function SettingsScreen({
       case 'googleFlow':
         // While the browser is the thing to act on, this screen is a report.
         if (view.step === 'waiting') break
-        if (key.escape) go({ kind: 'google' })
+        if (key.escape) {
+          go({ kind: 'google' })
+          break
+        }
+        if (view.step === 'access') {
+          if (key.upArrow) setIndex((value) => Math.max(0, value - 1))
+          else if (key.downArrow) setIndex((value) => Math.min(GOOGLE_TIERS.length - 1, value + 1))
+          else if (key.return) {
+            const tier = GOOGLE_TIERS[index]
+            if (tier) {
+              setGoogleAccess(tier.id)
+              go({ ...view, step: 'secret' }, '')
+            }
+          }
+        }
         break
 
       case 'memory':
@@ -1627,14 +1654,14 @@ export function SettingsScreen({
       const id = value.trim()
       if (!id) return
       setGoogleClientId(id)
-      go({ ...view, step: 'secret' }, '')
+      go({ ...view, step: 'access' }, '')
       return
     }
 
     if (view.kind === 'googleFlow' && view.step === 'secret') {
       const secret = value.trim()
       if (!secret) return
-      void runGoogleConnect(googleClientId, secret)
+      void runGoogleConnect(googleClientId, secret, googleAccess)
       return
     }
 
@@ -2035,7 +2062,12 @@ export function SettingsScreen({
                 </Text>
                 <Box marginTop={1}>
                   <Text color={theme.muted}>
-                    Read-only: {googleToolNames(auth.google ?? null).join(', ')} — nothing writes.
+                    Access: {accessLabel(google.access)} — {describeGoogleAccess(google.access)}
+                  </Text>
+                </Box>
+                <Box marginTop={1}>
+                  <Text color={theme.muted}>
+                    Reading tools: {googleToolNames(auth.google ?? null).join(', ')}.
                   </Text>
                 </Box>
                 <Box marginTop={1}>
@@ -2063,7 +2095,7 @@ export function SettingsScreen({
                 </Box>
                 <Box marginTop={1}>
                   <Text color={theme.muted}>
-                    Milo reads only: mail and files, and nothing here writes.
+                    Next you choose how much access to ask for: read-only, or more.
                   </Text>
                 </Box>
                 <Box marginTop={1}>
@@ -2096,6 +2128,25 @@ export function SettingsScreen({
           </Box>
         )}
 
+        {view.kind === 'googleFlow' && view.step === 'access' && (
+          <Box flexDirection="column">
+            <Text color={theme.accent}>
+              Step {GOOGLE_FLOW.indexOf(view.step) + 1} of {GOOGLE_FLOW.length} — how much access?
+            </Text>
+            <Text color={theme.muted}>
+              Google hands out the whole set at once and cannot widen it later, so pick what you
+              need now — you can reconnect for more.
+            </Text>
+            <Box marginTop={1}>
+              <Menu
+                items={GOOGLE_TIERS.map((tier) => ({ label: tier.label, hint: tier.description }))}
+                index={index}
+              />
+            </Box>
+            <Notices notices={notices} />
+          </Box>
+        )}
+
         {view.kind === 'googleFlow' && view.step === 'secret' && (
           <Box flexDirection="column">
             <Text color={theme.accent}>
@@ -2122,7 +2173,7 @@ export function SettingsScreen({
           <Box flexDirection="column">
             <Text color={theme.accent}>
               Step {GOOGLE_FLOW.indexOf(view.step) + 1} of {GOOGLE_FLOW.length} — open this in a
-              browser, on this machine, and allow the read-only access
+              browser, on this machine, and allow the access Milo asked for
             </Text>
             <Box marginTop={1}>
               <Text color={theme.accent}>{googleUrl || 'waiting for a port on this machine…'}</Text>

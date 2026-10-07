@@ -131,7 +131,7 @@ describe('a capability the registry can add is named in the prompt', () => {
       ],
       skills: [{ name: 'demo', description: 'x' }],
       browser: { binary: 'chromium', headless: true, profile: 'its own', running: false, port: null },
-      google: { kind: 'connected', email: 'me@example.com', enabled: true },
+      google: { kind: 'connected', email: 'me@example.com', enabled: true, access: 'none' },
       mcp: { file: '/home/x/.milo/mcp.json', servers: [] },
     })
     const unnamed = Object.entries(MARKER)
