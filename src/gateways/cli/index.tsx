@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Box, Text, useApp } from 'ink'
-import Spinner from 'ink-spinner'
 import { createRuntime } from '../../core/bootstrap.js'
 import {
   loadConfig,
@@ -12,7 +11,7 @@ import {
 import { MILO_HOME } from '../../core/config/paths.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../../core/config/schema.js'
 import type { MemoryScope } from '../../core/memory/index.js'
-import type { PermissionMode } from '../../core/tools/permission.js'
+import { PERMISSION_LABELS, type PermissionMode } from '../../core/tools/permission.js'
 import { DEFAULT_REASONING_EFFORT, type ReasoningEffort } from '../../core/providers/types.js'
 import { shortModel } from '../model-label.js'
 import { ChatScreen } from './screens/chat.js'
@@ -222,15 +221,15 @@ export function Shell({
   const display = loaded?.config.display ?? DEFAULT_DISPLAY
   const effort = loaded?.config.reasoningEffort
   const accent = busy ? theme.warning : theme.accent
+  const model = loaded
+    ? {
+        provider: loaded.provider.id,
+        model: shortModel(loaded.model),
+        effort: effort ?? DEFAULT_REASONING_EFFORT,
+      }
+    : undefined
 
-  // Every screen below budgets for a three-row header — borders around exactly
-  // one row of text — so both sides are cut to fit before rendering: text that
-  // wraps up here is what pushes the composer out of the frame down there.
-  const leftText =
-    `${busy ? '⠋ ' : ''}Milo` +
-    (mode !== 'ask' ? ` [${mode}]` : '') +
-    (display.tools !== 'full' ? ` [tools ${display.tools}]` : '') +
-    (display.thinking === 'off' ? ' [thinking off]' : '')
+  const leftText = `MILO${mode !== 'ask' ? ` · ${PERMISSION_LABELS[mode]}` : ''}${display.tools !== 'full' ? ` · tools ${display.tools}` : ''}${display.thinking === 'off' ? ' · thinking hidden' : ''}`
   const headerRight = fitHeaderRight(
     loaded
       ? [
@@ -245,37 +244,17 @@ export function Shell({
 
   return (
     <Box flexDirection="column" height={rows} width={columns}>
-      <Box borderStyle="round" borderColor={accent} paddingX={1} justifyContent="space-between">
-        <Box>
-          {busy && (
-            <Text color={theme.warning}>
-              <Spinner type="dots" />{' '}
-            </Text>
-          )}
-          <Text bold color={accent}>
-            Milo
-          </Text>
-          {mode !== 'ask' && (
-            <Text bold color={mode === 'yolo' ? theme.danger : theme.warning}>
-              {' '}
-              [{mode}]
-            </Text>
-          )}
-          {display.tools !== 'full' && (
-            <Text bold color={theme.warning}>
-              {' '}
-              [tools {display.tools}]
-            </Text>
-          )}
-          {display.thinking === 'off' && (
-            <Text bold color={theme.warning}>
-              {' '}
-              [thinking off]
-            </Text>
-          )}
+      {screen !== 'chat' && (
+        <Box paddingX={2} height={1} justifyContent="space-between">
+          <Box>
+            <Text bold color={accent}>MILO</Text>
+            {mode !== 'ask' && <Text bold color={mode === 'yolo' ? theme.danger : theme.warning}> · {mode}</Text>}
+            {display.tools !== 'full' && <Text color={theme.secondary}> · tools {display.tools}</Text>}
+            {display.thinking === 'off' && <Text color={theme.secondary}> · thinking hidden</Text>}
+          </Box>
+          <Text color={theme.secondary}>{headerRight}</Text>
         </Box>
-        <Text color={theme.muted}>{headerRight}</Text>
-      </Box>
+      )}
 
       {screen === 'chat' && runtime ? (
         <ChatScreen
@@ -293,6 +272,8 @@ export function Shell({
           onExit={exit}
           onBusyChange={setBusy}
           onSessionChange={setSessionId}
+          model={model}
+          sessionId={sessionId}
         />
       ) : screen === 'settings' && loaded ? (
         <SettingsScreen

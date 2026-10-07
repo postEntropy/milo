@@ -19,11 +19,12 @@ import type { ImagePart } from '../../../core/providers/types.js'
 import { describeRebase, formatWhen, type SessionStats } from '../../../core/sessions/index.js'
 import { formatSkillList } from '../../../core/skills/index.js'
 import type { TodoItem } from '../../../core/todos.js'
-import type {
-  PermissionAsker,
-  PermissionMode,
-  PermissionRequest,
-  PermissionResult,
+import {
+  PERMISSION_LABELS,
+  type PermissionAsker,
+  type PermissionMode,
+  type PermissionRequest,
+  type PermissionResult,
 } from '../../../core/tools/permission.js'
 import { errorMessage } from '../../../util/errors.js'
 import { buildSessionsList } from '../../actions.js'
@@ -36,7 +37,7 @@ import {
 } from '../../commands.js'
 import { isCtrlC, isSteerKey } from '../keys.js'
 import { readInputHistory, saveInputHistory } from '../input-history.js'
-import { theme } from '../theme.js'
+import { theme, type ThemeColor } from '../theme.js'
 import { showsToolCall, toolDetail, toolDisplayName } from '../../tool-line.js'
 import { buildLines, padToBottom, visibleWindow, type Item, type Line } from '../transcript.js'
 import { useElapsed } from '../use-elapsed.js'
@@ -44,11 +45,34 @@ import { useTerminalSize } from '../use-terminal-size.js'
 
 type Phase = 'idle' | 'thinking' | 'writing' | 'tool' | 'asking' | 'waiting'
 
-const HEADER_ROWS = 3
-/** The bordered composer: its top border, the line being typed, its bottom border. */
+const HEADER_ROWS = 0
+/** The composer line and its breathing room. */
 const COMPOSER_ROWS = 3
 /** The permission prompt: the question and the key it is waiting on. */
-const PERMISSION_ROWS = 2
+const PERMISSION_ROWS = 3
+
+/**
+ * What the turn runs on. Kept in parts rather than as one string: the band under
+ * the composer colours each piece for what it is — the model is the value, the
+ * provider and the id are the reference — and a single run of text could not.
+ */
+export interface ModelInfo {
+  provider: string
+  model: string
+  effort: ReasoningEffort
+}
+
+/**
+ * One field of the band under the composer: an optional muted label, and the value
+ * that carries the colour. `effort` is the label and `medium` is the value, so the
+ * eye lands on what is set rather than on the word naming it.
+ */
+interface FooterPart {
+  label?: string
+  text: string
+  color: ThemeColor
+  bold?: boolean
+}
 
 export interface ChatScreenProps {
   runtime: AgentRuntime
@@ -67,6 +91,8 @@ export interface ChatScreenProps {
   onOpenSettings: () => void
   onExit: () => void
   onBusyChange?: (busy: boolean) => void
+  model?: ModelInfo
+  sessionId?: string | null
   /** Fired when /new or /resume rebinds this conversation to another session. */
   onSessionChange?: (id: string) => void
 }
@@ -129,6 +155,8 @@ export function ChatScreen({
   onExit,
   onBusyChange,
   onSessionChange,
+  model,
+  sessionId,
 }: ChatScreenProps) {
   const { exit } = useApp()
   const { rows, columns } = useTerminalSize()
@@ -210,12 +238,14 @@ export function ChatScreen({
     resolve?.({ allowed })
   }
 
-  const width = Math.max(20, columns - 2)
+  // The width the transcript wraps to: the screen less the two columns each line
+  // is inset by, so a line never runs past the edge and gets clipped.
+  const width = Math.max(20, columns - 4)
 
   // Everything below the transcript: whichever of the two footers is showing,
   // plus the status line under it. The thought is no longer a pane of its own
   // above the input — it is part of the transcript, so it costs nothing here.
-  const footerRows = (permission ? PERMISSION_ROWS : COMPOSER_ROWS) + 1
+  const footerRows = (permission ? PERMISSION_ROWS : COMPOSER_ROWS) + 2
   // A floor of 1, not 3: on a short viewport the old floor made the frame one
   // row taller than the screen, and the composer at the bottom is what it ate.
   const chatHeight = Math.max(1, rows - HEADER_ROWS - footerRows)
@@ -234,7 +264,9 @@ export function ChatScreen({
   )
   const bodyLines = useMemo<Line[]>(() => {
     if (window.lines.length === 0 && !busy && displayItems.length === 0) {
-      return [{ text: 'Ask Milo anything. Type /help for commands.', dim: true }]
+      // Anchored like any other content: the first line of a session waits just
+      // above the composer, not stranded at the top of an empty screen.
+      return padToBottom([{ text: 'Ask Milo anything. Type /help for commands.', dim: true }], chatHeight)
     }
     return padToBottom(window.lines, chatHeight)
   }, [window.lines, chatHeight, busy, displayItems.length])
@@ -886,95 +918,126 @@ export function ChatScreen({
             ? 'writing…'
             : 'thinking…'
 
-  // The hint and the counters share one line, and a frame of fixed height cannot
-  // afford a wrap: the overflow pushes everything below it down, and Ink redraws
-  // the rest of the screen into whatever is left — two frames on top of each
-  // other, the composer showing its placeholder and the typed text at once. So
-  // the pieces drop in order of what they are worth — the steer hint, then the
-  // scroll marker, then the counters — before any of them is allowed to wrap.
   const statusText = `${statusLabel} ${formatSeconds(elapsed)}${queued > 0 ? ` · ${queued} queued` : ''}`
-  const steerHint = ' · Ctrl+Enter steers'
-  // The wheel scrolls now — a drag on a phone, the wheel itself on a desktop — so
-  // the keys for it are not a legend the footer has to carry. PgUp/PgDn still
-  // work, quietly, for whoever reaches for them.
-  const idleHint =
-    columns >= 60
-      ? 'Enter send · /help · Ctrl+C quits'
-      : 'Enter send · /help · Ctrl+C'
   const scrolled = window.offset > 0 ? `▲ scrolled (${window.offset})` : ''
-  const idleFull = scrolled ? `${scrolled} · ${idleHint}` : idleHint
-  const hint = statusText.length + steerHint.length + 2 <= columns ? steerHint : ''
-  const idleText = idleFull.length + 2 <= columns ? idleFull : scrolled || idleHint
+  const idleText = scrolled || 'Ready'
   const counters = [
     !busy && lastDuration !== null ? `last ${formatSeconds(lastDuration)}` : '',
     contextTokens > 0 ? `${formatTokens(contextTokens)} tok` : '',
   ]
     .filter(Boolean)
     .join(' · ')
-  const leftWidth = (busy ? statusText.length + hint.length : idleText.length) + 2
-  const showCounters = counters !== '' && leftWidth + counters.length <= columns
+  // One band under the composer: what the request runs on, and where it is going,
+  // said once. Each field is a muted label and a value that carries the colour, so
+  // the eye lands on what is set rather than on the word naming it. The model's own
+  // name already says where the request goes, so the provider is not repeated; a
+  // flag that takes something away wears the warning tone; and the fields drop from
+  // the end when the line does not fit, the session id first — the state that takes
+  // something away outlives the id nobody has to read twice.
+  const footerParts: FooterPart[] = [
+    ...(model
+      ? [
+          { text: model.model, color: theme.accent, bold: true },
+          { label: 'effort', text: model.effort, color: theme.secondary },
+        ]
+      : [{ text: 'Milo', color: theme.muted }]),
+    ...(mode !== 'ask' ? [{ text: PERMISSION_LABELS[mode], color: theme.warning }] : []),
+    ...(display.tools !== 'full' ? [{ label: 'tools', text: display.tools, color: theme.warning }] : []),
+    ...(display.thinking === 'off' ? [{ label: 'thinking', text: 'hidden', color: theme.warning }] : []),
+    ...(sessionId ? [{ label: 'session', text: sessionId, color: theme.muted }] : []),
+  ]
+  const footerWidth = Math.max(1, columns - 4)
+  const partWidth = (part: FooterPart) => (part.label ? part.label.length + 1 : 0) + part.text.length
+  const footerWidthOf = (parts: FooterPart[]) =>
+    parts.reduce((total, part, index) => total + partWidth(part) + (index > 0 ? 3 : 0), 0)
+  while (footerWidthOf(footerParts) > footerWidth && footerParts.length > 1) footerParts.pop()
+  if (footerWidthOf(footerParts) > footerWidth) {
+    const last = footerParts[footerParts.length - 1]
+    if (last) {
+      const label = last.label ? last.label.length + 1 : 0
+      last.text = `${last.text.slice(0, Math.max(1, footerWidth - label - 1))}…`
+    }
+  }
+  const statusWidth = (busy ? statusText.length + 2 : idleText.length + 2)
+  const showCounters = counters !== '' && statusWidth + counters.length <= columns - 4
 
   return (
     <Box flexDirection="column" height={rows - HEADER_ROWS} width={columns}>
-      <Box flexDirection="column" flexGrow={1} paddingX={1} overflow="hidden">
+      <Box flexDirection="column" flexGrow={1} overflow="hidden">
         {bodyLines.map((line, index) => (
+          // Every line is its own row box, inset where the transcript is; a line
+          // carrying a background fills the whole row, the way the composer does,
+          // and the ones without one are transparent and read as plain text.
           // biome-ignore lint/suspicious/noArrayIndexKey: the window is rebuilt every frame and never reorders
-          <Text key={index} color={line.color} dimColor={line.dim}>
-            {line.segments
-              ? line.segments.map((segment, segmentIndex) => (
-                  // biome-ignore lint/suspicious/noArrayIndexKey: segments are re-wrapped every frame and never reorder
-                  <Text key={segmentIndex} bold={segment.bold} color={segment.color}>
-                    {segment.text}
-                  </Text>
-                ))
-              : line.text || ' '}
-          </Text>
+          <Box key={index} width={columns} paddingX={2} backgroundColor={line.background}>
+            <Text color={line.color} dimColor={line.dim}>
+              {line.segments
+                ? line.segments.map((segment, segmentIndex) => (
+                    // biome-ignore lint/suspicious/noArrayIndexKey: segments are re-wrapped every frame and never reorder
+                    <Text key={segmentIndex} bold={segment.bold} color={segment.color}>
+                      {segment.text}
+                    </Text>
+                  ))
+                : line.text || ' '}
+            </Text>
+          </Box>
         ))}
       </Box>
 
-      {permission ? (
-        <Box flexDirection="column" paddingX={1}>
-          <Text color={theme.warning}>⚠ Milo wants to run {toolDisplayName(permission.tool)}:</Text>
-          <Text color={theme.warning}>  {permission.summary}</Text>
-          <Text color={theme.muted}>[y] allow · [n] deny</Text>
-        </Box>
-      ) : (
-        // A panel of its own, so where the answer ends and the next message
-        // begins is never in doubt — the border turns warning-coloured while a
-        // turn is running, which is also when the placeholder changes.
-        <Box
-          borderStyle="round"
-          borderColor={busy ? theme.warning : theme.accent}
-          marginX={1}
-          paddingX={1}
-          width={width}
-          height={COMPOSER_ROWS}
-          overflow="hidden"
-        >
-          <Text color={mode === 'yolo' ? theme.danger : theme.accent}>› </Text>
-          {/* Always mounted, and without an `onSubmit`: a turn running is no
-              reason to take the composer away — it is exactly when a correction
-              is worth typing — and Enter is read one level up, where the
-              modifier that tells queue and steer apart is still visible. */}
-          <TextInput
-            key={recallEpoch}
-            value={input}
-            onChange={setInput}
-            placeholder={busy ? 'Queue a message — Ctrl+Enter to steer…' : 'Type a message or @file…'}
-          />
-        </Box>
-      )}
-
-      <Box paddingX={1} justifyContent="space-between">
+      <Box paddingX={2} width={columns} justifyContent="space-between">
         {busy ? (
           <Text color={theme.warning}>
             <Spinner type="dots" /> {statusText}
-            {hint ? <Text color={theme.muted}>{hint}</Text> : null}
           </Text>
         ) : (
           <Text color={theme.muted}>{idleText}</Text>
         )}
         {showCounters ? <Text color={theme.muted}>{counters}</Text> : null}
+      </Box>
+
+      {permission ? (
+        <Box flexDirection="column" paddingX={2}>
+          <Text color={theme.warning}>⚠ Milo wants to run {toolDisplayName(permission.tool)}:</Text>
+          <Text color={theme.warning}>  {permission.summary}</Text>
+          <Text color={theme.muted}>[y] allow · [n] deny</Text>
+        </Box>
+      ) : (
+        <Box
+          backgroundColor={theme.surface}
+          paddingX={2}
+          width={columns}
+          height={COMPOSER_ROWS}
+          alignItems="center"
+          overflow="hidden"
+        >
+          <Text bold>› </Text>
+          {/* Always mounted, and without an `onSubmit`: a turn running is no
+              reason to take the composer away — it is exactly when a correction
+              is worth typing — and Enter is read one level up, where the
+              modifier that tells queue and steer apart is still visible. The
+              placeholder is drawn here rather than by the input, whose own hint
+              is grey — and a grey that vanishes against the composer's fill is
+              no hint at all. */}
+          <TextInput key={recallEpoch} value={input} onChange={setInput} placeholder="" />
+          {input === '' && (
+            <Text color={theme.surfaceText}>
+              {' '}
+              {busy ? 'Queue a message — Ctrl+Enter to steer…' : 'Type a message or @file…'}
+            </Text>
+          )}
+        </Box>
+      )}
+
+      <Box paddingX={2} width={columns}>
+        {footerParts.map((part, index) => (
+          <Text key={`${part.label ?? ''}:${part.text}`}>
+            {index > 0 ? <Text color={theme.muted}> · </Text> : null}
+            {part.label ? <Text color={theme.muted}>{part.label} </Text> : null}
+            <Text color={part.color} bold={part.bold}>
+              {part.text}
+            </Text>
+          </Text>
+        ))}
       </Box>
     </Box>
   )

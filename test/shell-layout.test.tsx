@@ -42,38 +42,38 @@ function resize(app: ReturnType<typeof render>, columns: number, rows: number): 
   app.stdout.emit('resize')
 }
 
-/** The header's and the composer's borders are the frame's only rounded rows. */
-const TOP_BORDER = /^\s*╭─+╮\s*$/
-const BOTTOM_BORDER = /^\s*╰─+╯\s*$/
+/**
+ * No row carries a rounded box any more: the composer is a filled bar, delimited
+ * by its own surface rather than by borders. The frame under test must draw none.
+ */
+const ROUNDED = /^\s*[╭╰]─+[╮╯]\s*$/
 
 describe('Shell layout on small terminals', () => {
   afterEach(() => cleanup())
 
-  it('keeps the header on one row, with the effort beside the model', async () => {
+  it('keeps the status band on the last row, with the effort beside the model', async () => {
     const app = render(<Shell initial={loadConfig()} cwd={home} startScreen="chat" />)
     resize(app, 60, 20)
     await tick()
 
     const lines = (app.lastFrame() ?? '').split('\n')
-    // Borders around exactly one row of text: a header that wraps is one row
-    // more than every screen below it budgets for, and the composer pays.
-    expect(lines[0]).toMatch(TOP_BORDER)
-    expect(lines[2]).toMatch(BOTTOM_BORDER)
-    expect(lines[1]).toContain('Milo')
+    // The chat has no header: the knobs live in the band under the composer, the
+    // frame's last row — so the transcript keeps the top of the screen.
+    const band = lines.at(-1) ?? ''
     // Without the vendor prefix: the provider beside it already says enough.
-    expect(lines[1]).toContain('deepseek-v4.1-flash')
-    expect(lines[1]).not.toContain('deepseek/deepseek')
-    expect(lines[1]).toContain('effort medium')
+    expect(band).toContain('deepseek-v4.1-flash')
+    expect(band).not.toContain('deepseek/deepseek')
+    expect(band).toContain('effort medium')
 
     app.stdin.write('/effort low')
     await tick(20)
     app.stdin.write('\r')
     await tick()
 
-    expect((app.lastFrame() ?? '').split('\n')[1]).toContain('effort low')
+    expect((app.lastFrame() ?? '').split('\n').at(-1)).toContain('effort low')
   })
 
-  it('keeps the composer intact while a turn runs on a tiny viewport', async () => {
+  it('keeps the filled composer intact while a turn runs on a tiny viewport', async () => {
     const app = render(<Shell initial={loadConfig()} cwd={home} startScreen="chat" />)
     resize(app, 44, 12)
     await tick()
@@ -89,13 +89,11 @@ describe('Shell layout on small terminals', () => {
     // The frame is the screen: whatever is taller, the terminal cuts off — and
     // what it cut was the bottom of the composer.
     expect(lines.length).toBeLessThanOrEqual(12)
-    // Both bordered boxes keep top and bottom borders, one row each.
-    expect(lines.filter((line) => TOP_BORDER.test(line))).toHaveLength(2)
-    expect(lines.filter((line) => BOTTOM_BORDER.test(line))).toHaveLength(2)
-    // Nothing is painted over the composer's bottom border: the status line
-    // used to collide with it once a message had been sent.
-    expect(
-      lines.some((line) => line.includes('─') && /\b(Enter send|last |queued)/.test(line)),
-    ).toBe(false)
+    // The composer is a filled bar, so nothing in the frame is boxed.
+    expect(lines.filter((line) => ROUNDED.test(line))).toHaveLength(0)
+    expect(lines.some((line) => line.includes('─'))).toBe(false)
+    // The composer survives below the status line, its prompt drawn whole: a
+    // status/counter row painted onto it is what this guards against.
+    expect(lines.some((line) => /› /.test(line))).toBe(true)
   })
 })

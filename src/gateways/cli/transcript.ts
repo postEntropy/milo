@@ -16,6 +16,11 @@ export interface Line {
   color?: LineColor
   dim?: boolean
   /**
+   * A fill behind the line — the person's own message reads as one stripe, the
+   * way the composer delimits itself by a surface rather than by a border.
+   */
+  background?: LineColor
+  /**
    * Inline runs, when one line needs more than one weight — the tool name inside
    * its call, so the name reads as a name and not as the start of the arguments.
    * `text` stays the plain string the window and the tests work with.
@@ -85,11 +90,17 @@ export function buildLines(items: Item[], width: number): Line[] {
     if (index > 0 && !(item.kind === 'tool' && previous?.kind === 'tool')) push('')
     switch (item.kind) {
       case 'user': {
-        wrapText(item.text, width - 2).forEach((text, lineIndex) => {
-          push(lineIndex === 0 ? `› ${text}` : `  ${text}`, {
-            color: lineIndex === 0 ? theme.accent : theme.muted,
+        // The person's words in a filled stripe, like the composer: what is theirs
+        // is one band, and its own surface delimits it rather than a rule. The
+        // prefix is part of the stripe, so the wrap leaves room for it — the fill
+        // itself spans the column, so no padding is needed to reach the edge.
+        for (const [lineIndex, text] of wrapText(item.text, width - 2).entries()) {
+          const prefix = lineIndex === 0 ? '› ' : '  '
+          push(`${prefix}${text}`, {
+            color: theme.surfaceText,
+            background: theme.surface,
           })
-        })
+        }
         break
       }
       case 'assistant':

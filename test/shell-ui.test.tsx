@@ -102,7 +102,7 @@ describe('Shell', () => {
 
   /**
    * One `milo` launch, far enough to know which conversation it is in: the
-   * wizard hands over, and the header's first right-hand field is the session.
+   * wizard hands over, and the band under the composer names the session.
    * With `say`, the conversation is spoken in, so it is written to disk and can
    * be continued — a run that is opened and never used leaves nothing behind.
    */
@@ -128,7 +128,7 @@ describe('Shell', () => {
       }
       await tick(20)
     }
-    if (!id) throw new Error('no session id in the header')
+    if (!id) throw new Error('no session id in the status band')
 
     if (say) {
       app.stdin.write(say)

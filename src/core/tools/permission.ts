@@ -11,6 +11,17 @@ import type { Tool } from './types.js'
 export type PermissionDecision = 'allow' | 'ask' | 'deny'
 export type PermissionMode = 'ask' | 'auto' | 'yolo'
 
+/**
+ * How each mode is named on screen. The stored value is `yolo` — a joke, and not
+ * a word to put in front of someone — so what a person reads is this label, and
+ * every surface that shows the mode takes it from here rather than inventing one.
+ */
+export const PERMISSION_LABELS: Record<PermissionMode, string> = {
+  ask: 'Ask',
+  auto: 'Auto',
+  yolo: 'Unrestricted',
+}
+
 export interface PermissionRequest {
   tool: string
   args: unknown

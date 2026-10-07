@@ -79,6 +79,15 @@ async function submit(stdin: { write: (data: string) => void }, text: string): P
   await tick()
 }
 
+/**
+ * The composer's own row: the last line carrying its prompt. The composer sits
+ * below the transcript, so a line already echoed above it — the same words sent
+ * and shown — is never the one this returns.
+ */
+function composerRow(frame: string): string {
+  return frame.split('\n').filter((line) => line.includes('› ')).at(-1) ?? ''
+}
+
 interface RenderOptions {
   mode?: PermissionMode
   onModeChange?: (mode: PermissionMode) => void
@@ -411,12 +420,15 @@ describe('ChatScreen', () => {
     await tick()
 
     const frame = app.lastFrame() ?? ''
-    // The frame is a fixed height, so a line that wraps pushes everything below
-    // it down and Ink redraws two frames over each other — which is how the
-    // composer ended up showing its placeholder and the typed text at once.
-    expect(frame).toContain('Enter send · /help · Ctrl+C')
+    // The shortcut legend is off the surface now, and the frame is a fixed height:
+    // a status line that wrapped would push everything below it down and Ink would
+    // redraw two frames over each other — the way the composer once showed its
+    // placeholder and the typed text at once.
+    expect(frame).not.toContain('Enter send')
     expect(frame).not.toContain('PgUp')
-    expect(frame.split('\n').some((line) => line.trim() === 'quits')).toBe(false)
+    // The counters share the status row, not a wrapped second one.
+    expect(frame.split('\n').some((line) => line.includes('tok'))).toBe(true)
+    expect(frame.split('\n').some((line) => line.trim() === 'tok')).toBe(false)
   })
 
   it('stays quiet when the answer starts straight away', async () => {
@@ -511,15 +523,15 @@ describe('ChatScreen', () => {
     await submit(stdin, 'primeira')
     await submit(stdin, 'segunda')
 
-    // Into the composer — the bordered line, not the echo of the same words
-    // left in the transcript above it.
+    // Into the composer — the row below the transcript, not the echo of the same
+    // words left in the transcript above it.
     stdin.write(UP)
     await tick()
-    expect(lastFrame()).toContain('│ › segunda')
+    expect(composerRow(lastFrame() ?? '')).toContain('› segunda')
 
     stdin.write(UP)
     await tick()
-    expect(lastFrame()).toContain('│ › primeira')
+    expect(composerRow(lastFrame() ?? '')).toContain('› primeira')
 
     // Enter sends whatever the arrow put there.
     stdin.write('\r')
@@ -536,11 +548,11 @@ describe('ChatScreen', () => {
 
     stdin.write(UP)
     await tick()
-    expect(lastFrame()).toContain('│ › guardada')
+    expect(composerRow(lastFrame() ?? '')).toContain('› guardada')
 
     stdin.write(DOWN)
     await tick()
-    expect(lastFrame()).toContain('│ › rascunho')
+    expect(composerRow(lastFrame() ?? '')).toContain('› rascunho')
 
     stdin.write('\r')
     await tick()
@@ -582,7 +594,7 @@ describe('ChatScreen', () => {
     second.stdin.write(UP)
     await tick()
 
-    expect(second.lastFrame()).toContain('│ › sobrevive ao reinicio')
+    expect(composerRow(second.lastFrame() ?? '')).toContain('› sobrevive ao reinicio')
   })
 
   it('scrolls the transcript on a wheel tick, which reaches it as an alt+arrow', async () => {
@@ -605,7 +617,7 @@ describe('ChatScreen', () => {
     const frame = lastFrame() ?? ''
     expect(frame).toContain('▲ scrolled')
     // And it is not the history: the composer stays as it was, empty.
-    expect(frame).not.toContain('│ › uma pergunta')
+    expect(composerRow(frame)).not.toContain('uma pergunta')
   })
 
   it('opens the model picker via /model and the settings hub via /setup', async () => {
@@ -822,7 +834,7 @@ describe('ChatScreen — queue and steer', () => {
     expect(lastFrame()).toContain('Queue a message')
 
     await submit(stdin, 'second')
-    expect(lastFrame()).toContain('1 queued ·')
+    expect(lastFrame()).toContain('· 1 queued')
     // Still one turn: the second message waits its turn.
     expect(sent.map((turn) => turn.text)).toEqual(['first'])
 
@@ -887,11 +899,11 @@ describe('ChatScreen — queue and steer', () => {
 
     await submit(stdin, 'first')
     await submit(stdin, 'second')
-    expect(lastFrame()).toContain('1 queued ·')
+    expect(lastFrame()).toContain('· 1 queued')
 
     stdin.write('\u0003')
     await tick()
-    expect(lastFrame()).not.toContain('1 queued ·')
+    expect(lastFrame()).not.toContain('· 1 queued')
 
     // The turn the stub was holding ends; the queued message must not run.
     release()
