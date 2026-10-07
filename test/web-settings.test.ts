@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { Classifier } from '../src/core/classifier/index.js'
 import type { McpServers } from '../src/core/mcp/servers.js'
 import { stringify } from 'yaml'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -50,6 +51,7 @@ function writeConfig(): void {
 function build(
   memory: Record<string, unknown> = {},
   mcp: McpServers | null = null,
+  classifier: Classifier | null = null,
 ): InstanceType<typeof AgentRuntime> {
   return new AgentRuntime({
     provider: { id: 'test', stream: async function* () {} },
@@ -65,6 +67,7 @@ function build(
     } as never,
     cwd: home,
     mcp,
+    classifier,
   })
 }
 
@@ -637,5 +640,123 @@ describe('web Settings mail', () => {
     grantAt('none')
     const settings = new WebSettings(build({}), home)
     await expect(settings.handle('email-assist', { mode: 'translate' })).rejects.toThrow(/triage/)
+  })
+
+  /** A stand-in for the decision model: one answer per message id. */
+  const classifierOf = (answers: Record<string, { choice: string; confidence?: number }>): Classifier =>
+    ({ ask: async () => answers }) as unknown as Classifier
+
+  /** The inbox behind a stubbed Gmail: one message, `m1`. */
+  const oneMessage = (): void => gmail((url) => {
+    if (url.includes('/messages?')) return json({ messages: [{ id: 'm1', threadId: 't1' }] })
+    if (url.includes('/messages/m1')) {
+      return json({ id: 'm1', threadId: 't1', payload: { headers: [{ name: 'From', value: 'ana@exemplo' }, { name: 'Subject', value: 'a nota' }] } })
+    }
+    return json({})
+  })
+
+  it('sorts the inbox into a label Milo makes from the mail', async () => {
+    writeConfig()
+    grantAt('none')
+    oneMessage()
+    const settings = new WebSettings(build({}, null, classifierOf({ m1: { choice: 'receipt', confidence: 0.9 } })), home)
+    const page = (await settings.handle('email-inbox', { limit: 5 })) as {
+      messages: { labels: { id: string; name: string }[] }[]
+      labels: { id: string }[]
+      colors: string[]
+    }
+    expect(page.messages[0]?.labels).toEqual([expect.objectContaining({ id: 'receipt', name: 'Receipts' })])
+    expect(page.labels.map((label) => label.id)).toContain('receipt')
+    expect(page.colors).toContain('sage')
+  })
+
+  it('filters the inbox by a label', async () => {
+    writeConfig()
+    grantAt('none')
+    oneMessage()
+    const settings = new WebSettings(build({}, null, classifierOf({ m1: { choice: 'receipt', confidence: 0.9 } })), home)
+    const kept = (await settings.handle('email-inbox', { labelId: 'receipt' })) as { messages: unknown[] }
+    expect(kept.messages).toHaveLength(1)
+    const none = (await settings.handle('email-inbox', { labelId: 'newsletter' })) as { messages: unknown[] }
+    expect(none.messages).toHaveLength(0)
+  })
+
+  it('carries the label onto a thread it already sorted, without asking again', async () => {
+    writeConfig()
+    grantAt('none')
+    let asks = 0
+    const classifier = {
+      ask: async () => { asks += 1; return { m1: { choice: 'receipt', confidence: 0.9 } } },
+    } as unknown as Classifier
+    gmail((url) => {
+      if (url.includes('/messages?')) return json({ messages: [{ id: 'm1', threadId: 't1' }] })
+      if (url.includes('/messages/m1')) return json({ id: 'm1', threadId: 't1', payload: { headers: [{ name: 'Subject', value: 'a nota' }] } })
+      if (url.includes('/threads/t1')) {
+        return json({ id: 't1', messages: [{ id: 'm1', threadId: 't1', payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: 'a nota' }], body: { data: Buffer.from('oi').toString('base64url') } } }] })
+      }
+      return json({})
+    })
+    const settings = new WebSettings(build({}, null, classifier), home)
+    await settings.handle('email-inbox', { limit: 5 })
+
+    const thread = (await settings.handle('email-thread', { threadId: 't1' })) as { messages: { labels: { id: string }[] }[] }
+    expect(thread.messages[0]?.labels).toEqual([expect.objectContaining({ id: 'receipt' })])
+    // The sort is the inbox's job; reading a thread only looks the labels up.
+    expect(asks).toBe(1)
+  })
+
+  it('reads the inbox even when the classifier fails', async () => {
+    writeConfig()
+    grantAt('none')
+    oneMessage()
+    const broken = { ask: async () => { throw new Error('classifier review timed out') } } as unknown as Classifier
+    const settings = new WebSettings(build({}, null, broken), home)
+    const page = (await settings.handle('email-inbox', {})) as { messages: { labels: unknown[] }[]; labels: unknown[] }
+    expect(page.messages).toHaveLength(1)
+    expect(page.messages[0]?.labels).toEqual([])
+  })
+
+  it('adds and deletes a label from the screen, answering a bad colour with the valid ones', async () => {
+    writeConfig()
+    grantAt('none')
+    const settings = new WebSettings(build({}), home)
+
+    const made = (await settings.handle('email-label-create', { name: 'Invoices', color: 'teal' })) as { labels: { id: string; name: string }[] }
+    const created = made.labels.find((label) => label.name === 'Invoices')
+    expect(created).toBeTruthy()
+
+    await expect(settings.handle('email-label-create', { name: 'Loud', color: 'chartreuse' })).rejects.toThrow(/terracotta/)
+
+    const after = (await settings.handle('email-label-delete', { id: created!.id })) as { labels: { id: string }[] }
+    expect(after.labels.some((label) => label.id === created!.id)).toBe(false)
+  })
+
+  it('says whether it can sort mail, from the classifier it was built with', async () => {
+    writeConfig()
+    grantAt('none')
+    const without = new WebSettings(build({}), home)
+    expect((await without.handle('email-status') as { sorting: boolean }).sorting).toBe(false)
+    const withClassifier = new WebSettings(build({}, null, classifierOf({})), home)
+    expect((await withClassifier.handle('email-status') as { sorting: boolean }).sorting).toBe(true)
+  })
+
+  it('puts a label on one message by hand, and takes it off', async () => {
+    writeConfig()
+    grantAt('none')
+    oneMessage()
+    const settings = new WebSettings(build({}, null, classifierOf({ m1: { choice: 'receipt', confidence: 0.9 } })), home)
+    await settings.handle('email-inbox', { limit: 5 })
+    const made = (await settings.handle('email-label-create', { name: 'Invoices', color: 'teal' })) as { labels: { id: string; name: string }[] }
+    const id = made.labels.find((label) => label.name === 'Invoices')!.id
+
+    expect(await settings.handle('email-label-assign', { id: 'm1', label: id, on: true })).toMatchObject({ on: true })
+    const both = (await settings.handle('email-inbox', { limit: 5 })) as { messages: { labels: { id: string }[] }[] }
+    expect(both.messages[0]?.labels.map((label) => label.id).sort()).toEqual([id, 'receipt'].sort())
+
+    await settings.handle('email-label-assign', { id: 'm1', label: id, on: false })
+    const after = (await settings.handle('email-inbox', { limit: 5 })) as { messages: { labels: { id: string }[] }[] }
+    expect(after.messages[0]?.labels.map((label) => label.id)).toEqual(['receipt'])
+
+    await expect(settings.handle('email-label-assign', { id: 'm1', label: 'nope', on: true })).rejects.toThrow(/No label/)
   })
 })

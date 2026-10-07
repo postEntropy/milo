@@ -20,6 +20,7 @@ import {
   type DraftInput,
 } from '../../core/google/gmail.js'
 import type { GoogleOutcome, GoogleTokens } from '../../core/google/oauth.js'
+import { LABEL_COLORS, createLabel, deleteLabel, labelMessages, toggleAssignment } from '../../core/google/labels.js'
 import { googleState } from '../../core/google/state.js'
 import { GOOGLE_TIERS, accessOf, type GoogleAccess } from '../../core/google/tiers.js'
 import { googleToolNames } from '../../core/tools/index.js'
@@ -156,6 +157,9 @@ export class WebSettings {
       case 'email-draft': return this.emailDraft(body)
       case 'email-send': return this.emailSend(body)
       case 'email-assist': return this.emailAssist(body)
+      case 'email-label-create': return this.emailLabelCreate(body)
+      case 'email-label-delete': return this.emailLabelDelete(body)
+      case 'email-label-assign': return this.emailLabelAssign(body)
       default: throw new Error('Unknown Settings action.')
     }
   }
@@ -168,13 +172,56 @@ export class WebSettings {
     return {
       ...googleState(readConfig(), readAuth()),
       tiers: GOOGLE_TIERS.map(({ id, label, description }) => ({ id, label, description })),
+      // Whether Milo can sort the mail at all. Said here, up front, so the screen
+      // can tell the person rather than promise a sorting that will never come.
+      sorting: this.runtime.classifier !== null,
     }
   }
 
-  private emailInbox(body: Record<string, unknown>): Promise<unknown> {
+  /**
+   * A page of the inbox, each message carrying the labels Milo has sorted it into.
+   * The classifier is asked about the messages with no label yet — never the whole
+   * page again — and a classifier that fails leaves the mail readable, only unlabelled.
+   */
+  private async emailInbox(body: Record<string, unknown>): Promise<unknown> {
     const pageToken = optionalText(body.pageToken)
     const limit = typeof body.limit === 'number' && body.limit > 0 ? Math.min(Math.floor(body.limit), 50) : 20
-    return this.mailCall((tokens) => listInbox(tokens, { ...(pageToken ? { pageToken } : {}), limit }))
+    const page = await this.mailCall((tokens) => listInbox(tokens, { ...(pageToken ? { pageToken } : {}), limit }))
+    const { byMessage, labels } = await labelMessages(this.runtime.classifier, page.messages)
+    const labelId = optionalText(body.labelId)
+    const messages = page.messages
+      .map((message) => ({ ...message, labels: byMessage.get(message.id) ?? [] }))
+      .filter((message) => !labelId || message.labels.some((label) => label.id === labelId))
+    return {
+      messages,
+      ...(page.nextPageToken ? { nextPageToken: page.nextPageToken } : {}),
+      labels,
+      colors: LABEL_COLORS,
+    }
+  }
+
+  /** The person's own label, added to the set. Local to Milo — nothing reaches Gmail. */
+  private async emailLabelCreate(body: Record<string, unknown>): Promise<unknown> {
+    const result = await createLabel(optionalText(body.name) ?? '', optionalText(body.color) ?? '')
+    if (!result.ok) throw new Error(result.error)
+    return { labels: result.labels, colors: LABEL_COLORS }
+  }
+
+  private async emailLabelDelete(body: Record<string, unknown>): Promise<unknown> {
+    const result = await deleteLabel(optionalText(body.id) ?? '')
+    if (!result.ok) throw new Error(result.error)
+    return { labels: result.labels, colors: LABEL_COLORS }
+  }
+
+  /** Puts a label on one message or takes it off, by hand. Milo's own, so no grant. */
+  private async emailLabelAssign(body: Record<string, unknown>): Promise<unknown> {
+    const id = googleId(body.id)
+    const label = optionalText(body.label)
+    if (!label) throw new Error('A label is required.')
+    const on = body.on !== false
+    const result = await toggleAssignment(id, label, on)
+    if (!result.ok) throw new Error(result.error)
+    return { id, label, on, labels: result.labels }
   }
 
   private emailMessage(body: Record<string, unknown>): Promise<unknown> {
@@ -182,9 +229,19 @@ export class WebSettings {
     return this.mailCall((tokens) => readMail(tokens, id))
   }
 
-  private emailThread(body: Record<string, unknown>): Promise<unknown> {
+  /**
+   * One thread, each message carrying the labels already sorted onto it. It is a
+   * lookup, not a sort — the inbox is what sorts — so opening a thread asks the
+   * classifier nothing and is never slower for it.
+   */
+  private async emailThread(body: Record<string, unknown>): Promise<unknown> {
     const id = googleId(body.threadId ?? body.id)
-    return this.mailCall((tokens) => readThread(tokens, id))
+    const thread = await this.mailCall((tokens) => readThread(tokens, id))
+    const { byMessage } = await labelMessages(null, thread.messages)
+    return {
+      ...thread,
+      messages: thread.messages.map((message) => ({ ...message, labels: byMessage.get(message.id) ?? [] })),
+    }
   }
 
   /** What a message answers to: out of the inbox, and read or unread. */

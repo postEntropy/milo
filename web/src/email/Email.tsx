@@ -24,11 +24,13 @@ type Tier = { id: Access; label: string; description: string }
 type Status =
   | { kind: 'off'; tiers: Tier[] }
   | { kind: 'wanted'; tiers: Tier[] }
-  | { kind: 'connected'; email?: string; access: Access; tiers: Tier[] }
+  | { kind: 'connected'; email?: string; access: Access; tiers: Tier[]; sorting: boolean }
 
-type MailSummary = { id: string; threadId: string; date?: string; from?: string; subject?: string; snippet?: string; labelIds?: string[] }
+type MailLabel = { id: string; name: string; color: string }
+type MailSummary = { id: string; threadId: string; date?: string; from?: string; subject?: string; snippet?: string; labelIds?: string[]; labels?: MailLabel[] }
 type MailMessage = MailSummary & { text: string; truncated: boolean; html: boolean }
 type MailThread = { id: string; messages: MailMessage[] }
+type InboxPage = { messages: MailSummary[]; nextPageToken?: string; labels: MailLabel[]; colors: string[] }
 type Draft = { to: string; subject: string; body: string; threadId?: string }
 /** A message being written from scratch, before anything is typed. */
 const EMPTY_DRAFT: Draft = { to: '', subject: '', body: '' }
@@ -71,6 +73,13 @@ function mailDate(value: string | undefined): string {
   return Number.isNaN(at) ? value : formatWhen(at)
 }
 
+/** A message with one label added or dropped, leaving the rest of what it carries. */
+function withLabel<T extends MailSummary>(mail: T, label: MailLabel, on: boolean): T {
+  const current = mail.labels ?? []
+  const labels = on ? [...current.filter((entry) => entry.id !== label.id), label] : current.filter((entry) => entry.id !== label.id)
+  return { ...mail, labels }
+}
+
 /**
  * The Email view: an inbox, one thread, and the actions the grant allows. Write
  * actions live only here — the agent's own Gmail tools stay read-only — so what a
@@ -84,6 +93,9 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
   const [status, setStatus] = useState<Status | null>(null)
   const [inbox, setInbox] = useState<MailSummary[] | null>(null)
   const [nextPage, setNextPage] = useState<string | undefined>(undefined)
+  const [labels, setLabels] = useState<MailLabel[]>([])
+  const [colors, setColors] = useState<string[]>([])
+  const [labelFilter, setLabelFilter] = useState<string | null>(null)
   const [thread, setThread] = useState<MailThread | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [assist, setAssist] = useState<{ title: string; text: string } | null>(null)
@@ -106,26 +118,75 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
 
   const loadInbox = useCallback(async (pageToken?: string): Promise<void> => {
     try {
-      const page = await api<{ messages: MailSummary[]; nextPageToken?: string }>(
-        'email-inbox',
-        pageToken ? { pageToken } : {},
-      )
+      const page = await api<InboxPage>('email-inbox', {
+        ...(pageToken ? { pageToken } : {}),
+        ...(labelFilter ? { labelId: labelFilter } : {}),
+      })
+      setLabels(page.labels)
+      setColors(page.colors)
       setInbox((current) => (pageToken && current ? [...current, ...page.messages] : page.messages))
       setNextPage(page.nextPageToken)
     } catch (error) {
       setNotice({ text: message(error), error: true })
     }
-  }, [])
+  }, [labelFilter])
 
   useEffect(() => {
     void loadStatus()
   }, [loadStatus])
 
   // Read the inbox once the grant turns out to be connected — not before, so a
-  // screen with no account never shows a failed fetch it did not need.
+  // screen with no account never shows a failed fetch it did not need. Changing the
+  // label filter reads it again, from the top, so the list shows only that label.
   useEffect(() => {
-    if (connected && inbox === null) void loadInbox()
-  }, [connected, inbox, loadInbox])
+    if (!connected) return
+    setInbox(null)
+    void loadInbox()
+  }, [connected, loadInbox])
+
+  /** A new label of the person's own, local to Milo. */
+  async function createLabel(name: string, color: string): Promise<void> {
+    try {
+      const result = await api<{ labels: MailLabel[]; colors: string[] }>('email-label-create', { name, color })
+      setLabels(result.labels)
+      setColors(result.colors)
+      setNotice({ text: `Added the label ${name}.`, error: false })
+    } catch (error) {
+      setNotice({ text: message(error), error: true })
+    }
+  }
+
+  /** Drops a label and everything it was on. Milo's own, so no grant is needed. */
+  async function removeLabel(id: string): Promise<void> {
+    const label = labels.find((entry) => entry.id === id)
+    if (!window.confirm(`Delete the label ${label?.name ?? id}? It comes off every message.`)) return
+    try {
+      const result = await api<{ labels: MailLabel[]; colors: string[] }>('email-label-delete', { id })
+      setLabels(result.labels)
+      setColors(result.colors)
+      if (labelFilter === id) setLabelFilter(null)
+      setNotice({ text: 'Label deleted.', error: false })
+    } catch (error) {
+      setNotice({ text: message(error), error: true })
+    }
+  }
+
+  /** A label put on or taken off one message by hand, on the thread and the list at once. */
+  async function assign(messageId: string, labelId: string, on: boolean): Promise<void> {
+    const label = labels.find((entry) => entry.id === labelId)
+    if (!label) return
+    try {
+      await api('email-label-assign', { id: messageId, label: labelId, on })
+      setThread((current) => current && {
+        ...current,
+        messages: current.messages.map((mail) => (mail.id === messageId ? withLabel(mail, label, on) : mail)),
+      })
+      setInbox((current) => current?.map((mail) => (mail.id === messageId ? withLabel(mail, label, on) : mail)) ?? current)
+      setNotice({ text: on ? `Added ${label.name}.` : `Removed ${label.name}.`, error: false })
+    } catch (error) {
+      setNotice({ text: message(error), error: true })
+    }
+  }
 
   // The thread the address bar names. Leaving it — Back, or the Inbox button —
   // drops it, and the list is what is left.
@@ -249,6 +310,7 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
         <section className="settings-section mail-section">
           {head}
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
+          {connected && route === null && <Labels labels={labels} colors={colors} active={labelFilter} sorting={connected.sorting} onFilter={setLabelFilter} onCreate={createLabel} onDelete={removeLabel} />}
           <div className="panel-body">
             {status === null
               ? <p className="list-empty">Reading the connection…</p>
@@ -258,7 +320,7 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
               ? <Compose draft={draft ?? EMPTY_DRAFT} access={access} onChange={setDraft} onSave={() => void saveDraft()} onSend={() => void send()} onDiscard={toInbox} />
               : threadId !== null
               ? thread?.id === threadId
-                ? <ThreadView thread={thread} access={access} busy={busy} onReply={reply} onDraft={() => void draftReply()} onModify={modify} onAsk={ask} />
+                ? <ThreadView thread={thread} access={access} busy={busy} labels={labels} onReply={reply} onDraft={() => void draftReply()} onModify={modify} onAsk={ask} onAssign={assign} />
                 : <p className="list-empty">Reading the thread…</p>
               : <Inbox inbox={inbox} access={access} onOpen={(mail) => onRoute(mail.threadId)} onModify={modify} onMore={() => void loadInbox(nextPage)} nextPage={nextPage} busy={busy} onAsk={ask} />}
             {assist && <section className="mail-assist">
@@ -330,6 +392,7 @@ function Inbox({
           <button className="mail-row-open" type="button" onClick={() => onOpen(mail)}>
             <span className="mail-row-from">{displaySender(mail.from)}</span>
             <span className="mail-row-subject">{mail.subject ?? '(no subject)'}</span>
+            {mail.labels && mail.labels.length > 0 && <span className="mail-row-labels">{mail.labels.map((label) => <LabelChip label={label} key={label.id} />)}</span>}
           </button>
           <span className="mail-row-when">{mailDate(mail.date)}</span>
           <span className="mail-row-actions">
@@ -341,6 +404,58 @@ function Inbox({
     </div>
     {nextPage && <div className="mail-more"><button className="button" type="button" onClick={onMore}>Load more</button></div>}
   </>
+}
+
+/** One label as the list draws it: a filled pill in its colour. */
+function LabelChip({ label }: { label: MailLabel }) {
+  return <span className="label-chip" data-color={label.color}>{label.name}</span>
+}
+
+/**
+ * The label bar over the inbox: Milo's own labels, a filter by each, and the way to
+ * add and drop one. Local to Milo — none of it touches Gmail — so it needs no grant
+ * and is offered at every access level.
+ */
+function Labels({
+  labels,
+  colors,
+  active,
+  sorting,
+  onFilter,
+  onCreate,
+  onDelete,
+}: {
+  labels: MailLabel[]
+  colors: string[]
+  active: string | null
+  sorting: boolean
+  onFilter(id: string | null): void
+  onCreate(name: string, color: string): void
+  onDelete(id: string): void
+}) {
+  const [draft, setDraft] = useState<{ name: string; color: string } | null>(null)
+  return <div className="mail-labels">
+    {!sorting && <span className="mail-labels-note">Milo has no classifier set up, so it cannot sort mail — your own labels still work.</span>}
+    <div className="mail-label-list">
+      {labels.length === 0
+        ? <span className="mail-labels-empty">{sorting ? 'No labels yet. Milo sorts the inbox as mail arrives.' : 'No labels yet.'}</span>
+        : labels.map((label) => <span className={`label-chip label-chip-filter ${active === label.id ? 'active' : ''}`} data-color={label.color} key={label.id}>
+            <button className="label-chip-name" type="button" onClick={() => onFilter(active === label.id ? null : label.id)}>{label.name}</button>
+            <button className="label-chip-remove" type="button" title={`Delete ${label.name}`} aria-label={`Delete the label ${label.name}`} onClick={() => onDelete(label.id)}><Icon name="x" size={12} /></button>
+          </span>)}
+      {active !== null && <button className="mail-label-clear" type="button" onClick={() => onFilter(null)}>Clear filter</button>}
+    </div>
+    {draft
+      ? <form className="mail-label-form" onSubmit={(event) => { event.preventDefault(); const name = draft.name.trim(); if (name) { onCreate(name, draft.color); setDraft(null) } }}>
+          <input className="mail-label-input" placeholder="Label name" value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} />
+          <span className="label-swatches">
+            {colors.map((color) => <button className={`label-swatch ${draft.color === color ? 'active' : ''}`} data-color={color} type="button" key={color} title={color} aria-label={color} onClick={() => setDraft({ ...draft, color })} />)}
+          </span>
+          <button className="button primary" type="submit" disabled={!draft.name.trim()}>Add</button>
+          <button className="button" type="button" onClick={() => setDraft(null)}>Cancel</button>
+        </form>
+      : <button className="button" type="button" onClick={() => setDraft({ name: '', color: colors[0] ?? 'sage' })}><Icon name="plus" size={15} /> New label</button>}
+  </div>
 }
 
 /**
@@ -444,19 +559,24 @@ function ThreadView({
   thread,
   access,
   busy,
+  labels,
   onReply,
   onDraft,
   onModify,
   onAsk,
+  onAssign,
 }: {
   thread: MailThread
   access: Access | undefined
   busy: boolean
+  labels: MailLabel[]
   onReply(message: MailMessage): void
   onDraft(): void
   onModify(id: string, op: string): void
   onAsk(mode: 'summarize', title: string, body: Record<string, unknown>): void
+  onAssign(messageId: string, labelId: string, on: boolean): void
 }) {
+  const [picking, setPicking] = useState<string | null>(null)
   const last = thread.messages[thread.messages.length - 1]
   return <>
     <div className="mail-thread-actions">
@@ -470,8 +590,23 @@ function ThreadView({
       {thread.messages.map((mail) => <article className="mail-message" key={mail.id}>
         <div className="mail-message-head">
           <strong className="mail-sender">{displaySender(mail.from)}</strong>
+          <span className="mail-message-labels">
+            {(mail.labels ?? []).map((label) => <LabelChip label={label} key={label.id} />)}
+            <button className="mail-label-add" type="button" title="Label this message" aria-label="Label this message" onClick={() => setPicking(picking === mail.id ? null : mail.id)}><Icon name={picking === mail.id ? 'x' : 'plus'} size={12} /></button>
+          </span>
           <span className="mail-when">{mailDate(mail.date)}</span>
         </div>
+        {picking === mail.id && <div className="mail-label-picker">
+          {labels.length === 0
+            ? <span className="mail-labels-empty">No labels yet — add one above, or let Milo make them as it sorts.</span>
+            : labels.map((label) => {
+                const assigned = (mail.labels ?? []).some((entry) => entry.id === label.id)
+                return <button className={`mail-label-pick ${assigned ? 'active' : ''}`} data-color={label.color} type="button" key={label.id} aria-pressed={assigned} onClick={() => onAssign(mail.id, label.id, !assigned)}>
+                  <Icon name={assigned ? 'check' : 'plus'} size={12} /><span>{label.name}</span>
+                </button>
+              })}
+          {labels.length > 0 && <button className="mail-label-done" type="button" onClick={() => setPicking(null)}>Done</button>}
+        </div>}
         <div className="mail-message-subject">{mail.subject ?? '(no subject)'}</div>
         <MailBody message={mail} />
         {mail.truncated && <p className="mail-message-note">The body was cut — open it in Gmail to read the rest.</p>}

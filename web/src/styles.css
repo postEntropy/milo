@@ -23,6 +23,16 @@
   --warn: #976C0C;
   --warning: #976C0C;
   --danger: #DA392F;
+  /* The palette a mail label's colour is drawn from. One hue each, so a chip reads
+     the same way on any screen and the darkest text on it still passes contrast. */
+  --label-terracotta: #C0552A;
+  --label-amber: #A9740F;
+  --label-moss: #6E7F1E;
+  --label-sage: #5F7A45;
+  --label-teal: #2F7E7A;
+  --label-sky: #2E6FA8;
+  --label-plum: #8A4E86;
+  --label-rose: #B44A63;
   --knob: #FFFEFA;
   --shadow: 0 4px 16px rgb(39 39 36 / 7%);
   --shadow-sm: 0 1px 2px rgb(39 39 36 / 7%);
@@ -71,6 +81,14 @@
   --warn: #D6A23A;
   --warning: #D6A23A;
   --danger: #F07068;
+  --label-terracotta: #ED8754;
+  --label-amber: #D6A23A;
+  --label-moss: #B6C46A;
+  --label-sage: #9DBE86;
+  --label-teal: #6FBFB8;
+  --label-sky: #7FB2E8;
+  --label-plum: #C79AD0;
+  --label-rose: #E88FA6;
   --knob: #EFEEE9;
   --shadow: 0 4px 18px rgb(0 0 0 / 45%);
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 38%);
@@ -1048,9 +1066,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 .mail-thread { display: flex; flex-direction: column; gap: 12px; }
 .mail-message { border-radius: 12px; background: var(--surface); padding: 14px 16px; }
-.mail-message-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
+.mail-message-head { display: flex; align-items: baseline; justify-content: flex-start; gap: 10px; margin-bottom: 8px; }
 .mail-sender { color: var(--fg); font-size: 13px; font-weight: 600; }
-.mail-when { color: var(--muted); font: 11px var(--font-mono); }
+.mail-message-labels { display: flex; flex-wrap: wrap; gap: 4px; }
+.mail-when { margin-inline-start: auto; color: var(--muted); font: 11px var(--font-mono); }
 .mail-message-subject { margin-bottom: 8px; color: var(--fg-2); font-size: 12.5px; font-weight: 550; }
 .mail-message-body { color: var(--fg-2); font-size: 13px; line-height: 1.6; white-space: pre-wrap; overflow-wrap: anywhere; }
 /* A mail body, which is arbitrary HTML: it is drawn in its own frame, so its
@@ -1071,3 +1090,50 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .mail-head { align-items: flex-start; flex-direction: column; gap: 12px; }
   .mail-thread-actions .button { flex: 1; }
 }
+
+/* Mail labels: Milo's own, coloured from the palette above. A chip is filled, like
+   every other control the person presses, never outlined; its colour is the one the
+   label carries, so the bar and the rows read as one thing. */
+.label-chip[data-color='terracotta'], .label-swatch[data-color='terracotta'], .mail-label-pick[data-color='terracotta'] { --chip: var(--label-terracotta); }
+.label-chip[data-color='amber'], .label-swatch[data-color='amber'], .mail-label-pick[data-color='amber'] { --chip: var(--label-amber); }
+.label-chip[data-color='moss'], .label-swatch[data-color='moss'], .mail-label-pick[data-color='moss'] { --chip: var(--label-moss); }
+.label-chip[data-color='sage'], .label-swatch[data-color='sage'], .mail-label-pick[data-color='sage'] { --chip: var(--label-sage); }
+.label-chip[data-color='teal'], .label-swatch[data-color='teal'], .mail-label-pick[data-color='teal'] { --chip: var(--label-teal); }
+.label-chip[data-color='sky'], .label-swatch[data-color='sky'], .mail-label-pick[data-color='sky'] { --chip: var(--label-sky); }
+.label-chip[data-color='plum'], .label-swatch[data-color='plum'], .mail-label-pick[data-color='plum'] { --chip: var(--label-plum); }
+.label-chip[data-color='rose'], .label-swatch[data-color='rose'], .mail-label-pick[data-color='rose'] { --chip: var(--label-rose); }
+.label-chip { display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 999px; background: color-mix(in oklab, var(--chip, var(--muted)) 16%, var(--surface)); padding: 1px 8px; color: var(--chip, var(--muted)); font-size: 11px; font-weight: 550; white-space: nowrap; }
+.mail-row-labels { display: flex; flex-wrap: wrap; gap: 4px; }
+.label-chip-filter { padding-inline-end: 3px; }
+.label-chip-filter.active { background: var(--chip, var(--muted)); color: var(--accent-on); }
+.label-chip-name { border: 0; border-radius: 999px; background: transparent; padding: 1px 2px; color: inherit; font: inherit; }
+.label-chip-name:hover { text-decoration: underline; }
+.label-chip-remove { display: grid; width: 15px; height: 15px; flex: none; place-items: center; border: 0; border-radius: 999px; background: transparent; padding: 0; color: inherit; opacity: .5; transition: opacity var(--motion-fast); }
+.label-chip-remove:hover { opacity: 1; }
+
+.mail-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
+.mail-label-list { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.mail-labels-empty { color: var(--muted); font-size: 12px; }
+.mail-label-clear { border: 0; background: transparent; padding: 0 2px; color: var(--muted); font-size: 12px; text-decoration: underline; }
+.mail-label-clear:hover { color: var(--fg-2); }
+.mail-label-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.mail-label-input { width: min(200px, 40vw); min-height: 36px; border: 0; border-radius: 10px; background: var(--surface); padding: 7px 11px; color: var(--fg); font-size: 13px; transition: box-shadow var(--motion-fast); }
+.mail-label-input:focus { outline: 0; box-shadow: var(--focus-ring); }
+.mail-label-input::placeholder { color: var(--muted); }
+.label-swatches { display: inline-flex; align-items: center; gap: 5px; }
+.label-swatch { width: 20px; height: 20px; flex: none; border: 0; border-radius: 999px; background: var(--chip, var(--muted)); transition: transform var(--motion-fast), box-shadow var(--motion-fast); }
+.label-swatch:hover { transform: translateY(-1px); }
+.label-swatch.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--chip, var(--muted)); }
+.mail-labels-note { flex-basis: 100%; color: var(--muted); font-size: 12px; }
+
+/* Putting a label on one message by hand, in the thread: a control that opens the
+   picker, and the picker itself — the labels as toggles, the ones on it marked. */
+.mail-label-add { display: grid; width: 16px; height: 16px; flex: none; place-items: center; border: 0; border-radius: 999px; background: var(--surface-warm); padding: 0; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
+.mail-label-add:hover { background: var(--border-soft); color: var(--fg); }
+.mail-label-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 12px; border-radius: 12px; background: var(--surface-warm); padding: 9px 11px; }
+.mail-label-pick { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 999px; background: var(--surface); padding: 4px 10px; color: var(--fg-2); font-size: 12px; font-weight: 500; transition: background var(--motion-fast), color var(--motion-fast); }
+.mail-label-pick svg.icon { flex: none; color: var(--chip, var(--muted)); }
+.mail-label-pick:hover { background: var(--border-soft); }
+.mail-label-pick.active { background: color-mix(in oklab, var(--chip, var(--muted)) 16%, var(--surface)); color: var(--chip, var(--muted)); }
+.mail-label-done { margin-inline-start: auto; border: 0; border-radius: 9px; background: var(--surface); padding: 4px 10px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
+.mail-label-done:hover { background: var(--border-soft); }
