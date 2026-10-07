@@ -522,10 +522,11 @@ describe('web Settings mail', () => {
     writeConfig()
     grantAt('modify')
     const settings = new WebSettings(build({}), home)
-    const status = (await settings.handle('email-status')) as { kind: string; access: string; tiers: { id: string }[] }
+    const status = (await settings.handle('email-status')) as { kind: string; access: string; tiers: { id: string }[]; filters: { id: string }[] }
     expect(status.kind).toBe('connected')
     expect(status.access).toBe('modify')
     expect(status.tiers.map((tier) => tier.id)).toEqual(['none', 'modify', 'compose', 'send'])
+    expect(status.filters.map((filter) => filter.id)).toEqual(['unread', 'starred'])
   })
 
   it('lists the inbox through the grant', async () => {
@@ -679,6 +680,31 @@ describe('web Settings mail', () => {
     expect(kept.messages).toHaveLength(1)
     const none = (await settings.handle('email-inbox', { labelId: 'newsletter' })) as { messages: unknown[] }
     expect(none.messages).toHaveLength(0)
+  })
+
+  it('narrows the inbox by a quick filter and a search term, in one call', async () => {
+    writeConfig()
+    grantAt('none')
+    const asked: string[] = []
+    gmail((url) => {
+      asked.push(url)
+      if (url.includes('/messages?')) return json({ messages: [{ id: 'm1', threadId: 't1' }] })
+      return json({ id: 'm1', threadId: 't1', payload: { headers: [{ name: 'Subject', value: 'a nota' }] } })
+    })
+
+    const settings = new WebSettings(build({}), home)
+    await settings.handle('email-inbox', { filter: 'unread', search: 'from:ana' })
+    // The query Gmail was handed carries both narrowings, and only one list was asked for.
+    const listed = asked.filter((url) => url.includes('/messages?'))
+    expect(listed).toHaveLength(1)
+    expect(new URL(listed[0]!).searchParams.get('q')).toBe('in:inbox is:unread from:ana')
+  })
+
+  it('answers an unknown inbox filter with the ones it knows', async () => {
+    writeConfig()
+    grantAt('none')
+    const settings = new WebSettings(build({}), home)
+    await expect(settings.handle('email-inbox', { filter: 'important' })).rejects.toThrow(/unread/)
   })
 
   it('carries the label onto a thread it already sorted, without asking again', async () => {

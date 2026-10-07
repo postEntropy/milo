@@ -1043,20 +1043,45 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mail-head-action { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 9px; background: var(--surface-warm); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
 .mail-head-action:not(:disabled):hover { background: var(--border-soft); color: var(--fg); }
 .mail-head-action:disabled { opacity: .4; }
+/* The head's own text action, sized to sit with the 32px icons it stands beside. */
+.mail-head-summarize { min-height: 32px; padding: 0 12px; font-size: 12.5px; }
 .mail-command { display: inline-block; margin: 0 0 4px; border-radius: 10px; background: var(--surface-warm); padding: 9px 14px; color: var(--fg-2); font: 12.5px var(--font-mono); }
 
-.mail-toolbar, .mail-thread-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+/* The inbox's own controls, above the labels: a search over what the inbox holds and
+   the quick filters. The labels — Milo's, coloured — sit below as their own row, so a
+   filter and a label are never read as the same kind of thing. */
+.mail-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.mail-search { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; }
+.mail-search svg.icon { position: absolute; inset-inline-start: 11px; color: var(--muted); pointer-events: none; }
+.mail-search input { width: 100%; min-height: 40px; border: 0; border-radius: 12px; background: var(--surface); padding: 9px 12px 9px 34px; color: var(--fg); font-size: 13px; }
+.mail-search input::placeholder { color: var(--muted); }
+.mail-search input:focus { outline: 0; box-shadow: var(--focus-ring); }
+/* A track with the chosen filter filled in — contiguous and neutral, so it never
+   reads as one of the coloured label chips below. */
+.mail-filters { display: flex; flex: none; gap: 3px; margin: 0; border: 0; min-inline-size: 0; border-radius: 12px; background: var(--surface); padding: 4px; }
+.mail-filter { border: 0; border-radius: 9px; background: transparent; padding: 7px 13px; color: var(--fg-2); font-size: 12.5px; font-weight: 500; transition: background var(--motion-fast), color var(--motion-fast); }
+.mail-filter:hover { color: var(--fg); }
+.mail-filter.active { background: var(--surface-warm); color: var(--fg); }
+
+.mail-thread-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
 .mail-thread-actions .button:disabled { opacity: .45; }
 
 .mail-list { display: flex; flex-direction: column; gap: 5px; }
-/* Three columns: who and what, when, then the actions. The time has one of its
-   own and is right-aligned, so dates line up down the list instead of sitting
-   against the buttons. */
+/* Three columns: who and what, the labels with the time, then the actions. The meta cell
+   keeps its right edge, so dates line up down the list, and the labels sit just before
+   the time instead of claiming a line of their own under the subject. */
 .mail-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: 18px; border-radius: 12px; background: var(--surface); padding: 10px 14px; transition: background var(--motion-fast); }
 .mail-row:hover { background: var(--surface-warm); }
+/* The row stays the grid; the track carries its cells, so a phone can slide them aside
+   without disturbing the wide layout — where the track draws no box of its own. */
+.mail-row-track { display: contents; }
+.mail-row-tray { display: none; }
 .mail-row-open { display: flex; min-width: 0; flex-direction: column; gap: 3px; border: 0; background: transparent; padding: 0; color: inherit; font: inherit; text-align: start; }
 .mail-row-from { overflow: hidden; color: var(--fg); font-size: 13px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
-.mail-row-when { min-width: 78px; color: var(--muted); font: 11px var(--font-mono); text-align: end; white-space: nowrap; }
+/* The labels and the time share one cell, labels first: the time keeps its own edge, so
+   dates still line up down the list, and the labels need no line of their own. */
+.mail-row-meta { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 78px; }
+.mail-row-when { color: var(--muted); font: 11px var(--font-mono); white-space: nowrap; }
 .mail-row-subject { overflow: hidden; color: var(--fg-2); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
 .mail-row-actions { display: flex; flex: none; gap: 4px; }
 .mail-row-action { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 9px; background: var(--surface-warm); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
@@ -1086,9 +1111,40 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mail-assist h3 { color: var(--fg); font-size: 13px; font-weight: 600; }
 .mail-assist-text { margin: 8px 0 14px; color: var(--fg-2); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 
+/* The mail panel carries its own padding, so on a phone it has to repeat the
+   safe-area-aware top every other screen gets — otherwise the floating menu button
+   lands on top of "Inbox". */
+@media (max-width: 900px) {
+  .settings-inner.mail-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 48px) 20px 24px; }
+}
 @media (max-width: 620px) {
+  .settings-inner.mail-inner { padding-inline: 16px; }
   .mail-head { align-items: flex-start; flex-direction: column; gap: 12px; }
+  /* The head's action takes the whole line on a phone — whatever order it keeps among
+     the icons on a wide screen — and the count with the icons keep the line below. */
+  .mail-head .panel-count { width: 100%; flex-wrap: wrap; row-gap: 8px; }
+  .mail-head-summarize { order: -1; flex-basis: 100%; }
+  .mail-controls { align-items: stretch; flex-direction: column; gap: 8px; }
+  .mail-filter { flex: 1; }
   .mail-thread-actions .button { flex: 1; }
+  /* A phone has no room for the row's buttons, so the row is swept instead: the track
+     follows the finger and the tray behind it says what letting go will do. The action
+     itself is the same one the buttons call, and the thread still carries them. */
+  .mail-row { position: relative; display: block; overflow: hidden; background: transparent; padding: 0; }
+  .mail-row:hover { background: transparent; }
+  .mail-row-track { position: relative; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; border-radius: 12px; background: var(--surface); padding: 10px 14px; touch-action: pan-y; user-select: none; transition: transform var(--motion-base) var(--ease-standard); }
+  /* The cell comes apart here, so the labels can take a line of their own below the
+     subject and the time keeps the first one. */
+  .mail-row-meta { display: contents; }
+  .mail-row-track .mail-row-open { order: 1; flex: 1; }
+  .mail-row-track .mail-row-when { order: 2; }
+  /* Here the label keeps the line it has always had: a phone has no room to sit it beside
+     the time without taking back the width the subject just gained. */
+  .mail-row-track .mail-row-labels { order: 3; flex-basis: 100%; }
+  .mail-row-actions { display: none; }
+  .mail-row-tray { position: absolute; inset: 0; z-index: 0; display: flex; align-items: center; gap: 7px; border-radius: 12px; padding: 0 16px; font-size: 12.5px; font-weight: 550; }
+  .mail-row-tray.archive { justify-content: flex-end; background: color-mix(in oklab, var(--danger) 12%, var(--surface)); color: var(--danger); }
+  .mail-row-tray.read, .mail-row-tray.unread { justify-content: flex-start; background: color-mix(in oklab, var(--secondary) 12%, var(--surface)); color: var(--secondary); }
 }
 
 /* Mail labels: Milo's own, coloured from the palette above. A chip is filled, like
@@ -1102,13 +1158,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .label-chip[data-color='sky'], .label-swatch[data-color='sky'], .mail-label-pick[data-color='sky'] { --chip: var(--label-sky); }
 .label-chip[data-color='plum'], .label-swatch[data-color='plum'], .mail-label-pick[data-color='plum'] { --chip: var(--label-plum); }
 .label-chip[data-color='rose'], .label-swatch[data-color='rose'], .mail-label-pick[data-color='rose'] { --chip: var(--label-rose); }
-.label-chip { display: inline-flex; align-items: center; gap: 4px; border: 0; border-radius: 999px; background: color-mix(in oklab, var(--chip, var(--muted)) 16%, var(--surface)); padding: 1px 8px; color: var(--chip, var(--muted)); font-size: 11px; font-weight: 550; white-space: nowrap; }
+.label-chip { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 999px; background: color-mix(in oklab, var(--chip, var(--muted)) 16%, var(--surface)); padding: 3px 10px; color: var(--chip, var(--muted)); font-size: 11.5px; font-weight: 550; white-space: nowrap; }
 .mail-row-labels { display: flex; flex-wrap: wrap; gap: 4px; }
-.label-chip-filter { padding-inline-end: 3px; }
+/* A chip in the label bar is something to press, so it wears a control's height — the
+   labels and the one that makes a new one alike, whatever each holds inside, so the row
+   reads as one set. The chips a message carries keep the compact size: they are read,
+   not pressed. */
+.label-chip-filter, .label-chip-new { min-height: 32px; padding: 0 13px; font-size: 12.5px; }
+.label-chip-filter { padding-inline-end: 7px; }
+.label-chip-filter:hover { background: color-mix(in oklab, var(--chip, var(--muted)) 27%, var(--surface)); }
 .label-chip-filter.active { background: var(--chip, var(--muted)); color: var(--accent-on); }
-.label-chip-name { border: 0; border-radius: 999px; background: transparent; padding: 1px 2px; color: inherit; font: inherit; }
-.label-chip-name:hover { text-decoration: underline; }
-.label-chip-remove { display: grid; width: 15px; height: 15px; flex: none; place-items: center; border: 0; border-radius: 999px; background: transparent; padding: 0; color: inherit; opacity: .5; transition: opacity var(--motion-fast); }
+.label-chip-new:hover { background: var(--border-soft); color: var(--fg); }
+.label-chip-name { border: 0; border-radius: 999px; background: transparent; padding: 2px 1px; color: inherit; font: inherit; }
+.label-chip-remove { display: grid; width: 19px; height: 19px; flex: none; place-items: center; border: 0; border-radius: 999px; background: transparent; padding: 0; color: inherit; opacity: .55; transition: opacity var(--motion-fast); }
 .label-chip-remove:hover { opacity: 1; }
 
 .mail-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }

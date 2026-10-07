@@ -21,10 +21,13 @@ function can(access: Access | undefined, need: Access): boolean {
 
 type Tier = { id: Access; label: string; description: string }
 
+/** One of the inbox's quick filters, as the server names it. */
+type MailFilter = { id: string; label: string }
+
 type Status =
-  | { kind: 'off'; tiers: Tier[] }
-  | { kind: 'wanted'; tiers: Tier[] }
-  | { kind: 'connected'; email?: string; access: Access; tiers: Tier[]; sorting: boolean }
+  | { kind: 'off'; tiers: Tier[]; filters: MailFilter[] }
+  | { kind: 'wanted'; tiers: Tier[]; filters: MailFilter[] }
+  | { kind: 'connected'; email?: string; access: Access; tiers: Tier[]; filters: MailFilter[]; sorting: boolean }
 
 type MailLabel = { id: string; name: string; color: string }
 type MailSummary = { id: string; threadId: string; date?: string; from?: string; subject?: string; snippet?: string; labelIds?: string[]; labels?: MailLabel[] }
@@ -96,6 +99,10 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
   const [labels, setLabels] = useState<MailLabel[]>([])
   const [colors, setColors] = useState<string[]>([])
   const [labelFilter, setLabelFilter] = useState<string | null>(null)
+  const [search, setSearch] = useState('')
+  /** What was searched, a beat after typing stops — the value the list is read for. */
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState<string | null>(null)
   const [thread, setThread] = useState<MailThread | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [assist, setAssist] = useState<{ title: string; text: string } | null>(null)
@@ -107,6 +114,8 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
   const access = connected?.access
   const composing = route === 'new'
   const threadId = route !== null && route !== 'new' ? route : null
+  /** Whether something is hiding mail, so an empty list knows which empty it is. */
+  const narrowed = query !== '' || filter !== null || labelFilter !== null
 
   const loadStatus = useCallback(async (): Promise<void> => {
     try {
@@ -121,6 +130,8 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
       const page = await api<InboxPage>('email-inbox', {
         ...(pageToken ? { pageToken } : {}),
         ...(labelFilter ? { labelId: labelFilter } : {}),
+        ...(filter ? { filter } : {}),
+        ...(query ? { search: query } : {}),
       })
       setLabels(page.labels)
       setColors(page.colors)
@@ -129,7 +140,15 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
     } catch (error) {
       setNotice({ text: message(error), error: true })
     }
-  }, [labelFilter])
+  }, [labelFilter, filter, query])
+
+  // What was typed becomes the query a beat after typing stops, so a search is one
+  // Gmail call rather than one per keystroke.
+  useEffect(() => {
+    const typed = search.trim()
+    const timer = window.setTimeout(() => setQuery(typed), 350)
+    return () => window.clearTimeout(timer)
+  }, [search])
 
   useEffect(() => {
     void loadStatus()
@@ -229,6 +248,14 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
     onRoute(null)
   }
 
+  /** Everything narrowing the list at once — the search, the quick filter, the label. */
+  function clearNarrowing(): void {
+    setSearch('')
+    setQuery('')
+    setFilter(null)
+    setLabelFilter(null)
+  }
+
   async function saveDraft(): Promise<void> {
     if (!draft) return
     try {
@@ -301,6 +328,7 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
       <span className="panel-count-divider" />
       <button className="mail-head-action" type="button" title="Refresh" aria-label="Refresh the inbox" onClick={() => void loadInbox()}><Icon name="refresh" size={16} /></button>
       <button className="mail-head-action" type="button" title="New message" aria-label="New message" disabled={!can(access, 'compose')} onClick={() => { setDraft(EMPTY_DRAFT); onRoute('new') }}><Icon name="edit" size={16} /></button>
+      <button className="button mail-head-summarize" type="button" disabled={busy} onClick={() => void ask('triage', 'Unread summary', {})}><Icon name="spark" size={15} /> Summarize unread</button>
     </div>}
   </div>
 
@@ -310,6 +338,22 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
         <section className="settings-section mail-section">
           {head}
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
+          {connected && route === null && <div className="mail-controls">
+            <label className="mail-search">
+              <Icon name="search" size={16} />
+              <input type="text" aria-label="Search mail" placeholder="Search mail" value={search} onChange={(event) => setSearch(event.target.value)} />
+            </label>
+            <fieldset className="mail-filters" aria-label="Filter the inbox">
+              <button className={`mail-filter ${filter === null ? 'active' : ''}`} type="button" aria-pressed={filter === null} onClick={() => setFilter(null)}>All</button>
+              {status?.filters.map((one) => <button
+                className={`mail-filter ${filter === one.id ? 'active' : ''}`}
+                type="button"
+                key={one.id}
+                aria-pressed={filter === one.id}
+                onClick={() => setFilter(filter === one.id ? null : one.id)}
+              >{one.label}</button>)}
+            </fieldset>
+          </div>}
           {connected && route === null && <Labels labels={labels} colors={colors} active={labelFilter} sorting={connected.sorting} onFilter={setLabelFilter} onCreate={createLabel} onDelete={removeLabel} />}
           <div className="panel-body">
             {status === null
@@ -322,7 +366,7 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
               ? thread?.id === threadId
                 ? <ThreadView thread={thread} access={access} busy={busy} labels={labels} onReply={reply} onDraft={() => void draftReply()} onModify={modify} onAsk={ask} onAssign={assign} />
                 : <p className="list-empty">Reading the thread…</p>
-              : <Inbox inbox={inbox} access={access} onOpen={(mail) => onRoute(mail.threadId)} onModify={modify} onMore={() => void loadInbox(nextPage)} nextPage={nextPage} busy={busy} onAsk={ask} />}
+              : <Inbox inbox={inbox} access={access} onOpen={(mail) => onRoute(mail.threadId)} onModify={modify} onMore={() => void loadInbox(nextPage)} nextPage={nextPage} narrowed={narrowed} onClear={clearNarrowing} />}
             {assist && <section className="mail-assist">
               <h3>{assist.title}</h3>
               <p className="mail-assist-text">{assist.text || 'The model had nothing to add.'}</p>
@@ -359,51 +403,155 @@ function Inbox({
   onModify,
   onMore,
   nextPage,
-  busy,
-  onAsk,
+  narrowed,
+  onClear,
 }: {
   inbox: MailSummary[] | null
   access: Access | undefined
   onOpen(summary: MailSummary): void
-  onModify(id: string, op: string): void
+  onModify(id: string, op: string): Promise<void>
   onMore(): void
   nextPage?: string
-  busy: boolean
-  onAsk(mode: 'triage', title: string, body: Record<string, unknown>): void
+  narrowed: boolean
+  onClear(): void
 }) {
   if (inbox === null) return <p className="list-empty">Reading the inbox…</p>
   if (inbox.length === 0) return <div className="panel-empty">
     <span className="panel-empty-mark"><Icon name="inbox" size={22} /></span>
-    <h3>The inbox is empty</h3>
-    <p className="panel-empty-copy">Nothing is in the inbox right now.</p>
+    <h3>{narrowed ? 'Nothing matches' : 'The inbox is empty'}</h3>
+    <p className="panel-empty-copy">
+      {narrowed
+        ? 'No mail in the inbox matches the search and filters in place.'
+        : 'Nothing is in the inbox right now.'}
+    </p>
+    {narrowed && <button className="button" type="button" onClick={onClear}>Clear search and filters</button>}
   </div>
   return <>
-    <div className="mail-toolbar">
-      <button className="button" type="button" disabled={busy} onClick={() => onAsk('triage', 'Unread summary', {})}>
-        <Icon name="spark" size={15} /> Summarize unread
-      </button>
-    </div>
     <div className="mail-list">
-      {inbox.map((mail) => {
-        // Gmail marks unread by carrying `UNREAD`, so one control can do both
-        // directions and show which one it will do.
-        const unread = mail.labelIds?.includes('UNREAD') ?? false
-        return <div className="mail-row" key={mail.id}>
-          <button className="mail-row-open" type="button" onClick={() => onOpen(mail)}>
-            <span className="mail-row-from">{displaySender(mail.from)}</span>
-            <span className="mail-row-subject">{mail.subject ?? '(no subject)'}</span>
-            {mail.labels && mail.labels.length > 0 && <span className="mail-row-labels">{mail.labels.map((label) => <LabelChip label={label} key={label.id} />)}</span>}
-          </button>
-          <span className="mail-row-when">{mailDate(mail.date)}</span>
-          <span className="mail-row-actions">
-            <button className="mail-row-action" type="button" title={can(access, 'modify') ? 'Archive' : 'Archive needs “Tidy up” access'} aria-label="Archive" disabled={!can(access, 'modify')} onClick={() => onModify(mail.id, 'archive')}><Icon name="archive" size={15} /></button>
-            <button className="mail-row-action" type="button" title={can(access, 'modify') ? (unread ? 'Mark read' : 'Mark unread') : 'Needs “Tidy up” access'} aria-label={unread ? 'Mark read' : 'Mark unread'} disabled={!can(access, 'modify')} onClick={() => onModify(mail.id, unread ? 'read' : 'unread')}><Icon name={unread ? 'circle-dot' : 'circle'} size={15} /></button>
-          </span>
-        </div>
-      })}
+      {inbox.map((mail) => (
+        <MailRow key={mail.id} mail={mail} access={access} onOpen={onOpen} onModify={onModify} />
+      ))}
     </div>
     {nextPage && <div className="mail-more"><button className="button" type="button" onClick={onMore}>Load more</button></div>}
   </>
+}
+
+/** The width at or under which the row's buttons give way to a sweep — the CSS breakpoint. */
+const SWIPE_QUERY = '(max-width: 620px)'
+/** How far the finger moves before a drag is a sweep rather than the page scrolling. */
+const SWIPE_SLOP = 10
+/** How far a row must travel before letting go acts on it. */
+const SWIPE_COMMIT = 72
+/** How far the row follows the finger before it stops, so a long drag is not carried away. */
+const SWIPE_LIMIT = 132
+
+/**
+ * One row of the inbox. On a phone the action buttons give their width back to the
+ * subject and the row is swept instead: left archives, right toggles read. The buttons
+ * stay on a wide screen, where there is room for them.
+ *
+ * The sweep is offered only where the buttons are hidden and only when the grant allows
+ * the write, so a row that cannot be acted on does not move at all. Releasing past the
+ * threshold acts; releasing short of it springs back.
+ */
+function MailRow({
+  mail,
+  access,
+  onOpen,
+  onModify,
+}: {
+  mail: MailSummary
+  access: Access | undefined
+  onOpen(mail: MailSummary): void
+  onModify(id: string, op: string): Promise<void>
+}) {
+  // Gmail marks unread by carrying `UNREAD`, so one control can do both directions
+  // and show which one it will do.
+  const unread = mail.labelIds?.includes('UNREAD') ?? false
+  const canModify = can(access, 'modify')
+  const [dx, setDx] = useState(0)
+  const [dragging, setDragging] = useState(false)
+  // A drag that became a sweep must not also open the thread when the finger lifts.
+  const swept = useRef(false)
+  const gesture = useRef<{ id: number; x: number; y: number; across: boolean | null } | null>(null)
+
+  function down(event: React.PointerEvent<HTMLDivElement>): void {
+    swept.current = false
+    if (!canModify || !window.matchMedia(SWIPE_QUERY).matches) return
+    gesture.current = { id: event.pointerId, x: event.clientX, y: event.clientY, across: null }
+  }
+
+  function move(event: React.PointerEvent<HTMLDivElement>): void {
+    const started = gesture.current
+    if (!started || started.id !== event.pointerId) return
+    const across = event.clientX - started.x
+    const along = event.clientY - started.y
+    if (started.across === null) {
+      if (Math.hypot(across, along) < SWIPE_SLOP) return
+      // The first direction wins: a scroll must not turn into a sweep half-way, and a
+      // sweep must not drag the page with it.
+      started.across = Math.abs(across) > Math.abs(along)
+      if (!started.across) { gesture.current = null; return }
+      swept.current = true
+      setDragging(true)
+      event.currentTarget.setPointerCapture(event.pointerId)
+    }
+    setDx(Math.max(-SWIPE_LIMIT, Math.min(SWIPE_LIMIT, across)))
+  }
+
+  function release(event: React.PointerEvent<HTMLDivElement>): void {
+    const started = gesture.current
+    gesture.current = null
+    setDragging(false)
+    if (started?.across !== true) { setDx(0); return }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    if (Math.abs(dx) < SWIPE_COMMIT) { setDx(0); return }
+    const archive = dx < 0
+    setDx(archive ? -SWIPE_LIMIT - 60 : SWIPE_LIMIT + 60)
+    // Whatever the call answers, the row goes back where it belongs — unless the list
+    // took it away first, which is what a successful archive does.
+    void onModify(mail.id, archive ? 'archive' : unread ? 'read' : 'unread').finally(() => setDx(0))
+  }
+
+  /** A gesture the browser took back — a system swipe, a lost pointer — never acts. */
+  function cancel(): void {
+    gesture.current = null
+    setDragging(false)
+    setDx(0)
+  }
+
+  function open(event: React.MouseEvent): void {
+    if (swept.current) { swept.current = false; event.preventDefault(); return }
+    onOpen(mail)
+  }
+
+  return <div className="mail-row">
+    {canModify && dx !== 0 && <span className={`mail-row-tray ${dx < 0 ? 'archive' : unread ? 'read' : 'unread'}`} aria-hidden="true">
+      <Icon name={dx < 0 ? 'archive' : unread ? 'circle-dot' : 'circle'} size={16} />
+      <span>{dx < 0 ? 'Archive' : unread ? 'Mark read' : 'Mark unread'}</span>
+    </span>}
+    <div
+      className="mail-row-track"
+      style={{ transform: `translateX(${dx}px)`, ...(dragging ? { transition: 'none' } : {}) }}
+      onPointerDown={down}
+      onPointerMove={move}
+      onPointerUp={release}
+      onPointerCancel={cancel}
+    >
+      <button className="mail-row-open" type="button" onClick={open}>
+        <span className="mail-row-from">{displaySender(mail.from)}</span>
+        <span className="mail-row-subject">{mail.subject ?? '(no subject)'}</span>
+      </button>
+      <span className="mail-row-meta">
+        {mail.labels && mail.labels.length > 0 && <span className="mail-row-labels">{mail.labels.map((label) => <LabelChip label={label} key={label.id} />)}</span>}
+        <span className="mail-row-when">{mailDate(mail.date)}</span>
+      </span>
+    </div>
+    <span className="mail-row-actions">
+      <button className="mail-row-action" type="button" title={canModify ? 'Archive' : 'Archive needs “Tidy up” access'} aria-label="Archive" disabled={!canModify} onClick={() => void onModify(mail.id, 'archive')}><Icon name="archive" size={15} /></button>
+      <button className="mail-row-action" type="button" title={canModify ? (unread ? 'Mark read' : 'Mark unread') : 'Needs “Tidy up” access'} aria-label={unread ? 'Mark read' : 'Mark unread'} disabled={!canModify} onClick={() => void onModify(mail.id, unread ? 'read' : 'unread')}><Icon name={unread ? 'circle-dot' : 'circle'} size={15} /></button>
+    </span>
+  </div>
 }
 
 /** One label as the list draws it: a filled pill in its colour. */
@@ -454,7 +602,7 @@ function Labels({
           <button className="button primary" type="submit" disabled={!draft.name.trim()}>Add</button>
           <button className="button" type="button" onClick={() => setDraft(null)}>Cancel</button>
         </form>
-      : <button className="button" type="button" onClick={() => setDraft({ name: '', color: colors[0] ?? 'sage' })}><Icon name="plus" size={15} /> New label</button>}
+      : <button className="label-chip label-chip-new" type="button" onClick={() => setDraft({ name: '', color: colors[0] ?? 'sage' })}><Icon name="plus" size={13} /> New label</button>}
   </div>
 }
 

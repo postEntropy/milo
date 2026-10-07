@@ -11,6 +11,7 @@ import { ASSIST_MODES, emailAssist, type AssistMode } from '../../core/google/as
 import {
   archive,
   createDraft,
+  INBOX_FILTERS,
   listInbox,
   read as readMail,
   readThread,
@@ -18,6 +19,7 @@ import {
   sendMessage,
   setRead,
   type DraftInput,
+  type InboxFilter,
 } from '../../core/google/gmail.js'
 import type { GoogleOutcome, GoogleTokens } from '../../core/google/oauth.js'
 import { LABEL_COLORS, createLabel, deleteLabel, labelMessages, toggleAssignment } from '../../core/google/labels.js'
@@ -172,6 +174,9 @@ export class WebSettings {
     return {
       ...googleState(readConfig(), readAuth()),
       tiers: GOOGLE_TIERS.map(({ id, label, description }) => ({ id, label, description })),
+      // The quick filters the inbox can be narrowed by, named once in the core so the
+      // query and the controls that offer it cannot drift apart.
+      filters: INBOX_FILTERS.map(({ id, label }) => ({ id, label })),
       // Whether Milo can sort the mail at all. Said here, up front, so the screen
       // can tell the person rather than promise a sorting that will never come.
       sorting: this.runtime.classifier !== null,
@@ -182,11 +187,22 @@ export class WebSettings {
    * A page of the inbox, each message carrying the labels Milo has sorted it into.
    * The classifier is asked about the messages with no label yet — never the whole
    * page again — and a classifier that fails leaves the mail readable, only unlabelled.
+   *
+   * The quick filter and the search narrow the Gmail query itself, so a page is a page
+   * of what was asked for. The label is Milo's own, so it can only be applied to what
+   * came back — the two narrow the list together, and neither replaces the other.
    */
   private async emailInbox(body: Record<string, unknown>): Promise<unknown> {
     const pageToken = optionalText(body.pageToken)
     const limit = typeof body.limit === 'number' && body.limit > 0 ? Math.min(Math.floor(body.limit), 50) : 20
-    const page = await this.mailCall((tokens) => listInbox(tokens, { ...(pageToken ? { pageToken } : {}), limit }))
+    const filter = inboxFilter(body.filter)
+    const search = optionalText(body.search)
+    const page = await this.mailCall((tokens) => listInbox(tokens, {
+      ...(pageToken ? { pageToken } : {}),
+      limit,
+      ...(filter ? { filter } : {}),
+      ...(search ? { search } : {}),
+    }))
     const { byMessage, labels } = await labelMessages(this.runtime.classifier, page.messages)
     const labelId = optionalText(body.labelId)
     const messages = page.messages
@@ -924,6 +940,16 @@ function googleId(value: unknown): string {
   const id = optionalText(value)
   if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('Invalid mail id.')
   return id
+}
+
+/** A quick filter as the page sends it — one of the filters the core declares. */
+function inboxFilter(value: unknown): InboxFilter | undefined {
+  const id = optionalText(value)
+  if (!id) return undefined
+  if (!INBOX_FILTERS.some((filter) => filter.id === id)) {
+    throw new Error(`Unknown inbox filter "${id}" — one of ${INBOX_FILTERS.map((filter) => filter.id).join(', ')}.`)
+  }
+  return id as InboxFilter
 }
 
 /** A message body out of the page, with what Gmail needs to carry it. */

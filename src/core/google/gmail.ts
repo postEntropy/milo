@@ -58,6 +58,40 @@ export interface InboxPage {
   nextPageToken?: string
 }
 
+/**
+ * The inbox's quick filters, each one Gmail's own `is:` operator and the word the
+ * screen draws beside it. Declared once, here, so the query and the row of controls
+ * that offers it cannot come to disagree about what a filter is.
+ */
+export const INBOX_FILTERS = [
+  { id: 'unread', label: 'Unread' },
+  { id: 'starred', label: 'Starred' },
+] as const
+
+export type InboxFilter = (typeof INBOX_FILTERS)[number]['id']
+
+export interface InboxQuery {
+  pageToken?: string
+  limit?: number
+  /** Narrow to one of the quick filters. */
+  filter?: InboxFilter
+  /** Free text as typed, in Gmail's own syntax — a plain word and `from:ana` alike. */
+  search?: string
+}
+
+/**
+ * The Gmail query a page of the inbox is asked for: the inbox itself, narrowed by the
+ * quick filter and by whatever the person typed. Built on the side that speaks Gmail's
+ * syntax, so the page sends a word and a filter rather than a query string.
+ */
+export function inboxQuery(options: { filter?: InboxFilter; search?: string } = {}): string {
+  const terms = ['in:inbox']
+  if (options.filter) terms.push(`is:${options.filter}`)
+  const typed = options.search?.trim()
+  if (typed) terms.push(typed)
+  return terms.join(' ')
+}
+
 export interface MailThread {
   id: string
   messages: MailMessage[]
@@ -208,9 +242,9 @@ export async function read(tokens: GoogleTokens, id: string): Promise<GoogleOutc
 /** The inbox, a page at a time: `q: 'in:inbox'` with Gmail's own cursor. */
 export async function listInbox(
   tokens: GoogleTokens,
-  options: { pageToken?: string; limit?: number } = {},
+  options: InboxQuery = {},
 ): Promise<GoogleOutcome<InboxPage>> {
-  const query: Record<string, string> = { q: 'in:inbox', maxResults: String(options.limit ?? 20) }
+  const query: Record<string, string> = { q: inboxQuery(options), maxResults: String(options.limit ?? 20) }
   if (options.pageToken) query.pageToken = options.pageToken
 
   const listed = await authorizedJson(tokens, endpoint('messages', query))
