@@ -9,7 +9,9 @@ import type {
   Provider,
   ReasoningEffort,
   ToolSpec,
+  TraceTag,
 } from '../providers/types.js'
+import type { TraceWriter } from '../traces.js'
 import type { ToolContext, ToolImage, ToolRegistry, ToolResult } from '../tools/index.js'
 import {
   summarizeToolCall,
@@ -21,6 +23,17 @@ import type { AgentEvent } from './events.js'
 export interface ToolPermission {
   policy: PermissionPolicy
   ask?: PermissionAsker
+}
+
+/**
+ * What a run tells the execution log: where to write, and what the run is.
+ * Threaded from the session (the chat turn) into any subtask it delegates.
+ */
+export interface RunTrace {
+  traces: TraceWriter
+  purpose?: string
+  surface?: string
+  session?: string
 }
 
 export interface RunAgentOptions {
@@ -55,6 +68,13 @@ export interface RunAgentOptions {
    * snapshot per step and every request after the first pays for all of them.
    */
   keepSnapshots?: number
+  /**
+   * Where the execution log is written and what this run is. Every model request
+   * is timed by the provider wrapper, which reads the tag this run puts on it;
+   * the tool calls are timed here, where a call begins and ends. Absent means
+   * nothing is logged and no tag is set.
+   */
+  trace?: RunTrace
 }
 
 const DEFAULT_MAX_STEPS = 75
@@ -83,6 +103,15 @@ const OUT_OF_STEPS = [
 export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentEvent> {
   const { provider, registry, messages, context } = options
   const maxSteps = options.maxSteps ?? DEFAULT_MAX_STEPS
+  // Stamped on every request this run makes, so the provider wrapper's line names
+  // the purpose and the surface instead of guessing at them.
+  const tag: TraceTag | undefined = options.trace
+    ? {
+        purpose: options.trace.purpose ?? 'chat',
+        ...(options.trace.surface ? { surface: options.trace.surface } : {}),
+        ...(options.trace.session ? { session: options.trace.session } : {}),
+      }
+    : undefined
 
   for (let step = 0; step < maxSteps; step += 1) {
     // A message sent while this turn was running joins it here, at the one point
@@ -117,6 +146,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         // neither asks to think.
         thinkingBudget: options.reasoningEffort ? thinkingBudgetFor(options.reasoningEffort) : undefined,
         signal: options.signal,
+        ...(tag ? { trace: tag } : {}),
       })) {
         if (event.type === 'text') {
           text += event.delta
@@ -180,11 +210,15 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       // and two calls into one browser session from interleaving.
       const run = toolCalls.slice(index, concurrentRunEnd(toolCalls, registry, index))
       index += run.length
+      // A run that overlaps starts all its calls here, so the span is measured
+      // from this line rather than from where each result is read back.
+      const runStarted = Date.now()
       const pending =
         run.length > 1 ? run.map((call) => executeCall(options.permission, registry, call, context)) : null
 
       for (let at = 0; at < run.length; at += 1) {
         const call = run[at]
+        const startedAt = pending ? runStarted : Date.now()
         yield { type: 'tool-start', id: call.id, name: call.name, args: call.args }
         const result = pending ? await pending[at] : await executeCall(options.permission, registry, call, context)
         yield {
@@ -194,6 +228,16 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
           result: result.content,
           isError: Boolean(result.isError),
         }
+        options.trace?.traces.record({
+          at: new Date().toISOString(),
+          event: 'tool.call',
+          ok: !result.isError,
+          ms: Date.now() - startedAt,
+          purpose: tag?.purpose ?? 'chat',
+          tool: call.name,
+          ...(tag?.surface ? { surface: tag.surface } : {}),
+          ...(tag?.session ? { session: tag.session } : {}),
+        })
         // The plan is drawn by the surfaces and nothing the model needs told
         // back, so it rides as its own event rather than into the transcript.
         if (result.todos) yield { type: 'todo', items: result.todos }
@@ -229,6 +273,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     reasoningEffort: options.reasoningEffort,
     thinkingBudget: options.reasoningEffort ? thinkingBudgetFor(options.reasoningEffort) : undefined,
     signal: options.signal,
+    ...(tag ? { trace: tag } : {}),
   })) {
     if (event.type === 'text') {
       closing += event.delta

@@ -37,6 +37,9 @@ export const CONFIG_NOTES: Record<string, string> = {
   history: 'The log: one JSONL per day, and how far back recall reads it.',
   'history.windowDays': 'How far back recall reaches. 0 keeps every day.',
 
+  traces: 'The execution log: every model request, classifier, tool and turn with its latency. No content.',
+  'traces.enabled': 'false turns the execution log off; nothing else in Milo changes.',
+
   display: 'How much of a turn the surfaces show. One setting for every surface.',
   'display.tools': 'full, name or off — how much of each tool call is shown.',
   'display.thinking': "on or off — whether the model's reasoning is shown. Display only.",

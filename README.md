@@ -53,9 +53,9 @@ On the first run an onboarding wizard asks for a provider, API key and model, an
 
 ## Configuration
 
-- `~/.milo/config.yml` — provider, model, `maxTokens`, reasoning effort, memory, sessions, display,
-  permissions, browser, the web UI and enabled gateways. YAML so it can carry comments; every surface
-  rewrites it, and a line you add survives any write that does not touch the key above it.
+- `~/.milo/config.yml` — provider, model, `maxTokens`, reasoning effort, memory, sessions, traces,
+  display, permissions, browser, the web UI and enabled gateways. YAML so it can carry comments; every
+  surface rewrites it, and a line you add survives any write that does not touch the key above it.
 - `~/.milo/auth.json` — API keys, bot tokens and the Google grant (`0600`).
 - `~/.milo/input-history.json` — what was typed at the CLI's prompt, for `↑`/`↓`.
 - `~/.milo/task-lists.json` — the named task lists, shared by every session (see [Task lists](#task-lists)).
@@ -66,6 +66,8 @@ On the first run an onboarding wizard asks for a provider, API key and model, an
   left behind (see [Sessions](#sessions)).
 - `~/.milo/memory/` — the memory store, `memory.db` (SQLite) (see [Memory](#memory)).
 - `~/.milo/history/` — the log: one JSONL per day, plus `turns.db`, its index.
+- `~/.milo/traces.jsonl` — the execution log: one line per model request, classifier, tool and turn,
+  with its latency (see [Execution log](#execution-log)).
 - `~/.milo/skills/` — one `<name>/SKILL.md` per skill (see [Skills](#skills)).
 - `~/.milo/browser/` — the browser's own profile (`profile/`), a downloaded Chrome (`chrome/`) and
   profiles copied out of a browser you use (`profiles/`) — not the browser you use (see
@@ -792,6 +794,32 @@ by how well their recap, title and first words match the query. `search_history`
 recall runs before every turn and uses an index, `~/.milo/history/turns.db`, derived from those files
 and rebuildable from them.
 
+## Execution log
+
+The history log holds *what was said*; the **execution log** at `~/.milo/traces.jsonl` holds *what it
+cost* — one append-only JSONL file, a line per event, each with `at`, `event`, `ok` and `ms` plus its own
+numbers. It never holds a prompt, an argument or an answer, so it is safe to keep and to read; that line
+is the whole reason it can live beside the history.
+
+Four events, each a closed name:
+
+- `model.request` — one call to the chat model: `purpose` (`chat`, `task`, `compaction`, `recap`,
+  `derive`), `model`, `provider`, `ttftMs` (time to the first token), `ms`, `inputTokens`, `outputTokens`,
+  `finish`, and `surface`/`session` for a chat turn.
+- `classifier.request` — the decision model: `purpose` (`danger`, `mail-labels`), `backend`, `model`,
+  `cached`, and the typed answer it gave.
+- `tool.call` — `tool`, `ms`, `ok` (no arguments).
+- `turn` — the whole turn: `surface`, `session`, `model`, `ms`, `ok`.
+
+Every model call goes through one seam (`Provider.stream`), so wrapping it once covers the chat turn, a
+delegated subtask and the mechanical calls alike, from one measurement instead of counting the same span
+at each caller. The classifier is a client of its own and is timed where it runs; the embedding engine
+(run only when memory recall by meaning is on) is not logged yet.
+
+The log is on by default (`traces.enabled`); `false` turns it off and nothing else changes. It is never
+trimmed on its own — `milo log` reports what it holds (`status`), shows the last few events (`tail [n]`),
+and `milo log trim --older-than <days>` (or `--before <date>`) drops the old ones.
+
 ## Memory
 
 Memory sits behind a thin, vendor-agnostic interface (`remember` / `recall`). Milo's own store is **one
@@ -952,10 +980,11 @@ exported in your shell, npm treats every install as `--omit=dev` and **prunes th
     compaction (`estimateTokens` / `planCut` / `planCutUnderBudget` / `summarize`), retention
     (`pruneSessions`) and `/stats` formatting.
   - `config/` — paths, zod schema, presets, load/save, onboarding wizard.
-  - `runtime.ts` / `session.ts` / `bootstrap.ts` / `history.ts` (the log and its readout).
+  - `runtime.ts` / `session.ts` / `bootstrap.ts` / `history.ts` (the log and its readout) /
+    `traces.ts` (the execution log).
 - `src/gateways/` — `cli/` (Ink), `telegram/` (grammY), `discord/` (discord.js) and `web/` (the HTTP +
   WebSocket server, the hub that drives turns, the settings actions and the job registry).
 - `web/` — the browser frontend (React + Vite), built into `web/dist` and served by `src/gateways/web/`.
 - `src/bin/` — `cli.ts` (`milo`), `serve.ts` (`milo serve`), `web.ts` (`milo web`), and the plain
-  terminal commands `skills.ts` (`milo skills`), `history.ts` (`milo history`), `routines.ts`
-  (`milo routines`) and `google.ts` (`milo google`).
+  terminal commands `skills.ts` (`milo skills`), `history.ts` (`milo history`), `log.ts` (`milo log`),
+  `routines.ts` (`milo routines`) and `google.ts` (`milo google`).

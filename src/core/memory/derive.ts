@@ -107,6 +107,7 @@ async function stream(
       messages: options.messages,
       ...(reasoningEffort ? { reasoningEffort } : {}),
       signal: controller.signal,
+      trace: { purpose: 'derive' },
     })) {
       if (event.type === 'text') text += event.delta
     }

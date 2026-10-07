@@ -1,5 +1,7 @@
+import { errorMessage } from '../../util/errors.js'
 import { OPENAI_DECISIONS_MODEL } from '../config/schema.js'
 import type { DangerReviewer } from '../tools/permission.js'
+import type { TraceWriter } from '../traces.js'
 
 /**
  * The wire an endpoint speaks. TypeSafe (`/systemone`, the hosted jev and
@@ -20,6 +22,19 @@ export interface ClassifierOptions {
   /** Memoize verdicts per state and question set. Defaults to true. */
   cache?: boolean
   cacheSize?: number
+  /** What the config calls this backend, for the execution log. */
+  backend?: string
+  /** Where each request is timed and written down. Absent means nothing is logged. */
+  traces?: TraceWriter
+}
+
+/** What a caller may pin on one request, beyond the questions themselves. */
+export interface AskOptions {
+  signal?: AbortSignal
+  /** Override the instance timeout for this call. */
+  timeoutMs?: number
+  /** What the execution log calls this request — `danger`, `mail-labels`, and so on. */
+  purpose?: string
 }
 
 /**
@@ -76,6 +91,7 @@ export class Classifier {
   private readonly wire: ClassifierWire
   private readonly cacheEnabled: boolean
   private readonly cacheSize: number
+  private readonly traces?: TraceWriter
   private readonly cache = new Map<string, ClassifierAnswers>()
 
   constructor(options: ClassifierOptions) {
@@ -83,44 +99,81 @@ export class Classifier {
     this.wire = options.wire ?? 'typesafe'
     this.cacheEnabled = options.cache ?? true
     this.cacheSize = options.cacheSize ?? DEFAULT_CACHE_SIZE
+    this.traces = options.traces
   }
 
   async ask(
     state: string,
     questions: Record<string, ClassifierQuestion>,
-    signal?: AbortSignal,
-    timeoutMs?: number,
+    options: AskOptions = {},
   ): Promise<ClassifierAnswers> {
+    const purpose = options.purpose ?? 'classify'
     const key = this.keyFor(state, questions)
     const cached = this.cacheEnabled ? this.cache.get(key) : undefined
     if (cached !== undefined) {
       this.cache.delete(key)
       this.cache.set(key, cached)
+      this.record({ purpose, ok: true, ms: 0, cached: true, answers: cached })
       return cached
     }
 
     const controller = new AbortController()
     const timeout = setTimeout(
       () => controller.abort(new Error('classifier review timed out')),
-      timeoutMs ?? this.options.timeoutMs ?? DEFAULT_TIMEOUT,
+      options.timeoutMs ?? this.options.timeoutMs ?? DEFAULT_TIMEOUT,
     )
     const onAbort = () => controller.abort()
-    signal?.addEventListener('abort', onAbort, { once: true })
+    options.signal?.addEventListener('abort', onAbort, { once: true })
 
+    const started = Date.now()
     try {
       const answers = await this.request(state, questions, controller.signal)
       if (this.cacheEnabled) this.remember(key, answers)
+      this.record({ purpose, ok: true, ms: Date.now() - started, cached: false, answers })
       return answers
+    } catch (error) {
+      this.record({ purpose, ok: false, ms: Date.now() - started, cached: false, error: errorMessage(error) })
+      throw error
     } finally {
       clearTimeout(timeout)
-      signal?.removeEventListener('abort', onAbort)
+      options.signal?.removeEventListener('abort', onAbort)
     }
   }
 
   /** P(dangerous) in 0..1, for the permission layer's `auto` grey zone. */
   async reviewDanger(state: string, signal?: AbortSignal): Promise<number> {
-    const answers = await this.ask(state, { dangerous: DANGER_QUESTION }, signal)
+    const answers = await this.ask(state, { dangerous: DANGER_QUESTION }, { signal, purpose: 'danger' })
     return probabilityOf(answers.dangerous)
+  }
+
+  /** The model actually asked, so the log names the one that answered rather than "absent". */
+  private modelName(): string {
+    if (this.options.model) return this.options.model
+    return this.wire === 'openai' ? OPENAI_DECISIONS_MODEL : DEFAULT_JEV_MODEL
+  }
+
+  /** One line of the execution log: what was asked, of whom, how long, and the answer. */
+  private record(event: {
+    purpose: string
+    ok: boolean
+    ms: number
+    cached: boolean
+    answers?: ClassifierAnswers
+    error?: string
+  }): void {
+    if (!this.traces) return
+    this.traces.record({
+      at: new Date().toISOString(),
+      event: 'classifier.request',
+      ok: event.ok,
+      ms: event.ms,
+      purpose: event.purpose,
+      ...(this.options.backend ? { backend: this.options.backend } : {}),
+      model: this.modelName(),
+      cached: event.cached,
+      ...(event.answers ? { answers: event.answers } : {}),
+      ...(event.error ? { error: event.error } : {}),
+    })
   }
 
   private async request(

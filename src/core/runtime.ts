@@ -4,6 +4,7 @@ import type { Classifier } from './classifier/index.js'
 import type { GoogleState } from './google/state.js'
 import { mcpFacts, type McpServers } from './mcp/servers.js'
 import type { HistoryWriter } from './history.js'
+import type { TraceWriter } from './traces.js'
 import type { Memory, MemoryScope } from './memory/index.js'
 import { scopeKey } from './memory/index.js'
 import { DEFAULT_REASONING_EFFORT, type Provider, type ReasoningEffort } from './providers/types.js'
@@ -72,6 +73,8 @@ export interface RuntimeOptions {
   sessions?: SessionsConfig
   /** Where turns are logged for later recall; absent means nothing is logged. */
   history?: HistoryWriter
+  /** Where each request, tool and turn is timed and written down; absent means nothing is. */
+  traces?: TraceWriter
   /**
    * The install's routine list, for the model to read and change. Absent on a
    * runtime that cannot touch routines, in which case the `routine` tool fails
@@ -546,6 +549,7 @@ export class AgentRuntime {
       recaps: this.recaps,
       sessions: this.options.sessions,
       history: this.options.history,
+      traces: this.options.traces,
       routine: this.options.routine,
       lookupContextWindow: this.options.lookupContextWindow,
       keepSnapshots: this.options.keepSnapshots,

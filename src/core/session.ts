@@ -16,7 +16,8 @@ import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEf
 import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, ToolRegistry } from './tools/index.js'
 import { withGrants } from './tools/index.js'
 import type { AgentEvent } from './agent/events.js'
-import { runAgent } from './agent/loop.js'
+import { runAgent, type RunTrace } from './agent/loop.js'
+import type { TraceWriter } from './traces.js'
 import { runSubagent } from './agent/subagent.js'
 import { buildSystemPrompt, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import {
@@ -105,6 +106,8 @@ export interface SessionOptions {
   sessions?: SessionsConfig
   /** Where a turn is written down for later recall. Absent: nothing is logged. */
   history?: HistoryWriter
+  /** Where each request, tool and turn is timed and written down. Absent: nothing is logged. */
+  traces?: TraceWriter
   /**
    * The install's routine list, for a turn that may read it and change it. Absent
    * on a caller that cannot touch routines — and a routine's own run never gets
@@ -266,6 +269,16 @@ export class Session {
   }
 
   /**
+   * What the execution log calls this session's work. The surface is the scope's
+   * own gateway, so a routine's run reads as `routine` rather than as nothing.
+   * Absent when logging is off, which is what keeps the loop from setting a tag.
+   */
+  private runTrace(purpose: string): RunTrace | undefined {
+    const traces = this.options.traces
+    return traces ? { traces, purpose, surface: this.scope.gateway, session: this.id } : undefined
+  }
+
+  /**
    * The ceiling a request is measured against. The rule lives in one place, so
    * the surface that draws a context meter fills the same bar the fold acts on.
    */
@@ -405,6 +418,7 @@ export class Session {
       temperature,
       permissionPolicy,
     } = this.options
+    const startedAt = Date.now()
     const model = opts?.model ?? (opts?.images?.length ? this.options.mediaModels?.vision : undefined) ?? this.options.model
     const provider = opts?.model || (opts?.images?.length && this.options.mediaModels?.vision)
       ? this.options.providerFor?.(model) ?? this.options.provider
@@ -550,6 +564,7 @@ export class Session {
               reasoningEffort: effort,
               input,
               context: { remember, recall, origin, routine, sendFile },
+              trace: this.runTrace('task'),
             }),
         },
         maxSteps,
@@ -563,6 +578,7 @@ export class Session {
         reasoningEffort: effort,
         permission,
         keepSnapshots: this.options.keepSnapshots,
+        trace: this.runTrace('chat'),
       })) {
         if (event.type === 'error') errored = true
         else if (event.type === 'text-delta') answer += event.delta
@@ -623,6 +639,16 @@ export class Session {
       // A turn that was stopped still said something worth finding later.
       if (answer || reasoning) note({ kind: 'assistant', text: answer, reasoning })
       this.options.history?.append(entries)
+      this.options.traces?.record({
+        at: new Date().toISOString(),
+        event: 'turn',
+        ok: !errored,
+        ms: Date.now() - startedAt,
+        purpose: 'chat',
+        surface: this.scope.gateway,
+        session: this.id,
+        model,
+      })
     }
 
     // Reading the turn for facts worth keeping is a model call of its own, so it

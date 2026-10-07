@@ -206,6 +206,21 @@ export type HistoryConfig = z.infer<typeof HistorySchema>
 export const DEFAULT_HISTORY: HistoryConfig = { windowDays: 365 }
 
 /**
+ * The execution log under `~/.milo/traces.jsonl`: one append-only JSONL file,
+ * a line per model request, classifier request, tool call and turn, each with
+ * how long it took and how it ended. Numbers and names only — the log holds no
+ * prompt, no argument and no answer, so it is safe to keep and to read. On by
+ * default, because a latency nobody measures is a latency nobody can act on.
+ */
+export const TracesSchema = z.object({
+  /** false turns the execution log off; nothing else in Milo changes. */
+  enabled: z.boolean().default(true),
+})
+export type TracesConfig = z.infer<typeof TracesSchema>
+
+export const DEFAULT_TRACES: TracesConfig = { enabled: true }
+
+/**
  * Whether a surface shows the model's reasoning. `on` keeps the text under the
  * question it belongs to, `off` shows none of it. The model reasons either way —
  * this is display only. Deliberately not a "level": how much thinking happens
@@ -342,6 +357,7 @@ export const ConfigSchema = z.object({
   memory: MemorySchema.default(DEFAULT_MEMORY),
   sessions: SessionsSchema.default(DEFAULT_SESSIONS),
   history: HistorySchema.default(DEFAULT_HISTORY),
+  traces: TracesSchema.default(DEFAULT_TRACES),
   display: DisplaySchema.default(DEFAULT_DISPLAY),
   gateways: z.record(z.string(), GatewaySchema).default({}),
   web: WebSchema.default(DEFAULT_WEB),

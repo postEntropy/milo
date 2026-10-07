@@ -9,6 +9,7 @@ export type Command =
   | 'chat'
   | 'skills'
   | 'history'
+  | 'log'
   | 'routines'
   | 'google'
   | 'mcp'
@@ -41,6 +42,7 @@ export function resolveCommand(command: string): Command | null {
     case 'setup':
     case 'skills':
     case 'history':
+    case 'log':
     case 'routines':
     case 'google':
     case 'mcp':

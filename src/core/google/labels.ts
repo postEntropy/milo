@@ -16,7 +16,7 @@ import { randomUUID } from 'node:crypto'
 import { mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import lockfile from 'proper-lockfile'
-import type { ClassifierAnswers, ClassifierQuestion } from '../classifier/index.js'
+import type { AskOptions, ClassifierAnswers, ClassifierQuestion } from '../classifier/index.js'
 import { labelsFile } from '../config/paths.js'
 import { errorMessage } from '../../util/errors.js'
 import { writePrivateFile } from '../../util/fs.js'
@@ -89,8 +89,7 @@ export interface Labeler {
   ask(
     state: string,
     questions: Record<string, ClassifierQuestion>,
-    signal?: AbortSignal,
-    timeoutMs?: number,
+    options?: AskOptions,
   ): Promise<ClassifierAnswers>
 }
 
@@ -289,7 +288,11 @@ async function suggestLabels(
       criteria,
     }
   }
-  const answers = await classifier.ask(renderState(messages), questions, signal, LABEL_TIMEOUT_MS)
+  const answers = await classifier.ask(renderState(messages), questions, {
+    signal,
+    timeoutMs: LABEL_TIMEOUT_MS,
+    purpose: 'mail-labels',
+  })
   return messages.map((message) => {
     const answer = answers[message.id]
     const choice = typeof answer?.choice === 'string' ? answer.choice : undefined

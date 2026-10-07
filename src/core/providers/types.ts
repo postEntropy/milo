@@ -116,6 +116,20 @@ export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
  */
 export const DEFAULT_REASONING_EFFORT: ReasoningEffort = 'medium'
 
+/**
+ * What the execution log should call this request, and where it came from. It is
+ * carried on the request and read by `TracedProvider`, never by a provider: the
+ * wires build their body from the fields they know and ignore this one.
+ */
+export interface TraceTag {
+  /** Which kind of request this is — `chat`, `task`, `compaction`, `recap`, `derive`. */
+  purpose: string
+  /** The surface it serves, when one is behind it. Absent on a background call. */
+  surface?: string
+  /** The session's name (`calm-otter-7`), when the request belongs to one. */
+  session?: string
+}
+
 export interface ChatRequest {
   model: string
   messages: Message[]
@@ -124,6 +138,8 @@ export interface ChatRequest {
   temperature?: number
   maxTokens?: number
   signal?: AbortSignal
+  /** For the execution log. Ignored by every provider. */
+  trace?: TraceTag
   /**
    * Absent means the provider's own default — what every request sent before
    * this existed. A mechanical call (summarizing, recapping) has no reason to

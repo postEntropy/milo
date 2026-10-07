@@ -15,6 +15,8 @@ import {
   updateRoutine,
 } from './routines.js'
 import { createProvider } from './providers/create.js'
+import type { Provider } from './providers/types.js'
+import { fileTraces, TracedProvider, type TraceWriter } from './traces.js'
 import { lookupContextWindow } from './providers/context.js'
 import { AgentRuntime } from './runtime.js'
 import { FileRecapStore, FileSessionStore, pruneSessions } from './sessions/index.js'
@@ -33,6 +35,13 @@ import { logWarn } from '../util/log.js'
 
 export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   const auth = readAuth()
+  // The execution log: on unless the config turned it off. One writer for the
+  // whole process, so every request, tool call and turn lands in the same file.
+  const traces = loaded.config.traces.enabled ? fileTraces : null
+  // Every model call goes through the provider, so timing it here is the one
+  // place that covers the chat turn, a subtask and the mechanical calls alike.
+  const traced = (provider: Provider): Provider =>
+    traces ? new TracedProvider(provider, traces) : provider
   // Wanted is not the same as connected: a config that asks for Google gets the
   // tools, and an account that has not been granted yet is a state the tools and
   // the setup screen both speak about.
@@ -119,14 +128,14 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
 
   // Built once: the permission layer asks it P(dangerous), and the inbox asks it to
   // sort mail into labels. One instance, so the two cannot land on different backends.
-  const classifier = buildClassifier(loaded, auth)
+  const classifier = buildClassifier(loaded, auth, traces)
 
   runtime = new AgentRuntime({
-    provider: createProvider(loaded.provider, loaded.model),
+    provider: traced(createProvider(loaded.provider, loaded.model)),
     // One entry, and the model it is on: `auto` picks its wire from the model
     // id, so a model switched later resolves a provider of its own instead of
     // keeping the wire of the one it replaced.
-    providerFor: (model) => createProvider(activeProvider, model),
+    providerFor: (model) => traced(createProvider(activeProvider, model)),
     providerSwitch: {
       use: (id) => {
         const next = resolveActive(id)
@@ -163,6 +172,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     store,
     recaps,
     history: fileHistory,
+    traces: traces ?? undefined,
     // The routine list the model reads and changes, backed by the install's file;
     // `milo serve` is what runs it.
     routine: routines,
@@ -202,7 +212,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
  * independent of the provider the conversation runs on. Null when none is configured:
  * the permission layer then asks instead of guessing, and the inbox goes unlabelled.
  */
-function buildClassifier(loaded: LoadedConfig, auth: Auth): Classifier | null {
+function buildClassifier(loaded: LoadedConfig, auth: Auth, traces: TraceWriter | null): Classifier | null {
   const config = loaded.config.classifier
   // The classifier's own timeout wins; a file that only set the old permission
   // key keeps working, hence the fallback.
@@ -219,6 +229,8 @@ function buildClassifier(loaded: LoadedConfig, auth: Auth): Classifier | null {
       headers: loaded.provider.headers,
       model: config.model,
       timeoutMs,
+      backend: config.backend,
+      traces: traces ?? undefined,
     })
   }
 
@@ -234,6 +246,8 @@ function buildClassifier(loaded: LoadedConfig, auth: Auth): Classifier | null {
       model: config.model ?? OPENAI_DECISIONS_MODEL,
       wire: 'openai',
       timeoutMs,
+      backend: config.backend,
+      traces: traces ?? undefined,
     })
   }
 
@@ -263,5 +277,7 @@ function buildClassifier(loaded: LoadedConfig, auth: Auth): Classifier | null {
       resolveClassifierKey(config, auth) || (config.backend === 'ollaya' ? 'local' : undefined),
     model: config.model ?? defaultModel,
     timeoutMs,
+    backend: config.backend,
+    traces: traces ?? undefined,
   })
 }

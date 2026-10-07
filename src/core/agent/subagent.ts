@@ -1,6 +1,7 @@
 import { closeParagraph } from '../../util/format.js'
 import type { Message, Provider, ReasoningEffort } from '../providers/types.js'
 import type { SkillSummary } from '../skills/index.js'
+import type { RunTrace } from './loop.js'
 import type { ToolContext, ToolRegistry, ToolResult } from '../tools/index.js'
 import type { BrowserFacts } from '../browser/index.js'
 import type { GoogleState } from '../google/state.js'
@@ -34,6 +35,8 @@ export interface SubagentRun {
   input: { description: string; prompt: string }
   /** The parent's memory, recall, address and delivery, so the subagent's tools still work. */
   context: Pick<ToolContext, 'remember' | 'recall' | 'origin' | 'routine' | 'sendFile'>
+  /** Carried through from the parent turn, so the subtask's requests are logged too. */
+  trace?: RunTrace
 }
 
 /**
@@ -91,6 +94,7 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     reasoningEffort: options.reasoningEffort,
     signal: options.signal,
     permission: options.permission,
+    trace: options.trace,
   })) {
     if (event.type === 'text-delta') text += event.delta
     else if (event.type === 'tool-start') {

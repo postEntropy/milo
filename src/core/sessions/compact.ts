@@ -269,6 +269,8 @@ export interface SummarizeOptions {
   dropped: Message[]
   signal?: AbortSignal
   timeoutMs?: number
+  /** What the execution log calls this call — `compaction` unless a caller says otherwise. */
+  purpose?: string
 }
 
 const DEFAULT_TIMEOUT_MS = 20_000
@@ -307,6 +309,7 @@ export async function summarize(options: SummarizeOptions): Promise<string | nul
     ],
     timeoutMs: options.timeoutMs ?? DEFAULT_TIMEOUT_MS,
     signal: options.signal,
+    purpose: options.purpose ?? 'compaction',
   }
 
   const asked = await call({ ...request, reasoningEffort: 'low' })
@@ -342,6 +345,8 @@ interface CallOptions {
   reasoningEffort?: ReasoningEffort
   timeoutMs: number
   signal?: AbortSignal
+  /** What the execution log calls this call. */
+  purpose?: string
 }
 
 /**
@@ -367,6 +372,7 @@ async function call(
       messages: options.messages,
       reasoningEffort: options.reasoningEffort,
       signal: controller.signal,
+      trace: { purpose: options.purpose ?? 'compaction' },
     })) {
       if (event.type === 'text') text += event.delta
     }
@@ -425,6 +431,7 @@ export async function digest(options: DigestOptions): Promise<string | null> {
     dropped: options.messages,
     signal: options.signal,
     timeoutMs: options.timeoutMs ?? DEFAULT_DIGEST_TIMEOUT_MS,
+    purpose: 'recap',
   })
 }
 

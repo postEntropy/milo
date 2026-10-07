@@ -239,7 +239,7 @@ describe('Classifier', () => {
 
     // The instance would abort at 5ms; this call asks for longer and gets its answer.
     const classifier = new Classifier({ baseURL: 'https://x.test/v1', timeoutMs: 5 })
-    const answers = await classifier.ask('slow-ish', { dangerous: DANGER_QUESTION }, undefined, 1_000)
+    const answers = await classifier.ask('slow-ish', { dangerous: DANGER_QUESTION }, { timeoutMs: 1_000 })
     expect(answers.dangerous).toMatchObject({ noul: 0.5 })
   })
 

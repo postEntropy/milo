@@ -29,6 +29,11 @@ export const browserProfilesDir = (): string => path.join(browserDir(), 'profile
 /** One append-only JSONL per day: what was asked, answered and run. */
 export const historyDir = (): string => path.join(MILO_HOME, 'history')
 /**
+ * One append-only JSONL file: how long each model, classifier, tool and turn
+ * took, with its outcome. Numbers and names only — never the conversation.
+ */
+export const tracesFile = (): string => path.join(MILO_HOME, 'traces.jsonl')
+/**
  * The embedding engine Milo downloaded for itself, and the models it pulls.
  * Its own copy and its own port, so an Ollama someone already runs is neither
  * disturbed nor depended on.

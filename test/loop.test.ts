@@ -5,6 +5,7 @@ import { runAgent } from '../src/core/agent/loop.js'
 import type { ChatRequest, Message, Provider, StreamEvent } from '../src/core/providers/types.js'
 import { ToolRegistry } from '../src/core/tools/registry.js'
 import type { Tool } from '../src/core/tools/types.js'
+import { TracedProvider, type TraceEvent } from '../src/core/traces.js'
 
 class ScriptedProvider implements Provider {
   readonly id = 'scripted'
@@ -434,6 +435,61 @@ describe('runAgent — the plan', () => {
     expect(events.find((event) => event.type === 'todo')).toEqual({
       type: 'todo',
       items: [{ content: 'Step', status: 'pending' }],
+    })
+  })
+})
+
+describe('the execution log along a turn', () => {
+  it('times every request and every tool call, naming the surface and the session', async () => {
+    const provider = new ScriptedProvider([
+      [
+        { type: 'text', delta: 'reading…' },
+        { type: 'tool-call', id: 'c1', name: 'fake_read', args: { path: 'a.txt' } },
+        { type: 'usage', inputTokens: 7, outputTokens: 2 },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      [
+        { type: 'text', delta: 'done' },
+        { type: 'done', finishReason: 'stop' },
+      ],
+    ])
+    const registry = new ToolRegistry([fakeTool])
+    const seen: TraceEvent[] = []
+    const writer = { record: (entry: TraceEvent) => seen.push(entry) }
+    // The wrapper is what the runtime builds around the real provider; the loop
+    // stamps the tag it reads and times the tool calls itself.
+    const traced = new TracedProvider(provider, writer)
+
+    for await (const _ of runAgent({
+      provider: traced,
+      model: 'test-model',
+      tools: registry.specs(),
+      registry,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'read a.txt' }] }],
+      context: { cwd: process.cwd(), signal: new AbortController().signal },
+      trace: { traces: writer, surface: 'cli', session: 'calm-otter-7' },
+    })) {
+      void _
+    }
+
+    const models = seen.filter((event) => event.event === 'model.request')
+    expect(models).toHaveLength(2)
+    expect(models[0]).toMatchObject({
+      purpose: 'chat',
+      surface: 'cli',
+      session: 'calm-otter-7',
+      model: 'test-model',
+      provider: 'scripted',
+      inputTokens: 7,
+      outputTokens: 2,
+      finish: 'tool_calls',
+    })
+    expect(seen.find((event) => event.event === 'tool.call')).toMatchObject({
+      tool: 'fake_read',
+      ok: true,
+      purpose: 'chat',
+      surface: 'cli',
+      session: 'calm-otter-7',
     })
   })
 })
