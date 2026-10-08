@@ -55,6 +55,14 @@ function viewFromPath(pathname: string): View {
 }
 
 /**
+ * A phone scrolls the document — iOS Safari shows the page behind its own bar only
+ * then (see `styles.css`) — while a wide screen keeps the thread in its own box.
+ * The scroll maths reads and writes whichever is live.
+ */
+const PHONE_QUERY = '(max-width: 900px)'
+function isPhone(): boolean { return window.matchMedia(PHONE_QUERY).matches }
+
+/**
  * What the Email screen is showing, from its own path: null is the inbox, `new`
  * the composer, anything else a thread id. It lives in the address bar so the
  * browser's Back leaves a thread for the inbox instead of leaving the app.
@@ -151,17 +159,27 @@ export default function App() {
   const [chatScrolled, setChatScrolled] = useState(false)
   /** Whether the thread is at its end; when it is not, the way back shows. */
   const [atEnd, setAtEnd] = useState(true)
+  /** What scrolls the thread: its own box on a wide screen, the page on a phone. */
+  const threadScroller = useCallback((): HTMLElement | null => (
+    isPhone() ? document.scrollingElement as HTMLElement | null : messagesRef.current
+  ), [])
   const updateMessagesTop = useCallback((): void => {
-    const el = messagesRef.current
+    const el = threadScroller()
     if (!el) return
     setChatScrolled(el.scrollTop > 2)
     setAtEnd(el.scrollHeight - el.scrollTop - el.clientHeight < 120)
-  }, [])
+  }, [threadScroller])
   // biome-ignore lint/correctness/useExhaustiveDependencies: recomputes when messages or view change
   useEffect(() => { updateMessagesTop() }, [updateMessagesTop, messages, view])
   useEffect(() => {
+    // The element's own `scroll` covers a wide screen; the window's covers a phone,
+    // where the page is the scroller. Each is inert on the other.
     window.addEventListener('resize', updateMessagesTop)
-    return () => window.removeEventListener('resize', updateMessagesTop)
+    window.addEventListener('scroll', updateMessagesTop)
+    return () => {
+      window.removeEventListener('resize', updateMessagesTop)
+      window.removeEventListener('scroll', updateMessagesTop)
+    }
   }, [updateMessagesTop])
 
   /**
@@ -207,11 +225,17 @@ export default function App() {
   // composer stranded above a gap once it closes; see `trackVisualViewport`.
   useEffect(() => trackVisualViewport(), [])
 
+  // A phone scrolls the page (see `styles.css`), so an open overlay has to lock it,
+  // or the thread slides behind the drawer while it is showing.
+  useEffect(() => {
+    document.documentElement.classList.toggle('overlay-lock', isPhone() && (sidebarOpen || (view === 'chat' && panelOpen)))
+  }, [sidebarOpen, view, panelOpen])
+
   /** The end of the thread, brought back into view rather than jumped to. */
   const jumpToEnd = useCallback((): void => {
-    const el = messagesRef.current
+    const el = threadScroller()
     if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' })
-  }, [])
+  }, [threadScroller])
 
   /** Hands the words picked out of a reply to the composer, quoted. */
   const quoteIntoComposer = useCallback((text: string): void => {
@@ -227,13 +251,35 @@ export default function App() {
     localStorage.setItem('milo-sidebar', sidebarCollapsed ? 'collapsed' : 'open')
     if (theme === 'system') localStorage.removeItem('milo-theme')
     else localStorage.setItem('milo-theme', theme)
-    const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
-    document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-    // The status bar and the toolbar take the app's own background: launched full
-    // screen, the page would otherwise sit under a band of another colour. Read
-    // from the token rather than repeated here, so the two cannot drift.
-    document.querySelector('meta[name=theme-color]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim())
   }, [conversationId, theme, sidebarCollapsed])
+
+  // The theme goes on the document as the app paints, and the phone's own bars take
+  // its colour: the explicit choice and a system flip both land here. The `theme-color`
+  // metas are re-created rather than edited — Safari reads that tag as it appears, so
+  // editing the one already in the head changes nothing until a reload.
+  useEffect(() => {
+    const root = document.documentElement
+    const media = window.matchMedia('(prefers-color-scheme: dark)')
+    const apply = (): void => {
+      root.dataset.theme = theme === 'dark' || (theme === 'system' && media.matches) ? 'dark' : 'light'
+      const chrome = getComputedStyle(root).getPropertyValue('--bg').trim()
+      // A phone in a browser tab says nothing here on purpose: the tag is what fills
+      // Safari's own bar with a solid colour, and left unset Safari samples the page
+      // (the `.chrome-tint` strips) and draws the bar translucent instead. The
+      // installed app has no page behind its bar to reveal, so it keeps the colour; a
+      // wide screen's browser is not what the bar question was ever about.
+      const solid = !isPhone() || window.matchMedia('(display-mode: standalone)').matches
+      document.querySelectorAll('meta[name=theme-color]').forEach((meta) => {
+        meta.remove()
+        if (!solid) return
+        meta.setAttribute('content', chrome)
+        document.head.append(meta)
+      })
+    }
+    apply()
+    media.addEventListener('change', apply)
+    return () => media.removeEventListener('change', apply)
+  }, [theme])
 
   // The Email view is mounted on the first visit and then kept; this is the one place
   // the view changes that knows it, whether by the sidebar, a link or the browser's Back.
@@ -273,15 +319,6 @@ export default function App() {
     window.addEventListener('popstate', fromPath)
     return () => window.removeEventListener('popstate', fromPath)
   }, [])
-
-  useEffect(() => {
-    const media = window.matchMedia('(prefers-color-scheme: dark)')
-    const applySystemTheme = () => {
-      if (theme === 'system') document.documentElement.dataset.theme = media.matches ? 'dark' : 'light'
-    }
-    media.addEventListener('change', applySystemTheme)
-    return () => media.removeEventListener('change', applySystemTheme)
-  }, [theme])
 
   const refreshSessions = useCallback(async (): Promise<void> => {
     try { setSessions(await api<SessionSummary[]>('sessions')) }
@@ -538,7 +575,7 @@ export default function App() {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-render triggers, not closure values — the list has already grown by the time this runs, and the scroll follows the rendered height
   useEffect(() => {
-    const container = messagesRef.current
+    const container = threadScroller()
     if (!container) return
     // The empty state is a screen of its own: it stays at the top, so the hero
     // is never half-scrolled out of view when it is only slightly too tall.
@@ -558,7 +595,7 @@ export default function App() {
       followSend.current = false
       container.scrollTop = container.scrollHeight
     }
-  }, [messages, pendingPermission])
+  }, [messages, pendingPermission, threadScroller])
 
   /**
    * The thread stays pinned to its own end. The effect above only runs when the
@@ -567,7 +604,7 @@ export default function App() {
    * last message below the fold until the person scrolled it up themselves.
    */
   useEffect(() => {
-    const container = messagesRef.current
+    const container = threadScroller()
     if (!container) return
     const observer = new ResizeObserver(() => {
       const nearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 120
@@ -575,7 +612,7 @@ export default function App() {
     })
     observer.observe(container)
     return () => observer.disconnect()
-  }, [])
+  }, [threadScroller])
 
   useEffect(() => () => {
     if (drawFrame.current !== null) cancelAnimationFrame(drawFrame.current)

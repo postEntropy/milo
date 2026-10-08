@@ -7,13 +7,14 @@ const KEYBOARD_MIN = 120
  * back down with it.
  *
  * On iOS the keyboard shrinks the visual viewport **and** pans it — `height` and
- * `offsetTop` both move — and the shell has to follow both, or it ends up partly
- * outside what is on screen. The page itself must not scroll while this happens
- * (`body` is pinned): the browser's own scroll to bring the focused field into
- * view is a second lift on top of this one, and the composer overshoots the keys.
+ * `offsetTop` both move — and the composer has to follow both, or it ends up
+ * behind the keys. `--keyboard-gap` is the space the keyboard covers, which the
+ * phone's sticky composer is held up by; `--app-top` is the pan, which the fixed
+ * topbar follows. The page scrolls on a phone — that is what Safari wants — so
+ * this is a lift, not a shrink.
  *
  * Nothing is set unless the keyboard is actually up. iOS 26 leaves `offsetTop`
- * stuck above zero after the keyboard is dismissed, and going back to the
+ * stuck above zero after the keyboard is dismissed, and dropping back to the
  * stylesheet's own `100dvh` — rather than following that stale offset — is what
  * makes the composer return instead of staying lifted with a gap beneath it.
  *
@@ -27,6 +28,7 @@ export function trackVisualViewport(): () => void {
   const clear = (): void => {
     root.style.removeProperty('--app-height')
     root.style.removeProperty('--app-top')
+    root.style.removeProperty('--keyboard-gap')
   }
 
   const apply = (): void => {
@@ -39,6 +41,10 @@ export function trackVisualViewport(): () => void {
     const top = Math.min(Math.max(viewport.offsetTop, 0), keyboard)
     root.style.setProperty('--app-height', `${viewport.height}px`)
     root.style.setProperty('--app-top', `${top}px`)
+    // How far the visible area's foot sits above the layout viewport's: the space
+    // the keyboard covers. The phone's sticky composer is held up by exactly this.
+    const gap = Math.max(0, root.clientHeight - viewport.offsetTop - viewport.height)
+    root.style.setProperty('--keyboard-gap', `${gap}px`)
   }
 
   apply()

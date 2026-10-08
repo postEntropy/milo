@@ -105,11 +105,13 @@
 
 * { box-sizing: border-box; }
 html, body, #root { width: 100%; height: 100%; margin: 0; }
-/* Fixed, not merely `overflow: hidden`: a phone lets the page scroll itself to
-   bring a focused field out from under the keyboard, and that scroll is a second
-   lift on top of the shell's own shrink — the composer ends up above the keys.
-   With the page pinned, the visual viewport is the only thing that moves, and
-   `--app-height`/`--app-top` are the whole of the correction. */
+/* A wide screen pins the page and scrolls the thread in its own box: a phone lets
+   the page scroll itself to bring a focused field out from under the keyboard, and
+   that scroll is a second lift on top of the shell's own — the composer ends up
+   above the keys. A phone does the opposite on purpose — the document scrolls, so
+   iOS Safari shows the page behind its own bar — and the keyboard is answered by
+   lifting the composer (`--keyboard-gap`) instead of pinning the page; see the
+   `max-width: 900px` block and `lib/viewport.ts`. */
 body { position: fixed; inset: 0; min-width: 320px; overflow: hidden; }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -879,15 +881,39 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 @media (max-width: 900px) {
   .app-shell { grid-template-columns: minmax(0, 1fr); }
+  /* The document is the scroller here. iOS Safari only shows the page behind its
+     own translucent bottom bar when the document scrolls, so on a phone the page
+     is unpinned, the shell takes the page's own height, and the thread and the
+     settings/email workspace grow with their content instead of scrolling in a
+     box. A wide screen keeps the pinned shell above. */
+  html, body, #root { height: auto; }
+  body { position: static; overflow: visible; }
+  .app-shell { height: auto; min-height: 100dvh; inset-block-start: 0; }
+  /* `flex-basis: auto` and `min-height: auto` so a box grows with what it holds
+     rather than being sized by the flex line; only then does the page get taller
+     than the screen and scroll. */
+  .messages, .settings-workspace, .chat-view { flex: 1 0 auto; min-height: auto; }
+  .messages, .settings-workspace { overflow: visible; }
+  /* Held at the foot of the screen as the page scrolls under it — and lifted clear
+     of the keyboard, which `lib/viewport.ts` measures into `--keyboard-gap`.
+     Sticky, not fixed, so it keeps its own space in the flow and the last message
+     is never hidden behind it. */
+  .composer-dock { position: sticky; z-index: 2; bottom: var(--keyboard-gap, 0); }
+  /* The thread passes under the floating topbar, and the soft edge rides the bar —
+     fixed like it, not left at the top of the page to scroll away. */
+  .scroll-blur.top { position: fixed; top: var(--app-top, 0); }
+  /* An overlay is what is being read; the page behind it must not slide while it
+     is up. */
+  html.overlay-lock { overflow: hidden; }
   /* The drawer rests behind the screen and the chat slides over it, the way the
      phone's own panels work: the strip left uncovered is the sidebar, the layer
      that travels is the conversation, and the chat is where the finger already
      is. Neither ever leaves bare page showing. The rounded edge goes on the chat,
      which is the panel on top, and its own surface on the drawer is what the
      corner cuts against. */
-  /* Absolute, not fixed: the shell is the viewport, so the geometry is the same,
-     and Safari's sampler ignores absolutely positioned elements — leaving the
-     `.chrome-tint` strips as the only thing it can read the bar colour from. */
+  /* Absolute, not fixed: Safari's sampler ignores absolutely positioned elements,
+     leaving the `.chrome-tint` strips as the only thing it can read the bar colour
+     from. It spans the whole page, but the page is locked while it is open. */
   .sidebar { position: absolute; z-index: 1; inset-block: 0; inset-inline-start: 0; width: var(--drawer-width); transform: none; padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom); }
   .main { grid-column: 1; z-index: 2; transition: transform var(--motion-drawer) var(--ease-standard); }
   /* Clipped while it is a panel, so the chat's own bars cannot square the corner
@@ -899,6 +925,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      wide as the chat travels, so the cut would open onto bare page of the same
      colour and read as a square edge. */
   .app-shell { background: var(--surface-warm); }
+  /* The strips are the sample Safari reads for its own bars, across the whole width
+     (see the base rule). With the drawer open the edge beneath them is the drawer,
+     not the chat, so they take its tone: left on `--bg` the bar sits a shade lighter
+     than the drawer, a border laid over content that is not there. */
+  .app-shell.drawer-open .chrome-tint { background: var(--surface-warm); }
   /* The shadow is what lifts the chat off the drawer; kept tight on purpose, since
      a wide one is a band across the drawer's surface rather than a shadow, which
      reads as a border left behind. The rounded corner is off for now, to compare:
@@ -915,7 +946,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      Every screen names itself below — the chat in the sidebar, Settings in its
      own nav and panel head, Routines in its panel head — and the per-session
      actions are desktop affordances. */
-  .topbar { position: absolute; z-index: 6; inset-inline: 0; top: 0; min-height: 0; background: none; padding: max(8px, env(safe-area-inset-top)) 12px 8px; pointer-events: none; }
+  .topbar { position: fixed; z-index: 6; inset-inline: 0; top: var(--app-top, 0); min-height: 0; background: none; padding: max(8px, env(safe-area-inset-top)) 12px 8px; pointer-events: none; }
   .topbar > *, .topbar-actions > * { pointer-events: auto; }
   .topbar-actions { margin-inline-start: auto; }
   .topbar-action, .topbar-title { display: none; }
@@ -924,7 +955,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .mobile-menu, .topbar-new, .panel-toggle { background: color-mix(in oklab, var(--surface) 82%, transparent); box-shadow: var(--shadow-sm); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
   /* The panel is a layer over the chat, not a column beside it: nothing fits two
      panes on a phone, so it takes the screen and the chat waits underneath. */
-  .panel { position: absolute; z-index: 8; inset: 0; width: 100%; background: var(--bg); }
+  .panel { position: fixed; z-index: 8; inset: 0; width: 100%; background: var(--bg); }
   .app-shell.panel-open .panel { animation: panel-sheet-in var(--motion-drawer) var(--ease-standard); }
   /* The strip rides on the sheet, and on a phone its tabs are touch targets first:
      the close grows to the app's own button size and the name gives up width so a
@@ -935,7 +966,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .messages { padding: calc(max(8px, env(safe-area-inset-top)) + 44px) 18px 8px; }
   /* Hug the bottom: the browser's own bar already supplies the breathing room,
      and the safe area only pushes it up when that bar has scrolled away. */
-  .composer-shell { padding: 10px 18px max(6px, env(safe-area-inset-bottom)); }
+  /* No backdrop: the thread passes behind the dock and reaches the bottom edge, the
+     same way it passes under the floating topbar — so the page shows behind Safari's
+     own bar instead of a solid block. The box itself stays opaque (`.composer-box`). */
+  .composer-shell { background: transparent; padding: 10px 18px max(6px, env(safe-area-inset-bottom)); }
   .chat-view .notice { width: min(780px, calc(100% - 36px)); }
   .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 48px) 20px 0; }
   /* This bar is the top of Settings, so the panel starts right under it. */
