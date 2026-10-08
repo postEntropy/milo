@@ -329,8 +329,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .thread-inner { width: min(940px, 100%); margin: 0 auto; padding: 6px 0 18px; }
 .empty-state { display: flex; min-height: min(70vh, 720px); flex-direction: column; align-items: center; justify-content: center; padding: 42px 20px 56px; text-align: center; }
 .empty-brand { display: grid; width: 96px; height: 96px; place-items: center; margin-bottom: 14px; border-radius: 26px; background: var(--accent); color: var(--accent-on); object-fit: cover; font-size: 25px; font-weight: 600; }
-.empty-state h1 { max-width: 16ch; margin-top: 0; font-family: var(--font-display); font-size: clamp(32px, 4.5vw, 42px); font-weight: 400; letter-spacing: -.02em; line-height: 1.14; }
-.suggestion-grid { display: grid; width: min(660px, 100%); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 34px; }
+.empty-state h1 { max-width: 16ch; margin: 0; font-family: var(--font-display); font-size: clamp(32px, 4.5vw, 42px); font-weight: 400; letter-spacing: -.02em; line-height: 1.14; }
+.suggestion-grid { display: grid; width: min(660px, 100%); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 32px; }
 .suggestion { display: flex; min-height: 70px; align-items: center; gap: 12px; border: 0; border-radius: 16px; background: var(--surface); padding: 14px 15px; box-shadow: var(--shadow-sm); text-align: start; transition: box-shadow var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .suggestion:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
 .suggestion > svg:first-child { flex: none; color: var(--fg-2); }
@@ -968,7 +968,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .sidebar-search input { font-size: 14px; }
 }
 @media (max-width: 620px) {
-  .suggestion-grid { grid-template-columns: 1fr; gap: 9px; margin-top: 26px; }
+  .suggestion-grid { grid-template-columns: 1fr; gap: 9px; margin-top: 24px; }
   .suggestion { min-height: 62px; }
   .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 48px) 16px 0; }
   .form-grid { grid-template-columns: 1fr; }
