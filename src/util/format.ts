@@ -16,7 +16,7 @@ export function shortenPath(target: string, home: string): string {
   if (!home || !target.startsWith(home)) return target
   const rest = target.slice(home.length)
   if (rest === '') return '~'
-  // Only at a separator: `/home/leonardo2` is not inside `/home/leonardo`, and
+  // Only at a separator: `/home/user2` is not inside `/home/user`, and
   // `~2/foo` is a path that leads nowhere.
   return rest.startsWith('/') || rest.startsWith('\\') ? `~${rest}` : target
 }

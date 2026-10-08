@@ -31,9 +31,9 @@ describe('shortenPath', () => {
   })
 
   it('is not fooled by a sibling whose name merely starts the same', () => {
-    // `/home/leonardo2` is not inside `/home/leonardo`, and `~2/foo` is a path
+    // `/home/user2` is not inside `/home/user`, and `~2/foo` is a path
     // that leads nowhere.
-    expect(shortenPath('/home/leonardo2/foo', '/home/leonardo')).toBe('/home/leonardo2/foo')
+    expect(shortenPath('/home/user2/foo', '/home/user')).toBe('/home/user2/foo')
   })
 
   it('copes with no home to shorten against', () => {
