@@ -94,6 +94,14 @@ export default function App() {
   const [view, setView] = useState<View>(() => viewFromPath(location.pathname))
   /** The Email screen's place within its own path: null inbox, `new` compose, else a thread. */
   const [emailRoute, setEmailRoute] = useState<string | null>(() => emailRouteFromPath(location.pathname))
+  /** Mail that arrived since the person last looked at the inbox, for the Email tab's badge. */
+  const [mailUnread, setMailUnread] = useState<{ count: number; more: boolean } | null>(null)
+  /**
+   * Whether the Email view has ever been opened. Once it has, it stays mounted — hidden
+   * rather than torn down — so returning to it is instant instead of rebuilding the
+   * screen and reading the mail again from nothing.
+   */
+  const [emailMounted, setEmailMounted] = useState(false)
   const [settingsSection, setSettingsSection] = useState(() => settingsSectionFromPath(location.pathname) ?? 'provider')
   /** Whether the settings hold edits that were never saved. */
   const [settingsDirty, setSettingsDirty] = useState(false)
@@ -167,6 +175,34 @@ export default function App() {
     return () => window.removeEventListener('resize', updateMessagesTop)
   }, [updateMessagesTop])
 
+  /**
+   * The sidebar's mail badge: unread that arrived since the inbox was last looked
+   * at. Asked for on load and on a slow interval — so a mail that lands while the
+   * app is open appears without a reload — and again when the tab regains focus.
+   */
+  const refreshMailUnread = useCallback((): void => {
+    void api<{ count: number; more: boolean }>('email-unread')
+      .then(setMailUnread)
+      // A background count that fails leaves the last one standing rather than
+      // raising a notice once a minute.
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshMailUnread()
+    const timer = window.setInterval(() => {
+      if (document.visibilityState === 'visible') refreshMailUnread()
+    }, 60_000)
+    window.addEventListener('focus', refreshMailUnread)
+    return () => {
+      window.clearInterval(timer)
+      window.removeEventListener('focus', refreshMailUnread)
+    }
+  }, [refreshMailUnread])
+
+  /** Looking at the inbox is what clears the badge; the write itself is server-side. */
+  const clearMailBadge = useCallback((): void => setMailUnread({ count: 0, more: false }), [])
+
   // The shell is the phone's visible area, so the keyboard never leaves the
   // composer stranded above a gap once it closes; see `trackVisualViewport`.
   useEffect(() => trackVisualViewport(), [])
@@ -198,6 +234,12 @@ export default function App() {
     // from the token rather than repeated here, so the two cannot drift.
     document.querySelector('meta[name=theme-color]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim())
   }, [conversationId, theme, sidebarCollapsed])
+
+  // The Email view is mounted on the first visit and then kept; this is the one place
+  // the view changes that knows it, whether by the sidebar, a link or the browser's Back.
+  useEffect(() => {
+    if (view === 'email') setEmailMounted(true)
+  }, [view])
 
   /**
    * The screen is in the address bar: a session, the routines, and each settings
@@ -844,7 +886,7 @@ export default function App() {
         <div className="sidebar-pad">
           <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={16} /><span>Routines</span></button>
           <button className={`sidebar-tab ${view === 'tasks' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'tasks' ? 'chat' : 'tasks'); setSidebarOpen(false) }}><Icon name="list-check" size={16} /><span>Task lists</span></button>
-          <button className={`sidebar-tab ${view === 'email' ? 'active' : ''}`} type="button" onClick={() => { setEmailRoute(null); setView(view === 'email' ? 'chat' : 'email'); setSidebarOpen(false) }}><Icon name="mail" size={16} /><span>Email</span></button>
+          <button className={`sidebar-tab ${view === 'email' ? 'active' : ''}`} type="button" onClick={() => { setEmailRoute(null); setView(view === 'email' ? 'chat' : 'email'); setSidebarOpen(false) }}><Icon name="mail" size={16} /><span>Email</span>{mailUnread !== null && mailUnread.count > 0 && <span className="sidebar-badge">{mailUnread.more ? `${mailUnread.count}+` : mailUnread.count}</span>}</button>
           <div className="sidebar-controls">
             <label className="sidebar-search"><Icon name="search" size={16} /><input aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
             <button className="new-chat" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>
@@ -910,9 +952,8 @@ export default function App() {
         ? <Routines conversationId={conversationId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
-        : view === 'email'
-        ? <Email route={emailRoute} onRoute={setEmailRoute} />
-        : <section className="chat-view">
+        : view === 'chat'
+        ? <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>
             <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} />
             {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
@@ -923,7 +964,12 @@ export default function App() {
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
             <Composer ref={composerRef} busy={busy} queued={queued} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={(provider) => void changeProvider(provider)} />
           </div>
-        </section>}
+        </section>
+        : null}
+      {/* Opened once, the Email view is kept mounted and hidden rather than torn down and
+          rebuilt, so coming back to it draws the mail it already read instead of its
+          loading line. It is told the view itself, not the path, so this is where it draws. */}
+      {(emailMounted || view === 'email') && <Email active={view === 'email'} route={emailRoute} onRoute={setEmailRoute} onSeen={clearMailBadge} />}
     </main>
     {view === 'chat' && panelOpen && panel && panel.tabs.length > 0 && <Panel view={panel} onClose={() => setPanelVisible(false)} onInput={panelInput} onActivateTab={activateTab} onCloseTab={closeTab} />}
   </div>

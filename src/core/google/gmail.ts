@@ -260,6 +260,32 @@ export async function listInbox(
   return { ok: true, value: { messages: summaries.value, ...(next ? { nextPageToken: next } : {}) } }
 }
 
+/** How much unread arrived since a moment, and whether it was more than was counted. */
+export interface UnreadCount {
+  count: number
+  /** True when Gmail has more than `count` matches, so the number is a floor. */
+  more: boolean
+}
+
+/**
+ * The unread mail in the inbox newer than a moment — what the sidebar's badge
+ * counts. One `messages.list` and the ids it answers with; no summaries, since
+ * only the number matters. `sinceMs` of zero counts every unread in the inbox,
+ * which is what a first look (no watermark yet) means.
+ */
+export async function unreadSince(
+  tokens: GoogleTokens,
+  sinceMs: number,
+  limit = 99,
+): Promise<GoogleOutcome<UnreadCount>> {
+  const seconds = Math.floor(sinceMs / 1000)
+  const q = seconds > 0 ? `in:inbox is:unread after:${seconds}` : 'in:inbox is:unread'
+  const listed = await authorizedJson(tokens, endpoint('messages', { q, maxResults: String(limit) }))
+  if (!listed.ok) return listed
+  const next = asString((listed.value as { nextPageToken?: unknown }).nextPageToken)
+  return { ok: true, value: { count: idsOf(listed.value).length, more: Boolean(next) } }
+}
+
 /** One thread, every message in it, bodies and all. */
 export async function readThread(tokens: GoogleTokens, threadId: string): Promise<GoogleOutcome<MailThread>> {
   const got = await authorizedJson(tokens, endpoint(`threads/${encodeURIComponent(threadId)}`, { format: 'full' }))

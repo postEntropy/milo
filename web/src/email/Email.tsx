@@ -93,7 +93,7 @@ function withLabel<T extends MailSummary>(mail: T, label: MailLabel, on: boolean
  * for the composer, and otherwise a thread id. That is what lets the browser's own
  * Back leave a thread for the inbox instead of leaving the app.
  */
-export function Email({ route, onRoute }: { route: string | null; onRoute(next: string | null): void }) {
+export function Email({ active, route, onRoute, onSeen }: { active: boolean; route: string | null; onRoute(next: string | null): void; onSeen(): void }) {
   const [status, setStatus] = useState<Status | null>(null)
   const [inbox, setInbox] = useState<MailSummary[] | null>(null)
   const [nextPage, setNextPage] = useState<string | undefined>(undefined)
@@ -108,6 +108,8 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
   const [draft, setDraft] = useState<Draft | null>(null)
   const [assist, setAssist] = useState<{ title: string; text: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  /** Whether the next page is being fetched — the list scrolls into it on its own. */
+  const [pageLoading, setPageLoading] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
   useAutoDismiss(notice, setNotice)
 
@@ -117,6 +119,15 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
   const threadId = route !== null && route !== 'new' ? route : null
   /** Whether something is hiding mail, so an empty list knows which empty it is. */
   const narrowed = query !== '' || filter !== null || labelFilter !== null
+  /**
+   * What narrows the list, as one value. A change to it is a different reading, so the
+   * list is emptied for it; the same one keeps what is on screen while it is read again
+   * — which is what lets a return to the screen draw mail instead of a loading line.
+   */
+  const narrowing = JSON.stringify([labelFilter, filter, query])
+  const narrowingRef = useRef(narrowing)
+  /** The panel itself, which is what scrolls — so a fresh page can start at the top. */
+  const workspace = useRef<HTMLElement>(null)
 
   const loadStatus = useCallback(async (): Promise<void> => {
     try {
@@ -138,10 +149,27 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
       setColors(page.colors)
       setInbox((current) => (pageToken && current ? [...current, ...page.messages] : page.messages))
       setNextPage(page.nextPageToken)
+      // A fresh read is the newest page; the top is where it is read from — the same place
+      // rebuilding the view used to land, which is what a kept-mounted view must keep doing.
+      if (!pageToken) workspace.current?.scrollTo({ top: 0 })
     } catch (error) {
       setNotice({ text: message(error), error: true })
     }
   }, [labelFilter, filter, query])
+
+  // One page in flight at a time: the observer below can fire again before the first
+  // answer lands, and two calls for the same cursor would double the rows.
+  const loadingMore = useRef(false)
+  const loadMore = useCallback((): void => {
+    if (!nextPage || loadingMore.current) return
+    const token = nextPage
+    loadingMore.current = true
+    setPageLoading(true)
+    void loadInbox(token).finally(() => {
+      loadingMore.current = false
+      setPageLoading(false)
+    })
+  }, [nextPage, loadInbox])
 
   // What was typed becomes the query a beat after typing stops, so a search is one
   // Gmail call rather than one per keystroke.
@@ -151,18 +179,35 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
     return () => window.clearTimeout(timer)
   }, [search])
 
+  // Read the grant when the view is entered — not before it is ever opened, so a screen
+  // nobody asked for never reads the account, and not while it is hidden.
   useEffect(() => {
-    void loadStatus()
-  }, [loadStatus])
+    if (active) void loadStatus()
+  }, [active, loadStatus])
 
   // Read the inbox once the grant turns out to be connected — not before, so a
   // screen with no account never shows a failed fetch it did not need. Changing the
   // label filter reads it again, from the top, so the list shows only that label.
   useEffect(() => {
-    if (!connected) return
-    setInbox(null)
+    if (!connected || !active) return
+    // A different narrowing empties the list, so the loading line is honest; the same one
+    // keeps it, and the fresh page lands behind the mail already on screen.
+    if (narrowingRef.current !== narrowing) setInbox(null)
+    narrowingRef.current = narrowing
     void loadInbox()
-  }, [connected, loadInbox])
+  }, [connected, active, narrowing, loadInbox])
+
+  // Showing the inbox is what "noticed" means: the sidebar's badge counts from here,
+  // and the write is server-side, so this only tells the app it can clear it. A thread
+  // opened by its own address (`/email/<id>`) never drew the list, so it does not count.
+  useEffect(() => {
+    if (!active || !connected || route !== null) return
+    let live = true
+    void api('email-seen')
+      .then(() => { if (live) onSeen() })
+      .catch((error) => { if (live) setNotice({ text: message(error), error: true }) })
+    return () => { live = false }
+  }, [active, connected, route, onSeen])
 
   /** A new label of the person's own, local to Milo. */
   async function createLabel(name: string, color: string): Promise<void> {
@@ -333,7 +378,7 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
     </div>}
   </div>
 
-  return <main className="settings-workspace mail-workspace">
+  return <main className="settings-workspace mail-workspace" ref={workspace} hidden={!active}>
     <div className="settings-inner mail-inner">
       <div className="settings-panel-stack">
         <section className="settings-section mail-section">
@@ -367,7 +412,7 @@ export function Email({ route, onRoute }: { route: string | null; onRoute(next: 
               ? thread?.id === threadId
                 ? <ThreadView thread={thread} access={access} busy={busy} labels={labels} onReply={reply} onDraft={() => void draftReply()} onModify={modify} onAsk={ask} onAssign={assign} />
                 : <p className="list-empty">Reading the thread…</p>
-              : <Inbox inbox={inbox} access={access} onOpen={(mail) => onRoute(mail.threadId)} onModify={modify} onMore={() => void loadInbox(nextPage)} nextPage={nextPage} narrowed={narrowed} onClear={clearNarrowing} />}
+              : <Inbox inbox={inbox} access={access} onOpen={(mail) => onRoute(mail.threadId)} onModify={modify} onMore={loadMore} loading={pageLoading} nextPage={nextPage} narrowed={narrowed} onClear={clearNarrowing} />}
             {assist && <section className="mail-assist">
               <h3>{assist.title}</h3>
               <p className="mail-assist-text">{assist.text || 'The model had nothing to add.'}</p>
@@ -403,6 +448,7 @@ function Inbox({
   onOpen,
   onModify,
   onMore,
+  loading,
   nextPage,
   narrowed,
   onClear,
@@ -412,10 +458,28 @@ function Inbox({
   onOpen(summary: MailSummary): void
   onModify(id: string, op: string): Promise<void>
   onMore(): void
+  loading: boolean
   nextPage?: string
   narrowed: boolean
   onClear(): void
 }) {
+  const sentinel = useRef<HTMLDivElement>(null)
+
+  // The list pages itself in as its own end comes into view. `rootMargin` starts the
+  // next page a little before the bottom, so the wait lands in the gap rather than at
+  // the edge; the fetch is guarded upstream, so a repeated fire is harmless.
+  useEffect(() => {
+    if (!nextPage) return
+    const node = sentinel.current
+    if (!node || typeof IntersectionObserver === 'undefined') return
+    const observer = new IntersectionObserver(
+      (entries) => { if (entries.some((entry) => entry.isIntersecting)) onMore() },
+      { rootMargin: '300px 0px' },
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [nextPage, onMore])
+
   if (inbox === null) return <p className="list-empty">Reading the inbox…</p>
   if (inbox.length === 0) return <div className="panel-empty">
     <span className="panel-empty-mark"><Icon name="inbox" size={22} /></span>
@@ -433,7 +497,9 @@ function Inbox({
         <MailRow key={mail.id} mail={mail} access={access} onOpen={onOpen} onModify={onModify} />
       ))}
     </div>
-    {nextPage && <div className="mail-more"><button className="button" type="button" onClick={onMore}>Load more</button></div>}
+    {nextPage && <div className="mail-more" ref={sentinel}>
+      <span className="mail-more-note">{loading ? 'Loading more…' : ''}</span>
+    </div>}
   </>
 }
 

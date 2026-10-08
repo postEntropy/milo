@@ -24,6 +24,7 @@ import {
   sendMessage,
   setRead,
   trashMessage,
+  unreadSince,
   type MailSummary,
 } from '../src/core/google/gmail.js'
 import { googleState } from '../src/core/google/state.js'
@@ -288,6 +289,38 @@ describe('Gmail beyond reading', () => {
     expect(page.value.nextPageToken).toBe('cursor')
     expect(page.value.messages[0]?.subject).toBe('a nota')
     expect(decodeURIComponent(urls[0]!).replace(/\+/g, ' ')).toContain('in:inbox')
+  })
+})
+
+describe('the unread badge count', () => {
+  it('counts the unread newer than a moment, and says when there are more', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', async (input: URL | string) => {
+      urls.push(String(input))
+      return answer({ messages: [{ id: 'm1' }, { id: 'm2' }], nextPageToken: 'cursor' })
+    })
+
+    const counted = await unreadSince(tokens, 1_700_000_000_000)
+    expect(counted.ok).toBe(true)
+    if (!counted.ok) return
+    expect(counted.value).toEqual({ count: 2, more: true })
+    const query = new URL(urls[0]!).searchParams
+    expect(query.get('q')).toBe('in:inbox is:unread after:1700000000')
+    expect(query.get('maxResults')).toBe('99')
+  })
+
+  it('counts every unread in the inbox when the inbox was never looked at', async () => {
+    let q = ''
+    vi.stubGlobal('fetch', async (input: URL | string) => {
+      q = new URL(String(input)).searchParams.get('q') ?? ''
+      return answer({ messages: [{ id: 'm1' }] })
+    })
+
+    const counted = await unreadSince(tokens, 0)
+    expect(counted.ok).toBe(true)
+    if (!counted.ok) return
+    expect(counted.value).toEqual({ count: 1, more: false })
+    expect(q).toBe('in:inbox is:unread')
   })
 })
 

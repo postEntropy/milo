@@ -18,12 +18,14 @@ import {
   sendMessage,
   setRead,
   trashMessage,
+  unreadSince,
   type DraftInput,
   type InboxFilter,
 } from '../../core/google/gmail.js'
 import type { GoogleOutcome, GoogleTokens } from '../../core/google/oauth.js'
 import { labeledPage } from '../../core/google/inbox.js'
 import { LABEL_COLORS, carryingLabel, createLabel, deleteLabel, labelMessages, toggleAssignment } from '../../core/google/labels.js'
+import { markSeen, seenAt } from '../../core/google/seen.js'
 import { googleState } from '../../core/google/state.js'
 import { GOOGLE_TIERS, accessOf, type GoogleAccess } from '../../core/google/tiers.js'
 import { googleToolNames, googleWriteToolNames } from '../../core/tools/index.js'
@@ -153,6 +155,8 @@ export class WebSettings {
       case 'job-start': return this.jobStart(body)
       case 'job-status': return this.jobStatus(body)
       case 'email-status': return this.emailStatus()
+      case 'email-unread': return this.emailUnread()
+      case 'email-seen': return this.emailSeen()
       case 'email-inbox': return this.emailInbox(body)
       case 'email-message': return this.emailMessage(body)
       case 'email-thread': return this.emailThread(body)
@@ -182,6 +186,21 @@ export class WebSettings {
       // can tell the person rather than promise a sorting that will never come.
       sorting: this.runtime.classifier !== null,
     }
+  }
+
+  /**
+   * The sidebar's badge: unread mail in the inbox that arrived after the person
+   * last looked. Zero when no account is connected, so the number is drawn only
+   * when there is a grant behind it.
+   */
+  private async emailUnread(): Promise<unknown> {
+    if (!readAuth().google?.refreshToken) return { count: 0, more: false }
+    return this.mailCall((tokens) => unreadSince(tokens, seenAt()))
+  }
+
+  /** The inbox was looked at: the badge starts counting from now. */
+  private async emailSeen(): Promise<unknown> {
+    return markSeen()
   }
 
   /**

@@ -51,6 +51,11 @@ export const taskListsFile = (): string => path.join(MILO_HOME, 'task-lists.json
  * back to the account.
  */
 export const labelsFile = (): string => path.join(MILO_HOME, 'labels.json')
+/**
+ * When the inbox was last looked at. The watermark the sidebar's badge counts
+ * "new" mail from — Milo's own, like the labels, and never written to Gmail.
+ */
+export const mailSeenFile = (): string => path.join(MILO_HOME, 'mail-seen.json')
 /** What was typed at the CLI's prompt, for the arrow keys to walk back through. */
 export const inputHistoryFile = (): string => path.join(MILO_HOME, 'input-history.json')
 /**

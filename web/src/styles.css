@@ -138,6 +138,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-tab > svg { flex: none; }
 .sidebar-tab:hover { background: var(--surface); }
 .sidebar-tab.active { background: var(--surface); color: var(--fg); }
+/* New mail waiting behind the Email tab: a number, not a control — a filled pill at
+   the end of the tab's own row, tinted off the text colour so it reads on the warm
+   sidebar and on the lighter fill its tab takes when hovered or active. */
+.sidebar-badge { flex: none; margin-inline-start: auto; border-radius: 999px; background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px 7px; color: var(--fg); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; animation: fade-in var(--motion-base) var(--ease-standard) backwards; }
 .sidebar-controls { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
 .new-chat { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 12px; background: var(--surface); color: var(--fg-2); transition: background var(--motion-fast); }
 .new-chat:hover { background: var(--border-soft); }
@@ -1123,6 +1127,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 /* Email: the inbox, one thread, and the actions the grant allows. */
+/* The Email view stays mounted once it has been opened, so returning to it draws the
+   mail already read instead of its loading line. Hidden with the native attribute, so it
+   leaves the tab order too — and this rule because the class's own `display: flex` would
+   otherwise beat the attribute's `display: none`. */
+.mail-workspace[hidden] { display: none; }
 .settings-inner.mail-inner { width: min(1080px, 100%); padding: 36px 32px 28px; }
 .mail-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 20px; }
 .mail-title { color: var(--fg); font-size: 20px; font-weight: 620; }
@@ -1174,7 +1183,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mail-row-action { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 9px; background: var(--surface-warm); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
 .mail-row-action:not(:disabled):hover { background: var(--border-soft); color: var(--fg); }
 .mail-row-action:disabled { opacity: .45; }
-.mail-more { display: flex; justify-content: center; margin-top: 16px; }
+/* The end of the list, and the target the next page is fetched from as it comes into
+   view. It keeps a height of its own even while empty, so there is always something
+   for the observer to see. */
+.mail-more { display: flex; min-height: 28px; align-items: center; justify-content: center; margin-top: 16px; }
+.mail-more-note { color: var(--muted); font-size: 12.5px; }
 
 .mail-thread { display: flex; flex-direction: column; gap: 12px; }
 .mail-message { border-radius: 12px; background: var(--surface); padding: 14px 16px; }

@@ -801,4 +801,34 @@ describe('web Settings mail', () => {
 
     await expect(settings.handle('email-label-assign', { id: 'm1', label: 'nope', on: true })).rejects.toThrow(/No label/)
   })
+
+  it('answers the badge with the unread newer than the last look', async () => {
+    writeConfig()
+    grantAt('modify')
+    const asked: string[] = []
+    gmail((url) => {
+      asked.push(url)
+      return json({ messages: [{ id: 'm1' }, { id: 'm2' }, { id: 'm3' }] })
+    })
+    const settings = new WebSettings(build({}), home)
+
+    // Nothing has been looked at yet, so every unread in the inbox counts.
+    expect(await settings.handle('email-unread')).toEqual({ count: 3, more: false })
+    expect(new URL(asked[0]!).searchParams.get('q')).toBe('in:inbox is:unread')
+
+    // Looking at the inbox moves the watermark, and the next count asks from there.
+    await settings.handle('email-seen')
+    expect(await settings.handle('email-unread')).toEqual({ count: 3, more: false })
+    expect(new URL(asked[1]!).searchParams.get('q')).toMatch(/^in:inbox is:unread after:\d+$/)
+  })
+
+  it('has no badge without a grant, and reaches no Gmail for it', async () => {
+    writeConfig()
+    let called = 0
+    vi.stubGlobal('fetch', async () => { called += 1; return json({}) })
+    const settings = new WebSettings(build({}), home)
+
+    expect(await settings.handle('email-unread')).toEqual({ count: 0, more: false })
+    expect(called).toBe(0)
+  })
 })
