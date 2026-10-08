@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Milo — a multi-surface agent (CLI, Telegram, Discord) with pluggable LLM providers and memory.",
+  "license": "MIT",
   "type": "module",
   "bin": {
     "milo": "dist/bin/cli.js",

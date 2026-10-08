@@ -1007,3 +1007,7 @@ exported in your shell, npm treats every install as `--omit=dev` and **prunes th
 - `src/bin/` — `cli.ts` (`milo`), `serve.ts` (`milo serve`), `web.ts` (`milo web`), and the plain
   terminal commands `skills.ts` (`milo skills`), `history.ts` (`milo history`), `log.ts` (`milo log`),
   `routines.ts` (`milo routines`) and `google.ts` (`milo google`).
+
+## License
+
+MIT — see [LICENSE](LICENSE).
