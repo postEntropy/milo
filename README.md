@@ -246,7 +246,9 @@ itself. Milo opens it when it has something to show ("here, look at this"). It h
 thing**, per session: showing a second file does not take away the first, the strip at the top switches
 between them and closes them, and Milo is told what is on the panel — so he can talk about a tab, or
 read the file behind it, without being told where it is. The header's toggle folds the panel away, and
-the tabs come back on reload. The browser streams only while its own tab is on screen.
+that is remembered: Milo opens the panel when it shows something, not when a session is opened, so a
+reload brings the tabs back folded unless you keep it open. The browser streams only while its own tab
+is on screen.
 
 **Settings** (the sidebar's last row) is `milo setup` in the browser — provider and model, API keys,
 memory, routines, gateways, tools and the browser, permissions, display, skills and sessions. The long

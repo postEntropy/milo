@@ -100,9 +100,15 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   /** The desktop sidebar, folded away; the phone keeps its drawer instead. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('milo-sidebar') === 'collapsed')
-  /** The panel beside the chat: the tabs Milo opened, and whether it is folded away. */
+  /**
+   * The panel beside the chat: the tabs Milo opened, and whether it is folded away.
+   * The tabs are session state and always come back. Whether the column is out is
+   * the person's own choice, so it starts folded — Milo showing something reveals
+   * the panel for the sitting, it does not decide that it is open every time this
+   * chat is opened.
+   */
   const [panel, setPanel] = useState<PanelView | null>(null)
-  const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem('milo-panel') !== 'closed')
+  const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem('milo-panel') === 'open')
   const [theme, setTheme] = useState(() => localStorage.getItem('milo-theme') ?? 'system')
   const [notice, setNotice] = useState<Notice | null>(null)
   useAutoDismiss(notice, setNotice)
@@ -183,7 +189,6 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('milo-conversation', conversationId)
     localStorage.setItem('milo-sidebar', sidebarCollapsed ? 'collapsed' : 'open')
-    localStorage.setItem('milo-panel', panelOpen ? 'open' : 'closed')
     if (theme === 'system') localStorage.removeItem('milo-theme')
     else localStorage.setItem('milo-theme', theme)
     const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
@@ -192,7 +197,7 @@ export default function App() {
     // screen, the page would otherwise sit under a band of another colour. Read
     // from the token rather than repeated here, so the two cannot drift.
     document.querySelector('meta[name=theme-color]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim())
-  }, [conversationId, theme, sidebarCollapsed, panelOpen])
+  }, [conversationId, theme, sidebarCollapsed])
 
   /**
    * The screen is in the address bar: a session, the routines, and each settings
@@ -722,6 +727,16 @@ export default function App() {
     try { socket.send({ type: 'panel-close', key }) } catch (error) { fail(error) }
   }, [socket, fail])
 
+  /**
+   * Folding or unfolding the panel, and remembering it: the one thing about the
+   * panel that outlives the page. Written here and nowhere else, so a `panel` call
+   * revealing the panel never comes to read as the person's own preference.
+   */
+  const setPanelVisible = useCallback((open: boolean): void => {
+    localStorage.setItem('milo-panel', open ? 'open' : 'closed')
+    setPanelOpen(open)
+  }, [])
+
   function handleSessionChange(id: string): void {
     editingTurn.current = null
     setSessionId(id)
@@ -868,7 +883,7 @@ export default function App() {
         <button className="sidebar-expand" type="button" aria-label="Show sidebar" title="Show sidebar" onClick={() => setSidebarCollapsed(false)}><Icon name="panel-left" size={17} /></button>
         <div className="topbar-title"><h1>{view === 'settings' ? 'Settings' : view === 'routines' ? 'Routines' : view === 'tasks' ? 'Task lists' : view === 'email' ? 'Email' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
         <div className="topbar-actions">
-          {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelOpen((open) => !open)}><Icon name="panel-right" size={18} /></button>}
+          {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelVisible(!panelOpen)}><Icon name="panel-right" size={18} /></button>}
           {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>}
           {view === 'chat' && connection.state !== 'online' && <span className={`connection-status ${connection.state}`} title={connection.reason}><span />{connection.state === 'refused' ? 'Disconnected' : connection.state === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
         </div>
@@ -910,7 +925,7 @@ export default function App() {
           </div>
         </section>}
     </main>
-    {view === 'chat' && panelOpen && panel && panel.tabs.length > 0 && <Panel view={panel} onClose={() => setPanelOpen(false)} onInput={panelInput} onActivateTab={activateTab} onCloseTab={closeTab} />}
+    {view === 'chat' && panelOpen && panel && panel.tabs.length > 0 && <Panel view={panel} onClose={() => setPanelVisible(false)} onInput={panelInput} onActivateTab={activateTab} onCloseTab={closeTab} />}
   </div>
 }
 
