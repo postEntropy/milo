@@ -6,7 +6,21 @@
          so the composer rides up with it on Android instead of being left behind
          the keys. iOS ignores it; the visual-viewport tracking covers that. -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta name="theme-color" content="#f5f3ed" />
+    <!-- One per scheme: the browser paints its own bars before any script runs, so
+         the value has to be right here, not only once the theme setting is known. -->
+    <meta name="theme-color" content="#F5F3ED" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#191A18" media="(prefers-color-scheme: dark)" />
+    <!-- The theme has to be on the document before the first paint, not in a React
+         effect: Safari reads the page's colour for its own bars as it paints, so a
+         light first frame — the stylesheet's own default — is what leaves them
+         light. Same rule the app applies on mount, from the same key. -->
+    <script>
+      (() => {
+        const saved = localStorage.getItem('milo-theme')
+        const dark = saved === 'dark' || (saved !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+      })()
+    </script>
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
