@@ -141,7 +141,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* The page tabs are the sidebar's primary navigation: its largest text, on a row that
    sits between the roomy original and a cramped list — enough air to stay readable
    without the three reading as separate blocks. */
-.sidebar-tab { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; margin-top: 4px; border: 0; border-radius: 10px; background: transparent; padding: 6px 10px; color: var(--fg-2); font-size: 16px; font-weight: 500; text-align: start; transition: background var(--motion-fast); }
+.sidebar-tab { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; margin-top: 4px; border: 0; border-radius: 10px; background: transparent; padding: 6px 10px; color: var(--fg-2); font-size: 14px; font-weight: 500; text-align: start; transition: background var(--motion-fast); }
 .sidebar-tab > svg { flex: none; }
 .sidebar-tab:hover { background: var(--surface); }
 .sidebar-tab.active { background: var(--surface); color: var(--fg); }
@@ -959,7 +959,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   /* The drawer's list and controls, one step up: at the sidebar's width on a phone, 13px
      read too fine. Kept at the 14px the Settings screen already uses on a phone, so the
      app still holds one mobile size rather than the sidebar inventing another. The page
-     tabs stand above this at 15px, their own size at every width. */
+     tabs stand one step above even this — the sidebar's largest text, here as there. */
+  .sidebar-tab { font-size: 16px; }
   .session-title, .new-chat { font-size: 14px; }
   .sidebar-search input { font-size: 14px; }
 }
