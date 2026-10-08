@@ -66,7 +66,7 @@ import {
   type InstalledSkill,
 } from '../../../core/skills/install.js'
 import { resolveSource, type ResolvedSkill } from '../../../core/skills/sources.js'
-import { googleToolNames } from '../../../core/tools/index.js'
+import { googleToolNames, googleWriteToolNames } from '../../../core/tools/index.js'
 import type { PermissionMode } from '../../../core/tools/permission.js'
 import { formatWhen } from '../../../core/sessions/index.js'
 import { humanSize, plural, shortenPath } from '../../../util/format.js'
@@ -2076,6 +2076,12 @@ export function SettingsScreen({
                 <Box marginTop={1}>
                   <Text color={theme.muted}>
                     Reading tools: {googleToolNames(auth.google ?? null).join(', ')}.
+                  </Text>
+                </Box>
+                <Box marginTop={1}>
+                  <Text color={theme.muted}>
+                    Tools that can change mail or its labels:{' '}
+                    {googleWriteToolNames(auth.google ?? null).join(', ')}.
                   </Text>
                 </Box>
                 <Box marginTop={1}>

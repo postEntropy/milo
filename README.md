@@ -330,8 +330,10 @@ comes is skipped rather than stacked, and a routine cannot create routines.
 | `panel` | — | Shows a file or the live browser in the Panel beside the web chat, one tab per thing — the tab already holding something comes forward rather than a second copy of it. Only the web app draws a panel, so it is offered on that surface alone; its call is not drawn as a tool line. |
 | `web_search` | yes | Registered only when a search provider is configured. |
 | `read_skill` | yes | Loads a skill's instructions on demand; registered only when a skill is installed. |
-| `gmail_search` | yes | Search the connected Gmail account; registered only when Google is on. |
+| `gmail_search` | yes | Search the connected Gmail account; registered only when Google is on. `label:` reaches Gmail's own labels. |
 | `gmail_read` | yes | One message in full, by the id `gmail_search` returned. |
+| `gmail_modify` | no | Archive, mark read/unread, or move a message to the bin, by id. Needs the `modify` grant; asks before acting, and a routine must name it in `allow`. |
+| `mail_labels` | — | Lists and edits Milo's own mail labels — local to `~/.milo/labels.json`, never written to Gmail — and says which messages carry one. Sorts mail to answer, so it is not read-only, but only touches Milo's own state, so it never asks. |
 | `drive_search` | yes | Search the connected Drive. |
 | `drive_read` | yes | One Drive file as text; Docs and Sheets come back exported. |
 | `task` | — | Runs a subtask in its own context; only the report comes back. Only on request; never asks itself. |
@@ -620,14 +622,20 @@ google:
   enabled: true
 ```
 
-Turning it on registers four tools, all read-only: `gmail_search` / `gmail_read` and `drive_search` /
-`drive_read`. The agent never writes, whatever the grant allows — the write actions live in the web
-app's **Email** screen (inbox → thread → compose), which is web-only by design (see `AGENTS.md`). The
-scopes follow the level: `gmail.readonly` + `drive.readonly` are the base, and `gmail.modify`,
-`gmail.compose` and `gmail.send` are added as the level rises, never before. A Google Doc or Sheet comes
-back as exported text; a file Milo cannot read as text says so by type instead of pretending.
-`milo google status` names the tools a connection actually bought, taken from the same factories that
-answer, so the line cannot drift from what is registered.
+Turning it on registers four read-only tools — `gmail_search` / `gmail_read` and `drive_search` /
+`drive_read` — plus two that act, as far as the grant allows. `gmail_modify` archives a message, marks
+it read or unread, or moves it to the bin — Gmail's `trash`, recoverable for thirty days, never the
+permanent delete. `mail_labels` lists and edits Milo's own mail labels, which live in
+`~/.milo/labels.json`, are never written back to Gmail, and answer which messages carry one now. Email
+writes are a shared core capability: the web **Email** screen and the agent reach them through the same
+functions. The agent's `gmail_modify` asks before acting and needs the `modify` grant, and a routine
+that acts on mail with nobody there has to name it in `allow` — which is how "from now on, bin
+everything with label X" is made. Drive stays read-only. The scopes follow the level: `gmail.readonly` +
+`drive.readonly` are the base, and `gmail.modify`, `gmail.compose` and `gmail.send` are added as the
+level rises, never before. A Google Doc or Sheet comes back as exported text; a file Milo cannot read
+as text says so by type instead of pretending. `milo google status` names the tools a connection
+actually bought, taken from the same factories that answer, so the line cannot drift from what is
+registered.
 
 ### MCP servers
 

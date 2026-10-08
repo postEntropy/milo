@@ -216,6 +216,17 @@ export function summarizeToolCall(args: unknown): string {
       return `${record.message.trim()}${staging}`
     }
     if (typeof record.path === 'string') return writePreview(record) ?? record.path
+    // Acting on one mail message: what is done, and to which one — a prompt that
+    // does not say what it will touch is not a decision.
+    if (typeof record.op === 'string' && typeof record.id === 'string') {
+      const verb: Record<string, string> = {
+        archive: 'Archive',
+        read: 'Mark read',
+        unread: 'Mark unread',
+        trash: 'Move to the bin',
+      }
+      return `${verb[record.op] ?? record.op} message ${record.id}`
+    }
     // Changing or dropping a routine: the id is what it acts on, and a standing
     // grant is still the half that has to be seen before it is approved.
     if (record.action === 'remove') {

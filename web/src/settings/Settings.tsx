@@ -46,7 +46,7 @@ type GoogleReport = (
   | { kind: 'off' }
   | { kind: 'wanted' }
   | { kind: 'connected'; email?: string; connectedAt?: string; enabled: boolean; access: GoogleTier['id'] }
-) & { tools: string[]; tiers: GoogleTier[] }
+) & { tools: string[]; writeTools: string[]; tiers: GoogleTier[] }
 
 /** The tier a level names, from the list the server sends, so the screen never guesses a label. */
 function tierOf(tiers: GoogleTier[], id: GoogleTier['id']): GoogleTier | undefined {
@@ -489,10 +489,11 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
                 {tierOf(data.google.tiers, data.google.access)?.description}
               </p>
               <p className="panel-note">
-                Reading tools: <code className="mono">{data.google.tools.join(', ')}</code>. The write
-                actions — archive, mark read, draft, send — live in the Email screen, and only as far as
-                this access allows. To widen it, run <code className="mono">milo google connect</code>{' '}
-                again: Google grants access only on a fresh consent.
+                Reading tools: <code className="mono">{data.google.tools.join(', ')}</code>. Tools that can
+                change mail or its labels: <code className="mono">{data.google.writeTools.join(', ')}</code>{' '}
+                — each only as far as this access allows, and each asks before it acts. To widen it, run{' '}
+                <code className="mono">milo google connect</code> again: Google grants access only on a
+                fresh consent.
               </p>
             </>
           ) : data?.google.kind === 'wanted' ? (

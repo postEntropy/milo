@@ -112,7 +112,18 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   const resolveActive = (id: string): ResolvedProvider | undefined =>
     resolveProvider(readConfig() ?? loaded.config, readAuth(), id)
 
-  const registry = createToolRegistry({ search, skills, browser, google, mcp })
+  // Built once, before the registry: the permission layer asks it P(dangerous), the
+  // inbox asks it to sort mail into labels, and the label tool asks it to answer
+  // which messages carry one. One instance, so those cannot land on different backends.
+  const classifier = buildClassifier(loaded, auth, traces)
+
+  const registry = createToolRegistry({
+    search,
+    skills,
+    browser,
+    google: google ? { account: google.account, classifier } : null,
+    mcp,
+  })
 
   // The install's routine list, as the `routine` tool sees it. A removal takes the
   // runs the routine left behind with it — they are reachable only through it —
@@ -125,10 +136,6 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     update: updateRoutine,
     remove: (id) => removeRoutineWithRuns(runtime, id),
   }
-
-  // Built once: the permission layer asks it P(dangerous), and the inbox asks it to
-  // sort mail into labels. One instance, so the two cannot land on different backends.
-  const classifier = buildClassifier(loaded, auth, traces)
 
   runtime = new AgentRuntime({
     provider: traced(createProvider(loaded.provider, loaded.model)),

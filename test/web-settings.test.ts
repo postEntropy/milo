@@ -589,6 +589,22 @@ describe('web Settings mail', () => {
     await expect(settings.handle('email-modify', { id: 'm1', op: 'delete' })).rejects.toThrow(/archive/)
   })
 
+  it('bins a message through the grant, over messages/trash', async () => {
+    writeConfig()
+    grantAt('modify')
+    let asked = ''
+    gmail((url, init) => {
+      asked = `${init?.method ?? 'GET'} ${url}`
+      return json({ id: 'm1' })
+    })
+
+    const settings = new WebSettings(build({}), home)
+    const result = (await settings.handle('email-modify', { id: 'm1', op: 'trash' })) as { id: string }
+    expect(result.id).toBe('m1')
+    expect(asked).toContain('POST')
+    expect(asked).toContain('/messages/m1/trash')
+  })
+
   it('refuses an id that is not one', async () => {
     writeConfig()
     grantAt('modify')

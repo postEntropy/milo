@@ -23,6 +23,7 @@ import {
   search as searchMail,
   sendMessage,
   setRead,
+  trashMessage,
   type MailSummary,
 } from '../src/core/google/gmail.js'
 import { googleState } from '../src/core/google/state.js'
@@ -172,6 +173,33 @@ describe('Gmail beyond reading', () => {
     expect(done.ok).toBe(true)
     expect(method).toBe('POST')
     expect(JSON.parse(body)).toEqual({ removeLabelIds: ['INBOX'] })
+  })
+
+  it('bins a message over messages/trash, at the modify level', async () => {
+    let asked = ''
+    let method = ''
+    vi.stubGlobal('fetch', async (input: URL | string, init?: RequestInit) => {
+      asked = String(input)
+      method = init?.method ?? 'GET'
+      return answer({ id: 'm1', threadId: 't1' })
+    })
+
+    const done = await trashMessage(tokens, 'modify', 'm1')
+    expect(done.ok).toBe(true)
+    if (!done.ok) return
+    expect(done.value.id).toBe('m1')
+    // Gmail's `trash`, not `delete`: the message stays in the account.
+    expect(method).toBe('POST')
+    expect(asked).toContain('/messages/m1/trash')
+    expect(asked).not.toContain('/delete')
+  })
+
+  it('refuses to bin a message below the modify level, and says how to get it', async () => {
+    const denied = await trashMessage(tokens, 'none', 'm1')
+    expect(denied.ok).toBe(false)
+    if (denied.ok) return
+    expect(denied.error).toContain('--access modify')
+    expect(denied.error).toContain('Read only')
   })
 
   it('marks read by clearing UNREAD, and unread by putting it back', async () => {

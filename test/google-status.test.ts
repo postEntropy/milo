@@ -44,6 +44,7 @@ describe('what `milo google status` reports', () => {
       'Connected as ana@exemplo since 2026-09-30. Access: Read only — Search and read mail and files. Nothing in the account is changed.',
     )
     expect(lines[1]).toBe('  Reading tools: gmail_search, gmail_read, drive_search, drive_read.')
+    expect(lines[2]).toBe('  Tools that can change mail or its labels: mail_labels, gmail_modify.')
   })
 
   it('says the tools are off when the config turned them off', async () => {

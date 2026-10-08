@@ -105,6 +105,11 @@ export interface InboxLabels {
   labels: MailLabel[]
 }
 
+/** A message as a surface reads it: the mail, plus the labels Milo put on it. */
+export interface LabeledMessage extends MailSummary {
+  labels: MailLabel[]
+}
+
 function isColor(value: string): value is LabelColor {
   return (LABEL_COLORS as readonly string[]).includes(value)
 }
@@ -170,6 +175,35 @@ function describe(labels: MailLabel[]): string {
   return labels.length === 0 ? 'none yet' : labels.map((label) => label.name).join(', ')
 }
 
+/**
+ * Every label the install knows, read-only. The web bar and the agent's own tool
+ * both need the list without going through a page of mail that happens to be sorted.
+ */
+export function listLabels(): MailLabel[] {
+  return readLabels().labels
+}
+
+/**
+ * A label named the way a person says it — by id, or by name. Undefined when
+ * nothing matches, so the caller answers with the list rather than guessing.
+ */
+export function resolveLabel(nameOrId: string): MailLabel | undefined {
+  const wanted = nameOrId.trim()
+  if (!wanted) return undefined
+  const store = readLabels()
+  const lower = wanted.toLocaleLowerCase()
+  const materialised =
+    store.labels.find((label) => label.id === wanted) ??
+    store.labels.find((label) => label.name.toLocaleLowerCase() === lower)
+  if (materialised) return materialised
+  // The taxonomy is fixed, so a base label answers before any message was ever
+  // sorted into it — unless the person deleted it.
+  const base = BASE_LABELS.find(
+    (entry) => !store.hidden.includes(entry.id) && (entry.id === wanted || entry.name.toLocaleLowerCase() === lower),
+  )
+  return base ? { id: base.id, name: base.name, color: base.color } : undefined
+}
+
 /** A person's own label, drawn from the palette. */
 export async function createLabel(name: string, color: string): Promise<LabelChange> {
   return withLabels<LabelChange>((store) => {
@@ -190,13 +224,14 @@ export async function createLabel(name: string, color: string): Promise<LabelCha
 export async function deleteLabel(id: string): Promise<LabelChange> {
   return withLabels<LabelChange>((store) => {
     const index = store.labels.findIndex((label) => label.id === id)
-    if (index < 0) {
+    const base = BASE_LABELS.find((entry) => entry.id === id)
+    if (index < 0 && !base) {
       return { result: { ok: false, error: `No label "${id}". Available labels: ${describe(store.labels)}.` } }
     }
-    const [removed] = store.labels.splice(index, 1)
-    if (removed && BASE_LABELS.some((base) => base.id === removed.id) && !store.hidden.includes(removed.id)) {
-      store.hidden.push(removed.id)
-    }
+    if (index >= 0) store.labels.splice(index, 1)
+    // A base label is remembered as hidden whether or not it was ever materialised,
+    // so sorting never brings it back.
+    if (base && !store.hidden.includes(base.id)) store.hidden.push(base.id)
     for (const [messageId, assignment] of Object.entries(store.assignments)) {
       const kept = assignment.labels.filter((label) => label !== id)
       if (kept.length === assignment.labels.length) continue
@@ -215,7 +250,13 @@ export async function deleteLabel(id: string): Promise<LabelChange> {
 export async function toggleAssignment(messageId: string, labelId: string, on: boolean): Promise<LabelChange> {
   return withLabels<LabelChange>((store) => {
     if (!store.labels.some((label) => label.id === labelId)) {
-      return { result: { ok: false, error: `No label "${labelId}". Available labels: ${describe(store.labels)}.` } }
+      // A base label answers before it was ever materialised, unless the person
+      // deleted it — putting one on by hand is the same act that makes the rest.
+      const base = BASE_LABELS.find((entry) => entry.id === labelId)
+      if (!base || store.hidden.includes(base.id)) {
+        return { result: { ok: false, error: `No label "${labelId}". Available labels: ${describe(store.labels)}.` } }
+      }
+      store.labels.push({ id: base.id, name: base.name, color: base.color })
     }
     const existing = store.assignments[messageId]?.labels ?? []
     const next = on ? [...new Set([...existing, labelId])] : existing.filter((id) => id !== labelId)
@@ -242,6 +283,16 @@ export async function labelMessages(
     // One entry per message still, empty: the surface draws the same shape either way.
     return { byMessage: new Map(messages.map((message) => [message.id, []])), labels: [] }
   }
+}
+
+/**
+ * The messages on a page that carry a label, in the order they came. With no
+ * label asked for the page is returned whole, so a caller can pass its filter
+ * straight through. Shared, so the web screen and the agent's tool cannot come
+ * to disagree about what "has this label" means.
+ */
+export function carryingLabel(messages: LabeledMessage[], labelId?: string): LabeledMessage[] {
+  return labelId ? messages.filter((message) => message.labels.some((label) => label.id === labelId)) : messages
 }
 
 async function labelPage(

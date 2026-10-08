@@ -52,23 +52,13 @@ const paths: Record<string, React.ReactNode> = {
   edit: <><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></>,
   branch: <><line x1="6" y1="3" x2="6" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" /></>,
   mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="m3 7.5 9 6 9-6" /></>,
+  // The mail mark every email tool wears: one envelope-with-shield rather than
+  // per-action art, so the four tools read the same on the line.
+  'mail-shield': <path d="M11 19H6.2C5.0799 19 4.51984 19 4.09202 18.782C3.71569 18.5903 3.40973 18.2843 3.21799 17.908C3 17.4802 3 16.9201 3 15.8V8.2C3 7.0799 3 6.51984 3.21799 6.09202C3.40973 5.71569 3.71569 5.40973 4.09202 5.21799C4.51984 5 5.0799 5 6.2 5H17.8C18.9201 5 19.4802 5 19.908 5.21799C20.2843 5.40973 20.5903 5.71569 20.782 6.09202C21 6.51984 21 7.0799 21 8.2V11.1981M20.6067 8.26229L15.5499 11.6335C14.2669 12.4888 13.6254 12.9165 12.932 13.0827C12.3192 13.2295 11.6804 13.2295 11.0677 13.0827C10.3743 12.9165 9.73279 12.4888 8.44975 11.6335L3.14746 8.09863M21 15.1667C21 15.1667 20.6941 15.1667 20.625 15.1667C19.6006 15.1667 18.7077 14.7524 18 14C17.2923 14.7524 16.3995 15.1667 15.375 15.1667C15.306 15.1667 15 15.1667 15 15.1667C15 15.1667 15 15.9444 15 16.3979C15 18.6121 16.2748 20.4725 18 21C19.7252 20.4725 21 18.6121 21 16.3979C21 15.9444 21 15.1667 21 15.1667Z" />,
   inbox: <><path d="M3 12h5l1.5 2h5L16 12h5" /><path d="M5.5 5h13l2.5 7v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z" /></>,
   archive: <><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" /><path d="M10 12h4" /></>,
   reply: <><path d="m10 8-5 4 5 4" /><path d="M5 12h9a5 5 0 0 1 5 5v1" /></>,
   refresh: <><path d="M20 11a8 8 0 1 0-.6 4" /><path d="M20 5v6h-6" /></>,
-  gmail: <g stroke="none" transform="translate(0 2.4375) scale(0.09375)">
-    <defs>
-      <linearGradient id="milo-gmail-bar" x1="165" x2="165" y1="44" y2="166" gradientUnits="userSpaceOnUse">
-        <stop stopColor="#60d673" /><stop offset=".17" stopColor="#42c868" /><stop offset=".39" stopColor="#0ebc5f" /><stop offset=".62" stopColor="#00a9bb" /><stop offset=".86" stopColor="#3c90ff" /><stop offset="1" stopColor="#3186ff" />
-      </linearGradient>
-      <linearGradient id="milo-gmail-flap" x1="8" x2="184" y1="46.13" y2="46.13" gradientUnits="userSpaceOnUse">
-        <stop offset=".08" stopColor="#ff63a0" /><stop offset=".3" stopColor="#fc413d" /><stop offset=".5" stopColor="#fc413d" /><stop offset=".65" stopColor="#fc413d" /><stop offset=".72" stopColor="#fc5c30" /><stop offset=".86" stopColor="#feb10c" /><stop offset=".91" stopColor="#fec700" /><stop offset=".96" stopColor="#ffdb0f" />
-      </linearGradient>
-    </defs>
-    <path fill="url(#milo-gmail-bar)" d="M146 44h38v110c0 6.627-5.373 12-12 12h-20a6 6 0 0 1-6-6z" transform="translate(-11.636 -37.818)scale(1.45454)" />
-    <path fill="#fc413d" d="M55.273 26.182H0v160c0 9.638 7.816 17.454 17.455 17.454h29.09a8.727 8.727 0 0 0 8.728-8.728z" />
-    <path fill="url(#milo-gmail-flap)" d="M39.226 30.456c-8.033-6.752-20.018-5.714-26.77 2.319c-6.752 8.032-5.714 20.017 2.319 26.77l76.078 63.949a8 8 0 0 0 10.295 0l76.078-63.95c8.032-6.752 9.07-18.737 2.318-26.77c-6.752-8.032-18.737-9.07-26.769-2.318L96 78.18z" transform="translate(-11.636 -37.818)scale(1.45454)" />
-  </g>,
   drive: <g stroke="none" transform="translate(0 0.84375) scale(0.09375)">
     <defs>
       <linearGradient id="milo-drive-yellow" x1="86.924%" x2="7.63%" y1="94.294%" y2="45.952%">

@@ -6,9 +6,17 @@ import path from 'node:path'
 const home = mkdtempSync(path.join(os.tmpdir(), 'milo-labels-'))
 process.env.MILO_HOME = home
 
-const { BASE_LABELS, LABEL_COLORS, createLabel, deleteLabel, labelMessages, toggleAssignment } = await import(
-  '../src/core/google/labels.js'
-)
+const {
+  BASE_LABELS,
+  LABEL_COLORS,
+  carryingLabel,
+  createLabel,
+  deleteLabel,
+  labelMessages,
+  listLabels,
+  resolveLabel,
+  toggleAssignment,
+} = await import('../src/core/google/labels.js')
 
 /** A page of mail as the Gmail client hands it up: only the fields a person sorts by. */
 const mail = (id: string, subject = 'a note') => ({ id, threadId: `t-${id}`, from: 'ana@exemplo', subject, snippet: 'the gist' })
@@ -58,6 +66,16 @@ describe('mail labels', () => {
     expect(LABEL_COLORS).toHaveLength(8)
     for (const base of BASE_LABELS) expect(LABEL_COLORS).toContain(base.color)
   })
+
+  it('lists what the install knows, and resolves one by name or id', async () => {
+    const created = await createLabel('Invoices', 'teal')
+    const id = created.ok ? created.labels[0]!.id : ''
+
+    expect(listLabels()).toEqual([expect.objectContaining({ name: 'Invoices', color: 'teal' })])
+    expect(resolveLabel('invoices')).toMatchObject({ id })
+    expect(resolveLabel(id)).toMatchObject({ name: 'Invoices' })
+    expect(resolveLabel('nothing')).toBeUndefined()
+  })
 })
 
 describe('sorting mail into labels', () => {
@@ -104,6 +122,21 @@ describe('sorting mail into labels', () => {
     const result = await labelMessages(again, [mail('m2')])
     expect(result.byMessage.get('m2')).toEqual([])
     expect(IDs(result.labels)).not.toContain('receipt')
+  })
+
+  it('answers which of a page’s messages carry a label', async () => {
+    const classifier = fakeClassifier({
+      m1: { choice: 'receipt', confidence: 0.9 },
+      m2: { choice: 'newsletter', confidence: 0.9 },
+    })
+    const { byMessage } = await labelMessages(classifier, [mail('m1'), mail('m2')])
+    const page = [mail('m1'), mail('m2')].map((message) => ({ ...message, labels: byMessage.get(message.id) ?? [] }))
+
+    expect(carryingLabel(page, 'receipt').map((message) => message.id)).toEqual(['m1'])
+    expect(carryingLabel(page, 'newsletter').map((message) => message.id)).toEqual(['m2'])
+    // No label asked for: the page comes back whole, so a caller can pass its filter through.
+    expect(carryingLabel(page).map((message) => message.id)).toEqual(['m1', 'm2'])
+    expect(carryingLabel(page, 'nope')).toEqual([])
   })
 
   it('writes what it decided to the store, not just to memory', async () => {

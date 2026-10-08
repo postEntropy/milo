@@ -12,20 +12,21 @@ import {
   archive,
   createDraft,
   INBOX_FILTERS,
-  listInbox,
   read as readMail,
   readThread,
   search as searchMail,
   sendMessage,
   setRead,
+  trashMessage,
   type DraftInput,
   type InboxFilter,
 } from '../../core/google/gmail.js'
 import type { GoogleOutcome, GoogleTokens } from '../../core/google/oauth.js'
-import { LABEL_COLORS, createLabel, deleteLabel, labelMessages, toggleAssignment } from '../../core/google/labels.js'
+import { labeledPage } from '../../core/google/inbox.js'
+import { LABEL_COLORS, carryingLabel, createLabel, deleteLabel, labelMessages, toggleAssignment } from '../../core/google/labels.js'
 import { googleState } from '../../core/google/state.js'
 import { GOOGLE_TIERS, accessOf, type GoogleAccess } from '../../core/google/tiers.js'
-import { googleToolNames } from '../../core/tools/index.js'
+import { googleToolNames, googleWriteToolNames } from '../../core/tools/index.js'
 import {
   listProviders,
   listProviderModels,
@@ -197,21 +198,17 @@ export class WebSettings {
     const limit = typeof body.limit === 'number' && body.limit > 0 ? Math.min(Math.floor(body.limit), 50) : 20
     const filter = inboxFilter(body.filter)
     const search = optionalText(body.search)
-    const page = await this.mailCall((tokens) => listInbox(tokens, {
+    const labelId = optionalText(body.labelId)
+    const page = await this.mailCall((tokens) => labeledPage(tokens, this.runtime.classifier, {
       ...(pageToken ? { pageToken } : {}),
       limit,
       ...(filter ? { filter } : {}),
       ...(search ? { search } : {}),
     }))
-    const { byMessage, labels } = await labelMessages(this.runtime.classifier, page.messages)
-    const labelId = optionalText(body.labelId)
-    const messages = page.messages
-      .map((message) => ({ ...message, labels: byMessage.get(message.id) ?? [] }))
-      .filter((message) => !labelId || message.labels.some((label) => label.id === labelId))
     return {
-      messages,
+      messages: carryingLabel(page.messages, labelId),
       ...(page.nextPageToken ? { nextPageToken: page.nextPageToken } : {}),
-      labels,
+      labels: page.labels,
       colors: LABEL_COLORS,
     }
   }
@@ -260,7 +257,7 @@ export class WebSettings {
     }
   }
 
-  /** What a message answers to: out of the inbox, and read or unread. */
+  /** What a message answers to: out of the inbox, read or unread, and into the bin. */
   private emailModify(body: Record<string, unknown>): Promise<unknown> {
     const id = googleId(body.id)
     const op = optionalText(body.op) ?? ''
@@ -271,6 +268,7 @@ export class WebSettings {
       archive: (tokens, access) => archive(tokens, access, id),
       read: (tokens, access) => setRead(tokens, access, id, true),
       unread: (tokens, access) => setRead(tokens, access, id, false),
+      trash: (tokens, access) => trashMessage(tokens, access, id),
     }
     // An argument it does not know answers with the ones it does.
     const run = actions[op]
@@ -427,6 +425,7 @@ export class WebSettings {
       google: {
         ...googleState(config, auth),
         tools: googleToolNames(auth.google ?? null),
+        writeTools: googleWriteToolNames(auth.google ?? null),
         tiers: GOOGLE_TIERS.map(({ id, label, description }) => ({ id, label, description })),
       },
     }

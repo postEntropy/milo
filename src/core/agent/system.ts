@@ -196,8 +196,12 @@ function googleLine(state: GoogleState): string {
   }
   return (
     `- Google (Gmail and Drive) right now: connected${state.email ? ` as ${state.email}` : ''}, account access: ` +
-    `${accessLabel(state.access)}. Your own Gmail and Drive tools are read-only whatever the account allows — the ` +
-    'write actions live in the web Email screen. The grant lives in `~/.milo/auth.json`; `milo google status` reports it.'
+    `${accessLabel(state.access)}. ` +
+    'Gmail is read with `gmail_search` and `gmail_read`; `gmail_modify` archives, marks read/unread and moves a ' +
+    'message to the bin — it needs the `modify` grant and asks before acting, and a routine must name ' +
+    '`gmail_modify` in `allow`. `mail_labels` lists and edits Milo\'s own mail labels — local to ' +
+    '`~/.milo/labels.json`, never written back to Gmail — and says which messages carry one. Drive is read-only. ' +
+    'The grant lives in `~/.milo/auth.json`; `milo google status` reports it.'
   )
 }
 

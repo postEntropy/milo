@@ -18,8 +18,10 @@ describe('toolLine', () => {
     expect(toolLine('grep', { pattern: 'alpha' })).toBe('🔍 grep alpha')
   })
 
-  it('gives the Google tools one emoji per service, since neither has an emoji of its own', () => {
+  it('gives every email tool the one envelope, and Drive the folder', () => {
     expect(toolLine('gmail_search', { query: 'is:unread' })).toBe('📧 gmail_search is:unread')
+    expect(toolLine('gmail_modify', { id: 'm1', op: 'trash' })).toBe('📧 gmail_modify')
+    expect(toolLine('mail_labels', { action: 'list' })).toBe('📧 mail_labels list')
     expect(toolLine('drive_search', { query: 'budget' })).toBe('📂 drive_search budget')
   })
 
@@ -50,7 +52,7 @@ describe('toolLine', () => {
 
   it('starts every line with an emoji, never a typographic glyph', () => {
     const emoji = /\p{Extended_Pictographic}/u
-    const names = ['read_file', 'list_dir', 'glob', 'grep', 'fetch_url', 'write_file', 'edit_file', 'remember', 'recall', 'search_history', 'web_search', 'read_skill', 'task', 'shell_command', 'gmail_search', 'gmail_read', 'drive_search', 'drive_read', 'unknown_tool']
+    const names = ['read_file', 'list_dir', 'glob', 'grep', 'fetch_url', 'write_file', 'edit_file', 'remember', 'recall', 'search_history', 'web_search', 'read_skill', 'task', 'shell_command', 'gmail_search', 'gmail_read', 'gmail_modify', 'mail_labels', 'drive_search', 'drive_read', 'unknown_tool']
 
     for (const name of names) {
       const [icon] = toolLine(name, { path: 'a' }).split(' ')
@@ -98,11 +100,14 @@ describe('toolIcon', () => {
 })
 
 describe('toolBrand', () => {
-  it('names the service behind a Google tool, and nothing for the rest', () => {
-    expect(toolBrand('gmail_search')).toBe('gmail')
-    expect(toolBrand('gmail_read')).toBe('gmail')
+  it('names the service behind a Drive tool, and nothing for the rest', () => {
     expect(toolBrand('drive_search')).toBe('drive')
     expect(toolBrand('drive_read')).toBe('drive')
+    // The email tools share one mail mark, so none of them names a service.
+    expect(toolBrand('gmail_search')).toBeNull()
+    expect(toolBrand('gmail_read')).toBeNull()
+    expect(toolBrand('gmail_modify')).toBeNull()
+    expect(toolBrand('mail_labels')).toBeNull()
     expect(toolBrand('web_search')).toBeNull()
     expect(toolBrand('anything')).toBeNull()
   })

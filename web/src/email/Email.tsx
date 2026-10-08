@@ -43,6 +43,7 @@ const DONE: Record<string, string> = {
   archive: 'Archived.',
   read: 'Marked read.',
   unread: 'Marked unread.',
+  trash: 'Moved to the bin.',
 }
 
 /** The address inside a `From` header, `Ana <ana@exemplo>` reduced to `ana@exemplo`. */
@@ -732,6 +733,7 @@ function ThreadView({
       <button className="button" type="button" disabled={busy || !can(access, 'compose')} title={can(access, 'compose') ? undefined : 'Drafting needs “Write drafts” access'} onClick={onDraft}><Icon name="reply" size={15} /> Draft with Milo</button>
       <button className="button" type="button" disabled={!can(access, 'modify')} title={can(access, 'modify') ? undefined : 'Needs “Tidy up” access'} onClick={() => last && onModify(last.id, 'archive')}><Icon name="archive" size={15} /> Archive</button>
       <button className="button" type="button" disabled={!can(access, 'modify')} title={can(access, 'modify') ? undefined : 'Needs “Tidy up” access'} onClick={() => last && onModify(last.id, 'unread')}>Mark unread</button>
+      <button className="button" type="button" disabled={!can(access, 'modify')} title={can(access, 'modify') ? undefined : 'Needs “Tidy up” access'} onClick={() => last && onModify(last.id, 'trash')}><Icon name="trash" size={15} /> Delete</button>
       <button className="button primary" type="button" disabled={!can(access, 'compose') || !last} title={can(access, 'compose') ? undefined : 'Replies need “Write drafts” access'} onClick={() => last && onReply(last)}>Reply</button>
     </div>
     <div className="mail-thread">

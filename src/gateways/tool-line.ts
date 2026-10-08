@@ -13,9 +13,12 @@
 /**
  * The service a tool belongs to, when it has a mark of its own. Only the surface
  * that draws icons can use it — a chat client renders text, so the emoji is what
- * a Gmail call looks like there and the mark is what it looks like in the browser.
+ * a Drive call looks like there and the mark is what it looks like in the browser.
+ * The email tools have no brand: they share one mail mark, drawn from the emoji
+ * table below and from the browser's own icon set, so there is nothing per-service
+ * to name.
  */
-export type ToolBrand = 'gmail' | 'drive'
+export type ToolBrand = 'drive'
 
 /**
  * Every line starts with a real emoji, never a typographic glyph: these lines are
@@ -49,10 +52,14 @@ const TOOLS: Record<string, { icon: string; brand?: ToolBrand }> = {
   browser_snapshot: { icon: '👁️' },
   browser_screenshot: { icon: '📸' },
   browser_act: { icon: '🖱️' },
-  // A mail envelope and a folder rather than the services' logotypes: the text
-  // surfaces can only draw a character, and there is no Gmail or Drive emoji.
-  gmail_search: { icon: '📧', brand: 'gmail' },
-  gmail_read: { icon: '📧', brand: 'gmail' },
+  // Every email tool wears the one envelope — the browser draws the same mail mark,
+  // and a chat client, which can only draw a character, wears this one.
+  gmail_search: { icon: '📧' },
+  gmail_read: { icon: '📧' },
+  gmail_modify: { icon: '📧' },
+  mail_labels: { icon: '📧' },
+  // A folder rather than Drive's logotype: the text surfaces can only draw a
+  // character, and there is no Drive emoji — the browser draws the mark instead.
   drive_search: { icon: '📂', brand: 'drive' },
   drive_read: { icon: '📂', brand: 'drive' },
 }

@@ -2,11 +2,14 @@ import type { SearchProvider } from '../search/index.js'
 import type { SkillLibrary } from '../skills/index.js'
 import type { BrowserSession } from '../browser/index.js'
 import { createBrowserTools } from '../browser/index.js'
+import type { Classifier } from '../classifier/index.js'
 import type { GoogleAccount } from '../config/schema.js'
 import type { McpServers } from '../mcp/servers.js'
 import { editFileTool } from './edit-file.js'
 import { createGmailTools } from './gmail.js'
 import { createDriveTools } from './drive.js'
+import { createMailLabelTools } from './mail-labels.js'
+import { createGmailWriteTools } from './mail-actions.js'
 import { fetchUrlTool } from './fetch-url.js'
 import { gitCommitTool, gitTool } from './git.js'
 import { globTool } from './glob.js'
@@ -89,6 +92,19 @@ export function googleToolNames(account: GoogleAccount | null): string[] {
   return [...createGmailTools(account), ...createDriveTools(account)].map((tool) => tool.name)
 }
 
+/**
+ * The Google tools that can change something, named apart from the read-only ones
+ * so a surface can say what a grant buys without blurring the two. The label tool
+ * is here because it sorts mail as a side effect, though a label itself never
+ * reaches the account. Only the name is wanted, so the classifier is left out.
+ */
+export function googleWriteToolNames(account: GoogleAccount | null): string[] {
+  return [
+    ...createMailLabelTools({ account, classifier: null }),
+    ...createGmailWriteTools(account),
+  ].map((tool) => tool.name)
+}
+
 export interface ToolRegistryOptions {
   search?: SearchProvider | null
   /** The skills directory, live; `read_skill` is only registered when it holds one. */
@@ -99,8 +115,11 @@ export interface ToolRegistryOptions {
    * Google, when the config asks for it. Registered even with a null account:
    * the tools then answer "not connected, run `milo google connect`", which is a
    * thing the person can act on — an absent tool is only a silence.
+   *
+   * The classifier rides along because one of the tools — `mail_labels` — sorts
+   * mail to answer which messages carry a label, the same model the inbox uses.
    */
-  google?: { account: GoogleAccount | null } | null
+  google?: { account: GoogleAccount | null; classifier?: Classifier | null } | null
   /**
    * The external servers, when any are configured. What is registered from them
    * is the cache of what they last said — the connection is the manager's own
@@ -127,6 +146,8 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
   if (options.google) {
     tools.push(...createGmailTools(options.google.account))
     tools.push(...createDriveTools(options.google.account))
+    tools.push(...createMailLabelTools({ account: options.google.account, classifier: options.google.classifier ?? null }))
+    tools.push(...createGmailWriteTools(options.google.account))
   }
   const registry = new ToolRegistry(tools)
   // Added after the built-ins, so the cache the servers bring lands in a registry

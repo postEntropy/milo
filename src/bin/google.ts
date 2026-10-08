@@ -19,7 +19,7 @@ import {
   type GoogleAccess,
 } from '../core/google/tiers.js'
 import { GOOGLE_SHORTCUT, googleStepsInWords } from '../core/google/walkthrough.js'
-import { googleToolNames } from '../core/tools/index.js'
+import { googleToolNames, googleWriteToolNames } from '../core/tools/index.js'
 import { errorMessage } from '../util/errors.js'
 import { hyperlink } from '../util/terminal.js'
 
@@ -114,7 +114,9 @@ function status(out: GoogleIo['out']): number {
   // The tool names come off the factories that will actually answer, so this line
   // cannot go on naming one service after the grant has grown another.
   const tools = googleToolNames(auth.google ?? null)
+  const writeTools = googleWriteToolNames(auth.google ?? null)
   out(`  Reading tools: ${tools.join(', ')}.`)
+  out(`  Tools that can change mail or its labels: ${writeTools.join(', ')}.`)
   if (!state.enabled) out('…but the config says `google.enabled: false`, so the tools are not registered.')
   return 0
 }

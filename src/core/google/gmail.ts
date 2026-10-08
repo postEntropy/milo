@@ -314,6 +314,27 @@ export function setRead(
   return modifyMessage(tokens, access, id, read ? { remove: ['UNREAD'] } : { add: ['UNREAD'] })
 }
 
+/**
+ * To the bin. Gmail's `trash` rather than its `delete`: the message leaves the
+ * inbox and stays in the account, recoverable for thirty days. `messages.delete`
+ * would be gone for good and needs the full-mail scope, which the grant never
+ * asks for — so there is deliberately no function here that calls it.
+ */
+export async function trashMessage(
+  tokens: GoogleTokens,
+  access: GoogleAccess,
+  id: string,
+): Promise<GoogleOutcome<{ id: string }>> {
+  const denied = allowed(access, 'modify')
+  if (denied) return denied
+
+  const trashed = await authorizedJson(tokens, endpoint(`messages/${encodeURIComponent(id)}/trash`), {
+    method: 'POST',
+  })
+  if (!trashed.ok) return trashed
+  return { ok: true, value: { id } }
+}
+
 /** A message Gmail will carry, as RFC 822 in the base64url the API takes. */
 function rawMessage(mail: { to: string; subject: string; body: string }): string {
   // Newlines in a header are how a value becomes a second header; an address or a
