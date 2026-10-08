@@ -59,6 +59,14 @@ const paths: Record<string, React.ReactNode> = {
   archive: <><rect x="3" y="4" width="18" height="4" rx="1" /><path d="M5 8v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8" /><path d="M10 12h4" /></>,
   reply: <><path d="m10 8-5 4 5 4" /><path d="M5 12h9a5 5 0 0 1 5 5v1" /></>,
   refresh: <><path d="M20 11a8 8 0 1 0-.6 4" /><path d="M20 5v6h-6" /></>,
+  // The Model Context Protocol mark: what a tool running on someone else's server
+  // wears. Line art on a 180 grid, scaled onto the 24 this set is drawn on, with
+  // the stroke widened back so it keeps the set's own weight.
+  mcp: <g transform="scale(0.1333333)" strokeWidth={13.5}>
+    <path d="M18 84.8528L85.8822 16.9706C95.2548 7.59798 110.451 7.59798 119.823 16.9706V16.9706C129.196 26.3431 129.196 41.5391 119.823 50.9117L68.5581 102.177" />
+    <path d="M69.2652 101.47L119.823 50.9117C129.196 41.5391 144.392 41.5391 153.765 50.9117L154.118 51.2652C163.491 60.6378 163.491 75.8338 154.118 85.2063L92.7248 146.6C89.6006 149.724 89.6006 154.789 92.7248 157.913L105.331 170.52" />
+    <path d="M102.853 33.9411L52.6482 84.1457C43.2756 93.5183 43.2756 108.714 52.6482 118.087V118.087C62.0208 127.459 77.2167 127.459 86.5893 118.087L136.794 67.8822" />
+  </g>,
   drive: <g stroke="none" transform="translate(0 0.84375) scale(0.09375)">
     <defs>
       <linearGradient id="milo-drive-yellow" x1="86.924%" x2="7.63%" y1="94.294%" y2="45.952%">
