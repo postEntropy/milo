@@ -343,7 +343,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 >{EFFORT_LABELS[level]}</button>)}
               </div> : undefined}
               value={model}
-              triggerLabel={phone && model ? `${shortModel(model)} · ${EFFORT_LABELS[effort]}` : model ? shortModel(model) : 'Model'}
+              triggerLabel={model ? shortModel(model) : 'Model'}
               choices={(models ?? []).map((item) => ({
                 value: item.id, label: item.id, meta: <ModelDetails model={item} />,
               }))}
