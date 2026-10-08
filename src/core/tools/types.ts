@@ -1,6 +1,7 @@
 import type { z } from 'zod'
 import type { MemoryInput, MemoryScope } from '../memory/types.js'
 import type { OutgoingFile } from '../outgoing.js'
+import type { PanelRequest } from '../panel.js'
 import type { ImageMime } from '../providers/types.js'
 import type { NewRoutine, Routine } from '../routines.js'
 import type { SessionSummary } from '../sessions/types.js'
@@ -94,6 +95,13 @@ export interface ToolResult {
    * for the surfaces and nothing the model needs told back.
    */
   todos?: TodoItem[]
+  /**
+   * What the panel should show, when the tool is one that shows something. Like
+   * `todos`, this is display state: the loop turns it into an event for the
+   * surfaces and it never goes back to the model. Only the web app resolves it,
+   * which is why the `panel` tool is kept out of every other surface's catalog.
+   */
+  panel?: PanelRequest
 }
 
 export interface Tool<A = unknown> {

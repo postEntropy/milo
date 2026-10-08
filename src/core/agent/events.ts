@@ -1,3 +1,4 @@
+import type { PanelRequest } from '../panel.js'
 import type { TodoItem } from '../todos.js'
 
 export type AgentEvent =
@@ -11,6 +12,13 @@ export type AgentEvent =
    * model is the one that set it.
    */
   | { type: 'todo'; items: TodoItem[] }
+  /**
+   * The panel beside the chat changed. Carries the request — a file path or the
+   * browser — which the surface resolves its own way; the web gateway turns it
+   * into the renderable state and draws it. Like `todo`, it is never part of the
+   * transcript sent back to the model.
+   */
+  | { type: 'panel'; request: PanelRequest }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   /**
    * The transcript was compacted just before this turn. A session-level event

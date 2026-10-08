@@ -9,6 +9,8 @@ const paths: Record<string, React.ReactNode> = {
   'arrow-left': <><path d="M19 12H5" /><path d="m11 18-6-6 6-6" /></>,
   'arrow-down': <><path d="M12 5v14" /><path d="m5 12 7 7 7-7" /></>,
   'panel-left': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16" /></>,
+  'panel-right': <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M15 4v16" /></>,
+  code: <><path d="m9 8-5 4 5 4" /><path d="m15 8 5 4-5 4" /></>,
   quote: <><path d="M8 7H5a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h3v1.5A2.5 2.5 0 0 1 5.5 16" /><path d="M18 7h-3a1 1 0 0 0-1 1v3a1 1 0 0 0 1 1h3v1.5A2.5 2.5 0 0 1 15.5 16" /></>,
   check: <><path d="m5 13 4 4L19 7" /></>,
   circle: <><circle cx="12" cy="12" r="9" /></>,

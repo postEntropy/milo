@@ -11,7 +11,8 @@ import { Routines } from './routines/Routines.js'
 import { TaskLists } from './tasks/TaskLists.js'
 import { Email } from './email/Email.js'
 import { Settings } from './settings/Settings.js'
-import type { ServerFrame, PermissionRequest, SendTarget, TranscriptPart } from '@protocol'
+import { Panel } from './panel/Panel.js'
+import type { ServerFrame, PermissionRequest, PanelInput, PanelView, SendTarget, TranscriptPart } from '@protocol'
 import { toolText } from '../../src/gateways/tool-line.ts'
 import { describeRebase } from '../../src/core/sessions/format.ts'
 import { Icon } from './ui/Icons.js'
@@ -99,6 +100,9 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   /** The desktop sidebar, folded away; the phone keeps its drawer instead. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('milo-sidebar') === 'collapsed')
+  /** The panel beside the chat: the tabs Milo opened, and whether it is folded away. */
+  const [panel, setPanel] = useState<PanelView | null>(null)
+  const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem('milo-panel') !== 'closed')
   const [theme, setTheme] = useState(() => localStorage.getItem('milo-theme') ?? 'system')
   const [notice, setNotice] = useState<Notice | null>(null)
   useAutoDismiss(notice, setNotice)
@@ -179,6 +183,7 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem('milo-conversation', conversationId)
     localStorage.setItem('milo-sidebar', sidebarCollapsed ? 'collapsed' : 'open')
+    localStorage.setItem('milo-panel', panelOpen ? 'open' : 'closed')
     if (theme === 'system') localStorage.removeItem('milo-theme')
     else localStorage.setItem('milo-theme', theme)
     const dark = theme === 'dark' || (theme === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)
@@ -187,7 +192,7 @@ export default function App() {
     // screen, the page would otherwise sit under a band of another colour. Read
     // from the token rather than repeated here, so the two cannot drift.
     document.querySelector('meta[name=theme-color]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--bg').trim())
-  }, [conversationId, theme, sidebarCollapsed])
+  }, [conversationId, theme, sidebarCollapsed, panelOpen])
 
   /**
    * The screen is in the address bar: a session, the routines, and each settings
@@ -293,6 +298,7 @@ export default function App() {
       const res = await api<{ id: string }>('fork-session', { conversationId: nextConversationId, sessionId, upToTurn })
       socket.close()
       setMessages([])
+      setPanel(null)
       setSessionId(res.id)
       setConversationId(nextConversationId)
       setView('chat')
@@ -337,6 +343,9 @@ export default function App() {
       setThinking(frame.thinking === 'on')
       if (frame.effort) setEffort(frame.effort)
       setIdentity({ provider: frame.provider, providerName: frame.providerName, model: frame.model })
+      // What the panel was left showing, resolved by the server from the session's
+      // own history, so a reload comes back to the same view.
+      setPanel(frame.panel ?? null)
       // A session opens at its end, where the conversation is — the whole thread
       // is here at once, so there is no "scrolled there" to respect.
       pinToEnd.current = true
@@ -352,6 +361,13 @@ export default function App() {
     }
     if (frame.type === 'error') { setNotice({ text: frame.message, error: true }); return }
     if (frame.type === 'routines-changed') { setRoutinesTick((current) => current + 1); return }
+    if (frame.type === 'panel') {
+      // Milo shows something and the panel opens itself — that is the "here, look
+      // at this". A resolved `null` is the model taking it down.
+      setPanel(frame.panel)
+      if (frame.panel) setPanelOpen(true)
+      return
+    }
     if (frame.type === 'suggestions') { setIdeas(frame.items); return }
     if (frame.type === 'state') { setBusy(frame.busy); setQueued(frame.queued); return }
     if (frame.type === 'turn-start') {
@@ -465,6 +481,7 @@ export default function App() {
       const session = await api<{ id: string }>('new-session', { conversationId: nextConversationId })
       socket.close()
       setMessages([])
+      setPanel(null)
       setSessionId(session.id)
       setView('chat')
       setSidebarOpen(false)
@@ -638,6 +655,7 @@ export default function App() {
       await api('resume-session', { conversationId: nextConversationId, id })
       socket.close()
       setMessages([])
+      setPanel(null)
       setSessionId(id)
       setConversationId(nextConversationId)
       setView('chat')
@@ -659,6 +677,7 @@ export default function App() {
       })
       socket.close()
       setMessages([])
+      setPanel(null)
       setSessionId(res.id)
       setConversationId(nextConversationId)
       setView('chat')
@@ -679,11 +698,38 @@ export default function App() {
     }
   }, [openSession, socket, fail])
 
+  /** Pointer and keys the person sends into the live browser panel. */
+  const panelInput = useCallback((input: PanelInput): void => {
+    try { socket.send({ type: 'panel-input', input }) } catch (error) { fail(error) }
+  }, [socket, fail])
+
+  /**
+   * The strip is the person's own move. Bringing a tab forward shows at once and
+   * tells the server, so the click is never waiting on the round trip; a tab
+   * closed waits for the server's view, because guessing wrong would put a tab
+   * back that is not there.
+   */
+  const activateTab = useCallback((key: string): void => {
+    setPanel((current) => {
+      if (!current) return current
+      const index = current.tabs.findIndex((tab) => tab.key === key)
+      return index < 0 ? current : { ...current, active: index }
+    })
+    try { socket.send({ type: 'panel-activate', key }) } catch (error) { fail(error) }
+  }, [socket, fail])
+
+  const closeTab = useCallback((key: string): void => {
+    try { socket.send({ type: 'panel-close', key }) } catch (error) { fail(error) }
+  }, [socket, fail])
+
   function handleSessionChange(id: string): void {
     editingTurn.current = null
     setSessionId(id)
     socket.close()
     setMessages([])
+    // The tabs belong to the session that opened them, so the old strip is dropped
+    // now rather than shown against the new session until its ready frame lands.
+    setPanel(null)
     socket.connect(conversationId)
     setView('chat')
   }
@@ -771,7 +817,7 @@ export default function App() {
     return 0
   }, [messages])
 
-  return <div className={`app-shell ${sidebarOpen ? 'drawer-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+  return <div className={`app-shell ${sidebarOpen ? 'drawer-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'chat' && panelOpen && panel && panel.tabs.length > 0 ? 'panel-open' : ''}`}>
     {/* The colour iOS 26 Safari reads for its own bars; see the `.chrome-tint`
         rules. They sit off screen and take no pointer. */}
     <div className="chrome-tint top" aria-hidden="true" />
@@ -822,6 +868,7 @@ export default function App() {
         <button className="sidebar-expand" type="button" aria-label="Show sidebar" title="Show sidebar" onClick={() => setSidebarCollapsed(false)}><Icon name="panel-left" size={17} /></button>
         <div className="topbar-title"><h1>{view === 'settings' ? 'Settings' : view === 'routines' ? 'Routines' : view === 'tasks' ? 'Task lists' : view === 'email' ? 'Email' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
         <div className="topbar-actions">
+          {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelOpen((open) => !open)}><Icon name="panel-right" size={18} /></button>}
           {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>}
           {view === 'chat' && connection.state !== 'online' && <span className={`connection-status ${connection.state}`} title={connection.reason}><span />{connection.state === 'refused' ? 'Disconnected' : connection.state === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
         </div>
@@ -863,6 +910,7 @@ export default function App() {
           </div>
         </section>}
     </main>
+    {view === 'chat' && panelOpen && panel && panel.tabs.length > 0 && <Panel view={panel} onClose={() => setPanelOpen(false)} onInput={panelInput} onActivateTab={activateTab} onCloseTab={closeTab} />}
   </div>
 }
 

@@ -50,6 +50,10 @@
   /* How much of the screen the mobile drawer takes, and how far the chat slides
      to uncover it. One value, so the two cannot disagree. */
   --drawer-width: min(286px, 86vw);
+  /* How wide the panel beside the chat is. It tracks the window rather than a
+     fixed number, with a floor that keeps a small laptop usable and a ceiling
+     that stops a large monitor turning it into a wall. */
+  --panel-width: clamp(360px, 42vw, 760px);
   --ease-standard: cubic-bezier(.16, 1, .3, 1);
   font-family: var(--font-body);
   color: var(--fg);
@@ -210,6 +214,63 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-nav-item.active svg { color: var(--fg-2); }
 .sidebar-scrim { display: none; }
 
+/* The panel beside the chat: a column of its own on a wide screen, a sheet over
+   the chat on a phone (see below). No border, like every other region — it is set
+   apart by its own surface, not a line. */
+.panel { grid-column: 3; display: none; flex-direction: column; min-width: 0; overflow: hidden; background: var(--surface-warm); }
+/* Fades and nudges in as the column widens; the grid transition below carries
+   the chat aside, so the two read as one motion. */
+.app-shell.panel-open .panel { display: flex; animation: panel-in var(--motion-slow) var(--ease-standard); }
+.panel-toggle { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 10px; background: transparent; padding: 0; color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
+.panel-toggle:hover { background: var(--surface); }
+.panel-toggle.active { background: var(--surface); color: var(--fg); }
+/* The strip, when there is more than one thing open: the tab in front and the rest
+   beside it, scrolling sideways rather than wrapping when they crowd. Filled, like
+   every other control the person presses, and never outlined. */
+.panel-tabs { display: flex; flex: none; gap: 4px; overflow-x: auto; padding: calc(12px + env(safe-area-inset-top)) 14px 0; scrollbar-width: none; }
+.panel-tabs::-webkit-scrollbar { display: none; }
+.panel-tab { display: inline-flex; flex: none; align-items: center; border-radius: 9px; background: transparent; transition: background var(--motion-fast); }
+.panel-tab:hover { background: var(--surface); }
+.panel-tab.active { background: var(--surface); }
+.panel-tab-name { display: inline-flex; max-width: 180px; align-items: center; gap: 6px; border: 0; border-radius: 9px 0 0 9px; background: transparent; padding: 6px 2px 6px 9px; color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.panel-tab.active .panel-tab-name { color: var(--fg); }
+.panel-tab-name svg.icon { flex: none; }
+.panel-tab-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-tab-x { display: grid; width: 22px; height: 26px; flex: none; place-items: center; border: 0; border-radius: 0 9px 9px 0; background: transparent; padding: 0; color: var(--muted); opacity: .7; transition: opacity var(--motion-fast), color var(--motion-fast); }
+.panel-tab-x:hover { opacity: 1; color: var(--fg); }
+.panel-head { display: flex; align-items: center; gap: 6px; padding: calc(14px + env(safe-area-inset-top)) 14px 8px; }
+/* The strip above already cleared the screen's own bar. */
+.panel-tabs + .panel-head { padding-top: 6px; }
+.panel-head-fill { flex: 1; }
+.panel-kind { display: grid; flex: none; place-items: center; color: var(--muted); }
+.panel-title { flex: 1; min-width: 0; margin: 0; overflow: hidden; font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
+.panel-icon-btn { display: grid; width: 30px; height: 30px; flex: none; place-items: center; border: 0; border-radius: 8px; background: transparent; padding: 0; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
+.panel-icon-btn:hover { background: var(--surface); color: var(--fg); }
+.panel-body { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: auto; padding: 6px 14px calc(14px + env(safe-area-inset-bottom)); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.panel-state { margin: auto; color: var(--muted); font-size: 12.5px; text-align: center; }
+.panel-frame { flex: 1; width: 100%; min-height: 0; border: 0; border-radius: 12px; background: #fff; }
+.panel-image { display: grid; flex: 1; min-height: 0; place-items: center; }
+.panel-image img { max-width: 100%; max-height: 100%; border-radius: 12px; }
+.panel-code { margin: 0; color: var(--text); font: 12.5px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.panel-doc { color: var(--fg-2); font-size: 13.5px; line-height: 1.65; }
+.panel-file { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+.panel-download { display: inline-flex; max-width: 100%; align-items: center; gap: 8px; border-radius: 10px; background: var(--surface); padding: 9px 12px; color: var(--fg-2); font-size: 13px; text-decoration: none; transition: background var(--motion-fast); }
+.panel-download svg.icon { flex: none; }
+.panel-download span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-download:hover { background: var(--border-soft); }
+.panel-browser { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 10px; }
+.panel-url { display: flex; align-items: center; gap: 7px; border-radius: 9px; background: var(--surface); padding: 7px 10px; color: var(--muted); font: 12px var(--font-mono); }
+.panel-url svg.icon { flex: none; }
+.panel-url span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.panel-view { display: flex; flex: 1; min-height: 0; align-items: flex-start; justify-content: center; overflow: auto; }
+/* The stage and the stream share one aspect box, so a point the person clicks
+   maps to the same spot on the page the browser is showing. */
+.panel-stage { position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 12px; background: #fff; }
+.panel-browser-img { display: block; width: 100%; height: 100%; }
+.panel-input-layer { position: absolute; inset: 0; cursor: pointer; outline: 0; border-radius: 12px; }
+.panel-input-layer:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.panel-hint { margin: 0; color: var(--muted); font-size: 11.5px; text-align: center; }
+
 .main { position: relative; grid-column: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--bg); }
 .topbar { position: relative; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 62px; background: var(--bg); padding: 10px 20px; }
 .mobile-menu, .topbar-new { display: none; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 10px; background: transparent; padding: 0; color: var(--fg-2); transition: background var(--motion-fast); }
@@ -223,10 +284,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-expand:hover { background: var(--surface); }
 @media (min-width: 901px) {
   .sidebar-toggle { display: grid; }
-  .app-shell { transition: grid-template-columns var(--motion-base) var(--ease-standard); }
-  .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr); }
+  /* Three tracks at all times, the panel's one at zero when it is closed: a grid
+     cannot interpolate between a different number of columns, so going 2 → 3 was
+     a jump — this way the chat is carried aside and back. The fold travels a whole
+     column, so it takes the slower token, matched to the panel's own fade so the
+     two read as one motion. */
+  .app-shell { grid-template-columns: 286px minmax(0, 1fr) 0; transition: grid-template-columns var(--motion-slow) var(--ease-standard); }
+  .app-shell.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) 0; }
   .app-shell.sidebar-collapsed .sidebar { visibility: hidden; }
   .app-shell.sidebar-collapsed .sidebar-expand { display: grid; }
+  .app-shell.panel-open { grid-template-columns: 286px minmax(0, 1fr) var(--panel-width); }
+  .app-shell.panel-open.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) var(--panel-width); }
 }
 .topbar-title { position: absolute; left: 50%; transform: translateX(-50%); text-align: center; max-width: min(520px, 60vw); pointer-events: none; }
 .topbar-title h1 { overflow: hidden; font-size: 15px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
@@ -835,8 +903,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .topbar-actions { margin-inline-start: auto; }
   .topbar-action, .topbar-title { display: none; }
   .session-more-btn { opacity: 1; }
-  /* A frosted pill each, so they stay legible with the content running under. */
-  .mobile-menu, .topbar-new { background: color-mix(in oklab, var(--surface) 82%, transparent); box-shadow: var(--shadow-sm); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  /* The panel rides with the other frosted pills on the phone. */
+  .mobile-menu, .topbar-new, .panel-toggle { background: color-mix(in oklab, var(--surface) 82%, transparent); box-shadow: var(--shadow-sm); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  /* The panel is a layer over the chat, not a column beside it: nothing fits two
+     panes on a phone, so it takes the screen and the chat waits underneath. */
+  .panel { position: absolute; z-index: 8; inset: 0; width: 100%; background: var(--bg); }
+  .app-shell.panel-open .panel { animation: panel-sheet-in var(--motion-drawer) var(--ease-standard); }
+  /* The strip rides on the sheet, and on a phone its tabs are touch targets first:
+     the close grows to the app's own button size and the name gives up width so a
+     second tab is reachable without a swipe. */
+  .panel-tab-name { max-width: 132px; padding: 9px 4px 9px 10px; }
+  .panel-tab-x { width: 30px; height: 34px; }
   /* The content starts below the pills, wherever the screen's own bars put them. */
   .messages { padding: calc(max(8px, env(safe-area-inset-top)) + 44px) 18px 8px; }
   /* Hug the bottom: the browser's own bar already supplies the breathing room,
@@ -953,6 +1030,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+/* The panel opening: a wide-screen column arrives on a nudge; on a phone it is a
+   whole layer, so it travels the screen the way the drawer does. */
+@keyframes panel-in {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes panel-sheet-in {
+  from { transform: translateX(100%); }
+  to { transform: none; }
 }
 .message:not(.is-loaded),
 .message:not(.is-loaded) .tool-line,

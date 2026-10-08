@@ -41,6 +41,11 @@ const SETTLE_MS = 150
 /** How long nothing may be in flight before a load counts as settled. */
 const NETWORK_IDLE_MS = 500
 const VIEWPORT = { width: 1280, height: 800 }
+/**
+ * The live view's JPEG quality. Below the screenshot's 72 on purpose: the frames
+ * are watched, not kept, and a smaller frame is what keeps the stream cheap.
+ */
+const SCREENCAST_QUALITY = 60
 
 export type Wait = 'load' | 'domcontentloaded' | 'networkidle'
 
@@ -152,6 +157,8 @@ export class BrowserSession {
    * only honest answer.
    */
   private refCounter = 0
+  /** The live view a surface is watching, when one is: the page and its off switch. */
+  private screencast: { off: () => void; sessionId: string } | null = null
 
   constructor(options: BrowserSessionOptions) {
     this.options = options
@@ -199,6 +206,7 @@ export class BrowserSession {
   }
 
   async close(): Promise<void> {
+    this.screencast = null
     this.connection?.close()
     this.connection = null
     this.stopChrome?.()
@@ -333,6 +341,119 @@ export class BrowserSession {
       signal,
     )
     return result.data
+  }
+
+  /**
+   * Streams the page as JPEG frames, for a surface that draws the browser live.
+   *
+   * One screencast per session: the first watcher starts it and every frame is
+   * acknowledged, which is what keeps Chrome sending the next one. A frame the
+   * surface dropped must not stall the stream, so the ack is not waited on.
+   */
+  async startScreencast(onFrame: (frame: Buffer) => void): Promise<void> {
+    await this.start()
+    if (this.screencast) return
+    const target = await this.drivePage(new AbortController().signal)
+    const sessionId = target.sessionId
+    if (!sessionId) throw new Error('the browser has no page to show')
+    // Two watchers can reach here together; the second finds the first's stream
+    // already up and rides it instead of starting a second.
+    if (this.screencast) return
+    const off = this.connection!.on('Page.screencastFrame', (params, eventSession) => {
+      if (eventSession !== sessionId) return
+      if (typeof params.data === 'string') onFrame(Buffer.from(params.data, 'base64'))
+      const frameSession = params.sessionId
+      if (typeof frameSession === 'number') {
+        void this.connection
+          ?.send('Page.screencastFrameAck', { sessionId: frameSession }, { sessionId, timeoutMs: ACT_TIMEOUT_MS })
+          .catch(() => undefined)
+      }
+    })
+    this.screencast = { off, sessionId }
+    try {
+      await this.send(
+        'Page.startScreencast',
+        { format: 'jpeg', quality: SCREENCAST_QUALITY, everyNthFrame: 1 },
+        sessionId,
+        HANDSHAKE_TIMEOUT_MS,
+      )
+    } catch (error) {
+      this.screencast = null
+      off()
+      throw error
+    }
+  }
+
+  /** Stops the live view, if one is running. Safe to call when none is. */
+  stopScreencast(): void {
+    const active = this.screencast
+    if (!active) return
+    this.screencast = null
+    active.off()
+    void this.connection
+      ?.send('Page.stopScreencast', {}, { sessionId: active.sessionId, timeoutMs: ACT_TIMEOUT_MS })
+      .catch(() => undefined)
+  }
+
+  /** Whether a live view is running. */
+  get isStreaming(): boolean {
+    return this.screencast !== null
+  }
+
+  /**
+   * A pointer event the person made in the live view, at a point normalized to
+   * the viewport (0..1) so the surface does not have to know its pixel size.
+   */
+  async pointer(kind: 'click' | 'move' | 'down' | 'up', nx: number, ny: number, signal: AbortSignal): Promise<void> {
+    await this.start()
+    const target = await this.drivePage(signal)
+    const sessionId = target.sessionId
+    if (!sessionId) throw new Error('the browser has no page to act on')
+    const point = this.atPoint(nx, ny)
+    if (kind === 'click') {
+      await this.click(point, 1, sessionId, signal)
+      return
+    }
+    const type = kind === 'move' ? 'mouseMoved' : kind === 'down' ? 'mousePressed' : 'mouseReleased'
+    await this.dispatchMouse(type, point, kind === 'move' ? 0 : 1, sessionId, signal)
+  }
+
+  /** A wheel the person turned in the live view. */
+  async wheel(nx: number, ny: number, deltaY: number, signal: AbortSignal): Promise<void> {
+    await this.start()
+    const target = await this.drivePage(signal)
+    const sessionId = target.sessionId
+    if (!sessionId) throw new Error('the browser has no page to act on')
+    const point = this.atPoint(nx, ny)
+    await this.send(
+      'Input.dispatchMouseEvent',
+      { type: 'mouseWheel', x: point.x, y: point.y, deltaX: 0, deltaY },
+      sessionId,
+      ACT_TIMEOUT_MS,
+      signal,
+    )
+  }
+
+  /** A key the person pressed in the live view, sent to whatever has focus. */
+  async key(key: string, signal: AbortSignal): Promise<void> {
+    await this.start()
+    const target = await this.drivePage(signal)
+    if (!target.sessionId) throw new Error('the browser has no page to act on')
+    await this.pressKey(key, target.sessionId, signal)
+  }
+
+  /** Text the person typed in the live view, inserted into whatever has focus. */
+  async typeText(text: string, signal: AbortSignal): Promise<void> {
+    await this.start()
+    const target = await this.drivePage(signal)
+    if (!target.sessionId) throw new Error('the browser has no page to act on')
+    await this.send('Input.insertText', { text }, target.sessionId, ACT_TIMEOUT_MS, signal)
+  }
+
+  /** A normalized point, clamped to the page, in the viewport's own pixels. */
+  private atPoint(nx: number, ny: number): { x: number; y: number } {
+    const clamp = (value: number): number => Math.min(1, Math.max(0, Number.isFinite(value) ? value : 0))
+    return { x: clamp(nx) * VIEWPORT.width, y: clamp(ny) * VIEWPORT.height }
   }
 
   /**

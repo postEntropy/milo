@@ -241,6 +241,9 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         // The plan is drawn by the surfaces and nothing the model needs told
         // back, so it rides as its own event rather than into the transcript.
         if (result.todos) yield { type: 'todo', items: result.todos }
+        // The panel is the same shape of display state: the web gateway resolves
+        // the request into a view, and none of it goes back to the model.
+        if (result.panel) yield { type: 'panel', request: result.panel }
         const images = await persistImages(result.images)
         messages.push({
           role: 'tool',

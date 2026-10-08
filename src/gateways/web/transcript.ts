@@ -1,4 +1,5 @@
 import type { OutgoingFile } from '../../core/outgoing.js'
+import type { PanelRequest } from '../../core/panel.js'
 import type { Message } from '../../core/providers/types.js'
 import { todosFromArgs } from '../../core/todos.js'
 import { showsToolCall, toolText } from '../tool-line.js'
@@ -67,4 +68,37 @@ export function transcriptOf(messages: Message[], register: RegisterFile): Trans
   }
 
   return transcript.filter((message) => message.parts.length > 0 || (message.attachments?.length ?? 0) > 0)
+}
+
+/**
+ * The panel out of a session's history: every request a `panel` call made, in the
+ * order it was made, so a reload replays what was open — the same requests, run
+ * through the same rule, that put the tabs up live. Read from the tool-call
+ * arguments the way the plan is — a transcript read back from disk is checked,
+ * not trusted — and a path is left as written; the caller resolves it against the
+ * working directory, which is the only place that knows it.
+ */
+export function panelsOf(messages: Message[]): PanelRequest[] {
+  const requests: PanelRequest[] = []
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue
+    for (const part of message.content) {
+      if (part.type !== 'tool-call' || part.name !== 'panel') continue
+      const request = panelRequestFromArgs(part.args)
+      if (request) requests.push(request)
+    }
+  }
+  return requests
+}
+
+function panelRequestFromArgs(args: unknown): PanelRequest | null {
+  if (!args || typeof args !== 'object') return null
+  const record = args as Record<string, unknown>
+  const request: PanelRequest = {}
+  if (typeof record.path === 'string' && record.path.trim()) request.path = record.path.trim()
+  if (record.browser === true) request.browser = true
+  if (typeof record.title === 'string' && record.title.trim()) request.title = record.title.trim()
+  if (record.action === 'close') request.close = true
+  if (!request.path && !request.browser && !request.close) return null
+  return request
 }

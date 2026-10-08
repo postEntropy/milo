@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_SYSTEM_PROMPT, buildSystemPrompt, formatToolSignature } from '../src/core/agent/system.js'
+import { DEFAULT_SYSTEM_PROMPT, buildSystemPrompt, formatToolSignature, type PanelFacts } from '../src/core/agent/system.js'
 import type { ToolSpec } from '../src/core/providers/types.js'
 import type { McpFacts } from '../src/core/mcp/servers.js'
 import type { GoogleState } from '../src/core/google/state.js'
@@ -139,7 +139,7 @@ describe('buildSystemPrompt', () => {
 })
 
 describe('what Milo knows about its own setup', () => {
-  const build = (tools: ToolSpec[], skills = 0, mcp?: McpFacts, google?: GoogleState) =>
+  const build = (tools: ToolSpec[], skills = 0, mcp?: McpFacts, google?: GoogleState, panel?: PanelFacts) =>
     buildSystemPrompt({
       base: 'BASE',
       surface: 'cli',
@@ -155,6 +155,7 @@ describe('what Milo knows about its own setup', () => {
       memories: [],
       ...(mcp ? { mcp } : {}),
       ...(google ? { google } : {}),
+      ...(panel ? { panel } : {}),
     })
 
   it('is always there, so a question about Milo is answerable without going to look', () => {
@@ -175,6 +176,29 @@ describe('what Milo knows about its own setup', () => {
     expect(build([tool])).toContain('On right now: no optional capability')
     expect(build([tool, { ...tool, name: 'web_search' }])).toContain('On right now: web search')
     expect(build([tool, { ...tool, name: 'browser_act' }])).toContain('a browser')
+  })
+
+  it('names the tabs on the panel, and where each one is', () => {
+    const panel = build([tool, { ...tool, name: 'panel' }], 0, undefined, undefined, {
+      tabs: [
+        { kind: 'document', title: 'brainstorm.md', path: '/home/me/brainstorm.md' },
+        { kind: 'browser', url: 'https://example.com' },
+      ],
+      active: 1,
+    })
+    expect(panel).toContain('Panel right now: 2 tabs')
+    // The file, so it can be read without the person saying where it is.
+    expect(panel).toContain('"brainstorm.md" (document at `/home/me/brainstorm.md`)')
+    expect(panel).toContain('the browser on `https://example.com` (in front)')
+  })
+
+  it('says the panel is empty when nothing is open', () => {
+    const panel = build([tool, { ...tool, name: 'panel' }], 0, undefined, undefined, { tabs: [], active: 0 })
+    expect(panel).toContain('Panel right now: nothing open.')
+  })
+
+  it('says nothing about the panel on a surface that has none', () => {
+    expect(build([tool])).not.toContain('Panel right now')
   })
 
   it('knows the browser is signed in nowhere, and how that is fixed', () => {

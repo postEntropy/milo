@@ -15,6 +15,7 @@ import { listDirTool } from './list-dir.js'
 import { readFileTool } from './read-file.js'
 import { recallTool } from './recall.js'
 import { rememberTool } from './remember.js'
+import { panelTool } from './panel.js'
 import { routineTool } from './routine.js'
 import { searchHistoryTool } from './search-history.js'
 import { sendFileTool } from './send-file.js'
@@ -42,6 +43,7 @@ export { writeFileTool } from './write-file.js'
 export { editFileTool } from './edit-file.js'
 export { rememberTool } from './remember.js'
 export { recallTool } from './recall.js'
+export { panelTool } from './panel.js'
 export { routineTool } from './routine.js'
 export { searchHistoryTool } from './search-history.js'
 export { sendFileTool } from './send-file.js'
@@ -69,6 +71,7 @@ export const builtinTools = [
   searchHistoryTool,
   routineTool,
   sendFileTool,
+  panelTool,
   taskTool,
   todoTool,
   taskListsTool,

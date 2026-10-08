@@ -1,18 +1,22 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { statSync } from 'node:fs'
+import { basename, extname } from 'node:path'
 import { deriveIdeas, type Idea } from '../../core/ideas.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { Session } from '../../core/session.js'
 import { INSTALL_SCOPE, type MemoryScope } from '../../core/memory/index.js'
-import { isImage, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
+import { isImage, mimeFor, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
+import type { PanelRequest } from '../../core/panel.js'
 import { readDisplay } from '../../core/config/load.js'
 import { buildCommandContext, handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
-import type { ClientFrame, FrameAttachment, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
+import type { ClientFrame, FrameAttachment, PanelInput, PanelKind, PanelState, PanelTab, PanelView, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
 import { PERMISSION_TIMEOUT_MS } from './protocol.js'
 import { displayEvent } from './turn.js'
-import { transcriptOf } from './transcript.js'
+import { panelsOf, transcriptOf } from './transcript.js'
+import type { PanelFacts } from '../../core/agent/system.js'
+import { resolveToolPath } from '../../core/tools/walk.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import { prepareIncoming } from '../../core/media.js'
@@ -57,6 +61,12 @@ interface Conversation {
   session: Session
   clients: Set<WebClient>
   activeTurnId?: string
+  /**
+   * The panel's tabs, in the order they opened, and the one in front. The requests
+   * that made them, not the resolved views: a tab is read from disk afresh each
+   * time it is drawn, so an edit shows without reopening anything.
+   */
+  panel?: { requests: PanelRequest[]; active: number }
 }
 
 export class WebHub {
@@ -83,8 +93,19 @@ export class WebHub {
   private ideaCalledAt = 0
   /** The generations still running; `flush()` waits for them, a shutdown does not. */
   private readonly pendingIdeas = new Set<Promise<void>>()
+  /**
+   * The pages watching the live browser. The screencast runs while this is not
+   * empty and stops when the last watcher leaves, so a browser nobody is looking
+   * at is not streaming.
+   */
+  private readonly browserWatchers = new Set<(frame: Buffer) => void>()
 
-  constructor(private readonly runtime: AgentRuntime) {}
+  /**
+   * `cwd` is only ever needed to resolve a panel's file when a request is read
+   * back from a transcript; the server passes its own, and the default matches
+   * how a bare path is resolved everywhere else.
+   */
+  constructor(private readonly runtime: AgentRuntime, private readonly cwd: string = process.cwd()) {}
 
   async connect(client: WebClient, conversationId: string): Promise<void> {
     if (!/^[0-9a-f-]{36}$/i.test(conversationId)) throw new Error('Invalid conversation id.')
@@ -109,6 +130,7 @@ export class WebHub {
       providerName: this.runtime.providerName,
       model: this.runtime.model,
       effort: this.runtime.reasoningEffort,
+      panel: this.panelFor(conversation),
     })
     this.sendState(conversationId)
     // Parked (see `IDEAS_ENABLED`): the standing four stand, and no call is made.
@@ -170,6 +192,25 @@ export class WebHub {
       return
     }
 
+    if (frame.type === 'panel-input') {
+      void this.browserInput(frame.input).catch((error: unknown) => {
+        client.send({ type: 'error', message: errorMessage(error) })
+      })
+      return
+    }
+
+    // The person's own move on the strip: their own action, so nothing is
+    // confirmed, and everyone watching the chat sees the same tab come forward.
+    if (frame.type === 'panel-activate') {
+      this.activateTab(conversationId, frame.key)
+      return
+    }
+
+    if (frame.type === 'panel-close') {
+      this.closeTab(conversationId, frame.key)
+      return
+    }
+
     if (frame.type === 'command') void this.command(client, conversation, frame.text).catch((error: unknown) => {
       client.send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     })
@@ -193,6 +234,8 @@ export class WebHub {
     this.ideaWork?.controller.abort()
     for (const staged of this.stagedUploads.values()) clearTimeout(staged.timer)
     this.stagedUploads.clear()
+    this.browserWatchers.clear()
+    this.runtime.browser?.stopScreencast()
     for (const id of this.conversations.keys()) this.turns.stop(id)
   }
 
@@ -294,6 +337,187 @@ export class WebHub {
     const size = statSync(file.path, { throwIfNoEntry: false })?.size ?? 0
     this.attachments.set(id, { path: file.path, name: file.name, mimeType: file.mimeType })
     return { id, name: file.name, mimeType: file.mimeType, size, image: isImage(file.mimeType) }
+  }
+
+  /**
+   * The panel a conversation was left showing. Seeded once, when the conversation
+   * opens, by replaying the requests its history kept through the very rule a live
+   * one goes through — so a reload and a fresh show cannot disagree — and resolved
+   * afresh on every read, from each file's current contents rather than a snapshot.
+   */
+  private panelFor(conversation: Conversation): PanelView | null {
+    if (!conversation.panel) {
+      conversation.panel = { requests: [], active: 0 }
+      for (const request of panelsOf(conversation.session.messages)) this.showPanel(conversation, request)
+    }
+    return this.panelView(conversation)
+  }
+
+  /**
+   * Puts a request on the panel: its own tab, in front — or, when a tab for it is
+   * already open, that one brought forward. Re-showing the same file therefore
+   * does not stack a second copy of it, which matters because the model re-shows a
+   * report every time it revises it. `close` takes the whole panel down, which is
+   * what the model means by it.
+   */
+  private showPanel(conversation: Conversation, request: PanelRequest): void {
+    if (request.close) {
+      conversation.panel = { requests: [], active: 0 }
+      return
+    }
+    const state = this.resolvePanel(request)
+    if (!state) return
+    const tabs = conversation.panel?.requests ?? []
+    const key = panelKeyOf(state)
+    const existing = tabs.findIndex((one) => {
+      const resolved = this.resolvePanel(one)
+      return resolved ? panelKeyOf(resolved) === key : false
+    })
+    conversation.panel = existing >= 0
+      ? { requests: tabs, active: existing }
+      : { requests: [...tabs, request], active: tabs.length }
+  }
+
+  /**
+   * The panel as the page draws it: every stored request resolved afresh, with the
+   * tabs that no longer resolve dropped — a file that has since gone takes its tab
+   * with it, and the one in front shifts with the rest. Null when nothing is left,
+   * which is the panel being down.
+   */
+  private panelView(conversation: Conversation): PanelView | null {
+    const panel = conversation.panel
+    if (!panel || panel.requests.length === 0) return null
+    const tabs: PanelTab[] = []
+    const kept: PanelRequest[] = []
+    let active = 0
+    panel.requests.forEach((request, index) => {
+      const state = this.resolvePanel(request)
+      if (!state) return
+      if (index === panel.active) active = tabs.length
+      kept.push(request)
+      tabs.push({ ...state, key: panelKeyOf(state) })
+    })
+    if (tabs.length === 0) {
+      conversation.panel = { requests: [], active: 0 }
+      return null
+    }
+    active = Math.min(active, tabs.length - 1)
+    conversation.panel = { requests: kept, active }
+    return { tabs, active }
+  }
+
+  /**
+   * What is on the panel, for the model: which tabs are open and where each one's
+   * contents are, so it can talk about them, or read one, rather than ask. The path
+   * is the hub's own — the page is never given one — and the browser tab carries
+   * the page it is on.
+   */
+  private panelFacts(conversation: Conversation): PanelFacts {
+    const view = this.panelView(conversation)
+    if (!view) return { tabs: [], active: 0 }
+    return {
+      tabs: view.tabs.map((tab) => {
+        const path = tab.artifact ? this.attachment(tab.artifact.id)?.path : undefined
+        return {
+          kind: tab.kind,
+          ...(tab.title ? { title: tab.title } : {}),
+          ...(path ? { path } : {}),
+          ...(tab.kind === 'browser' ? { url: tab.url ?? null } : {}),
+        }
+      }),
+      active: view.active,
+    }
+  }
+
+  /** Brings a tab to the front, by key. A key that is not open is ignored. */
+  private activateTab(conversationId: string, key: string): void {
+    const conversation = this.conversations.get(conversationId)
+    if (!conversation) return
+    const index = this.panelView(conversation)?.tabs.findIndex((tab) => tab.key === key) ?? -1
+    if (index < 0 || !conversation.panel) return
+    conversation.panel = { requests: conversation.panel.requests, active: index }
+    this.broadcast(conversationId, { type: 'panel', panel: this.panelView(conversation) })
+  }
+
+  /** Closes a tab, by key. Closing the last one leaves the panel down. */
+  private closeTab(conversationId: string, key: string): void {
+    const conversation = this.conversations.get(conversationId)
+    if (!conversation) return
+    const index = this.panelView(conversation)?.tabs.findIndex((tab) => tab.key === key) ?? -1
+    if (index < 0 || !conversation.panel) return
+    const requests = conversation.panel.requests.filter((_, at) => at !== index)
+    conversation.panel = { requests, active: Math.min(index, Math.max(0, requests.length - 1)) }
+    this.broadcast(conversationId, { type: 'panel', panel: this.panelView(conversation) })
+  }
+
+  /**
+   * A panel request as a view the browser can draw. A browser request needs no
+   * file; a path is registered so its bytes are served inline by id, and the kind
+   * is decided by what the file is. A file that is gone resolves to no panel
+   * rather than a broken one.
+   */
+  private resolvePanel(request: PanelRequest): PanelState | null {
+    if (request.close) return null
+    const title = request.title?.trim() || undefined
+    if (request.browser) {
+      return { kind: 'browser', ...(title ? { title } : {}), url: this.runtime.browser?.status.url ?? null }
+    }
+    if (!request.path) return null
+    const path = resolveToolPath(this.cwd, request.path)
+    const stats = statSync(path, { throwIfNoEntry: false })
+    if (!stats?.isFile()) return null
+    const name = basename(path)
+    // The MIME the panel serves it as: HTML needs its own type or the browser
+    // downloads the page instead of framing it.
+    const ext = extname(name).toLowerCase()
+    const mimeType = ext === '.html' || ext === '.htm' ? 'text/html; charset=utf-8' : mimeFor(path)
+    const artifact = this.register({ path, name, mimeType })
+    return { kind: panelKindOf(artifact.mimeType, name), title: title ?? name, artifact }
+  }
+
+  /**
+   * Frames of the live browser, fanned out to every watcher. The screencast
+   * starts with the first watcher and stops with the last, so a browser nobody is
+   * looking at is not streaming. Returns the off switch, which the caller keeps
+   * for as long as its own stream is open.
+   */
+  async watchBrowser(onFrame: (frame: Buffer) => void): Promise<() => void> {
+    const browser = this.runtime.browser
+    if (!browser) throw new Error('the browser is not enabled — turn it on in Settings → Tools')
+    if (this.browserWatchers.size === 0) await browser.startScreencast((frame) => this.fanBrowser(frame))
+    this.browserWatchers.add(onFrame)
+    let stopped = false
+    return () => {
+      if (stopped) return
+      stopped = true
+      this.browserWatchers.delete(onFrame)
+      if (this.browserWatchers.size === 0) browser.stopScreencast()
+    }
+  }
+
+  private fanBrowser(frame: Buffer): void {
+    for (const watcher of this.browserWatchers) {
+      try {
+        watcher(frame)
+      } catch {
+        // A watcher whose socket died must not stop the frames for the rest.
+      }
+    }
+  }
+
+  /**
+   * A pointer or key the person sent into the live browser panel, run against the
+   * page. It is their own action, so nothing is confirmed; a failure is reported
+   * back where they acted rather than swallowed.
+   */
+  async browserInput(input: PanelInput): Promise<void> {
+    const browser = this.runtime.browser
+    if (!browser) throw new Error('the browser is not enabled — turn it on in Settings → Tools')
+    const signal = new AbortController().signal
+    if (input.kind === 'click' || input.kind === 'move') return browser.pointer(input.kind, input.x, input.y, signal)
+    if (input.kind === 'scroll') return browser.wheel(input.x, input.y, input.deltaY, signal)
+    if (input.kind === 'key') return browser.key(input.key, signal)
+    return browser.typeText(input.text, signal)
   }
 
   /**
@@ -459,6 +683,9 @@ export class WebHub {
             // names a routine's destination, and the tool takes it from here
             // rather than from the chat the turn happens to be running in.
             ...(target ? { origin: target } : {}),
+            // What is on the panel, so the model knows what the person is looking
+            // at, and where each tab's contents are, without having to ask.
+            panel: this.panelFacts(conversation),
             ask: async (request) => {
               const permissionId = randomUUID()
               this.broadcast(conversationId, {
@@ -474,6 +701,15 @@ export class WebHub {
           })) {
             if (event.type === 'error') status = 'error'
             if (event.type === 'aborted') status = 'stopped'
+            // The panel is display state of the web surface, not something the
+            // other surfaces draw: it is resolved to a view here and sent as its
+            // own frame, never as a raw `event`. A `close` request leaves no tabs,
+            // which is the model taking the panel down.
+            if (event.type === 'panel') {
+              this.showPanel(conversation, event.request)
+              this.broadcast(conversationId, { type: 'panel', panel: this.panelView(conversation) })
+              continue
+            }
             displayEvent(event, id, display, (frame) => this.broadcast(conversationId, frame))
           }
           currentImages = []
@@ -584,4 +820,37 @@ export class WebHub {
   private transcript(session: Session): TranscriptMessage[] {
     return transcriptOf(session.messages, (file) => this.register(file))
   }
+}
+
+/** The text and code extensions the panel renders as prose, beyond what MIME knows. */
+const TEXT_EXTENSIONS = new Set([
+  '.md', '.markdown', '.txt', '.text', '.log', '.csv', '.tsv', '.yml', '.yaml', '.toml',
+  '.ini', '.cfg', '.conf', '.env', '.xml', '.css', '.js', '.mjs', '.cjs', '.jsx', '.ts',
+  '.tsx', '.py', '.rb', '.go', '.rs', '.java', '.kt', '.c', '.h', '.cpp', '.hpp', '.cs',
+  '.php', '.sh', '.bash', '.zsh', '.fish', '.sql', '.lua', '.swift',
+])
+
+/**
+ * What kind of thing the panel is showing, from what the file is. A page is HTML,
+ * rendered live; a document is text or code, drawn as prose; an image and a PDF
+ * draw themselves; anything else is a file the panel can only offer to open or
+ * download.
+ */
+function panelKindOf(mimeType: string, name: string): PanelKind {
+  if (mimeType.startsWith('image/')) return 'image'
+  if (mimeType === 'application/pdf') return 'pdf'
+  const ext = extname(name).toLowerCase()
+  if (ext === '.html' || ext === '.htm' || mimeType === 'text/html') return 'page'
+  if (mimeType.startsWith('text/') || mimeType === 'application/json' || TEXT_EXTENSIONS.has(ext)) return 'document'
+  return 'file'
+}
+
+/**
+ * A tab's stable name: the browser's own, or the artifact id — a hash of the path,
+ * so it is the same before and after a reload. A click names this rather than a
+ * position, which would race the list shifting under it.
+ */
+function panelKeyOf(state: PanelState): string {
+  if (state.kind === 'browser') return 'browser'
+  return state.artifact?.id ?? state.kind
 }

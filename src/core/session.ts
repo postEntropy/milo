@@ -19,7 +19,7 @@ import type { AgentEvent } from './agent/events.js'
 import { runAgent, type RunTrace } from './agent/loop.js'
 import type { TraceWriter } from './traces.js'
 import { runSubagent } from './agent/subagent.js'
-import { buildSystemPrompt, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
+import { buildSystemPrompt, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import {
   contextBudget,
   countMessages,
@@ -178,6 +178,12 @@ export interface SendOptions {
   images?: import('./providers/types.js').ImagePart[]
   audio?: import('./providers/types.js').AudioPart[]
   model?: string
+  /**
+   * What the surface's panel is showing, when it has one — the web chat's tabs, so
+   * the model knows what the person is looking at and can read a tab's file without
+   * being told where it is. Absent on a surface with no panel.
+   */
+  panel?: PanelFacts | null
 }
 
 export class Session {
@@ -444,11 +450,14 @@ export class Session {
     // A tool with nothing to act on is absent from the catalog, and `send_file`
     // needs a chat that can receive a file: a routine's named target, or the live
     // surface the turn is talking through. The terminal is the one surface with
-    // nowhere to put one, so the tool stays out of its list. (A subagent filters
-    // `task` out of its own list the same way.)
+    // nowhere to put one, so the tool stays out of its list. `panel` needs a
+    // surface that can draw one, which is the web app alone, so it is withheld
+    // from every other catalog the same way. (A subagent filters `task` out of its
+    // own list too.)
     const surface = asSurface(this.scope.gateway)
     const canSendFiles = this.options.deliverTo !== undefined || receivesFiles(surface)
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
+      .filter((tool) => tool.name !== 'panel' || surface === 'web')
     const recalled = (
       await memory.recall(this.scope, input, {
         limit: this.options.recallLimit ?? DEFAULT_RECALL_LIMIT,
@@ -463,6 +472,9 @@ export class Session {
       tools,
       skills: this.options.skills?.(),
       memories: recalled,
+      // Per turn, from the surface: the prompt is frozen for the turn once built,
+      // and what the model opens mid-turn is reported by its own tool result.
+      panel: opts?.panel ?? null,
     }
 
     // Measured against the request that will actually be sent: the tool list,

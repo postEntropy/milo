@@ -87,7 +87,7 @@ export interface RunningWebServer {
 
 export async function startWebServer(options: WebServerOptions): Promise<RunningWebServer> {
   const token = options.token ?? randomBytes(32).toString('base64url')
-  const hub = new WebHub(options.runtime)
+  const hub = new WebHub(options.runtime, options.cwd)
   const settings = new WebSettings(options.runtime, options.cwd, hub)
   const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
   const server = createServer((request, response) => {
@@ -247,6 +247,67 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
       return
     }
     createReadStream(known.path).pipe(response)
+    return
+  }
+
+  // A panel artifact drawn inline. The same files the chat serves, but rendered
+  // rather than downloaded: a canvas and a PDF are framed by the page, an image
+  // is shown — so the disposition is always inline here.
+  if (url.pathname.startsWith('/panel/')) {
+    if (!authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
+    const known = hub.attachment(url.pathname.slice('/panel/'.length))
+    const stats = known ? statSync(known.path, { throwIfNoEntry: false }) : undefined
+    if (!known || !stats?.isFile()) return json(response, 404, { error: 'Not found.' })
+    response.writeHead(200, {
+      'content-type': known.mimeType,
+      'content-length': String(stats.size),
+      'content-disposition': 'inline',
+      'cache-control': 'no-store',
+      'x-content-type-options': 'nosniff',
+    })
+    if (request.method === 'HEAD') {
+      response.end()
+      return
+    }
+    createReadStream(known.path).pipe(response)
+    return
+  }
+
+  // The live browser, as an MJPEG stream the panel draws in an <img>. Raw JPEG
+  // rather than base64 over the socket: the bytes are the expensive part, and
+  // this is the cheap way to carry them. Nothing beyond the headers is written
+  // until the screencast has actually started, so a failure here can still be
+  // reported as JSON rather than into an open stream.
+  if (url.pathname === '/browser/frames') {
+    if (!authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
+    const boundary = 'milo-browser-frame'
+    let streaming = false
+    let off: (() => void) | null = null
+    try {
+      off = await hub.watchBrowser((frame) => {
+        if (!streaming || response.writableEnded) return
+        response.write(`--${boundary}\r\ncontent-type: image/jpeg\r\ncontent-length: ${frame.length}\r\n\r\n`)
+        response.write(frame)
+        response.write('\r\n')
+      })
+    } catch (error) {
+      return json(response, 409, { error: error instanceof Error ? error.message : String(error) })
+    }
+    // The page can have gone while the screencast was starting. Nothing else
+    // will unhook the watcher, so this is where it is let go.
+    if (request.destroyed || response.writableEnded) {
+      off()
+      return
+    }
+    response.writeHead(200, {
+      'content-type': `multipart/x-mixed-replace; boundary=${boundary}`,
+      'cache-control': 'no-store',
+      connection: 'close',
+    })
+    streaming = true
+    const stop = (): void => off?.()
+    request.on('close', stop)
+    response.on('close', stop)
     return
   }
 

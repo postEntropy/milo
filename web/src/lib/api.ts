@@ -32,6 +32,21 @@ export function attachmentUrl(id: string): string {
   return `/attachment/${encodeURIComponent(id)}?t=${encodeURIComponent(apiToken())}`
 }
 
+/**
+ * Where a panel artifact is fetched, inline rather than as a download: the panel
+ * frames an HTML page or a PDF and shows an image, so the server serves it with
+ * the disposition the page needs. It shares the attachment id space — the same
+ * files, drawn differently.
+ */
+export function panelUrl(id: string): string {
+  return `/panel/${encodeURIComponent(id)}?t=${encodeURIComponent(apiToken())}`
+}
+
+/** The live browser as an MJPEG stream, drawn directly in an `<img>`. */
+export function browserFramesUrl(): string {
+  return `/browser/frames?t=${encodeURIComponent(apiToken())}`
+}
+
 export async function api<T>(action: string, body: Record<string, unknown> = {}): Promise<T> {
   const response = await fetch(`/api/${action}`, {
     method: 'POST',

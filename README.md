@@ -239,6 +239,15 @@ lines appear as they run, a confirmation is an Allow/Deny card, `Enter` queues a
 and `/` opens the command palette. Export and Clear sit in the top bar; sessions can be searched,
 resumed and deleted. **Task lists** is a view of its own, showing the lists the `task_lists` tool keeps.
 
+The **Panel** sits beside the chat: the `panel` tool shows a file there (a document or HTML you wrote,
+a screenshot, a PDF — any type) or the **live browser** Milo is driving, which is also **interactive** —
+click and type in it, which is where Milo hands over a login, a 2FA code or a payment it must not do
+itself. Milo opens it when it has something to show ("here, look at this"). It holds **one tab per
+thing**, per session: showing a second file does not take away the first, the strip at the top switches
+between them and closes them, and Milo is told what is on the panel — so he can talk about a tab, or
+read the file behind it, without being told where it is. The header's toggle folds the panel away, and
+the tabs come back on reload. The browser streams only while its own tab is on screen.
+
 **Settings** (the sidebar's last row) is `milo setup` in the browser — provider and model, API keys,
 memory, routines, gateways, tools and the browser, permissions, display, skills and sessions. The long
 setup jobs stream their output into a panel: the Chrome for Testing download, a profile copy, the local
@@ -318,6 +327,7 @@ comes is skipped rather than stacked, and a routine cannot create routines.
 | `search_history` | yes | Term search over Milo's own past turns, reasoning and tool calls included. |
 | `routine` | — | Runs a prompt on a timer and delivers it to a chat. Asks only when the routine carries a standing grant; absent inside a routine's own run. |
 | `send_file` | no | Sends a file to the chat a turn is talking in — the live chat, or a routine's target — as a picture when it is an image. Asks; in a routine it needs a grant to run unattended. Not offered on the terminal, and its call is not drawn as a tool line. |
+| `panel` | — | Shows a file or the live browser in the Panel beside the web chat, one tab per thing — the tab already holding something comes forward rather than a second copy of it. Only the web app draws a panel, so it is offered on that surface alone; its call is not drawn as a tool line. |
 | `web_search` | yes | Registered only when a search provider is configured. |
 | `read_skill` | yes | Loads a skill's instructions on demand; registered only when a skill is installed. |
 | `gmail_search` | yes | Search the connected Gmail account; registered only when Google is on. |

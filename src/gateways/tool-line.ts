@@ -86,10 +86,12 @@ export function isExternalTool(name: string): boolean {
  * Tools whose own activity is not drawn. Reaching for one should read as the
  * answer itself, not as a call: `send_file` is the case — the file lands in the
  * chat, and a line announcing it is a line between the person and the picture —
- * and `todo`, whose whole point is the checklist drawn in its place. A failure
- * is still reported, so nothing goes wrong in silence.
+ * and `todo`, whose whole point is the checklist drawn in its place. `panel` is
+ * the same: its result is the panel itself, so a line announcing it would stand
+ * between the person and what they are looking at. A failure is still reported,
+ * so nothing goes wrong in silence.
  */
-const HIDDEN = new Set(['send_file', 'todo'])
+const HIDDEN = new Set(['send_file', 'todo', 'panel'])
 
 /** Whether a tool's own call is drawn as a line on the surfaces. */
 export function showsToolCall(name: string): boolean {
