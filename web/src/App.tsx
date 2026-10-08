@@ -106,6 +106,9 @@ export default function App() {
   /** Whether the settings hold edits that were never saved. */
   const [settingsDirty, setSettingsDirty] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  /** The phone's session search, folded behind its own icon until it is asked for. */
+  const [searchOpen, setSearchOpen] = useState(false)
+  const searchRef = useRef<HTMLInputElement>(null)
   /** The desktop sidebar, folded away; the phone keeps its drawer instead. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('milo-sidebar') === 'collapsed')
   /**
@@ -202,6 +205,17 @@ export default function App() {
 
   /** Looking at the inbox is what clears the badge; the write itself is server-side. */
   const clearMailBadge = useCallback((): void => setMailUnread({ count: 0, more: false }), [])
+
+  // The search the phone folded behind its icon takes the cursor the moment it opens.
+  useEffect(() => {
+    if (searchOpen) searchRef.current?.focus()
+  }, [searchOpen])
+
+  /** Puts that search away, and clears it so the list it narrowed is whole again. */
+  function closeSearch(): void {
+    setSearchOpen(false)
+    setSearch('')
+  }
 
   // The shell is the phone's visible area, so the keyboard never leaves the
   // composer stranded above a gap once it closes; see `trackVisualViewport`.
@@ -884,12 +898,19 @@ export default function App() {
       <div className="sidebar-chat-nav">
         <div className="brand-row"><img className="brand-mark" src={miloAvatar} alt="" /><span className="brand-name" translate="no">Milo</span><button className="sidebar-toggle" type="button" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><Icon name="panel-left" size={17} /></button></div>
         <div className="sidebar-pad">
-          <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={16} /><span>Routines</span></button>
-          <button className={`sidebar-tab ${view === 'tasks' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'tasks' ? 'chat' : 'tasks'); setSidebarOpen(false) }}><Icon name="list-check" size={16} /><span>Task lists</span></button>
-          <button className={`sidebar-tab ${view === 'email' ? 'active' : ''}`} type="button" onClick={() => { setEmailRoute(null); setView(view === 'email' ? 'chat' : 'email'); setSidebarOpen(false) }}><Icon name="mail" size={16} /><span>Email</span>{mailUnread !== null && mailUnread.count > 0 && <span className="sidebar-badge">{mailUnread.more ? `${mailUnread.count}+` : mailUnread.count}</span>}</button>
+          <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={18} /><span>Routines</span></button>
+          <button className={`sidebar-tab ${view === 'tasks' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'tasks' ? 'chat' : 'tasks'); setSidebarOpen(false) }}><Icon name="list-check" size={18} /><span>Task lists</span></button>
+          <button className={`sidebar-tab ${view === 'email' ? 'active' : ''}`} type="button" onClick={() => { setEmailRoute(null); setView(view === 'email' ? 'chat' : 'email'); setSidebarOpen(false) }}><Icon name="mail" size={18} /><span>Email</span>{mailUnread !== null && mailUnread.count > 0 && <span className="sidebar-badge">{mailUnread.more ? `${mailUnread.count}+` : mailUnread.count}</span>}</button>
           <div className="sidebar-controls">
-            <label className="sidebar-search"><Icon name="search" size={16} /><input aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} /></label>
-            <button className="new-chat" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>
+            {/* On a phone this is folded behind the magnifier: the row shows the action
+                people reach for most — a new session — and the search waits on its icon. */}
+            <div className={`sidebar-search ${searchOpen ? 'open' : ''}`}>
+              <Icon name="search" size={16} />
+              <input ref={searchRef} aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} />
+              <button className="sidebar-search-close" type="button" aria-label="Close search" onClick={closeSearch}><Icon name="x" size={15} /></button>
+            </div>
+            <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /><span className="new-chat-label">New session</span></button>
+            <button className="sidebar-search-toggle" type="button" title="Search sessions" aria-label="Search sessions" aria-expanded={searchOpen} onClick={() => setSearchOpen((open) => !open)}><Icon name="search" size={18} /></button>
           </div>
         </div>
         <div className="session-region">

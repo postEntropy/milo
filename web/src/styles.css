@@ -134,7 +134,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .brand-mark { display: grid; width: 30px; height: 30px; place-items: center; flex: none; border-radius: 9px; background: var(--accent); color: var(--accent-on); object-fit: cover; font-size: 15px; font-weight: 600; letter-spacing: -.05em; }
 .brand-name { font-size: 17px; font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
 .sidebar-pad { padding-inline: 14px; }
-.sidebar-tab { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; margin-top: 6px; border: 0; border-radius: 10px; background: transparent; padding: 8px 10px; color: var(--fg-2); font-size: 13px; font-weight: 500; text-align: start; transition: background var(--motion-fast); }
+/* The page tabs are the sidebar's primary navigation: its largest text, on a row that
+   sits between the roomy original and a cramped list — enough air to stay readable
+   without the three reading as separate blocks. */
+.sidebar-tab { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; margin-top: 4px; border: 0; border-radius: 10px; background: transparent; padding: 6px 10px; color: var(--fg-2); font-size: 16px; font-weight: 500; text-align: start; transition: background var(--motion-fast); }
 .sidebar-tab > svg { flex: none; }
 .sidebar-tab:hover { background: var(--surface); }
 .sidebar-tab.active { background: var(--surface); color: var(--fg); }
@@ -143,13 +146,27 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    sidebar and on the lighter fill its tab takes when hovered or active. */
 .sidebar-badge { flex: none; margin-inline-start: auto; border-radius: 999px; background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px 7px; color: var(--fg); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; animation: fade-in var(--motion-base) var(--ease-standard) backwards; }
 .sidebar-controls { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-.new-chat { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 12px; background: var(--surface); color: var(--fg-2); transition: background var(--motion-fast); }
+.new-chat { display: flex; width: auto; flex: 1; min-height: 40px; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 12px; background: var(--surface); padding: 0 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; transition: background var(--motion-fast); }
 .new-chat:hover { background: var(--border-soft); }
-.sidebar-search { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; }
-.sidebar-search svg { position: absolute; inset-inline-start: 11px; color: var(--muted); pointer-events: none; }
-.sidebar-search input { width: 100%; min-height: 40px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 9px 10px 9px 34px; font-size: 13px; }
+.new-chat.is-hidden { display: none; }
+/* The search folds behind the magnifier at the end of the row at every width, so the
+   action the sidebar exists for — a new session — holds the row and reads as the one
+   it is; the field takes the row the moment the icon asks for it. */
+.sidebar-search { position: relative; display: none; flex: 1; min-width: 0; align-items: center; }
+.sidebar-search.open { display: flex; }
+/* The leading magnifier only: the close button carries its own icon, drawn in place. */
+.sidebar-search > svg { position: absolute; inset-inline-start: 11px; color: var(--muted); pointer-events: none; }
+.sidebar-search input { width: 100%; min-height: 40px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 9px 38px 9px 34px; font-size: 13px; }
 .sidebar-search input::placeholder { color: var(--muted); }
 .sidebar-search input:focus { outline: 0; border-color: var(--accent); box-shadow: var(--focus-ring); }
+.sidebar-search-close { position: absolute; inset-inline-end: 6px; display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
+.sidebar-search-close:hover { background: var(--border-soft); color: var(--fg); }
+.sidebar-search-toggle { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 12px; background: var(--surface); color: var(--fg-2); transition: background var(--motion-fast); }
+.sidebar-search-toggle:hover { background: var(--border-soft); }
+/* Open, the field carries its own magnifier and an ×; the icon that opened it stands
+   down, so the row never shows the same glyph twice. Last, and so the one rule that
+   outranks the toggle it hides. */
+.sidebar-search.open ~ .sidebar-search-toggle { display: none; }
 .session-region { position: relative; display: flex; flex: 1; min-height: 0; }
 .session-list { flex: 1; min-height: 0; overflow: auto; padding: 6px 14px 12px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 /* A soft edge under the search box: the top rows blur out instead of being cut,
@@ -943,6 +960,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .sidebar.settings-mode .sidebar-chat-nav { display: flex; }
   .sidebar.settings-mode .sidebar-settings-nav { display: none; }
   .settings-save { padding-bottom: max(12px, env(safe-area-inset-bottom)); }
+  /* The drawer's list and controls, one step up: at the sidebar's width on a phone, 13px
+     read too fine. Kept at the 14px the Settings screen already uses on a phone, so the
+     app still holds one mobile size rather than the sidebar inventing another. The page
+     tabs stand above this at 15px, their own size at every width. */
+  .sidebar-action strong, .session-title, .new-chat { font-size: 14px; }
+  .sidebar-search input { font-size: 14px; }
 }
 @media (max-width: 620px) {
   .suggestion-grid { grid-template-columns: 1fr; gap: 9px; margin-top: 26px; }
@@ -976,7 +999,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @media (max-width: 640px) {
   .composer-box textarea,
   .field input, .field select, .field textarea,
-  .sidebar-search input, .session-rename-input, .secret-row input, .select-search input,
+  .session-rename-input, .secret-row input, .select-search input,
   .tasklist-input { font-size: 1rem; }
   /* Settings' own size on a phone: one value for the labels and every control, so
      a dropdown is the same size as the text field beside it. Deliberately below the
