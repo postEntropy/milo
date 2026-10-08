@@ -5,6 +5,9 @@
   --bg: #F5F3ED;
   --surface: #FFFEFA;
   --surface-warm: #EDE9DF;
+  /* One step above the plain surface: the controls that should stand off a warm
+     panel, e.g. the sidebar's own action row. */
+  --surface-raised: #FFFFFF;
   --fg: #272724;
   --fg-2: #3B3934;
   --text: #272724;
@@ -67,6 +70,7 @@
   --bg: #191A18;
   --surface: #20211F;
   --surface-warm: #1D1E1C;
+  --surface-raised: #2A2B28;
   --fg: #EFEEE9;
   --fg-2: #D9D6CE;
   --text: #EFEEE9;
@@ -145,8 +149,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    the end of the tab's own row, tinted off the text colour so it reads on the warm
    sidebar and on the lighter fill its tab takes when hovered or active. */
 .sidebar-badge { flex: none; margin-inline-start: auto; border-radius: 999px; background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px 7px; color: var(--fg); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; animation: fade-in var(--motion-base) var(--ease-standard) backwards; }
-.sidebar-controls { display: flex; align-items: center; gap: 8px; margin-top: 12px; }
-.new-chat { display: flex; width: auto; flex: 1; min-height: 40px; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 12px; background: var(--surface); padding: 0 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; transition: background var(--motion-fast); }
+.sidebar-actions { display: flex; align-items: center; gap: 8px; padding: 8px 14px 14px; }
+.new-chat { display: flex; width: auto; flex: 1; min-height: 40px; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 14px; background: var(--surface-raised); padding: 0 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; transition: background var(--motion-fast); }
 .new-chat:hover { background: var(--border-soft); }
 .new-chat.is-hidden { display: none; }
 /* The search folds behind the magnifier at the end of the row at every width, so the
@@ -156,23 +160,22 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-search.open { display: flex; }
 /* The leading magnifier only: the close button carries its own icon, drawn in place. */
 .sidebar-search > svg { position: absolute; inset-inline-start: 11px; color: var(--muted); pointer-events: none; }
-.sidebar-search input { width: 100%; min-height: 40px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 9px 38px 9px 34px; font-size: 13px; }
+.sidebar-search input { width: 100%; min-height: 40px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 9px 38px 9px 34px; font-size: 13px; }
 .sidebar-search input::placeholder { color: var(--muted); }
 .sidebar-search input:focus { outline: 0; border-color: var(--accent); box-shadow: var(--focus-ring); }
 .sidebar-search-close { position: absolute; inset-inline-end: 6px; display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
 .sidebar-search-close:hover { background: var(--border-soft); color: var(--fg); }
-.sidebar-search-toggle { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 12px; background: var(--surface); color: var(--fg-2); transition: background var(--motion-fast); }
-.sidebar-search-toggle:hover { background: var(--border-soft); }
+.sidebar-search-toggle, .sidebar-settings-toggle { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 14px; background: var(--surface-raised); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
+.sidebar-search-toggle:hover, .sidebar-settings-toggle:hover { background: var(--border-soft); }
+.sidebar-settings-toggle.active { background: var(--border-soft); color: var(--fg); }
 /* Open, the field carries its own magnifier and an ×; the icon that opened it stands
    down, so the row never shows the same glyph twice. Last, and so the one rule that
    outranks the toggle it hides. */
 .sidebar-search.open ~ .sidebar-search-toggle { display: none; }
-.session-region { position: relative; display: flex; flex: 1; min-height: 0; }
+.session-region { display: flex; flex: 1; min-height: 0; }
 .session-list { flex: 1; min-height: 0; overflow: auto; padding: 6px 14px 12px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
-/* A soft edge under the search box: the top rows blur out instead of being cut,
-   so the list reads as one surface with the search above. It appears only once
-   the list is scrolled. The bottom is left alone — a blur there drew a line
-   against the Settings button rather than softening it. */
+/* A soft edge at the top of a scrolled region: its first rows blur out instead of
+   being cut, so the content reads as passing under the bar above it. */
 .scroll-blur { position: absolute; z-index: 1; inset-inline: 0; height: 30px; pointer-events: none; opacity: 0; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); transition: opacity var(--motion-base) var(--ease-standard); }
 .scroll-blur.on { opacity: 1; }
 .scroll-blur.top { top: 0; -webkit-mask-image: linear-gradient(to bottom, #000 20%, transparent); mask-image: linear-gradient(to bottom, #000 20%, transparent); }
@@ -207,13 +210,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-rename-input { width: 100%; height: 32px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 4px 8px; color: var(--fg); font-size: 13px; font-family: inherit; outline: none; }
 .session-rename-input:focus { border-color: var(--accent); }
 .list-empty { padding: 16px 10px; color: var(--muted); font-size: 13px; text-align: center; }
-.sidebar-footer { padding: 8px 14px 14px; }
-.sidebar-action { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; border: 0; border-radius: 10px; background: transparent; padding: 8px 10px; color: var(--fg-2); text-align: start; transition: background var(--motion-fast); }
-.sidebar-action-text { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 2px; }
-.sidebar-action strong { font-size: 13px; font-weight: 500; }
-.sidebar-action small { color: var(--muted); font-size: 12px; }
-.sidebar-action:hover { background: var(--surface); }
-.sidebar-action > svg.icon { flex: none; color: var(--muted); }
 /* The drawer holds the sections on a wide screen; on a phone they move into the
    strip below, and the drawer keeps the session list. */
 .sidebar-settings-nav { display: none; padding: 12px 14px 14px; }
@@ -964,7 +960,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      read too fine. Kept at the 14px the Settings screen already uses on a phone, so the
      app still holds one mobile size rather than the sidebar inventing another. The page
      tabs stand above this at 15px, their own size at every width. */
-  .sidebar-action strong, .session-title, .new-chat { font-size: 14px; }
+  .session-title, .new-chat { font-size: 14px; }
   .sidebar-search input { font-size: 14px; }
 }
 @media (max-width: 620px) {

@@ -146,20 +146,6 @@ export default function App() {
    */
   const pendingDeltas = useRef(new Map<string, { text: string; reasoning: string }>())
   const drawFrame = useRef<number | null>(null)
-  const sessionListRef = useRef<HTMLElement | null>(null)
-  /** The soft edge under the search box shows only once the list is scrolled. */
-  const [listScrolled, setListScrolled] = useState(false)
-  const updateListTop = useCallback((): void => {
-    const list = sessionListRef.current
-    if (!list) return
-    setListScrolled(list.scrollTop > 2)
-  }, [])
-  // biome-ignore lint/correctness/useExhaustiveDependencies: this recomputes when the rows or the view change, not for the values themselves — the list's height is what moved
-  useEffect(() => { updateListTop() }, [updateListTop, sessions, search, view, sidebarOpen])
-  useEffect(() => {
-    window.addEventListener('resize', updateListTop)
-    return () => window.removeEventListener('resize', updateListTop)
-  }, [updateListTop])
 
   /** The soft edge under the session header shows only once messages are scrolled. */
   const [chatScrolled, setChatScrolled] = useState(false)
@@ -901,20 +887,9 @@ export default function App() {
           <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={18} /><span>Routines</span></button>
           <button className={`sidebar-tab ${view === 'tasks' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'tasks' ? 'chat' : 'tasks'); setSidebarOpen(false) }}><Icon name="list-check" size={18} /><span>Task lists</span></button>
           <button className={`sidebar-tab ${view === 'email' ? 'active' : ''}`} type="button" onClick={() => { setEmailRoute(null); setView(view === 'email' ? 'chat' : 'email'); setSidebarOpen(false) }}><Icon name="mail" size={18} /><span>Email</span>{mailUnread !== null && mailUnread.count > 0 && <span className="sidebar-badge">{mailUnread.more ? `${mailUnread.count}+` : mailUnread.count}</span>}</button>
-          <div className="sidebar-controls">
-            {/* On a phone this is folded behind the magnifier: the row shows the action
-                people reach for most — a new session — and the search waits on its icon. */}
-            <div className={`sidebar-search ${searchOpen ? 'open' : ''}`}>
-              <Icon name="search" size={16} />
-              <input ref={searchRef} aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} />
-              <button className="sidebar-search-close" type="button" aria-label="Close search" onClick={closeSearch}><Icon name="x" size={15} /></button>
-            </div>
-            <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /><span className="new-chat-label">New session</span></button>
-            <button className="sidebar-search-toggle" type="button" title="Search sessions" aria-label="Search sessions" aria-expanded={searchOpen} onClick={() => setSearchOpen((open) => !open)}><Icon name="search" size={18} /></button>
-          </div>
         </div>
         <div className="session-region">
-          <nav className="session-list" aria-label="Sessions" ref={sessionListRef} onScroll={updateListTop}>
+          <nav className="session-list" aria-label="Sessions">
             {historyHits && historyHits.length > 0 && <div className="history-hits">
               <div className="section-label">In past turns</div>
               {historyHits.map((hit) => <button className="history-hit" key={`${hit.session}-${hit.at}-${hit.text.slice(0, 32)}`} type="button" title={hit.session} onClick={() => void openSession(hit.session)}>
@@ -925,10 +900,19 @@ export default function App() {
             {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} onRename={renameSession} onExport={exportSession} onDelete={deleteSession} />)}</div>)}
             {visibleSessions.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
           </nav>
-          <div className={`scroll-blur top ${listScrolled ? 'on' : ''}`} aria-hidden="true" />
         </div>
-        <div className="sidebar-footer">
-          <button className={`sidebar-action ${view === 'settings' ? 'active' : ''}`} type="button" onClick={() => { setView('settings'); setSidebarOpen(false) }}><Icon name="settings" /><span className="sidebar-action-text"><strong>Settings</strong><small>Models, keys and tools</small></span></button>
+        {/* The sidebar's one action row, at its foot: start a session, find one, and
+            the way to Settings. The list above it keeps every other line of height.
+            The search folds behind its icon until asked for, taking the row whole. */}
+        <div className="sidebar-actions">
+          <div className={`sidebar-search ${searchOpen ? 'open' : ''}`}>
+            <Icon name="search" size={16} />
+            <input ref={searchRef} aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} />
+            <button className="sidebar-search-close" type="button" aria-label="Close search" onClick={closeSearch}><Icon name="x" size={15} /></button>
+          </div>
+          <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /><span className="new-chat-label">New session</span></button>
+          <button className="sidebar-search-toggle" type="button" title="Search sessions" aria-label="Search sessions" aria-expanded={searchOpen} onClick={() => setSearchOpen((open) => !open)}><Icon name="search" size={18} /></button>
+          <button className={`sidebar-settings-toggle ${view === 'settings' ? 'active' : ''}`} type="button" title="Settings" aria-label="Settings" onClick={() => { setView('settings'); setSidebarOpen(false) }}><Icon name="settings" size={18} /></button>
         </div>
       </div>
       <div className="sidebar-settings-nav">
