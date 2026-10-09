@@ -417,7 +417,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             <span className="composer-context-count">{formatTokens(context.used)} / {formatTokens(context.budget)}</span>
           </span>}
           {busy
-            ? <button className="send-button stop" type="button" title="Stop (Esc)" aria-label="Stop Milo" onClick={onStop}><Icon name="stop" size={16} /></button>
+            ? <button className="send-button stop" type="button" title="Stop (Esc)" aria-label="Stop Milo" onClick={onStop}><Icon name="stop" size={24} /></button>
             : <button className="send-button" type="button" title="Send (Enter)" aria-label="Send message" disabled={!draft.trim() && files.length === 0} onClick={() => void submit('queue')}><Icon name="send" size={17} /></button>}
         </div>
       </div>
