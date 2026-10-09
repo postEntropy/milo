@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { GoogleAccount } from '../config/schema.js'
 import { tokenSource } from '../google/access.js'
-import { archive, setRead, trashMessage } from '../google/gmail.js'
+import { applyMailOperation } from '../google/gmail.js'
 import { accessOf } from '../google/tiers.js'
 import type { Tool } from './types.js'
 
@@ -29,13 +29,6 @@ const schema = z.object({
 
 export type GmailModifyArgs = z.infer<typeof schema>
 
-const DONE: Record<GmailModifyArgs['op'], (id: string) => string> = {
-  archive: (id) => `Archived ${id}.`,
-  read: (id) => `Marked ${id} as read.`,
-  unread: (id) => `Marked ${id} as unread.`,
-  trash: (id) => `Moved ${id} to the bin.`,
-}
-
 export function createGmailWriteTools(account: GoogleAccount | null): Tool<unknown>[] {
   const token = tokenSource(account)
   const access = accessOf(account)
@@ -52,17 +45,10 @@ export function createGmailWriteTools(account: GoogleAccount | null): Tool<unkno
       const id = args.id.trim()
       if (!id) return { content: 'Name the message by its id.', isError: true }
 
-      const work = {
-        archive: () => archive(got.value, access, id),
-        read: () => setRead(got.value, access, id, true),
-        unread: () => setRead(got.value, access, id, false),
-        trash: () => trashMessage(got.value, access, id),
-      }[args.op]
-
-      const done = await work()
+      const done = await applyMailOperation(got.value, access, id, args.op)
       // The core's refusal already names the level to reconnect at; passed through.
       if (!done.ok) return { content: done.error, isError: true }
-      return { content: DONE[args.op](id) }
+      return { content: done.value }
     },
   }
 

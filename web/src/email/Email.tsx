@@ -38,14 +38,6 @@ type Draft = { to: string; subject: string; body: string; threadId?: string }
 /** A message being written from scratch, before anything is typed. */
 const EMPTY_DRAFT: Draft = { to: '', subject: '', body: '' }
 
-/** What an action says once it lands, so the notice names the thing that happened. */
-const DONE: Record<string, string> = {
-  archive: 'Archived.',
-  read: 'Marked read.',
-  unread: 'Marked unread.',
-  trash: 'Moved to the bin.',
-}
-
 /** The address inside a `From` header, `Ana <ana@exemplo>` reduced to `ana@exemplo`. */
 function addressOf(from: string | undefined): string {
   if (!from) return ''

@@ -599,8 +599,9 @@ describe('web Settings mail', () => {
     })
 
     const settings = new WebSettings(build({}), home)
-    const result = (await settings.handle('email-modify', { id: 'm1', op: 'trash' })) as { id: string }
-    expect(result.id).toBe('m1')
+    const result = (await settings.handle('email-modify', { id: 'm1', op: 'trash' })) as { done: string }
+    // The wording the core owns, the same one the agent's tool answers with.
+    expect(result.done).toBe('Moved m1 to the bin.')
     expect(asked).toContain('POST')
     expect(asked).toContain('/messages/m1/trash')
   })

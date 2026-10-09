@@ -256,6 +256,64 @@ describe('Gmail beyond reading', () => {
     expect(asked).toContain('/messages/send')
   })
 
+  it('encodes an accented subject as RFC 2047 and the body as base64', async () => {
+    let sent = ''
+    vi.stubGlobal('fetch', async (_input: URL | string, init?: RequestInit) => {
+      sent = String(init?.body ?? '')
+      return answer({ id: 'd1' })
+    })
+
+    const draft = await createDraft(tokens, 'compose', {
+      to: 'ana@exemplo',
+      subject: 'Reunião às 15h',
+      body: 'olá, tudo bem?',
+    })
+    expect(draft.ok).toBe(true)
+
+    const raw = Buffer.from(JSON.parse(sent).message.raw, 'base64url').toString('utf8')
+    const encoded = `=?UTF-8?B?${Buffer.from('Reunião às 15h', 'utf8').toString('base64')}?=`
+    // A raw accented subject is not a legal header, so it goes as an encoded word.
+    expect(raw).toContain(`Subject: ${encoded}`)
+    expect(raw).toContain('Content-Transfer-Encoding: base64')
+    // And the body decodes back to exactly what was written.
+    const body = raw.split('\r\n\r\n').slice(1).join('\r\n\r\n').replace(/\r\n/g, '')
+    expect(Buffer.from(body, 'base64').toString('utf8')).toBe('olá, tudo bem?')
+  })
+
+  it('carries the thread id on a send, so a reply stays in its conversation', async () => {
+    let sent = ''
+    vi.stubGlobal('fetch', async (_input: URL | string, init?: RequestInit) => {
+      sent = String(init?.body ?? '')
+      return answer({ id: 'm9' })
+    })
+
+    const reply = await sendMessage(tokens, 'send', {
+      to: 'ana@exemplo',
+      subject: 'Re: oi',
+      body: 'oi',
+      threadId: 'th1',
+    })
+    expect(reply.ok).toBe(true)
+    expect(JSON.parse(sent)).toMatchObject({ threadId: 'th1' })
+  })
+
+  it('keeps the page when one message refuses to answer', async () => {
+    vi.stubGlobal('fetch', async (input: URL | string) => {
+      const url = String(input)
+      if (url.includes('/messages?') || url.endsWith('/messages')) {
+        return answer({ messages: [{ id: 'm1' }, { id: 'm2' }] })
+      }
+      // One message's metadata call fails — the inbox must not go down with it.
+      if (url.includes('/messages/m1')) throw new Error('network')
+      return answer({ id: 'm2', threadId: 't2', payload: { headers: [{ name: 'Subject', value: 'ok' }] } })
+    })
+
+    const page = await listInbox(tokens, {})
+    expect(page.ok).toBe(true)
+    if (!page.ok) return
+    expect(page.value.messages.map((message) => message.id)).toEqual(['m2'])
+  })
+
   it('carries the label ids a message has, which is how the list tells read from unread', async () => {
     vi.stubGlobal('fetch', async () =>
       answer({

@@ -9,15 +9,15 @@ import { PRESETS } from '../../core/config/presets.js'
 import { tokenSource, type TokenSource } from '../../core/google/access.js'
 import { ASSIST_MODES, emailAssist, type AssistMode } from '../../core/google/assist.js'
 import {
-  archive,
+  applyMailOperation,
   createDraft,
   INBOX_FILTERS,
+  isMailOperation,
+  MAIL_OPERATIONS,
   read as readMail,
   readThread,
   search as searchMail,
   sendMessage,
-  setRead,
-  trashMessage,
   unreadSince,
   type DraftInput,
   type InboxFilter,
@@ -277,22 +277,16 @@ export class WebSettings {
   }
 
   /** What a message answers to: out of the inbox, read or unread, and into the bin. */
-  private emailModify(body: Record<string, unknown>): Promise<unknown> {
+  private async emailModify(body: Record<string, unknown>): Promise<unknown> {
     const id = googleId(body.id)
     const op = optionalText(body.op) ?? ''
-    const actions: Record<
-      string,
-      (tokens: GoogleTokens, access: GoogleAccess) => Promise<GoogleOutcome<{ id: string }>>
-    > = {
-      archive: (tokens, access) => archive(tokens, access, id),
-      read: (tokens, access) => setRead(tokens, access, id, true),
-      unread: (tokens, access) => setRead(tokens, access, id, false),
-      trash: (tokens, access) => trashMessage(tokens, access, id),
-    }
     // An argument it does not know answers with the ones it does.
-    const run = actions[op]
-    if (!run) throw new Error(`Unknown mail action "${op || '(none)'}" — one of ${Object.keys(actions).join(', ')}.`)
-    return this.mailCall(run)
+    if (!isMailOperation(op)) {
+      throw new Error(`Unknown mail action "${op || '(none)'}" — one of ${MAIL_OPERATIONS.join(', ')}.`)
+    }
+    // The move and its wording live in the core, shared with the agent's tool.
+    const done = await this.mailCall((tokens, access) => applyMailOperation(tokens, access, id, op))
+    return { done }
   }
 
   private emailDraft(body: Record<string, unknown>): Promise<unknown> {

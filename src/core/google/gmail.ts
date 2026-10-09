@@ -168,10 +168,18 @@ async function summariesFor(tokens: GoogleTokens, ids: string[]): Promise<Google
   )
 
   const summaries: MailSummary[] = []
+  let firstError: GoogleOutcome<never> | null = null
   for (const [index, detail] of details.entries()) {
-    if (!detail.ok) return detail
+    // One message that would not answer does not take the page down with it: the
+    // rest of the inbox is still worth reading. Only a page where nothing came
+    // back is an error worth reporting.
+    if (!detail.ok) {
+      firstError ??= detail
+      continue
+    }
     summaries.push(summaryOf(ids[index]!, detail.value))
   }
+  if (summaries.length === 0 && firstError) return firstError
   return { ok: true, value: summaries }
 }
 
@@ -361,6 +369,64 @@ export async function trashMessage(
   return { ok: true, value: { id } }
 }
 
+/**
+ * The moves one message answers to, and the words each is said in. Declared once
+ * so the agent's tool, the web screen and the permission prompt all offer the
+ * same four and call them the same thing.
+ */
+export const MAIL_OPERATIONS = ['archive', 'read', 'unread', 'trash'] as const
+
+export type MailOperation = (typeof MAIL_OPERATIONS)[number]
+
+export function isMailOperation(value: string): value is MailOperation {
+  return (MAIL_OPERATIONS as readonly string[]).includes(value)
+}
+
+const MAIL_OPERATION_WORDS: Record<MailOperation, (id: string) => string> = {
+  archive: (id) => `Archived ${id}.`,
+  read: (id) => `Marked ${id} as read.`,
+  unread: (id) => `Marked ${id} as unread.`,
+  trash: (id) => `Moved ${id} to the bin.`,
+}
+
+/**
+ * One move on one message, and the sentence it answers with when it lands. The
+ * single place both the agent's `gmail_modify` and the web Email screen reach for
+ * it, so the call a move makes and the words it reports cannot drift apart.
+ */
+export async function applyMailOperation(
+  tokens: GoogleTokens,
+  access: GoogleAccess,
+  id: string,
+  op: MailOperation,
+): Promise<GoogleOutcome<string>> {
+  const done =
+    op === 'archive'
+      ? await archive(tokens, access, id)
+      : op === 'trash'
+        ? await trashMessage(tokens, access, id)
+        : await setRead(tokens, access, id, op === 'read')
+  if (!done.ok) return done
+  return { ok: true, value: MAIL_OPERATION_WORDS[op](id) }
+}
+
+/**
+ * A header value as RFC 2047 requires it: as written when it is ASCII, and an
+ * encoded word when it is not. A raw accented subject is not legal in a header,
+ * and arrives at the other end mangled.
+ */
+function encodeHeader(value: string): string {
+  if (!/[^\x20-\x7e]/.test(value)) return value
+  return `=?UTF-8?B?${Buffer.from(value, 'utf8').toString('base64')}?=`
+}
+
+/** Base64 in seventy-six-character lines, the width RFC 2045 asks a body for. */
+function wrapBase64(text: string): string {
+  const lines: string[] = []
+  for (let index = 0; index < text.length; index += 76) lines.push(text.slice(index, index + 76))
+  return lines.join('\r\n')
+}
+
 /** A message Gmail will carry, as RFC 822 in the base64url the API takes. */
 function rawMessage(mail: { to: string; subject: string; body: string }): string {
   // Newlines in a header are how a value becomes a second header; an address or a
@@ -368,11 +434,15 @@ function rawMessage(mail: { to: string; subject: string; body: string }): string
   const oneLine = (value: string): string => value.replace(/[\r\n]+/g, ' ').trim()
   const headers = [
     `To: ${oneLine(mail.to)}`,
-    `Subject: ${oneLine(mail.subject)}`,
+    `Subject: ${encodeHeader(oneLine(mail.subject))}`,
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset="UTF-8"',
+    // The body is UTF-8 and declared as such, so it is base64 rather than 8-bit:
+    // a body sent as raw bytes with no encoding is not one every relay will carry.
+    'Content-Transfer-Encoding: base64',
   ]
-  return Buffer.from([...headers, '', mail.body].join('\r\n'), 'utf8').toString('base64url')
+  const body = wrapBase64(Buffer.from(mail.body, 'utf8').toString('base64'))
+  return Buffer.from([...headers, '', body].join('\r\n'), 'utf8').toString('base64url')
 }
 
 /** A draft, written and left in Drafts — nothing is sent by this call. */
@@ -402,7 +472,7 @@ export async function createDraft(
 export async function sendMessage(
   tokens: GoogleTokens,
   access: GoogleAccess,
-  mail: { to: string; subject: string; body: string },
+  mail: { to: string; subject: string; body: string; threadId?: string },
 ): Promise<GoogleOutcome<{ id: string }>> {
   const denied = allowed(access, 'send')
   if (denied) return denied
@@ -410,7 +480,9 @@ export async function sendMessage(
   const sent = await authorizedJson(tokens, endpoint('messages/send'), {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ raw: rawMessage(mail) }),
+    // The thread id is what Gmail threads on: a reply sent without it starts a
+    // conversation of its own instead of landing under the one it answers.
+    body: JSON.stringify({ raw: rawMessage(mail), ...(mail.threadId ? { threadId: mail.threadId } : {}) }),
   })
   if (!sent.ok) return sent
   const id = asString((sent.value as { id?: unknown }).id)
