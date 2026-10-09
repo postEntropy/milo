@@ -448,17 +448,16 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
 })
 
 /**
- * The wait for the model's next output: a glyph, the word and three dots, so a
- * turn that has nothing to show yet still says it is running. Whatever arrives
- * next takes this line's place. The same line stands for a tool call while it
- * executes, named so the wait is attributed to what is actually running.
+ * The wait for the model's next output: a steady glyph and the word, with a light
+ * travelling along the word, so a turn that has nothing to show yet still says it
+ * is running. Whatever arrives next takes this line's place. The same line stands
+ * for a tool call while it executes, named so the wait is attributed to what is
+ * actually running.
  */
-function WaitLine({ label = 'thinking' }: { label?: string }) {
+function WaitLine({ label = 'Thinking' }: { label?: string }) {
   return <div className="wait-line">
     <Icon name="spark" size={14} />
-    <span>{label}</span>
-    {/* Motion rather than something to read: out of the accessibility tree. */}
-    <span className="wait-dots" aria-hidden="true"><span className="wait-dot" /><span className="wait-dot" /><span className="wait-dot" /></span>
+    <span className="wait-label">{label}</span>
   </div>
 }
 

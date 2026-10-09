@@ -381,17 +381,23 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .reasoning-reveal-hint { color: var(--accent); opacity: 0; transition: opacity var(--motion-fast); }
 .reasoning-reveal:hover .reasoning-reveal-hint { opacity: 1; }
 /* The wait for the model's next output, before there is anything of its own to
-   show: the glyph and the word the terminal uses while a turn runs, in the tone
-   it uses there, with three dots breathing rather than a number ticking. An
-   output arriving takes its place. */
-.wait-line { display: flex; align-items: center; gap: 7px; color: var(--warn); font-size: 12px; }
-.wait-line svg.icon { flex: none; animation: wait-pulse 1.4s var(--ease-standard) infinite; }
-.wait-dots { display: inline-flex; gap: 3px; }
-.wait-dot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .3; animation: wait-dot 1.2s var(--ease-standard) infinite; }
-.wait-dot:nth-child(2) { animation-delay: .16s; }
-.wait-dot:nth-child(3) { animation-delay: .32s; }
-@keyframes wait-pulse { 0%, 100% { opacity: .35; } 50% { opacity: 1; } }
-@keyframes wait-dot { 0%, 100% { opacity: .3; } 40% { opacity: 1; } }
+   show: the glyph the terminal uses, steady, and a light that travels along the
+   word — so the row says it is working without anything blinking, and without
+   wearing the alarm colour. An output arriving takes its place. */
+.wait-line { display: flex; align-items: center; gap: 8px; width: fit-content; color: var(--muted); font-size: 12px; }
+.wait-line svg.icon { flex: none; }
+.wait-label {
+  background-image: linear-gradient(90deg, var(--muted) 0%, var(--muted) 42%, var(--fg) 50%, var(--muted) 58%, var(--muted) 100%);
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: wait-shimmer 1.9s linear infinite;
+}
+@keyframes wait-shimmer {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
 .tool-line { display: flex; align-items: center; justify-content: space-between; gap: 9px; min-height: 36px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); padding: 7px 12px; color: var(--fg-2); font-size: 12px; }
 /* Heavier than the rest of the set on purpose: at 14px a 1.8 stroke thins to about
    a pixel, and the tool lines were reading as pencil. */
