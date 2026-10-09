@@ -38,6 +38,20 @@ const tokens = { accessToken: 't', expiresAt: Date.now() + 60_000 }
 const answer = (body: unknown, status = 200): Response =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
+/** A Gmail batch answer: one `multipart/mixed` part per message, in the order asked. */
+function batchAnswer(parts: Array<{ id: string; message?: unknown; status?: number }>): Response {
+  const boundary = 'test-batch'
+  const body = `${parts
+    .map((part) => {
+      const status = part.status ?? 200
+      const payload = part.message === undefined ? '' : JSON.stringify(part.message)
+      return `--${boundary}\r\ncontent-type: application/http\r\ncontent-id: <${part.id}>\r\n\r\n`
+        + `HTTP/1.1 ${status} ${status === 200 ? 'OK' : 'Error'}\r\ncontent-type: application/json\r\n\r\n${payload}\r\n`
+    })
+    .join('')}--${boundary}--\r\n`
+  return new Response(body, { status: 200, headers: { 'content-type': `multipart/mixed; boundary=${boundary}` } })
+}
+
 afterEach(() => vi.unstubAllGlobals())
 
 describe('Google consent', () => {
@@ -347,6 +361,68 @@ describe('Gmail beyond reading', () => {
     expect(page.value.nextPageToken).toBe('cursor')
     expect(page.value.messages[0]?.subject).toBe('a nota')
     expect(decodeURIComponent(urls[0]!).replace(/\+/g, ' ')).toContain('in:inbox')
+  })
+
+  it('fetches a page of mail in one batch call, not one request per message', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', async (input: URL | string) => {
+      const url = String(input)
+      urls.push(url)
+      if (url.includes('/messages?')) {
+        return answer({ messages: [{ id: 'm1', threadId: 't1' }, { id: 'm2', threadId: 't2' }] })
+      }
+      if (url.includes('/batch/gmail')) {
+        return batchAnswer([
+          { id: 'm1', message: { id: 'm1', threadId: 't1', payload: { headers: [{ name: 'Subject', value: 'a nota' }] } } },
+          { id: 'm2', message: { id: 'm2', threadId: 't2', payload: { headers: [{ name: 'Subject', value: 'outra' }] } } },
+        ])
+      }
+      throw new Error(`a message was fetched on its own: ${url}`)
+    })
+
+    const page = await listInbox(tokens, {})
+    expect(page.ok).toBe(true)
+    if (!page.ok) return
+    expect(page.value.messages.map((message) => message.subject)).toEqual(['a nota', 'outra'])
+    expect(urls.filter((url) => url.includes('/batch/gmail'))).toHaveLength(1)
+    expect(urls.some((url) => /\/messages\/m\d/.test(url))).toBe(false)
+  })
+
+  it('keeps the page when one part of the batch refuses', async () => {
+    vi.stubGlobal('fetch', async (input: URL | string) => {
+      const url = String(input)
+      if (url.includes('/messages?')) return answer({ messages: [{ id: 'm1' }, { id: 'm2' }] })
+      if (url.includes('/batch/gmail')) {
+        return batchAnswer([
+          { id: 'm1', status: 500 },
+          { id: 'm2', message: { id: 'm2', threadId: 't2', payload: { headers: [{ name: 'Subject', value: 'ok' }] } } },
+        ])
+      }
+      throw new Error(`unexpected call: ${url}`)
+    })
+
+    const page = await listInbox(tokens, {})
+    expect(page.ok).toBe(true)
+    if (!page.ok) return
+    expect(page.value.messages.map((message) => message.id)).toEqual(['m2'])
+  })
+
+  it('falls back to one request per message when the batch answer is not the multipart it promised', async () => {
+    const urls: string[] = []
+    vi.stubGlobal('fetch', async (input: URL | string) => {
+      const url = String(input)
+      urls.push(url)
+      if (url.includes('/messages?')) return answer({ messages: [{ id: 'm1', threadId: 't1' }] })
+      if (url.includes('/batch/gmail')) return answer({ not: 'multipart' })
+      return answer({ id: 'm1', threadId: 't1', payload: { headers: [{ name: 'Subject', value: 'a nota' }] } })
+    })
+
+    const page = await listInbox(tokens, {})
+    expect(page.ok).toBe(true)
+    if (!page.ok) return
+    expect(page.value.messages[0]?.subject).toBe('a nota')
+    expect(urls.some((url) => url.includes('/batch/gmail'))).toBe(true)
+    expect(urls.filter((url) => url.includes('/messages/m1'))).toHaveLength(1)
   })
 })
 

@@ -306,3 +306,12 @@ export async function authorizedText(tokens: GoogleTokens, url: URL): Promise<Go
   if (!response.ok) return response
   return { ok: true, value: await response.value.text() }
 }
+
+/**
+ * A call's raw response, for the one request whose answer is not JSON — a batch of
+ * them, whose parts name their own boundary in the content type. The auth and the
+ * failure wording are the same as every other Google call.
+ */
+export async function authorizedResponse(tokens: GoogleTokens, url: URL, init: RequestInit = {}): Promise<GoogleOutcome<Response>> {
+  return request(tokens, url, init)
+}

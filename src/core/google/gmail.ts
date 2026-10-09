@@ -10,7 +10,8 @@
  * Each write takes the level it needs and refuses below it with the sentence
  * that fixes it, so a missing scope can never surface as a bare 403.
  */
-import { authorizedJson, type GoogleOutcome, type GoogleTokens } from './oauth.js'
+import { logWarn } from '../../util/log.js'
+import { authorizedJson, authorizedResponse, type GoogleOutcome, type GoogleTokens } from './oauth.js'
 import { accessLabel, tierAtLeast, type GoogleAccess } from './tiers.js'
 
 const API = 'https://gmail.googleapis.com/gmail/v1/users/me'
@@ -36,10 +37,19 @@ export const BODY_LIMIT = 4000
 /** One chunk of a full body when it is read past the cut above. */
 export const BODY_PAGE = 20_000
 
+/** Where a page's metadata is fetched: one batch call, not one request per message. */
+const BATCH_URL = 'https://gmail.googleapis.com/batch/gmail/v1'
+
+/** The boundary the batch request and its parts share. */
+const BATCH_BOUNDARY = 'milo-gmail-batch'
+
+/** How many messages one batch carries. Gmail's own ceiling is a hundred. */
+const BATCH_SIZE = 50
+
 /**
- * How many messages one page's metadata is fetched for at a time. Gmail has no
- * batch call for this, so a page costs one request per message — capped here, so a
- * fifty-row page is a handful of requests in flight rather than fifty at once.
+ * How many messages a page's metadata is fetched for at a time when the batch call
+ * cannot be used. A page costs one request per message on this path — capped here,
+ * so a fifty-row page is a handful of requests in flight rather than fifty at once.
  */
 const SUMMARY_CONCURRENCY = 8
 
@@ -163,22 +173,31 @@ function idsOf(payload: unknown): string[] {
   )
 }
 
+/** The metadata query every summary asks for: the three headers a person chooses by. */
+const SUMMARY_HEADERS = ['From', 'Subject', 'Date']
+
 /**
  * List metadata for a set of ids — the three headers a person chooses by, never
  * the bodies: those come one at a time, for whichever the model decides to read.
+ *
+ * A page is one batch call where Gmail answers it; if the batch endpoint does not,
+ * the same metadata is fetched one message at a time so the inbox still opens.
  */
 async function summariesFor(tokens: GoogleTokens, ids: string[]): Promise<GoogleOutcome<MailSummary[]>> {
+  const batched = await summariesInBatch(tokens, ids)
+  if (batched) return batched
+  logWarn('the Gmail batch call did not answer — fetching a page of mail one message at a time')
+  return summariesOneByOne(tokens, ids)
+}
+
+/** The same metadata, one request per message, in flight a bounded few at a time. */
+async function summariesOneByOne(tokens: GoogleTokens, ids: string[]): Promise<GoogleOutcome<MailSummary[]>> {
   const details: GoogleOutcome<unknown>[] = []
   for (let start = 0; start < ids.length; start += SUMMARY_CONCURRENCY) {
     const batch = ids.slice(start, start + SUMMARY_CONCURRENCY)
     details.push(
       ...(await Promise.all(
-        batch.map((id) =>
-          authorizedJson(
-            tokens,
-            endpoint(`messages/${encodeURIComponent(id)}`, { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] }),
-          ),
-        ),
+        batch.map((id) => authorizedJson(tokens, metadataUrl(id))),
       )),
     )
   }
@@ -196,6 +215,91 @@ async function summariesFor(tokens: GoogleTokens, ids: string[]): Promise<Google
     summaries.push(summaryOf(ids[index]!, detail.value))
   }
   if (summaries.length === 0 && firstError) return firstError
+  return { ok: true, value: summaries }
+}
+
+/**
+ * The metadata for a page in one call, or null when the batch call cannot be used —
+ * it did not answer, or answered something that is not the multipart it promised.
+ * Null is not an error: it is the signal to fall back to one request per message.
+ */
+async function summariesInBatch(tokens: GoogleTokens, ids: string[]): Promise<GoogleOutcome<MailSummary[]> | null> {
+  const details: (unknown | null)[] = []
+  let refused = false
+
+  for (let start = 0; start < ids.length; start += BATCH_SIZE) {
+    const batch = ids.slice(start, start + BATCH_SIZE)
+    const body = `${batch.map(subRequest).join('')}--${BATCH_BOUNDARY}--\r\n`
+    const got = await authorizedResponse(tokens, new URL(BATCH_URL), {
+      method: 'POST',
+      headers: { 'content-type': `multipart/mixed; boundary=${BATCH_BOUNDARY}` },
+      body,
+    })
+    if (!got.ok) return null
+    const boundary = boundaryOf(got.value.headers.get('content-type'))
+    if (!boundary) return null
+    const parts = parseBatch(await got.value.text(), boundary)
+    if (!parts || parts.length !== batch.length) return null
+    for (const part of parts) {
+      if (part === null) refused = true
+      details.push(part)
+    }
+  }
+
+  // `collect` reports the all-refused page; a page that is merely empty stays empty.
+  return collect(ids, details, refused)
+}
+
+/** One `messages.get` as a sub-request inside the batch, at the path the batch takes. */
+function subRequest(id: string): string {
+  const url = metadataUrl(id)
+  return `--${BATCH_BOUNDARY}\r\ncontent-type: application/http\r\n\r\nGET ${url.pathname}${url.search}\r\n\r\n`
+}
+
+function metadataUrl(id: string): URL {
+  return endpoint(`messages/${encodeURIComponent(id)}`, { format: 'metadata', metadataHeaders: SUMMARY_HEADERS })
+}
+
+/** The boundary named in a `multipart/mixed; boundary=…` content type. */
+function boundaryOf(contentType: string | null): string | null {
+  return /boundary="?([^";]+)"?/i.exec(contentType ?? '')?.[1] ?? null
+}
+
+/**
+ * The JSON each part of a batch answer carries, in order, or null for a part that
+ * refused. Null when nothing could be read at all, so the caller can fall back.
+ */
+function parseBatch(raw: string, boundary: string): (unknown | null)[] | null {
+  const parts: (unknown | null)[] = []
+  for (const chunk of raw.split(`--${boundary}`)) {
+    const part = chunk.replace(/^\r\n/, '').trim()
+    if (part === '' || part === '--') continue
+    // The part's own headers, then the nested HTTP response it wraps.
+    const outerEnd = part.indexOf('\r\n\r\n')
+    const nested = outerEnd >= 0 ? part.slice(outerEnd + 4) : part
+    const status = /^HTTP\/\d(?:\.\d)?\s+(\d{3})/.exec(nested)?.[1]
+    const nestedEnd = nested.indexOf('\r\n\r\n')
+    const json = nestedEnd >= 0 ? nested.slice(nestedEnd + 4) : ''
+    if (status !== '200') {
+      parts.push(null)
+      continue
+    }
+    try {
+      parts.push(JSON.parse(json) as unknown)
+    } catch {
+      parts.push(null)
+    }
+  }
+  return parts.length > 0 ? parts : null
+}
+
+/** The summaries a page's details make, one message that refused never sinking it. */
+function collect(ids: string[], details: (unknown | null)[], refused: boolean): GoogleOutcome<MailSummary[]> {
+  const summaries: MailSummary[] = []
+  details.forEach((detail, index) => {
+    if (detail !== null) summaries.push(summaryOf(ids[index]!, detail))
+  })
+  if (summaries.length === 0 && refused) return { ok: false, error: 'none of the mail on this page could be read' }
   return { ok: true, value: summaries }
 }
 
