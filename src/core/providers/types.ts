@@ -89,6 +89,12 @@ export type ContentPart = TextPart | ImagePart | AudioPart | ReasoningPart | Too
 export interface Message {
   role: Role
   content: ContentPart[]
+  /**
+   * When this message was said. Kept for the surfaces that show it — a session
+   * read back from disk still knows when each turn happened — and ignored by the
+   * wires, which build their blocks from `role` and `content` alone.
+   */
+  at?: number
 }
 
 export interface ToolSpec {

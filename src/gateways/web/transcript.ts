@@ -31,7 +31,7 @@ export function transcriptOf(messages: Message[], register: RegisterFile): Trans
         ? [register({ path: part.path, name: part.name, mimeType: part.mimeType })]
         : [])
       if (text || attachments.length) {
-        transcript.push({ role: 'user', parts: text ? [{ kind: 'text', text }] : [], ...(attachments.length ? { attachments } : {}) })
+        transcript.push({ role: 'user', parts: text ? [{ kind: 'text', text }] : [], ...(attachments.length ? { attachments } : {}), ...(message.at !== undefined ? { at: message.at } : {}) })
       }
       continue
     }
@@ -58,6 +58,9 @@ export function transcriptOf(messages: Message[], register: RegisterFile): Trans
           role: 'assistant',
           parts,
           ...(attachments.length > 0 ? { attachments } : {}),
+          // The turn's start, not the last step: a turn drawn as one message is
+          // said to have happened when it began.
+          ...(message.at !== undefined ? { at: message.at } : {}),
         }
         transcript.push(currentAssistant)
       } else {

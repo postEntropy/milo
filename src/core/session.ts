@@ -532,7 +532,7 @@ export class Session {
     // Nothing the person said means nothing added to the transcript as theirs; the
     // instruction above is the whole of this turn's prompt.
     if (!opts?.notice) {
-      this.messages.push({ role: 'user', content: [{ type: 'text', text: input }, ...(opts?.images ?? []), ...(opts?.audio ?? [])] })
+      this.messages.push({ role: 'user', content: [{ type: 'text', text: input }, ...(opts?.images ?? []), ...(opts?.audio ?? [])], at: Date.now() })
       note({ kind: 'user', text: input })
     }
 
@@ -822,6 +822,7 @@ export class Session {
       if (lease.latest) this.adoptLatest(lease.latest)
       this.messages.push({
         role: 'assistant',
+        at: Date.now(),
         content: [
           { type: 'text', text },
           ...files.map((file) => ({

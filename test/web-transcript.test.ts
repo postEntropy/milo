@@ -68,4 +68,25 @@ describe('transcriptOf — a turn keeps the order it happened in', () => {
       attachments: [{ name: 'a.png' }],
     })
   })
+
+  it('carries when a message was said, dated from the start of the turn', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'look' }], at: 1_000 },
+      { role: 'assistant', content: [{ type: 'text', text: 'Checking.' }], at: 2_000 },
+      { role: 'assistant', content: [{ type: 'text', text: 'It is fine.' }], at: 3_500 },
+    ]
+
+    // The turn is drawn as one message, so it is dated when it began — the last
+    // step's time is not the message's.
+    expect(of(messages)).toMatchObject([
+      { role: 'user', at: 1_000 },
+      { role: 'assistant', at: 2_000 },
+    ])
+  })
+
+  it('leaves the time absent on a message that carries none', () => {
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'look' }] }]
+
+    expect(of(messages)[0]).not.toHaveProperty('at')
+  })
 })

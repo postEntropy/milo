@@ -200,6 +200,8 @@ export interface TranscriptMessage {
   parts: TranscriptPart[]
   /** Files delivered into this conversation, still on disk and served by id. */
   attachments?: FrameAttachment[]
+  /** When the message was first said, for a surface that shows it. */
+  at?: number
 }
 
 /** The words of a message, everything that is not prose left out. */

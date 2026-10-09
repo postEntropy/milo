@@ -555,8 +555,8 @@ describe('a session another writer has moved on from', () => {
     // And the turn it wrote builds on top of that, rather than replacing it.
     expect((await store.load(record.id))!.messages).toEqual([
       { role: 'user', content: [{ type: 'text', text: 'from elsewhere' }] },
-      { role: 'user', content: [{ type: 'text', text: 'hello there' }] },
-      { role: 'assistant', content: [{ type: 'text', text: 'SECRET_ASSISTANT_REPLY' }] },
+      { role: 'user', content: [{ type: 'text', text: 'hello there' }], at: expect.any(Number) },
+      { role: 'assistant', content: [{ type: 'text', text: 'SECRET_ASSISTANT_REPLY' }], at: expect.any(Number) },
     ])
   })
 })

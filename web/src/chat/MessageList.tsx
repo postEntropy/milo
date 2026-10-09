@@ -1,5 +1,7 @@
-import { memo, useEffect, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useCopy, type CopyState } from '../lib/clipboard.js'
+import { formatTokens } from '../lib/format.js'
+import { formatWhen } from '../../../src/core/sessions/format.ts'
 import type { ActionRow, FrameAttachment, SessionCardItem, ToolMark, TranscriptMessage } from '@protocol'
 import { proseOf } from '@protocol'
 import { toolBrand } from '../../../src/gateways/tool-line.ts'
@@ -235,6 +237,7 @@ export function MessageList({
           onFork={onFork}
           onEdit={onEdit}
           onRegenerate={onRegenerate}
+          onQuote={onQuote}
           regenPrompt={message.id === regen?.id ? regen.prompt : undefined}
           regenUpToTurn={message.id === regen?.id ? regen.upToTurn : undefined}
         />
@@ -297,7 +300,7 @@ function QuoteButton({ onQuote }: { onQuote?(text: string): void }) {
  * leaves every earlier one untouched, instead of reconciling the whole thread on
  * each frame.
  */
-const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onAction, onFork, onEdit, onRegenerate, regenPrompt, regenUpToTurn }: {
+const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onAction, onFork, onEdit, onRegenerate, onQuote, regenPrompt, regenUpToTurn }: {
   message: ChatMessage
   thinking: boolean
   busy: boolean
@@ -306,6 +309,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
   onFork?(upToTurn: number): void
   onEdit?(text: string, upToTurn: number): void
   onRegenerate?(text: string, upToTurn: number): void
+  onQuote?(text: string): void
   regenPrompt?: string
   regenUpToTurn?: number
 }) {
@@ -422,6 +426,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
               <span className="message-tool-label">Regenerate</span>
             </button>
           )}
+          <MessageMenu at={message.at} tokens={message.tokens} thoughtMs={message.thoughtMs} prose={prose} onQuote={onQuote} />
         </div>
       )}
       {message.waitingSince !== undefined && <WaitLine />}
@@ -430,12 +435,13 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
     </div>
     {/* The person's own message is a filled bubble: its controls sit under it, not
         inside it, the way the model's sit under its answer. */}
-    {message.role === 'user' && prose && onEdit && <div className="message-below">
+    {message.role === 'user' && prose && (onEdit || onQuote) && <div className="message-below">
       <div className="message-toolbar">
-        <button className="message-tool-btn" type="button" title="Edit this message" aria-label="Edit this message" onClick={() => onEdit(prose, turn - 1)}>
+        {onEdit && <button className="message-tool-btn" type="button" title="Edit this message" aria-label="Edit this message" onClick={() => onEdit(prose, turn - 1)}>
           <Icon name="edit" size={15} />
           <span className="message-tool-label">Edit</span>
-        </button>
+        </button>}
+        <MessageMenu at={message.at} prose={prose} onQuote={onQuote} />
       </div>
     </div>}
   </article>
@@ -485,6 +491,130 @@ function thoughtLabel(ms?: number): string {
 /** A tenth of a second matters at 6.4s; at 51s it is noise. */
 function formatSeconds(value: number): string {
   return `${value < 10 ? Math.round(value * 10) / 10 : Math.round(value)}s`
+}
+
+/**
+ * What a message is and what can be done with it, behind the three dots: when it
+ * was said, what an answer cost (tokens and thinking time, when the turn that
+ * produced it is still the one on screen), and the way to answer it as a whole.
+ *
+ * The panel is placed against the window rather than the thread: opened near an
+ * edge it flips and slides to stay whole instead of spilling off the screen, and
+ * a scroll moves it with its button rather than leaving it behind or cutting it
+ * at the scroller's edge.
+ */
+function MessageMenu({ at, tokens, thoughtMs, prose, onQuote }: {
+  at?: number
+  tokens?: { input: number; output: number }
+  thoughtMs?: number
+  prose: string
+  onQuote?(text: string): void
+}) {
+  const [open, setOpen] = useState(false)
+  const [spot, setSpot] = useState<{ left: number; top: number; up: boolean } | null>(null)
+  // Armed one frame after the panel mounts: an element that gets its entrance
+  // animation in the very style pass it first appears in does not always travel,
+  // so the growth is held a frame and then let go.
+  const [shown, setShown] = useState(false)
+  const box = useRef<HTMLSpanElement>(null)
+  const anchor = useRef<HTMLButtonElement>(null)
+  const panel = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDown = (event: MouseEvent): void => {
+      if (!box.current?.contains(event.target as Node)) setOpen(false)
+    }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
+  }, [open])
+
+  useEffect(() => {
+    if (!open) { setShown(false); return }
+    const frame = requestAnimationFrame(() => setShown(true))
+    return () => cancelAnimationFrame(frame)
+  }, [open])
+
+  useLayoutEffect(() => {
+    if (!open) { setSpot(null); return }
+    const place = (): void => {
+      const from = anchor.current?.getBoundingClientRect()
+      const size = panel.current?.getBoundingClientRect()
+      if (!from || !size) return
+      const margin = 10
+      const gap = 8
+      // Below when it fits, above otherwise: a menu that is always on screen, and
+      // that covers as little of the message it belongs to as the room allows.
+      const up = from.bottom + gap + size.height > window.innerHeight - margin
+      const top = up ? from.top - gap - size.height : from.bottom + gap
+      const widest = Math.max(margin, window.innerWidth - size.width - margin)
+      setSpot({ up, left: Math.min(Math.max(margin, from.left), widest), top: Math.max(margin, top) })
+    }
+    place()
+    window.addEventListener('resize', place)
+    document.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      document.removeEventListener('scroll', place, true)
+    }
+  }, [open])
+
+  const thinking = thoughtMs !== undefined && thoughtMs >= 1000
+  const hasInfo = at !== undefined || tokens !== undefined || thinking
+
+  return <span className="message-more" ref={box}>
+    <button
+      ref={anchor}
+      className={`message-tool-btn${open ? ' open' : ''}`}
+      type="button"
+      title="Message actions"
+      aria-label="Message actions"
+      aria-expanded={open}
+      onClick={() => setOpen((value) => !value)}
+    >
+      <Icon name="dots" size={15} />
+    </button>
+    {open && <div
+      ref={panel}
+      className={`message-menu${shown ? ' in' : ''}${spot?.up ? ' up' : ''}`}
+      role="menu"
+      aria-label="Message actions"
+      style={spot ? { left: spot.left, top: spot.top } : undefined}
+    >
+      {at !== undefined && <div className="message-menu-row" role="presentation">
+        <Icon name="clock" size={14} />
+        <span>{formatWhen(at)}</span>
+      </div>}
+      {tokens && <div className="message-menu-row" role="presentation">
+        <Icon name="cpu" size={14} />
+        <span>{formatTokens(tokens.input)} in · {formatTokens(tokens.output)} out</span>
+      </div>}
+      {thinking && <div className="message-menu-row" role="presentation">
+        <Icon name="spark" size={14} />
+        <span>{thoughtLabel(thoughtMs)}</span>
+      </div>}
+      {hasInfo && onQuote && <div className="message-menu-sep" />}
+      {onQuote && <button
+        className="message-menu-action"
+        type="button"
+        role="menuitem"
+        onClick={() => {
+          setOpen(false)
+          onQuote(prose)
+        }}
+      >
+        <Icon name="quote" size={15} />
+        <span>Quote this message</span>
+      </button>}
+    </div>}
+  </span>
 }
 
 function CopyButton({ text }: { text: string }) {

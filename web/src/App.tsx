@@ -469,7 +469,8 @@ export default function App() {
     if (frame.type === 'turn-start') {
       // The wait starts here and the turn says so on screen: the assistant
       // message carries it, so the line appears where the reply will.
-      setMessages((current) => [...current, { id: `user-${frame.id}`, role: 'user', parts: [{ kind: 'text', text: frame.text }] }, { id: frame.id, role: 'assistant', parts: [], waitingSince: Date.now() }])
+      const now = Date.now()
+      setMessages((current) => [...current, { id: `user-${frame.id}`, role: 'user', parts: [{ kind: 'text', text: frame.text }], at: now }, { id: frame.id, role: 'assistant', parts: [], waitingSince: now, at: now }])
       setBusy(true)
       return
     }
@@ -545,6 +546,7 @@ export default function App() {
             id: randomUUID(),
             role: 'assistant',
             parts: [{ kind: 'text', text: frame.markdown ?? frame.reply }],
+            at: Date.now(),
             ...(frame.attachments?.length ? { attachments: frame.attachments } : {}),
             ...(frame.actions?.length ? { actions: frame.actions } : {}),
             ...(frame.cards?.length ? { cards: frame.cards } : {}),
@@ -555,6 +557,7 @@ export default function App() {
           id: randomUUID(),
           role: 'assistant',
           parts: [{ kind: 'text', text: frame.markdown ?? frame.reply }],
+          at: Date.now(),
           ...(frame.attachments?.length ? { attachments: frame.attachments } : {}),
           ...(frame.actions?.length ? { actions: frame.actions } : {}),
           ...(frame.cards?.length ? { cards: frame.cards } : {}),
@@ -726,7 +729,7 @@ export default function App() {
       const uploadIds = files?.length ? await Promise.all(files.map(uploadFile)) : []
       followSend.current = true
       if (text.startsWith('/') && !uploadIds.length) {
-        setMessages((current) => [...current, { id: `user-${randomUUID()}`, role: 'user', parts: [{ kind: 'text', text }] }])
+        setMessages((current) => [...current, { id: `user-${randomUUID()}`, role: 'user', parts: [{ kind: 'text', text }], at: Date.now() }])
         socket.send({ type: 'command', text })
       } else socket.sendFor(sendingConversation, { type: 'send', text, intent, ...(target ? { target } : {}), ...(uploadIds.length ? { uploadIds } : {}) })
       setNotice(null)

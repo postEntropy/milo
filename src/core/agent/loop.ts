@@ -117,7 +117,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     // A message sent while this turn was running joins it here, at the one point
     // where the transcript is not halfway through a tool call.
     for (const steer of take(options.steering)) {
-      messages.push({ role: 'user', content: [{ type: 'text', text: steer }] })
+      messages.push({ role: 'user', content: [{ type: 'text', text: steer }], at: Date.now() })
       yield { type: 'steer', text: steer }
     }
 
@@ -175,7 +175,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         shown.push({ type: 'reasoning', text: reasoning, ...(signature ? { signature } : {}) })
       }
       if (text) shown.push({ type: 'text', text })
-      if (shown.length > 0) messages.push({ role: 'assistant', content: shown })
+      if (shown.length > 0) messages.push({ role: 'assistant', content: shown, at: Date.now() })
       throw error
     }
 
@@ -190,7 +190,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     for (const call of toolCalls) {
       parts.push({ type: 'tool-call', id: call.id, name: call.name, args: call.args })
     }
-    messages.push({ role: 'assistant', content: parts.length > 0 ? parts : [{ type: 'text', text: '' }] })
+    messages.push({ role: 'assistant', content: parts.length > 0 ? parts : [{ type: 'text', text: '' }], at: Date.now() })
 
     // No tool calls and nothing new to answer means the turn is over. A
     // correction that landed while this step was streaming keeps it going
