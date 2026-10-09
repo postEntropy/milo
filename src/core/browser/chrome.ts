@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process'
+import type { ChildProcess } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync } from 'node:fs'
 import { access, constants } from 'node:fs/promises'
 import { homedir } from 'node:os'
@@ -270,7 +271,14 @@ export async function launchChrome(options: {
       '--mute-audio',
       'about:blank',
     ],
-    { stdio: ['ignore', 'ignore', 'pipe'] },
+    {
+      stdio: ['ignore', 'ignore', 'pipe'],
+      // Its own process group, so the whole browser — root, zygote, renderers, GPU —
+      // can be signalled at once. Without it a kill reaches only the root and the
+      // rest run on. Windows has no process groups to signal; `stopBrowserProcess`
+      // walks the tree there instead.
+      detached: process.platform !== 'win32',
+    },
   )
 
   let stderr = ''
@@ -286,9 +294,7 @@ export async function launchChrome(options: {
     spawnError = error
   })
 
-  const stop = () => {
-    if (!child.killed && child.exitCode === null) child.kill('SIGKILL')
-  }
+  const stop = () => stopBrowserProcess(child)
 
   const deadline = Date.now() + (options.timeoutMs ?? 15_000)
   while (Date.now() < deadline) {
@@ -318,6 +324,31 @@ export async function launchChrome(options: {
 
   stop()
   throw new Error(`the browser did not start within ${Math.round((options.timeoutMs ?? 15_000) / 1000)}s at ${options.profileDir}`)
+}
+
+/**
+ * Ends the browser and everything it started. Chrome's zygote, renderer and GPU
+ * processes are not children this process owns in the signal sense, so a kill aimed
+ * at the root leaves them behind — holding the profile open for the next launch. The
+ * browser is started in a process group of its own, which can be signalled whole;
+ * Windows has no such group, so `taskkill /T` walks the tree instead.
+ */
+export function stopBrowserProcess(child: ChildProcess, platform = process.platform): void {
+  if (child.pid === undefined || child.killed || child.exitCode !== null) return
+
+  if (platform === 'win32') {
+    spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' })
+    return
+  }
+
+  try {
+    // A negative pid is the group, not one process: the whole browser goes at once.
+    process.kill(-child.pid, 'SIGKILL')
+  } catch {
+    // No group to signal — the spawn failed, or its leader is already gone. The root
+    // alone is then the most that can be done.
+    child.kill('SIGKILL')
+  }
 }
 
 /**

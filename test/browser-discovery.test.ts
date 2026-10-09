@@ -1,8 +1,16 @@
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { defaultProfileRoots, isDefaultProfile, launchChrome, listBrowsers } from '../src/core/browser/chrome.js'
+import {
+  defaultProfileRoots,
+  isDefaultProfile,
+  launchChrome,
+  listBrowsers,
+  stopBrowserProcess,
+} from '../src/core/browser/chrome.js'
 
 /**
  * Finding browsers, against a `PATH` and a home of the test's own. A machine's
@@ -87,6 +95,45 @@ describe('launchChrome', () => {
     await expect(
       launchChrome({ chromePath: path.join(dir(), 'no-such-chromium'), profileDir: profile, headless: true }),
     ).rejects.toThrow(/could not start/)
+  })
+})
+
+/** Whether a whole process group is still there: signal 0 asks, it does not kill. */
+function groupAlive(pid: number): boolean {
+  try {
+    process.kill(-pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+async function until(check: () => boolean, ms: number): Promise<boolean> {
+  const deadline = Date.now() + ms
+  while (Date.now() < deadline && !check()) await new Promise((wait) => setTimeout(wait, 20))
+  return check()
+}
+
+describe('stopBrowserProcess', () => {
+  it.skipIf(process.platform === 'win32')('ends the whole group, not only the root', async () => {
+    // A shell that forks a child and waits: Chrome's shape, one root with others
+    // under it. Started detached, exactly as the browser is, so it leads its own
+    // group — and a kill aimed at the root alone would leave the child running.
+    const child = spawn('sh', ['-c', 'sleep 30 & sleep 30'], { detached: true, stdio: 'ignore' })
+    const pid = child.pid!
+    await once(child, 'spawn')
+
+    try {
+      expect(groupAlive(pid)).toBe(true)
+      stopBrowserProcess(child)
+      expect(await until(() => !groupAlive(pid), 2_000)).toBe(true)
+    } finally {
+      try {
+        process.kill(-pid, 'SIGKILL')
+      } catch {
+        // Already gone: the fix did its work.
+      }
+    }
   })
 })
 
