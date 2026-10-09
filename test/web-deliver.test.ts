@@ -171,6 +171,29 @@ describe('a turn in a web conversation', () => {
     expect(after.at(-1)).toEqual({ type: 'state', busy: false, queued: 0 })
   })
 
+  it('ends a slash command with the same freeing state frame', async () => {
+    const hub = new WebHub(build())
+    const frames: ServerFrame[] = []
+    const client = { send: (frame: ServerFrame) => frames.push(frame) }
+
+    await hub.connect(client, CONVERSATION)
+    frames.length = 0 // the handshake; only what follows is the command
+
+    hub.handle(client, { type: 'command', text: '/help' }, CONVERSATION)
+    expect(await waitFor(() => frames.some((frame) => frame.type === 'command-result'))).toBe(true)
+    // A slash command is instantaneous, so it must never report itself as running:
+    // the frame that frees the stop button rides the queue's promise, a tick after
+    // the reply. Read from inside the command it said `busy: true`, and the page
+    // was left holding a stop button with nothing to stop.
+    await tick()
+
+    const answered = frames.findIndex((frame) => frame.type === 'command-result')
+    const after = frames.slice(answered + 1).filter((frame) => frame.type === 'state')
+    expect(after.at(-1)).toEqual({ type: 'state', busy: false, queued: 0 })
+    // And the command never announced itself as busy in the first place.
+    expect(frames.filter((frame) => frame.type === 'state' && frame.busy)).toEqual([])
+  })
+
   it('delivers a file the live turn sends into the chat it is talking in', async () => {
     const shot = path.join(home, 'shot.png')
     writeFileSync(shot, 'not really a png')

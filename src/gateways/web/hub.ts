@@ -842,23 +842,25 @@ export class WebHub {
       this.sendState(conversation.scope.conversationId)
       return
     }
+    // The state frame goes on the queue's settle handler, not inside `work`: read
+    // from there it would still say `busy: true` for this very command — a slash
+    // command is instantaneous, and the page would be left holding the stop
+    // button with nothing running to stop.
     this.turns.run(conversation.scope.conversationId, async () => {
       const response = await handleCommand(text, context)
-      if (response.handled) {
-        const refreshed = await this.runtime.getSession(conversation.scope)
-        conversation.session = refreshed
-        client.send({
-          type: 'command-result',
-          reply: response.reply ?? '',
-          markdown: response.markdown,
-          actions: response.actions,
-          cards: response.cards,
-          sessionId: refreshed.id,
-          ...(messageId ? { messageId } : {}),
-        })
-      }
-      this.sendState(conversation.scope.conversationId)
-    })
+      if (!response.handled) return
+      const refreshed = await this.runtime.getSession(conversation.scope)
+      conversation.session = refreshed
+      client.send({
+        type: 'command-result',
+        reply: response.reply ?? '',
+        markdown: response.markdown,
+        actions: response.actions,
+        cards: response.cards,
+        sessionId: refreshed.id,
+        ...(messageId ? { messageId } : {}),
+      })
+    }, () => this.sendState(conversation.scope.conversationId))
   }
 
   private commandContext(conversation: Conversation, session: Session, signal: AbortSignal): CommandContext {
