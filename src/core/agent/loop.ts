@@ -201,6 +201,12 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     }
 
     for (let index = 0; index < toolCalls.length; ) {
+      // A turn stopped between two calls stops here rather than running the rest
+      // and only noticing at the next request. The tools read `context.signal`
+      // and the provider reads `signal`; either being set is the turn stopped. A
+      // call already in flight observed the same signal and is dealt with when it
+      // settles.
+      if (options.signal?.aborted || options.context.signal.aborted) throw abortError()
       // A run of calls that hold no shared state is started together, then read
       // back in the order the model made them: the events stay exactly as a
       // serial run's would — a start and its end for each call, in order — so
@@ -214,7 +220,17 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       // from this line rather than from where each result is read back.
       const runStarted = Date.now()
       const pending =
-        run.length > 1 ? run.map((call) => executeCall(options.permission, registry, call, context)) : null
+        run.length > 1
+          ? run.map((call) => {
+              const started = executeCall(options.permission, registry, call, context)
+              // A sibling that fails while an earlier result is still being
+              // awaited is not this turn's error — but an unhandled rejection
+              // would still take the process down. Read back below; marked
+              // handled here.
+              started.catch(() => undefined)
+              return started
+            })
+          : null
 
       for (let at = 0; at < run.length; at += 1) {
         const call = run[at]
@@ -293,6 +309,13 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       ? `Stopped after ${maxSteps} steps — it answered with what it had.`
       : `Stopped after ${maxSteps} steps without a final answer.`,
   }
+}
+
+/** The error a stopped turn ends on, named so a caller can tell it from a failure. */
+function abortError(): Error {
+  const error = new Error('the turn was stopped')
+  error.name = 'AbortError'
+  return error
 }
 
 /** Empties the queue and hands back what was in it. */

@@ -439,6 +439,40 @@ describe('runAgent — the plan', () => {
   })
 })
 
+describe('runAgent — stopping', () => {
+  it('stops between tool calls once the turn is aborted', async () => {
+    const provider = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'fake_read', args: { path: 'a' } },
+        { type: 'tool-call', id: 'c2', name: 'fake_read', args: { path: 'b' } },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+    ])
+    const registry = new ToolRegistry([fakeTool])
+    const controller = new AbortController()
+    const events: AgentEvent[] = []
+
+    await expect(async () => {
+      for await (const event of runAgent({
+        provider,
+        model: 'm',
+        tools: registry.specs(),
+        registry,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'read a and b' }] }],
+        context: { cwd: process.cwd(), signal: controller.signal },
+      })) {
+        events.push(event)
+        // The person stops the turn while the first call's result is coming back.
+        if (event.type === 'tool-end') controller.abort()
+      }
+    }).rejects.toThrow('the turn was stopped')
+
+    // The call already in flight ran and was reported; the next one never started.
+    expect(events.filter((event) => event.type === 'tool-end')).toHaveLength(1)
+    expect(events.some((event) => event.type === 'tool-start' && event.id === 'c2')).toBe(false)
+  })
+})
+
 describe('the execution log along a turn', () => {
   it('times every request and every tool call, naming the surface and the session', async () => {
     const provider = new ScriptedProvider([
