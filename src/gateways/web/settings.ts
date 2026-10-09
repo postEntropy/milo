@@ -22,6 +22,7 @@ import {
   type DraftInput,
   type InboxFilter,
 } from '../../core/google/gmail.js'
+import { htmlToText } from '../../core/tools/html.js'
 import type { GoogleOutcome, GoogleTokens } from '../../core/google/oauth.js'
 import { labeledPage } from '../../core/google/inbox.js'
 import { LABEL_COLORS, carryingLabel, createLabel, deleteLabel, labelMessages, toggleAssignment } from '../../core/google/labels.js'
@@ -323,8 +324,12 @@ export class WebSettings {
     const id = googleId(body.threadId)
     const thread = await this.mailCall((tokens) => readThread(tokens, id))
     if (thread.messages.length === 0) throw new Error('That thread has no messages to read.')
+    // An HTML-only message is stripped to its words before it reaches the model:
+    // sending the markup spends the window on tags the model cannot use.
+    const bodyOf = (message: (typeof thread.messages)[number]): string =>
+      message.html ? htmlToText(message.text) : message.text
     const mail = thread.messages
-      .map((message) => `From: ${message.from ?? '(unknown)'}\nDate: ${message.date ?? '(no date)'}\nSubject: ${message.subject ?? '(no subject)'}\n\n${message.text}`)
+      .map((message) => `From: ${message.from ?? '(unknown)'}\nDate: ${message.date ?? '(no date)'}\nSubject: ${message.subject ?? '(no subject)'}\n\n${bodyOf(message)}`)
       .join('\n\n---\n\n')
     return { text: await this.askModel(mode as AssistMode, mail) }
   }
