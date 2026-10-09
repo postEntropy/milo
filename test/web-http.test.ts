@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { Readable } from 'node:stream'
-import { bindProblem, readRawBody, startWebServer, webReachLines } from '../src/gateways/web/http.js'
+import { bindProblem, panelHeaders, readRawBody, startWebServer, webReachLines } from '../src/gateways/web/http.js'
 
 const running: Array<{ stop(): Promise<void> }> = []
 
@@ -138,6 +138,20 @@ describe('web server static UI', () => {
     // Served as a download, the manifest is ignored: no `display: standalone`,
     // and the phone keeps dressing the app in its own browser chrome.
     expect(response.headers.get('content-type')).toContain('application/manifest+json')
+  })
+})
+
+describe('web server panel artifacts', () => {
+  it('sandboxes a panel artifact, so a direct hit on it cannot reach the app', () => {
+    const headers = panelHeaders('image/svg+xml', 12)
+    expect(headers).toMatchObject({
+      'content-type': 'image/svg+xml',
+      'content-disposition': 'inline',
+      'x-content-type-options': 'nosniff',
+      // Bare `sandbox` would also strip the panel's own pages of their scripts;
+      // the allowances keep HTML and the PDF viewer working under an opaque origin.
+      'content-security-policy': 'sandbox allow-scripts allow-forms allow-popups allow-modals',
+    })
   })
 })
 

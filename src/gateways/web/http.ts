@@ -197,6 +197,23 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   }
 }
 
+/**
+ * The headers a panel artifact is served with. The CSP sandbox is the security
+ * one: a direct hit on `/panel/<id>` — an SVG opened in its own tab — otherwise
+ * runs on the app's own origin, where a script inside it could reach the app. The
+ * allowances mirror the page iframe, so the panel's HTML and PDF still work.
+ */
+export function panelHeaders(mimeType: string, size: number): Record<string, string> {
+  return {
+    'content-type': mimeType,
+    'content-length': String(size),
+    'content-disposition': 'inline',
+    'cache-control': 'no-store',
+    'x-content-type-options': 'nosniff',
+    'content-security-policy': 'sandbox allow-scripts allow-forms allow-popups allow-modals',
+  }
+}
+
 async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, settings: WebSettings, hub: WebHub, boundHost: string): Promise<void> {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
   if (!sameOrigin(request, boundHost)) return json(response, 403, { error: 'Origin not allowed.' })
@@ -261,13 +278,7 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
     const known = hub.attachment(url.pathname.slice('/panel/'.length))
     const stats = known ? statSync(known.path, { throwIfNoEntry: false }) : undefined
     if (!known || !stats?.isFile()) return json(response, 404, { error: 'Not found.' })
-    response.writeHead(200, {
-      'content-type': known.mimeType,
-      'content-length': String(stats.size),
-      'content-disposition': 'inline',
-      'cache-control': 'no-store',
-      'x-content-type-options': 'nosniff',
-    })
+    response.writeHead(200, panelHeaders(known.mimeType, stats.size))
     if (request.method === 'HEAD') {
       response.end()
       return
