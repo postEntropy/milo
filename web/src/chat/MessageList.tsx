@@ -10,6 +10,7 @@ import { toolIconName } from '../ui/tool-icons.js'
 import { attachmentUrl } from '../lib/api.js'
 import { Markdown } from './Markdown.js'
 import { Icon, type IconName } from '../ui/Icons.js'
+import { WaitLine } from '../ui/WaitLine.js'
 import { miloAvatar } from '../ui/milo.js'
 import { defaultSuggestions, type Suggestion } from './suggestions.js'
 
@@ -429,7 +430,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
           <MessageMenu at={message.at} tokens={message.tokens} thoughtMs={message.thoughtMs} prose={prose} onQuote={onQuote} />
         </div>
       )}
-      {message.waitingSince !== undefined && <WaitLine />}
+      {message.waitingSince !== undefined && <WaitLine label="Thinking" />}
       {message.runningTool !== undefined && <WaitLine label={`${message.runningTool}…`} />}
       {message.status && <div className="message-status">{message.status}</div>}
     </div>
@@ -446,20 +447,6 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
     </div>}
   </article>
 })
-
-/**
- * The wait for the model's next output: a steady glyph and the word, with a light
- * travelling along the word, so a turn that has nothing to show yet still says it
- * is running. Whatever arrives next takes this line's place. The same line stands
- * for a tool call while it executes, named so the wait is attributed to what is
- * actually running.
- */
-function WaitLine({ label = 'Thinking' }: { label?: string }) {
-  return <div className="wait-line">
-    <Icon name="spark" size={14} />
-    <span className="wait-label">{label}</span>
-  </div>
-}
 
 /**
  * What the model thought, and how long it took. Open by default: the wait is

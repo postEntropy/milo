@@ -6,6 +6,7 @@ import { formatWhen, message } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
+import { WaitLine } from '../ui/WaitLine.js'
 
 /**
  * An access level, in the same order `src/core/google/tiers.ts` declares. Kept as
@@ -482,7 +483,7 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
           {connected && route === null && <Labels labels={labels} colors={colors} active={labelFilter} sorting={connected.sorting} onFilter={setLabelFilter} onCreate={createLabel} onDelete={removeLabel} />}
           <div className="panel-body">
             {status === null
-              ? <p className="list-empty">Reading the connection…</p>
+              ? <div className="mail-wait"><WaitLine label="Reading the connection…" /></div>
               : connected === null
               ? <NotConnected status={status} />
               : composing
@@ -490,7 +491,7 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
               : threadId !== null
               ? thread?.id === threadId
                 ? <ThreadView thread={thread} access={access} busy={busy} labels={labels} readingMore={readingMore} onReply={reply} onDraft={() => void draftReply()} onModify={modify} onAsk={ask} onAssign={assign} onReadMore={(mail) => void readMore(mail)} />
-                : <p className="list-empty">Reading the thread…</p>
+                : <div className="mail-wait"><WaitLine label="Reading the thread…" /></div>
               : <Inbox inbox={visible} access={access} onOpen={(mail) => onRoute(mail.threadId)} onModify={modify} onMore={loadMore} loading={pageLoading} nextPage={nextPage} narrowed={narrowed} onClear={clearNarrowing} />}
             {assist && <section className="mail-assist">
               <h3>{assist.title}</h3>
@@ -559,7 +560,7 @@ function Inbox({
     return () => observer.disconnect()
   }, [nextPage, onMore])
 
-  if (inbox === null) return <p className="list-empty">Reading the inbox…</p>
+  if (inbox === null) return <div className="mail-wait"><WaitLine label="Reading the inbox…" /></div>
   if (inbox.length === 0) return <div className="panel-empty">
     <span className="panel-empty-mark"><Icon name="inbox" size={22} /></span>
     <h3>{narrowed ? 'Nothing matches' : 'The inbox is empty'}</h3>
