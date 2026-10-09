@@ -146,6 +146,36 @@ describe('sorting mail into labels', () => {
     expect(store.assignments.m1.labels).toEqual(['calendar'])
     expect(IDs(store.labels)).toContain('calendar')
   })
+
+  it('sorts a page in bounded batches, so no single request carries the whole page', async () => {
+    const page = Array.from({ length: 23 }, (_, index) => mail(`m${index}`))
+    const answers = Object.fromEntries(page.map((message) => [message.id, { choice: 'newsletter', confidence: 0.9 }]))
+    const classifier = fakeClassifier(answers)
+
+    const { byMessage } = await labelMessages(classifier, page)
+
+    // 23 messages at ten to a call: three calls, and the last one still sorted.
+    expect(classifier.calls).toHaveLength(3)
+    expect(byMessage.get('m22')).toEqual([expect.objectContaining({ id: 'newsletter', name: 'Newsletters' })])
+  })
+
+  it('keeps the batches that sorted when one of them fails', async () => {
+    const page = Array.from({ length: 12 }, (_, index) => mail(`m${index}`))
+    let call = 0
+    const classifier = {
+      ask: async () => {
+        call += 1
+        if (call === 1) throw new Error('classifier review timed out')
+        return Object.fromEntries(page.map((message) => [message.id, { choice: 'receipt', confidence: 0.9 }]))
+      },
+    }
+
+    const { byMessage } = await labelMessages(classifier, page)
+
+    // The first batch (ten) failed and stays unlabelled; the second (two) still sorted.
+    expect(byMessage.get('m0')).toEqual([])
+    expect(byMessage.get('m11')).toEqual([expect.objectContaining({ id: 'receipt' })])
+  })
 })
 
 describe('putting a label on by hand', () => {

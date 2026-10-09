@@ -63,6 +63,13 @@ const NONE = 'none'
 const DEFAULT_LABEL_CONFIDENCE = 0.6
 /** Sorting a page is one call, so it is allowed longer than a single danger check. */
 const LABEL_TIMEOUT_MS = 8_000
+/**
+ * How many messages one classifier call may ask about. A choice question is asked
+ * per message and the criteria ride on each of them, so an unbounded page is an
+ * unbounded request body; batched, one request stays small and one batch that
+ * fails no longer costs the whole page.
+ */
+const MAX_QUESTIONS_PER_CALL = 10
 /** Assignments older than this are dropped, so the store does not grow for ever. */
 const MAX_ASSIGNMENT_AGE_MS = 30 * 24 * 60 * 60 * 1000
 
@@ -181,6 +188,19 @@ function describe(labels: MailLabel[]): string {
  */
 export function listLabels(): MailLabel[] {
   return readLabels().labels
+}
+
+/**
+ * The messages on a page with no assignment yet — exactly the ones a sort would ask
+ * the model about. A surface reads this to know what is still to be sorted without
+ * paying for the sort itself, which is what keeps the inbox off the classifier's
+ * critical path.
+ */
+export function unsorted(messages: MailSummary[]): string[] {
+  const store = readLabels()
+  return messages
+    .filter((message) => store.assignments[message.id] === undefined)
+    .map((message) => message.id)
 }
 
 /**
@@ -323,7 +343,7 @@ async function labelPage(
   return { byMessage, labels: written.labels }
 }
 
-/** One call for the whole page: a choice per message, over the labels on offer. */
+/** One call for a whole page: a choice per message, over the labels on offer. */
 async function suggestLabels(
   classifier: Labeler,
   messages: MailSummary[],
@@ -331,6 +351,27 @@ async function suggestLabels(
   signal?: AbortSignal,
 ): Promise<LabelSuggestion[]> {
   const criteria = criteriaFor(store)
+  const suggestions: LabelSuggestion[] = []
+  for (let start = 0; start < messages.length; start += MAX_QUESTIONS_PER_CALL) {
+    const batch = messages.slice(start, start + MAX_QUESTIONS_PER_CALL)
+    try {
+      suggestions.push(...(await labelBatch(classifier, batch, criteria, signal)))
+    } catch (error) {
+      // This batch stays unsorted and is asked about again later; the rest of the
+      // page is still worth sorting, so one bad batch does not sink it.
+      logWarn(`could not label ${batch.length} message${batch.length === 1 ? '' : 's'}: ${errorMessage(error)}`)
+    }
+  }
+  return suggestions
+}
+
+/** One call's worth of messages: a choice question each, and the labels it reads back. */
+async function labelBatch(
+  classifier: Labeler,
+  messages: MailSummary[],
+  criteria: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<LabelSuggestion[]> {
   const questions: Record<string, ClassifierQuestion> = {}
   for (const message of messages) {
     questions[message.id] = {
