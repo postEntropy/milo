@@ -33,6 +33,16 @@ function allowed(access: GoogleAccess, needed: 'modify' | 'compose' | 'send'): G
 /** Bodies are cut here: a newsletter is not worth a context window. */
 export const BODY_LIMIT = 4000
 
+/** One chunk of a full body when it is read past the cut above. */
+export const BODY_PAGE = 20_000
+
+/**
+ * How many messages one page's metadata is fetched for at a time. Gmail has no
+ * batch call for this, so a page costs one request per message — capped here, so a
+ * fifty-row page is a handful of requests in flight rather than fifty at once.
+ */
+const SUMMARY_CONCURRENCY = 8
+
 export interface MailSummary {
   id: string
   threadId: string
@@ -158,14 +168,20 @@ function idsOf(payload: unknown): string[] {
  * the bodies: those come one at a time, for whichever the model decides to read.
  */
 async function summariesFor(tokens: GoogleTokens, ids: string[]): Promise<GoogleOutcome<MailSummary[]>> {
-  const details = await Promise.all(
-    ids.map((id) =>
-      authorizedJson(
-        tokens,
-        endpoint(`messages/${encodeURIComponent(id)}`, { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] }),
-      ),
-    ),
-  )
+  const details: GoogleOutcome<unknown>[] = []
+  for (let start = 0; start < ids.length; start += SUMMARY_CONCURRENCY) {
+    const batch = ids.slice(start, start + SUMMARY_CONCURRENCY)
+    details.push(
+      ...(await Promise.all(
+        batch.map((id) =>
+          authorizedJson(
+            tokens,
+            endpoint(`messages/${encodeURIComponent(id)}`, { format: 'metadata', metadataHeaders: ['From', 'Subject', 'Date'] }),
+          ),
+        ),
+      )),
+    )
+  }
 
   const summaries: MailSummary[] = []
   let firstError: GoogleOutcome<never> | null = null
@@ -245,6 +261,40 @@ export async function read(tokens: GoogleTokens, id: string): Promise<GoogleOutc
   const fetched = await authorizedJson(tokens, endpoint(`messages/${encodeURIComponent(id)}`, { format: 'full' }))
   if (!fetched.ok) return fetched
   return { ok: true, value: messageOf(id, fetched.value) }
+}
+
+/** A body read past the cut: the text itself, and where more of it starts. */
+export interface MailBody {
+  id: string
+  text: string
+  html: boolean
+  /** True when more of a text body is left, at `nextOffset`. */
+  truncated: boolean
+  nextOffset?: number
+}
+
+/**
+ * One message's body beyond the `BODY_LIMIT` the thread draws. A text body comes in
+ * `BODY_PAGE` chunks so a whole message is reachable without ever handing a
+ * newsletter to the context window; an HTML body comes whole, since half a document
+ * is not a document and the frame that draws it cannot stitch two halves.
+ */
+export async function readBody(
+  tokens: GoogleTokens,
+  id: string,
+  offset = 0,
+): Promise<GoogleOutcome<MailBody>> {
+  const fetched = await authorizedJson(tokens, endpoint(`messages/${encodeURIComponent(id)}`, { format: 'full' }))
+  if (!fetched.ok) return fetched
+  const payload = (fetched.value as { payload?: unknown }).payload
+  const { text, html } = plainText(payload)
+  if (html) return { ok: true, value: { id, text, html, truncated: false } }
+  const start = Math.max(0, Math.min(offset, text.length))
+  const end = Math.min(start + BODY_PAGE, text.length)
+  return {
+    ok: true,
+    value: { id, text: text.slice(start, end), html, truncated: end < text.length, ...(end < text.length ? { nextOffset: end } : {}) },
+  }
 }
 
 /** The inbox, a page at a time: `q: 'in:inbox'` with Gmail's own cursor. */
