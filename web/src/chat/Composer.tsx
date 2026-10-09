@@ -195,6 +195,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   async function submit(intent: 'steer' | 'queue'): Promise<void> {
     const text = draft.trim()
     if (!text && files.length === 0) return
+    // The cursor stays where the next message is typed, taken back here — inside
+    // the gesture that sent this one — because the send button keeps the press and
+    // gives it up when `busy` swaps it for the stop control. On a phone the keys
+    // go down with that focus, and raising them again is a tap the composer does
+    // not always get back. `preventScroll` so the browser's own scroll to the
+    // field cannot ride on top of the phone's keyboard lift.
+    ref.current?.focus({ preventScroll: true })
     // The picked-out words travel as a quotation ahead of the reply, so what was
     // answered is part of the message and not only in the reader's head.
     const quoted = quote ? `${quote.split('\n').map((line) => `> ${line}`).join('\n')}\n\n` : ''
