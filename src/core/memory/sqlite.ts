@@ -178,6 +178,10 @@ export class SqliteMemory implements Memory {
     // WAL, because the CLI and `milo serve` are two processes on one store and
     // the default rollback journal would make one of them wait on the other.
     this.db.exec('pragma journal_mode = WAL')
+    // And a busy timeout on top: two writers still contend, and without this the
+    // loser gets `SQLITE_BUSY` instantly, which recall and the memory screen would
+    // otherwise read as "nothing here".
+    this.db.exec('pragma busy_timeout = 5000')
     this.db.exec(SCHEMA)
     this.addVectorColumn()
     tightenDb(this.location)
@@ -516,9 +520,11 @@ export class SqliteMemory implements Memory {
         createdAt: row.createdAt,
         tags: parseTags(row.tags),
       }))
-    } catch {
-      // Same rule as recall: a store that cannot be read answers nothing rather
-      // than taking down the screen that asked.
+    } catch (error) {
+      // A store that cannot be read answers nothing rather than taking down the
+      // screen that asked — but it says why, so an empty list is never mistaken
+      // for an install with nothing remembered.
+      logWarn(`could not list memory: ${errorMessage(error)}`)
       return []
     }
   }
