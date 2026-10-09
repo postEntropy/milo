@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -37,6 +38,22 @@ function offsetOf(index: TurnIndex, name: string): number | undefined {
   }
   return internals.db.prepare('select offset from files where name = ?').get(name)?.offset
 }
+
+/**
+ * A second connection holding the write lock across processes, the way the CLI
+ * does while it catches up the log. It says `locked` once the lock is taken and
+ * lets it go a moment later.
+ */
+const LOCK_SCRIPT = `
+  const { DatabaseSync } = require('node:sqlite')
+  const db = new DatabaseSync(process.env.MILO_LOCK_DB)
+  db.exec('pragma journal_mode = WAL')
+  db.exec('begin immediate')
+  db.prepare('insert into turns (at, session, scope, text, hash) values (?, ?, ?, ?, ?)')
+    .run('${DAY}T12:00:00.000Z', 'calm-otter-7', 'cli:main', 'held open', 'hash-held-open')
+  process.stdout.write('locked')
+  setTimeout(() => { db.exec('commit'); db.close(); process.exit(0) }, 300)
+`
 
 describe('TurnIndex', () => {
   it('keeps what the person typed and not the replies', async () => {
@@ -195,6 +212,42 @@ describe('TurnIndex', () => {
       'a memoria e do install',
     ])
     rebuilt.close()
+  })
+
+  it('keeps the index when another writer is only holding the lock', async () => {
+    const dir = tempDir()
+    const file = writeLog(dir, [entry('user', 'a senha gira na segunda')])
+
+    // The schema, and the log indexed once so far.
+    const first = new TurnIndex({ dir })
+    const before = statSync(turnIndexFile(dir)).ino
+    first.close()
+
+    // The write lock the other process (the CLI) takes while it catches up the log.
+    // A process of its own, because `new TurnIndex` below blocks the event loop and
+    // a `setTimeout` in this one could never run to release it.
+    const holder = spawn(process.execPath, ['-e', LOCK_SCRIPT], {
+      stdio: ['ignore', 'pipe', 'inherit'],
+      env: { ...process.env, MILO_LOCK_DB: turnIndexFile(dir) },
+    })
+    try {
+      await new Promise<void>((resolve, reject) => {
+        holder.stdout?.once('data', () => resolve())
+        holder.once('error', reject)
+      })
+
+      // A turn lands while the lock is held, so the second reader has to write too.
+      appendFileSync(file, `${JSON.stringify(entry('user', 'a senha nova'))}\n`)
+
+      // A lock is not corruption: the second index waits it out (busy timeout)
+      // rather than deleting a file that was about to work.
+      const second = new TurnIndex({ dir })
+      expect(statSync(turnIndexFile(dir)).ino).toBe(before)
+      expect((await second.recall(scope, 'nova')).map((hit) => hit.text)).toEqual(['a senha nova'])
+      second.close()
+    } finally {
+      holder.kill('SIGKILL')
+    }
   })
 
   it('throws away a database it cannot open rather than failing recall', async () => {

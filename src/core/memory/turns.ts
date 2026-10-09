@@ -131,12 +131,15 @@ export class TurnIndex implements TurnSource {
     this.location = turnIndexFile(options.dir)
     this.debug = options.debug ?? process.env.MILO_DEBUG === '1'
 
-    // Derived, so a file that cannot be opened is deleted rather than refused:
-    // everything in it can be read back off the log. Without this a damaged
-    // index would cost recall forever, one line in a log nobody reads.
+    // Derived, so a file that is not a database at all is deleted rather than
+    // refused: everything in it can be read back off the log. Only that, though —
+    // a lock (the CLI and `milo serve` both write here) or a permission is a
+    // state to report, not a file to throw away, and deleting on any error used
+    // to destroy a working index the moment the other process held it.
     try {
       this.db = openDatabase(this.location, DatabaseSync)
-    } catch {
+    } catch (error) {
+      if (!isUnusableDatabase(error)) throw error
       for (const suffix of ['', '-wal', '-shm']) rmSync(`${this.location}${suffix}`, { force: true })
       this.db = openDatabase(this.location, DatabaseSync)
     }
@@ -335,8 +338,25 @@ function openDatabase(location: string, DatabaseSync: typeof import('node:sqlite
   // WAL, because the CLI and `milo serve` both append to the log and both index
   // it; the default rollback journal would make one of them wait on the other.
   db.exec('pragma journal_mode = WAL')
+  // And a busy timeout on top: WAL keeps readers off writers, but two writers —
+  // the CLI and the daemon, both catching up the same log — still contend, and
+  // without this the loser gets `SQLITE_BUSY` instantly instead of waiting.
+  db.exec('pragma busy_timeout = 5000')
   db.exec(SCHEMA)
   return db
+}
+
+/**
+ * SQLite's own result codes for a file that is not a database at all — the two a
+ * delete-and-rebuild can actually fix. Everything else (a lock, a permission, a
+ * full disk) is a state to report, not a file to throw away.
+ */
+const SQLITE_CORRUPT = 11
+const SQLITE_NOTADB = 26
+
+function isUnusableDatabase(error: unknown): boolean {
+  const code = (error as { errcode?: unknown } | null)?.errcode
+  return code === SQLITE_CORRUPT || code === SQLITE_NOTADB
 }
 
 /** The bytes from `from` to `to`, which is how a growing file is caught up with. */
