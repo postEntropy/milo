@@ -245,4 +245,13 @@ describe('what a tool call answered', () => {
   it('says so when the server answered nothing', () => {
     expect(mcpToolResult('github', 'echo', { content: [] }).content).toMatch(/returned no content/)
   })
+
+  it('caps a runaway output the way the shell does', () => {
+    // A server has no idea how big the window is, so one chatty tool must not be
+    // able to overflow every request that follows it.
+    const huge = 'x'.repeat(50_000)
+    const content = mcpToolResult('github', 'dump', { content: [{ type: 'text', text: huge }] }).content
+    expect(content.length).toBeLessThan(huge.length)
+    expect(content).toContain('omitted')
+  })
 })

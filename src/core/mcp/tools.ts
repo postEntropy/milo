@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { ImageMime } from '../providers/types.js'
+import { clipMiddle } from '../tools/output.js'
 import type { Tool, ToolResult } from '../tools/types.js'
 import type { McpToolDefinition } from './protocol.js'
 
@@ -21,6 +22,13 @@ const MAX_TOOL_NAME = 64
 
 /** A description is context in every request; a runaway one is a server's bug, not a catalog entry. */
 const MAX_DESCRIPTION = 2_048
+
+/**
+ * A tool's output is context too, and a server has no idea how big Milo's window
+ * is. The same ceiling the shell and `git` hold their output to, applied here so
+ * one chatty server cannot overflow every request that follows it.
+ */
+const MAX_OUTPUT = 20_000
 
 /** The call into the server, owned by the manager so one connection serves every tool. */
 export type McpToolCall = (tool: string, args: unknown, signal: AbortSignal) => Promise<unknown>
@@ -166,7 +174,7 @@ export function mcpToolResult(server: string, tool: string, result: unknown): To
     parts.push(JSON.stringify(record.structuredContent, null, 2))
   }
 
-  const text = parts.join('\n\n').trim()
+  const text = clipMiddle(parts.join('\n\n').trim(), MAX_OUTPUT)
   return {
     content: text || `The ${server} server's "${tool}" tool returned no content.`,
     ...(record.isError === true ? { isError: true } : {}),
