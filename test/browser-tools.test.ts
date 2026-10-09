@@ -89,6 +89,21 @@ describe('browser_open', () => {
     expect(result.isError).toBe(true)
   })
 
+  it('refuses a cloud metadata address', async () => {
+    // Opening is read-only and never asks, so an address that hands back the
+    // machine's credentials must be barred at the tool, not left to the page.
+    const { byName } = stub()
+    const result = await run(byName.get('browser_open')!, { url: 'http://169.254.169.254/latest/meta-data/' })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('metadata address')
+  })
+
+  it('still opens loopback, which a dev server needs', async () => {
+    const { byName } = stub()
+    const result = await run(byName.get('browser_open')!, { url: 'http://127.0.0.1:3000/' })
+    expect(result.isError).toBeUndefined()
+  })
+
   it('answers with the page as elements', async () => {
     const { byName } = stub()
     const result = await run(byName.get('browser_open')!, { url: 'https://example.com' })
