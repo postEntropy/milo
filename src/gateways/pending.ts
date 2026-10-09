@@ -1,9 +1,12 @@
 /**
  * One-shot permission decisions awaited by a gateway (an inline button press in
  * Telegram or Discord). Resolves `false` if nobody answers in time.
+ *
+ * A waiter may name the session the question was put to. An answer is then the act
+ * of that session — a different one holding the same id cannot resolve it.
  */
 export class PendingDecisions {
-  private readonly waiters = new Map<string, (allowed: boolean) => void>()
+  private readonly waiters = new Map<string, { finish: (allowed: boolean) => void; owner?: string }>()
 
   /**
    * Waits for the answer. A stopped turn resolves it too, as a **denial**: the
@@ -11,7 +14,7 @@ export class PendingDecisions {
    * indicator on, the queue blocked — and a ✅ pressed afterwards would run the
    * very tool the stop was meant to prevent.
    */
-  wait(id: string, timeoutMs: number, signal?: AbortSignal): Promise<boolean> {
+  wait(id: string, timeoutMs: number, signal?: AbortSignal, owner?: string): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       let timer: ReturnType<typeof setTimeout>
       const finish = (allowed: boolean): void => {
@@ -28,16 +31,20 @@ export class PendingDecisions {
         return
       }
       signal?.addEventListener('abort', stopped, { once: true })
-      this.waiters.set(id, finish)
+      this.waiters.set(id, { finish, ...(owner !== undefined ? { owner } : {}) })
     })
   }
 
-  /** Returns false when the id is unknown (already answered or expired). */
-  resolve(id: string, allowed: boolean): boolean {
+  /**
+   * Returns false when the id is unknown (already answered or expired), or when an
+   * owner was named and the answer comes from someone else.
+   */
+  resolve(id: string, allowed: boolean, owner?: string): boolean {
     const waiter = this.waiters.get(id)
     if (!waiter) return false
+    if (waiter.owner !== undefined && waiter.owner !== owner) return false
     this.waiters.delete(id)
-    waiter(allowed)
+    waiter.finish(allowed)
     return true
   }
 

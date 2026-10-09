@@ -950,6 +950,26 @@ describe('PendingDecisions', () => {
     expect(await pending.wait('id5', 60_000, controller.signal)).toBe(false)
     expect(pending.size).toBe(0)
   })
+
+  it('refuses an answer from a session the permission was not put to', async () => {
+    const pending = new PendingDecisions()
+    const waiting = pending.wait('id6', 60_000, undefined, 'session-a')
+
+    // A different session holding the id cannot answer for it.
+    expect(pending.resolve('id6', true, 'session-b')).toBe(false)
+    expect(pending.size).toBe(1)
+
+    expect(pending.resolve('id6', true, 'session-a')).toBe(true)
+    expect(await waiting).toBe(true)
+  })
+
+  it('leaves a permission with no owner answerable by anyone', async () => {
+    const pending = new PendingDecisions()
+    const waiting = pending.wait('id7', 60_000)
+
+    expect(pending.resolve('id7', true)).toBe(true)
+    expect(await waiting).toBe(true)
+  })
 })
 
 describe('a surface that steers with its own machinery', () => {

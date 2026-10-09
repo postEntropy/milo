@@ -161,8 +161,13 @@ export class WebHub {
         if (!result.stopped) client.send({ type: 'error', message: 'Nothing is running to stop.' })
       } else if (frame.id) {
         const allowed = frame.action === 'allow'
-        this.pending.resolve(frame.id, allowed)
-        client.send({ type: 'permission-result', id: frame.id, allowed })
+        // The permission belongs to the session it was raised in: a client of another
+        // session cannot answer it, even holding the id.
+        if (this.pending.resolve(frame.id, allowed, conversationId)) {
+          client.send({ type: 'permission-result', id: frame.id, allowed })
+        } else {
+          client.send({ type: 'error', message: 'That permission is no longer waiting.' })
+        }
       }
       return
     }
@@ -694,7 +699,7 @@ export class WebHub {
                 request,
                 expiresAt: Date.now() + PERMISSION_TIMEOUT_MS,
               })
-              const allowed = await this.pending.wait(permissionId, PERMISSION_TIMEOUT_MS, signal)
+              const allowed = await this.pending.wait(permissionId, PERMISSION_TIMEOUT_MS, signal, conversationId)
               this.broadcast(conversationId, { type: 'permission-result', id: permissionId, allowed })
               return { allowed }
             },
