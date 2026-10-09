@@ -1120,8 +1120,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
    `backwards` and never `both`: the resting state is the element's own style,
    so no filter layer is left behind once the animation is over. A session
-   opened from the sidebar marks its earlier messages `is-loaded` and does not
-   replay this for a whole conversation — only what arrives now settles in. */
+   opened from the sidebar marks its earlier messages `is-loaded`, so they do
+   not each replay their own entrance; the thread settles in as one block —
+   which is what keeps a whole conversation from arriving as a jump. */
 @keyframes fade-blur-in {
   from { opacity: 0; filter: blur(6px); transform: translateY(4px); }
   to { opacity: 1; filter: blur(0); transform: none; }
@@ -1152,6 +1153,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .empty-state,
 .suggestion-grid .suggestion {
   animation: fade-blur-in 380ms var(--ease-standard) backwards;
+}
+/* A stored session's thread arrives whole, so the block itself settles in rather
+   than each earlier message replaying its own entrance on top of it: opening a
+   past session reads as the conversation arriving, not as it being there all along. */
+.thread-inner.is-opened {
+  animation: fade-blur-in 500ms var(--ease-standard) backwards;
 }
 /* The two views are whole screens: a fade is enough there, and blurring them
    would put the entire thread through a filter for no visible gain. */

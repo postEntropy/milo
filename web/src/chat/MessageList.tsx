@@ -226,7 +226,7 @@ export function MessageList({
     : undefined
 
   return <>
-    <div className="thread-inner" aria-live="polite" aria-relevant="additions text">
+    <div className={`thread-inner${messages[0]?.loaded ? ' is-opened' : ''}`} aria-live="polite" aria-relevant="additions text">
       {messages.filter((m) => hasContent(m, thinking)).map((message) => (
         <MessageRow
           key={message.id}
