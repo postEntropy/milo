@@ -90,11 +90,18 @@ export class OpenAIProvider implements Provider {
 
     const pending = new Map<number, PendingToolCall>()
     let finish: FinishReason = 'stop'
+    // Whether the stream said it was over — `[DONE]`, or a choice that carried a
+    // finish reason. A body that ends without either stopped mid-token, and the
+    // last words read as a finished answer would hide the cut.
+    let finished = false
     let contentChars = 0
     let reasoningChars = 0
 
     for await (const message of parseSSE(response.body)) {
-      if (message.data === '[DONE]') break
+      if (message.data === '[DONE]') {
+        finished = true
+        break
+      }
 
       let chunk: OpenAIStreamChunk
       try {
@@ -148,7 +155,14 @@ export class OpenAIProvider implements Provider {
         }
       }
 
-      if (choice.finish_reason) finish = mapFinishReason(choice.finish_reason)
+      if (choice.finish_reason) {
+        finish = mapFinishReason(choice.finish_reason)
+        finished = true
+      }
+    }
+
+    if (!finished) {
+      throw new Error('the provider stream ended before the message was complete')
     }
 
     if (pending.size > 0) {

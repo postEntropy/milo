@@ -125,6 +125,11 @@ export class AnthropicProvider implements Provider {
 
     const blocks = new Map<number, Block>()
     let finish: FinishReason = 'stop'
+    // Whether the stream said it was over — `message_stop`, or the `message_delta`
+    // that carries the stop reason. A body that ends without either was cut off,
+    // and reporting its last words as a finished answer is the silent half of a
+    // dropped connection.
+    let finished = false
     let contentChars = 0
     let reasoningChars = 0
     let inputTokens = 0
@@ -188,11 +193,18 @@ export class AnthropicProvider implements Provider {
         }
         case 'message_delta': {
           const stop = event.delta?.stop_reason
-          if (stop) finish = mapStopReason(stop)
+          if (stop) {
+            finish = mapStopReason(stop)
+            finished = true
+          }
           const outputTokens = event.usage?.output_tokens
           if (typeof outputTokens === 'number') {
             yield { type: 'usage', inputTokens, outputTokens }
           }
+          break
+        }
+        case 'message_stop': {
+          finished = true
           break
         }
         case 'error': {
@@ -201,6 +213,10 @@ export class AnthropicProvider implements Provider {
         default:
           break
       }
+    }
+
+    if (!finished) {
+      throw new Error('the provider stream ended before the message was complete')
     }
 
     // A provider that puts both channels in one field is indistinguishable from a

@@ -212,4 +212,18 @@ describe('AnthropicProvider', () => {
     expect(JSON.stringify(body)).not.toContain('a private thought')
     expect(JSON.stringify(body.messages)).toContain('the answer')
   })
+
+  it('refuses a stream that ended before the message was complete', async () => {
+    // Text with no `message_delta` stop reason and no `message_stop`: the
+    // connection dropped mid-answer, and the half that arrived is not an answer.
+    stubFetch([
+      frame({ type: 'content_block_start', index: 0, content_block: { type: 'text' } }),
+      frame({ type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'half' } }),
+      frame({ type: 'content_block_stop', index: 0 }),
+    ])
+
+    await expect(collect(new AnthropicProvider({ id: 'test', baseURL: 'https://a.test/v1' }))).rejects.toThrow(
+      /before the message was complete/,
+    )
+  })
 })

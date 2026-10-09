@@ -172,6 +172,16 @@ describe('OpenAIProvider', () => {
     expect(await drain()).not.toHaveProperty('reasoning_effort')
   })
 
+  it('refuses a stream that ended before the message was complete', async () => {
+    // Content with neither a finish reason nor `[DONE]`: the stream was cut
+    // mid-token, and the fragment that arrived must not read as an answer.
+    stubFetch([frame({ choices: [{ delta: { content: 'half' } }] })])
+
+    await expect(collect(new OpenAIProvider({ id: 'test', baseURL: 'https://example.test/v1' }))).rejects.toThrow(
+      /before the message was complete/,
+    )
+  })
+
   it('throws a clear error on a non-ok response', async () => {
     vi.stubGlobal(
       'fetch',
