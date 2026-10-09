@@ -76,10 +76,20 @@ function withLabel<T extends MailSummary>(mail: T, label: MailLabel, on: boolean
   return { ...mail, labels }
 }
 
+/** A message with its read state set — Gmail marks unread by carrying `UNREAD`. */
+function withUnread<T extends MailSummary>(mail: T, unread: boolean): T {
+  const current = mail.labelIds ?? []
+  const labelIds = unread
+    ? (current.includes('UNREAD') ? current : [...current, 'UNREAD'])
+    : current.filter((id) => id !== 'UNREAD')
+  return { ...mail, labelIds }
+}
+
 /**
- * The Email view: an inbox, one thread, and the actions the grant allows. Write
- * actions live only here — the agent's own Gmail tools stay read-only — so what a
- * grant can do is drawn on the control rather than guessed at.
+ * The Email view: an inbox, one thread, and the actions the grant allows. The
+ * screen's write actions live only here and go through the server; the agent
+ * reaches mail through its own Gmail tools — so what a grant can do is drawn on
+ * the control rather than guessed at.
  *
  * What is on screen is the address bar's: `route` is null for the inbox, `new`
  * for the composer, and otherwise a thread id. That is what lets the browser's own
@@ -257,12 +267,23 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
     return () => { live = false }
   }, [threadId, connected])
 
-  /** A label change, then the inbox is read again so the list shows what happened. */
+  /**
+   * A move, applied to the list in place. Reading the inbox again here used to
+   * throw away every page after the first and scroll back to the top — the one row
+   * that changed is what actually moved. The server's own wording names it.
+   */
   async function modify(id: string, op: string): Promise<void> {
     try {
-      await api('email-modify', { id, op })
-      await loadInbox()
-      setNotice({ text: DONE[op] ?? 'Done.', error: false })
+      const result = await api<{ done: string }>('email-modify', { id, op })
+      const gone = op === 'archive' || op === 'trash'
+      setInbox((current) => current && (gone
+        ? current.filter((mail) => mail.id !== id)
+        : current.map((mail) => (mail.id === id ? withUnread(mail, op === 'unread') : mail))))
+      setThread((current) => current && {
+        ...current,
+        messages: current.messages.map((mail) => (mail.id === id ? withUnread(mail, op === 'unread') : mail)),
+      })
+      setNotice({ text: result.done, error: false })
     } catch (error) {
       setNotice({ text: message(error), error: true })
     }
