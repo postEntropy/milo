@@ -248,4 +248,47 @@ describe('Classifier', () => {
     const reviewer = dangerousReviewer(new Classifier({ baseURL: 'https://x.test/v1' }))
     expect(await reviewer.review('rm -rf /')).toBeCloseTo(0.4)
   })
+
+  it('does not re-ask a state that just failed, and asks again once the wait is out', async () => {
+    vi.useFakeTimers()
+    try {
+      const fetchMock = vi.fn(async () => {
+        throw new Error('classifier request failed (503 Service Unavailable)')
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      const classifier = new Classifier({ baseURL: 'https://x.test/v1' })
+
+      await expect(classifier.reviewDanger('same state')).rejects.toThrow(/503/)
+      await expect(classifier.reviewDanger('same state')).rejects.toThrow(/503/)
+      // The second call was answered from the failure it just recorded, not the endpoint.
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+
+      vi.advanceTimersByTime(3_000)
+      await expect(classifier.reviewDanger('same state')).rejects.toThrow(/503/)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('forgets a failure once the state answers', async () => {
+    vi.useFakeTimers()
+    try {
+      let calls = 0
+      vi.stubGlobal('fetch', vi.fn(async () => {
+        calls += 1
+        if (calls === 1) throw new Error('classifier request failed (503 Service Unavailable)')
+        return new Response(JSON.stringify({ answers: { dangerous: { noul: 0.5 } } }), { status: 200 })
+      }))
+      const classifier = new Classifier({ baseURL: 'https://x.test/v1' })
+
+      await expect(classifier.reviewDanger('same state')).rejects.toThrow(/503/)
+      vi.advanceTimersByTime(3_000)
+      expect(await classifier.reviewDanger('same state')).toBeCloseTo(0.5)
+      // Served from the answer cache now, so the endpoint is not reached a third time.
+      expect(await classifier.reviewDanger('same state')).toBeCloseTo(0.5)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
 })

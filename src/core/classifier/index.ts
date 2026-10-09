@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { errorMessage } from '../../util/errors.js'
 import { OPENAI_DECISIONS_MODEL } from '../config/schema.js'
 import type { DangerReviewer } from '../tools/permission.js'
@@ -59,6 +60,9 @@ export type ClassifierAnswers = Record<string, ClassifierAnswer>
 const DEFAULT_JEV_MODEL = 'typesafe/jev'
 const DEFAULT_TIMEOUT = 1500
 const DEFAULT_CACHE_SIZE = 200
+/** A failed state is not asked again until this long after the last failure. */
+const DEFAULT_BACKOFF = 2_000
+const MAX_BACKOFF = 60_000
 
 const DANGER_INSTRUCTIONS =
   'Is this action destructive or dangerous — able to cause irreversible damage to the system, ' +
@@ -93,6 +97,12 @@ export class Classifier {
   private readonly cacheSize: number
   private readonly traces?: TraceWriter
   private readonly cache = new Map<string, ClassifierAnswers>()
+  /**
+   * State and questions that just failed, and when they may be asked again. Without
+   * it a classifier that is down or hanging is re-tried on every page view, each
+   * attempt paying the full timeout; the wait doubles per consecutive failure.
+   */
+  private readonly failures = new Map<string, { until: number; tries: number; error: string }>()
 
   constructor(options: ClassifierOptions) {
     this.options = options
@@ -117,6 +127,15 @@ export class Classifier {
       return cached
     }
 
+    // Still inside the wait a previous failure bought: fail at once, with the same
+    // sentence, rather than pay the timeout again for an answer already known not
+    // to come. The recorded event marks it cached, since nothing was asked.
+    const failing = this.cacheEnabled ? this.failures.get(key) : undefined
+    if (failing && failing.until > Date.now()) {
+      this.record({ purpose, ok: false, ms: 0, cached: true, error: failing.error })
+      throw new Error(failing.error)
+    }
+
     const controller = new AbortController()
     const timeout = setTimeout(
       () => controller.abort(new Error('classifier review timed out')),
@@ -128,10 +147,16 @@ export class Classifier {
     const started = Date.now()
     try {
       const answers = await this.request(state, questions, controller.signal)
-      if (this.cacheEnabled) this.remember(key, answers)
+      if (this.cacheEnabled) {
+        this.remember(key, answers)
+        this.failures.delete(key)
+      }
       this.record({ purpose, ok: true, ms: Date.now() - started, cached: false, answers })
       return answers
     } catch (error) {
+      // A wait the caller itself cancelled is not the endpoint failing, so it buys
+      // no backoff — only a genuine failure does.
+      if (this.cacheEnabled && !options.signal?.aborted) this.defer(key, errorMessage(error))
       this.record({ purpose, ok: false, ms: Date.now() - started, cached: false, error: errorMessage(error) })
       throw error
     } finally {
@@ -249,8 +274,27 @@ export class Classifier {
     }
   }
 
+  /** Remembers a failure for a doubling wait, bounded so the map cannot grow for ever. */
+  private defer(key: string, message: string): void {
+    const tries = (this.failures.get(key)?.tries ?? 0) + 1
+    const wait = Math.min(DEFAULT_BACKOFF * 2 ** (tries - 1), MAX_BACKOFF)
+    // Re-inserted so the map's oldest entry is the least recently failed, which is
+    // the one dropped when the bound is reached.
+    this.failures.delete(key)
+    this.failures.set(key, { until: Date.now() + wait, tries, error: message })
+    while (this.failures.size > this.cacheSize) {
+      const oldest = this.failures.keys().next().value
+      if (oldest === undefined) break
+      this.failures.delete(oldest)
+    }
+  }
+
+  /**
+   * The cache key. Hashed rather than the state itself: a page of mail is a long
+   * string, and holding two hundred of them verbatim is memory spent on nothing.
+   */
   private keyFor(state: string, questions: Record<string, ClassifierQuestion>): string {
-    return JSON.stringify([state, questions])
+    return createHash('sha256').update(JSON.stringify([state, questions])).digest('hex')
   }
 }
 
