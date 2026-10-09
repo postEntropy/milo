@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
 import { formatWhen, message } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
@@ -24,13 +24,18 @@ export function TaskLists({ tick }: { tick: number }) {
       failed read keeps its own sentence and its way to try again. */
   const [loadError, setLoadError] = useState<string | null>(null)
 
+  /** Bumped per read, so a slower earlier answer cannot overwrite a newer one. */
+  const loadSeq = useRef(0)
   const refresh = useCallback(async (): Promise<void> => {
+    const mine = ++loadSeq.current
     try {
       const next = await api<TaskList[]>('task-lists')
+      if (mine !== loadSeq.current) return
       setLists(next)
       setSelectedId((current) => (current && next.some((list) => list.id === current) ? current : null))
       setLoadError(null)
     } catch (error) {
+      if (mine !== loadSeq.current) return
       setLoadError(message(error))
     }
   }, [])

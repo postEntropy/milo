@@ -72,9 +72,18 @@ export function Routines({ conversationId, chat, tick }: { conversationId: strin
   const [notice, setNotice] = useState<Notice | null>(null)
   useAutoDismiss(notice, setNotice)
 
+  /** Bumped per read, so a slower earlier answer cannot overwrite a newer one. */
+  const loadSeq = useRef(0)
   const refresh = useCallback(async (): Promise<void> => {
-    try { setRoutines(await api<RoutineSummary[]>('routines')) }
-    catch (error) { setNotice({ text: message(error), error: true }) }
+    const mine = ++loadSeq.current
+    try {
+      const next = await api<RoutineSummary[]>('routines')
+      if (mine !== loadSeq.current) return
+      setRoutines(next)
+    } catch (error) {
+      if (mine !== loadSeq.current) return
+      setNotice({ text: message(error), error: true })
+    }
   }, [])
 
   useEffect(() => { void refresh() }, [refresh])
