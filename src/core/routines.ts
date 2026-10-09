@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import lockfile from 'proper-lockfile'
 import { errorMessage } from '../util/errors.js'
@@ -268,20 +268,44 @@ export function formatLocal(date: Date): string {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
+/**
+ * The file as routines. Absent or empty is an empty list; anything present that
+ * is not a list of routines throws, because that is a file to report rather than
+ * one to read as nothing — reading it as nothing is what let the next write
+ * erase it.
+ */
+function readRoutinesStrict(): Routine[] {
+  const file = routinesFile()
+  if (!existsSync(file)) return []
+  const text = readFileSync(file, 'utf8').trim()
+  if (text === '') return []
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch (error) {
+    throw new Error(`routines.json is not valid JSON: ${errorMessage(error)}`)
+  }
+  if (!Array.isArray(parsed)) throw new Error('routines.json does not hold a list.')
+  return parsed.filter(isRoutine).map((routine) => ({
+    ...routine,
+    enabled: routine.enabled !== false,
+    allow: Array.isArray(routine.allow)
+      ? routine.allow.filter((name) => typeof name === 'string')
+      : undefined,
+  }))
+}
+
+/**
+ * The routine list for a surface that only reads it. A file someone left mid-edit
+ * must not take the daemon down, so the reason is said out loud and an empty list
+ * is answered — but a *write* reads strictly below, so this tolerant reading is
+ * never the basis of an overwrite.
+ */
 export function readRoutines(): Routine[] {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(routinesFile(), 'utf8'))
-    if (!Array.isArray(parsed)) return []
-    return parsed.filter(isRoutine).map((routine) => ({
-      ...routine,
-      enabled: routine.enabled !== false,
-      allow: Array.isArray(routine.allow)
-        ? routine.allow.filter((name) => typeof name === 'string')
-        : undefined,
-    }))
-  } catch {
-    // No file yet, or one someone left mid-edit by hand: an empty list beats a
-    // daemon that will not start.
+    return readRoutinesStrict()
+  } catch (error) {
+    logWarn(`could not read routines.json: ${errorMessage(error)}`)
     return []
   }
 }
@@ -342,7 +366,9 @@ async function changeRoutines<T>(
 ): Promise<T> {
   const release = await lockRoutines()
   try {
-    const routines = readRoutines()
+    // Strict: a read-modify-write must never be built on a tolerant empty reading
+    // of a file it could not parse, which is how a corrupt one got erased.
+    const routines = readRoutinesStrict()
     const outcome = change(routines)
     if (outcome.next) await writePrivateFile(routinesFile(), serialize(outcome.next))
     return outcome.result

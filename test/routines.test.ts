@@ -382,6 +382,14 @@ describe('the store', () => {
     await expect(addRoutine(routine())).rejects.toThrow(/at most/)
   })
 
+  it('refuses to write over a routines file it cannot read', async () => {
+    // A tolerant read answers nothing, but a write must not be built on that
+    // reading: the next add would otherwise erase the whole file.
+    writeFileSync(routinesFile(), '{ not json')
+    await expect(addRoutine(routine())).rejects.toThrow(/routines\.json/)
+    expect(readFileSync(routinesFile(), 'utf8')).toBe('{ not json')
+  })
+
   it('writes a file a person can read', async () => {
     await writeRoutines([])
     await addRoutine(routine({ name: 'briefing' }))
