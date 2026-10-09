@@ -362,6 +362,28 @@ describe('web Settings config', () => {
     expect(readConfig()?.web).toEqual({ enabled: true, host: '0.0.0.0', port: 8123 })
   })
 
+  it('keeps the keys of a nested section a patch only partly sends', async () => {
+    writeConfig()
+    const settings = new WebSettings(build({}), home)
+    const before = await settings.handle('overview') as { config: Record<string, unknown> }
+    const permissions = before.config.permissions as Record<string, unknown>
+
+    // A nested section written whole, with values away from the defaults.
+    await settings.handle('save-config', {
+      config: { permissions: { ...permissions, allow: ['gmail_modify'], deny: ['shell_command'], jevThreshold: 0.5 } },
+    })
+    // Now a patch that mentions only the mode: the siblings must survive it
+    // rather than reset to the schema's defaults on the way through.
+    await settings.handle('save-config', { config: { permissions: { mode: 'yolo' } } })
+
+    expect(readConfig()?.permissions).toMatchObject({
+      mode: 'yolo',
+      allow: ['gmail_modify'],
+      deny: ['shell_command'],
+      jevThreshold: 0.5,
+    })
+  })
+
   it('moves the running model on a save', async () => {
     writeConfig()
     const runtime = build({})

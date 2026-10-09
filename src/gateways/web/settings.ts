@@ -463,7 +463,20 @@ export class WebSettings {
         id,
         { ...entry, headers: entry.headers ?? current.providers[id]?.headers },
       ]))
-      const next = ConfigSchema.parse({ ...current, ...patchConfig, providers })
+      // A patch is merged section by section, not laid over the whole config: a
+      // nested object the client sent only part of keeps the keys it left out
+      // instead of resetting them to the schema's defaults on the way through.
+      // Arrays replace — a list is a whole value, not a set to be added to.
+      const isPlain = (value: unknown): value is Record<string, unknown> =>
+        Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+      const merge = (base: unknown, patch: unknown): unknown => {
+        if (!isPlain(patch) || !isPlain(base)) return patch
+        const out: Record<string, unknown> = { ...base }
+        for (const [key, value] of Object.entries(patch)) out[key] = merge(out[key], value)
+        return out
+      }
+      const merged = merge(current, patchConfig) as Record<string, unknown>
+      const next = ConfigSchema.parse({ ...merged, providers })
       saveConfig(next)
       this.runtime.permissions?.update({
         mode: next.permissions.mode,
