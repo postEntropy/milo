@@ -739,18 +739,6 @@ describe('web Settings mail', () => {
     expect(page.unsorted).toEqual([])
   })
 
-  it('filters the inbox by a label', async () => {
-    writeConfig()
-    grantAt('none')
-    oneMessage()
-    const settings = new WebSettings(build({}, null, classifierOf({ m1: { choice: 'receipt', confidence: 0.9 } })), home)
-    await settings.handle('email-sort', { messages: [row] })
-    const kept = (await settings.handle('email-inbox', { labelId: 'receipt' })) as { messages: unknown[] }
-    expect(kept.messages).toHaveLength(1)
-    const none = (await settings.handle('email-inbox', { labelId: 'newsletter' })) as { messages: unknown[] }
-    expect(none.messages).toHaveLength(0)
-  })
-
   it('narrows the inbox by a quick filter and a search term, in one call', async () => {
     writeConfig()
     grantAt('none')

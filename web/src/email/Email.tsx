@@ -1,5 +1,6 @@
 import DOMPurify from 'dompurify'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { carryingLabel } from '../../../src/core/google/label-match.js'
 import { api } from '../lib/api.js'
 import { formatWhen, message } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
@@ -131,11 +132,18 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
   /** Whether something is hiding mail, so an empty list knows which empty it is. */
   const narrowed = query !== '' || filter !== null || labelFilter !== null
   /**
+   * The rows the list draws. A label is Milo's own — it does not change the Gmail query
+   * — so it narrows what is already here instead of reading the page again, which is
+   * what makes picking one instant.
+   */
+  const visible = inbox === null ? null : carryingLabel(inbox, labelFilter ?? undefined)
+  /**
    * What narrows the list, as one value. A change to it is a different reading, so the
    * list is emptied for it; the same one keeps what is on screen while it is read again
    * — which is what lets a return to the screen draw mail instead of a loading line.
+   * The label is not here: it filters in place, so picking one is not a reading at all.
    */
-  const narrowing = JSON.stringify([labelFilter, filter, query])
+  const narrowing = JSON.stringify([filter, query])
   const narrowingRef = useRef(narrowing)
   /** The panel itself, which is what scrolls — so a fresh page can start at the top. */
   const workspace = useRef<HTMLElement>(null)
@@ -175,7 +183,6 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
     try {
       const page = await api<InboxPage>('email-inbox', {
         ...(pageToken ? { pageToken } : {}),
-        ...(labelFilter ? { labelId: labelFilter } : {}),
         ...(filter ? { filter } : {}),
         ...(query ? { search: query } : {}),
       })
@@ -191,7 +198,7 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
     } catch (error) {
       setNotice({ text: message(error), error: true })
     }
-  }, [labelFilter, filter, query, sortRows])
+  }, [filter, query, sortRows])
 
   // One page in flight at a time: the observer below can fire again before the first
   // answer lands, and two calls for the same cursor would double the rows.
@@ -222,8 +229,9 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
   }, [active, loadStatus])
 
   // Read the inbox once the grant turns out to be connected — not before, so a
-  // screen with no account never shows a failed fetch it did not need. Changing the
-  // label filter reads it again, from the top, so the list shows only that label.
+  // screen with no account never shows a failed fetch it did not need. A new quick
+  // filter or search reads it again, from the top; a label does not, since it filters
+  // what is already drawn.
   useEffect(() => {
     if (!connected || !active) return
     // A different narrowing empties the list, so the loading line is honest; the same one
@@ -440,7 +448,7 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
       ? <button className="settings-back" type="button" onClick={toInbox}><Icon name="arrow-left" /><span>Inbox</span></button>
       : <h2 className="mail-title">Inbox</h2>}
     {connected && route === null && <div className="panel-count">
-      <strong>{inbox?.length ?? 0}</strong><span>shown</span>
+      <strong>{visible?.length ?? 0}</strong><span>shown</span>
       <span className="panel-count-divider" />
       <button className="mail-head-action" type="button" title="Refresh" aria-label="Refresh the inbox" onClick={() => void loadInbox()}><Icon name="refresh" size={16} /></button>
       <button className="mail-head-action" type="button" title="New message" aria-label="New message" disabled={!can(access, 'compose')} onClick={() => { setDraft(EMPTY_DRAFT); onRoute('new') }}><Icon name="edit" size={16} /></button>
@@ -482,7 +490,7 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
               ? thread?.id === threadId
                 ? <ThreadView thread={thread} access={access} busy={busy} labels={labels} readingMore={readingMore} onReply={reply} onDraft={() => void draftReply()} onModify={modify} onAsk={ask} onAssign={assign} onReadMore={(mail) => void readMore(mail)} />
                 : <p className="list-empty">Reading the thread…</p>
-              : <Inbox inbox={inbox} access={access} onOpen={(mail) => onRoute(mail.threadId)} onModify={modify} onMore={loadMore} loading={pageLoading} nextPage={nextPage} narrowed={narrowed} onClear={clearNarrowing} />}
+              : <Inbox inbox={visible} access={access} onOpen={(mail) => onRoute(mail.threadId)} onModify={modify} onMore={loadMore} loading={pageLoading} nextPage={nextPage} narrowed={narrowed} onClear={clearNarrowing} />}
             {assist && <section className="mail-assist">
               <h3>{assist.title}</h3>
               <p className="mail-assist-text">{assist.text || 'The model had nothing to add.'}</p>

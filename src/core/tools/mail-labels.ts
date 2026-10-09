@@ -3,7 +3,6 @@ import type { GoogleAccount } from '../config/schema.js'
 import { tokenSource } from '../google/access.js'
 import { labeledPage } from '../google/inbox.js'
 import {
-  carryingLabel,
   createLabel,
   deleteLabel,
   LABEL_COLORS,
@@ -13,6 +12,7 @@ import {
   type Labeler,
   type MailLabel,
 } from '../google/labels.js'
+import { carryingLabel } from '../google/label-match.js'
 import type { LabeledMessage } from '../google/labels.js'
 import { MAIL_IS_DATA } from './gmail.js'
 import type { Tool, ToolResult } from './types.js'

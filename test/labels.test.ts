@@ -9,7 +9,6 @@ process.env.MILO_HOME = home
 const {
   BASE_LABELS,
   LABEL_COLORS,
-  carryingLabel,
   createLabel,
   deleteLabel,
   labelMessages,
@@ -17,6 +16,7 @@ const {
   resolveLabel,
   toggleAssignment,
 } = await import('../src/core/google/labels.js')
+const { carryingLabel } = await import('../src/core/google/label-match.js')
 
 /** A page of mail as the Gmail client hands it up: only the fields a person sorts by. */
 const mail = (id: string, subject = 'a note') => ({ id, threadId: `t-${id}`, from: 'ana@exemplo', subject, snippet: 'the gist' })

@@ -27,7 +27,7 @@ import {
 } from '../../core/google/gmail.js'
 import { htmlToText } from '../../core/tools/html.js'
 import type { GoogleOutcome, GoogleTokens } from '../../core/google/oauth.js'
-import { LABEL_COLORS, carryingLabel, createLabel, deleteLabel, labelMessages, toggleAssignment, unsorted } from '../../core/google/labels.js'
+import { LABEL_COLORS, createLabel, deleteLabel, labelMessages, toggleAssignment, unsorted } from '../../core/google/labels.js'
 import { markSeen, seenAt } from '../../core/google/seen.js'
 import { googleState } from '../../core/google/state.js'
 import { GOOGLE_TIERS, accessOf, type GoogleAccess } from '../../core/google/tiers.js'
@@ -216,15 +216,14 @@ export class WebSettings {
    * inbox behind its timeout; now it can only delay the labels, never the mail.
    *
    * The quick filter and the search narrow the Gmail query itself, so a page is a page
-   * of what was asked for. The label is Milo's own, so it can only be applied to what
-   * came back — the two narrow the list together, and neither replaces the other.
+   * of what was asked for. A label is Milo's own and does not change that query, so it
+   * is not read for here — the surface filters the page it drew.
    */
   private async emailInbox(body: Record<string, unknown>): Promise<unknown> {
     const pageToken = optionalText(body.pageToken)
     const limit = typeof body.limit === 'number' && body.limit > 0 ? Math.min(Math.floor(body.limit), 50) : 20
     const filter = inboxFilter(body.filter)
     const search = optionalText(body.search)
-    const labelId = optionalText(body.labelId)
     const page = await this.mailCall((tokens) => listInbox(tokens, {
       ...(pageToken ? { pageToken } : {}),
       limit,
@@ -232,9 +231,8 @@ export class WebSettings {
       ...(search ? { search } : {}),
     }))
     const { byMessage, labels } = await labelMessages(null, page.messages)
-    const messages = page.messages.map((message) => ({ ...message, labels: byMessage.get(message.id) ?? [] }))
     return {
-      messages: carryingLabel(messages, labelId),
+      messages: page.messages.map((message) => ({ ...message, labels: byMessage.get(message.id) ?? [] })),
       ...(page.nextPageToken ? { nextPageToken: page.nextPageToken } : {}),
       labels,
       colors: LABEL_COLORS,

@@ -305,16 +305,6 @@ export async function labelMessages(
   }
 }
 
-/**
- * The messages on a page that carry a label, in the order they came. With no
- * label asked for the page is returned whole, so a caller can pass its filter
- * straight through. Shared, so the web screen and the agent's tool cannot come
- * to disagree about what "has this label" means.
- */
-export function carryingLabel(messages: LabeledMessage[], labelId?: string): LabeledMessage[] {
-  return labelId ? messages.filter((message) => message.labels.some((label) => label.id === labelId)) : messages
-}
-
 async function labelPage(
   classifier: Labeler | null,
   messages: MailSummary[],
