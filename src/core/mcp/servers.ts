@@ -247,6 +247,14 @@ export class McpServers {
       logWarn(`could not re-read mcp.json: ${this.problem}`)
       return
     }
+    // A server taken out of the file, or turned off in it, must not keep running:
+    // the file is the interface, and the process follows the file. Only the ones
+    // still on are left for the warm below.
+    for (const [name, entry] of [...this.live]) {
+      if (this.config.servers[name]?.enabled) continue
+      this.live.delete(name)
+      void entry.client.close().catch(() => undefined)
+    }
     void this.warm()
   }
 
@@ -261,6 +269,10 @@ export class McpServers {
   private async client(name: string, options: { ignoreFloor?: boolean } = {}): Promise<McpClient> {
     const server = this.config.servers[name]
     if (!server) throw new Error(`mcp.json has no server named "${name}".`)
+    // Off means its process is not run at all, whichever path reached here — a
+    // tool call, a `list_changed` refresh, a warm. Only the toggle that turns it
+    // back on gets past this, and only after the flag has been written.
+    if (!server.enabled) throw new Error(`mcp server "${name}" is off.`)
     const existing = this.live.get(name)
     if (existing?.state === 'ready' && !existing.promise) return existing.client
     if (existing?.promise) return await existing.promise
@@ -272,6 +284,11 @@ export class McpServers {
         `mcp server "${name}" is not being restarted yet — it failed ${Math.round(since / 100) / 10}s ago.`,
       )
     }
+
+    // The previous attempt's process, if it left one, is not this one's to keep:
+    // a failed dial stays in `live` for the surfaces to report, and replacing the
+    // entry without letting the old client go would orphan its child for good.
+    if (existing) await existing.client.close().catch(() => undefined)
 
     const client = new McpClient(server, {
       name,
@@ -300,6 +317,9 @@ export class McpServers {
       })
       .catch((error: unknown) => {
         this.markFailed(name, error)
+        // Let the process go too: the state says the server is unusable, so the
+        // child behind it has no reason to keep running.
+        void client.close().catch(() => undefined)
         // The cached listing stays in the catalog: its tools may still work once
         // the server is back, and taking them away would make a flaky server
         // silently shrink what the model can do. A shutdown is not a failure,

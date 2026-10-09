@@ -1,7 +1,7 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LoadedConfig } from '../src/core/config/load.js'
 import type { ToolContext } from '../src/core/tools/types.js'
 
@@ -10,6 +10,7 @@ const home = mkdtempSync(path.join(tmpdir(), 'milo-mcp-servers-'))
 process.env.MILO_HOME = home
 
 const { createMcpServers, mcpFacts } = await import('../src/core/mcp/servers.js')
+const { McpClient } = await import('../src/core/mcp/client.js')
 const { writeMcpCache } = await import('../src/core/mcp/cache.js')
 const { ToolRegistry } = await import('../src/core/tools/registry.js')
 const { createRuntime } = await import('../src/core/bootstrap.js')
@@ -257,6 +258,24 @@ describe('an MCP server that will not run', () => {
     }
   })
 
+  it('lets go of a client it gives up on, instead of orphaning its process', async () => {
+    writeServers({ fixture: { command: 'milo-no-such-mcp-server', args: [] } })
+    const manager = createMcpServers(cwd)
+    const close = vi.spyOn(McpClient.prototype, 'close')
+    try {
+      await expect(manager.check('fixture')).rejects.toThrow(/could not start/)
+      expect(close).toHaveBeenCalled()
+
+      // A second attempt replaces the failed entry; the first client must already
+      // have been closed, not lost by the overwrite.
+      await expect(manager.check('fixture')).rejects.toThrow(/could not start/)
+      expect(close.mock.calls.length).toBeGreaterThanOrEqual(2)
+    } finally {
+      close.mockRestore()
+      await manager.close()
+    }
+  })
+
   it('reports a server that dies, with what it said on stderr', async () => {
     writeServers({
       fixture: server({ MCP_ERA: 'legacy', MCP_EXIT_AFTER: 'init', MCP_STDERR: 'the token is wrong' }),
@@ -363,6 +382,26 @@ describe('the catalog before anything is started', () => {
     try {
       await expect(manager.check('fixture')).rejects.toThrow(/is off\. Turn it on/)
     } finally {
+      await manager.close()
+    }
+  })
+
+  it('lets a server go when the file turns it off, instead of leaving its process running', async () => {
+    writeServers({ fixture: server({ MCP_ERA: 'modern' }) })
+    const manager = createMcpServers(cwd)
+    const close = vi.spyOn(McpClient.prototype, 'close')
+    try {
+      await manager.check('fixture')
+      expect(manager.status()[0]?.state).toBe('ready')
+
+      // The person turns it off by hand, and the file is re-read.
+      writeServers({ fixture: server({ MCP_ERA: 'modern' }, { enabled: false }) })
+      manager.reload()
+
+      expect(close).toHaveBeenCalled()
+      expect(manager.status()[0]).toMatchObject({ enabled: false, state: 'idle' })
+    } finally {
+      close.mockRestore()
       await manager.close()
     }
   })
