@@ -595,6 +595,24 @@ describe('RoutineScheduler', () => {
     h.scheduler.stop()
   })
 
+  it('does not fire a burst of the occurrences it slept through', async () => {
+    // Every minute, and the machine then sleeps for ten: the timer that was armed
+    // fires once, late, with ten occurrences behind it.
+    await writeRoutines([sample({ when: every(1) })])
+    const h = harness()
+    h.scheduler.start()
+
+    // The timer that was armed fires once, late: ten occurrences are behind it.
+    h.setClock(new Date(2026, 8, 25, 8, 10, 0))
+    await h.advance(60_000)
+    // Then the loop re-arms each tick, one second apart, the way it would while
+    // the run is going. One occurrence is owed, not one per second of the gap.
+    for (let tick = 0; tick < 10; tick += 1) await h.advance(1_000)
+
+    expect(h.prompts).toHaveLength(1)
+    h.scheduler.stop()
+  })
+
   it('runs an interval routine once per occurrence, never twice for one', async () => {
     await writeRoutines([sample({ when: every(1) })])
     const h = harness()

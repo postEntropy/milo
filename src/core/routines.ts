@@ -605,9 +605,11 @@ export class RoutineScheduler {
       if (!routine.enabled) continue
       const due = nextRunAt(routine.when, this.cursor(routine, now))
       if (due.getTime() > now.getTime()) continue
-      // The occurrence is consumed whether or not it runs: a routine still going
-      // from last time is skipped, not queued up behind itself.
-      this.cursors.set(routine.id, due)
+      // The cursor moves to now, never to `due`: a daemon that was asleep through
+      // several occurrences owes the person one run, not a burst of them once per
+      // second as the cursor walks each missed tick. A routine still going from
+      // last time is skipped the same way, not queued up behind itself.
+      this.cursors.set(routine.id, now)
       if (this.running.has(routine.id)) {
         this.log(`skipped ${routine.id}: the previous run is still going`)
         continue
