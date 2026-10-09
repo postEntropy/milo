@@ -46,3 +46,19 @@ export function closeParagraph(text: string): string {
   if (text.endsWith('\n\n')) return text
   return text.endsWith('\n') ? `${text}\n` : `${text}\n\n`
 }
+
+/**
+ * A duration as a person reads it: `8s`, `2m 10s`, `1h 3m`. Shared by every
+ * place a wait or a running job is shown, so the same span cannot read two ways
+ * on two surfaces.
+ */
+export function formatDuration(ms: number): string {
+  const total = Math.max(0, Math.round(ms / 1000))
+  if (total < 60) return `${total}s`
+  const minutes = Math.floor(total / 60)
+  const seconds = total % 60
+  if (minutes < 60) return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`
+  const hours = Math.floor(minutes / 60)
+  const rest = minutes % 60
+  return rest > 0 ? `${hours}h ${rest}m` : `${hours}h`
+}

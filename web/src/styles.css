@@ -544,6 +544,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .send-button.stop:hover:not(:disabled) { background: var(--border-soft); transform: none; }
 .queue-list { width: min(940px, 100%); margin: 0 auto; }
 .queue-chip { display: flex; min-height: 34px; align-items: center; gap: 8px; margin-bottom: 6px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface-warm); padding: 6px 11px; color: var(--muted); font-size: 12px; }
+.job-strip { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+.job-entry { display: flex; flex-direction: column; }
+.job-chip { display: flex; min-height: 34px; align-items: center; gap: 4px; border-radius: 10px; background: var(--surface-warm); padding: 3px 6px 3px 11px; }
+.job-toggle { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; border: 0; background: transparent; padding: 0; color: var(--muted); font-size: 12px; text-align: left; cursor: pointer; }
+.job-command { overflow: hidden; font-family: var(--font-mono); color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
+.job-elapsed { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
+.job-chevron { display: flex; transition: transform var(--motion-base); }
+.job-toggle[aria-expanded='true'] .job-chevron { transform: rotate(90deg); }
+.job-stop { display: flex; flex: none; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: transparent; padding: 5px 6px; color: var(--muted); cursor: pointer; }
+.job-stop:hover { background: var(--border-soft); color: var(--fg); }
+.job-log { max-height: 160px; margin: 4px 0 0; border-radius: 10px; background: var(--bg); padding: 8px 11px; overflow: auto; color: var(--muted); font-family: var(--font-mono); font-size: 12px; line-height: 1.4; white-space: pre-wrap; }
 
 .approval { width: 100%; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 16px 18px; box-shadow: var(--shadow); }
 .approval-head { display: flex; align-items: flex-start; gap: 12px; }

@@ -83,6 +83,8 @@ export interface RunningWebServer {
   urls: string[]
   /** Posts a message into a conversation with no turn behind it (a routine's answer). */
   deliver(conversationId: string, message: OutgoingMessage): Promise<void>
+  /** Shows a message already in the transcript (a finished job's announcement). */
+  showNotice(conversationId: string, message: OutgoingMessage): void
   /** Tells every open page that a routine ran, so the history it shows re-reads. */
   routinesChanged(): void
   stop(): Promise<void>
@@ -183,6 +185,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     url,
     urls,
     deliver: (conversationId, message) => hub.deliver(conversationId, message),
+    showNotice: (conversationId, message) => hub.showNotice(conversationId, message),
     routinesChanged: () => hub.routinesChanged(),
     stop: () => new Promise<void>((resolve, reject) => {
       hub.close()

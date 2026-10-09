@@ -6,6 +6,7 @@ import { describeExport, writeSessionExport, type ExportFormat } from '../core/e
 import { formatStats, formatWhen } from '../core/sessions/index.js'
 import type { CompactResult, SessionStats, SessionSummary } from '../core/sessions/index.js'
 import { formatSkillList, type SkillSummary } from '../core/skills/index.js'
+import { jobSummary, type JobInfo } from '../core/jobs/index.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
 import {
   DEFAULT_REASONING_EFFORT,
@@ -76,6 +77,10 @@ export interface CommandContext {
   memoryLocked?: string
   /** Set when this surface may not create or switch sessions; used as the reply. */
   sessionLocked?: string
+  /** The background jobs, newest first, for `/jobs`. */
+  jobs?: () => JobInfo[]
+  /** Stops a running job by id, for `/jobs kill <id>`. */
+  killJob?: (id: string) => boolean
 }
 
 export interface CommandResult {
@@ -110,6 +115,7 @@ const HELP = [
   '/resume <id> — switch to another session',
   '/fork [id] [turn] — branch into a new session from this or a named session',
   '/stats — numbers for the current session',
+  '/jobs [kill <id>] — the background jobs, and how they are doing',
   '/compact — fold the oldest turns into the summary now, instead of when the context fills up',
   '/export [md|json] — write this conversation out as a file, tool calls and reasoning included',
   '/skills — the skills installed, and where they live',
@@ -332,6 +338,8 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
     listSessions: () => runtime.listSessions(),
     skills: () => runtime.skills,
     sessionStats: () => session.stats(),
+    jobs: () => runtime.jobs?.list() ?? [],
+    killJob: (id) => runtime.jobs?.kill(id) ?? false,
     compactSession: () => session.compact(signal),
     memories: (limit) => session.memories(limit),
     forgetMemory: (id) => session.forget(id),
@@ -361,10 +369,51 @@ export function formatMemoryList(notes: MemoryItem[]): string {
   ].join('\n')
 }
 
+/**
+ * The `/jobs` reply: the list, or stopping one. Shared so the terminal and the
+ * chats read the same words, and so an argument it does not know answers with the
+ * valid ones rather than falling back to the listing.
+ */
+export function jobsReply(
+  argument: string,
+  context: { jobs?: () => JobInfo[]; killJob?: (id: string) => boolean },
+): string {
+  const asked = argument.trim()
+  if (asked !== '') {
+    const [verb, id] = asked.split(/\s+/)
+    if (verb === 'kill' || verb === 'stop') {
+      if (!id) return 'Usage: /jobs kill <id>. The ids come from /jobs.'
+      return context.killJob?.(id ?? '')
+        ? `Stopped ${id}.`
+        : `No running job "${id}".`
+    }
+    return 'Use /jobs to list them, or /jobs kill <id> to stop one.'
+  }
+  return formatJobList(context.jobs?.() ?? [])
+}
+
 /** Applies a mode change to the running policy and to disk. */
 function applyMode(context: CommandContext, mode: PermissionMode): void {
   context.policy?.setMode(mode)
   context.persistMode?.(mode)
+}
+
+/**
+ * The background jobs, one per line — what `/jobs` answers on every surface, so
+ * the terminal and the chats cannot describe the same jobs differently.
+ */
+export function formatJobList(jobs: JobInfo[]): string {
+  if (jobs.length === 0) return 'No background jobs.'
+  return [
+    `Background jobs (${jobs.length}):`,
+    // One line each, plus the last thing it printed: enough to tell a stalled
+    // download from one that is moving. Finished jobs are shown too — the strip
+    // above the composer holds only what is still running.
+    ...jobs.map((job) => {
+      const last = job.lines.at(-1)
+      return last ? `${jobSummary(job)}\n  ${last}` : jobSummary(job)
+    }),
+  ].join('\n')
 }
 
 /** Splits `/command the rest` into the command and everything after it. */
@@ -598,6 +647,9 @@ export async function handleCommand(
       }
       return { handled: true, reply: formatStats(await context.sessionStats()) }
     }
+
+    case 'jobs':
+      return { handled: true, reply: jobsReply(argument, context) }
 
     case 'clear':
       await context.resetSession?.()

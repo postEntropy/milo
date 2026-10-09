@@ -3,6 +3,8 @@ import { createRuntime } from '../core/bootstrap.js'
 import { DEFAULT_WORKING_DIRECTORY } from '../core/config/paths.js'
 import { loadConfig, readAuth, resolveGatewayToken } from '../core/config/load.js'
 import { MILO_HOME } from '../core/config/paths.js'
+import { attachJobNotifier } from '../core/jobs/index.js'
+import type { OutgoingMessage } from '../core/outgoing.js'
 import { readRoutines, RoutineScheduler } from '../core/routines.js'
 import type { Gateway } from './types.js'
 
@@ -55,7 +57,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   // names wins over the one the config holds.
   const web = loaded.config.web
   /** Kept so the scheduler can tell an open Routines screen that a run happened. */
-  let webUi: { routinesChanged(): void } | undefined
+  let webUi: { routinesChanged(): void; showNotice(conversationId: string, message: OutgoingMessage): void } | undefined
   if (!options.noWeb && web.enabled) {
     const { WebGateway } = await import('./web/gateway.js')
     const gateway = new WebGateway({
@@ -83,6 +85,24 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   }
 
   for (const gateway of gateways) await gateway.start()
+
+  // A finished background job speaks up: a short turn on the conversation that
+  // started it, then a message shown wherever that conversation is. The web has
+  // its own path — the announcement is already in the conversation's transcript,
+  // so it is shown to whoever is watching, not written a second time.
+  const detachJobs = attachJobNotifier(runtime, async (job, message) => {
+    const outgoing: OutgoingMessage = {
+      text: message.text,
+      ...(message.files.length > 0 ? { files: message.files } : {}),
+    }
+    if (job.origin.gateway === 'web') {
+      webUi?.showNotice(job.origin.conversationId, outgoing)
+      return
+    }
+    const gateway = gateways.find((candidate) => candidate.id === job.origin.gateway)
+    if (!gateway?.deliver) throw new Error(`no ${job.origin.gateway} surface to deliver to`)
+    await gateway.deliver(job.origin.conversationId, outgoing)
+  })
 
   // The prompts that run on a timer. It shares this runtime, so a routine's turn
   // has the same memory, sessions and history as any other — and it delivers
@@ -130,6 +150,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   /** Lets go of everything this run holds. The port is free once it returns. */
   const stop = async (): Promise<void> => {
     scheduler.stop()
+    detachJobs()
     for (const gateway of gateways) {
       await gateway.stop().catch(() => undefined)
     }

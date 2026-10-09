@@ -52,6 +52,7 @@ const loadedConfig = (
       cdpUrl: null,
       keepSnapshots: 2,
     },
+    jobs: { max: 8 },
   },
   provider: { id: 'test', baseURL, apiKey, wire: 'openai' },
   model: 'test-model',

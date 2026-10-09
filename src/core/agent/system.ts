@@ -6,7 +6,8 @@ import type { BrowserFacts } from '../browser/index.js'
 import type { GoogleState } from '../google/state.js'
 import { accessLabel } from '../google/tiers.js'
 import type { McpFacts } from '../mcp/servers.js'
-import { plural } from '../../util/format.js'
+import type { JobFacts } from '../jobs/index.js'
+import { formatDuration, plural } from '../../util/format.js'
 
 export type SurfaceKind = 'cli' | 'telegram' | 'discord' | 'web'
 
@@ -92,6 +93,8 @@ export interface SystemPromptInput {
   google?: GoogleState | null
   /** What the surface's panel is showing right now; absent on a surface that has none. */
   panel?: PanelFacts | null
+  /** The background jobs as they stand, for the live-state line; absent when none can run. */
+  jobs?: JobFacts | null
   now?: Date
 }
 
@@ -223,6 +226,30 @@ function panelLine(facts: PanelFacts): string {
     : `- Panel right now: ${facts.tabs.length} tabs — ${view}. \`panel\` brings a tab forward, or opens another beside them.`
 }
 
+/**
+ * The background jobs, as they are: the commands still running behind the
+ * conversation. Only the running ones are named — a job that ended was announced
+ * when it did and is in `/jobs`, and a line per job ever run would grow every
+ * prompt without telling the model anything it needs to act on.
+ */
+function jobLine(facts: JobFacts): string | null {
+  const running = facts.jobs.filter((job) => job.state === 'running')
+  if (running.length === 0) return null
+  const described = running.map(
+    (job) => `${job.id} \`${oneLine(job.command)}\` — running ${formatDuration(Date.now() - job.startedAt)}`,
+  )
+  return (
+    `- Background jobs right now: ${described.join('; ')}. They keep running while you talk; ` +
+    '`job_status` reads the output, `job_kill` stops one. You will be told when each ends.'
+  )
+}
+
+/** A command as one line the prompt can carry: whitespace flattened and clipped. */
+function oneLine(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > 80 ? `${flat.slice(0, 77)}…` : flat
+}
+
 /** One tab, named and placed: what it is, and where its contents are. */
 function tabLabel(tab: PanelTabFacts): string {
   if (tab.kind === 'browser') {
@@ -240,6 +267,9 @@ function setupSection(input: SystemPromptInput): string {
   if (input.tools.some((tool) => tool.name === 'panel')) on.push('the panel')
   if (input.tools.some((tool) => tool.name === 'task')) on.push('subagents')
   const skills = input.skills?.length ?? 0
+  // Absent when nothing is running, so an install that never backgrounds a
+  // command carries no line about it at all.
+  const jobs = input.jobs ? jobLine(input.jobs) : null
 
   return [
     '## Your own setup',
@@ -299,6 +329,7 @@ function setupSection(input: SystemPromptInput): string {
     ...(input.mcp ? [mcpLine(input.mcp)] : []),
     ...(input.google ? [googleLine(input.google)] : []),
     ...(input.panel ? [panelLine(input.panel)] : []),
+    ...(jobs ? [jobs] : []),
     `- On right now: ${on.length > 0 ? on.join(', ') : 'no optional capability'}, and ${plural(skills, 'skill')} installed.`,
   ].join('\n')
 }

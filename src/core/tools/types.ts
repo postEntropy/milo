@@ -1,4 +1,5 @@
 import type { z } from 'zod'
+import type { JobManager } from '../jobs/index.js'
 import type { MemoryInput, MemoryScope } from '../memory/types.js'
 import type { OutgoingFile } from '../outgoing.js'
 import type { PanelRequest } from '../panel.js'
@@ -72,6 +73,13 @@ export interface ToolContext {
    * routine's own run, where it goes to the routine's target.
    */
   sendFile?: SendFileFn
+  /**
+   * The background jobs of this process, for a turn that may leave a command
+   * running behind the conversation. Absent on a context with no manager behind
+   * it — a subagent's own, a bare test one — so `shell_command` with `background`
+   * falls back to running in the foreground and says so.
+   */
+  jobs?: JobManager
 }
 
 /**

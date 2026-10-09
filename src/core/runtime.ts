@@ -1,5 +1,6 @@
 import type { MediaModelsConfig, SessionsConfig } from './config/schema.js'
 import type { BrowserSession } from './browser/index.js'
+import type { JobManager } from './jobs/index.js'
 import type { Classifier } from './classifier/index.js'
 import type { GoogleState } from './google/state.js'
 import { mcpFacts, type McpServers } from './mcp/servers.js'
@@ -97,6 +98,12 @@ export interface RuntimeOptions {
    * machine to reap.
    */
   mcp?: McpServers | null
+  /**
+   * The background jobs: commands left running behind a conversation. Owned here
+   * and closed on the way out, like the browser — a job lives as long as the
+   * process that started it.
+   */
+  jobs?: JobManager | null
   /**
    * The Google grant as this run sees it. A value, not a getter: connecting an
    * account needs a restart for the tools to appear, so the line that describes
@@ -331,6 +338,7 @@ export class AgentRuntime {
     await Promise.allSettled([...this.cache.values()].map((session) => session.settle()))
     await this.options.browser?.close()
     await this.options.mcp?.close()
+    await this.options.jobs?.close()
   }
 
   /** The external tool servers, for the surfaces that report them. */
@@ -341,6 +349,15 @@ export class AgentRuntime {
   /** The browser Milo drives, when one is configured. */
   get browser(): BrowserSession | null {
     return this.options.browser ?? null
+  }
+
+  /**
+   * The background jobs of this process, for a surface that draws what is running
+   * and for the seam that announces a finished one. Null on a runtime built
+   * without one — a test that never leaves a command behind.
+   */
+  get jobs(): JobManager | null {
+    return this.options.jobs ?? null
   }
 
   /** The skills on this install, for `/skills`. */
@@ -563,6 +580,9 @@ export class AgentRuntime {
       // A plain value: the grant does not move under a running process — a new
       // one needs a restart for its tools to appear, and this says the same.
       google: this.options.google ?? null,
+      // The manager, not its facts: a session reads the live state per turn, and
+      // hands it to `shell_command` so a turn may leave a command running.
+      jobs: this.options.jobs ?? null,
       // A getter, not the value: `/effort` changes what the next turn sends
       // without the runtime having to be rebuilt around it.
       reasoningEffort: () => this.reasoningEffort,

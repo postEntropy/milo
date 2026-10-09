@@ -14,6 +14,7 @@ import { ROUTINE_GATEWAY } from './routines.js'
 import { describeOutgoing, type OutgoingFile } from './outgoing.js'
 import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
 import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, ToolRegistry } from './tools/index.js'
+import type { JobManager } from './jobs/index.js'
 import { withGrants } from './tools/index.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent, type RunTrace } from './agent/loop.js'
@@ -150,6 +151,12 @@ export interface SessionOptions {
   /** The Google grant as this run sees it. Absent when the runtime was built without it. */
   google?: GoogleState | null
   /**
+   * The background jobs of this process. Read per turn for the prompt's live-state
+   * line, and handed to `shell_command` so a turn may leave a command running.
+   * Absent on a session with none behind it — a routine's own run shares the one.
+   */
+  jobs?: JobManager | null
+  /**
    * Called when this copy's last piece of work in flight ends — a turn, or the
    * fact extraction after one. The runtime uses it to let go of a session that
    * no conversation is bound to any more.
@@ -184,6 +191,13 @@ export interface SendOptions {
    * being told where it is. Absent on a surface with no panel.
    */
   panel?: PanelFacts | null
+  /**
+   * An instruction with no message behind it. The turn runs with this on the
+   * system prompt and nothing added to the transcript as coming from the person —
+   * what a finished background job uses to make Milo speak without putting words
+   * in anyone's mouth. Absent on an ordinary turn.
+   */
+  notice?: string
 }
 
 export class Session {
@@ -413,6 +427,16 @@ export class Session {
     if (!this.busy) this.options.onIdle?.(this)
   }
 
+  /**
+   * A turn with no message behind it: an instruction Milo acts on and answers in
+   * the transcript, without the person having said anything — what a finished
+   * background job uses to speak up. It takes the lease like any turn, so it lands
+   * right after whatever the conversation is already doing.
+   */
+  notify(instruction: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
+    return this.send('', { ...opts, notice: instruction })
+  }
+
   private async *turn(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
     const {
       system,
@@ -458,11 +482,14 @@ export class Session {
     const canSendFiles = this.options.deliverTo !== undefined || receivesFiles(surface)
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
       .filter((tool) => tool.name !== 'panel' || surface === 'web')
-    const recalled = (
-      await memory.recall(this.scope, input, {
-        limit: this.options.recallLimit ?? DEFAULT_RECALL_LIMIT,
-      })
-    ).sort((a, b) => a.text.localeCompare(b.text))
+    // An instruction-only turn has nothing of the person's to recall against.
+    const recalled = opts?.notice
+      ? []
+      : (
+          await memory.recall(this.scope, input, {
+            limit: this.options.recallLimit ?? DEFAULT_RECALL_LIMIT,
+          })
+        ).sort((a, b) => a.text.localeCompare(b.text))
     const prompt = {
       base: system,
       surface,
@@ -475,6 +502,9 @@ export class Session {
       // Per turn, from the surface: the prompt is frozen for the turn once built,
       // and what the model opens mid-turn is reported by its own tool result.
       panel: opts?.panel ?? null,
+      // Read live, like the panel: a job started a step ago is in the line the
+      // next turn sees, and one that ended is not.
+      jobs: this.options.jobs?.facts() ?? null,
     }
 
     // Measured against the request that will actually be sent: the tool list,
@@ -490,13 +520,21 @@ export class Session {
       mcp: this.mcpFacts(),
       google: this.options.google ?? null,
     })
+    // An instruction with no message behind it rides the system prompt, the way
+    // the out-of-steps closing request does — the transcript is never left
+    // carrying a sentence nobody said.
+    const turnSystem = opts?.notice ? `${systemPrompt}\n\n${opts.notice}` : systemPrompt
     // What every request carries besides the transcript: the prompt, and the tool
     // schemas the wire sends beside it. The transcript count is measured against
     // this, so leaving the catalog out said a request fitted while it did not.
-    this.lastFixedTokens = estimateText(systemPrompt) + estimateTools(tools)
+    this.lastFixedTokens = estimateText(turnSystem) + estimateTools(tools)
 
-    this.messages.push({ role: 'user', content: [{ type: 'text', text: input }, ...(opts?.images ?? []), ...(opts?.audio ?? [])] })
-    note({ kind: 'user', text: input })
+    // Nothing the person said means nothing added to the transcript as theirs; the
+    // instruction above is the whole of this turn's prompt.
+    if (!opts?.notice) {
+      this.messages.push({ role: 'user', content: [{ type: 'text', text: input }, ...(opts?.images ?? []), ...(opts?.audio ?? [])] })
+      note({ kind: 'user', text: input })
+    }
 
     // The turn's one signal, one permission decision and one effort, shared by
     // the turn and by any subagent it delegates to.
@@ -553,6 +591,7 @@ export class Session {
           origin,
           routine,
           sendFile,
+          jobs: this.options.jobs ?? undefined,
           // A subtask runs in its own context, but under this turn's model,
           // tools, permissions and stop: the same `ask` puts the subagent's
           // confirmations to the user, and the same signal stops both.

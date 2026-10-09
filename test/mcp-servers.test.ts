@@ -476,6 +476,7 @@ describe('the runtime', () => {
         cdpUrl: null,
         keepSnapshots: 2,
       },
+      jobs: { max: 8 },
     },
     provider: { id: 'test', baseURL: 'http://127.0.0.1:1/v1', apiKey: 'k', wire: 'openai' },
     model: 'test-model',

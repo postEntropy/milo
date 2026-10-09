@@ -11,7 +11,7 @@ import { readDisplay } from '../../core/config/load.js'
 import { buildCommandContext, handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
-import type { ClientFrame, FrameAttachment, PanelInput, PanelKind, PanelState, PanelTab, PanelView, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
+import type { ClientFrame, FrameAttachment, JobView, PanelInput, PanelKind, PanelState, PanelTab, PanelView, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
 import { PERMISSION_TIMEOUT_MS } from './protocol.js'
 import { displayEvent } from './turn.js'
 import { panelsOf, transcriptOf } from './transcript.js'
@@ -103,12 +103,22 @@ export class WebHub {
   /** Stops following the browser's URL once subscribed; see `watchBrowserUrl`. */
   private browserUrlWatch: (() => void) | null = null
 
+  /** Stops the job subscription on the way out; see the constructor. */
+  private detachJobs: (() => void) | null = null
+
   /**
    * `cwd` is only ever needed to resolve a panel's file when a request is read
    * back from a transcript; the server passes its own, and the default matches
    * how a bare path is resolved everywhere else.
    */
-  constructor(private readonly runtime: AgentRuntime, private readonly cwd: string = process.cwd()) {}
+  constructor(private readonly runtime: AgentRuntime, private readonly cwd: string = process.cwd()) {
+    // A job starts and ends on the process, not on one conversation, so every
+    // open page is told and each draws the same strip.
+    this.detachJobs =
+      this.runtime.jobs?.onChange(() => {
+        this.broadcastAll({ type: 'jobs', jobs: this.jobsView() })
+      }) ?? null
+  }
 
   async connect(client: WebClient, conversationId: string): Promise<void> {
     if (!/^[0-9a-f-]{36}$/i.test(conversationId)) throw new Error('Invalid conversation id.')
@@ -134,6 +144,7 @@ export class WebHub {
       model: this.runtime.model,
       effort: this.runtime.reasoningEffort,
       panel: this.panelFor(conversation),
+      jobs: this.jobsView(),
     })
     this.sendState(conversationId)
     // Parked (see `IDEAS_ENABLED`): the standing four stand, and no call is made.
@@ -172,6 +183,14 @@ export class WebHub {
           client.send({ type: 'error', message: 'That permission is no longer waiting.' })
         }
       }
+      return
+    }
+
+    if (frame.type === 'job-kill') {
+      // The person pressing stop is the confirmation; the manager kills the child
+      // and its change broadcast redraws the strip without this job.
+      const killed = this.runtime.jobs?.kill(frame.id) ?? false
+      if (!killed) client.send({ type: 'error', message: `No running job "${frame.id}".` })
       return
     }
 
@@ -247,6 +266,8 @@ export class WebHub {
     this.browserUrlWatch = null
     this.runtime.browser?.stopScreencast()
     for (const id of this.conversations.keys()) this.turns.stop(id)
+    this.detachJobs?.()
+    this.detachJobs = null
   }
 
   stageUpload(file: IncomingFile): string {
@@ -331,6 +352,24 @@ export class WebHub {
   /** The file behind an id, for the HTTP layer to stream. Null when none was delivered under it. */
   attachment(id: string): { path: string; name: string; mimeType: string } | null {
     return this.attachments.get(id) ?? null
+  }
+
+  /**
+   * Shows a message that is *already* in the conversation's transcript — the
+   * announcement of a finished background job, whose turn ran on the
+   * conversation's own session. Unlike `deliver` it does not write the transcript
+   * again, so the message is not doubled; a reload reads it from the transcript.
+   */
+  showNotice(conversationId: string, message: OutgoingMessage): void {
+    const files = message.files ?? []
+    const text = message.text ?? ''
+    const attachments = files.map((file) => this.register(file))
+    this.broadcast(conversationId, {
+      type: 'command-result',
+      reply: text,
+      markdown: text,
+      ...(attachments.length > 0 ? { attachments } : {}),
+    })
   }
 
   /**
@@ -845,6 +884,29 @@ export class WebHub {
 
   private broadcast(conversationId: string, frame: ServerFrame): void {
     for (const client of this.conversations.get(conversationId)?.clients ?? []) client.send(frame)
+  }
+
+  /** The same frame to every open page: jobs belong to the process, not a chat. */
+  private broadcastAll(frame: ServerFrame): void {
+    for (const conversation of this.conversations.values()) {
+      for (const client of conversation.clients) client.send(frame)
+    }
+  }
+
+  /**
+   * The jobs still running, as the strip draws them. Only the ones still going:
+   * a job that ended is announced in the chat, and a strip that kept it would be
+   * saying something the conversation already said.
+   */
+  private jobsView(): JobView[] {
+    return (this.runtime.jobs?.list() ?? [])
+      .filter((job) => job.state === 'running')
+      .map((job) => ({
+        id: job.id,
+        command: job.command,
+        startedAt: job.startedAt,
+        lines: job.lines.slice(-12),
+      }))
   }
 
   /** A session's history as the page renders it; see `transcriptOf`. */

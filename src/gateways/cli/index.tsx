@@ -10,6 +10,7 @@ import {
 } from '../../core/config/load.js'
 import { MILO_HOME } from '../../core/config/paths.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../../core/config/schema.js'
+import { announceJob, shouldAnnounce } from '../../core/jobs/index.js'
 import type { MemoryScope } from '../../core/memory/index.js'
 import { PERMISSION_LABELS, type PermissionMode } from '../../core/tools/permission.js'
 import { DEFAULT_REASONING_EFFORT, type ReasoningEffort } from '../../core/providers/types.js'
@@ -128,6 +129,38 @@ export function Shell({
       threshold: loaded.config.permissions.jevThreshold,
     })
   }, [runtime, loaded, mode])
+
+  /** The job whose announcement is running, drawn in the chat's status line. */
+  const [jobNotice, setJobNotice] = useState<string | null>(null)
+
+  // A background job that ends speaks up here: a short turn on this terminal's
+  // session, then the answer drawn as an ordinary message. Only this terminal's
+  // own jobs — a daemon's jobs are announced by the daemon.
+  useEffect(() => {
+    const active = runtime
+    const jobs = active?.jobs
+    if (!active || !jobs) return
+    return jobs.onSettled((job) => {
+      if (job.origin.gateway !== 'cli' || !shouldAnnounce(job)) return
+      void (async () => {
+        setJobNotice(job.id)
+        try {
+          const session = await active.getSession(job.origin)
+          const message = await announceJob(session, job)
+          if (message?.text) {
+            setItems((previous) => [...previous, { kind: 'assistant', text: message.text }])
+          }
+        } catch (error) {
+          setItems((previous) => [
+            ...previous,
+            { kind: 'error', text: `could not announce ${job.id}: ${errorMessage(error)}` },
+          ])
+        } finally {
+          setJobNotice(null)
+        }
+      })()
+    })
+  }, [runtime])
 
   // Set when a screen writes to disk, so leaving setup can say so.
   const wroteSettings = useRef(false)
@@ -274,6 +307,7 @@ export function Shell({
           onSessionChange={setSessionId}
           model={model}
           sessionId={sessionId}
+          jobNotice={jobNotice}
         />
       ) : screen === 'settings' && loaded ? (
         <SettingsScreen

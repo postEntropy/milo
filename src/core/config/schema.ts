@@ -350,6 +350,18 @@ export const GoogleAccountSchema = z.object({
 })
 export type GoogleAccount = z.infer<typeof GoogleAccountSchema>
 
+/**
+ * Background jobs: what `shell_command` may leave running behind the conversation.
+ * Shell can always background, so this is the cap and not an on/off switch — the
+ * number of jobs that may run at once before `shell_command background` is refused.
+ */
+export const JobsSchema = z.object({
+  max: z.number().int().positive().default(8),
+})
+export type JobsConfig = z.infer<typeof JobsSchema>
+
+export const DEFAULT_JOBS: JobsConfig = { max: 8 }
+
 export const ConfigSchema = z.object({
   provider: z.string(),
   model: z.string(),
@@ -365,6 +377,7 @@ export const ConfigSchema = z.object({
   classifier: ClassifierSchema.default(DEFAULT_CLASSIFIER),
   browser: BrowserSchema.default(DEFAULT_BROWSER),
   google: GoogleSchema.default(DEFAULT_GOOGLE),
+  jobs: JobsSchema.default(DEFAULT_JOBS),
   media: MediaModelsSchema.optional(),
   search: SearchSchema.optional(),
   systemPrompt: z.string().optional(),

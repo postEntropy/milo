@@ -101,6 +101,7 @@ describe('a capability the registry can add is named in the prompt', () => {
   const MARKER: Record<string, string> = {
     browser: 'Browser right now',
     google: 'Google (Gmail and Drive)',
+    jobs: 'Background jobs right now',
     mcp: 'External tool servers (MCP)',
     search: 'On right now: web search',
     skills: '1 skill installed',
@@ -109,7 +110,7 @@ describe('a capability the registry can add is named in the prompt', () => {
   it('reads the capabilities the registry actually switches on', () => {
     // If this fails because registration was refactored, put the two back in sync:
     // a guard that reads nothing guards nothing.
-    expect(switchedOn).toEqual(['browser', 'google', 'mcp', 'search', 'skills'])
+    expect(switchedOn).toEqual(['browser', 'google', 'jobs', 'mcp', 'search', 'skills'])
   })
 
   it('has a marker for every capability it reads', () => {
@@ -133,6 +134,21 @@ describe('a capability the registry can add is named in the prompt', () => {
       browser: { binary: 'chromium', headless: true, profile: 'its own', running: false, port: null },
       google: { kind: 'connected', email: 'me@example.com', enabled: true, access: 'none' },
       mcp: { file: '/home/x/.milo/mcp.json', servers: [] },
+      jobs: {
+        jobs: [
+          {
+            id: 'job_1',
+            command: 'echo hi',
+            cwd: '/tmp/x',
+            notify: 'auto',
+            origin: { gateway: 'cli', conversationId: 'c' },
+            state: 'running',
+            startedAt: Date.now(),
+            logPath: '/tmp/x/output.log',
+            lines: [],
+          },
+        ],
+      },
     })
     const unnamed = Object.entries(MARKER)
       .filter(([, marker]) => !prompt.includes(marker))

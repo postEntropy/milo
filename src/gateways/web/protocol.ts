@@ -2,7 +2,7 @@ import type { Idea } from '../../core/ideas.js'
 import type { PanelRequest } from '../../core/panel.js'
 import type { TodoItem } from '../../core/todos.js'
 
-export const PROTOCOL_VERSION = 4
+export const PROTOCOL_VERSION = 5
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 export const PERMISSION_MODES = ['ask', 'auto', 'yolo'] as const
@@ -71,6 +71,8 @@ export type ClientFrame =
   | { type: 'hello'; version: number; conversationId: string }
   | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[] }
   | { type: 'control'; action: 'stop' | 'allow' | 'deny'; id?: string }
+  /** Stop a background job. Pressing the control is the confirmation. */
+  | { type: 'job-kill'; id: string }
   | { type: 'command'; text: string }
   | { type: 'action'; actionId: string; messageId?: string }
   /** Pointer/keyboard the person sent into the live browser panel. */
@@ -128,6 +130,18 @@ export interface PanelView {
 }
 
 /**
+ * A background job as the page draws it in the strip above the composer. Only
+ * what the strip needs: what it is running, since when, and the tail of what it
+ * has printed — the full log stays on the machine.
+ */
+export interface JobView {
+  id: string
+  command: string
+  startedAt: number
+  lines: string[]
+}
+
+/**
  * Pointer and keyboard the person sends into the live browser panel. Coordinates
  * are normalized to the viewport (0..1) so the page does not have to know its
  * pixel size, and the browser maps them back. A key carries CDP's modifier
@@ -142,7 +156,7 @@ export type PanelInput =
   | { kind: 'type'; text: string }
 
 export type ServerFrame =
-  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: 'on' | 'off'; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null }
+  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: 'on' | 'off'; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[] }
   | { type: 'turn-start'; id: string; text: string }
   | { type: 'event'; turnId: string; event: AgentEvent }
   | { type: 'permission'; id: string; request: PermissionRequest; expiresAt: number }
@@ -154,6 +168,8 @@ export type ServerFrame =
   | { type: 'routines-changed' }
   /** The panel beside the chat changed; null takes it down. */
   | { type: 'panel'; panel: PanelView | null }
+  /** The background jobs still running, for the strip above the composer. */
+  | { type: 'jobs'; jobs: JobView[] }
   /**
    * Ideas for the empty home, from what Milo knows. They arrive after the page is
    * already showing the standing four, which they take the place of.
@@ -210,6 +226,9 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
     return frame as ClientFrame
   }
   if (frame.type === 'control' && ['stop', 'allow', 'deny'].includes(String(frame.action))) {
+    return frame as ClientFrame
+  }
+  if (frame.type === 'job-kill' && typeof frame.id === 'string' && frame.id !== '') {
     return frame as ClientFrame
   }
   if (frame.type === 'command' && typeof frame.text === 'string') return frame as ClientFrame

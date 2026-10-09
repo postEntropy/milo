@@ -3,6 +3,7 @@ import type { SkillLibrary } from '../skills/index.js'
 import type { BrowserSession } from '../browser/index.js'
 import { createBrowserTools } from '../browser/index.js'
 import type { Classifier } from '../classifier/index.js'
+import type { JobManager } from '../jobs/index.js'
 import type { GoogleAccount } from '../config/schema.js'
 import type { McpServers } from '../mcp/servers.js'
 import { editFileTool } from './edit-file.js'
@@ -13,6 +14,7 @@ import { createGmailWriteTools } from './mail-actions.js'
 import { fetchUrlTool } from './fetch-url.js'
 import { gitCommitTool, gitTool } from './git.js'
 import { globTool } from './glob.js'
+import { createJobTools } from './jobs.js'
 import { grepTool } from './grep.js'
 import { listDirTool } from './list-dir.js'
 import { readFileTool } from './read-file.js'
@@ -126,6 +128,12 @@ export interface ToolRegistryOptions {
    * business, started in the background and never waited for here.
    */
   mcp?: McpServers | null
+  /**
+   * The background jobs of this process. Its two tools — `job_status` and
+   * `job_kill` — are only registered when there is a manager behind them, so a
+   * caller with none never offers a job tool it cannot answer.
+   */
+  jobs?: JobManager | null
 }
 
 /**
@@ -149,6 +157,7 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
     tools.push(...createMailLabelTools({ account: options.google.account, classifier: options.google.classifier ?? null }))
     tools.push(...createGmailWriteTools(options.google.account))
   }
+  if (options.jobs) tools.push(...createJobTools(options.jobs))
   const registry = new ToolRegistry(tools)
   // Added after the built-ins, so the cache the servers bring lands in a registry
   // that already holds everything Milo ships. No name can collide anyway: every

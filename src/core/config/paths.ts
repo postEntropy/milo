@@ -70,3 +70,14 @@ export const mcpFile = (): string => path.join(MILO_HOME, 'mcp.json')
  * came back. Derived: deleting it costs one round trip and nothing else.
  */
 export const mcpCacheFile = (): string => path.join(MILO_HOME, 'mcp-cache.json')
+/**
+ * The background jobs: one directory per job, holding its full output log and the
+ * state it reached. Kept after it ends, so a job a closed terminal left behind is
+ * still readable — and swept for the ones a dead process left `running`.
+ */
+export const jobsDir = (): string => path.join(MILO_HOME, 'jobs')
+export const jobDir = (id: string): string => path.join(jobsDir(), id)
+/** A job's full stdout+stderr, appended as it runs; 0600, like the transcript. */
+export const jobLogFile = (id: string): string => path.join(jobDir(id), 'output.log')
+/** A job's command, state and exit code, rewritten as its state moves. */
+export const jobMetaFile = (id: string): string => path.join(jobDir(id), 'job.json')

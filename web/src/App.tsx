@@ -12,7 +12,7 @@ import { TaskLists } from './tasks/TaskLists.js'
 import { Email } from './email/Email.js'
 import { Settings } from './settings/Settings.js'
 import { Panel } from './panel/Panel.js'
-import type { ServerFrame, PermissionRequest, PanelInput, PanelView, SendTarget, TranscriptPart } from '@protocol'
+import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, TranscriptPart } from '@protocol'
 import { toolText } from '../../src/gateways/tool-line.ts'
 import { describeRebase } from '../../src/core/sessions/format.ts'
 import { Icon } from './ui/Icons.js'
@@ -127,6 +127,8 @@ export default function App() {
    * chat is opened.
    */
   const [panel, setPanel] = useState<PanelView | null>(null)
+  /** The background jobs still running, for the strip above the composer. */
+  const [jobs, setJobs] = useState<JobView[]>([])
   const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem('milo-panel') === 'open')
   const [theme, setTheme] = useState(() => localStorage.getItem('milo-theme') ?? 'system')
   const [notice, setNotice] = useState<Notice | null>(null)
@@ -438,6 +440,7 @@ export default function App() {
       // What the panel was left showing, resolved by the server from the session's
       // own history, so a reload comes back to the same view.
       setPanel(frame.panel ?? null)
+      setJobs(frame.jobs ?? [])
       // A session opens at its end, where the conversation is — the whole thread
       // is here at once, so there is no "scrolled there" to respect.
       pinToEnd.current = true
@@ -462,6 +465,7 @@ export default function App() {
     }
     if (frame.type === 'suggestions') { setIdeas(frame.items); return }
     if (frame.type === 'state') { setBusy(frame.busy); setQueued(frame.queued); return }
+    if (frame.type === 'jobs') { setJobs(frame.jobs); return }
     if (frame.type === 'turn-start') {
       // The wait starts here and the turn says so on screen: the assistant
       // message carries it, so the line appears where the reply will.
@@ -1019,7 +1023,7 @@ export default function App() {
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock">
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={(provider) => void changeProvider(provider)} />
+            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={(provider) => void changeProvider(provider)} />
           </div>
         </section>
         : null}

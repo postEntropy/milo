@@ -3,8 +3,9 @@ import { api } from '../lib/api.js'
 import { formatTokens } from '../lib/format.js'
 import { EFFORT_LABELS } from '../lib/labels.js'
 import { shortModel } from '../../../src/gateways/model-label.ts'
+import { formatDuration } from '../../../src/util/format.ts'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
-import { EFFORT_LEVELS } from '@protocol'
+import { EFFORT_LEVELS, type JobView } from '@protocol'
 import { Icon } from '../ui/Icons.js'
 import { Select } from '../ui/Select.js'
 import { ModelDetails } from '../ui/ModelDetails.js'
@@ -12,6 +13,10 @@ import { ModelDetails } from '../ui/ModelDetails.js'
 interface Props {
   busy: boolean
   queued: number
+  /** The background jobs still running, drawn above the composer. */
+  jobs?: JobView[]
+  /** Stops a running job, from the control on its own row. */
+  onKillJob?: (id: string) => void
   provider: string
   /** What the provider is called on screen, so its models can be lead with it. */
   providerName: string
@@ -82,6 +87,7 @@ const COMMANDS: Array<{ name: string; hint: string }> = [
   { name: 'sessions', hint: 'the saved sessions' },
   { name: 'resume', hint: 'switch to a session: /resume <id>' },
   { name: 'stats', hint: 'numbers for the current session' },
+  { name: 'jobs', hint: 'the background jobs, and how they are doing' },
   { name: 'compact', hint: 'fold the oldest turns into the summary now' },
   { name: 'export', hint: 'write this conversation to a file: /export [md|json]' },
   { name: 'skills', hint: 'the skills installed, and where they live' },
@@ -92,14 +98,29 @@ const COMMANDS: Array<{ name: string; hint: string }> = [
   { name: 'queue', hint: 'say it as its own turn, after this one' },
 ]
 
+/** A command as one line for the strip: whitespace flattened and clipped. */
+function oneLine(text: string): string {
+  const flat = text.replace(/\s+/g, ' ').trim()
+  return flat.length > 80 ? `${flat.slice(0, 77)}…` : flat
+}
+
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { busy, queued, provider, providerName, draftKey, model, context, effort, focusSignal, onSend, onStop, onModelChange, onEffortChange, onProviderChange },
+  { busy, queued, jobs, onKillJob, provider, providerName, draftKey, model, context, effort, focusSignal, onSend, onStop, onModelChange, onEffortChange, onProviderChange },
   handle,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null)
   const [draft, setDraft] = useState('')
   /** The words picked out of a reply, held until the answer is sent. */
   const [quote, setQuote] = useState<string | null>(null)
+  /** Which running job's output is expanded, if any. */
+  const [openJob, setOpenJob] = useState<string | null>(null)
+  /** A clock for the running jobs' elapsed time; it ticks only while one runs. */
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    if (!jobs || jobs.length === 0) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [jobs])
   /** What was typed in each conversation, kept under the one it was typed in. */
   const drafts = useRef(new Map<string, string>())
   const fileDrafts = useRef(new Map<string, File[]>())
@@ -301,7 +322,25 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   return (
     <div className="composer-shell">
-      <div className="queue-list" aria-live="polite">{queued > 0 && <div className="queue-chip"><Icon name="history" size={14} /> {queued} {queued === 1 ? 'message queued' : 'messages queued'}</div>}</div>
+      <div className="queue-list" aria-live="polite">{queued > 0 && <div className="queue-chip"><Icon name="history" size={14} /> {queued} {queued === 1 ? 'message queued' : 'messages queued'}</div>}
+        {jobs && jobs.length > 0 && <div className="job-strip">
+          {jobs.map((job) => {
+            const open = openJob === job.id
+            return <div className="job-entry" key={job.id}>
+              <div className="job-chip">
+                <button type="button" className="job-toggle" aria-expanded={open} title="Background job — show its output" onClick={() => setOpenJob(open ? null : job.id)}>
+                  <Icon name="terminal" size={17} />
+                  <span className="job-command">{oneLine(job.command)}</span>
+                  <span className="job-elapsed">{formatDuration(Math.max(0, now - job.startedAt))}</span>
+                  <span className="job-chevron"><Icon name="chevron" size={13} /></span>
+                </button>
+                {onKillJob && <button type="button" className="job-stop" title="Stop this job" aria-label={`Stop ${job.id}`} onClick={() => onKillJob(job.id)}><Icon name="stop" size={15} /></button>}
+              </div>
+              {open && <pre className="job-log">{job.lines.length > 0 ? job.lines.slice(-12).join('\n') : 'No output yet.'}</pre>}
+            </div>
+          })}
+        </div>}
+      </div>
       <div className="composer-box">
         {uploadError && <div className="composer-upload-error" role="alert">{uploadError}</div>}
         {files.length > 0 && <div className="composer-files" aria-live="polite">{files.map((file, index) => <span className="composer-file" key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name}<button type="button" aria-label={`Remove ${file.name}`} title={`Remove ${file.name}`} onClick={() => setFiles((current) => { const next = current.filter((_, item) => item !== index); fileDrafts.current.set(draftKey, next); return next })}><Icon name="x" size={12} /></button></span>)}</div>}

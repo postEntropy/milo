@@ -67,6 +67,11 @@ export class WebGateway implements Gateway {
     await this.running.deliver(conversationId, message)
   }
 
+  /** Shows a finished job's announcement, already written to the transcript. */
+  showNotice(conversationId: string, message: OutgoingMessage): void {
+    this.running?.showNotice(conversationId, message)
+  }
+
   /** A routine ran: every page open on the web UI re-reads the history it shows. */
   routinesChanged(): void {
     this.running?.routinesChanged()

@@ -22,6 +22,66 @@ import {
 import { PendingDecisions } from '../src/gateways/pending.js'
 import { TurnQueue } from '../src/gateways/turns.js'
 import type { MemoryItem } from '../src/core/memory/index.js'
+import type { JobInfo } from '../src/core/jobs/index.js'
+
+describe('/jobs', () => {
+  const job = (over: Partial<JobInfo> = {}): JobInfo => ({
+    id: 'job_1',
+    command: 'yt-dlp https://example.com/v',
+    cwd: '/',
+    notify: 'auto',
+    origin: { gateway: 'cli', conversationId: 'main' },
+    state: 'running',
+    startedAt: Date.now() - 65_000,
+    logPath: '/l',
+    lines: ['[download] 42%'],
+    ...over,
+  })
+
+  it('says so plainly when nothing was started', async () => {
+    const result = await handleCommand('/jobs', { jobs: () => [] })
+    expect(result.handled).toBe(true)
+    expect(result.reply).toContain('No background jobs.')
+  })
+
+  it('names each job, how it is doing, and its last output line', async () => {
+    const result = await handleCommand('/jobs', { jobs: () => [job()] })
+    expect(result.reply).toContain('job_1')
+    expect(result.reply).toContain('running')
+    expect(result.reply).toContain('yt-dlp')
+    expect(result.reply).toContain('[download] 42%')
+  })
+
+  it('shows the exit code of a job that failed', async () => {
+    const result = await handleCommand('/jobs', {
+      jobs: () => [job({ state: 'error', exitCode: 1, endedAt: Date.now() })],
+    })
+    expect(result.reply).toContain('exit 1')
+  })
+
+  it('stops a job it was told to kill', async () => {
+    const killed: string[] = []
+    const result = await handleCommand('/jobs kill job_1', {
+      jobs: () => [job()],
+      killJob: (id) => {
+        killed.push(id)
+        return true
+      },
+    })
+    expect(killed).toEqual(['job_1'])
+    expect(result.reply).toContain('Stopped job_1')
+  })
+
+  it('does not claim to have stopped a job that is not running', async () => {
+    const result = await handleCommand('/jobs kill job_9', { jobs: () => [], killJob: () => false })
+    expect(result.reply).toContain('No running job "job_9"')
+  })
+
+  it('answers an argument it does not know with the valid ones', async () => {
+    const result = await handleCommand('/jobs nope', { jobs: () => [job()] })
+    expect(result.reply).toContain('/jobs kill <id>')
+  })
+})
 
 describe('/memory', () => {
   const notes: MemoryItem[] = [

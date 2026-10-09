@@ -32,6 +32,7 @@ import {
   compactReply,
   formatMemoryList,
   handleTurnControl,
+  jobsReply,
   parseForkArgument,
   type TurnControlTarget,
 } from '../../commands.js'
@@ -95,6 +96,8 @@ export interface ChatScreenProps {
   sessionId?: string | null
   /** Fired when /new or /resume rebinds this conversation to another session. */
   onSessionChange?: (id: string) => void
+  /** A finished job's announcement is running: its id, drawn in the status line. */
+  jobNotice?: string | null
 }
 
 /** Described one per line: a bare list of names leaves the reader to guess. */
@@ -114,6 +117,7 @@ const HELP_TEXT = [
   '/sessions [page] — list saved sessions',
   '/resume <id> — switch to another session',
   '/stats — numbers for the current session',
+  '/jobs — the background jobs, and how they are doing',
   '/skills — the skills installed, and where they live',
   '/memory [forget <id>] — what Milo keeps, and how to drop one of them',
   '/clear — forget this conversation',
@@ -157,6 +161,7 @@ export function ChatScreen({
   onSessionChange,
   model,
   sessionId,
+  jobNotice,
 }: ChatScreenProps) {
   const { exit } = useApp()
   const { rows, columns } = useTerminalSize()
@@ -181,6 +186,18 @@ export function ChatScreen({
   const [permission, setPermission] = useState<PermissionRequest | null>(null)
   /** Bumped on every recall, so the input remounts with its cursor at the end. */
   const [recallEpoch, setRecallEpoch] = useState(0)
+  /** How many background jobs are running, for the status line's counter. */
+  const [runningJobs, setRunningJobs] = useState(0)
+
+  // The manager changes under the UI — a job started a moment ago by a tool call,
+  // one that just ended — so the count is read live rather than threaded down.
+  useEffect(() => {
+    const jobs = runtime.jobs
+    if (!jobs) return
+    const sync = () => setRunningJobs(jobs.list().filter((job) => job.state === 'running').length)
+    sync()
+    return jobs.onChange(sync)
+  }, [runtime])
 
   const busy = phase !== 'idle'
   const elapsed = useElapsed(busy, startedAt)
@@ -481,6 +498,16 @@ export function ChatScreen({
       case 'stats': {
         const session = await runtime.getSession(scope)
         push({ kind: 'fields', rows: statsRows(session.stats()) })
+        break
+      }
+      case 'jobs': {
+        push({
+          kind: 'info',
+          text: jobsReply(argument, {
+            jobs: () => runtime.jobs?.list() ?? [],
+            killJob: (id) => runtime.jobs?.kill(id) ?? false,
+          }),
+        })
         break
       }
       case 'compact': {
@@ -922,6 +949,7 @@ export function ChatScreen({
   const scrolled = window.offset > 0 ? `▲ scrolled (${window.offset})` : ''
   const idleText = scrolled || 'Ready'
   const counters = [
+    runningJobs > 0 ? `↻ ${runningJobs} job${runningJobs === 1 ? '' : 's'}` : '',
     !busy && lastDuration !== null ? `last ${formatSeconds(lastDuration)}` : '',
     contextTokens > 0 ? `${formatTokens(contextTokens)} tok` : '',
   ]
@@ -988,6 +1016,10 @@ export function ChatScreen({
         {busy ? (
           <Text color={theme.warning}>
             <Spinner type="dots" /> {statusText}
+          </Text>
+        ) : jobNotice ? (
+          <Text color={theme.warning}>
+            <Spinner type="dots" /> job {jobNotice} finished — Milo is on it…
           </Text>
         ) : (
           <Text color={theme.muted}>{idleText}</Text>

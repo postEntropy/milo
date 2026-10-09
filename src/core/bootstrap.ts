@@ -5,6 +5,7 @@ import { readAuth, readConfig, resolveClassifierKey, resolveProvider, resolveSea
 import { findPreset } from './config/presets.js'
 import { fileHistory } from './history.js'
 import { googleState } from './google/state.js'
+import { JobManager } from './jobs/index.js'
 import { createMcpServers } from './mcp/servers.js'
 import { createMemory, embeddingKey, installMemory, TurnIndex } from './memory/index.js'
 import { engineOnDemand } from './memory/provision.js'
@@ -117,12 +118,18 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   // which messages carry one. One instance, so those cannot land on different backends.
   const classifier = buildClassifier(loaded, auth, traces)
 
+  // The background jobs: one manager for the process, so a turn can leave a
+  // command running and every surface sees the same thing. Its two tools ride
+  // along with it. Nothing is started here; a job starts when one is asked for.
+  const jobs = new JobManager({ max: loaded.config.jobs.max })
+
   const registry = createToolRegistry({
     search,
     skills,
     browser,
     google: google ? { account: google.account, classifier } : null,
     mcp,
+    jobs,
   })
 
   // The install's routine list, as the `routine` tool sees it. A removal takes the
@@ -162,6 +169,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     // connection a fourth way. A grant made later needs a restart anyway.
     google: googleState(loaded.config, auth),
     browser,
+    jobs,
     keepSnapshots: loaded.config.browser.keepSnapshots,
     memory: installMemory(
       createMemory(loaded.config.memory, memoryDir(), {
