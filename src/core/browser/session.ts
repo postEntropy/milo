@@ -580,10 +580,18 @@ export class BrowserSession {
         profileDir: this.options.profileDir,
         headless: this.options.headless !== false,
       })
+      // The browser is up but nothing is answering on its socket. Let it go here,
+      // because this is the only chance: the next launch overwrites `stopChrome`,
+      // and the process it named would then run on with no one holding it.
+      try {
+        this.connection = await CdpConnection.connect(handle.wsUrl, CONNECT_TIMEOUT_MS)
+      } catch (error) {
+        stop()
+        throw error
+      }
       this.stopChrome = stop
       this.endpoint = handle.wsUrl
       this.binary = chromePath
-      this.connection = await CdpConnection.connect(handle.wsUrl, CONNECT_TIMEOUT_MS)
       this.mode = 'owned'
     }
 

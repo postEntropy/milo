@@ -278,6 +278,14 @@ export async function launchChrome(options: {
     stderr = `${stderr}${chunk.toString()}`.slice(-2_000)
   })
 
+  // A spawn that fails — the binary gone or not executable between the search and
+  // here — reports it as an 'error' event rather than an exit. With no listener
+  // that is an uncaught exception, and it takes the whole process down with it.
+  let spawnError: Error | null = null
+  child.on('error', (error) => {
+    spawnError = error
+  })
+
   const stop = () => {
     if (!child.killed && child.exitCode === null) child.kill('SIGKILL')
   }
@@ -287,6 +295,10 @@ export async function launchChrome(options: {
     if (options.signal?.aborted) {
       stop()
       throw new Error('cancelled')
+    }
+    if (spawnError) {
+      stop()
+      throw new Error(`could not start ${options.chromePath}: ${errorMessage(spawnError)}`)
     }
     if (child.exitCode !== null) {
       stop()

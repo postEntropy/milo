@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
-import { defaultProfileRoots, isDefaultProfile, listBrowsers } from '../src/core/browser/chrome.js'
+import { defaultProfileRoots, isDefaultProfile, launchChrome, listBrowsers } from '../src/core/browser/chrome.js'
 
 /**
  * Finding browsers, against a `PATH` and a home of the test's own. A machine's
@@ -76,6 +76,17 @@ describe('listBrowsers', () => {
     const chromium = found.filter((entry) => entry.id === 'chromium')
     expect(chromium).toHaveLength(1)
     expect(chromium[0]?.path).toBe(path.join(bin, 'chromium'))
+  })
+})
+
+describe('launchChrome', () => {
+  it('reports a browser it cannot start instead of crashing the process', async () => {
+    // A path that exists in no directory: `spawn` answers with an `error` event,
+    // not an exit, and an unlistened one is an uncaught exception.
+    const profile = path.join(dir(), 'profile')
+    await expect(
+      launchChrome({ chromePath: path.join(dir(), 'no-such-chromium'), profileDir: profile, headless: true }),
+    ).rejects.toThrow(/could not start/)
   })
 })
 
