@@ -100,6 +100,9 @@ export class WebHub {
    */
   private readonly browserWatchers = new Set<(frame: Buffer) => void>()
 
+  /** Stops following the browser's URL once subscribed; see `watchBrowserUrl`. */
+  private browserUrlWatch: (() => void) | null = null
+
   /**
    * `cwd` is only ever needed to resolve a panel's file when a request is read
    * back from a transcript; the server passes its own, and the default matches
@@ -240,6 +243,8 @@ export class WebHub {
     for (const staged of this.stagedUploads.values()) clearTimeout(staged.timer)
     this.stagedUploads.clear()
     this.browserWatchers.clear()
+    this.browserUrlWatch?.()
+    this.browserUrlWatch = null
     this.runtime.browser?.stopScreencast()
     for (const id of this.conversations.keys()) this.turns.stop(id)
   }
@@ -456,6 +461,26 @@ export class WebHub {
   }
 
   /**
+   * Follows the live browser's URL, so a panel drawing it is not left on the
+   * snapshot it opened with. Subscribed once, the first time a browser panel is
+   * resolved; every conversation showing the browser tab is then told afresh.
+   */
+  private watchBrowserUrl(): void {
+    const browser = this.runtime.browser
+    if (!browser || this.browserUrlWatch) return
+    this.browserUrlWatch = browser.onNavigate(() => {
+      for (const [id, conversation] of this.conversations) {
+        if (this.hasBrowserTab(conversation)) this.broadcast(id, { type: 'panel', panel: this.panelView(conversation) })
+      }
+    })
+  }
+
+  /** Whether the panel a conversation holds has the browser tab on it. */
+  private hasBrowserTab(conversation: Conversation): boolean {
+    return (conversation.panel?.requests ?? []).some((request) => request.browser)
+  }
+
+  /**
    * A panel request as a view the browser can draw. A browser request needs no
    * file; a path is registered so its bytes are served inline by id, and the kind
    * is decided by what the file is. A file that is gone resolves to no panel
@@ -465,6 +490,7 @@ export class WebHub {
     if (request.close) return null
     const title = request.title?.trim() || undefined
     if (request.browser) {
+      this.watchBrowserUrl()
       return { kind: 'browser', ...(title ? { title } : {}), url: this.runtime.browser?.status.url ?? null }
     }
     if (!request.path) return null
@@ -521,7 +547,7 @@ export class WebHub {
     const signal = new AbortController().signal
     if (input.kind === 'click' || input.kind === 'move') return browser.pointer(input.kind, input.x, input.y, signal)
     if (input.kind === 'scroll') return browser.wheel(input.x, input.y, input.deltaY, signal)
-    if (input.kind === 'key') return browser.key(input.key, signal)
+    if (input.kind === 'key') return browser.key(input.key, input.modifiers ?? 0, signal)
     return browser.typeText(input.text, signal)
   }
 

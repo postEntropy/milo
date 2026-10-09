@@ -130,13 +130,15 @@ export interface PanelView {
 /**
  * Pointer and keyboard the person sends into the live browser panel. Coordinates
  * are normalized to the viewport (0..1) so the page does not have to know its
- * pixel size, and the browser maps them back.
+ * pixel size, and the browser maps them back. A key carries CDP's modifier
+ * bitmask (Alt 1, Ctrl 2, Meta 4, Shift 8) so a shortcut is not mistaken for a
+ * plain character.
  */
 export type PanelInput =
   | { kind: 'click'; x: number; y: number }
   | { kind: 'move'; x: number; y: number }
   | { kind: 'scroll'; x: number; y: number; deltaY: number }
-  | { kind: 'key'; key: string }
+  | { kind: 'key'; key: string; modifiers?: number }
   | { kind: 'type'; text: string }
 
 export type ServerFrame =
@@ -226,7 +228,11 @@ function isPanelInput(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const input = value as Record<string, unknown>
   const point = (key: string): boolean => typeof input[key] === 'number' && Number.isFinite(input[key])
-  if (input.kind === 'key') return typeof input.key === 'string' && input.key.trim() !== ''
+  if (input.kind === 'key') {
+    return typeof input.key === 'string' && input.key.trim() !== ''
+      && (input.modifiers === undefined
+        || (typeof input.modifiers === 'number' && Number.isInteger(input.modifiers) && input.modifiers >= 0 && input.modifiers <= 15))
+  }
   if (input.kind === 'type') return typeof input.text === 'string'
   if (input.kind === 'scroll') return point('x') && point('y') && point('deltaY')
   if (input.kind === 'click' || input.kind === 'move') return point('x') && point('y')

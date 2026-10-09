@@ -20,7 +20,7 @@ afterEach(() => {
   mkdirSync(home, { recursive: true })
 })
 
-function build(provider: Provider): InstanceType<typeof AgentRuntime> {
+function build(provider: Provider, browser: unknown = null): InstanceType<typeof AgentRuntime> {
   return new AgentRuntime({
     provider,
     model: 'test-model',
@@ -33,6 +33,7 @@ function build(provider: Provider): InstanceType<typeof AgentRuntime> {
       forget: async () => false,
     } as never,
     cwd: home,
+    browser: browser as never,
   })
 }
 
@@ -122,6 +123,30 @@ describe('the panel beside a web chat', () => {
     await turn(hub, frames)
 
     expect(viewOf(frames)).toEqual({ tabs: [{ kind: 'browser', url: null, key: 'browser' }], active: 0 })
+  })
+
+  it('follows the browser onto a new page, so the header is not left on the old one', async () => {
+    const listeners = new Set<(url: string | null) => void>()
+    const status = { url: 'https://example.com/' }
+    const runtime = build(new PanelProvider([{ browser: true }]), {
+      status,
+      facts: () => ({ binary: 'chromium', headless: true, profile: 'its own', running: true, port: null }),
+      onNavigate: (listener: (url: string | null) => void) => {
+        listeners.add(listener)
+        return () => listeners.delete(listener)
+      },
+      stopScreencast: () => undefined,
+    })
+    const hub = new WebHub(runtime, home)
+    const frames: ServerFrame[] = []
+
+    await turn(hub, frames)
+    expect(viewOf(frames)?.tabs[0]?.url).toBe('https://example.com/')
+
+    status.url = 'https://example.com/deeper'
+    for (const listener of listeners) listener(status.url)
+
+    expect(await waitFor(() => viewOf(frames)?.tabs[0]?.url === 'https://example.com/deeper')).toBe(true)
   })
 
   it('takes the panel down when the model closes it', async () => {
@@ -280,6 +305,7 @@ describe('the panel-input frame', () => {
     expect(parseClientFrame({ type: 'panel-input', input: { kind: 'click', x: 0.2, y: 0.8 } })).not.toBeNull()
     expect(parseClientFrame({ type: 'panel-input', input: { kind: 'scroll', x: 0.5, y: 0.5, deltaY: -120 } })).not.toBeNull()
     expect(parseClientFrame({ type: 'panel-input', input: { kind: 'key', key: 'Enter' } })).not.toBeNull()
+    expect(parseClientFrame({ type: 'panel-input', input: { kind: 'key', key: 'a', modifiers: 2 } })).not.toBeNull()
     expect(parseClientFrame({ type: 'panel-input', input: { kind: 'type', text: 'hi' } })).not.toBeNull()
   })
 
@@ -287,6 +313,8 @@ describe('the panel-input frame', () => {
     expect(parseClientFrame({ type: 'panel-input', input: { kind: 'click', x: 'left', y: 0.8 } })).toBeNull()
     expect(parseClientFrame({ type: 'panel-input', input: { kind: 'scroll', x: 0.1, y: 0.2 } })).toBeNull()
     expect(parseClientFrame({ type: 'panel-input', input: { kind: 'key', key: '  ' } })).toBeNull()
+    expect(parseClientFrame({ type: 'panel-input', input: { kind: 'key', key: 'a', modifiers: 16 } })).toBeNull()
+    expect(parseClientFrame({ type: 'panel-input', input: { kind: 'key', key: 'a', modifiers: 1.5 } })).toBeNull()
     expect(parseClientFrame({ type: 'panel-input' })).toBeNull()
   })
 })

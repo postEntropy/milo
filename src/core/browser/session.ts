@@ -5,6 +5,7 @@ import { logDebug } from '../../util/log.js'
 import { browserProfileDir } from '../config/paths.js'
 import { CdpConnection } from './cdp.js'
 import { attachUrl, findChrome, launchChrome } from './chrome.js'
+import { keyStroke } from './keys.js'
 import {
   isPageGoneError,
   mergeObservations,
@@ -159,6 +160,8 @@ export class BrowserSession {
   private refCounter = 0
   /** The live view a surface is watching, when one is: the page and its off switch. */
   private screencast: { off: () => void; sessionId: string } | null = null
+  /** Surfaces following where the page is, told whenever its URL changes. */
+  private readonly navigations = new Set<(url: string | null) => void>()
 
   constructor(options: BrowserSessionOptions) {
     this.options = options
@@ -167,6 +170,16 @@ export class BrowserSession {
   /** True when the browser has been started and not yet closed. */
   get isRunning(): boolean {
     return this.connection !== null && !this.connection.isClosed
+  }
+
+  /**
+   * Follows the page's own URL, for a surface drawing an address bar that would
+   * otherwise freeze on the snapshot from when it was built. The returned function
+   * stops the following.
+   */
+  onNavigate(listener: (url: string | null) => void): () => void {
+    this.navigations.add(listener)
+    return () => this.navigations.delete(listener)
   }
 
   /** One line's worth of truth about what the browser is and whether it is up. */
@@ -435,11 +448,11 @@ export class BrowserSession {
   }
 
   /** A key the person pressed in the live view, sent to whatever has focus. */
-  async key(key: string, signal: AbortSignal): Promise<void> {
+  async key(key: string, modifiers: number, signal: AbortSignal): Promise<void> {
     await this.start()
     const target = await this.drivePage(signal)
     if (!target.sessionId) throw new Error('the browser has no page to act on')
-    await this.pressKey(key, target.sessionId, signal)
+    await this.pressKey(key, modifiers, target.sessionId, signal)
   }
 
   /** Text the person typed in the live view, inserted into whatever has focus. */
@@ -482,7 +495,7 @@ export class BrowserSession {
       return `scrolled ${request.direction}`
     }
     if (request.action === 'press' && !request.ref) {
-      await this.pressKey(request.key, target.sessionId!, signal)
+      await this.pressKey(request.key, 0, target.sessionId!, signal)
       return `pressed ${request.key}`
     }
 
@@ -535,7 +548,7 @@ export class BrowserSession {
         await this.send('DOM.focus', { objectId: handle.objectId }, owner.sessionId, ACT_TIMEOUT_MS, signal)
         // In the element's own session: a frame is a target of its own, and a key
         // sent to the page would go to whatever has focus out there instead.
-        await this.pressKey(request.key, owner.sessionId, signal)
+        await this.pressKey(request.key, 0, owner.sessionId, signal)
         return `pressed ${request.key} in ${ref}`
       }
     }
@@ -679,7 +692,11 @@ export class BrowserSession {
       if (!state) return
       if (!frame.parentId) {
         state.mainFrameId = frame.id
-        state.url = frame.url ?? state.url
+        const next = frame.url ?? state.url
+        if (next === state.url) return
+        state.url = next
+        const url = this.status.url
+        for (const listener of this.navigations) listener(url)
       }
     })
     connection.on('Page.loadEventFired', (_params, sessionId) => {
@@ -1025,23 +1042,16 @@ export class BrowserSession {
     await this.evaluate(expression, realm, signal)
   }
 
-  private async pressKey(key: string, sessionId: string, signal: AbortSignal): Promise<void> {
-    const code = KEY_CODES[key.toLowerCase()]
-    const common = {
-      key,
-      code: code?.code ?? key,
-      windowsVirtualKeyCode: code?.keyCode ?? 0,
-      nativeVirtualKeyCode: code?.keyCode ?? 0,
-      ...(code?.text ? { text: code.text } : {}),
-    }
+  private async pressKey(key: string, modifiers: number, sessionId: string, signal: AbortSignal): Promise<void> {
+    const stroke = keyStroke(key, modifiers)
     await this.send(
       'Input.dispatchKeyEvent',
-      { type: code?.text ? 'keyDown' : 'rawKeyDown', ...common },
+      { type: stroke.text ? 'keyDown' : 'rawKeyDown', ...stroke },
       sessionId,
       ACT_TIMEOUT_MS,
       signal,
     )
-    await this.send('Input.dispatchKeyEvent', { type: 'keyUp', ...common }, sessionId, ACT_TIMEOUT_MS, signal)
+    await this.send('Input.dispatchKeyEvent', { type: 'keyUp', ...stroke }, sessionId, ACT_TIMEOUT_MS, signal)
   }
 
   /** Runs a snippet in a realm and hands back what it returned. */
@@ -1073,24 +1083,6 @@ export class BrowserSession {
     if (!connection) return Promise.reject(new Error('the browser is not running'))
     return connection.send<T>(method, params, { sessionId, timeoutMs, signal })
   }
-}
-
-/** Keys worth naming: a name the page's own handlers recognise. */
-const KEY_CODES: Record<string, { code: string; keyCode: number; text?: string }> = {
-  enter: { code: 'Enter', keyCode: 13, text: '\r' },
-  tab: { code: 'Tab', keyCode: 9 },
-  escape: { code: 'Escape', keyCode: 27 },
-  backspace: { code: 'Backspace', keyCode: 8 },
-  delete: { code: 'Delete', keyCode: 46 },
-  space: { code: 'Space', keyCode: 32, text: ' ' },
-  arrowup: { code: 'ArrowUp', keyCode: 38 },
-  arrowdown: { code: 'ArrowDown', keyCode: 40 },
-  arrowleft: { code: 'ArrowLeft', keyCode: 37 },
-  arrowright: { code: 'ArrowRight', keyCode: 39 },
-  pagedown: { code: 'PageDown', keyCode: 34 },
-  pageup: { code: 'PageUp', keyCode: 33 },
-  home: { code: 'Home', keyCode: 36 },
-  end: { code: 'End', keyCode: 35 },
 }
 
 /** Selects everything in a field, so typing replaces rather than appends. */
