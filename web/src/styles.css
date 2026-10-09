@@ -198,7 +198,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-more-btn { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: none; margin-inline-end: 6px; border: 0; border-radius: 7px; background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
 .session-item:hover .session-more-btn, .session-item.menu-open .session-more-btn { opacity: 1; }
 .session-more-btn:hover, .session-more-btn.open { background: var(--surface-warm); color: var(--fg); }
-.session-dropdown { position: absolute; z-index: 40; top: calc(100% + 4px); right: 6px; display: flex; min-width: 148px; flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow); padding: 5px; }
+.session-dropdown { position: absolute; z-index: 40; top: calc(100% + 4px); right: 6px; display: flex; min-width: 148px; flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow); padding: 5px; animation: menu-in var(--motion-base) var(--ease-standard); transform-origin: top right; }
 .session-dropdown-item { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 33px; border: 0; border-radius: 7px; background: transparent; padding: 6px 10px; color: var(--fg-2); font-size: 13px; font-weight: 500; text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
 .session-dropdown-item svg { flex: none; color: var(--muted); }
 .session-dropdown-item:hover { background: var(--surface-warm); color: var(--fg); }
