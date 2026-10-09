@@ -176,11 +176,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-search.open ~ .sidebar-search-toggle { display: none; }
 .session-region { display: flex; flex: 1; min-height: 0; }
 .session-list { flex: 1; min-height: 0; overflow: auto; padding: 6px 14px 12px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
-/* A soft edge at the top of a scrolled region: its first rows blur out instead of
-   being cut, so the content reads as passing under the bar above it. */
-.scroll-blur { position: absolute; z-index: 1; inset-inline: 0; height: 30px; pointer-events: none; opacity: 0; -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px); transition: opacity var(--motion-base) var(--ease-standard); }
-.scroll-blur.on { opacity: 1; }
-.scroll-blur.top { top: 0; -webkit-mask-image: linear-gradient(to bottom, #000 20%, transparent); mask-image: linear-gradient(to bottom, #000 20%, transparent); }
 .session-group + .session-group { margin-top: 8px; }
 .section-label { padding: 14px 8px 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
 /* What the past turns said about the search, over the matching sessions: the log
@@ -899,9 +894,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      Sticky, not fixed, so it keeps its own space in the flow and the last message
      is never hidden behind it. */
   .composer-dock { position: sticky; z-index: 2; bottom: var(--keyboard-gap, 0); }
-  /* The thread passes under the floating topbar, and the soft edge rides the bar —
-     fixed like it, not left at the top of the page to scroll away. */
-  .scroll-blur.top { position: fixed; top: var(--app-top, 0); }
   /* An overlay is what is being read; the page behind it must not slide while it
      is up. */
   html.overlay-lock { overflow: hidden; }
@@ -951,8 +943,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .topbar-actions { margin-inline-start: auto; }
   .topbar-action, .topbar-title { display: none; }
   .session-more-btn { opacity: 1; }
-  /* The panel rides with the other frosted pills on the phone. */
-  .mobile-menu, .topbar-new, .panel-toggle { background: color-mix(in oklab, var(--surface) 82%, transparent); box-shadow: var(--shadow-sm); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); }
+  /* The pills ride over the thread, which scrolls under them. A frosted fill let the
+     text show through and left them lost in it; solid, with a shadow to lift them,
+     they read as controls on their own. */
+  .mobile-menu, .topbar-new, .panel-toggle { background: var(--surface); box-shadow: var(--shadow); }
   /* The panel is a layer over the chat, not a column beside it: nothing fits two
      panes on a phone, so it takes the screen and the chat waits underneath. */
   .panel { position: fixed; z-index: 8; inset: 0; width: 100%; background: var(--bg); }

@@ -155,8 +155,6 @@ export default function App() {
   const pendingDeltas = useRef(new Map<string, { text: string; reasoning: string }>())
   const drawFrame = useRef<number | null>(null)
 
-  /** The soft edge under the session header shows only once messages are scrolled. */
-  const [chatScrolled, setChatScrolled] = useState(false)
   /** Whether the thread is at its end; when it is not, the way back shows. */
   const [atEnd, setAtEnd] = useState(true)
   /** What scrolls the thread: its own box on a wide screen, the page on a phone. */
@@ -166,7 +164,6 @@ export default function App() {
   const updateMessagesTop = useCallback((): void => {
     const el = threadScroller()
     if (!el) return
-    setChatScrolled(el.scrollTop > 2)
     setAtEnd(el.scrollHeight - el.scrollTop - el.clientHeight < 120)
   }, [threadScroller])
   // biome-ignore lint/correctness/useExhaustiveDependencies: recomputes when messages or view change
@@ -1019,7 +1016,6 @@ export default function App() {
             <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} />
             {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
           </div>
-          <div className={`scroll-blur top ${chatScrolled ? 'on' : ''}`} aria-hidden="true" />
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock">
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
