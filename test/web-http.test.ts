@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { bindProblem, startWebServer, webReachLines } from '../src/gateways/web/http.js'
+import { Readable } from 'node:stream'
+import { bindProblem, readRawBody, startWebServer, webReachLines } from '../src/gateways/web/http.js'
 
 const running: Array<{ stop(): Promise<void> }> = []
 
@@ -137,6 +138,20 @@ describe('web server static UI', () => {
     // Served as a download, the manifest is ignored: no `display: standalone`,
     // and the phone keeps dressing the app in its own browser chrome.
     expect(response.headers.get('content-type')).toContain('application/manifest+json')
+  })
+})
+
+describe('the upload body reader', () => {
+  it('reads a body under its ceiling whole', async () => {
+    const stream = Readable.from([Buffer.from('hello '), Buffer.from('world')])
+    expect((await readRawBody(stream as never, 1024)).toString()).toBe('hello world')
+  })
+
+  it('refuses a body past its ceiling rather than buffering it whole', async () => {
+    const megabyte = Buffer.alloc(1024 * 1024)
+    const stream = Readable.from([megabyte, megabyte, megabyte])
+
+    await expect(readRawBody(stream as never, 2 * 1024 * 1024)).rejects.toThrow(/larger than 2 MB/)
   })
 })
 

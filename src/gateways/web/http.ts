@@ -15,6 +15,9 @@ import { WebSettings } from './settings.js'
 
 const MAX_BODY = 1024 * 1024
 
+/** The most an upload may be. A file larger than a delivery can carry is not worth buffering. */
+const MAX_UPLOAD = 50 * 1024 * 1024
+
 /**
  * The built frontend. Found by walking up from this module rather than by one
  * relative path, because the layout differs: in the source tree this file sits in
@@ -455,9 +458,22 @@ async function readBody(request: IncomingMessage): Promise<Record<string, unknow
   return parsed as Record<string, unknown>
 }
 
-async function readRawBody(request: IncomingMessage): Promise<Buffer> {
+/**
+ * Reads a raw body up to a ceiling, refused rather than buffered whole: an
+ * unbounded body is how one request takes the process's memory with it.
+ */
+export async function readRawBody(request: IncomingMessage, limit: number = MAX_UPLOAD): Promise<Buffer> {
+  let size = 0
   const chunks: Buffer[] = []
-  for await (const chunk of request) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk))
+  for await (const chunk of request) {
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += buffer.length
+    if (size > limit) {
+      request.destroy()
+      throw new Error(`That file is larger than ${Math.floor(limit / (1024 * 1024))} MB.`)
+    }
+    chunks.push(buffer)
+  }
   return Buffer.concat(chunks)
 }
 
