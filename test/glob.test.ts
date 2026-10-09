@@ -1,6 +1,8 @@
+import { chmodSync } from 'node:fs'
+import path from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { globTool } from '../src/core/tools/glob.js'
-import { compileFilePattern, globToRegExp } from '../src/core/tools/walk.js'
+import { compileFilePattern, globToRegExp, walk } from '../src/core/tools/walk.js'
 import { ctxFor, makeTree, setMtime, type Tree } from './tree.js'
 
 let tree: Tree
@@ -131,6 +133,23 @@ describe('glob', () => {
     expect(globTool.readOnly).toBe(true)
   })
 
+  // A directory that cannot be read is not a directory with nothing in it: the
+  // walk carries the failure back so the answer does not claim the tree is smaller
+  // than it is. Skipped as root, where the mode bits are not enforced.
+  it.skipIf(process.getuid?.() === 0)('names a directory it could not read', async () => {
+    tree = makeTree({ 'a.ts': 'x\n', 'locked/b.ts': 'x\n' })
+    const locked = path.join(tree.root, 'locked')
+    chmodSync(locked, 0o000)
+    try {
+      const result = await globTool.execute({ pattern: '**/*.ts' }, ctxFor(tree.root))
+      expect(result.content).toContain('could not be read')
+      // What was readable is still reported.
+      expect(result.content).toContain('a.ts')
+    } finally {
+      chmodSync(locked, 0o755)
+    }
+  })
+
   it('says a cancelled walk was cancelled', async () => {
     tree = makeTree({ 'a.ts': 'x\n' })
     const controller = new AbortController()
@@ -144,5 +163,17 @@ describe('glob', () => {
     // An aborted walk is not the same as a finished one, and the answer says
     // which it was rather than reporting an empty result as a fact.
     expect(result.content).toContain('cancelled')
+  })
+})
+
+describe('walk', () => {
+  it('carries back a path it could not read instead of skipping it in silence', async () => {
+    tree = makeTree({ 'a.ts': 'x\n' })
+
+    const result = await walk({ root: path.join(tree.root, 'missing') })
+
+    expect(result.entries).toEqual([])
+    expect(result.warnings).toHaveLength(1)
+    expect(result.warnings[0]).toContain('could not read')
   })
 })

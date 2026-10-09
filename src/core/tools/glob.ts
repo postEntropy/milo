@@ -42,14 +42,15 @@ export const globTool: Tool<GlobArgs> = {
     if (!info.isDirectory()) return { content: `${label} is not a directory.`, isError: true }
 
     const limit = Math.min(args.limit ?? DEFAULT_LIMIT, MAX_LIMIT)
-    const { entries, truncated, aborted } = await walk({ root, signal: ctx.signal })
+    const { entries, truncated, aborted, warnings } = await walk({ root, signal: ctx.signal })
     const partial = aborted ? '(the walk was cancelled)' : truncated ? '(the tree was only partly walked)' : null
+    const unread = warnings.length > 0 ? `${warnings.length} path(s) could not be read` : null
     const matches = entries
       .filter((entry) => matcher.test(entry.rel))
       .sort((a, b) => b.mtimeMs - a.mtimeMs || a.rel.localeCompare(b.rel))
 
     if (matches.length === 0) {
-      const note = partial ? ` ${partial}` : ''
+      const note = [partial ? ` ${partial}` : '', unread ? ` (${unread})` : ''].join('')
       return { content: `No files match "${args.pattern}" in ${label}.${note}` }
     }
 
@@ -58,6 +59,7 @@ export const globTool: Tool<GlobArgs> = {
       lines.push(`… ${matches.length} matched, showing the ${lines.length} most recent`)
     }
     if (partial) lines.push(`… ${partial}`)
+    if (unread) lines.push(`… (${unread})`)
 
     return { content: lines.join('\n') }
   },

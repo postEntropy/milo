@@ -1,6 +1,8 @@
+import type { Dirent, Stats } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import path from 'node:path'
+import { errorMessage } from '../../util/errors.js'
 
 /**
  * Directories whose contents are build output or dependency caches. They are
@@ -47,6 +49,13 @@ export interface WalkResult {
   truncated: boolean
   /** The caller cancelled, so the tree was only partly walked. */
   aborted?: boolean
+  /**
+   * Directories and files that could not be read, in the walk's own words. A
+   * listing that quietly skipped an unreadable directory is a listing claiming
+   * the tree holds less than it does — so what was missed is carried back rather
+   * than dropped.
+   */
+  warnings: string[]
 }
 
 export interface WalkOptions {
@@ -64,19 +73,26 @@ export async function walk(options: WalkOptions): Promise<WalkResult> {
   const ignore = options.ignore ?? DEFAULT_IGNORES
   const maxEntries = options.maxEntries ?? MAX_ENTRIES
   const entries: WalkEntry[] = []
+  const warnings: string[] = []
   const queue = [options.root]
 
   for (let index = 0; index < queue.length; index += 1) {
     // A cancelled walk is reported as cancelled, never as a complete one.
-    if (options.signal?.aborted) return { entries, truncated: false, aborted: true }
-    if (entries.length >= maxEntries) return { entries, truncated: true }
+    if (options.signal?.aborted) return { entries, truncated: false, aborted: true, warnings }
+    if (entries.length >= maxEntries) return { entries, truncated: true, warnings }
 
     const dir = queue[index]!
-    const dirents = await readdir(dir, { withFileTypes: true }).catch(() => [])
+    let dirents: Dirent[]
+    try {
+      dirents = await readdir(dir, { withFileTypes: true })
+    } catch (error) {
+      warnings.push(`could not read ${dir}: ${errorMessage(error)}`)
+      continue
+    }
 
     for (const dirent of dirents) {
-      if (options.signal?.aborted) return { entries, truncated: false, aborted: true }
-      if (entries.length >= maxEntries) return { entries, truncated: true }
+      if (options.signal?.aborted) return { entries, truncated: false, aborted: true, warnings }
+      if (entries.length >= maxEntries) return { entries, truncated: true, warnings }
 
       const full = path.join(dir, dirent.name)
       if (dirent.isDirectory()) {
@@ -87,8 +103,13 @@ export async function walk(options: WalkOptions): Promise<WalkResult> {
       // tree would otherwise walk forever.
       if (!dirent.isFile()) continue
 
-      const info = await stat(full).catch(() => null)
-      if (!info) continue
+      let info: Stats
+      try {
+        info = await stat(full)
+      } catch (error) {
+        warnings.push(`could not read ${full}: ${errorMessage(error)}`)
+        continue
+      }
       entries.push({
         path: full,
         rel: toPosix(path.relative(options.root, full)),
@@ -98,7 +119,7 @@ export async function walk(options: WalkOptions): Promise<WalkResult> {
     }
   }
 
-  return { entries, truncated: false }
+  return { entries, truncated: false, warnings }
 }
 
 export function resolveToolPath(cwd: string, target: string | undefined): string {
