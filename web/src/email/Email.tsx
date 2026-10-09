@@ -662,7 +662,7 @@ function MailRow({
     onOpen(mail)
   }
 
-  return <div className="mail-row">
+  return <div className={`mail-row${unread ? ' unread' : ''}`}>
     {canModify && dx !== 0 && <span className={`mail-row-tray ${dx < 0 ? 'archive' : unread ? 'read' : 'unread'}`} aria-hidden="true">
       <Icon name={dx < 0 ? 'archive' : unread ? 'circle-dot' : 'circle'} size={16} />
       <span>{dx < 0 ? 'Archive' : unread ? 'Mark read' : 'Mark unread'}</span>

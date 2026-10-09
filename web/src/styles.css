@@ -1271,6 +1271,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mail-row-meta { display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: 78px; }
 .mail-row-when { color: var(--muted); font: 11px var(--font-mono); white-space: nowrap; }
 .mail-row-subject { overflow: hidden; color: var(--fg-2); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+/* An unread row says so at a glance when the inbox opens: a dot in the accent before the
+   sender, and the sender and subject carried heavier than a row already read. The dot
+   points at what is new rather than painting over the row. */
+.mail-row.unread .mail-row-from::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-inline-end: 7px; border-radius: 999px; background: var(--accent); vertical-align: middle; }
+.mail-row.unread .mail-row-from { font-weight: 650; }
+.mail-row.unread .mail-row-subject { color: var(--fg); }
 .mail-row-actions { display: flex; flex: none; gap: 4px; }
 .mail-row-action { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 9px; background: var(--surface-warm); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
 .mail-row-action:not(:disabled):hover { background: var(--border-soft); color: var(--fg); }
