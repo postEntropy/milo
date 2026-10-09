@@ -220,7 +220,16 @@ export class FileSessionStore implements SessionStore {
     // reason to go near the file lock, and taking both would only add latency.
     const unlock = this.leases.tryAcquire(id)
     if (!unlock) return null
-    const release = await this.tryTurnLock(file)
+    let release: (() => Promise<void>) | null
+    try {
+      release = await this.tryTurnLock(file)
+    } catch (error) {
+      // Not merely "someone holds it" — an unexpected failure. The in-process
+      // mutex must go back all the same, or this session is unacquirable for the
+      // rest of the process.
+      unlock()
+      throw error
+    }
     if (!release) {
       unlock()
       return null
