@@ -317,4 +317,14 @@ describe('the routine tool changing and dropping one', () => {
     expect(routineTool.asksWhen?.({ action: 'update', id: 'x', enabled: false })).toBe(false)
     expect(routineTool.asksWhen?.({ action: 'update', id: 'x', allow: ['shell_command'] })).toBe(true)
   })
+
+  it('asks before an edit changes what the routine will do unattended', () => {
+    // The routine keeps its grants across an edit, so a new prompt — or re-arming a
+    // paused one — is a new instruction those grants will run with nobody to confirm.
+    expect(routineTool.asksWhen?.({ action: 'update', id: 'x', prompt: 'do something else' })).toBe(true)
+    expect(routineTool.asksWhen?.({ action: 'update', id: 'x', enabled: true })).toBe(true)
+    // A pure reschedule or rename is not a change to what it does.
+    expect(routineTool.asksWhen?.({ action: 'update', id: 'x', at: '09:00' })).toBe(false)
+    expect(routineTool.asksWhen?.({ action: 'update', id: 'x', name: 'another name' })).toBe(false)
+  })
 })
