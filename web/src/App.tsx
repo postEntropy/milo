@@ -422,6 +422,17 @@ export default function App() {
     if (!(frame.type === 'event' && (frame.event.type === 'text-delta' || frame.event.type === 'reasoning-delta'))) drawDeltas()
 
     if (frame.type === 'ready') {
+      // A reconnect starts fresh from the server's transcript. Deltas buffered
+      // from before the drop would interleave with the new turn, and a busy flag
+      // left over from it would keep the controls locked; the server re-sends its
+      // own `state` if it is in fact still working.
+      if (drawFrame.current !== null) {
+        cancelAnimationFrame(drawFrame.current)
+        drawFrame.current = null
+      }
+      pendingDeltas.current = new Map()
+      setBusy(false)
+      setQueued(0)
       setConnection({ state: 'online' })
       setSessionId(frame.sessionId)
       setThinking(frame.thinking === 'on')
