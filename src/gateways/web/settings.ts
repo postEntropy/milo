@@ -13,19 +13,21 @@ import {
   createDraft,
   INBOX_FILTERS,
   isMailOperation,
+  listInbox,
   MAIL_OPERATIONS,
   read as readMail,
+  readBody,
   readThread,
   search as searchMail,
   sendMessage,
   unreadSince,
   type DraftInput,
   type InboxFilter,
+  type MailSummary,
 } from '../../core/google/gmail.js'
 import { htmlToText } from '../../core/tools/html.js'
 import type { GoogleOutcome, GoogleTokens } from '../../core/google/oauth.js'
-import { labeledPage } from '../../core/google/inbox.js'
-import { LABEL_COLORS, carryingLabel, createLabel, deleteLabel, labelMessages, toggleAssignment } from '../../core/google/labels.js'
+import { LABEL_COLORS, carryingLabel, createLabel, deleteLabel, labelMessages, toggleAssignment, unsorted } from '../../core/google/labels.js'
 import { markSeen, seenAt } from '../../core/google/seen.js'
 import { googleState } from '../../core/google/state.js'
 import { GOOGLE_TIERS, accessOf, type GoogleAccess } from '../../core/google/tiers.js'
@@ -159,6 +161,8 @@ export class WebSettings {
       case 'email-unread': return this.emailUnread()
       case 'email-seen': return this.emailSeen()
       case 'email-inbox': return this.emailInbox(body)
+      case 'email-sort': return this.emailSort(body)
+      case 'email-body': return this.emailBody(body)
       case 'email-message': return this.emailMessage(body)
       case 'email-thread': return this.emailThread(body)
       case 'email-modify': return this.emailModify(body)
@@ -205,9 +209,11 @@ export class WebSettings {
   }
 
   /**
-   * A page of the inbox, each message carrying the labels Milo has sorted it into.
-   * The classifier is asked about the messages with no label yet — never the whole
-   * page again — and a classifier that fails leaves the mail readable, only unlabelled.
+   * A page of the inbox, each message carrying the labels Milo has already sorted it
+   * into — and nothing else. The classifier is never on this path: the mail is drawn
+   * from the store as it is, and the messages with no label yet come back as `unsorted`
+   * for `email-sort` to ask about. A slow or down classifier used to hold the whole
+   * inbox behind its timeout; now it can only delay the labels, never the mail.
    *
    * The quick filter and the search narrow the Gmail query itself, so a page is a page
    * of what was asked for. The label is Milo's own, so it can only be applied to what
@@ -219,18 +225,45 @@ export class WebSettings {
     const filter = inboxFilter(body.filter)
     const search = optionalText(body.search)
     const labelId = optionalText(body.labelId)
-    const page = await this.mailCall((tokens) => labeledPage(tokens, this.runtime.classifier, {
+    const page = await this.mailCall((tokens) => listInbox(tokens, {
       ...(pageToken ? { pageToken } : {}),
       limit,
       ...(filter ? { filter } : {}),
       ...(search ? { search } : {}),
     }))
+    const { byMessage, labels } = await labelMessages(null, page.messages)
+    const messages = page.messages.map((message) => ({ ...message, labels: byMessage.get(message.id) ?? [] }))
     return {
-      messages: carryingLabel(page.messages, labelId),
+      messages: carryingLabel(messages, labelId),
       ...(page.nextPageToken ? { nextPageToken: page.nextPageToken } : {}),
-      labels: page.labels,
+      labels,
       colors: LABEL_COLORS,
+      unsorted: unsorted(page.messages),
     }
+  }
+
+  /**
+   * Sorts the mail the inbox handed back and could not place. A separate call on
+   * purpose: this is the only mail path that reaches the classifier, so the inbox
+   * itself is never waiting on it. The rows come back from the client rather than
+   * being listed again — re-fetching a page's metadata just to sort it would double
+   * every Gmail call the inbox already made.
+   */
+  private async emailSort(body: Record<string, unknown>): Promise<unknown> {
+    const messages = sortableMessages(body.messages)
+    if (!this.runtime.classifier || messages.length === 0) return { byMessage: {}, labels: [] }
+    const { byMessage, labels } = await labelMessages(this.runtime.classifier, messages)
+    return { byMessage: Object.fromEntries(byMessage), labels }
+  }
+
+  /**
+   * One message's body past the `BODY_LIMIT` the thread draws. A text body is paged
+   * from `offset`; an HTML one is answered whole, since only a whole document renders.
+   */
+  private emailBody(body: Record<string, unknown>): Promise<unknown> {
+    const id = googleId(body.id)
+    const offset = typeof body.offset === 'number' && body.offset > 0 ? Math.floor(body.offset) : 0
+    return this.mailCall((tokens) => readBody(tokens, id, offset))
   }
 
   /** The person's own label, added to the set. Local to Milo — nothing reaches Gmail. */
@@ -970,6 +1003,33 @@ function googleId(value: unknown): string {
   const id = optionalText(value)
   if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('Invalid mail id.')
   return id
+}
+
+/**
+ * The rows `email-sort` was handed, reduced to what the classifier reads: an id and
+ * the three fields a person sorts by. Anything else the body carried is dropped, and
+ * a row without a usable id is skipped rather than trusted.
+ */
+function sortableMessages(value: unknown): MailSummary[] {
+  if (!Array.isArray(value)) return []
+  const rows: MailSummary[] = []
+  for (const entry of value.slice(0, 50)) {
+    if (!entry || typeof entry !== 'object') continue
+    const row = entry as Record<string, unknown>
+    const id = optionalText(row.id)
+    if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) continue
+    const from = optionalText(row.from)
+    const subject = optionalText(row.subject)
+    const snippet = optionalText(row.snippet)
+    rows.push({
+      id,
+      threadId: optionalText(row.threadId) ?? '',
+      ...(from ? { from } : {}),
+      ...(subject ? { subject } : {}),
+      ...(snippet ? { snippet } : {}),
+    })
+  }
+  return rows
 }
 
 /** A quick filter as the page sends it — one of the filters the core declares. */

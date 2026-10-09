@@ -31,9 +31,13 @@ type Status =
 
 type MailLabel = { id: string; name: string; color: string }
 type MailSummary = { id: string; threadId: string; date?: string; from?: string; subject?: string; snippet?: string; labelIds?: string[]; labels?: MailLabel[] }
-type MailMessage = MailSummary & { text: string; truncated: boolean; html: boolean }
+type MailMessage = MailSummary & { text: string; truncated: boolean; html: boolean; nextOffset?: number }
 type MailThread = { id: string; messages: MailMessage[] }
-type InboxPage = { messages: MailSummary[]; nextPageToken?: string; labels: MailLabel[]; colors: string[] }
+type InboxPage = { messages: MailSummary[]; nextPageToken?: string; labels: MailLabel[]; colors: string[]; unsorted?: string[] }
+/** What sorting a page came back with: labels per message id, and the set they came from. */
+type SortResult = { byMessage: Record<string, MailLabel[]>; labels: MailLabel[] }
+/** A body read past the thread's cut: the text, and where the next chunk starts. */
+type BodyChunk = { id: string; text: string; html: boolean; truncated: boolean; nextOffset?: number }
 type Draft = { to: string; subject: string; body: string; threadId?: string }
 /** A message being written from scratch, before anything is typed. */
 const EMPTY_DRAFT: Draft = { to: '', subject: '', body: '' }
@@ -112,8 +116,13 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
   const [busy, setBusy] = useState(false)
   /** Whether the next page is being fetched — the list scrolls into it on its own. */
   const [pageLoading, setPageLoading] = useState(false)
+  /** Which message is having its body read past the thread's cut. */
+  const [readingMore, setReadingMore] = useState<string | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   useAutoDismiss(notice, setNotice)
+  /** Whether Milo sorts the mail at all, read from the status — held in a ref so the
+      inbox load does not change identity (and re-run) when the status lands. */
+  const sortingRef = useRef(false)
 
   const connected = status?.kind === 'connected' ? status : null
   const access = connected?.access
@@ -133,7 +142,30 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
 
   const loadStatus = useCallback(async (): Promise<void> => {
     try {
-      setStatus(await api<Status>('email-status'))
+      const next = await api<Status>('email-status')
+      setStatus(next)
+      sortingRef.current = next.kind === 'connected' && next.sorting
+    } catch (error) {
+      setNotice({ text: message(error), error: true })
+    }
+  }, [])
+
+  /**
+   * Asks the server to sort the rows the inbox could not place, and folds the labels
+   * back onto them. Its own call, after the mail is already drawn, so a slow or down
+   * classifier delays the labels and never the list.
+   */
+  const sortRows = useCallback(async (rows: MailSummary[], ids: string[]): Promise<void> => {
+    if (!sortingRef.current || ids.length === 0) return
+    const wanted = new Set(ids)
+    try {
+      const result = await api<SortResult>('email-sort', {
+        messages: rows
+          .filter((row) => wanted.has(row.id))
+          .map(({ id, threadId, from, subject, snippet }) => ({ id, threadId, from, subject, snippet })),
+      })
+      setLabels(result.labels)
+      setInbox((current) => current?.map((mail) => (result.byMessage[mail.id] ? { ...mail, labels: result.byMessage[mail.id] } : mail)) ?? current)
     } catch (error) {
       setNotice({ text: message(error), error: true })
     }
@@ -154,10 +186,12 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
       // A fresh read is the newest page; the top is where it is read from — the same place
       // rebuilding the view used to land, which is what a kept-mounted view must keep doing.
       if (!pageToken) workspace.current?.scrollTo({ top: 0 })
+      // The rows with no label yet are sorted after the mail is on screen, never before.
+      void sortRows(page.messages, page.unsorted ?? [])
     } catch (error) {
       setNotice({ text: message(error), error: true })
     }
-  }, [labelFilter, filter, query])
+  }, [labelFilter, filter, query, sortRows])
 
   // One page in flight at a time: the observer below can fire again before the first
   // answer lands, and two calls for the same cursor would double the rows.
@@ -300,6 +334,29 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
     onRoute('new')
   }
 
+  /**
+   * The rest of one message's body, past the 4000-character cut the thread draws. The
+   * first read replaces the cut text; a text body longer than one chunk appends the
+   * next from where it stopped, so a long message is reached a page at a time. An HTML
+   * body comes whole, so it is a single replace.
+   */
+  async function readMore(mail: MailMessage): Promise<void> {
+    setReadingMore(mail.id)
+    try {
+      const body = await api<BodyChunk>('email-body', { id: mail.id, ...(mail.nextOffset ? { offset: mail.nextOffset } : {}) })
+      setThread((current) => current && {
+        ...current,
+        messages: current.messages.map((one) => one.id === mail.id
+          ? { ...one, text: mail.nextOffset ? one.text + body.text : body.text, html: body.html, truncated: body.truncated, nextOffset: body.nextOffset }
+          : one),
+      })
+    } catch (error) {
+      setNotice({ text: message(error), error: true })
+    } finally {
+      setReadingMore(null)
+    }
+  }
+
   /** Back to the inbox from anywhere in the screen's own path. */
   function toInbox(): void {
     setDraft(null)
@@ -423,7 +480,7 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
               ? <Compose draft={draft ?? EMPTY_DRAFT} access={access} onChange={setDraft} onSave={() => void saveDraft()} onSend={() => void send()} onDiscard={toInbox} />
               : threadId !== null
               ? thread?.id === threadId
-                ? <ThreadView thread={thread} access={access} busy={busy} labels={labels} onReply={reply} onDraft={() => void draftReply()} onModify={modify} onAsk={ask} onAssign={assign} />
+                ? <ThreadView thread={thread} access={access} busy={busy} labels={labels} readingMore={readingMore} onReply={reply} onDraft={() => void draftReply()} onModify={modify} onAsk={ask} onAssign={assign} onReadMore={(mail) => void readMore(mail)} />
                 : <p className="list-empty">Reading the thread…</p>
               : <Inbox inbox={inbox} access={access} onOpen={(mail) => onRoute(mail.threadId)} onModify={modify} onMore={loadMore} loading={pageLoading} nextPage={nextPage} narrowed={narrowed} onClear={clearNarrowing} />}
             {assist && <section className="mail-assist">
@@ -788,21 +845,25 @@ function ThreadView({
   access,
   busy,
   labels,
+  readingMore,
   onReply,
   onDraft,
   onModify,
   onAsk,
   onAssign,
+  onReadMore,
 }: {
   thread: MailThread
   access: Access | undefined
   busy: boolean
   labels: MailLabel[]
+  readingMore: string | null
   onReply(message: MailMessage): void
   onDraft(): void
   onModify(id: string, op: string): void
   onAsk(mode: 'summarize', title: string, body: Record<string, unknown>): void
   onAssign(messageId: string, labelId: string, on: boolean): void
+  onReadMore(message: MailMessage): void
 }) {
   const [picking, setPicking] = useState<string | null>(null)
   const last = thread.messages[thread.messages.length - 1]
@@ -838,7 +899,12 @@ function ThreadView({
         </div>}
         <div className="mail-message-subject">{mail.subject ?? '(no subject)'}</div>
         <MailBody message={mail} />
-        {mail.truncated && <p className="mail-message-note">The body was cut — open it in Gmail to read the rest.</p>}
+        {mail.truncated && <p className="mail-message-note">
+          The body was cut.{' '}
+          <button className="button" type="button" disabled={readingMore === mail.id} onClick={() => onReadMore(mail)}>
+            {readingMore === mail.id ? 'Reading…' : 'Read the rest'}
+          </button>
+        </p>}
       </article>)}
     </div>
   </>

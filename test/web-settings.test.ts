@@ -695,19 +695,48 @@ describe('web Settings mail', () => {
     return json({})
   })
 
-  it('sorts the inbox into a label Milo makes from the mail', async () => {
+  /** The row the inbox handed back, as the screen sends it to `email-sort`. */
+  const row = { id: 'm1', threadId: 't1', from: 'ana@exemplo', subject: 'a nota' }
+
+  it('draws the inbox without asking the classifier, and names what is left to sort', async () => {
+    writeConfig()
+    grantAt('none')
+    oneMessage()
+    let asked = 0
+    const classifier = { ask: async () => { asked += 1; return {} } } as unknown as Classifier
+    const settings = new WebSettings(build({}, null, classifier), home)
+
+    const page = (await settings.handle('email-inbox', { limit: 5 })) as {
+      messages: { labels: unknown[] }[]
+      unsorted: string[]
+    }
+    // The mail is on screen and the classifier was never on the path to it.
+    expect(page.messages).toHaveLength(1)
+    expect(page.messages[0]?.labels).toEqual([])
+    expect(page.unsorted).toEqual(['m1'])
+    expect(asked).toBe(0)
+  })
+
+  it('sorts the rows the inbox could not place, materialising the label they fall into', async () => {
     writeConfig()
     grantAt('none')
     oneMessage()
     const settings = new WebSettings(build({}, null, classifierOf({ m1: { choice: 'receipt', confidence: 0.9 } })), home)
-    const page = (await settings.handle('email-inbox', { limit: 5 })) as {
-      messages: { labels: { id: string; name: string }[] }[]
+
+    const sorted = (await settings.handle('email-sort', { messages: [row] })) as {
+      byMessage: Record<string, { id: string; name: string }[]>
       labels: { id: string }[]
-      colors: string[]
+    }
+    expect(sorted.byMessage.m1).toEqual([expect.objectContaining({ id: 'receipt', name: 'Receipts' })])
+    expect(sorted.labels.map((label) => label.id)).toContain('receipt')
+
+    // The assignment is on disk, so the next inbox read carries it and has nothing left to sort.
+    const page = (await settings.handle('email-inbox', { limit: 5 })) as {
+      messages: { labels: { id: string }[] }[]
+      unsorted: string[]
     }
     expect(page.messages[0]?.labels).toEqual([expect.objectContaining({ id: 'receipt', name: 'Receipts' })])
-    expect(page.labels.map((label) => label.id)).toContain('receipt')
-    expect(page.colors).toContain('sage')
+    expect(page.unsorted).toEqual([])
   })
 
   it('filters the inbox by a label', async () => {
@@ -715,6 +744,7 @@ describe('web Settings mail', () => {
     grantAt('none')
     oneMessage()
     const settings = new WebSettings(build({}, null, classifierOf({ m1: { choice: 'receipt', confidence: 0.9 } })), home)
+    await settings.handle('email-sort', { messages: [row] })
     const kept = (await settings.handle('email-inbox', { labelId: 'receipt' })) as { messages: unknown[] }
     expect(kept.messages).toHaveLength(1)
     const none = (await settings.handle('email-inbox', { labelId: 'newsletter' })) as { messages: unknown[] }
@@ -763,6 +793,7 @@ describe('web Settings mail', () => {
     })
     const settings = new WebSettings(build({}, null, classifier), home)
     await settings.handle('email-inbox', { limit: 5 })
+    await settings.handle('email-sort', { messages: [row] })
 
     const thread = (await settings.handle('email-thread', { threadId: 't1' })) as { messages: { labels: { id: string }[] }[] }
     expect(thread.messages[0]?.labels).toEqual([expect.objectContaining({ id: 'receipt' })])
@@ -779,6 +810,69 @@ describe('web Settings mail', () => {
     const page = (await settings.handle('email-inbox', {})) as { messages: { labels: unknown[] }[]; labels: unknown[] }
     expect(page.messages).toHaveLength(1)
     expect(page.messages[0]?.labels).toEqual([])
+  })
+
+  /** A body of `size` characters, as Gmail hands it: base64url in a text/plain part. */
+  const bodyOf = (size: number): Response =>
+    json({
+      id: 'm1',
+      threadId: 't1',
+      payload: { mimeType: 'text/plain', headers: [{ name: 'Subject', value: 'a nota' }], body: { data: Buffer.from('x'.repeat(size)).toString('base64url') } },
+    })
+
+  it('reads a body past the thread cut, whole when it fits one chunk', async () => {
+    writeConfig()
+    grantAt('none')
+    gmail(() => bodyOf(9_000))
+    const settings = new WebSettings(build({}), home)
+
+    const cut = (await settings.handle('email-message', { id: 'm1' })) as { truncated: boolean }
+    expect(cut.truncated).toBe(true)
+
+    const more = (await settings.handle('email-body', { id: 'm1' })) as { text: string; truncated: boolean; nextOffset?: number }
+    expect(more.text).toHaveLength(9_000)
+    expect(more.truncated).toBe(false)
+    expect(more.nextOffset).toBeUndefined()
+  })
+
+  it('pages a text body longer than one chunk, and stops at the end', async () => {
+    writeConfig()
+    grantAt('none')
+    gmail(() => bodyOf(25_000))
+    const settings = new WebSettings(build({}), home)
+
+    const first = (await settings.handle('email-body', { id: 'm1' })) as { text: string; truncated: boolean; nextOffset: number }
+    expect(first.text).toHaveLength(20_000)
+    expect(first.truncated).toBe(true)
+
+    const rest = (await settings.handle('email-body', { id: 'm1', offset: first.nextOffset })) as { text: string; truncated: boolean; nextOffset?: number }
+    expect(rest.text).toHaveLength(5_000)
+    expect(rest.truncated).toBe(false)
+    expect(rest.nextOffset).toBeUndefined()
+  })
+
+  it('fetches a page of mail in bounded batches, not all at once', async () => {
+    writeConfig()
+    grantAt('none')
+    let inFlight = 0
+    let peak = 0
+    vi.stubGlobal('fetch', async (input: Parameters<typeof fetch>[0]) => {
+      const url = String(input)
+      if (url.includes('oauth2.googleapis.com/token')) return json({ access_token: 'at', expires_in: 3600 })
+      if (url.includes('/messages?')) return json({ messages: Array.from({ length: 20 }, (_, i) => ({ id: `m${i}`, threadId: `t${i}` })) })
+      inFlight += 1
+      peak = Math.max(peak, inFlight)
+      await new Promise((resolve) => setTimeout(resolve, 1))
+      inFlight -= 1
+      return json({ id: 'm', threadId: 't', payload: { headers: [] } })
+    })
+
+    const settings = new WebSettings(build({}), home)
+    const page = (await settings.handle('email-inbox', { limit: 20 })) as { messages: unknown[] }
+    expect(page.messages).toHaveLength(20)
+    // The metadata requests over one page overlap inside a batch, never across the whole page.
+    expect(peak).toBeGreaterThan(1)
+    expect(peak).toBeLessThanOrEqual(8)
   })
 
   it('adds and deletes a label from the screen, answering a bad colour with the valid ones', async () => {
@@ -811,6 +905,7 @@ describe('web Settings mail', () => {
     oneMessage()
     const settings = new WebSettings(build({}, null, classifierOf({ m1: { choice: 'receipt', confidence: 0.9 } })), home)
     await settings.handle('email-inbox', { limit: 5 })
+    await settings.handle('email-sort', { messages: [row] })
     const made = (await settings.handle('email-label-create', { name: 'Invoices', color: 'teal' })) as { labels: { id: string; name: string }[] }
     const id = made.labels.find((label) => label.name === 'Invoices')!.id
 
