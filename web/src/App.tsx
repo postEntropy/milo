@@ -563,7 +563,7 @@ export default function App() {
     }
   }, [refreshSessions])
 
-  const newChat = useCallback(async (): Promise<void> => {
+  const newChat = useCallback(async (): Promise<boolean> => {
     editingTurn.current = null
     const nextConversationId = randomUUID()
     // Inside the click that asked for it, before any state moves: a focus handed
@@ -581,7 +581,13 @@ export default function App() {
       setView('chat')
       setSidebarOpen(false)
       setConversationId(nextConversationId)
-    } catch (error) { fail(error) }
+      return true
+    } catch (error) {
+      // Reported here, and said as a failure to the caller: a delete that moves
+      // off the current session first must not go on when that move did not happen.
+      fail(error)
+      return false
+    }
   }, [socket, fail])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-render triggers, not closure values — the list has already grown by the time this runs, and the scroll follows the rendered height
@@ -861,7 +867,9 @@ export default function App() {
   async function deleteSession(id: string): Promise<void> {
     try {
       if (id === sessionId) {
-        await newChat()
+        // Move off the session first — and only delete it if that worked. Ending
+        // up on a session the delete removed is worse than not deleting at all.
+        if (!(await newChat())) return
       }
       await api('session-delete', { id })
       setSessions((current) => current.filter((s) => s.id !== id))
