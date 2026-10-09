@@ -222,24 +222,25 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
     return () => window.clearTimeout(timer)
   }, [search])
 
-  // Read the grant when the view is entered — not before it is ever opened, so a screen
-  // nobody asked for never reads the account, and not while it is hidden.
+  // Read the grant as the screen mounts: the mail for a screen that is about to be
+  // opened is read up front, so the inbox is already there instead of a loading line —
+  // the same account the sidebar's badge already reads from the start.
   useEffect(() => {
-    if (active) void loadStatus()
-  }, [active, loadStatus])
+    void loadStatus()
+  }, [loadStatus])
 
-  // Read the inbox once the grant turns out to be connected — not before, so a
-  // screen with no account never shows a failed fetch it did not need. A new quick
-  // filter or search reads it again, from the top; a label does not, since it filters
-  // what is already drawn.
+  // Read the inbox once the grant turns out to be connected — not before, so a screen
+  // with no account never shows a failed fetch it did not need. A new quick filter or
+  // search reads it again, from the top; a label does not, since it filters what is
+  // already drawn.
   useEffect(() => {
-    if (!connected || !active) return
+    if (!connected) return
     // A different narrowing empties the list, so the loading line is honest; the same one
     // keeps it, and the fresh page lands behind the mail already on screen.
     if (narrowingRef.current !== narrowing) setInbox(null)
     narrowingRef.current = narrowing
     void loadInbox()
-  }, [connected, active, narrowing, loadInbox])
+  }, [connected, narrowing, loadInbox])
 
   // Showing the inbox is what "noticed" means: the sidebar's badge counts from here,
   // and the write is server-side, so this only tells the app it can clear it. A thread

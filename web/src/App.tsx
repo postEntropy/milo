@@ -104,12 +104,6 @@ export default function App() {
   const [emailRoute, setEmailRoute] = useState<string | null>(() => emailRouteFromPath(location.pathname))
   /** Mail that arrived since the person last looked at the inbox, for the Email tab's badge. */
   const [mailUnread, setMailUnread] = useState<{ count: number; more: boolean } | null>(null)
-  /**
-   * Whether the Email view has ever been opened. Once it has, it stays mounted — hidden
-   * rather than torn down — so returning to it is instant instead of rebuilding the
-   * screen and reading the mail again from nothing.
-   */
-  const [emailMounted, setEmailMounted] = useState(false)
   const [settingsSection, setSettingsSection] = useState(() => settingsSectionFromPath(location.pathname) ?? 'provider')
   /** Whether the settings hold edits that were never saved. */
   const [settingsDirty, setSettingsDirty] = useState(false)
@@ -279,12 +273,6 @@ export default function App() {
     media.addEventListener('change', apply)
     return () => media.removeEventListener('change', apply)
   }, [theme])
-
-  // The Email view is mounted on the first visit and then kept; this is the one place
-  // the view changes that knows it, whether by the sidebar, a link or the browser's Back.
-  useEffect(() => {
-    if (view === 'email') setEmailMounted(true)
-  }, [view])
 
   /**
    * The screen is in the address bar: a session, the routines, and each settings
@@ -1030,10 +1018,10 @@ export default function App() {
           </div>
         </section>
         : null}
-      {/* Opened once, the Email view is kept mounted and hidden rather than torn down and
-          rebuilt, so coming back to it draws the mail it already read instead of its
+      {/* The Email view is always mounted and hidden rather than torn down and rebuilt,
+          so its inbox is read from the start and opening it draws mail instead of a
           loading line. It is told the view itself, not the path, so this is where it draws. */}
-      {(emailMounted || view === 'email') && <Email active={view === 'email'} route={emailRoute} onRoute={setEmailRoute} onSeen={clearMailBadge} />}
+      <Email active={view === 'email'} route={emailRoute} onRoute={setEmailRoute} onSeen={clearMailBadge} />
     </main>
     {view === 'chat' && panelOpen && panel && panel.tabs.length > 0 && <Panel view={panel} onClose={() => setPanelVisible(false)} onInput={panelInput} onActivateTab={activateTab} onCloseTab={closeTab} />}
   </div>
