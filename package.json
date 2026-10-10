@@ -23,6 +23,7 @@
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "bench:jev": "tsx scripts/bench-jev.ts",
+    "bench:genui": "tsx scripts/bench-genui.ts",
     "bench:browser": "tsx scripts/bench-browser.ts",
     "bench:memory": "tsx scripts/bench-memory.ts",
     "eval:memory": "tsx scripts/eval-memory.ts",

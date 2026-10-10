@@ -19,10 +19,26 @@ import {
   type PermissionPolicy,
 } from '../tools/permission.js'
 import type { AgentEvent } from './events.js'
+import { GenUiFence, type GenUiFencePart } from '../genui-fence.js'
 
 export interface ToolPermission {
   policy: PermissionPolicy
   ask?: PermissionAsker
+}
+
+/**
+ * A split part, as the events every surface already listens for: the prose outside
+ * the block as `text-delta`, the tree inside it as `ui`. A surface draws a widget
+ * from that pair without knowing it arrived in a fence — and a turn that draws is
+ * told to draft, so the widget fills in as the tree is written rather than landing
+ * whole at the end.
+ */
+function fenceEvents(parts: GenUiFencePart[]): AgentEvent[] {
+  return parts.map((part) => {
+    if (part.kind === 'ui') return { type: 'ui' as const, render: part.render }
+    if (part.kind === 'ui-draft') return { type: 'ui' as const, render: part.render, draft: true }
+    return { type: 'text-delta' as const, delta: part.text }
+  })
 }
 
 /**
@@ -68,6 +84,14 @@ export interface RunAgentOptions {
    * snapshot per step and every request after the first pays for all of them.
    */
   keepSnapshots?: number
+  /**
+   * Whether this run draws an interface. The model writes the tree in a fenced
+   * block inside its own answer, and the loop lifts it out of the stream below.
+   * Absent means nothing is taught and nothing is drawn: a widget sent to a
+   * surface with no way to show it would vanish rather than fail. What may be
+   * drawn is the catalog, and it is the same catalog on every run that draws.
+   */
+  genui?: boolean
   /**
    * Where the execution log is written and what this run is. Every model request
    * is timed by the provider wrapper, which reads the tag this run puts on it;
@@ -133,6 +157,11 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     dropOldSnapshots(messages, options.keepSnapshots)
 
     try {
+      // A block is written where the prose is, so it is split out of the stream
+      // here, at the one place every surface listens. Fresh per request, not per
+      // turn: a block left open when a request ends belongs to that request, and
+      // must not swallow the next one's answer.
+      const fence = options.genui ? new GenUiFence({ drafts: true }) : null
       for await (const event of provider.stream({
         model: options.model,
         messages,
@@ -149,8 +178,15 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         ...(tag ? { trace: tag } : {}),
       })) {
         if (event.type === 'text') {
+          // The transcript keeps the answer as the model wrote it, block and all:
+          // its own words are what the next request should see. Only what the
+          // surface is handed is split.
           text += event.delta
-          yield { type: 'text-delta', delta: event.delta }
+          if (fence) {
+            for (const part of fenceEvents(fence.push(event.delta))) yield part
+          } else {
+            yield { type: 'text-delta', delta: event.delta }
+          }
         } else if (event.type === 'reasoning') {
           reasoning += event.delta
           yield { type: 'reasoning-delta', delta: event.delta }
@@ -163,6 +199,9 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         } else if (event.type === 'done') {
           finish = event.finishReason
         }
+      }
+      if (fence) {
+        for (const part of fenceEvents(fence.finish())) yield part
       }
     } catch (error) {
       // The stream died after the surface had already drawn part of it. What was
@@ -282,6 +321,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
   // system prompt rather than on a user message, so the transcript is not left
   // carrying a sentence nobody said.
   let closing = ''
+  const closingFence = options.genui ? new GenUiFence({ drafts: true }) : null
   for await (const event of provider.stream({
     model: options.model,
     messages,
@@ -296,10 +336,17 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
   })) {
     if (event.type === 'text') {
       closing += event.delta
-      yield { type: 'text-delta', delta: event.delta }
+      if (closingFence) {
+        for (const part of fenceEvents(closingFence.push(event.delta))) yield part
+      } else {
+        yield { type: 'text-delta', delta: event.delta }
+      }
     } else if (event.type === 'reasoning') {
       yield { type: 'reasoning-delta', delta: event.delta }
     }
+  }
+  if (closingFence) {
+    for (const part of fenceEvents(closingFence.finish())) yield part
   }
   if (closing) messages.push({ role: 'assistant', content: [{ type: 'text', text: closing }] })
 

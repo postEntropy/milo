@@ -349,6 +349,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-content { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 10px; }
 .message.user .message-content { flex: initial; max-width: 82%; border: 0; border-radius: 16px; background: var(--surface); padding: 11px 15px; }
 .message-status { margin-top: 3px; color: var(--muted); font-size: 11px; }
+/* What the turn took, at the foot of the answer it belongs to, where the two sides of
+   a comparison can be read one above the other. A readout, not a control: no surface. */
+.message-turn { margin-top: 6px; color: var(--muted); font: 11px var(--font-body); font-variant-numeric: tabular-nums; }
 .message-prose { max-width: 100%; color: var(--fg-2); font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
 .message-prose p { margin: 0; }
 .message-prose p + p { margin-top: 11px; }
@@ -644,6 +647,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .field small { color: var(--muted); font-size: 12px; line-height: 1.5; }
 .check-row { display: flex; min-height: 44px; align-items: center; gap: 9px; color: var(--fg-2); font-size: 13px; }
 .check-row input { width: 16px; height: 16px; accent-color: var(--accent); }
+/* A setting that is not settled yet, said on the setting itself: a filled pill, the
+   same shape the sidebar's count wears, because it is a word about the row and not
+   something to press. */
+.experimental-tag { flex: none; border-radius: 999px; background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px 7px; color: var(--muted); font-size: 10px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; }
 .section-label { padding: 14px 0 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
 .secret-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; transition: background var(--motion-fast); }
 .secret-row:hover, .entry-row:hover { background: var(--surface-warm); }
@@ -1407,3 +1414,56 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mail-label-pick.active { background: color-mix(in oklab, var(--chip, var(--muted)) 16%, var(--surface)); color: var(--chip, var(--muted)); }
 .mail-label-done { margin-inline-start: auto; border: 0; border-radius: 9px; background: var(--surface); padding: 4px 10px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
 .mail-label-done:hover { background: var(--border-soft); }
+
+/* The generated interface: the catalog the model draws from, in the app's own
+   tokens. Controls are filled, never outlined. */
+.genui { display: flex; flex-direction: column; gap: 12px; margin: 2px 0 10px; }
+.genui-title { font-family: var(--font-display); font-weight: 500; letter-spacing: -.01em; line-height: 1.2; }
+.genui-size-sm { font-size: 14px; }
+.genui-size-md { font-size: 17px; }
+.genui-size-lg { font-size: 21px; }
+.genui-size-xl { font-size: 26px; }
+.genui-box { display: flex; min-width: 0; }
+.genui-box.row { flex-direction: row; align-items: flex-start; }
+.genui-box.column { flex-direction: column; }
+.genui-gap-1 { gap: 4px; }
+.genui-gap-2 { gap: 8px; }
+.genui-gap-3 { gap: 12px; }
+.genui-gap-4 { gap: 16px; }
+.genui-pad-1 { padding: 4px; }
+.genui-pad-2 { padding: 8px; }
+.genui-pad-3 { padding: 12px; }
+.genui-pad-4 { padding: 16px; }
+.genui-text { margin: 0; color: var(--fg); font-size: 14px; line-height: 1.55; }
+.genui-stat { display: flex; flex-direction: column; gap: 2px; border-radius: 14px; background: var(--surface); padding: 12px 14px; }
+.genui-stat-value { font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
+.genui-stat-label { color: var(--muted); font-size: 12px; }
+.genui-grid { width: 100%; border-collapse: collapse; font-size: 14px; }
+.genui-grid th, .genui-grid td { padding: 8px 10px; text-align: start; }
+.genui-grid th { color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+.genui-grid tr + tr td { border-top: 1px solid var(--border-soft); }
+.genui-list { display: flex; flex-direction: column; gap: 6px; margin: 0; padding-inline-start: 18px; font-size: 14px; }
+.genui-steps { display: flex; flex-direction: column; gap: 10px; }
+.genui-steps-title, .genui-facts-title { color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
+.genui-steps-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.genui-step { display: flex; align-items: flex-start; gap: 10px; }
+.genui-step-num { display: grid; width: 22px; height: 22px; flex: none; place-items: center; border-radius: 999px; background: var(--accent); color: var(--accent-on); font-size: 12px; font-weight: 600; line-height: 1; }
+.genui-step-body { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.genui-step-title { font-size: 14px; font-weight: 600; }
+.genui-step-detail { color: var(--fg-2); font-size: 13px; line-height: 1.5; }
+.genui-facts { display: flex; flex-direction: column; gap: 8px; border-radius: 14px; background: var(--surface-warm); padding: 12px 14px; }
+.genui-facts-list { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; }
+.genui-fact { display: flex; flex-direction: column; gap: 1px; }
+.genui-fact-label { color: var(--muted); font-size: 11.5px; letter-spacing: .02em; }
+.genui-fact-value { margin: 0; font-size: 15px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.genui-field { display: flex; flex-direction: column; gap: 6px; }
+.genui-field-inline { flex-direction: row; align-items: center; }
+.genui-field-row { display: flex; align-items: center; gap: 10px; }
+.genui-field-label { color: var(--fg-2); font-size: 13px; }
+.genui-field-value { min-width: 64px; color: var(--fg); font-variant-numeric: tabular-nums; font-size: 13px; }
+.genui-slider { flex: 1; min-width: 0; accent-color: var(--accent); }
+.genui-number, .genui-select { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 7px 10px; color: var(--fg); font: inherit; font-size: 13px; }
+.genui-number { width: 120px; }
+.genui-check { width: 18px; height: 18px; flex: none; accent-color: var(--accent); }
+.genui-action { align-self: flex-start; border: 0; border-radius: 12px; background: var(--accent); padding: 10px 14px; color: var(--accent-on); font: inherit; font-size: 13px; font-weight: 500; transition: filter var(--motion-fast); }
+.genui-action:hover { filter: brightness(1.06); }

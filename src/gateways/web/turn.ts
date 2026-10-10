@@ -1,7 +1,6 @@
 import { showsToolCall } from '../tool-line.js'
+import type { DisplayConfig } from '../../core/config/schema.js'
 import type { AgentEvent, ServerFrame } from './protocol.js'
-
-type DisplayConfig = { tools: 'full' | 'name' | 'off'; thinking: 'on' | 'off' }
 
 export type SendFrame = (frame: ServerFrame) => void
 

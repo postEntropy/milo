@@ -23,6 +23,7 @@ export {
 export {
   DEFAULT_PAGE_SIZE,
   describeRebase,
+  formatSeconds,
   formatSessionList,
   formatStats,
   formatWhen,

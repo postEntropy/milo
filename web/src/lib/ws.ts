@@ -7,6 +7,12 @@ export type { ConnectionState, ConnectionStatus } from './connection.js'
 export class MiloSocket {
   private socket: WebSocket | null = null
   private conversationId = ''
+  /**
+   * Whether this client draws a generated interface; declared on the handshake.
+   * `null` says nothing at all, which is what a plain chat does — and what leaves
+   * a capability the server already holds exactly as it was.
+   */
+  private genui: boolean | null = null
   private listeners = new Set<(frame: ServerFrame) => void>()
   private statusListeners = new Set<(status: ConnectionStatus) => void>()
   private retry = 0
@@ -17,8 +23,9 @@ export class MiloSocket {
   /** What the server said when it refused, before the handshake finished. */
   private refusal = ''
 
-  connect(conversationId: string): void {
+  connect(conversationId: string, genui: boolean | null = null): void {
     this.conversationId = conversationId
+    this.genui = genui
     this.closed = false
     this.retire()
     this.open()
@@ -80,7 +87,7 @@ export class MiloSocket {
     socket.addEventListener('open', () => {
       if (this.socket !== socket) return
       this.retry = 0
-      socket.send(JSON.stringify({ type: 'hello', version: PROTOCOL_VERSION, conversationId }))
+      socket.send(JSON.stringify({ type: 'hello', version: PROTOCOL_VERSION, conversationId, ...(this.genui ? { genui: this.genui } : {}) }))
     })
     socket.addEventListener('message', (event) => {
       if (this.socket !== socket) return

@@ -20,7 +20,7 @@ type SettingsConfig = {
   providers: Record<string, { name?: string; baseURL: string; wire?: string; keyless?: boolean; keyEnv?: string; headers?: Record<string, string> }>
   memory: { keepSaid?: number; recallLimit?: number; derive?: boolean; embedding?: { provider: 'ollama' | 'openrouter'; model?: string; url?: string } }
   sessions: { compactAt: number; contextWindow?: number; maxInputTokens: number; keepTurns: number; compaction: boolean; maxSessions: number }
-  display: { tools: 'full' | 'name' | 'off'; thinking: 'on' | 'off' }
+  display: { tools: 'full' | 'name' | 'off'; thinking: 'on' | 'off'; genui?: boolean }
   gateways: Record<string, { enabled: boolean; allowlist: string[] }>
   web: { enabled: boolean; host: string; port: number }
   google: { enabled: boolean }
@@ -592,6 +592,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             <Field label="Tool detail"><Select label="Tool detail" value={draft.display.tools} choices={TOOL_LEVELS.map((value) => ({ value, label: TOOL_DETAIL_LABELS[value] }))} onChange={(next) => update(['display', 'tools'], next)} /></Field>
             <Field label="Reasoning"><Select label="Reasoning" value={draft.display.thinking} choices={THINKING_LEVELS.map((value) => ({ value, label: REASONING_LABELS[value] }))} onChange={(next) => update(['display', 'thinking'], next)} /></Field>
           </div>
+          <label className="check-row"><input type="checkbox" checked={draft.display.genui === true} onChange={(event) => update(['display', 'genui'], event.target.checked)} /> Draw an answer instead of describing it — a table, a plan, a form<span className="experimental-tag">Experimental</span></label>
         </Section>
         <Section title="Skills" description="Skills are instructions the model can run. Install only what you have read and trust." active={section === 'skills'}>
           <h3 className="section-label" style={{ paddingInline: 0 }}>Installed</h3>

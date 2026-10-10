@@ -62,6 +62,13 @@ interface Conversation {
   clients: Set<WebClient>
   activeTurnId?: string
   /**
+   * Whether a client on this conversation said it draws a generated interface.
+   * Declared on connect and read on every turn, so drawing is taught only where
+   * its tree can actually be drawn: a plain web chat sits beside one that can,
+   * and is taught nothing.
+   */
+  genui?: boolean
+  /**
    * The panel's tabs, in the order they opened, and the one in front. The requests
    * that made them, not the resolved views: a tab is read from disk afresh each
    * time it is drawn, so an edit shows without reopening anything.
@@ -120,7 +127,7 @@ export class WebHub {
       }) ?? null
   }
 
-  async connect(client: WebClient, conversationId: string): Promise<void> {
+  async connect(client: WebClient, conversationId: string, genui?: boolean): Promise<void> {
     if (!/^[0-9a-f-]{36}$/i.test(conversationId)) throw new Error('Invalid conversation id.')
     let conversation = this.conversations.get(conversationId)
     if (!conversation) {
@@ -130,6 +137,9 @@ export class WebHub {
     } else if (!this.turns.busy(conversationId)) {
       conversation.session = await this.runtime.getSession(conversation.scope)
     }
+    // A client that says nothing leaves the capability as it was: the plain chat
+    // and a reload that does not repeat it must not take it away mid-session.
+    if (genui !== undefined) conversation.genui = genui
     conversation.clients.add(client)
     client.send({
       type: 'ready',
@@ -746,6 +756,11 @@ export class WebHub {
           for await (const event of session.send(currentText, {
             signal,
             steering: inbox,
+            // Whether this conversation's clients draw a generated interface, so the
+            // teaching reaches the model only where it can be shown: the surface says
+            // it draws one, and the setting has been turned on (unset is off — the
+            // feature is experimental, and the teaching rides every turn).
+            genui: conversation.genui === true && display.genui === true,
             ...(currentImages.length ? { images: currentImages } : {}),
             ...(currentAudio.length ? { audio: currentAudio } : {}),
             ...(currentModel ? { model: currentModel } : {}),

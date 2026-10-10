@@ -7,6 +7,7 @@ import type { GoogleState } from '../google/state.js'
 import { accessLabel } from '../google/tiers.js'
 import type { McpFacts } from '../mcp/servers.js'
 import type { JobFacts } from '../jobs/index.js'
+import { GENUI_SECTION } from '../genui.js'
 import { formatDuration, plural } from '../../util/format.js'
 
 export type SurfaceKind = 'cli' | 'telegram' | 'discord' | 'web'
@@ -95,6 +96,12 @@ export interface SystemPromptInput {
   panel?: PanelFacts | null
   /** The background jobs as they stand, for the live-state line; absent when none can run. */
   jobs?: JobFacts | null
+  /**
+   * Whether this turn draws a generated interface. There is no tool to be taught
+   * in, so the whole teaching — the rules, the catalog and the example — is a
+   * section of the prompt, added only for a run that was told it draws.
+   */
+  genui?: boolean
   now?: Date
 }
 
@@ -337,6 +344,10 @@ function setupSection(input: SystemPromptInput): string {
 export function buildSystemPrompt(input: SystemPromptInput): string {
   const sections: string[] = [input.base.trim()]
   const surface = input.surface
+
+  // A turn that draws by writing has no tool to be taught in, so the rules and the
+  // catalog go in the prompt, with the fence that marks where they belong.
+  if (input.genui) sections.push(GENUI_SECTION)
 
   const environment: string[] = ['- Context for you only — do not recite it back']
   if (surface) {

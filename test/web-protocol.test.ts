@@ -14,6 +14,17 @@ describe('web protocol', () => {
     expect(parseClientFrame(null)).toBeNull()
   })
 
+  it('takes the drawing flag on the handshake, and nothing else', () => {
+    const hello = { type: 'hello', version: PROTOCOL_VERSION, conversationId: 'e76b3fc7-f93d-4ee2-a1d8-1cc6e7e7ab92' }
+    expect(parseClientFrame({ ...hello, genui: true })?.type).toBe('hello')
+    expect(parseClientFrame({ ...hello, genui: false })?.type).toBe('hello')
+    // The transports this replaced. A page still naming one is refused rather than
+    // read as a flag meaning something it never meant.
+    expect(parseClientFrame({ ...hello, genui: 'tool' })).toBeNull()
+    expect(parseClientFrame({ ...hello, genui: 'block' })).toBeNull()
+    expect(parseClientFrame({ ...hello, genui: 'canvas' })).toBeNull()
+  })
+
   it('carries a pinned destination, and refuses half of one', () => {
     const pinned = parseClientFrame({ type: 'send', text: 'every day at 8', target: { gateway: 'telegram', conversationId: '123' } })
     // Half a target is not one: guessing the other half is how a routine goes quiet.

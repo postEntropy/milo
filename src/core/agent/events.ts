@@ -1,3 +1,4 @@
+import type { GenUiRender } from '../genui.js'
 import type { PanelRequest } from '../panel.js'
 import type { TodoItem } from '../todos.js'
 
@@ -19,6 +20,17 @@ export type AgentEvent =
    * transcript sent back to the model.
    */
   | { type: 'panel'; request: PanelRequest }
+  /**
+   * A generated interface to draw beside the prose — the tree a block held, lifted
+   * out of the stream by the loop. Like `todo` and `panel` it is display state: the
+   * surfaces draw it and it is never part of the transcript sent back to the model,
+   * which already has the block in its own words.
+   *
+   * A draft is the same widget read while the block is still being written: a prefix
+   * of it, drawn because the schema accepted that prefix. A surface replaces the
+   * draft with each one that follows, and with the finished `ui` when the block closes.
+   */
+  | { type: 'ui'; render: GenUiRender; draft?: boolean }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   /**
    * The transcript was compacted just before this turn. A session-level event

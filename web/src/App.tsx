@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, uploadFile } from './lib/api.js'
 import { randomUUID } from './lib/uuid.js'
 import { trackVisualViewport } from './lib/viewport.js'
+import { useTurnClock } from './lib/turn-clock.js'
 import { MiloSocket, type ConnectionStatus } from './lib/ws.js'
 import { Composer, type ComposerHandle } from './chat/Composer.js'
 import { MessageList, type ChatMessage } from './chat/MessageList.js'
+import { appendReasoning, appendText, withWidget } from './chat/parts.js'
 import { buildSuggestions } from './chat/suggestions.js'
 import { Permissions } from './chat/Permissions.js'
 import { Routines } from './routines/Routines.js'
@@ -130,6 +132,8 @@ export default function App() {
   /** Bumped to hand the cursor to the composer, e.g. once a new session opens. */
   const [composerFocus, setComposerFocus] = useState(0)
   const socket = useMemo(() => new MiloSocket(), [])
+  /** How long this chat's turn has been running, and how long the last one took. */
+  const { ms: turnMs, start: startTurn, stop: stopTurn } = useTurnClock()
   const composerRef = useRef<ComposerHandle>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
   /** Set when the person sends: their own message comes into view even from up here. */
@@ -398,9 +402,9 @@ export default function App() {
         let next = message
         if (add.text) {
           const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-          next = { ...next, parts: withText(next.parts, add.text), waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
+            next = { ...next, parts: appendText(next.parts, add.text), waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
         }
-        if (add.reasoning) next = { ...next, parts: withReasoning(next.parts, add.reasoning) }
+          if (add.reasoning) next = { ...next, parts: appendReasoning(next.parts, add.reasoning) }
         return next
       }))
     }
@@ -460,6 +464,7 @@ export default function App() {
       const now = Date.now()
       setMessages((current) => [...current, { id: `user-${frame.id}`, role: 'user', parts: [{ kind: 'text', text: frame.text }], at: now }, { id: frame.id, role: 'assistant', parts: [], waitingSince: now, at: now }])
       setBusy(true)
+      startTurn()
       return
     }
     if (frame.type === 'event') {
@@ -490,6 +495,12 @@ export default function App() {
         if (event.type === 'todo') return event.items.length > 0
           ? { ...message, parts: [...message.parts, { kind: 'todo', items: event.items }] }
           : message
+        if (event.type === 'ui') {
+          // A widget arrives as the model writes it: each draft takes the place of the
+          // one before it, and the closed block takes the place of the last draft.
+          const part: TranscriptPart = { kind: 'ui', render: event.render, ...(event.draft ? { draft: true } : {}) }
+          return { ...message, parts: withWidget(message.parts, part) }
+        }
         if (event.type === 'waiting') return { ...message, status: 'Waiting for this session to free up…' }
         if (event.type === 'waited') return { ...message, status: `Session freed after ${formatMs(event.ms)}.` }
         if (event.type === 'compacted') return { ...message, status: `Tidying the context (${formatMs(event.ms)}).` }
@@ -506,8 +517,9 @@ export default function App() {
     if (frame.type === 'permission') { setPendingPermission(frame); return }
     if (frame.type === 'permission-result') { setPendingPermission((current) => current?.id === frame.id ? null : current); return }
     if (frame.type === 'turn-end') {
+      const took = stopTurn()
       setMessages((current) => current.map((message) => message.id === frame.id
-        ? { ...message, waitingSince: undefined, runningTool: undefined, ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
+        ? { ...message, waitingSince: undefined, runningTool: undefined, ...(took > 0 ? { turnMs: took } : {}), ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
         : message))
       setPendingPermission(null)
       setTurnEnds((current) => current + 1)
@@ -553,7 +565,7 @@ export default function App() {
       }
       void refreshSessions()
     }
-  }, [refreshSessions])
+  }, [refreshSessions, startTurn, stopTurn])
 
   const newChat = useCallback(async (): Promise<boolean> => {
     editingTurn.current = null
@@ -635,7 +647,10 @@ export default function App() {
       setConnection(status)
       if (status.state === 'refused') setNotice({ text: status.reason ?? 'Milo refused this page.', error: true })
     })
-    socket.connect(conversationId)
+    // This page can draw a generated interface; whether one is drawn at all is the
+    // `display.genui` setting, which the turn reads — so the capability is said here
+    // and the preference is Milo's.
+    socket.connect(conversationId, true)
     void refreshSessions()
     return () => { unsubscribe(); unsubscribeStatus(); socket.close() }
   }, [conversationId, socket, handleFrame, refreshSessions])
@@ -719,7 +734,9 @@ export default function App() {
       if (text.startsWith('/') && !uploadIds.length) {
         setMessages((current) => [...current, { id: `user-${randomUUID()}`, role: 'user', parts: [{ kind: 'text', text }], at: Date.now() }])
         socket.send({ type: 'command', text })
-      } else socket.sendFor(sendingConversation, { type: 'send', text, intent, ...(target ? { target } : {}), ...(uploadIds.length ? { uploadIds } : {}) })
+      } else {
+        socket.sendFor(sendingConversation, { type: 'send', text, intent, ...(target ? { target } : {}), ...(uploadIds.length ? { uploadIds } : {}) })
+      }
       setNotice(null)
     })().catch(fail)
   }, [socket, fail, redo, conversationId])
@@ -833,7 +850,10 @@ export default function App() {
     // The tabs belong to the session that opened them, so the old strip is dropped
     // now rather than shown against the new session until its ready frame lands.
     setPanel(null)
-    socket.connect(conversationId)
+    // This page can draw a generated interface; whether one is drawn at all is the
+    // `display.genui` setting, which the turn reads — so the capability is said here
+    // and the preference is Milo's.
+    socket.connect(conversationId, true)
     setView('chat')
   }
 
@@ -922,6 +942,12 @@ export default function App() {
     return 0
   }, [messages])
 
+  /** The main chat's thread: prose, tools, the plan and anything the model drew. */
+  const thread = <>
+    <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} runningMs={turnMs ?? undefined} />
+    {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
+  </>
+
   return <div className={`app-shell ${sidebarOpen ? 'drawer-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'chat' && panelOpen && panel && panel.tabs.length > 0 ? 'panel-open' : ''}`}>
     {/* The colour iOS 26 Safari reads for its own bars; see the `.chrome-tint`
         rules. They sit off screen and take no pointer. */}
@@ -1007,10 +1033,7 @@ export default function App() {
         ? <TaskLists tick={turnEnds} />
         : view === 'chat'
         ? <section className="chat-view">
-          <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>
-            <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} />
-            {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
-          </div>
+          <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>{thread}</div>
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock">
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
@@ -1171,26 +1194,6 @@ function SessionRow({
 
 function formatMs(ms: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`
-}
-
-/**
- * Appends a token to the trailing prose part, or opens a new one. A tool line
- * between two stretches of prose leaves the second its own part, so the page
- * draws them as the separate paragraphs they were said as.
- */
-function withText(parts: TranscriptPart[], delta: string): TranscriptPart[] {
-  const last = parts[parts.length - 1]
-  return last?.kind === 'text'
-    ? [...parts.slice(0, -1), { ...last, text: last.text + delta }]
-    : [...parts, { kind: 'text', text: delta }]
-}
-
-/** The same for a thought, so a turn's reasoning stays one block per step. */
-function withReasoning(parts: TranscriptPart[], delta: string): TranscriptPart[] {
-  const last = parts[parts.length - 1]
-  return last?.kind === 'reasoning'
-    ? [...parts.slice(0, -1), { ...last, text: last.text + delta }]
-    : [...parts, { kind: 'reasoning', text: delta }]
 }
 
 /**

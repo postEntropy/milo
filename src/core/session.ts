@@ -198,6 +198,12 @@ export interface SendOptions {
    * in anyone's mouth. Absent on an ordinary turn.
    */
   notice?: string
+  /**
+   * Whether the surface this turn is talking through draws a generated interface.
+   * A client declares it when it connects — the web app does — and the hub hands it
+   * here on every turn. Absent, or any surface but the web, draws nothing.
+   */
+  genui?: boolean
 }
 
 export class Session {
@@ -480,6 +486,13 @@ export class Session {
     // own list too.)
     const surface = asSurface(this.scope.gateway)
     const canSendFiles = this.options.deliverTo !== undefined || receivesFiles(surface)
+    // A generated interface needs a surface that can draw one *and* a client that
+    // said it would draw it: the web surface alone is not enough, or every web
+    // chat would draw and a plain one could not exist beside it. There is no tool
+    // to withhold — the teaching goes in the prompt — so this is the whole gate.
+    // Nothing is taught to a surface that cannot draw it: a widget sent to a chat
+    // with no way to show it is a thing that vanishes rather than fails.
+    const draws = surface === 'web' ? opts?.genui : undefined
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
       .filter((tool) => tool.name !== 'panel' || surface === 'web')
     // An instruction-only turn has nothing of the person's to recall against.
@@ -498,6 +511,9 @@ export class Session {
       model,
       tools,
       skills: this.options.skills?.(),
+      // How this turn draws, when it draws: `block` is taught the block here,
+      // because a transport told only in prose has nowhere else to be taught.
+      genui: draws,
       memories: recalled,
       // Per turn, from the surface: the prompt is frozen for the turn once built,
       // and what the model opens mid-turn is reported by its own tool result.
@@ -629,6 +645,7 @@ export class Session {
         reasoningEffort: effort,
         permission,
         keepSnapshots: this.options.keepSnapshots,
+        genui: draws,
         trace: this.runTrace('chat'),
       })) {
         if (event.type === 'error') errored = true

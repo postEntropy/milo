@@ -248,6 +248,13 @@ export const DisplaySchema = z.object({
    */
   tools: z.enum(['full', 'name', 'off']).default('full'),
   thinking: ThinkingDisplayValue.default('on'),
+  /**
+   * Whether an answer may be drawn rather than described: the model is taught the
+   * catalog and writes the tree inside the answer, and a surface that can draw one
+   * shows it there. Unset means off, like every other optional capability — it is
+   * experimental, and it costs the teaching in the prompt of every turn it draws.
+   */
+  genui: z.boolean().optional(),
 })
 export type DisplayConfig = z.infer<typeof DisplaySchema>
 

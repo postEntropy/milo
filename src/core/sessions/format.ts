@@ -41,6 +41,15 @@ export function formatWhen(timestamp: number): string {
   )
 }
 
+/**
+ * A span of seconds as both surfaces say it: a tenth of a second matters at 6.4s,
+ * and at 51s it is noise. The terminal's status band and the web's turn clock read
+ * it from here, so the same wait is not two different numbers across the two.
+ */
+export function formatSeconds(seconds: number): string {
+  return `${seconds < 10 ? Math.round(seconds * 10) / 10 : Math.round(seconds)}s`
+}
+
 export function formatSessionList(
   sessions: SessionSummary[],
   style: SessionListStyle = {},

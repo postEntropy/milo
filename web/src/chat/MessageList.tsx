@@ -1,14 +1,15 @@
 import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useCopy, type CopyState } from '../lib/clipboard.js'
 import { formatTokens } from '../lib/format.js'
-import { formatWhen } from '../../../src/core/sessions/format.ts'
-import type { ActionRow, FrameAttachment, SessionCardItem, ToolMark, TranscriptMessage } from '@protocol'
+import { formatWhen, formatSeconds } from '../../../src/core/sessions/format.ts'
+import type { ActionRow, FrameAttachment, SessionCardItem, ToolMark, TranscriptMessage, TranscriptPart } from '@protocol'
 import { proseOf } from '@protocol'
 import { toolBrand } from '../../../src/gateways/tool-line.ts'
 import type { TodoItem, TodoStatus } from '../../../src/core/todos.ts'
 import { toolIconName } from '../ui/tool-icons.js'
 import { attachmentUrl } from '../lib/api.js'
 import { Markdown } from './Markdown.js'
+import { GenUi } from './genui/GenUi.js'
 import { Icon, type IconName } from '../ui/Icons.js'
 import { WaitLine } from '../ui/WaitLine.js'
 import { miloAvatar } from '../ui/milo.js'
@@ -21,6 +22,8 @@ export interface ChatMessage extends TranscriptMessage {
   tokens?: { input: number; output: number }
   /** How long the model took before its first output of this turn, in ms. */
   thoughtMs?: number
+  /** How long this turn took, end to end: the number written under the answer. */
+  turnMs?: number
   /** When the turn's wait for its next output began: what the thought time is
    *  measured from, and that its own line belongs on screen. */
   waitingSince?: number
@@ -169,6 +172,7 @@ export function MessageList({
   onRegenerate,
   suggestions,
   busy,
+  runningMs,
 }: {
   messages: ChatMessage[]
   thinking: boolean
@@ -184,6 +188,12 @@ export function MessageList({
   /** What the welcome screen offers; absent: the standing four. */
   suggestions?: Suggestion[]
   busy?: boolean
+  /**
+   * How long this answer has been running, when it is still running. Its own time is
+   * written under it, so the two answers of a comparison can be read one above the
+   * other.
+   */
+  runningMs?: number
 }) {
   if (messages.length === 0) return (
     <section className="empty-state" aria-labelledby="welcome-title">
@@ -225,6 +235,11 @@ export function MessageList({
     ? { id: lastAssistant.id, prompt: proseOf(lastUser), upToTurn: (messageTurns.get(lastUser.id) ?? 1) - 1 }
     : undefined
 
+  // The answer still being written: the last one, while the turn runs. Its number is the
+  // live one and it is the only row that changes on a tick — every earlier answer keeps
+  // the total it ended with, so the memo on the row holds for all of them.
+  const writing = busy ? [...messages].reverse().find((message) => message.role === 'assistant')?.id : undefined
+
   return <>
     <div className={`thread-inner${messages[0]?.loaded ? ' is-opened' : ''}`} aria-live="polite" aria-relevant="additions text">
       {messages.filter((m) => hasContent(m, thinking)).map((message) => (
@@ -234,11 +249,13 @@ export function MessageList({
           thinking={thinking}
           busy={Boolean(busy)}
           turn={messageTurns.get(message.id) ?? 1}
+          turnMs={message.turnMs ?? (message.id === writing ? runningMs : undefined)}
           onAction={onAction}
           onFork={onFork}
           onEdit={onEdit}
           onRegenerate={onRegenerate}
           onQuote={onQuote}
+          onSend={onPrompt}
           regenPrompt={message.id === regen?.id ? regen.prompt : undefined}
           regenUpToTurn={message.id === regen?.id ? regen.upToTurn : undefined}
         />
@@ -301,16 +318,20 @@ function QuoteButton({ onQuote }: { onQuote?(text: string): void }) {
  * leaves every earlier one untouched, instead of reconciling the whole thread on
  * each frame.
  */
-const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onAction, onFork, onEdit, onRegenerate, onQuote, regenPrompt, regenUpToTurn }: {
+const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, turnMs, onAction, onFork, onEdit, onRegenerate, onQuote, onSend, regenPrompt, regenUpToTurn }: {
   message: ChatMessage
   thinking: boolean
   busy: boolean
   turn: number
+  /** How long this answer took, or has been taking: written under it. */
+  turnMs?: number
   onAction?(actionId: string, messageId?: string): void
   onFork?(upToTurn: number): void
   onEdit?(text: string, upToTurn: number): void
   onRegenerate?(text: string, upToTurn: number): void
   onQuote?(text: string): void
+  /** What a generated interface's button sends, as a new turn. */
+  onSend?(text: string): void
   regenPrompt?: string
   regenUpToTurn?: number
 }) {
@@ -353,6 +374,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
           }
           if (part.kind === 'text') return <Markdown key={key} text={part.text} />
           if (part.kind === 'tool') return <ToolLine key={key} tool={part.tool} />
+          if (part.kind === 'ui') return <GenUi key={key} render={part.render} onSend={onSend} />
           return <TodoList key={key} items={part.items} />
         })
       )}
@@ -430,9 +452,14 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
           <MessageMenu at={message.at} tokens={message.tokens} thoughtMs={message.thoughtMs} prose={prose} onQuote={onQuote} />
         </div>
       )}
-      {message.waitingSince !== undefined && <WaitLine label="Thinking" />}
+      {message.waitingSince !== undefined && !drawingADraft(parts) && <WaitLine label="Thinking" />}
       {message.runningTool !== undefined && <WaitLine label={`${message.runningTool}…`} />}
       {message.status && <div className="message-status">{message.status}</div>}
+      {/* The turn's own time, under the answer it belongs to: two answers read one
+          above the other carry their number under them, where the eye already is. */}
+      {message.role === 'assistant' && turnMs !== undefined && (
+        <div className="message-turn">{formatSeconds(turnMs / 1000)}</div>
+      )}
     </div>
     {/* The person's own message is a filled bubble: its controls sit under it, not
         inside it, the way the model's sit under its answer. */}
@@ -472,11 +499,6 @@ function Reasoning({ text, thoughtMs, animateIn = false }: { text: string; thoug
 /** The terminal's wording, so both surfaces say the same thing about a wait. */
 function thoughtLabel(ms?: number): string {
   return ms !== undefined && ms >= 1000 ? `Thought for ${formatSeconds(ms / 1000)}` : 'Reasoning'
-}
-
-/** A tenth of a second matters at 6.4s; at 51s it is noise. */
-function formatSeconds(value: number): string {
-  return `${value < 10 ? Math.round(value * 10) / 10 : Math.round(value)}s`
 }
 
 /**
@@ -627,9 +649,23 @@ function copyLabel(state: CopyState): string {
   return 'Copy'
 }
 
+/**
+ * Whether the answer is showing a widget the model has not finished writing. The wait
+ * is named only while nothing is arriving; a table filling in front of the person is
+ * not a wait, whatever the turn is doing behind it.
+ */
+function drawingADraft(parts: TranscriptPart[]): boolean {
+  for (let at = parts.length - 1; at >= 0; at -= 1) {
+    const part = parts[at]!
+    if (part.kind === 'ui') return part.draft === true
+  }
+  return false
+}
+
 function hasContent(message: ChatMessage, thinking: boolean): boolean {
   if (message.parts.some((part) => part.kind === 'text' && part.text.trim())) return true
   if (message.parts.some((part) => part.kind === 'tool' || part.kind === 'todo')) return true
+  if (message.parts.some((part) => part.kind === 'ui')) return true
   if (thinking && message.parts.some((part) => part.kind === 'reasoning')) return true
   if (message.attachments && message.attachments.length > 0) return true
   if (message.cards && message.cards.length > 0) return true

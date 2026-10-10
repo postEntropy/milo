@@ -1,4 +1,6 @@
 import type { OutgoingFile } from '../../core/outgoing.js'
+import { genUiFromArgs } from '../../core/genui.js'
+import { GenUiFence } from '../../core/genui-fence.js'
 import type { PanelRequest } from '../../core/panel.js'
 import type { Message } from '../../core/providers/types.js'
 import { todosFromArgs } from '../../core/todos.js'
@@ -45,8 +47,16 @@ export function transcriptOf(messages: Message[], register: RegisterFile): Trans
       // the way any other part of the transcript does.
       for (const part of message.content) {
         if (part.type === 'reasoning' && part.text) parts.push({ kind: 'reasoning', text: part.text })
-        else if (part.type === 'text' && part.text) parts.push({ kind: 'text', text: part.text })
+        else if (part.type === 'text' && part.text) parts.push(...textParts(part.text))
         else if (part.type === 'tool-call') {
+          // A session stored while a turn could draw by calling a tool still holds
+          // the call, so its widget is read back out of the arguments here. Nothing
+          // writes one any more — this is how that history keeps drawing instead of
+          // losing a widget it showed.
+          if (part.name === 'render_ui') {
+            const render = genUiFromArgs(part.args)
+            if (render) parts.push({ kind: 'ui', render })
+          }
           const todos = todosFromArgs(part.args)
           if (todos.length > 0) parts.push({ kind: 'todo', items: todos })
           if (showsToolCall(part.name)) parts.push({ kind: 'tool', tool: { name: part.name, text: toolText(part.name, part.args) } })
@@ -71,6 +81,27 @@ export function transcriptOf(messages: Message[], register: RegisterFile): Trans
   }
 
   return transcript.filter((message) => message.parts.length > 0 || (message.attachments?.length ?? 0) > 0)
+}
+
+/**
+ * The stored text of a step, split the way it was split as it arrived.
+ *
+ * A turn that draws by writing keeps its block in the transcript verbatim — it is
+ * the model's own words, and the model reads them back on the next request. So
+ * reading a turn back is the same act as streaming it: the same splitter, handed
+ * the whole text at once instead of a token at a time. Prose and widgets come out
+ * in the order they were written, which is what a reload has to draw, and a block
+ * that is no longer drawable comes back as its own text exactly as it did live.
+ */
+function textParts(text: string): TranscriptPart[] {
+  const fence = new GenUiFence()
+  const parts: TranscriptPart[] = []
+  for (const part of [...fence.push(text), ...fence.finish()]) {
+    // No drafts are asked of this fence, so a block here is one the model finished.
+    if (part.kind === 'ui') parts.push({ kind: 'ui', render: part.render })
+    else if (part.kind === 'text' || part.kind === 'refused') parts.push({ kind: 'text', text: part.text })
+  }
+  return parts
 }
 
 /**

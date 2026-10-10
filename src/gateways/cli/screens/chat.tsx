@@ -16,7 +16,7 @@ import {
 import type { AgentRuntime } from '../../../core/runtime.js'
 import { prepareIncoming } from '../../../core/media.js'
 import type { ImagePart } from '../../../core/providers/types.js'
-import { describeRebase, formatWhen, type SessionStats } from '../../../core/sessions/index.js'
+import { describeRebase, formatSeconds, formatWhen, type SessionStats } from '../../../core/sessions/index.js'
 import { formatSkillList } from '../../../core/skills/index.js'
 import type { TodoItem } from '../../../core/todos.js'
 import {
@@ -1155,11 +1155,6 @@ function formatTokens(value: number): string {
 /** `1 turn`, `2 turns` — "1 turns" is the kind of thing that makes a block look unfinished. */
 function count(value: number, noun: string): string {
   return `${value} ${noun}${value === 1 ? '' : 's'}`
-}
-
-/** A tenth of a second matters at 6.4s; at 51s it is noise. */
-function formatSeconds(value: number): string {
-  return `${value < 10 ? Math.round(value * 10) / 10 : Math.round(value)}s`
 }
 
 /**

@@ -95,10 +95,13 @@ export function isExternalTool(name: string): boolean {
  * chat, and a line announcing it is a line between the person and the picture —
  * and `todo`, whose whole point is the checklist drawn in its place. `panel` is
  * the same: its result is the panel itself, so a line announcing it would stand
- * between the person and what they are looking at. A failure is still reported,
- * so nothing goes wrong in silence.
+ * between the person and what they are looking at. `render_ui` is no longer a
+ * tool at all; it is here for a session stored while it was one, whose widget is
+ * drawn from the call's arguments and whose line would be a line about a call
+ * nobody watching ever made. A failure is still reported, so nothing goes wrong
+ * in silence.
  */
-const HIDDEN = new Set(['send_file', 'todo', 'panel'])
+const HIDDEN = new Set(['send_file', 'todo', 'panel', 'render_ui'])
 
 /** Whether a tool's own call is drawn as a line on the surfaces. */
 export function showsToolCall(name: string): boolean {

@@ -9,7 +9,7 @@ import type { AgentRuntime } from '../../core/runtime.js'
 import { isImage, type OutgoingMessage } from '../../core/outgoing.js'
 import { errorMessage } from '../../util/errors.js'
 import { hyperlink } from '../../util/terminal.js'
-import { parseClientFrame, PROTOCOL_VERSION, type ServerFrame } from './protocol.js'
+import { parseClientFrame, PROTOCOL_VERSION, protocolRefusal, type ServerFrame } from './protocol.js'
 import { WebHub } from './hub.js'
 import { WebSettings } from './settings.js'
 
@@ -138,13 +138,23 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
         return
       }
       if (frame.type === 'hello') {
-        if (frame.version !== PROTOCOL_VERSION || conversationId) {
-          client.send({ type: 'error', message: 'Unsupported protocol version or duplicate handshake.' })
+        // The two refusals are named apart because they are fixed differently. A
+        // version skew is almost always a page served from a bundle older than the
+        // server — the number lives inside the build, not in the source — so the
+        // message says both numbers rather than leaving the person to guess which
+        // side is the stale one.
+        if (conversationId) {
+          client.send({ type: 'error', message: 'Duplicate handshake.' })
+          socket.close(1002, 'Invalid handshake')
+          return
+        }
+        if (frame.version !== PROTOCOL_VERSION) {
+          client.send({ type: 'error', message: protocolRefusal(frame.version) })
           socket.close(1002, 'Invalid handshake')
           return
         }
         conversationId = frame.conversationId
-        void hub.connect(client, conversationId).catch((error: unknown) => {
+        void hub.connect(client, conversationId, frame.genui).catch((error: unknown) => {
           client.send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
           socket.close(1011, 'Could not open conversation')
         })

@@ -1,9 +1,24 @@
+import type { GenUiRender } from '../../core/genui.js'
 import type { Idea } from '../../core/ideas.js'
 import type { PanelRequest } from '../../core/panel.js'
 import type { TodoItem } from '../../core/todos.js'
 
-export const PROTOCOL_VERSION = 5
+// 9: a `ui` event carries `draft` while the block is still being written, so the
+// widget fills in as the tree arrives. A page from 8 would drop the flag and draw
+// every draft as a finished widget, one under another, so it is refused — which is
+// what the version is for. 8 made the handshake's `genui` a flag again: there is one
+// way a turn draws, so a page naming a transport named something that no longer exists.
+export const PROTOCOL_VERSION = 9
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
+
+/**
+ * What a page is told when the protocol it speaks is not the server's. One sentence,
+ * said here, so the page, the server and the test that reads a refusal word for word
+ * are all reading the same one.
+ */
+export function protocolRefusal(pageVersion: number): string {
+  return `This page speaks protocol ${pageVersion} and this server speaks ${PROTOCOL_VERSION}. Rebuild the web bundle, or restart the server, and reload.`
+}
 
 export const PERMISSION_MODES = ['ask', 'auto', 'yolo'] as const
 export const CLASSIFIER_BACKENDS = ['commandcode', 'openai', 'openrouter', 'ollaya', 'custom'] as const
@@ -25,6 +40,7 @@ export type AgentEvent =
   | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean }
   | { type: 'todo'; items: TodoItem[] }
   | { type: 'panel'; request: PanelRequest }
+  | { type: 'ui'; render: GenUiRender; draft?: boolean }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   | { type: 'compacted'; ms: number }
   | { type: 'rebased'; added: number; removed: number; compacted: boolean }
@@ -68,7 +84,7 @@ export interface SessionCardItem {
 }
 
 export type ClientFrame =
-  | { type: 'hello'; version: number; conversationId: string }
+  | { type: 'hello'; version: number; conversationId: string; genui?: boolean }
   | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[] }
   | { type: 'control'; action: 'stop' | 'allow' | 'deny'; id?: string }
   /** Stop a background job. Pressing the control is the confirmation. */
@@ -193,6 +209,8 @@ export type TranscriptPart =
   | { kind: 'reasoning'; text: string }
   | { kind: 'tool'; tool: ToolMark }
   | { kind: 'todo'; items: TodoItem[] }
+  /** `draft` is only ever set on the wire: a stored session is read back as it ended. */
+  | { kind: 'ui'; render: GenUiRender; draft?: boolean }
 
 export interface TranscriptMessage {
   role: 'user' | 'assistant'
@@ -215,7 +233,7 @@ export function proseOf(message: { parts: TranscriptPart[] }): string {
 export function parseClientFrame(value: unknown): ClientFrame | null {
   if (!value || typeof value !== 'object') return null
   const frame = value as Record<string, unknown>
-  if (frame.type === 'hello' && typeof frame.conversationId === 'string' && typeof frame.version === 'number') {
+  if (frame.type === 'hello' && typeof frame.conversationId === 'string' && typeof frame.version === 'number' && (frame.genui === undefined || typeof frame.genui === 'boolean')) {
     return frame as ClientFrame
   }
   if (

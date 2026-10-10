@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { closeOutcome } from '../web/src/lib/connection.js'
+import { PROTOCOL_VERSION, protocolRefusal } from '../src/gateways/web/protocol.js'
 
 describe('what a closed web socket means', () => {
   it('retries a drop, because the conversation is still there to keep', () => {
@@ -7,16 +8,12 @@ describe('what a closed web socket means', () => {
   })
 
   it('stops on the reason the server gave, rather than looping on it', () => {
-    const outcome = closeOutcome({
-      everOnline: false,
-      error: 'Unsupported protocol version or duplicate handshake.',
-      reachable: true,
-    })
+    // The refusal the server actually sends, from the function that sends it: a reason
+    // copied in here by hand would outlive the message it claims to be.
+    const reason = protocolRefusal(PROTOCOL_VERSION - 1)
+    const outcome = closeOutcome({ everOnline: false, error: reason, reachable: true })
     expect(outcome.retry).toBe(false)
-    expect(outcome.status).toEqual({
-      state: 'refused',
-      reason: 'Unsupported protocol version or duplicate handshake.',
-    })
+    expect(outcome.status).toEqual({ state: 'refused', reason })
   })
 
   it('reads a server that is up but refused the page as a refusal', () => {
