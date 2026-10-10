@@ -3,7 +3,6 @@ import { api, uploadFile, withToken } from './lib/api.js'
 import { isPhone } from './lib/phone.js'
 import { randomUUID } from './lib/uuid.js'
 import { trackVisualViewport } from './lib/viewport.js'
-import { useTurnClock } from './lib/turn-clock.js'
 import { MiloSocket, type ConnectionStatus } from './lib/ws.js'
 import { Composer, type ComposerHandle } from './chat/Composer.js'
 import { MessageList, type ChatMessage } from './chat/MessageList.js'
@@ -125,8 +124,6 @@ export default function App() {
   /** Bumped to hand the cursor to the composer, e.g. once a new session opens. */
   const [composerFocus, setComposerFocus] = useState(0)
   const socket = useMemo(() => new MiloSocket(), [])
-  /** How long this chat's turn has been running, and how long the last one took. */
-  const { ms: turnMs, start: startTurn, stop: stopTurn } = useTurnClock()
   const composerRef = useRef<ComposerHandle>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
   /** Set when the person sends: their own message comes into view even from up here. */
@@ -460,7 +457,6 @@ export default function App() {
       const now = Date.now()
       setMessages((current) => [...current, { id: `user-${frame.id}`, role: 'user', parts: [{ kind: 'text', text: frame.text }], at: now }, { id: frame.id, role: 'assistant', parts: [], waitingSince: now, at: now }])
       setBusy(true)
-      startTurn()
       return
     }
     if (frame.type === 'event') {
@@ -513,9 +509,8 @@ export default function App() {
     if (frame.type === 'permission') { setPendingPermission(frame); return }
     if (frame.type === 'permission-result') { setPendingPermission((current) => current?.id === frame.id ? null : current); return }
     if (frame.type === 'turn-end') {
-      const took = stopTurn()
       setMessages((current) => current.map((message) => message.id === frame.id
-        ? { ...message, waitingSince: undefined, runningTool: undefined, ...(took > 0 ? { turnMs: took } : {}), ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
+        ? { ...message, waitingSince: undefined, runningTool: undefined, ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
         : message))
       setPendingPermission(null)
       setTurnEnds((current) => current + 1)
@@ -561,7 +556,7 @@ export default function App() {
       }
       void refreshSessions()
     }
-  }, [refreshSessions, startTurn, stopTurn])
+  }, [refreshSessions])
 
   const newChat = useCallback(async (): Promise<boolean> => {
     editingTurn.current = null
@@ -940,7 +935,7 @@ export default function App() {
 
   /** The main chat's thread: prose, tools, the plan and anything the model drew. */
   const thread = <>
-    <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} runningMs={turnMs ?? undefined} />
+    <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} />
     {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
   </>
 

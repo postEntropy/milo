@@ -22,8 +22,6 @@ export interface ChatMessage extends TranscriptMessage {
   tokens?: { input: number; output: number }
   /** How long the model took before its first output of this turn, in ms. */
   thoughtMs?: number
-  /** How long this turn took, end to end: the number written under the answer. */
-  turnMs?: number
   /** When the turn's wait for its next output began: what the thought time is
    *  measured from, and that its own line belongs on screen. */
   waitingSince?: number
@@ -172,7 +170,6 @@ export function MessageList({
   onRegenerate,
   suggestions,
   busy,
-  runningMs,
 }: {
   messages: ChatMessage[]
   thinking: boolean
@@ -188,12 +185,6 @@ export function MessageList({
   /** What the welcome screen offers; absent: the standing four. */
   suggestions?: Suggestion[]
   busy?: boolean
-  /**
-   * How long this answer has been running, when it is still running. Its own time is
-   * written under it, so the two answers of a comparison can be read one above the
-   * other.
-   */
-  runningMs?: number
 }) {
   if (messages.length === 0) return (
     <section className="empty-state" aria-labelledby="welcome-title">
@@ -235,11 +226,6 @@ export function MessageList({
     ? { id: lastAssistant.id, prompt: proseOf(lastUser), upToTurn: (messageTurns.get(lastUser.id) ?? 1) - 1 }
     : undefined
 
-  // The answer still being written: the last one, while the turn runs. Its number is the
-  // live one and it is the only row that changes on a tick — every earlier answer keeps
-  // the total it ended with, so the memo on the row holds for all of them.
-  const writing = busy ? [...messages].reverse().find((message) => message.role === 'assistant')?.id : undefined
-
   return <>
     <div className={`thread-inner${messages[0]?.loaded ? ' is-opened' : ''}`} aria-live="polite" aria-relevant="additions text">
       {messages.filter((m) => hasContent(m, thinking)).map((message) => (
@@ -249,7 +235,6 @@ export function MessageList({
           thinking={thinking}
           busy={Boolean(busy)}
           turn={messageTurns.get(message.id) ?? 1}
-          turnMs={message.turnMs ?? (message.id === writing ? runningMs : undefined)}
           onAction={onAction}
           onFork={onFork}
           onEdit={onEdit}
@@ -318,13 +303,11 @@ function QuoteButton({ onQuote }: { onQuote?(text: string): void }) {
  * leaves every earlier one untouched, instead of reconciling the whole thread on
  * each frame.
  */
-const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, turnMs, onAction, onFork, onEdit, onRegenerate, onQuote, onSend, regenPrompt, regenUpToTurn }: {
+const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onAction, onFork, onEdit, onRegenerate, onQuote, onSend, regenPrompt, regenUpToTurn }: {
   message: ChatMessage
   thinking: boolean
   busy: boolean
   turn: number
-  /** How long this answer took, or has been taking: written under it. */
-  turnMs?: number
   onAction?(actionId: string, messageId?: string): void
   onFork?(upToTurn: number): void
   onEdit?(text: string, upToTurn: number): void
@@ -455,11 +438,6 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, tur
       {message.waitingSince !== undefined && !drawingADraft(parts) && <WaitLine label="Thinking" />}
       {message.runningTool !== undefined && <WaitLine label={`${message.runningTool}…`} />}
       {message.status && <div className="message-status">{message.status}</div>}
-      {/* The turn's own time, under the answer it belongs to: two answers read one
-          above the other carry their number under them, where the eye already is. */}
-      {message.role === 'assistant' && turnMs !== undefined && (
-        <div className="message-turn">{formatSeconds(turnMs / 1000)}</div>
-      )}
     </div>
     {/* The person's own message is a filled bubble: its controls sit under it, not
         inside it, the way the model's sit under its answer. */}
