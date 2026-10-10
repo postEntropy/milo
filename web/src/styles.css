@@ -648,6 +648,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    same shape the sidebar's count wears, because it is a word about the row and not
    something to press. */
 .experimental-tag { flex: none; border-radius: 999px; background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px 7px; color: var(--muted); font-size: 10px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; }
+/* A setting said as one line and a switch, with air above it so it does not read as a
+   continuation of the grid it follows. The switch is a control like any other here:
+   filled, never outlined — the track carries the state, the knob sits on it. */
+.toggle-row { display: flex; align-items: center; gap: 16px; margin-top: 18px; }
+.toggle-text { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.toggle-label { display: flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: 13px; font-weight: 500; }
+.toggle-text small { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.switch { position: relative; flex: none; width: 44px; height: 26px; border: 0; border-radius: 999px; background: var(--surface); padding: 0; transition: background var(--motion-fast); }
+.switch:hover { background: var(--border-soft); }
+.switch.is-on { background: var(--accent); }
+.switch-knob { position: absolute; inset-block-start: 3px; inset-inline-start: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--knob); box-shadow: var(--shadow-sm); transition: transform var(--motion-fast) var(--ease-standard); }
+.switch.is-on .switch-knob { transform: translateX(18px); }
 .section-label { padding: 14px 0 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
 .secret-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; transition: background var(--motion-fast); }
 .secret-row:hover, .entry-row:hover { background: var(--surface-warm); }

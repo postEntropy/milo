@@ -592,7 +592,22 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             <Field label="Tool detail"><Select label="Tool detail" value={draft.display.tools} choices={TOOL_LEVELS.map((value) => ({ value, label: TOOL_DETAIL_LABELS[value] }))} onChange={(next) => update(['display', 'tools'], next)} /></Field>
             <Field label="Reasoning"><Select label="Reasoning" value={draft.display.thinking} choices={THINKING_LEVELS.map((value) => ({ value, label: REASONING_LABELS[value] }))} onChange={(next) => update(['display', 'thinking'], next)} /></Field>
           </div>
-          <label className="check-row"><input type="checkbox" checked={draft.display.genui === true} onChange={(event) => update(['display', 'genui'], event.target.checked)} /> Draw an answer instead of describing it — a table, a plan, a form<span className="experimental-tag">Experimental</span></label>
+          <div className="toggle-row">
+            <div className="toggle-text">
+              <span className="toggle-label">GenUI<span className="experimental-tag">Experimental</span></span>
+              <small>Milo draws the answer as it writes it — a table, a plan, a form — instead of describing it in words.</small>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={draft.display.genui === true}
+              aria-label="GenUI"
+              className={`switch ${draft.display.genui === true ? 'is-on' : ''}`}
+              onClick={() => update(['display', 'genui'], draft.display.genui !== true)}
+            >
+              <span className="switch-knob" />
+            </button>
+          </div>
         </Section>
         <Section title="Skills" description="Skills are instructions the model can run. Install only what you have read and trust." active={section === 'skills'}>
           <h3 className="section-label" style={{ paddingInline: 0 }}>Installed</h3>
