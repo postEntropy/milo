@@ -40,6 +40,10 @@
   --shadow: 0 4px 16px rgb(39 39 36 / 7%);
   --shadow-sm: 0 1px 2px rgb(39 39 36 / 7%);
   --focus-ring: 0 0 0 3px rgb(196 84 28 / 16%);
+  /* The ring a control wears when it holds focus. Neutral, not the accent: the accent is
+     a pointer (the cursor, the selected row), and an accent ring on every focused button
+     made focus read as selection. Resolves against the theme's own `--fg`. */
+  --focus-outline: color-mix(in oklab, var(--fg) 25%, transparent);
   /* Corner rounding: one scale for the whole interface. A value is picked by the role a
      thing plays — never per component. `--radius-pill` and `50%` are shapes, not levels. */
   --radius-xs: 8px;     /* marks read inline with text: inline code, id/size badges */
@@ -109,6 +113,9 @@
   --shadow: 0 4px 18px rgb(0 0 0 / 45%);
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 38%);
   --focus-ring: 0 0 0 3px rgb(237 135 84 / 26%);
+  /* The control focus ring, re-declared for the dark theme the way `--focus-ring` is;
+     the value is the same because it is built from `--fg`, which is not. */
+  --focus-outline: color-mix(in oklab, var(--fg) 25%, transparent);
 }
 
 * { box-sizing: border-box; }
@@ -124,7 +131,7 @@ body { position: fixed; inset: 0; min-width: 320px; overflow: hidden; }
 button, input, textarea, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
 button:disabled { cursor: not-allowed; opacity: .45; }
-button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-visible { outline: 2px solid var(--focus-outline); outline-offset: 2px; }
 
 /* The shell is the phone's visible area. While the keyboard is up, `--app-height`
    and `--app-top` are set from the visual viewport (see `lib/viewport.ts`) so the
@@ -198,13 +205,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-item.active { background: var(--surface); }
 .session-row { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; min-height: 44px; border: 0; border-radius: var(--radius-md); background: transparent; padding: 8px 6px 8px 10px; color: var(--fg-2); text-align: start; }
 .session-item.active .session-row { color: var(--fg); font-weight: 500; }
+/* The row's focus is the row's, not the button's: the ring wraps the whole card — the
+   `⋯` column with it — instead of the half the button inside happens to fill.
+   `:focus-visible` and not `:focus-within`, so a mouse click that opens the session and
+   closes the drawer leaves no ring behind. */
+.session-item:has(.session-row:focus-visible) { outline: 2px solid var(--focus-outline); outline-offset: 2px; }
+.session-row:focus-visible { outline: 0; }
 .session-content { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
 .session-title, .session-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-title { font-size: 13px; line-height: 1.35; }
 .session-preview { color: var(--muted); font-size: 11px; line-height: 1.35; }
 .session-row-actions { position: relative; display: flex; align-items: center; flex: none; }
 .session-more-btn { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: none; margin-inline-end: 6px; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
-.session-item:hover .session-more-btn, .session-item.menu-open .session-more-btn { opacity: 1; }
+.session-item:hover .session-more-btn, .session-item.menu-open .session-more-btn, .session-item:has(.session-row:focus-visible) .session-more-btn { opacity: 1; }
 .session-more-btn:hover, .session-more-btn.open { background: var(--surface-warm); color: var(--fg); }
 .session-dropdown { position: absolute; z-index: 40; top: calc(100% + 4px); right: 6px; display: flex; min-width: 148px; flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); padding: 5px; animation: menu-in var(--motion-base) var(--ease-standard); transform-origin: top right; }
 .session-dropdown-item { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 33px; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 6px 10px; color: var(--fg-2); font-size: 13px; font-weight: 500; text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
@@ -294,7 +307,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .panel-stage { position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: var(--radius-lg); background: #fff; }
 .panel-browser-img { display: block; width: 100%; height: 100%; }
 .panel-input-layer { position: absolute; inset: 0; cursor: pointer; outline: 0; border-radius: var(--radius-lg); }
-.panel-input-layer:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
+.panel-input-layer:focus-visible { box-shadow: inset 0 0 0 2px var(--focus-outline); }
 
 .main { position: relative; grid-column: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--bg); }
 .topbar { position: relative; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 62px; background: var(--bg); padding: 10px 20px; }
@@ -824,7 +837,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .routine-row-actions { display: flex; flex: none; gap: 4px; }
 .routine-row-action { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: var(--radius-sm); background: var(--surface); color: var(--fg-2); box-shadow: var(--shadow-sm); opacity: 0; transition: background var(--motion-fast), color var(--motion-fast), opacity var(--motion-fast); }
 .routine-row-action:hover { background: var(--surface-warm); color: var(--fg); }
-.routine-row:hover .routine-row-action, .routine-row-action:focus-visible { opacity: 1; }
+.routine-row:hover .routine-row-action, .routine-row-action:focus-visible, .routine-row:has(.routine-row-open:focus-visible) .routine-row-action { opacity: 1; }
 .routine-row:active { transform: translateY(1px); }
 .routine-state-mark { display: block; width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--muted); }
 .routine-state-mark.enabled { background: var(--success); box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 12%, transparent); }
@@ -939,7 +952,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .routine-detail-title-row .routine-state-mark { margin-top: 6px; }
   .routine-detail-title-row h2 { font-size: 17px; }
 }
-.routine-row-open:focus-visible, .run-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* A row's focus is the row's, not the button's: the ring wraps the whole card — the
+   actions column with it — instead of the half the button inside happens to fill. The
+   opener's own ring stands down; the row's takes its place. */
+.routine-row:has(.routine-row-open:focus-visible) { outline: 2px solid var(--focus-outline); outline-offset: 2px; }
+.routine-row-open:focus-visible { outline: 0; }
+.run-row:focus-visible { outline: 2px solid var(--focus-outline); outline-offset: 2px; }
 
 /* The settings sections, drawn from one list in two places: the drawer on a wide
    screen, the strip on a phone. Only one of the two is on screen at any width. */
