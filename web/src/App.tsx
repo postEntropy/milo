@@ -510,7 +510,7 @@ export default function App() {
     if (frame.type === 'permission-result') { setPendingPermission((current) => current?.id === frame.id ? null : current); return }
     if (frame.type === 'turn-end') {
       setMessages((current) => current.map((message) => message.id === frame.id
-        ? { ...message, waitingSince: undefined, runningTool: undefined, ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
+        ? { ...message, waitingSince: undefined, runningTool: undefined, ...(frame.raw ? { raw: frame.raw } : {}), ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
         : message))
       setPendingPermission(null)
       setTurnEnds((current) => current + 1)

@@ -3,6 +3,7 @@ import path from 'node:path'
 import { exportsDir } from './config/paths.js'
 import { readSession, type HistoryEntry } from './history.js'
 import { humanSize, plural } from '../util/format.js'
+import { block } from '../util/markdown.js'
 import { formatWhen } from './sessions/format.js'
 
 /**
@@ -35,19 +36,6 @@ export interface ExportResult {
   messages: number
   toolCalls: number
   bytes: number
-}
-
-/** A fence long enough that backticks inside the text cannot end it early. */
-function fence(text: string): string {
-  const longest = (text.match(/`+/g) ?? []).reduce((max, run) => Math.max(max, run.length), 0)
-  return '`'.repeat(Math.max(3, longest + 1))
-}
-
-/** Arbitrary text — a tool result, a thought — as something Markdown will not mangle. */
-function block(text: string): string {
-  const body = text.replace(/\s+$/, '')
-  const mark = fence(body)
-  return `${mark}\n${body}\n${mark}`
 }
 
 function counts(entries: HistoryEntry[]): { messages: number; toolCalls: number } {

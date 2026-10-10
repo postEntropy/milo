@@ -177,7 +177,7 @@ export type ServerFrame =
   | { type: 'event'; turnId: string; event: AgentEvent }
   | { type: 'permission'; id: string; request: PermissionRequest; expiresAt: number }
   | { type: 'permission-result'; id: string; allowed: boolean }
-  | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error' }
+  | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error'; raw?: string }
   | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; attachments?: FrameAttachment[]; actions?: ActionRow[]; messageId?: string; cards?: SessionCardItem[] }
   | { type: 'state'; busy: boolean; queued: number }
   /** A routine ran somewhere in this install: re-read whatever shows the history. */
@@ -220,6 +220,14 @@ export interface TranscriptMessage {
   attachments?: FrameAttachment[]
   /** When the message was first said, for a surface that shows it. */
   at?: number
+  /**
+   * The turn copied whole — the model's words (a `genui` block among them, in its own
+   * JSON), its thinking, and every tool call with its arguments and result — for a
+   * surface's "copy raw". Rendered on the server because the parts above are drawn
+   * forms that leave the arguments and the results out. Absent on a turn that is only
+   * prose, and on a person's own message, where the words are the whole of it.
+   */
+  raw?: string
 }
 
 /** The words of a message, everything that is not prose left out. */

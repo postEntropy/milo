@@ -188,6 +188,18 @@ export interface GenUiRender {
 /** The word in the fence that opens a block. */
 export const GENUI_FENCE_TAG = 'genui'
 
+/** A line that opens a block: three backticks, indented up to three spaces, then the tag. */
+const GENUI_OPEN_RE = /^[ \t]{0,3}```genui[ \t]*\r?\n/m
+
+/**
+ * Whether the model's own words open a widget. One test, for the raw copy: a turn has
+ * something the plain copy does not — worth a `Copy raw` beside it — exactly when this
+ * is true of what it wrote, or when it reasoned, or when it called a tool.
+ */
+export function holdsGenUi(text: string): boolean {
+  return GENUI_OPEN_RE.test(text)
+}
+
 /** How big a tree may get: a widget, not a page. */
 const MAX_DEPTH = 8
 const MAX_NODES = 80

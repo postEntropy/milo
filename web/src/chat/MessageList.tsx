@@ -432,7 +432,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
               <span className="message-tool-label">Regenerate</span>
             </button>
           )}
-          <MessageMenu at={message.at} tokens={message.tokens} thoughtMs={message.thoughtMs} prose={prose} onQuote={onQuote} />
+          <MessageMenu at={message.at} tokens={message.tokens} thoughtMs={message.thoughtMs} prose={prose} raw={message.raw} onQuote={onQuote} />
         </div>
       )}
       {message.waitingSince !== undefined && !drawingADraft(parts) && <WaitLine label="Thinking" />}
@@ -489,14 +489,18 @@ function thoughtLabel(ms?: number): string {
  * a scroll moves it with its button rather than leaving it behind or cutting it
  * at the scroller's edge.
  */
-function MessageMenu({ at, tokens, thoughtMs, prose, onQuote }: {
+function MessageMenu({ at, tokens, thoughtMs, prose, raw, onQuote }: {
   at?: number
   tokens?: { input: number; output: number }
   thoughtMs?: number
   prose: string
+  /** The turn copied whole — words, thinking, tool calls and their results. Absent when
+   *  the turn is only prose, which the plain Copy already covers. */
+  raw?: string
   onQuote?(text: string): void
 }) {
   const [open, setOpen] = useState(false)
+  const { state: rawState, copy: copyRaw } = useCopy(raw ?? '')
   const [spot, setSpot] = useState<{ left: number; top: number; up: boolean } | null>(null)
   // Armed one frame after the panel mounts: an element that gets its entrance
   // animation in the very style pass it first appears in does not always travel,
@@ -586,7 +590,18 @@ function MessageMenu({ at, tokens, thoughtMs, prose, onQuote }: {
         <Icon name="spark" size={14} />
         <span>{thoughtLabel(thoughtMs)}</span>
       </div>}
-      {hasInfo && onQuote && <div className="message-menu-sep" />}
+      {hasInfo && (raw || onQuote) && <div className="message-menu-sep" />}
+      {/* Copying the raw leaves the menu open: unlike Quote, which shows its work in the
+          composer, a copy has nothing else to say it landed but this row's own label. */}
+      {raw && <button
+        className="message-menu-action"
+        type="button"
+        role="menuitem"
+        onClick={copyRaw}
+      >
+        <Icon name={rawState === 'copied' ? 'check' : 'copy'} size={15} />
+        <span>{rawLabel(rawState)}</span>
+      </button>}
       {onQuote && <button
         className="message-menu-action"
         type="button"
@@ -625,6 +640,13 @@ function copyLabel(state: CopyState): string {
   if (state === 'copied') return 'Copied'
   if (state === 'failed') return 'Copy failed — select the text and copy it by hand'
   return 'Copy'
+}
+
+/** What the raw copy says — named for what it is, so it is not read as the plain Copy. */
+function rawLabel(state: CopyState): string {
+  if (state === 'copied') return 'Copied'
+  if (state === 'failed') return 'Copy raw failed — select the text and copy it by hand'
+  return 'Copy raw'
 }
 
 /**

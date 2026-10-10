@@ -4,6 +4,7 @@ import { GenUiFence } from '../../core/genui-fence.js'
 import type { PanelRequest } from '../../core/panel.js'
 import type { Message } from '../../core/providers/types.js'
 import { todosFromArgs } from '../../core/todos.js'
+import { rawTurn } from '../raw.js'
 import { showsToolCall, toolText } from '../tool-line.js'
 import type { FrameAttachment, TranscriptMessage, TranscriptPart } from './protocol.js'
 
@@ -20,15 +21,31 @@ export type RegisterFile = (file: OutgoingFile) => FrameAttachment
  *
  * Prose, thinking, tool lines and the plan keep the order they happened in: the
  * page draws a turn step by step, the way every other surface does.
+ *
+ * The turn's raw copy rides on the same group: the assistant and `tool` messages it was
+ * drawn from are kept aside and rendered whole once the group closes, so a surface can
+ * copy the arguments and the results the drawn parts leave out.
  */
 export function transcriptOf(messages: Message[], register: RegisterFile): TranscriptMessage[] {
   const transcript: TranscriptMessage[] = []
   let currentAssistant: TranscriptMessage | null = null
+  /** The assistant and `tool` messages behind the group being built, for its raw. */
+  let sources: Message[] = []
+
+  /** Seals the open group: its raw is rendered now that the last of its steps is in. */
+  const closeAssistant = (): void => {
+    if (currentAssistant) {
+      const raw = rawTurn(sources)
+      if (raw) currentAssistant.raw = raw
+    }
+    currentAssistant = null
+    sources = []
+  }
 
   for (const message of messages) {
     const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
     if (message.role === 'user') {
-      currentAssistant = null
+      closeAssistant()
       const attachments = message.content.flatMap((part) => part.type === 'image'
         ? [register({ path: part.path, name: part.name, mimeType: part.mimeType })]
         : [])
@@ -38,6 +55,7 @@ export function transcriptOf(messages: Message[], register: RegisterFile): Trans
       continue
     }
     if (message.role === 'assistant') {
+      sources.push(message)
       const parts: TranscriptPart[] = []
       const attachments = message.content.flatMap((part) => part.type === 'file'
         ? [register({ path: part.path, name: part.name, mimeType: part.mimeType })]
@@ -77,8 +95,13 @@ export function transcriptOf(messages: Message[], register: RegisterFile): Trans
         if (parts.length > 0) currentAssistant.parts.push(...parts)
         if (attachments.length > 0) currentAssistant.attachments = [...(currentAssistant.attachments ?? []), ...attachments]
       }
+      continue
     }
+    // A tool result belongs to the group it answered: it draws nothing of its own — the
+    // call beside the prose already names it — but it is half of the raw copy.
+    if (message.role === 'tool') sources.push(message)
   }
+  closeAssistant()
 
   return transcript.filter((message) => message.parts.length > 0 || (message.attachments?.length ?? 0) > 0)
 }

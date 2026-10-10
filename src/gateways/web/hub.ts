@@ -11,6 +11,7 @@ import { readDisplay } from '../../core/config/load.js'
 import { buildCommandContext, handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
+import { rawTurn } from '../raw.js'
 import type { ClientFrame, FrameAttachment, JobView, PanelInput, PanelKind, PanelState, PanelTab, PanelView, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
 import { PERMISSION_TIMEOUT_MS } from './protocol.js'
 import { displayEvent } from './turn.js'
@@ -719,6 +720,8 @@ export class WebHub {
       let currentAudio: import('../../core/providers/types.js').AudioPart[] = []
       let currentFiles = files
       let currentModel: string | undefined
+      /** Where this run's messages start, so its raw is the run and not the whole thread. */
+      let runFrom: number | undefined
       try {
         let currentText = text || (currentFiles?.length ? 'Please inspect the attached media.' : '')
         while (currentText && !signal.aborted) {
@@ -726,6 +729,7 @@ export class WebHub {
           if (!conversation) return
           let session = await this.runtime.getSession(conversation.scope)
           conversation.session = session
+          if (runFrom === undefined) runFrom = session.messages.length
           if (currentFiles?.length) {
             const prepared = await prepareIncoming(currentFiles, { model: session.model })
             currentText = [currentText, currentFiles.map((file) => `Attached ${file.name}`).join('\n'), ...prepared.text].filter(Boolean).join('\n\n') || 'Please inspect the attached media.'
@@ -823,8 +827,13 @@ export class WebHub {
           this.reportTurnFailure(conversationId, id, errorMessage(error))
         }
       } finally {
-        this.broadcast(conversationId, { type: 'turn-end', id, status })
         const endedConversation = this.conversations.get(conversationId)
+        // The answer's raw copy rides with the turn, so the just-streamed answer has it
+        // too — not only a reload, which reads the same rendering back from the transcript.
+        const raw = endedConversation && runFrom !== undefined
+          ? rawTurn(endedConversation.session.messages.slice(runFrom))
+          : null
+        this.broadcast(conversationId, { type: 'turn-end', id, status, ...(raw ? { raw } : {}) })
         if (endedConversation?.activeTurnId === id) endedConversation.activeTurnId = undefined
       }
     }, () => this.sendState(conversationId))

@@ -89,4 +89,36 @@ describe('transcriptOf — a turn keeps the order it happened in', () => {
 
     expect(of(messages)[0]).not.toHaveProperty('at')
   })
+
+  it('carries the raw copy of the turn, the tool result from its `tool` message included', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'look' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Checking.' },
+          { type: 'tool-call', id: 'c1', name: 'read_file', args: { path: 'a.txt' } },
+        ],
+      },
+      { role: 'tool', content: [{ type: 'tool-result', id: 'c1', name: 'read_file', content: 'ok' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'It is fine.' }] },
+    ]
+
+    const raw = of(messages).at(-1)?.raw ?? ''
+    expect(raw).toContain('Checking.')
+    expect(raw).toContain('**read_file**')
+    expect(raw).toContain('a.txt')
+    expect(raw).toContain('**Result**')
+    expect(raw).toContain('ok')
+    expect(raw).toContain('It is fine.')
+  })
+
+  it('leaves the raw off a turn that is only prose', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Hello.' }] },
+    ]
+
+    expect(of(messages).at(-1)).not.toHaveProperty('raw')
+  })
 })
