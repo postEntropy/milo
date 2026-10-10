@@ -40,6 +40,14 @@
   --shadow: 0 4px 16px rgb(39 39 36 / 7%);
   --shadow-sm: 0 1px 2px rgb(39 39 36 / 7%);
   --focus-ring: 0 0 0 3px rgb(196 84 28 / 16%);
+  /* Corner rounding: one scale for the whole interface. A value is picked by the role a
+     thing plays — never per component. `--radius-pill` and `50%` are shapes, not levels. */
+  --radius-xs: 8px;     /* marks read inline with text: inline code, id/size badges */
+  --radius-sm: 10px;    /* small icon buttons, menu options, tiny inner fields, chips */
+  --radius-md: 14px;    /* single-line rows, list/nav items, inputs, standard buttons */
+  --radius-lg: 18px;    /* cards, panels, popovers, code/blocks, notices, iframes */
+  --radius-xl: 22px;    /* the big surfaces: composer, user bubble, suggestions, approval */
+  --radius-pill: 999px; /* pills, chips, switches, round buttons */
   --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-display: 'Source Serif 4', Georgia, serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, monospace;
@@ -137,22 +145,22 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar { grid-column: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--surface-warm); }
 .sidebar-chat-nav, .sidebar-settings-nav { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .brand-row { display: flex; align-items: center; gap: 10px; padding: 18px 18px 14px; }
-.brand-mark { display: grid; width: 30px; height: 30px; place-items: center; flex: none; border-radius: 9px; background: var(--accent); color: var(--accent-on); object-fit: cover; font-size: 15px; font-weight: 600; letter-spacing: -.05em; }
+.brand-mark { display: grid; width: 30px; height: 30px; place-items: center; flex: none; border-radius: var(--radius-sm); background: var(--accent); color: var(--accent-on); object-fit: cover; font-size: 15px; font-weight: 600; letter-spacing: -.05em; }
 .brand-name { font-size: 17px; font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
 .sidebar-pad { padding-inline: 14px; }
 /* The page tabs are the sidebar's primary navigation: its largest text, on a row that
    sits between the roomy original and a cramped list — enough air to stay readable
    without the three reading as separate blocks. */
-.sidebar-tab { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; margin-top: 4px; border: 0; border-radius: 10px; background: transparent; padding: 6px 10px; color: var(--fg-2); font-size: 14px; font-weight: 500; text-align: start; transition: background var(--motion-fast); }
+.sidebar-tab { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 38px; margin-top: 4px; border: 0; border-radius: var(--radius-md); background: transparent; padding: 6px 10px; color: var(--fg-2); font-size: 14px; font-weight: 500; text-align: start; transition: background var(--motion-fast); }
 .sidebar-tab > svg { flex: none; }
 .sidebar-tab:hover { background: var(--surface); }
 .sidebar-tab.active { background: var(--surface); color: var(--fg); }
 /* New mail waiting behind the Email tab: a number, not a control — a filled pill at
    the end of the tab's own row, tinted off the text colour so it reads on the warm
    sidebar and on the lighter fill its tab takes when hovered or active. */
-.sidebar-badge { flex: none; margin-inline-start: auto; border-radius: 999px; background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px 7px; color: var(--fg); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; animation: fade-in var(--motion-base) var(--ease-standard) backwards; }
+.sidebar-badge { flex: none; margin-inline-start: auto; border-radius: var(--radius-pill); background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px 7px; color: var(--fg); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; animation: fade-in var(--motion-base) var(--ease-standard) backwards; }
 .sidebar-actions { display: flex; align-items: center; gap: 8px; padding: 8px 14px 14px; }
-.new-chat { display: flex; width: auto; flex: 1; min-height: 40px; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: 14px; background: var(--surface-raised); padding: 0 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; transition: background var(--motion-fast); }
+.new-chat { display: flex; width: auto; flex: 1; min-height: 40px; align-items: center; justify-content: center; gap: 8px; border: 0; border-radius: var(--radius-md); background: var(--surface-raised); padding: 0 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; transition: background var(--motion-fast); }
 .new-chat:hover { background: var(--border-soft); }
 .new-chat.is-hidden { display: none; }
 /* The search folds behind the magnifier at the end of the row at every width, so the
@@ -162,12 +170,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-search.open { display: flex; }
 /* The leading magnifier only: the close button carries its own icon, drawn in place. */
 .sidebar-search > svg { position: absolute; inset-inline-start: 11px; color: var(--muted); pointer-events: none; }
-.sidebar-search input { width: 100%; min-height: 40px; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); padding: 9px 38px 9px 34px; font-size: 13px; }
+.sidebar-search input { width: 100%; min-height: 40px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--surface); padding: 9px 38px 9px 34px; font-size: 13px; }
 .sidebar-search input::placeholder { color: var(--muted); }
 .sidebar-search input:focus { outline: 0; border-color: var(--accent); box-shadow: var(--focus-ring); }
-.sidebar-search-close { position: absolute; inset-inline-end: 6px; display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: 8px; background: transparent; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
+.sidebar-search-close { position: absolute; inset-inline-end: 6px; display: grid; width: 28px; height: 28px; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
 .sidebar-search-close:hover { background: var(--border-soft); color: var(--fg); }
-.sidebar-search-toggle, .sidebar-settings-toggle { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 14px; background: var(--surface-raised); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
+.sidebar-search-toggle, .sidebar-settings-toggle { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: var(--radius-sm); background: var(--surface-raised); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
 .sidebar-search-toggle:hover, .sidebar-settings-toggle:hover { background: var(--border-soft); }
 .sidebar-settings-toggle.active { background: var(--border-soft); color: var(--fg); }
 /* Open, the field carries its own magnifier and an ×; the icon that opened it stands
@@ -181,30 +189,30 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* What the past turns said about the search, over the matching sessions: the log
    itself, so a word a tidied-up title dropped is still findable. */
 .history-hits { display: flex; flex-direction: column; gap: 2px; padding: 0 8px 10px; }
-.history-hit { display: flex; flex-direction: column; gap: 2px; width: 100%; border: 0; border-radius: 9px; background: transparent; padding: 7px 9px; text-align: start; transition: background var(--motion-fast); }
+.history-hit { display: flex; flex-direction: column; gap: 2px; width: 100%; border: 0; border-radius: var(--radius-md); background: transparent; padding: 7px 9px; text-align: start; transition: background var(--motion-fast); }
 .history-hit:hover { background: var(--surface); }
 .history-hit-text { display: -webkit-box; overflow: hidden; color: var(--fg-2); font-size: 12px; line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .history-hit-where { color: var(--muted); font: 11px var(--font-mono); }
-.session-item { position: relative; display: flex; align-items: center; width: 100%; margin: 2px 0; border-radius: 10px; background: transparent; transition: background var(--motion-fast) var(--ease-standard); }
+.session-item { position: relative; display: flex; align-items: center; width: 100%; margin: 2px 0; border-radius: var(--radius-md); background: transparent; transition: background var(--motion-fast) var(--ease-standard); }
 .session-item:hover, .session-item.menu-open { background: var(--surface); }
 .session-item.active { background: var(--surface); }
-.session-row { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; min-height: 44px; border: 0; border-radius: 10px; background: transparent; padding: 8px 6px 8px 10px; color: var(--fg-2); text-align: start; }
+.session-row { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; min-height: 44px; border: 0; border-radius: var(--radius-md); background: transparent; padding: 8px 6px 8px 10px; color: var(--fg-2); text-align: start; }
 .session-item.active .session-row { color: var(--fg); font-weight: 500; }
 .session-content { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
 .session-title, .session-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-title { font-size: 13px; line-height: 1.35; }
 .session-preview { color: var(--muted); font-size: 11px; line-height: 1.35; }
 .session-row-actions { position: relative; display: flex; align-items: center; flex: none; }
-.session-more-btn { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: none; margin-inline-end: 6px; border: 0; border-radius: 7px; background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
+.session-more-btn { display: flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex: none; margin-inline-end: 6px; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
 .session-item:hover .session-more-btn, .session-item.menu-open .session-more-btn { opacity: 1; }
 .session-more-btn:hover, .session-more-btn.open { background: var(--surface-warm); color: var(--fg); }
-.session-dropdown { position: absolute; z-index: 40; top: calc(100% + 4px); right: 6px; display: flex; min-width: 148px; flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface); box-shadow: var(--shadow); padding: 5px; animation: menu-in var(--motion-base) var(--ease-standard); transform-origin: top right; }
-.session-dropdown-item { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 33px; border: 0; border-radius: 7px; background: transparent; padding: 6px 10px; color: var(--fg-2); font-size: 13px; font-weight: 500; text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
+.session-dropdown { position: absolute; z-index: 40; top: calc(100% + 4px); right: 6px; display: flex; min-width: 148px; flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); padding: 5px; animation: menu-in var(--motion-base) var(--ease-standard); transform-origin: top right; }
+.session-dropdown-item { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 33px; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 6px 10px; color: var(--fg-2); font-size: 13px; font-weight: 500; text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
 .session-dropdown-item svg { flex: none; color: var(--muted); }
 .session-dropdown-item:hover { background: var(--surface-warm); color: var(--fg); }
 .session-dropdown-item.danger:hover { background: color-mix(in oklab, var(--danger) 15%, transparent); color: var(--danger); }
 .session-rename-form { display: flex; flex: 1; min-width: 0; padding: 4px 6px 4px 10px; }
-.session-rename-input { width: 100%; height: 32px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); padding: 4px 8px; color: var(--fg); font-size: 13px; font-family: inherit; outline: none; }
+.session-rename-input { width: 100%; height: 32px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); padding: 4px 8px; color: var(--fg); font-size: 13px; font-family: inherit; outline: none; }
 .session-rename-input:focus { border-color: var(--accent); }
 .list-empty { padding: 16px 10px; color: var(--muted); font-size: 13px; text-align: center; }
 /* A reading wait, centred where a list or a thread is about to be: the mail's own
@@ -220,11 +228,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-nav-heading p { margin-top: 4px; color: var(--muted); font-size: 12px; }
 /* The way out of Settings: a control of its own, filled and raised, so it does
    not read as one more row of the section list below it. */
-.settings-back { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 44px; margin-bottom: 8px; border: 0; border-radius: 12px; background: var(--surface); padding: 9px 11px; color: var(--fg); box-shadow: var(--shadow-sm); font-size: 13px; font-weight: 550; text-align: start; transition: background var(--motion-fast); }
+.settings-back { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 44px; margin-bottom: 8px; border: 0; border-radius: var(--radius-md); background: var(--surface); padding: 9px 11px; color: var(--fg); box-shadow: var(--shadow-sm); font-size: 13px; font-weight: 550; text-align: start; transition: background var(--motion-fast); }
 .settings-back svg.icon { flex: none; color: var(--accent); }
 .settings-back:hover { background: var(--border-soft); }
 .settings-nav { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 2px; overflow: auto; padding: 4px 0 12px; }
-.settings-nav-item { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 44px; border: 0; border-radius: 10px; background: transparent; padding: 9px 11px; color: var(--fg-2); font-size: 13px; text-align: start; transition: background var(--motion-fast); }
+.settings-nav-item { display: flex; align-items: center; gap: 11px; width: 100%; min-height: 44px; border: 0; border-radius: var(--radius-md); background: transparent; padding: 9px 11px; color: var(--fg-2); font-size: 13px; text-align: start; transition: background var(--motion-fast); }
 .settings-nav-item svg.icon { color: var(--muted); }
 .settings-nav-item:hover, .settings-nav-item.active { background: var(--surface); }
 .settings-nav-item.active { color: var(--fg); font-weight: 550; }
@@ -238,7 +246,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* Fades and nudges in as the column widens; the grid transition below carries
    the chat aside, so the two read as one motion. */
 .app-shell.panel-open .panel { display: flex; animation: panel-in var(--motion-slow) var(--ease-standard); }
-.panel-toggle { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 10px; background: transparent; padding: 0; color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
+.panel-toggle { display: grid; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0; color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
 .panel-toggle:hover { background: var(--surface); }
 .panel-toggle.active { background: var(--surface); color: var(--fg); }
 /* The strip, when there is more than one thing open: the tab in front and the rest
@@ -246,14 +254,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    every other control the person presses, and never outlined. */
 .panel-tabs { display: flex; flex: none; gap: 4px; overflow-x: auto; padding: calc(12px + env(safe-area-inset-top)) 14px 0; scrollbar-width: none; }
 .panel-tabs::-webkit-scrollbar { display: none; }
-.panel-tab { display: inline-flex; flex: none; align-items: center; border-radius: 9px; background: transparent; transition: background var(--motion-fast); }
+.panel-tab { display: inline-flex; flex: none; align-items: center; border-radius: var(--radius-sm); background: transparent; transition: background var(--motion-fast); }
 .panel-tab:hover { background: var(--surface); }
 .panel-tab.active { background: var(--surface); }
-.panel-tab-name { display: inline-flex; max-width: 180px; align-items: center; gap: 6px; border: 0; border-radius: 9px 0 0 9px; background: transparent; padding: 6px 2px 6px 9px; color: var(--muted); font-size: 12.5px; font-weight: 500; }
+.panel-tab-name { display: inline-flex; max-width: 180px; align-items: center; gap: 6px; border: 0; border-radius: var(--radius-sm) 0 0 var(--radius-sm); background: transparent; padding: 6px 2px 6px 9px; color: var(--muted); font-size: 12.5px; font-weight: 500; }
 .panel-tab.active .panel-tab-name { color: var(--fg); }
 .panel-tab-name svg.icon { flex: none; }
 .panel-tab-name span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.panel-tab-x { display: grid; width: 22px; height: 26px; flex: none; place-items: center; border: 0; border-radius: 0 9px 9px 0; background: transparent; padding: 0; color: var(--muted); opacity: .7; transition: opacity var(--motion-fast), color var(--motion-fast); }
+.panel-tab-x { display: grid; width: 22px; height: 26px; flex: none; place-items: center; border: 0; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: transparent; padding: 0; color: var(--muted); opacity: .7; transition: opacity var(--motion-fast), color var(--motion-fast); }
 .panel-tab-x:hover { opacity: 1; color: var(--fg); }
 .panel-head { display: flex; align-items: center; gap: 6px; padding: calc(14px + env(safe-area-inset-top)) 14px 8px; }
 /* The strip above already cleared the screen's own bar. */
@@ -261,43 +269,43 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .panel-head-fill { flex: 1; }
 .panel-kind { display: grid; flex: none; place-items: center; color: var(--muted); }
 .panel-title { flex: 1; min-width: 0; margin: 0; overflow: hidden; font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; text-overflow: ellipsis; white-space: nowrap; }
-.panel-icon-btn { display: grid; width: 30px; height: 30px; flex: none; place-items: center; border: 0; border-radius: 8px; background: transparent; padding: 0; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
+.panel-icon-btn { display: grid; width: 30px; height: 30px; flex: none; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
 .panel-icon-btn:hover { background: var(--surface); color: var(--fg); }
 .panel-body { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: auto; padding: 6px 14px calc(14px + env(safe-area-inset-bottom)); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .panel-state { margin: auto; color: var(--muted); font-size: 12.5px; text-align: center; }
-.panel-frame { flex: 1; width: 100%; min-height: 0; border: 0; border-radius: 12px; background: #fff; }
+.panel-frame { flex: 1; width: 100%; min-height: 0; border: 0; border-radius: var(--radius-lg); background: #fff; }
 .panel-image { display: grid; flex: 1; min-height: 0; place-items: center; }
-.panel-image img { max-width: 100%; max-height: 100%; border-radius: 12px; }
+.panel-image img { max-width: 100%; max-height: 100%; border-radius: var(--radius-lg); }
 .panel-code { margin: 0; color: var(--text); font: 12.5px/1.6 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .panel-doc { color: var(--fg-2); font-size: 13.5px; line-height: 1.65; }
 .panel-doc-cut { margin: 12px 0 0; color: var(--muted); font-size: 12px; }
 .panel-file { display: flex; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
-.panel-download { display: inline-flex; max-width: 100%; align-items: center; gap: 8px; border-radius: 10px; background: var(--surface); padding: 9px 12px; color: var(--fg-2); font-size: 13px; text-decoration: none; transition: background var(--motion-fast); }
+.panel-download { display: inline-flex; max-width: 100%; align-items: center; gap: 8px; border-radius: var(--radius-sm); background: var(--surface); padding: 9px 12px; color: var(--fg-2); font-size: 13px; text-decoration: none; transition: background var(--motion-fast); }
 .panel-download svg.icon { flex: none; }
 .panel-download span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel-download:hover { background: var(--border-soft); }
 .panel-browser { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 10px; }
-.panel-url { display: flex; align-items: center; gap: 7px; border-radius: 9px; background: var(--surface); padding: 7px 10px; color: var(--muted); font: 12px var(--font-mono); }
+.panel-url { display: flex; align-items: center; gap: 7px; border-radius: var(--radius-sm); background: var(--surface); padding: 7px 10px; color: var(--muted); font: 12px var(--font-mono); }
 .panel-url svg.icon { flex: none; }
 .panel-url span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .panel-view { display: flex; flex: 1; min-height: 0; align-items: flex-start; justify-content: center; overflow: auto; }
 /* The stage and the stream share one aspect box, so a point the person clicks
    maps to the same spot on the page the browser is showing. */
-.panel-stage { position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 12px; background: #fff; }
+.panel-stage { position: relative; width: 100%; max-width: 100%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: var(--radius-lg); background: #fff; }
 .panel-browser-img { display: block; width: 100%; height: 100%; }
-.panel-input-layer { position: absolute; inset: 0; cursor: pointer; outline: 0; border-radius: 12px; }
+.panel-input-layer { position: absolute; inset: 0; cursor: pointer; outline: 0; border-radius: var(--radius-lg); }
 .panel-input-layer:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
 
 .main { position: relative; grid-column: 2; display: flex; min-width: 0; min-height: 0; flex-direction: column; background: var(--bg); }
 .topbar { position: relative; z-index: 5; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 62px; background: var(--bg); padding: 10px 20px; }
-.mobile-menu, .topbar-new { display: none; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 10px; background: transparent; padding: 0; color: var(--fg-2); transition: background var(--motion-fast); }
+.mobile-menu, .topbar-new { display: none; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0; color: var(--fg-2); transition: background var(--motion-fast); }
 .mobile-menu:hover, .topbar-new:hover { background: var(--surface); }
 /* The sidebar's own fold control, in the brand bar. Folded, the sidebar is gone
    entirely and the way back moves into the chat's own top bar — where the drawer's
    menu button stands on a phone. The phone keeps its drawer and hides both. */
-.sidebar-toggle { display: none; width: 34px; height: 34px; flex: none; margin-inline-start: auto; place-items: center; border: 0; border-radius: 9px; background: transparent; padding: 0; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
+.sidebar-toggle { display: none; width: 34px; height: 34px; flex: none; margin-inline-start: auto; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
 .sidebar-toggle:hover { background: var(--surface); color: var(--fg); }
-.sidebar-expand { display: none; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: 10px; background: transparent; padding: 0; color: var(--fg-2); transition: background var(--motion-fast); }
+.sidebar-expand { display: none; width: 40px; height: 40px; flex: none; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0; color: var(--fg-2); transition: background var(--motion-fast); }
 .sidebar-expand:hover { background: var(--surface); }
 @media (min-width: 901px) {
   .sidebar-toggle { display: grid; }
@@ -324,10 +332,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .messages { flex: 1; min-height: 0; overflow: auto; padding: 20px 28px 12px; scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .thread-inner { width: min(940px, 100%); margin: 0 auto; padding: 6px 0 18px; }
 .empty-state { display: flex; min-height: min(70vh, 720px); flex-direction: column; align-items: center; justify-content: center; padding: 42px 20px 56px; text-align: center; }
-.empty-brand { display: grid; width: 96px; height: 96px; place-items: center; margin-bottom: 14px; border-radius: 26px; background: var(--accent); color: var(--accent-on); object-fit: cover; font-size: 25px; font-weight: 600; }
+.empty-brand { display: grid; width: 96px; height: 96px; place-items: center; margin-bottom: 14px; border-radius: var(--radius-xl); background: var(--accent); color: var(--accent-on); object-fit: cover; font-size: 25px; font-weight: 600; }
 .empty-state h1 { max-width: 16ch; margin: 0; font-family: var(--font-display); font-size: clamp(32px, 4.5vw, 42px); font-weight: 400; letter-spacing: -.02em; line-height: 1.14; }
 .suggestion-grid { display: grid; width: min(660px, 100%); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 32px; }
-.suggestion { display: flex; min-height: 70px; align-items: center; gap: 12px; border: 0; border-radius: 16px; background: var(--surface); padding: 14px 15px; box-shadow: var(--shadow-sm); text-align: start; transition: box-shadow var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
+.suggestion { display: flex; min-height: 70px; align-items: center; gap: 12px; border: 0; border-radius: var(--radius-xl); background: var(--surface); padding: 14px 15px; box-shadow: var(--shadow-sm); text-align: start; transition: box-shadow var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .suggestion:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
 .suggestion > svg:first-child { flex: none; color: var(--fg-2); }
 .suggestion-grid .suggestion > span { display: flex; flex: 1; flex-direction: column; gap: 3px; }
@@ -347,15 +355,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .message.user:hover .message-below, .message-below:focus-within { opacity: 1; }
 }
 .message-content { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 10px; }
-.message.user .message-content { flex: initial; max-width: 82%; border: 0; border-radius: 16px; background: var(--surface); padding: 11px 15px; }
+.message.user .message-content { flex: initial; max-width: 82%; border: 0; border-radius: var(--radius-xl); background: var(--surface); padding: 11px 15px; }
 .message-status { margin-top: 3px; color: var(--muted); font-size: 11px; }
 .message-prose { max-width: 100%; color: var(--fg-2); font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
 .message-prose p { margin: 0; }
 .message-prose p + p { margin-top: 11px; }
 .message-prose strong { color: var(--fg); font-weight: 600; }
 .message-prose code, .message-prose pre { font-family: var(--font-mono); }
-.message-prose code { border: 1px solid var(--border-soft); border-radius: 6px; background: var(--surface-warm); padding: 1px 5px; font-size: .86em; }
-.message-prose pre { overflow: auto; margin: 12px 0; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface-warm); padding: 13px 15px; font-size: 13px; line-height: 1.6; }
+.message-prose code { border: 1px solid var(--border-soft); border-radius: var(--radius-xs); background: var(--surface-warm); padding: 1px 5px; font-size: .86em; }
+.message-prose pre { overflow: auto; margin: 12px 0; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--surface-warm); padding: 13px 15px; font-size: 13px; line-height: 1.6; }
 .message-prose pre code { border: 0; background: none; padding: 0; }
 .message-prose blockquote { margin: 12px 0; border-inline-start: 2px solid var(--secondary); padding-inline-start: 14px; color: var(--muted); }
 .message-prose ul, .message-prose ol { padding-inline-start: 24px; }
@@ -363,7 +371,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-prose table { display: block; overflow: auto; margin: 12px 0; border-collapse: collapse; background: var(--surface-warm); font-size: 13px; }
 .message-prose th, .message-prose td { border: 1px solid var(--border-soft); padding: 7px 12px; text-align: start; }
 .message-prose th { background: var(--surface); color: var(--fg); font-weight: 600; }
-.reasoning { overflow: hidden; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface-warm); }
+.reasoning { overflow: hidden; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--surface-warm); }
 .reasoning-summary { display: flex; width: 100%; min-height: 38px; align-items: center; gap: 8px; border: 0; background: transparent; padding: 8px 12px; color: var(--fg-2); cursor: pointer; font-size: 13px; font-weight: 500; text-align: start; }
 .reasoning-summary:hover { background: var(--surface); }
 .reasoning-chevron { margin-inline-start: auto; color: var(--muted); transition: transform var(--motion-base) var(--ease-standard); }
@@ -401,7 +409,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   from { background-position: 150% 0; }
   to { background-position: -50% 0; }
 }
-.tool-line { display: flex; align-items: center; justify-content: space-between; gap: 9px; min-height: 36px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); padding: 7px 12px; color: var(--fg-2); font-size: 12px; }
+.tool-line { display: flex; align-items: center; justify-content: space-between; gap: 9px; min-height: 36px; border: 1px solid var(--border-soft); border-radius: var(--radius-md); background: var(--surface); padding: 7px 12px; color: var(--fg-2); font-size: 12px; }
 /* Heavier than the rest of the set on purpose: at 14px a 1.8 stroke thins to about
    a pixel, and the tool lines were reading as pencil. */
 .tool-line svg.icon { color: var(--muted); stroke-width: 2.5; }
@@ -409,14 +417,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* The service's mark is a drawing on the text's baseline, not a character: it
    needs the nudge a glyph does not. */
 .tool-line code .tool-mark { flex: none; vertical-align: -3px; }
-.tool-copy-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: none; border: 0; border-radius: 6px; background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
+.tool-copy-btn { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; flex: none; border: 0; border-radius: var(--radius-xs); background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
 .tool-line:hover .tool-copy-btn, .tool-copy-btn:focus-visible { opacity: 1; }
 .tool-copy-btn:hover { background: var(--surface-warm); color: var(--fg); }
 /* The buttons under a turn are always there, each showing only its mark; the word
    comes out on hover. Pulled up against the answer — the content's own gap leaves
    the space, and this trims the rest of it. */
 .message-toolbar { display: flex; align-items: center; gap: 0; margin-top: -4px; }
-.message-tool-btn { display: inline-flex; min-height: 32px; align-items: center; border: 0; border-radius: 9px; background: transparent; padding: 0 6px; color: var(--muted); font-size: 12px; transition: background var(--motion-fast), color var(--motion-fast); }
+.message-tool-btn { display: inline-flex; min-height: 32px; align-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0 6px; color: var(--muted); font-size: 12px; transition: background var(--motion-fast), color var(--motion-fast); }
 .message-tool-btn:hover, .message-tool-btn:focus-visible { background: var(--surface-warm); color: var(--fg); }
 .message-tool-btn:disabled { color: var(--border); cursor: not-allowed; }
 .message-tool-label { font-size: 11px; font-weight: 500; }
@@ -433,7 +441,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    something sitting above it. */
 .message-more { display: inline-flex; }
 .message-more .message-tool-btn.open { background: var(--surface-warm); color: var(--fg); }
-.message-menu { position: fixed; z-index: 60; display: flex; min-width: 210px; max-width: min(320px, calc(100vw - 20px)); flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-raised); box-shadow: 0 12px 32px rgb(0 0 0 / 18%), 0 2px 6px rgb(0 0 0 / 10%); padding: 5px; }
+.message-menu { position: fixed; z-index: 60; display: flex; min-width: 210px; max-width: min(320px, calc(100vw - 20px)); flex-direction: column; gap: 2px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-raised); box-shadow: 0 12px 32px rgb(0 0 0 / 18%), 0 2px 6px rgb(0 0 0 / 10%); padding: 5px; }
 /* Held out of sight for the one frame it takes to measure and place it, so it
    never paints at the corner of the window before it settles. */
 .message-menu:not(.in) { visibility: hidden; }
@@ -449,17 +457,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-menu-row { display: flex; align-items: center; gap: 8px; min-height: 30px; padding: 3px 9px; color: var(--muted); font-size: 12px; }
 .message-menu-row svg.icon { flex: none; color: var(--muted); }
 .message-menu-sep { height: 1px; margin: 3px 6px; background: var(--border-soft); }
-.message-menu-action { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 33px; border: 0; border-radius: 7px; background: transparent; padding: 6px 10px; color: var(--fg-2); font-size: 13px; font-weight: 500; text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
+.message-menu-action { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 33px; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 6px 10px; color: var(--fg-2); font-size: 13px; font-weight: 500; text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
 .message-menu-action svg.icon { flex: none; color: var(--muted); }
 .message-menu-action:hover { background: var(--surface-warm); color: var(--fg); }
 .attachments { display: flex; flex-direction: column; gap: 8px; }
 .attachment-image { display: block; width: fit-content; max-width: 100%; }
-.attachment-image img { display: block; max-width: min(420px, 100%); max-height: 420px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); }
-.attachment-file { display: flex; max-width: 100%; min-height: 40px; align-items: center; gap: 9px; border: 1px solid var(--border-soft); border-radius: 12px; background: var(--surface); padding: 8px 12px; color: var(--fg-2); font-size: 12px; text-decoration: none; }
+.attachment-image img { display: block; max-width: min(420px, 100%); max-height: 420px; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--surface); }
+.attachment-file { display: flex; max-width: 100%; min-height: 40px; align-items: center; gap: 9px; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--surface); padding: 8px 12px; color: var(--fg-2); font-size: 12px; text-decoration: none; }
 .attachment-name { overflow: hidden; color: var(--fg); font: 500 12px var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .attachment-size { margin-inline-start: auto; color: var(--muted); }
 .attachment-file svg.icon { flex: none; color: var(--muted); }
-.notice { display: flex; align-items: center; gap: 12px; width: min(940px, calc(100% - 40px)); margin: 0 auto 10px; border: 1px solid var(--border); border-radius: 12px; padding: 11px 13px; font-size: 13px; }
+.notice { display: flex; align-items: center; gap: 12px; width: min(940px, calc(100% - 40px)); margin: 0 auto 10px; border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 11px 13px; font-size: 13px; }
 .notice.error { border-color: color-mix(in oklab, var(--danger) 30%, var(--border)); background: color-mix(in oklab, var(--danger) 7%, var(--surface)); color: var(--danger); }
 .notice button { margin-inline-start: auto; }
 /* The chat's notice lines up with the composer it sits above — the same column,
@@ -478,23 +486,23 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .jump-latest.on:hover { background: var(--surface-warm); color: var(--fg); transform: translate(-50%, -1px); }
 /* Quote: what appears over a picked-out stretch of a reply, so the answer can
    speak to exactly that. Fixed to the viewport, above the selection. */
-.quote-button { position: fixed; z-index: 40; display: inline-flex; min-height: 30px; align-items: center; gap: 6px; border: 0; border-radius: 999px; background: var(--surface); padding: 5px 11px; color: var(--fg-2); font-size: 12px; font-weight: 500; box-shadow: var(--shadow); transform: translate(-50%, calc(-100% - 8px)); transition: background var(--motion-fast), color var(--motion-fast); }
+.quote-button { position: fixed; z-index: 40; display: inline-flex; min-height: 30px; align-items: center; gap: 6px; border: 0; border-radius: var(--radius-pill); background: var(--surface); padding: 5px 11px; color: var(--fg-2); font-size: 12px; font-weight: 500; box-shadow: var(--shadow); transform: translate(-50%, calc(-100% - 8px)); transition: background var(--motion-fast), color var(--motion-fast); }
 .quote-button:hover { background: var(--surface-warm); color: var(--fg); }
-.composer-box { position: relative; width: min(780px, 100%); margin: 0 auto; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); transition: border-color var(--motion-fast), box-shadow var(--motion-fast); }
+.composer-box { position: relative; width: min(780px, 100%); margin: 0 auto; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--surface); transition: border-color var(--motion-fast), box-shadow var(--motion-fast); }
 .composer-box:focus-within { border-color: var(--accent); box-shadow: var(--focus-ring); }
 .composer-box textarea { display: block; width: 100%; min-height: 44px; max-height: 180px; resize: none; border: 0; outline: 0; background: none; padding: 12px 16px 4px; font-size: 14px; line-height: 1.55; }
 .composer-files { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 12px 0; }
 .composer-upload-error { padding: 8px 14px 0; color: var(--danger); font-size: 12px; }
-.composer-file { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: 9px; background: var(--surface-warm); padding: 5px 8px; color: var(--muted); font-size: 12px; }
+.composer-file { display: inline-flex; align-items: center; gap: 6px; border: 0; border-radius: var(--radius-sm); background: var(--surface-warm); padding: 5px 8px; color: var(--muted); font-size: 12px; }
 .composer-file button { display: inline-flex; border: 0; border-radius: 50%; background: var(--surface); padding: 3px; color: var(--fg); cursor: pointer; }
 .attach-button { display: inline-flex; align-items: center; justify-content: center; border: 0; background: var(--surface-warm); }
 .composer-box textarea::placeholder { color: var(--muted); }
 /* The picked-out words, held at the head of the box until the reply is sent — a
    filled strip with the quotation mark, what was picked, and the way to drop it. */
-.composer-quote { display: flex; align-items: flex-start; gap: 8px; margin: 10px 12px 0; border-radius: 10px; background: var(--surface-warm); padding: 7px 9px 7px 11px; }
+.composer-quote { display: flex; align-items: flex-start; gap: 8px; margin: 10px 12px 0; border-radius: var(--radius-sm); background: var(--surface-warm); padding: 7px 9px 7px 11px; }
 .composer-quote svg.icon { flex: none; margin-top: 1px; color: var(--accent); }
 .composer-quote-text { display: -webkit-box; flex: 1; overflow: hidden; color: var(--fg-2); font-size: 12px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; white-space: pre-wrap; }
-.composer-quote-remove { display: grid; width: 22px; height: 22px; flex: none; place-items: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
+.composer-quote-remove { display: grid; width: 22px; height: 22px; flex: none; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
 .composer-quote-remove:hover { background: var(--surface); color: var(--fg); }
 .composer-toolbar { display: flex; min-height: 42px; align-items: center; gap: 8px; padding: 2px 9px 4px 14px; }
 .composer-model-wrap { position: relative; min-width: 0; }
@@ -502,7 +510,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    filled, like everything else the person presses; the menu is a panel, so it is
    the one that carries the border. A long list gets a filter, held at the top. */
 .select { position: relative; }
-.select-trigger { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 8px; border: 0; border-radius: 11px; background: var(--surface); padding: 9px 12px; color: var(--fg); font-size: 13px; text-align: start; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
+.select-trigger { display: flex; width: 100%; min-height: 42px; align-items: center; gap: 8px; border: 0; border-radius: var(--radius-md); background: var(--surface); padding: 9px 12px; color: var(--fg); font-size: 13px; text-align: start; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
 .select-trigger:hover { background: var(--surface-warm); }
 .select.is-open .select-trigger { background: var(--surface); box-shadow: var(--focus-ring); }
 .select-value { overflow: hidden; flex: 1; text-overflow: ellipsis; white-space: nowrap; }
@@ -510,18 +518,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .select.is-open .select-caret { transform: rotate(90deg); }
 /* Overflow is visible so a control nested in the head can open its own menu past
    the panel; the rows themselves still clip to `.select-options`. */
-.select-menu { position: absolute; z-index: 30; inset-inline: 0; top: calc(100% + 6px); display: flex; max-height: 320px; flex-direction: column; gap: 4px; overflow: visible; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); padding: 6px; }
+.select-menu { position: absolute; z-index: 30; inset-inline: 0; top: calc(100% + 6px); display: flex; max-height: 320px; flex-direction: column; gap: 4px; overflow: visible; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); padding: 6px; }
 .select-note { padding: 9px 10px; color: var(--muted); font-size: 12px; }
 /* The head holds the filter and, beside it, whatever control shares the row; the
    foot holds the panel's own control. Only the rows between them scroll, so
    nothing ever slides under either one. */
 .select-head { display: flex; flex: none; align-items: center; gap: 6px; }
 .select-options { display: flex; min-height: 0; flex: 1 1 auto; flex-direction: column; gap: 2px; overflow: auto; }
-.select-search { display: flex; flex: 1; min-width: 0; align-items: center; gap: 7px; border-radius: 9px; background: var(--bg); padding: 0 9px; color: var(--muted); }
+.select-search { display: flex; flex: 1; min-width: 0; align-items: center; gap: 7px; border-radius: var(--radius-sm); background: var(--bg); padding: 0 9px; color: var(--muted); }
 .select-search svg.icon { flex: none; }
 .select-search input { width: 100%; min-height: 34px; border: 0; background: none; padding: 6px 0; color: var(--fg); font-size: 12px; }
 .select-search input:focus { outline: 0; }
-.select-option { display: flex; flex: none; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 9px; background: transparent; padding: 8px 10px; color: var(--fg-2); font-size: 13px; text-align: start; }
+.select-option { display: flex; flex: none; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 8px 10px; color: var(--fg-2); font-size: 13px; text-align: start; }
 .select-option.active { background: var(--surface-warm); }
 .select-option.chosen { color: var(--fg); font-weight: 550; }
 .select-option-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -530,7 +538,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    wearing a pill: one height, radius, fill and type for both, and each carries
    the caret that says it opens a menu. Declared after `.select-trigger` so the
    pill's own compact size wins over the plain trigger's roomy field size. */
-.composer-pill { width: auto; max-width: 240px; min-height: 30px; gap: 6px; border-radius: 999px; background: var(--bg); padding: 5px 10px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
+.composer-pill { width: auto; max-width: 240px; min-height: 30px; gap: 6px; border-radius: var(--radius-pill); background: var(--bg); padding: 5px 10px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
 .composer-pill:hover { background: var(--surface-warm); }
 .select.is-open .composer-pill { background: var(--bg); box-shadow: var(--focus-ring); }
 /* The composer's own menus open upwards: they sit at the foot of the screen. */
@@ -545,13 +553,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    trailing edge pinned — so it never leaves the screen. Declared after the
    composer's own upward menu so the nested one wins the position. */
 .composer-provider { flex: 1 1 0; min-width: 0; }
-.composer-provider .select .select-trigger { min-height: 34px; border-radius: 9px; background: var(--bg); padding: 6px 9px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
+.composer-provider .select .select-trigger { min-height: 34px; border-radius: var(--radius-sm); background: var(--bg); padding: 6px 9px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
 .composer-provider .select .select-trigger:hover { background: var(--surface-warm); }
 .composer-provider .select .select-menu { top: calc(100% + 6px); bottom: auto; z-index: 40; inset-inline: auto 0; width: min(220px, 70vw); }
 /* The phone folds the two pills into one menu: the effort is a row of segments at
    the foot of the panel, filled like every other control the person presses. */
 .composer-effort-seg { display: flex; gap: 4px; }
-.composer-effort-seg button { flex: 1; min-height: 28px; border: 0; border-radius: 8px; background: var(--bg); padding: 4px 8px; color: var(--fg-2); font-size: 11px; font-weight: 500; transition: background var(--motion-fast), color var(--motion-fast); }
+.composer-effort-seg button { flex: 1; min-height: 28px; border: 0; border-radius: var(--radius-sm); background: var(--bg); padding: 4px 8px; color: var(--fg-2); font-size: 11px; font-weight: 500; transition: background var(--motion-fast), color var(--motion-fast); }
 .composer-effort-seg button:hover { background: var(--surface-warm); }
 .composer-effort-seg button[aria-pressed='true'] { background: var(--accent); color: var(--accent-on); }
 .composer-spacer { flex: 1; }
@@ -579,29 +587,29 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .send-button.stop { border: 0; background: var(--surface-warm); color: var(--fg); box-shadow: none; }
 .send-button.stop:hover:not(:disabled) { background: var(--border-soft); transform: none; }
 .queue-list { width: min(940px, 100%); margin: 0 auto; }
-.queue-chip { display: flex; min-height: 34px; align-items: center; gap: 8px; margin-bottom: 6px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface-warm); padding: 6px 11px; color: var(--muted); font-size: 12px; }
+.queue-chip { display: flex; min-height: 34px; align-items: center; gap: 8px; margin-bottom: 6px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--surface-warm); padding: 6px 11px; color: var(--muted); font-size: 12px; }
 .job-strip { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
 .job-entry { display: flex; flex-direction: column; }
-.job-chip { display: flex; min-height: 34px; align-items: center; gap: 4px; border-radius: 10px; background: var(--surface-warm); padding: 3px 6px 3px 11px; }
+.job-chip { display: flex; min-height: 34px; align-items: center; gap: 4px; border-radius: var(--radius-sm); background: var(--surface-warm); padding: 3px 6px 3px 11px; }
 .job-toggle { display: flex; flex: 1; min-width: 0; align-items: center; gap: 8px; border: 0; background: transparent; padding: 0; color: var(--muted); font-size: 12px; text-align: left; cursor: pointer; }
 .job-command { overflow: hidden; font-family: var(--font-mono); color: var(--text); text-overflow: ellipsis; white-space: nowrap; }
 .job-elapsed { margin-left: auto; color: var(--muted); font-variant-numeric: tabular-nums; }
 .job-chevron { display: flex; transition: transform var(--motion-base); }
 .job-toggle[aria-expanded='true'] .job-chevron { transform: rotate(90deg); }
-.job-stop { display: flex; flex: none; align-items: center; justify-content: center; border: 0; border-radius: 8px; background: transparent; padding: 5px 6px; color: var(--muted); cursor: pointer; }
+.job-stop { display: flex; flex: none; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 5px 6px; color: var(--muted); cursor: pointer; }
 .job-stop:hover { background: var(--border-soft); color: var(--fg); }
-.job-log { max-height: 160px; margin: 4px 0 0; border-radius: 10px; background: var(--bg); padding: 8px 11px; overflow: auto; color: var(--muted); font-family: var(--font-mono); font-size: 12px; line-height: 1.4; white-space: pre-wrap; }
+.job-log { max-height: 160px; margin: 4px 0 0; border-radius: var(--radius-sm); background: var(--bg); padding: 8px 11px; overflow: auto; color: var(--muted); font-family: var(--font-mono); font-size: 12px; line-height: 1.4; white-space: pre-wrap; }
 
-.approval { width: 100%; border: 1px solid var(--border); border-radius: 16px; background: var(--surface); padding: 16px 18px; box-shadow: var(--shadow); }
+.approval { width: 100%; border: 1px solid var(--border); border-radius: var(--radius-xl); background: var(--surface); padding: 16px 18px; box-shadow: var(--shadow); }
 .approval-head { display: flex; align-items: flex-start; gap: 12px; }
-.approval-icon { display: grid; width: 34px; height: 34px; place-items: center; flex: none; border-radius: 10px; background: var(--surface-warm); color: var(--warn); }
+.approval-icon { display: grid; width: 34px; height: 34px; place-items: center; flex: none; border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--warn); }
 .approval-title { min-width: 0; }
 .approval-eyebrow { color: var(--warn); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
 .approval-title h2 { margin-top: 2px; font-size: 16px; font-weight: 600; }
 .approval .approval-title p { margin-top: 2px; color: var(--muted); font-size: 13px; line-height: 1.5; }
-.approval-command { overflow: auto; max-height: 180px; margin: 14px 0 0; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface-warm); padding: 11px 13px; color: var(--fg); font: 12px/1.55 var(--font-mono); white-space: pre-wrap; word-break: break-word; }
+.approval-command { overflow: auto; max-height: 180px; margin: 14px 0 0; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--surface-warm); padding: 11px 13px; color: var(--fg); font: 12px/1.55 var(--font-mono); white-space: pre-wrap; word-break: break-word; }
 .approval-actions { display: flex; align-items: center; gap: 9px; margin-top: 14px; flex-wrap: wrap; }
-.allow-button, .deny-button { display: inline-flex; min-height: 38px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 12px; background: var(--surface-warm); padding: 7px 13px; font-size: 13px; font-weight: 500; transition: background var(--motion-fast); }
+.allow-button, .deny-button { display: inline-flex; min-height: 38px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: var(--radius-md); background: var(--surface-warm); padding: 7px 13px; font-size: 13px; font-weight: 500; transition: background var(--motion-fast); }
 .allow-button { background: var(--accent); color: var(--accent-on); }
 .allow-button:hover { background: var(--accent-hover); }
 .deny-button:hover { background: var(--border-soft); }
@@ -626,7 +634,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* The Display preview: the chat's own background, so every part reads as it will
    in the chat — on `--surface` the tool line, the thing the setting changes,
    would dissolve into the frame. */
-.settings-preview { margin-bottom: 18px; border: 1px solid var(--border-soft); border-radius: 14px; background: var(--bg); padding: 14px 16px; }
+.settings-preview { margin-bottom: 18px; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--bg); padding: 14px 16px; }
 .settings-preview .thread-inner { padding: 0; }
 .settings-preview .message { padding-inline: 0; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
@@ -638,7 +646,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .field { display: grid; align-content: start; min-width: 0; gap: 6px; }
 .field.full { grid-column: 1 / -1; }
 .settings-section .field > label, .settings-section .field > span { font-size: 13px; font-weight: 500; }
-.field input, .field select, .field textarea { width: 100%; min-height: 42px; border: 0; border-radius: 11px; background: var(--surface); padding: 9px 12px; color: var(--fg); font-size: 13px; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
+.field input, .field select, .field textarea { width: 100%; min-height: 42px; border: 0; border-radius: var(--radius-md); background: var(--surface); padding: 9px 12px; color: var(--fg); font-size: 13px; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
 .field input:focus, .field select:focus, .field textarea:focus { outline: 0; background: var(--surface); box-shadow: var(--focus-ring); }
 .field textarea { min-height: 88px; resize: vertical; }
 .field small { color: var(--muted); font-size: 12px; line-height: 1.5; }
@@ -647,7 +655,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* A setting that is not settled yet, said on the setting itself: a filled pill, the
    same shape the sidebar's count wears, because it is a word about the row and not
    something to press. */
-.experimental-tag { flex: none; border-radius: 999px; background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px 7px; color: var(--muted); font-size: 10px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; }
+.experimental-tag { flex: none; border-radius: var(--radius-pill); background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px 7px; color: var(--muted); font-size: 10px; font-weight: 500; letter-spacing: .05em; text-transform: uppercase; }
 /* A setting said as one line and a switch, with air above it so it does not read as a
    continuation of the grid it follows. The switch is a control like any other here:
    filled, never outlined — the track carries the state, the knob sits on it. */
@@ -655,15 +663,15 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .toggle-text { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
 .toggle-label { display: flex; align-items: center; gap: 8px; color: var(--fg-2); font-size: 13px; font-weight: 500; }
 .toggle-text small { color: var(--muted); font-size: 12px; line-height: 1.5; }
-.switch { position: relative; flex: none; width: 44px; height: 26px; border: 0; border-radius: 999px; background: var(--surface); padding: 0; transition: background var(--motion-fast); }
+.switch { position: relative; flex: none; width: 44px; height: 26px; border: 0; border-radius: var(--radius-pill); background: var(--surface); padding: 0; transition: background var(--motion-fast); }
 .switch:hover { background: var(--border-soft); }
 .switch.is-on { background: var(--accent); }
 .switch-knob { position: absolute; inset-block-start: 3px; inset-inline-start: 3px; width: 20px; height: 20px; border-radius: 50%; background: var(--knob); box-shadow: var(--shadow-sm); transition: transform var(--motion-fast) var(--ease-standard); }
 .switch.is-on .switch-knob { transform: translateX(18px); }
 .section-label { padding: 14px 0 6px; color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
-.secret-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: 12px; transition: background var(--motion-fast); }
+.secret-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border-radius: var(--radius-md); transition: background var(--motion-fast); }
 .secret-row:hover, .entry-row:hover { background: var(--surface-warm); }
-.secret-row input { flex: 1; min-width: 0; min-height: 40px; border: 0; border-radius: 11px; background: var(--surface); padding: 8px 11px; font-size: 13px; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
+.secret-row input { flex: 1; min-width: 0; min-height: 40px; border: 0; border-radius: var(--radius-md); background: var(--surface); padding: 8px 11px; font-size: 13px; transition: background var(--motion-fast), box-shadow var(--motion-fast); }
 .secret-row input:focus { outline: 0; background: var(--surface); box-shadow: var(--focus-ring); }
 .secret-name { font-size: 13px; font-weight: 500; }
 .secret-row .secret-name { flex: none; min-width: 96px; }
@@ -677,16 +685,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* `min-height: 0` is what lets a pane be shorter than its list: a grid row is at
    least as tall as its content, so without it a long list grows the row past the
    height the picker is holding instead of scrolling inside it. */
-.model-picker-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 8px; border-radius: 12px; background: var(--surface); padding: 10px; }
+.model-picker-pane { display: flex; min-width: 0; min-height: 0; flex-direction: column; gap: 8px; border-radius: var(--radius-lg); background: var(--surface); padding: 10px; }
 .model-picker-pane h3 { color: var(--muted); font-size: 11px; font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
-.model-picker-search { display: flex; align-items: center; gap: 7px; border-radius: 9px; background: var(--bg); padding: 0 9px; color: var(--muted); }
+.model-picker-search { display: flex; align-items: center; gap: 7px; border-radius: var(--radius-sm); background: var(--bg); padding: 0 9px; color: var(--muted); }
 .model-picker-search svg.icon { flex: none; }
 .model-picker-search input { width: 100%; min-height: 32px; border: 0; background: none; padding: 5px 0; color: var(--fg); font-size: 12px; }
 .model-picker-search input:focus { outline: 0; }
 /* The lists scroll inside a height the panes hold between them, so switching
    provider does not make the section jump as the model list changes length. */
 .model-picker-list { display: flex; flex: 1; min-height: 0; flex-direction: column; gap: 2px; overflow: auto; }
-.model-picker-row { display: flex; flex: none; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: 9px; background: transparent; padding: 7px 9px; color: var(--fg-2); font-size: 13px; text-align: start; transition: background var(--motion-fast); }
+.model-picker-row { display: flex; flex: none; align-items: center; gap: 8px; width: 100%; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 7px 9px; color: var(--fg-2); font-size: 13px; text-align: start; transition: background var(--motion-fast); }
 .model-picker-row:hover, .model-picker-row.browsing { background: var(--surface-warm); }
 .model-picker-row.chosen { color: var(--fg); font-weight: 550; background: var(--accent-wash); }
 .model-picker-row svg.icon { flex: none; color: var(--accent); }
@@ -696,10 +704,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .model-picker-tail { display: flex; min-width: 0; flex: none; align-items: center; gap: 8px; margin-inline-start: auto; }
 /* A measure that belongs to the name beside it — how much a model holds. Shared
    by every list that shows one, so the badge cannot drift between them. */
-.size-badge { flex: none; border-radius: 6px; background: var(--bg); padding: 1px 6px; color: var(--muted); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
+.size-badge { flex: none; border-radius: var(--radius-xs); background: var(--bg); padding: 1px 6px; color: var(--muted); font: 11px var(--font-mono); font-variant-numeric: tabular-nums; }
 .model-details { display: inline-flex; flex: none; align-items: center; gap: 6px; }
 .model-modalities { display: inline-flex; align-items: center; gap: 5px; color: var(--muted); }
-.model-modality { display: inline-flex; width: 20px; height: 20px; flex: none; align-items: center; justify-content: center; border-radius: 6px; background: var(--bg); color: var(--muted); }
+.model-modality { display: inline-flex; width: 20px; height: 20px; flex: none; align-items: center; justify-content: center; border-radius: var(--radius-xs); background: var(--bg); color: var(--muted); }
 .model-modality svg.icon { color: currentColor; }
 .model-picker-note { padding: 8px 4px; color: var(--muted); font-size: 12px; }
 @media (min-width: 901px) {
@@ -716,7 +724,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .secret-group-head h3 { color: var(--fg-2); font-size: 13px; font-weight: 600; }
 .secret-group-count { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .secret-list { display: grid; gap: 5px; }
-.secret-group .secret-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 14px; min-height: 60px; border-radius: 11px; background: var(--surface); padding: 10px 12px; }
+.secret-group .secret-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px 14px; min-height: 60px; border-radius: var(--radius-md); background: var(--surface); padding: 10px 12px; }
 .secret-group .secret-row:hover, .secret-group .secret-row.editing { background: var(--surface-warm); }
 .secret-identity { display: flex; min-width: 0; align-items: baseline; gap: 12px; }
 .secret-identity .secret-name { overflow: hidden; min-width: 0; color: var(--fg); font-size: 13px; font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
@@ -725,14 +733,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .secret-row-actions { display: flex; align-items: center; gap: 6px; }
 .secret-group .secret-row button.button { min-height: 36px; padding-inline: 11px; }
 .secret-editor { display: grid; grid-column: 1 / -1; gap: 6px; padding: 2px 0 3px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
-.secret-group .secret-editor input { width: 100%; min-height: 42px; border: 0; border-radius: 10px; background: var(--surface); padding: 9px 12px; color: var(--fg); font-size: 13px; }
+.secret-group .secret-editor input { width: 100%; min-height: 42px; border: 0; border-radius: var(--radius-sm); background: var(--surface); padding: 9px 12px; color: var(--fg); font-size: 13px; }
 .secret-group .secret-editor input:focus { outline: 0; box-shadow: var(--focus-ring); }
 .settings-section .list-empty { padding: 18px; color: var(--muted); font-size: 13px; text-align: center; }
 /* Pinned to the foot of the screen, the content passing under it softening into
    a blur the way the sidebar's list does — no rule, and no text showing through. */
 .settings-save { position: sticky; z-index: 4; bottom: 0; display: flex; align-items: center; justify-content: flex-end; gap: 12px; margin: 18px -8px 0; background: color-mix(in oklab, var(--bg) 84%, transparent); padding: 12px 8px; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .save-actions { display: flex; gap: 9px; }
-.button { display: inline-flex; flex: none; min-height: 40px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: 11px; background: var(--surface-warm); padding: 8px 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
+.button { display: inline-flex; flex: none; min-height: 40px; align-items: center; justify-content: center; gap: 7px; border: 0; border-radius: var(--radius-md); background: var(--surface-warm); padding: 8px 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .button:hover { background: var(--border-soft); }
 .button:active { transform: translateY(1px); }
 .button:disabled { transform: none; }
@@ -740,37 +748,37 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .button.primary:hover { background: var(--accent-hover); }
 .button.danger { background: color-mix(in oklab, var(--danger) 11%, var(--surface)); color: var(--danger); }
 .button.danger:hover { background: color-mix(in oklab, var(--danger) 18%, var(--surface)); }
-.icon-button { display: grid; width: 28px; height: 28px; flex: none; place-items: center; border: 0; border-radius: 8px; background: transparent; color: currentColor; transition: background var(--motion-fast); }
+.icon-button { display: grid; width: 28px; height: 28px; flex: none; place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: currentColor; transition: background var(--motion-fast); }
 .icon-button:hover { background: color-mix(in oklab, currentColor 14%, transparent); }
-.notice { margin: 0 0 14px; border: 1px solid var(--border); border-radius: 12px; padding: 11px 13px; font-size: 13px; }
+.notice { margin: 0 0 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 11px 13px; font-size: 13px; }
 .notice.error { border-color: color-mix(in oklab, var(--danger) 30%, var(--border)); background: color-mix(in oklab, var(--danger) 7%, var(--surface)); color: var(--danger); }
 .notice.success { border-color: color-mix(in oklab, var(--success) 30%, var(--border)); background: color-mix(in oklab, var(--success) 7%, var(--surface)); color: var(--success); }
 .restart-notice { border-color: color-mix(in oklab, var(--warn) 30%, var(--border)); background: color-mix(in oklab, var(--warn) 7%, var(--surface)); color: var(--fg-2); }
 
 /* The `/` palette, the same popup shape as the model menu above the box. */
-.command-menu { position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 0; right: 0; display: flex; max-height: 320px; flex-direction: column; gap: 2px; overflow: auto; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); padding: 6px; }
-.command-option { display: flex; min-height: 40px; align-items: baseline; gap: 10px; width: 100%; border: 0; border-radius: 9px; background: transparent; padding: 8px 10px; text-align: start; }
+.command-menu { position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 0; right: 0; display: flex; max-height: 320px; flex-direction: column; gap: 2px; overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); padding: 6px; }
+.command-option { display: flex; min-height: 40px; align-items: baseline; gap: 10px; width: 100%; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 8px 10px; text-align: start; }
 .command-option.active { background: var(--surface-warm); }
 .command-name { flex: none; color: var(--fg); font: 12px var(--font-mono); }
 .command-option small { overflow: hidden; color: var(--muted); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 /* A long setup job — a download, a profile copy, the embedding engine. */
-.job-panel { margin: 0 0 14px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); padding: 11px 13px; }
+.job-panel { margin: 0 0 14px; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); padding: 11px 13px; }
 .job-panel.error { border-color: color-mix(in oklab, var(--danger) 30%, var(--border)); }
 .job-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; color: var(--fg-2); font-size: 13px; font-weight: 500; }
 .job-error { margin-top: 6px; color: var(--danger); font-size: 12px; }
-.job-log { overflow: auto; max-height: 180px; margin-top: 8px; border: 1px solid var(--border-soft); border-radius: 10px; background: var(--surface-warm); padding: 9px 11px; color: var(--muted); font: 11px/1.5 var(--font-mono); white-space: pre-wrap; word-break: break-word; }
+.job-log { overflow: auto; max-height: 180px; margin-top: 8px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--surface-warm); padding: 9px 11px; color: var(--muted); font: 11px/1.5 var(--font-mono); white-space: pre-wrap; word-break: break-word; }
 .job-log.error { color: var(--danger); }
 
 /* A list row with its own actions: routines, notes, browsers, sessions. */
-.entry-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: 12px; transition: background var(--motion-fast); }
+.entry-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border-radius: var(--radius-md); transition: background var(--motion-fast); }
 .entry-row > div:first-child { flex: 1; min-width: 0; }
 .entry-row .secret-state { overflow-wrap: anywhere; }
 .row-actions { display: flex; flex: none; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px; }
 .row-count { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
 .button-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
 .message-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
-.action-row { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px; background: var(--surface); border: 0; border-radius: 10px; box-shadow: var(--shadow-sm); width: fit-content; }
-.action-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 28px; padding: 4px 10px; border: 0; border-radius: 7px; background: transparent; color: var(--fg-2); font-family: var(--font-body); font-size: 12px; font-weight: 500; cursor: pointer; text-decoration: none; transition: background var(--motion-fast), color var(--motion-fast), transform var(--motion-fast) var(--ease-standard); user-select: none; }
+.action-row { display: inline-flex; align-items: center; gap: 4px; padding: 3px 4px; background: var(--surface); border: 0; border-radius: var(--radius-md); box-shadow: var(--shadow-sm); width: fit-content; }
+.action-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 28px; padding: 4px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--fg-2); font-family: var(--font-body); font-size: 12px; font-weight: 500; cursor: pointer; text-decoration: none; transition: background var(--motion-fast), color var(--motion-fast), transform var(--motion-fast) var(--ease-standard); user-select: none; }
 .action-btn:hover { background: var(--surface-warm); color: var(--fg); }
 .action-btn:active { transform: scale(0.97); }
 .action-btn.action-primary { background: var(--accent); color: var(--accent-on); }
@@ -783,13 +791,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 /* ── Session Cards ────────────────────────────────────────────── */
 .session-cards-container { display: flex; flex-direction: column; gap: 8px; width: 100%; max-width: 640px; margin-top: 4px; }
-.session-card { display: flex; flex-direction: column; gap: 7px; padding: 12px 14px; background: var(--surface); border: 0; border-radius: 14px; box-shadow: var(--shadow-sm); cursor: pointer; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast); width: 100%; }
+.session-card { display: flex; flex-direction: column; gap: 7px; padding: 12px 14px; background: var(--surface); border: 0; border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); cursor: pointer; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard), box-shadow var(--motion-fast); width: 100%; }
 .session-card:hover { background: var(--surface-warm); transform: translateY(-1px); box-shadow: var(--shadow); }
 .session-card:active { transform: translateY(0); }
 .session-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
 .session-card-title-row { display: flex; align-items: center; gap: 8px; min-width: 0; flex: 1; }
 .session-card-title { font-size: 13.5px; font-weight: 600; color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-card-id { flex: none; font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--muted); background: var(--surface-warm); border: 0; padding: 1px 6px; border-radius: 6px; }
+.session-card-id { flex: none; font-family: var(--font-mono); font-size: 11px; font-weight: 500; color: var(--muted); background: var(--surface-warm); border: 0; padding: 1px 6px; border-radius: var(--radius-xs); }
 .session-card-meta { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 11.5px; flex: none; }
 .session-card-body { font-size: 12.5px; line-height: 1.5; color: var(--fg-2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .panel-note { margin-top: 10px; color: var(--muted); font-size: 12px; line-height: 1.55; }
@@ -807,14 +815,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .panel-count strong { color: var(--fg-2); font-size: 13px; font-variant-numeric: tabular-nums; }
 .panel-count-divider { width: 1px; height: 13px; margin-inline: 5px; background: var(--border-soft); }
 .routine-list { display: flex; flex-direction: column; gap: 5px; }
-.routine-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 16px; align-items: center; gap: 14px; width: 100%; min-height: 68px; border: 0; border-radius: 12px; background: var(--surface); padding: 12px 16px; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
+.routine-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 16px; align-items: center; gap: 14px; width: 100%; min-height: 68px; border: 0; border-radius: var(--radius-md); background: var(--surface); padding: 12px 16px; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .routine-row:hover { background: var(--surface-warm); }
 /* The part that opens the routine is its own control inside the card, so the row
    keeps the whole width and the buttons beside it have a column of their own
    rather than a layer over what the routine says. */
-.routine-row-open { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 200px); align-items: center; gap: 14px; min-width: 0; border: 0; border-radius: 10px; background: transparent; padding: 0; color: inherit; font: inherit; text-align: start; }
+.routine-row-open { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 200px); align-items: center; gap: 14px; min-width: 0; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0; color: inherit; font: inherit; text-align: start; }
 .routine-row-actions { display: flex; flex: none; gap: 4px; }
-.routine-row-action { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 9px; background: var(--surface); color: var(--fg-2); box-shadow: var(--shadow-sm); opacity: 0; transition: background var(--motion-fast), color var(--motion-fast), opacity var(--motion-fast); }
+.routine-row-action { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: var(--radius-sm); background: var(--surface); color: var(--fg-2); box-shadow: var(--shadow-sm); opacity: 0; transition: background var(--motion-fast), color var(--motion-fast), opacity var(--motion-fast); }
 .routine-row-action:hover { background: var(--surface-warm); color: var(--fg); }
 .routine-row:hover .routine-row-action, .routine-row-action:focus-visible { opacity: 1; }
 .routine-row:active { transform: translateY(1px); }
@@ -832,7 +840,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .routine-row-chevron { color: var(--muted); }
 .routine-list-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 18px; color: var(--muted); font-size: 12px; }
 .panel-empty { display: flex; min-height: 300px; flex-direction: column; align-items: center; justify-content: center; padding: 36px 20px; text-align: center; }
-.panel-empty-mark { display: grid; width: 52px; height: 52px; place-items: center; margin-bottom: 18px; border-radius: 16px; background: var(--surface-warm); color: var(--accent); }
+.panel-empty-mark { display: grid; width: 52px; height: 52px; place-items: center; margin-bottom: 18px; border-radius: var(--radius-xl); background: var(--surface-warm); color: var(--accent); }
 .panel-empty h3 { color: var(--fg); font-size: 16px; font-weight: 600; }
 .panel-empty p.panel-empty-copy { max-width: 360px; margin: 8px 0 20px; color: var(--muted); font-size: 13px; line-height: 1.55; }
 .panel-state { display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 12px; padding: 22px; color: var(--danger); font-size: 13px; text-align: center; }
@@ -863,19 +871,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    answer to "what have they been up to lately". */
 .routine-feed { margin-top: 30px; }
 .routine-feed-list { display: flex; flex-direction: column; gap: 4px; }
-.routine-feed-row { display: flex; width: 100%; flex-direction: column; gap: 4px; border: 0; border-radius: 12px; background: var(--surface); padding: 11px 14px; text-align: start; transition: background var(--motion-fast); }
+.routine-feed-row { display: flex; width: 100%; flex-direction: column; gap: 4px; border: 0; border-radius: var(--radius-md); background: var(--surface); padding: 11px 14px; text-align: start; transition: background var(--motion-fast); }
 .routine-feed-row:hover { background: var(--surface-warm); }
 .routine-feed-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
 .routine-feed-head strong { color: var(--fg); font-size: 13px; font-weight: 500; }
 .routine-feed-when { flex: none; color: var(--muted); font: 11px var(--font-mono); }
 .routine-feed-text { display: -webkit-box; overflow: hidden; color: var(--fg-2); font-size: 12px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
-.routine-runs-count { display: grid; min-width: 28px; height: 28px; place-items: center; border-radius: 9px; background: var(--surface-warm); color: var(--fg-2); font: 11px var(--font-mono); }
+.routine-runs-count { display: grid; min-width: 28px; height: 28px; place-items: center; border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--fg-2); font: 11px var(--font-mono); }
 .routine-runs-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .run-list { display: flex; max-height: 520px; flex-direction: column; gap: 4px; overflow: auto; padding: 3px; }
 /* Zero content, one pixel tall: it exists only to be scrolled into view, and the
    list asks for the next page when it is. */
 .run-list-sentinel { display: block; flex: none; height: 1px; }
-.run-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) 15px; align-items: center; gap: 10px; width: 100%; min-height: 62px; border: 0; border-radius: 11px; background: transparent; padding: 10px 11px; color: var(--fg-2); text-align: start; transition: background var(--motion-fast); }
+.run-row { display: grid; grid-template-columns: 8px minmax(0, 1fr) 15px; align-items: center; gap: 10px; width: 100%; min-height: 62px; border: 0; border-radius: var(--radius-md); background: transparent; padding: 10px 11px; color: var(--fg-2); text-align: start; transition: background var(--motion-fast); }
 .run-row:hover { background: var(--surface-warm); }
 .run-row.active { background: var(--surface-warm); color: var(--fg); }
 .run-row-marker { width: 6px; height: 6px; border-radius: 50%; background: var(--border-soft); }
@@ -885,14 +893,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .run-row.active .run-row-copy strong { color: var(--fg); }
 .run-when { overflow: hidden; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
 .run-row-chevron { color: var(--muted); }
-.run-output { min-width: 0; min-height: 208px; border-radius: 14px; background: var(--surface); padding: 14px 16px; }
+.run-output { min-width: 0; min-height: 208px; border-radius: var(--radius-xl); background: var(--surface); padding: 14px 16px; }
 .run-output-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 8px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .run-output-head span:last-child { letter-spacing: .04em; text-transform: uppercase; }
 .run-output .routines-thread { margin-top: 0; }
 .run-output .thread-inner { padding: 0; }
 .run-output .message { padding-inline: 0; }
 .run-output .message.user .message-content { max-width: 100%; }
-.routine-runs-empty { display: flex; align-items: center; gap: 10px; border-radius: 12px; background: var(--surface); padding: 18px; color: var(--muted); font-size: 12px; }
+.routine-runs-empty { display: flex; align-items: center; gap: 10px; border-radius: var(--radius-lg); background: var(--surface); padding: 18px; color: var(--muted); font-size: 12px; }
 .routine-runs-empty svg.icon { flex: none; color: var(--fg-2); }
 .routine-create-form { display: grid; max-width: 760px; gap: 22px; }
 .routine-destination { display: grid; gap: 14px; }
@@ -987,10 +995,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .app-shell.drawer-open .chrome-tint { background: var(--surface-warm); }
   /* The shadow is what lifts the chat off the drawer; kept tight on purpose, since
      a wide one is a band across the drawer's surface rather than a shadow, which
-     reads as a border left behind. The rounded corner is off for now, to compare:
-     it is the two `border-*-radius` declarations below that bring it back, and
-     with it the `overflow: hidden` line. */
-  .app-shell.drawer-open .main { transform: translateX(var(--drawer-width)); box-shadow: -3px 0 12px rgb(39 39 36 / 12%); }
+     reads as a border left behind. The corner goes on the layer that travels over —
+     the chat — and `overflow: hidden` is what keeps its own bars from squaring it
+     off: the composer paints its background right up to the edge. */
+  .app-shell.drawer-open .main { transform: translateX(var(--drawer-width)); box-shadow: -3px 0 12px rgb(39 39 36 / 12%); border-start-start-radius: var(--radius-lg); border-end-start-radius: var(--radius-lg); overflow: hidden; }
   /* Only the uncovered chat takes the tap that closes it: the sidebar's own
      controls stay live underneath. */
   .sidebar-scrim { position: fixed; z-index: 3; inset-block: 0; inset-inline-start: var(--drawer-width); inset-inline-end: 0; display: block; border: 0; background: transparent; }
@@ -1034,11 +1042,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   /* The menu button stands down here: the arrow in the bar is the way back. */
   .main.has-settings-strip .mobile-menu { display: none; }
   .settings-mobile-nav { display: flex; flex: none; align-items: center; padding: calc(env(safe-area-inset-top) + 24px) 0 12px; }
-  .settings-strip-back { display: grid; width: 38px; height: 38px; flex: none; place-items: center; margin-inline-start: 16px; border: 0; border-radius: 999px; background: var(--surface-warm); color: var(--accent); transition: background var(--motion-fast); }
+  .settings-strip-back { display: grid; width: 38px; height: 38px; flex: none; place-items: center; margin-inline-start: 16px; border: 0; border-radius: var(--radius-pill); background: var(--surface-warm); color: var(--accent); transition: background var(--motion-fast); }
   .settings-strip-back:hover { background: var(--border-soft); }
   .settings-section-strip { display: flex; flex: 1; min-width: 0; gap: 6px; overflow-x: auto; padding: 0 16px 0 10px; scrollbar-width: none; }
   .settings-section-strip::-webkit-scrollbar { display: none; }
-  .settings-strip-item { display: inline-flex; flex: none; min-height: 38px; align-items: center; gap: 7px; border: 0; border-radius: 999px; background: var(--surface-warm); padding: 8px 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; white-space: nowrap; transition: background var(--motion-fast), color var(--motion-fast); }
+  .settings-strip-item { display: inline-flex; flex: none; min-height: 38px; align-items: center; gap: 7px; border: 0; border-radius: var(--radius-pill); background: var(--surface-warm); padding: 8px 14px; color: var(--fg-2); font-size: 13px; font-weight: 500; white-space: nowrap; transition: background var(--motion-fast), color var(--motion-fast); }
   .settings-strip-item svg.icon { flex: none; color: var(--muted); }
   .settings-strip-item:hover { background: var(--border-soft); }
   .settings-strip-item.active { background: var(--accent); color: var(--accent-on); }
@@ -1111,7 +1119,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* The plan the model is keeping: a card that names itself and how far it has got.
    A shape per state — an empty ring, a ring with a centre dot, a check — so a
    step reads without leaning on colour, and the current one wears the accent. */
-.todo-card { display: flex; flex-direction: column; gap: 8px; border-radius: 12px; background: var(--surface); box-shadow: var(--shadow-sm); padding: 11px 13px; }
+.todo-card { display: flex; flex-direction: column; gap: 8px; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-sm); padding: 11px 13px; }
 .todo-head { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
 .todo-head svg.icon { flex: none; }
 .todo-count { margin-inline-start: auto; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; letter-spacing: normal; }
@@ -1191,7 +1199,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    with the same panel, rows and empty state as every other workspace view. */
 .tasklists-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; }
 .tasklist-list { display: flex; flex-direction: column; gap: 5px; }
-.tasklist-card { display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: 14px; width: 100%; min-height: 68px; border: 0; border-radius: 12px; background: var(--surface); padding: 12px 16px; color: inherit; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
+.tasklist-card { display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: 14px; width: 100%; min-height: 68px; border: 0; border-radius: var(--radius-md); background: var(--surface); padding: 12px 16px; color: inherit; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .tasklist-card:hover { background: var(--surface-warm); }
 .tasklist-card:active { transform: translateY(1px); }
 .tasklist-card-main { display: flex; min-width: 0; flex-direction: column; gap: 5px; }
@@ -1203,7 +1211,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tasklist-footer { display: flex; margin-top: 18px; }
 .tasklist-new { display: flex; align-items: center; gap: 8px; width: min(430px, 100%); }
 /* The one field both the create row and the add-task row wear. */
-.tasklist-input { width: 100%; min-width: 0; min-height: 42px; border: 0; border-radius: 11px; background: var(--surface); padding: 9px 12px; color: var(--fg); font-size: 13px; transition: box-shadow var(--motion-fast); }
+.tasklist-input { width: 100%; min-width: 0; min-height: 42px; border: 0; border-radius: var(--radius-md); background: var(--surface); padding: 9px 12px; color: var(--fg); font-size: 13px; transition: box-shadow var(--motion-fast); }
 .tasklist-input:focus { outline: 0; box-shadow: var(--focus-ring); }
 .tasklist-input::placeholder { color: var(--muted); }
 .panel-empty .tasklist-new { width: min(470px, 100%); }
@@ -1220,11 +1228,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tasklist-group + .tasklist-group { margin-top: 22px; }
 .tasklist-group .section-label { display: flex; align-items: center; gap: 8px; padding-top: 0; }
 .tasklist-group .section-label span { color: var(--muted); font: 11px var(--font-mono); letter-spacing: 0; font-variant-numeric: tabular-nums; }
-.tasklist-row { display: flex; align-items: center; gap: 11px; min-height: 46px; border-radius: 10px; padding: 5px 8px; transition: background var(--motion-fast); }
+.tasklist-row { display: flex; align-items: center; gap: 11px; min-height: 46px; border-radius: var(--radius-md); padding: 5px 8px; transition: background var(--motion-fast); }
 .tasklist-row:hover { background: var(--surface-warm); }
 /* An empty box has to read as a control on the page's own background, which
    `--surface` is too close to: the neutral `--border` is what shows. */
-.tasklist-check { display: grid; width: 20px; height: 20px; flex: none; place-items: center; border: 0; border-radius: 7px; background: var(--border); color: var(--accent-on); transition: background var(--motion-fast); }
+.tasklist-check { display: grid; width: 20px; height: 20px; flex: none; place-items: center; border: 0; border-radius: var(--radius-xs); background: var(--border); color: var(--accent-on); transition: background var(--motion-fast); }
 .tasklist-check:not(:disabled):hover { background: var(--secondary); }
 .tasklist-row.completed .tasklist-check { background: var(--success); }
 .tasklist-row-text { min-width: 0; flex: 1; color: var(--fg-2); font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
@@ -1254,12 +1262,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mail-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 20px; }
 .mail-title { color: var(--fg); font-size: 20px; font-weight: 620; }
 .mail-head .panel-count { align-items: center; }
-.mail-head-action { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: 9px; background: var(--surface-warm); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
+.mail-head-action { display: grid; width: 32px; height: 32px; place-items: center; border: 0; border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
 .mail-head-action:not(:disabled):hover { background: var(--border-soft); color: var(--fg); }
 .mail-head-action:disabled { opacity: .4; }
 /* The head's own text action, sized to sit with the 32px icons it stands beside. */
 .mail-head-summarize { min-height: 32px; padding: 0 12px; font-size: 12.5px; }
-.mail-command { display: inline-block; margin: 0 0 4px; border-radius: 10px; background: var(--surface-warm); padding: 9px 14px; color: var(--fg-2); font: 12.5px var(--font-mono); }
+.mail-command { display: inline-block; margin: 0 0 4px; border-radius: var(--radius-sm); background: var(--surface-warm); padding: 9px 14px; color: var(--fg-2); font: 12.5px var(--font-mono); }
 
 /* The inbox's own controls, above the labels: a search over what the inbox holds and
    the quick filters. The labels — Milo's, coloured — sit below as their own row, so a
@@ -1267,13 +1275,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mail-controls { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
 .mail-search { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; }
 .mail-search svg.icon { position: absolute; inset-inline-start: 11px; color: var(--muted); pointer-events: none; }
-.mail-search input { width: 100%; min-height: 40px; border: 0; border-radius: 12px; background: var(--surface); padding: 9px 12px 9px 34px; color: var(--fg); font-size: 13px; }
+.mail-search input { width: 100%; min-height: 40px; border: 0; border-radius: var(--radius-md); background: var(--surface); padding: 9px 12px 9px 34px; color: var(--fg); font-size: 13px; }
 .mail-search input::placeholder { color: var(--muted); }
 .mail-search input:focus { outline: 0; box-shadow: var(--focus-ring); }
 /* A track with the chosen filter filled in — contiguous and neutral, so it never
    reads as one of the coloured label chips below. */
-.mail-filters { display: flex; flex: none; gap: 3px; margin: 0; border: 0; min-inline-size: 0; border-radius: 12px; background: var(--surface); padding: 4px; }
-.mail-filter { border: 0; border-radius: 9px; background: transparent; padding: 7px 13px; color: var(--fg-2); font-size: 12.5px; font-weight: 500; transition: background var(--motion-fast), color var(--motion-fast); }
+.mail-filters { display: flex; flex: none; gap: 3px; margin: 0; border: 0; min-inline-size: 0; border-radius: var(--radius-md); background: var(--surface); padding: 4px; }
+.mail-filter { border: 0; border-radius: var(--radius-sm); background: transparent; padding: 7px 13px; color: var(--fg-2); font-size: 12.5px; font-weight: 500; transition: background var(--motion-fast), color var(--motion-fast); }
 .mail-filter:hover { color: var(--fg); }
 .mail-filter.active { background: var(--surface-warm); color: var(--fg); }
 
@@ -1284,7 +1292,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* Three columns: who and what, the labels with the time, then the actions. The meta cell
    keeps its right edge, so dates line up down the list, and the labels sit just before
    the time instead of claiming a line of their own under the subject. */
-.mail-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: 18px; border-radius: 12px; background: var(--surface); padding: 10px 14px; transition: background var(--motion-fast); }
+.mail-row { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; column-gap: 18px; border-radius: var(--radius-md); background: var(--surface); padding: 10px 14px; transition: background var(--motion-fast); }
 .mail-row:hover { background: var(--surface-warm); }
 /* The row stays the grid; the track carries its cells, so a phone can slide them aside
    without disturbing the wide layout — where the track draws no box of its own. */
@@ -1300,11 +1308,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* An unread row says so at a glance when the inbox opens: a dot in the accent before the
    sender, and the sender and subject carried heavier than a row already read. The dot
    points at what is new rather than painting over the row. */
-.mail-row.unread .mail-row-from::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-inline-end: 7px; border-radius: 999px; background: var(--accent); vertical-align: middle; }
+.mail-row.unread .mail-row-from::before { content: ''; display: inline-block; width: 6px; height: 6px; margin-inline-end: 7px; border-radius: 50%; background: var(--accent); vertical-align: middle; }
 .mail-row.unread .mail-row-from { font-weight: 650; }
 .mail-row.unread .mail-row-subject { color: var(--fg); }
 .mail-row-actions { display: flex; flex: none; gap: 4px; }
-.mail-row-action { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: 9px; background: var(--surface-warm); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
+.mail-row-action { display: grid; width: 30px; height: 30px; place-items: center; border: 0; border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
 .mail-row-action:not(:disabled):hover { background: var(--border-soft); color: var(--fg); }
 .mail-row-action:disabled { opacity: .45; }
 /* The end of the list, and the target the next page is fetched from as it comes into
@@ -1314,7 +1322,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mail-more-note { color: var(--muted); font-size: 12.5px; }
 
 .mail-thread { display: flex; flex-direction: column; gap: 12px; }
-.mail-message { border-radius: 12px; background: var(--surface); padding: 14px 16px; }
+.mail-message { border-radius: var(--radius-lg); background: var(--surface); padding: 14px 16px; }
 .mail-message-head { display: flex; align-items: baseline; justify-content: flex-start; gap: 10px; margin-bottom: 8px; }
 .mail-sender { color: var(--fg); font-size: 13px; font-weight: 600; }
 .mail-message-labels { display: flex; flex-wrap: wrap; gap: 4px; }
@@ -1325,13 +1333,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    stylesheet lays it out and cannot reach the app. The frame follows the height
    the screen measures, so nothing is clipped. */
 .mail-frame-wrap { white-space: normal; }
-.mail-frame { display: block; width: 100%; border: 0; border-radius: 8px; background: #fff; }
+.mail-frame { display: block; width: 100%; border: 0; border-radius: var(--radius-md); background: #fff; }
 .mail-message-note { margin-top: 8px; color: var(--warn); font-size: 11.5px; }
 
 .mail-compose { display: flex; flex-direction: column; gap: 14px; max-width: 640px; }
 .mail-tier-note { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.55; }
 
-.mail-assist { margin-top: 20px; border-radius: 12px; background: var(--surface-warm); padding: 16px; }
+.mail-assist { margin-top: 20px; border-radius: var(--radius-lg); background: var(--surface-warm); padding: 16px; }
 .mail-assist h3 { color: var(--fg); font-size: 13px; font-weight: 600; }
 .mail-assist-text { margin: 8px 0 14px; color: var(--fg-2); font-size: 13px; line-height: 1.6; white-space: pre-wrap; }
 
@@ -1356,7 +1364,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      itself is the same one the buttons call, and the thread still carries them. */
   .mail-row { position: relative; display: block; overflow: hidden; background: transparent; padding: 0; }
   .mail-row:hover { background: transparent; }
-  .mail-row-track { position: relative; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; border-radius: 12px; background: var(--surface); padding: 10px 14px; touch-action: pan-y; user-select: none; transition: transform var(--motion-base) var(--ease-standard); }
+  .mail-row-track { position: relative; z-index: 1; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; border-radius: var(--radius-md); background: var(--surface); padding: 10px 14px; touch-action: pan-y; user-select: none; transition: transform var(--motion-base) var(--ease-standard); }
   /* The cell comes apart here, so the labels can take a line of their own below the
      subject and the time keeps the first one. */
   .mail-row-meta { display: contents; }
@@ -1366,7 +1374,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      the time without taking back the width the subject just gained. */
   .mail-row-track .mail-row-labels { order: 3; flex-basis: 100%; }
   .mail-row-actions { display: none; }
-  .mail-row-tray { position: absolute; inset: 0; z-index: 0; display: flex; align-items: center; gap: 7px; border-radius: 12px; padding: 0 16px; font-size: 12.5px; font-weight: 550; }
+  .mail-row-tray { position: absolute; inset: 0; z-index: 0; display: flex; align-items: center; gap: 7px; border-radius: var(--radius-md); padding: 0 16px; font-size: 12.5px; font-weight: 550; }
   .mail-row-tray.archive { justify-content: flex-end; background: color-mix(in oklab, var(--danger) 12%, var(--surface)); color: var(--danger); }
   .mail-row-tray.read, .mail-row-tray.unread { justify-content: flex-start; background: color-mix(in oklab, var(--secondary) 12%, var(--surface)); color: var(--secondary); }
 }
@@ -1382,7 +1390,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .label-chip[data-color='sky'], .label-swatch[data-color='sky'], .mail-label-pick[data-color='sky'] { --chip: var(--label-sky); }
 .label-chip[data-color='plum'], .label-swatch[data-color='plum'], .mail-label-pick[data-color='plum'] { --chip: var(--label-plum); }
 .label-chip[data-color='rose'], .label-swatch[data-color='rose'], .mail-label-pick[data-color='rose'] { --chip: var(--label-rose); }
-.label-chip { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 999px; background: color-mix(in oklab, var(--chip, var(--muted)) 16%, var(--surface)); padding: 3px 10px; color: var(--chip, var(--muted)); font-size: 11.5px; font-weight: 550; white-space: nowrap; }
+.label-chip { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: var(--radius-pill); background: color-mix(in oklab, var(--chip, var(--muted)) 16%, var(--surface)); padding: 3px 10px; color: var(--chip, var(--muted)); font-size: 11.5px; font-weight: 550; white-space: nowrap; }
 .mail-row-labels { display: flex; flex-wrap: wrap; gap: 4px; }
 /* A chip in the label bar is something to press, so it wears a control's height — the
    labels and the one that makes a new one alike, whatever each holds inside, so the row
@@ -1393,8 +1401,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .label-chip-filter:hover { background: color-mix(in oklab, var(--chip, var(--muted)) 27%, var(--surface)); }
 .label-chip-filter.active { background: var(--chip, var(--muted)); color: var(--accent-on); }
 .label-chip-new:hover { background: var(--border-soft); color: var(--fg); }
-.label-chip-name { border: 0; border-radius: 999px; background: transparent; padding: 2px 1px; color: inherit; font: inherit; }
-.label-chip-remove { display: grid; width: 19px; height: 19px; flex: none; place-items: center; border: 0; border-radius: 999px; background: transparent; padding: 0; color: inherit; opacity: .55; transition: opacity var(--motion-fast); }
+.label-chip-name { border: 0; border-radius: var(--radius-pill); background: transparent; padding: 2px 1px; color: inherit; font: inherit; }
+.label-chip-remove { display: grid; width: 19px; height: 19px; flex: none; place-items: center; border: 0; border-radius: var(--radius-pill); background: transparent; padding: 0; color: inherit; opacity: .55; transition: opacity var(--motion-fast); }
 .label-chip-remove:hover { opacity: 1; }
 
 .mail-labels { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 16px; }
@@ -1403,25 +1411,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mail-label-clear { border: 0; background: transparent; padding: 0 2px; color: var(--muted); font-size: 12px; text-decoration: underline; }
 .mail-label-clear:hover { color: var(--fg-2); }
 .mail-label-form { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.mail-label-input { width: min(200px, 40vw); min-height: 36px; border: 0; border-radius: 10px; background: var(--surface); padding: 7px 11px; color: var(--fg); font-size: 13px; transition: box-shadow var(--motion-fast); }
+.mail-label-input { width: min(200px, 40vw); min-height: 36px; border: 0; border-radius: var(--radius-sm); background: var(--surface); padding: 7px 11px; color: var(--fg); font-size: 13px; transition: box-shadow var(--motion-fast); }
 .mail-label-input:focus { outline: 0; box-shadow: var(--focus-ring); }
 .mail-label-input::placeholder { color: var(--muted); }
 .label-swatches { display: inline-flex; align-items: center; gap: 5px; }
-.label-swatch { width: 20px; height: 20px; flex: none; border: 0; border-radius: 999px; background: var(--chip, var(--muted)); transition: transform var(--motion-fast), box-shadow var(--motion-fast); }
+.label-swatch { width: 20px; height: 20px; flex: none; border: 0; border-radius: var(--radius-pill); background: var(--chip, var(--muted)); transition: transform var(--motion-fast), box-shadow var(--motion-fast); }
 .label-swatch:hover { transform: translateY(-1px); }
 .label-swatch.active { box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--chip, var(--muted)); }
 .mail-labels-note { flex-basis: 100%; color: var(--muted); font-size: 12px; }
 
 /* Putting a label on one message by hand, in the thread: a control that opens the
    picker, and the picker itself — the labels as toggles, the ones on it marked. */
-.mail-label-add { display: grid; width: 16px; height: 16px; flex: none; place-items: center; border: 0; border-radius: 999px; background: var(--surface-warm); padding: 0; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
+.mail-label-add { display: grid; width: 16px; height: 16px; flex: none; place-items: center; border: 0; border-radius: var(--radius-pill); background: var(--surface-warm); padding: 0; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
 .mail-label-add:hover { background: var(--border-soft); color: var(--fg); }
-.mail-label-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 12px; border-radius: 12px; background: var(--surface-warm); padding: 9px 11px; }
-.mail-label-pick { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: 999px; background: var(--surface); padding: 4px 10px; color: var(--fg-2); font-size: 12px; font-weight: 500; transition: background var(--motion-fast), color var(--motion-fast); }
+.mail-label-picker { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 4px 0 12px; border-radius: var(--radius-md); background: var(--surface-warm); padding: 9px 11px; }
+.mail-label-pick { display: inline-flex; align-items: center; gap: 5px; border: 0; border-radius: var(--radius-pill); background: var(--surface); padding: 4px 10px; color: var(--fg-2); font-size: 12px; font-weight: 500; transition: background var(--motion-fast), color var(--motion-fast); }
 .mail-label-pick svg.icon { flex: none; color: var(--chip, var(--muted)); }
 .mail-label-pick:hover { background: var(--border-soft); }
 .mail-label-pick.active { background: color-mix(in oklab, var(--chip, var(--muted)) 16%, var(--surface)); color: var(--chip, var(--muted)); }
-.mail-label-done { margin-inline-start: auto; border: 0; border-radius: 9px; background: var(--surface); padding: 4px 10px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
+.mail-label-done { margin-inline-start: auto; border: 0; border-radius: var(--radius-sm); background: var(--surface); padding: 4px 10px; color: var(--fg-2); font-size: 12px; font-weight: 500; }
 .mail-label-done:hover { background: var(--border-soft); }
 
 /* The generated interface: the catalog the model draws from, in the app's own
@@ -1444,7 +1452,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .genui-pad-3 { padding: 12px; }
 .genui-pad-4 { padding: 16px; }
 .genui-text { margin: 0; color: var(--fg); font-size: 14px; line-height: 1.55; }
-.genui-stat { display: flex; flex-direction: column; gap: 2px; border-radius: 14px; background: var(--surface); padding: 12px 14px; }
+.genui-stat { display: flex; flex-direction: column; gap: 2px; border-radius: var(--radius-lg); background: var(--surface); padding: 12px 14px; }
 .genui-stat-value { font-size: 24px; font-weight: 600; letter-spacing: -.02em; }
 .genui-stat-label { color: var(--muted); font-size: 12px; }
 .genui-grid { width: 100%; border-collapse: collapse; font-size: 14px; }
@@ -1456,11 +1464,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .genui-steps-title, .genui-facts-title { color: var(--muted); font-size: 11.5px; font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
 .genui-steps-list { display: flex; flex-direction: column; gap: 10px; margin: 0; padding: 0; list-style: none; }
 .genui-step { display: flex; align-items: flex-start; gap: 10px; }
-.genui-step-num { display: grid; width: 22px; height: 22px; flex: none; place-items: center; border-radius: 999px; background: var(--accent); color: var(--accent-on); font-size: 12px; font-weight: 600; line-height: 1; }
+.genui-step-num { display: grid; width: 22px; height: 22px; flex: none; place-items: center; border-radius: var(--radius-pill); background: var(--accent); color: var(--accent-on); font-size: 12px; font-weight: 600; line-height: 1; }
 .genui-step-body { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
 .genui-step-title { font-size: 14px; font-weight: 600; }
 .genui-step-detail { color: var(--fg-2); font-size: 13px; line-height: 1.5; }
-.genui-facts { display: flex; flex-direction: column; gap: 8px; border-radius: 14px; background: var(--surface-warm); padding: 12px 14px; }
+.genui-facts { display: flex; flex-direction: column; gap: 8px; border-radius: var(--radius-lg); background: var(--surface-warm); padding: 12px 14px; }
 .genui-facts-list { display: flex; flex-wrap: wrap; gap: 8px 20px; margin: 0; }
 .genui-fact { display: flex; flex-direction: column; gap: 1px; }
 .genui-fact-label { color: var(--muted); font-size: 11.5px; letter-spacing: .02em; }
@@ -1471,8 +1479,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .genui-field-label { color: var(--fg-2); font-size: 13px; }
 .genui-field-value { min-width: 64px; color: var(--fg); font-variant-numeric: tabular-nums; font-size: 13px; }
 .genui-slider { flex: 1; min-width: 0; accent-color: var(--accent); }
-.genui-number, .genui-select { border: 1px solid var(--border); border-radius: 10px; background: var(--surface); padding: 7px 10px; color: var(--fg); font: inherit; font-size: 13px; }
+.genui-number, .genui-select { border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); padding: 7px 10px; color: var(--fg); font: inherit; font-size: 13px; }
 .genui-number { width: 120px; }
 .genui-check { width: 18px; height: 18px; flex: none; accent-color: var(--accent); }
-.genui-action { align-self: flex-start; border: 0; border-radius: 12px; background: var(--accent); padding: 10px 14px; color: var(--accent-on); font: inherit; font-size: 13px; font-weight: 500; transition: filter var(--motion-fast); }
+.genui-action { align-self: flex-start; border: 0; border-radius: var(--radius-md); background: var(--accent); padding: 10px 14px; color: var(--accent-on); font: inherit; font-size: 13px; font-weight: 500; transition: filter var(--motion-fast); }
 .genui-action:hover { filter: brightness(1.06); }

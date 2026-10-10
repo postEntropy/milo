@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { buildSystemPrompt } from '../src/core/agent/system.js'
-import { findOutlinedControls, findPortugueseCopy, sourceFiles, type Hit } from './conventions.js'
+import { findHardcodedRadius, findOutlinedControls, findPortugueseCopy, sourceFiles, type Hit } from './conventions.js'
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 
@@ -86,6 +86,20 @@ describe('interactive controls are filled, not outlined', () => {
     expect(hits).toHaveLength(1)
     expect(hits[0]?.line).toBe(3)
     expect(hits[0]?.text).toBe('.model-option')
+  })
+})
+
+describe('corner rounding comes from the shared scale', () => {
+  it('writes no raw radius literal into the stylesheet', () => {
+    const hits = cssFiles.flatMap((file) => findHardcodedRadius(file, readFileSync(file, 'utf8')))
+
+    expect(report(hits)).toEqual([])
+  })
+
+  it('flags a raw literal, and leaves a token or a circle alone', () => {
+    expect(findHardcodedRadius('a.css', '.card { border-radius: 12px; }')).toHaveLength(1)
+    expect(findHardcodedRadius('a.css', '.card { border-radius: var(--radius-lg); }')).toEqual([])
+    expect(findHardcodedRadius('a.css', '.dot { border-radius: 50%; }')).toEqual([])
   })
 })
 

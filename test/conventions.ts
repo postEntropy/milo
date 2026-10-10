@@ -105,6 +105,8 @@ const CONTROL_SELECTOR = /button|btn|card|pill|tab|option/i
 const BORDER_WIDTH =
   /border(?:-(?:inline|block)(?:-(?:start|end))?|-(?:top|right|bottom|left))?:\s*([\d.]+)px/gi
 
+const RADIUS = /\bborder(?:-[a-z]+)*-radius\s*:\s*([^;}]+)/gi
+
 interface RuleBlock {
   selector: string
   body: string
@@ -161,6 +163,28 @@ export function findOutlinedControls(file: string, css: string): Hit[] {
     if (!CONTROL_SELECTOR.test(block.selector)) continue
     for (const match of block.body.matchAll(BORDER_WIDTH)) {
       if (Number(match[1]) === 0) continue
+      hits.push({
+        file,
+        line: block.line,
+        text: block.selector,
+        detail: match[0].replace(/\s+/g, ' ').trim(),
+      })
+    }
+  }
+  return hits
+}
+
+/**
+ * Corner rounding written as a raw number instead of the shared scale. Every corner the
+ * interface draws takes its value from `--radius-*`; `50%` is the one exception, since a
+ * circle is a shape and not a level of the scale.
+ */
+export function findHardcodedRadius(file: string, css: string): Hit[] {
+  const hits: Hit[] = []
+  for (const block of ruleBlocks(css)) {
+    for (const match of block.body.matchAll(RADIUS)) {
+      const value = match[1]!.trim()
+      if (!/\d[\d.]*px/.test(value)) continue
       hits.push({
         file,
         line: block.line,
