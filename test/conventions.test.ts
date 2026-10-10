@@ -89,6 +89,19 @@ describe('interactive controls are filled, not outlined', () => {
   })
 })
 
+describe('an installed home screen opens where it was added', () => {
+  it('leaves `start_url` out of the manifest, so the install keeps its address', () => {
+    // On an iPhone the installed app has storage of its own, so the token a Safari
+    // tab holds never reaches it: the address it was added from is the only thing
+    // that carries across. A `start_url` would open it at a tokenless root instead.
+    const manifest = JSON.parse(
+      readFileSync(path.join(repoRoot, 'web/public/manifest.webmanifest'), 'utf8'),
+    ) as Record<string, unknown>
+    expect(manifest.start_url).toBeUndefined()
+    expect(manifest.display).toBe('standalone')
+  })
+})
+
 describe('a capability the registry can add is named in the prompt', () => {
   // What `createToolRegistry` switches on, read from the source rather than typed
   // out again. Adding an `options.something` there grows this list, and the marker

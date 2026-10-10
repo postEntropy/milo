@@ -138,6 +138,30 @@ describe('web server static UI', () => {
     // Served as a download, the manifest is ignored: no `display: standalone`,
     // and the phone keeps dressing the app in its own browser chrome.
     expect(response.headers.get('content-type')).toContain('application/manifest+json')
+    // Revalidated, not cached for an hour: a manifest left in the browser's cache
+    // would keep an installed home screen opening on rules it no longer has.
+    expect(response.headers.get('cache-control')).toBe('no-cache')
+  })
+
+  it('names the token in the manifest only for a caller that holds it', async () => {
+    const server = await startWebServer({ runtime: {} as never, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
+    running.push(server)
+    const base = `http://127.0.0.1:${portOf(server.url)}`
+    // An installed app opens at `start_url`, and an iPhone home screen carries no
+    // storage of its own — so this is where the token has to be for it to arrive.
+    const mine = await (await fetch(`${base}/manifest.webmanifest?t=test-token`)).json() as { start_url?: string }
+    expect(mine.start_url).toBe('/?t=test-token')
+    // Handed to anyone else, the manifest says nothing about the token.
+    const theirs = await (await fetch(`${base}/manifest.webmanifest`)).json() as { start_url?: string }
+    expect(theirs.start_url).toBeUndefined()
+  })
+
+  it('points the page at the manifest that carries the token', async () => {
+    const server = await startWebServer({ runtime: {} as never, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
+    running.push(server)
+    const base = `http://127.0.0.1:${portOf(server.url)}`
+    const html = await (await fetch(`${base}/?t=test-token`)).text()
+    expect(html).toContain('href="/manifest.webmanifest?t=test-token"')
   })
 })
 

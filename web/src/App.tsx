@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { api, uploadFile } from './lib/api.js'
+import { api, uploadFile, withToken } from './lib/api.js'
+import { isPhone } from './lib/phone.js'
 import { randomUUID } from './lib/uuid.js'
 import { trackVisualViewport } from './lib/viewport.js'
 import { useTurnClock } from './lib/turn-clock.js'
@@ -55,14 +56,6 @@ function viewFromPath(pathname: string): View {
   }
   return 'chat'
 }
-
-/**
- * A phone scrolls the document — iOS Safari shows the page behind its own bar only
- * then (see `styles.css`) — while a wide screen keeps the thread in its own box.
- * The scroll maths reads and writes whichever is live.
- */
-const PHONE_QUERY = '(max-width: 900px)'
-function isPhone(): boolean { return window.matchMedia(PHONE_QUERY).matches }
 
 /**
  * What the Email screen is showing, from its own path: null is the inbox, `new`
@@ -260,12 +253,12 @@ export default function App() {
     const apply = (): void => {
       root.dataset.theme = theme === 'dark' || (theme === 'system' && media.matches) ? 'dark' : 'light'
       const chrome = getComputedStyle(root).getPropertyValue('--bg').trim()
-      // A phone in a browser tab says nothing here on purpose: the tag is what fills
-      // Safari's own bar with a solid colour, and left unset Safari samples the page
-      // (the `.chrome-tint` strips) and draws the bar translucent instead. The
-      // installed app has no page behind its bar to reveal, so it keeps the colour; a
-      // wide screen's browser is not what the bar question was ever about.
-      const solid = !isPhone() || window.matchMedia('(display-mode: standalone)').matches
+      // A phone says nothing here on purpose: the tag is what fills Safari's own bar
+      // with a solid colour, and left unset Safari samples the page (the
+      // `.chrome-tint` strips) and draws the bar translucent instead — the installed
+      // app included, whose content runs under the status bar. A wide screen's
+      // browser is not what the bar question was ever about.
+      const solid = !isPhone()
       document.querySelectorAll('meta[name=theme-color]').forEach((meta) => {
         meta.remove()
         if (!solid) return
@@ -291,13 +284,16 @@ export default function App() {
         ? `${VIEW_PATH.email}/${encodeURIComponent(emailRoute)}`
         : VIEW_PATH[view]
     if (location.pathname === target) return
+    // The token rides on every address the app writes, so moving between screens
+    // never drops it: an icon added from any of them has to carry it home.
+    const address = withToken(target)
     // A bare `/settings` is the provider section written shorter: normalize it in
     // place, so Back never lands on a sectionless URL that would push again.
     if (view === 'settings' && location.pathname.replace(/\/+$/, '') === '/settings') {
-      window.history.replaceState(null, '', target)
+      window.history.replaceState(null, '', address)
       return
     }
-    window.history.pushState(null, '', target)
+    window.history.pushState(null, '', address)
   }, [view, settingsSection, emailRoute])
 
   useEffect(() => {

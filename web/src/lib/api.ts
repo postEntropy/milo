@@ -7,20 +7,27 @@ export class ApiError extends Error {
 const TOKEN_KEY = 'milo-token'
 
 /**
- * The token the server printed, taken out of the URL once and kept on the device.
- * It outlives the tab on purpose: a page added to the home screen opens at the
- * app's root, with no `?t=` on it, and would otherwise have nothing to present.
+ * The token the server printed, kept on the device and left in the address bar.
+ *
+ * It has to stay in the URL. An iPhone's home-screen app runs in a storage of its
+ * own, so the token a Safari tab writes never reaches it — the address the page
+ * was added from is the only thing that carries over. That is also why the
+ * manifest declares no `start_url`: the installed app opens at that address.
  */
 export function apiToken(): string {
-  const params = new URLSearchParams(location.search)
-  const fromUrl = params.get('t')
-  if (fromUrl) {
-    localStorage.setItem(TOKEN_KEY, fromUrl)
-    params.delete('t')
-    const search = params.toString()
-    history.replaceState(null, '', `${location.pathname}${search ? `?${search}` : ''}${location.hash}`)
-  }
-  return localStorage.getItem(TOKEN_KEY) ?? ''
+  const fromUrl = new URLSearchParams(location.search).get('t')
+  if (fromUrl) localStorage.setItem(TOKEN_KEY, fromUrl)
+  return fromUrl ?? localStorage.getItem(TOKEN_KEY) ?? ''
+}
+
+/**
+ * A screen's address with the token still on it, for the paths the app writes to
+ * the address bar. Without it, navigating away drops the token and an icon added
+ * from that screen would open with nothing to present.
+ */
+export function withToken(path: string): string {
+  const token = apiToken()
+  return token ? `${path}?t=${encodeURIComponent(token)}` : path
 }
 
 /**

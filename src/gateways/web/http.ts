@@ -1,5 +1,5 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto'
-import { createReadStream, existsSync, statSync } from 'node:fs'
+import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
 import path from 'node:path'
@@ -342,20 +342,58 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
   if (!root) {
     return json(response, 503, { error: 'Web UI is not built. Run `npm run build:web`.' })
   }
+  // The manifest is assembled per request so the token can ride in `start_url`.
+  // An installed app opens at that URL, and on an iPhone nothing else carries a
+  // token to it — the shortcut has storage of its own, separate from Safari's.
+  // Only a request that already holds the token is told it; anyone else gets the
+  // manifest without one.
+  if (url.pathname === '/manifest.webmanifest') {
+    const manifest = JSON.parse(readFileSync(path.join(root, 'manifest.webmanifest'), 'utf8')) as Record<string, unknown>
+    const named = authorized(request, token, url.searchParams.get('t'))
+      ? { ...manifest, start_url: `/?t=${encodeURIComponent(token)}` }
+      : manifest
+    response.writeHead(200, {
+      'content-type': 'application/manifest+json; charset=utf-8',
+      'cache-control': 'no-cache',
+      'x-content-type-options': 'nosniff',
+    })
+    if (request.method === 'HEAD') {
+      response.end()
+      return
+    }
+    response.end(JSON.stringify(named))
+    return
+  }
+
   const candidate = path.resolve(root, `.${decodeURIComponent(url.pathname)}`)
   const inside = candidate === root || candidate.startsWith(root + path.sep)
   const file = inside && existsSync(candidate) && statSync(candidate).isFile()
     ? candidate
     : path.join(root, 'index.html')
   if (!existsSync(file)) return json(response, 404, { error: 'Not found.' })
+  const page = path.basename(file) === 'index.html'
+  // The page passes the token on to the manifest link, so the manifest a phone
+  // reads as it installs points the shortcut back at the address that holds it.
+  const html = page && authorized(request, token, url.searchParams.get('t'))
+    ? readFileSync(file, 'utf8').replace(
+      'href="/manifest.webmanifest"',
+      `href="/manifest.webmanifest?t=${encodeURIComponent(token)}"`,
+    )
+    : null
   response.writeHead(200, {
     'content-type': MIME[path.extname(file)] ?? 'application/octet-stream',
-    'cache-control': path.basename(file) === 'index.html' ? 'no-cache' : 'public, max-age=3600',
+    // Revalidated rather than cached: the page carries how the app starts, and a
+    // cached copy left an installed home screen opening on the old rules.
+    'cache-control': page ? 'no-cache' : 'public, max-age=3600',
     'x-content-type-options': 'nosniff',
     'content-security-policy': "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'",
   })
   if (request.method === 'HEAD') {
     response.end()
+    return
+  }
+  if (html !== null) {
+    response.end(html)
     return
   }
   createReadStream(file).pipe(response)
