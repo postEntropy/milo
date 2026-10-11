@@ -101,19 +101,22 @@
 
 :root[data-theme='dark'] {
   color-scheme: dark;
+  /* A card lifts off the page with its shadow in the light theme; on a dark page the
+     shadow is invisible, so the whole lift is carried by the fill and the four steps
+     are wider than the light theme's — 1.2:1 where the light one sits at 1.1:1. */
   --bg: #191A18;
-  --surface: #20211F;
-  --surface-warm: #1D1E1C;
-  --surface-raised: #2A2B28;
+  --surface: #292A27;
+  --surface-warm: #232422;
+  --surface-raised: #32332E;
   --fg: #EFEEE9;
   --fg-2: #D9D6CE;
   --muted: #A8A29A;
-  --border: #34352F;
-  --border-soft: #2A2B27;
+  --border: #3F403A;
+  --border-soft: #3A3B34;
   --accent: #ED8754;
   --accent-on: #191A18;
   --accent-hover: #F29A6B;
-  --accent-wash: #38271F;
+  --accent-wash: #4A3323;
   --secondary: #80B5B3;
   --secondary-hover: #9AC9C7;
   --success: #8FB457;
