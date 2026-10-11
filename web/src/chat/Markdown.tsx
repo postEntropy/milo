@@ -12,10 +12,12 @@ marked.setOptions({ breaks: true, gfm: true })
  * is quadratic work for a screen that is only growing at the end.
  */
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
-  const html = useMemo(
-    () => DOMPurify.sanitize(marked.parse(text) as string, { USE_PROFILES: { html: true } }),
-    [text],
-  )
+  const html = useMemo(() => {
+    const clean = DOMPurify.sanitize(marked.parse(text) as string, { USE_PROFILES: { html: true } })
+    // A fence the model closes with nothing inside it would draw as an empty box, since
+    // the block carries its own padding — drop it instead of painting the gap.
+    return clean.replace(/<pre><code[^>]*>\s*<\/code><\/pre>/g, '')
+  }, [text])
   // biome-ignore lint/security/noDangerouslySetInnerHtml: the HTML is produced by marked and sanitized with DOMPurify above, which strips scripts, event handlers and unsafe URLs.
   return <div className="message-prose" dangerouslySetInnerHTML={{ __html: html }} />
 })
