@@ -83,5 +83,8 @@ describe('remember', () => {
     expect(rememberTool.description).toMatch(/greeting/i)
     expect(rememberTool.description).toMatch(/small talk/i)
     expect(rememberTool.description).toMatch(/one-off/i)
+    // A number read off one run is not a fact: it changes, and recall would serve a
+    // stale reading back as if it still held.
+    expect(rememberTool.description).toMatch(/measurement|number/i)
   })
 })

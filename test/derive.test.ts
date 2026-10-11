@@ -98,4 +98,19 @@ describe('deriveFacts', () => {
     // that ran out of time: asking again would be cut off at the same budget.
     expect(calls).toBe(1)
   })
+
+  it('tells the extractor to leave out numbers that will change', async () => {
+    let system = ''
+    const provider: Provider = {
+      id: 'capture',
+      async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+        system = req.system ?? ''
+        yield { type: 'text', delta: 'NONE' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+
+    await deriveFacts({ provider, model: 'm', messages: turn })
+    expect(system).toMatch(/measurement|version|number/i)
+  })
 })
