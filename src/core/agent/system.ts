@@ -377,7 +377,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
       : '- A project is selected; use it as the default context for project work.',
   )
   environment.push(
-    `- Scratch space for throwaway files — scripts, temp data, anything that is not the person's own work: ${scratchDir()}. Write them there, never into the working directory or the person's home.`,
+    `- Scratch space for your own intermediate files — a script, temp data, anything you need while working but the person did not ask for: ${scratchDir()}. Never put there what the person asked you to produce; that goes into the project, or is sent to them.`,
   )
   sections.push(`## Environment\n${environment.join('\n')}`)
 

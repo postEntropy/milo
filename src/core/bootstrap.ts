@@ -1,6 +1,6 @@
 import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
 import { BrowserSession } from './browser/index.js'
-import { browserProfileDir, embedEngineDir, historyDir, memoryDir, recapsDir, sessionsDir, skillsDir } from './config/paths.js'
+import { browserProfileDir, embedEngineDir, historyDir, memoryDir, recapsDir, sessionsDir, scratchDir, skillsDir } from './config/paths.js'
 import { readAuth, readConfig, resolveClassifierKey, resolveProvider, resolveSearchKey, type LoadedConfig, type ResolvedProvider } from './config/load.js'
 import { findPreset } from './config/presets.js'
 import { fileHistory } from './history.js'
@@ -32,6 +32,7 @@ import {
   type RoutineStore,
 } from './tools/index.js'
 import { errorMessage } from '../util/errors.js'
+import { ensurePrivateDir } from '../util/fs.js'
 import { logWarn } from '../util/log.js'
 
 export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
@@ -56,6 +57,14 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   // to create, and nothing else ever would. The index of what it holds rides
   // along with every request — the bodies stay on disk.
   ensureSkillsDir()
+  // Where a turn puts a file it makes for itself: in the system temp, so the OS
+  // sweeps it, and made `0700` here rather than left to the first write — a
+  // plain write to `/tmp` leaves a file another account can read.
+  try {
+    ensurePrivateDir(scratchDir())
+  } catch (error) {
+    logWarn(`could not create ${scratchDir()}: ${errorMessage(error)}`)
+  }
   // Read through the library, not once: the index it feeds is rebuilt when the
   // directory moves, so a skill installed from a settings screen is served from
   // the next turn on. The bodies stay on disk.

@@ -1,3 +1,4 @@
+import os from 'node:os'
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SYSTEM_PROMPT, buildSystemPrompt, formatToolSignature, type PanelFacts } from '../src/core/agent/system.js'
 import { scratchDir } from '../src/core/config/paths.js'
@@ -90,7 +91,7 @@ describe('buildSystemPrompt', () => {
     expect(DEFAULT_SYSTEM_PROMPT).toMatch(/background process/i)
   })
 
-  it('names the scratch space for throwaway files', () => {
+  it('names a private scratch space, kept out of the project', () => {
     const prompt = buildSystemPrompt({
       base: 'BASE',
       cwd: '/a',
@@ -100,7 +101,10 @@ describe('buildSystemPrompt', () => {
       memories: [],
     })
     expect(prompt).toContain(scratchDir())
-    expect(prompt).toMatch(/throwaway/i)
+    // In the system temp, not under the person's home: throwaway, and swept by the OS.
+    expect(scratchDir().startsWith(os.tmpdir())).toBe(true)
+    // And nothing the person asked for is to be produced into it.
+    expect(prompt).toMatch(/what the person asked you to produce/i)
   })
 
   it('tells the model which surface it is on', () => {
