@@ -96,7 +96,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   const settings = new WebSettings(options.runtime, options.cwd, hub)
   const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
   const server = createServer((request, response) => {
-    void handleHttp(request, response, token, settings, hub, options.host).catch((error: unknown) => {
+    void handleHttp(request, response, token, settings, hub).catch((error: unknown) => {
       if (!response.headersSent) json(response, 500, { error: error instanceof Error ? error.message : String(error) })
       else response.destroy()
     })
@@ -105,11 +105,6 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
     if (url.pathname !== '/ws' || !authorized(request, token, url.searchParams.get('t'))) {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
-      socket.destroy()
-      return
-    }
-    if (!sameOrigin(request, options.host)) {
-      socket.write('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n')
       socket.destroy()
       return
     }
@@ -227,9 +222,8 @@ export function panelHeaders(mimeType: string, size: number): Record<string, str
   }
 }
 
-async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, settings: WebSettings, hub: WebHub, boundHost: string): Promise<void> {
+async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, settings: WebSettings, hub: WebHub): Promise<void> {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
-  if (!sameOrigin(request, boundHost)) return json(response, 403, { error: 'Origin not allowed.' })
   if (url.pathname === '/upload') {
     if (!authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
     if (request.method !== 'POST') return json(response, 405, { error: 'Use POST.' })
@@ -409,6 +403,13 @@ function headerName(name: string): string {
   return safe
 }
 
+/**
+ * The whole of the authorization: holding the token is being the owner. It rides
+ * a header where one is sent and the URL query where it is not — an `<img>` and a
+ * WebSocket cannot set a header — and nothing else gates a request. A `Bearer`
+ * token is immune to a cross-site request on its own: another origin cannot read
+ * this one's token, so it cannot send it.
+ */
 function authorized(request: IncomingMessage, token: string, queryToken?: string | null): boolean {
   const header = request.headers.authorization
   const supplied = header?.startsWith('Bearer ')
@@ -417,27 +418,6 @@ function authorized(request: IncomingMessage, token: string, queryToken?: string
   const left = Buffer.from(token)
   const right = Buffer.from(supplied)
   return left.length === right.length && timingSafeEqual(left, right)
-}
-
-function sameOrigin(request: IncomingMessage, boundHost: string): boolean {
-  const origin = request.headers.origin
-  // No Origin: not a page, so not a cross-site request. The token is the gate.
-  if (!origin) return true
-  try {
-    const parsed = new URL(origin)
-    if (parsed.protocol !== 'http:') return false
-    const originHost = parsed.hostname.toLowerCase()
-    const addressed = hostName(request.headers.host ?? '')
-    // Bound to every interface: whichever name it was reached by is the name the
-    // page must also have come from — there is no fixed one to allow.
-    if (isWildcardHost(boundHost)) return originHost === addressed
-    // Otherwise the page has to have come from a name this server answers to:
-    // loopback, or the address it was configured to bind.
-    const allowed = new Set(['localhost', '127.0.0.1', '::1', hostName(boundHost)])
-    return allowed.has(originHost) && allowed.has(addressed)
-  } catch {
-    return false
-  }
 }
 
 /**
@@ -491,19 +471,6 @@ function reachableHosts(): string[] {
     }
   }
   return hosts
-}
-
-/** The host out of a `Host` header or a bind address, without its port or brackets. */
-function hostName(value: string): string {
-  const trimmed = value.trim().toLowerCase()
-  if (trimmed.startsWith('[')) {
-    const end = trimmed.indexOf(']')
-    return end === -1 ? trimmed.slice(1) : trimmed.slice(1, end)
-  }
-  // A bare IPv6 address has more than one colon, and nothing to strip from it.
-  if ((trimmed.match(/:/g) ?? []).length > 1) return trimmed
-  const colon = trimmed.indexOf(':')
-  return colon === -1 ? trimmed : trimmed.slice(0, colon)
 }
 
 async function readBody(request: IncomingMessage): Promise<Record<string, unknown>> {

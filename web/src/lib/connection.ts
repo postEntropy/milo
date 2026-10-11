@@ -23,7 +23,7 @@ export interface ConnectionStatus {
  * way this actually happens.
  */
 const REFUSED_REASON =
-  'Milo is up but refused this page — its token is stale, or the address is not one it serves. Reopen the URL `milo serve` printed.'
+  'Milo is up but refused this page — its token is not the one it serves. Reopen the URL `milo serve` printed.'
 
 /**
  * What a closed socket means.

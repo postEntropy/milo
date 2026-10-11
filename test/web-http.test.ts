@@ -65,7 +65,33 @@ describe('web server authentication', () => {
     expect(response.status).not.toBe(401)
   })
 
-  it('does not accept cross-origin API writes', async () => {
+  it('lets the token alone decide, whatever origin the request claims', async () => {
+    const server = await startWebServer({
+      runtime: {} as never,
+      cwd: process.cwd(),
+      host: '127.0.0.1',
+      port: 0,
+      token: 'test-token',
+    })
+    running.push(server)
+    // The token is the whole of the authorization. A page reached by another name
+    // — a tailnet host, an IPv6 literal, anything behind TLS — presents the same
+    // token and is served; the browser's `Origin` is not a second gate.
+    const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/api/overview`, {
+      method: 'POST',
+      headers: {
+        authorization: 'Bearer test-token',
+        origin: 'https://other.example',
+        'content-type': 'application/json',
+      },
+      body: '{}',
+    })
+    // Past the gate: whatever the action answers, it is not a refusal.
+    expect(response.status).not.toBe(401)
+    expect(response.status).not.toBe(403)
+  })
+
+  it('refuses a request that carries no token, whatever its origin', async () => {
     const server = await startWebServer({
       runtime: {} as never,
       cwd: process.cwd(),
@@ -77,13 +103,12 @@ describe('web server authentication', () => {
     const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/api/overview`, {
       method: 'POST',
       headers: {
-        authorization: 'Bearer test-token',
         origin: 'https://attacker.example',
         'content-type': 'application/json',
       },
       body: '{}',
     })
-    expect(response.status).toBe(403)
+    expect(response.status).toBe(401)
   })
 
   it('prints an openable address when bound to every interface', async () => {

@@ -255,12 +255,10 @@ memory, routines, gateways, tools and the browser, permissions, display, skills 
 setup jobs stream their output into a panel: the Chrome for Testing download, a profile copy, the local
 embedding engine.
 
-Two things to know before pointing a browser at it:
+One thing to know before pointing a browser at it:
 
 - **The frontend has to be built.** `npm run build:web` compiles `web/` into `web/dist`, which the
   server serves; after any change under `web/src` the served UI is stale until it is rebuilt.
-- **The page may only come from a name the server answers to.** A request whose `Origin` names something
-  else is refused.
 
 ## Documentation
 
