@@ -6,6 +6,7 @@ import { formatWhen, message } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
+import { PageHeader } from '../ui/PageHeader.js'
 import { WaitLine } from '../ui/WaitLine.js'
 
 /**
@@ -455,23 +456,24 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
     }
   }
 
-  const head = <div className="panel-head mail-head">
-    {route !== null
+  const head = <PageHeader
+    back={route !== null
       ? <button className="settings-back" type="button" onClick={toInbox}><Icon name="arrow-left" /><span>Inbox</span></button>
-      : <h2 className="mail-title">Inbox</h2>}
-    {connected && route === null && <div className="panel-count">
+      : undefined}
+    title={route === null ? 'Inbox' : undefined}
+    action={connected && route === null ? <div className="panel-count">
       <strong>{visible?.length ?? 0}</strong><span>shown</span>
       <span className="panel-count-divider" />
       <button className="mail-head-action" type="button" title="Refresh" aria-label="Refresh the inbox" onClick={() => void loadInbox()}><Icon name="refresh" size={16} /></button>
       <button className="mail-head-action" type="button" title="New message" aria-label="New message" disabled={!can(access, 'compose')} onClick={() => { setDraft(EMPTY_DRAFT); onRoute('new') }}><Icon name="edit" size={16} /></button>
       <button className="button mail-head-summarize" type="button" disabled={busy} onClick={() => void ask('summarize-unread', 'Unread summary', {})}><Icon name="spark" size={15} /> Summarize unread</button>
-    </div>}
-  </div>
+    </div> : undefined}
+  />
 
   return <main className="settings-workspace mail-workspace" ref={workspace} hidden={!active}>
-    <div className="settings-inner mail-inner">
+    <div className="settings-inner">
       <div className="settings-panel-stack">
-        <section className="settings-section mail-section">
+        <section className="settings-section">
           {head}
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           {connected && route === null && <div className="mail-controls">

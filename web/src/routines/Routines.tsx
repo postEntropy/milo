@@ -6,6 +6,7 @@ import { formatIn, formatWhen, message } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
+import { PageHeader } from '../ui/PageHeader.js'
 import { Select } from '../ui/Select.js'
 import { MessageList, type ChatMessage } from '../chat/MessageList.js'
 import { Permissions } from '../chat/Permissions.js'
@@ -150,10 +151,10 @@ export function Routines({ conversationId, chat, tick }: { conversationId: strin
 
 /** The main area's frame, so every state of this view sits in the same place. */
 function Shell({ head, notice, onDismiss, children }: { head?: ReactNode; notice?: Notice | null; onDismiss?(): void; children: ReactNode }) {
-  return <main className="settings-workspace routines-workspace">
-    <div className="settings-inner routines-inner">
+  return <main className="settings-workspace">
+    <div className="settings-inner">
       <div className="settings-panel-stack">
-        <section className="settings-section routines-section">
+        <section className="settings-section">
           {head}
           <Notice notice={notice ?? null} onDismiss={onDismiss ?? ((): void => {})} />
           <div className="panel-body">
@@ -206,13 +207,14 @@ function RoutineList({
   return <Shell
     notice={notice}
     onDismiss={onDismiss}
-    head={<div className="panel-head routine-page-head">
-      <div>
-        <h2>Routines</h2>
-        <p>Scheduled work, with each run kept here to read back.</p>
-      </div>
-      {routines && routines.length > 0 && <div className="panel-count"><strong>{enabled}</strong><span>active</span><span className="panel-count-divider" /><strong>{routines.length}</strong><span>total</span></div>}
-    </div>}
+    head={<PageHeader
+      title="Routines"
+      description="Scheduled work, with each run kept here to read back."
+      action={routines && routines.length > 0 ? <>
+        <div className="panel-count"><strong>{enabled}</strong><span>active</span><span className="panel-count-divider" /><strong>{routines.length}</strong><span>total</span></div>
+        <button className="button primary" type="button" onClick={onCompose}><Icon name="plus" size={15} /> New routine</button>
+      </> : undefined}
+    />}
   >
     {routines === null ? notice?.error
       ? <div className="panel-state"><p>Could not read routines.</p><button className="button" type="button" onClick={onRetry}>Try again</button></div>
@@ -256,10 +258,6 @@ function RoutineList({
         </button>)}
       </div>
     </section>}
-    {routines && routines.length > 0 && <div className="routine-list-footer">
-      <span>{routines.length} {routines.length === 1 ? 'routine' : 'routines'}</span>
-      <button className="button primary" type="button" onClick={onCompose}><Icon name="plus" size={15} /> New routine</button>
-    </div>}
   </Shell>
 }
 
@@ -402,14 +400,11 @@ function RoutineDetail({
   return <Shell
     notice={notice}
     onDismiss={() => setNotice(null)}
-    head={<div className="panel-head routine-detail-head">
-      <button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Routines</span></button>
-      <div className="routine-detail-title-row">
-        <span className={`routine-state-mark ${routine.enabled ? 'enabled' : 'paused'}`} aria-hidden="true" />
-        <h2 className="routine-detail-heading">{routine.name ?? routine.prompt}</h2>
-      </div>
-      <p className="routine-detail-prompt">{routine.prompt}</p>
-    </div>}
+    head={<PageHeader
+      back={<button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Routines</span></button>}
+      title={<><span className={`routine-state-mark ${routine.enabled ? 'enabled' : 'paused'}`} aria-hidden="true" />{routine.name ?? routine.prompt}</>}
+      description={routine.name ? routine.prompt : undefined}
+    />}
   >
     <div className="routine-overview">
       <div className="routine-overview-data">
@@ -488,11 +483,11 @@ function NewRoutine({ conversationId, chat, onBack }: { conversationId: string; 
   /** What has been asked here and answered here: nothing until the first ask. */
   const thread = createdFrom === null ? [] : chat.messages.slice(createdFrom)
 
-  return <Shell head={<div className="panel-head routine-detail-head">
-    <button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Routines</span></button>
-    <h2>New routine</h2>
-    <p>Describe the task and schedule. Milo will turn your request into a routine.</p>
-  </div>}>
+  return <Shell head={<PageHeader
+    back={<button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Routines</span></button>}
+    title="New routine"
+    description="Describe the task and schedule. Milo will turn your request into a routine."
+  />}>
     <div className="routine-create-form">
       <Field className="full" label="What should Milo do, and when?">
         <textarea value={ask} onChange={(event) => setAsk(event.target.value)} rows={3} placeholder="Every weekday at 8, look at the repo and tell me what moved." />

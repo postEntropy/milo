@@ -4,6 +4,7 @@ import { formatWhen, message } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
+import { PageHeader } from '../ui/PageHeader.js'
 
 type TaskItem = { id: string; content: string; completed: boolean; createdAt: number }
 type TaskList = { id: string; name: string; createdAt: number; items: TaskItem[] }
@@ -97,7 +98,7 @@ function Shell({ head, notice, onDismiss, children }: { head: ReactNode; notice:
     <div className="settings-inner">
       <div className="settings-panel-stack">
         <section className="settings-section">
-          <div className="panel-head">{head}</div>
+          {head}
           <Notice notice={notice} onDismiss={onDismiss} />
           <div className="panel-body">
             {children}
@@ -134,13 +135,11 @@ function TaskListIndex({
   return <Shell
     notice={notice}
     onDismiss={onDismiss}
-    head={<div className="tasklists-head">
-      <div>
-        <h2>Task lists</h2>
-        <p>Keep the things you and Milo are working on, together across sessions.</p>
-      </div>
-      {lists && lists.length > 0 && <div className="panel-count"><strong>{openCount}</strong><span>open</span></div>}
-    </div>}
+    head={<PageHeader
+      title="Task lists"
+      description="Keep the things you and Milo are working on, together across sessions."
+      action={lists && lists.length > 0 ? <div className="panel-count"><strong>{openCount}</strong><span>open</span></div> : undefined}
+    />}
   >
     {lists === null
       ? loadError
@@ -236,19 +235,15 @@ function TaskListDetail({
   return <Shell
     notice={notice}
     onDismiss={onDismiss}
-    head={<div className="tasklist-detail-head">
-      <button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Task lists</span></button>
-      <div className="tasklist-detail-title">
-        <div>
-          <h2 className="tasklist-detail-heading">{list.name}</h2>
-          <p>{list.items.length === 0 ? 'No tasks yet' : `${todo.length} open · ${completed.length} completed`}</p>
-        </div>
-        <div className="tasklist-actions">
-          <button className="button" type="button" onClick={() => { setRename(list.name); setRenaming(true) }}><Icon name="edit" size={14} /> Rename</button>
-          <button className="button danger" type="button" disabled={saving} onClick={removeList}><Icon name="trash" size={14} /> Delete</button>
-        </div>
-      </div>
-    </div>}
+    head={<PageHeader
+      back={<button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Task lists</span></button>}
+      title={list.name}
+      description={list.items.length === 0 ? 'No tasks yet' : `${todo.length} open · ${completed.length} completed`}
+      action={<div className="tasklist-actions">
+        <button className="button" type="button" onClick={() => { setRename(list.name); setRenaming(true) }}><Icon name="edit" size={14} /> Rename</button>
+        <button className="button danger" type="button" disabled={saving} onClick={removeList}><Icon name="trash" size={14} /> Delete</button>
+      </div>}
+    />}
   >
     {renaming && <form className="tasklist-rename" onSubmit={saveRename}>
       <Field label="List name"><input value={rename} onChange={(event) => setRename(event.target.value)} maxLength={80} /></Field>
