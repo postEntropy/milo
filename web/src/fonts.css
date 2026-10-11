@@ -1,0 +1,21 @@
+/* The two families the interface is drawn with, served from this app rather than from
+   Google: the page's CSP allows no third-party style, so the `@import` that used to sit
+   at the top of `styles.css` was blocked and every screen fell back to the system font.
+   Each file is the family's variable font, latin subset — one file covers every weight
+   the design uses, so nothing is requested that the UI does not draw. */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('./fonts/inter-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Source Serif 4';
+  font-style: normal;
+  font-weight: 200 900;
+  font-display: swap;
+  src: url('./fonts/source-serif-4-latin.woff2') format('woff2');
+}

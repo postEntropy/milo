@@ -17,14 +17,10 @@
     <!-- The theme has to be on the document before the first paint, not in a React
          effect: Safari reads the page's colour for its own bars as it paints, so a
          light first frame — the stylesheet's own default — is what leaves them
-         light. Same rule the app applies on mount, from the same key. -->
-    <script>
-      (() => {
-        const saved = localStorage.getItem('milo-theme')
-        const dark = saved === 'dark' || (saved !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
-        document.documentElement.dataset.theme = dark ? 'dark' : 'light'
-      })()
-    </script>
+         light. Served as its own file rather than inline, because the page's CSP
+         allows no inline script; same rule the app applies on mount, from the same
+         key. -->
+    <script src="/theme.js"></script>
     <link rel="icon" href="/favicon.ico" sizes="any" />
     <link rel="icon" type="image/png" href="/favicon.png" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
