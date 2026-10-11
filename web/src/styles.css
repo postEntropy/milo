@@ -1053,11 +1053,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      than the screen and scroll. */
   .messages, .settings-workspace, .chat-view { flex: 1 0 auto; min-height: auto; }
   .messages, .settings-workspace { overflow: visible; }
-  /* Held at the foot of the screen as the page scrolls under it — and lifted clear
-     of the keyboard, which `lib/viewport.ts` measures into `--keyboard-gap`.
-     Sticky, not fixed, so it keeps its own space in the flow and the last message
-     is never hidden behind it. */
-  .composer-dock { position: sticky; z-index: 2; bottom: var(--keyboard-gap, 0); }
+  /* Pinned to the visible area, the way the floating topbar above it is: the
+     document is the scroller here, and left in its flow the composer rode the
+     page's own bounce at the end of the thread — up, then settling back with it.
+     Out of the flow, nothing the page does can move it; the keyboard still lifts
+     it, `lib/viewport.ts` measuring `--keyboard-gap`. The room the dock used to
+     hold by sitting in the flow the thread reserves instead, from the dock's own
+     height (`--composer-height`, set in `App.tsx`), so the last message is never
+     hidden behind it. */
+  .composer-dock { position: fixed; z-index: 2; inset-inline: 0; bottom: var(--keyboard-gap, 0); }
+  .chat-view { padding-bottom: var(--composer-height, 0); }
   /* An overlay is what is being read; the page behind it must not slide while it
      is up. */
   html.overlay-lock { overflow: hidden; }

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, uploadFile, withToken } from './lib/api.js'
-import { isPhone } from './lib/phone.js'
+import { isPhone, usePhone } from './lib/phone.js'
 import { randomUUID } from './lib/uuid.js'
 import { trackVisualViewport } from './lib/viewport.js'
 import { MiloSocket, type ConnectionStatus } from './lib/ws.js'
@@ -120,6 +120,8 @@ export default function App() {
   const socket = useMemo(() => new MiloSocket(), [])
   const composerRef = useRef<ComposerHandle>(null)
   const messagesRef = useRef<HTMLDivElement>(null)
+  /** The dock the composer sits in, measured so the phone's thread can clear it. */
+  const composerDockRef = useRef<HTMLDivElement>(null)
   /** Set when the person sends: their own message comes into view even from up here. */
   const followSend = useRef(false)
   /** Set when a session arrives, so opening one lands at its end, not its top. */
@@ -139,6 +141,8 @@ export default function App() {
   const pendingDeltas = useRef(new Map<string, { text: string; reasoning: string }>())
   const drawFrame = useRef<number | null>(null)
 
+  /** Whether what is showing is a phone's layout; the composer's dock reads it. */
+  const phone = usePhone()
   /** Whether the thread is at its end; when it is not, the way back shows. */
   const [atEnd, setAtEnd] = useState(true)
   /** What scrolls the thread: its own box on a wide screen, the page on a phone. */
@@ -613,6 +617,28 @@ export default function App() {
     return () => observer.disconnect()
   }, [threadScroller])
 
+  /**
+   * How tall the composer is, for the thread to keep clear of it. A phone pins the
+   * dock to the visible area (see `styles.css`), out of the page's flow, so the
+   * room it used to hold by sitting in that flow is reserved here instead — and the
+   * last message still reaches above the composer rather than behind it. It follows
+   * the dock's own height, which grows with what is typed and with what the thread
+   * is waiting on.
+   */
+  useEffect(() => {
+    const el = composerDockRef.current
+    if (!phone || view !== 'chat' || !el) return
+    const root = document.documentElement
+    const measure = (): void => { root.style.setProperty('--composer-height', `${el.offsetHeight}px`) }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => {
+      observer.disconnect()
+      root.style.removeProperty('--composer-height')
+    }
+  }, [phone, view])
+
   useEffect(() => () => {
     if (drawFrame.current !== null) cancelAnimationFrame(drawFrame.current)
   }, [])
@@ -991,7 +1017,7 @@ export default function App() {
         ? <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>{thread}</div>
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
-          <div className="composer-dock">
+          <div className="composer-dock" ref={composerDockRef}>
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
             <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={(provider) => void changeProvider(provider)} />
           </div>
