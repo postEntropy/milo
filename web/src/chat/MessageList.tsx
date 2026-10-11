@@ -226,6 +226,12 @@ export function MessageList({
     ? { id: lastAssistant.id, prompt: proseOf(lastUser), upToTurn: (messageTurns.get(lastUser.id) ?? 1) - 1 }
     : undefined
 
+  // The turn in flight is the last thing said, so while one runs its own row is the one
+  // that has not finished: the controls that act on a finished answer — copy, fork,
+  // regenerate — wait for it instead of standing under words still being written.
+  let runningId: string | undefined
+  if (busy) for (const message of messages) if (message.role === 'assistant') runningId = message.id
+
   return <>
     <div className={`thread-inner${messages[0]?.loaded ? ' is-opened' : ''}`} aria-live="polite" aria-relevant="additions text">
       {messages.filter((m) => hasContent(m, thinking)).map((message) => (
@@ -234,6 +240,7 @@ export function MessageList({
           message={message}
           thinking={thinking}
           busy={Boolean(busy)}
+          running={message.id === runningId}
           turn={messageTurns.get(message.id) ?? 1}
           onAction={onAction}
           onFork={onFork}
@@ -303,10 +310,12 @@ function QuoteButton({ onQuote }: { onQuote?(text: string): void }) {
  * leaves every earlier one untouched, instead of reconciling the whole thread on
  * each frame.
  */
-const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onAction, onFork, onEdit, onRegenerate, onQuote, onSend, regenPrompt, regenUpToTurn }: {
+const MessageRow = memo(function MessageRow({ message, thinking, busy, running, turn, onAction, onFork, onEdit, onRegenerate, onQuote, onSend, regenPrompt, regenUpToTurn }: {
   message: ChatMessage
   thinking: boolean
   busy: boolean
+  /** The message this turn is still writing; its answer is not ready to act on. */
+  running: boolean
   turn: number
   onAction?(actionId: string, messageId?: string): void
   onFork?(upToTurn: number): void
@@ -403,7 +412,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, turn, onA
           ))}
         </div>
       )}
-      {message.role === 'assistant' && prose && message.waitingSince === undefined && (
+      {message.role === 'assistant' && prose && message.waitingSince === undefined && !running && (
         <div className="message-toolbar">
           <CopyButton text={prose} />
           {onFork && (
