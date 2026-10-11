@@ -333,9 +333,9 @@ export class WebSettings {
 
   /**
    * The agentic reading: the model is asked about mail the server has already
-   * fetched. Triage reads the unread; summarize and draft read one thread. The
-   * answer is text, and a draft is only a body — the screen puts the recipient
-   * and subject on it, from the message it is looking at.
+   * fetched. The unread summary reads the unread; summarize and draft read one
+   * thread. The answer is text, and a draft is only a body — the screen puts the
+   * recipient and subject on it, from the message it is looking at.
    */
   private async emailAssist(body: Record<string, unknown>): Promise<unknown> {
     const mode = optionalText(body.mode) ?? ''
@@ -343,13 +343,13 @@ export class WebSettings {
       throw new Error(`Unknown mail assistance "${mode || '(none)'}" — one of ${ASSIST_MODES.join(', ')}.`)
     }
 
-    if (mode === 'triage') {
+    if (mode === 'summarize-unread') {
       const found = await this.mailCall((tokens) => searchMail(tokens, 'is:unread newer_than:3d', 20))
       if (found.length === 0) return { text: 'Nothing unread in the last three days.' }
       const mail = found
         .map((message) => `- ${message.from ?? '(unknown sender)'} — ${message.subject ?? '(no subject)'}${message.snippet ? ` — ${message.snippet}` : ''}`)
         .join('\n')
-      return { text: await this.askModel('triage', mail) }
+      return { text: await this.askModel('summarize-unread', mail) }
     }
 
     const id = googleId(body.threadId)

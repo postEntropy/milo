@@ -660,7 +660,7 @@ describe('web Settings mail', () => {
     expect(result.text).toBe('It asks how you are.')
   })
 
-  it('triages the unread mail', async () => {
+  it('summarizes the unread mail', async () => {
     writeConfig()
     grantAt('none')
     gmail((url) => {
@@ -671,7 +671,7 @@ describe('web Settings mail', () => {
       return json({})
     })
     const settings = new WebSettings(buildModel('Answer Ana.'), home)
-    const result = (await settings.handle('email-assist', { mode: 'triage' })) as { text: string }
+    const result = (await settings.handle('email-assist', { mode: 'summarize-unread' })) as { text: string }
     expect(result.text).toBe('Answer Ana.')
   })
 
@@ -679,7 +679,7 @@ describe('web Settings mail', () => {
     writeConfig()
     grantAt('none')
     const settings = new WebSettings(build({}), home)
-    await expect(settings.handle('email-assist', { mode: 'translate' })).rejects.toThrow(/triage/)
+    await expect(settings.handle('email-assist', { mode: 'translate' })).rejects.toThrow(/summarize-unread/)
   })
 
   /** A stand-in for the decision model: one answer per message id. */

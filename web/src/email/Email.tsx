@@ -44,6 +44,12 @@ type Draft = { to: string; subject: string; body: string; threadId?: string }
 /** A message being written from scratch, before anything is typed. */
 const EMPTY_DRAFT: Draft = { to: '', subject: '', body: '' }
 
+/** What the wait says while each reading is bought, where the answer will stand. */
+const ASSIST_WAIT: Record<'summarize-unread' | 'summarize', string> = {
+  'summarize-unread': 'Reading the unread mail…',
+  summarize: 'Reading the thread…',
+}
+
 /** The address inside a `From` header, `Ana <ana@exemplo>` reduced to `ana@exemplo`. */
 function addressOf(from: string | undefined): string {
   if (!from) return ''
@@ -115,6 +121,8 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
   const [thread, setThread] = useState<MailThread | null>(null)
   const [draft, setDraft] = useState<Draft | null>(null)
   const [assist, setAssist] = useState<{ title: string; text: string } | null>(null)
+  /** The reading in flight, by its title, so its wait stands where the answer will. */
+  const [asking, setAsking] = useState<{ title: string; label: string } | null>(null)
   const [busy, setBusy] = useState(false)
   /** Whether the next page is being fetched — the list scrolls into it on its own. */
   const [pageLoading, setPageLoading] = useState(false)
@@ -408,15 +416,17 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
   }
 
   /** The agentic layer: the model reads what is on screen and answers about it. */
-  async function ask(mode: 'triage' | 'summarize', title: string, body: Record<string, unknown>): Promise<void> {
+  async function ask(mode: 'summarize-unread' | 'summarize', title: string, body: Record<string, unknown>): Promise<void> {
     setBusy(true)
     setAssist(null)
+    setAsking({ title, label: ASSIST_WAIT[mode] })
     try {
       const result = await api<{ text: string }>('email-assist', { mode, ...body })
       setAssist({ title, text: result.text })
     } catch (error) {
       setNotice({ text: message(error), error: true })
     } finally {
+      setAsking(null)
       setBusy(false)
     }
   }
@@ -454,7 +464,7 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
       <span className="panel-count-divider" />
       <button className="mail-head-action" type="button" title="Refresh" aria-label="Refresh the inbox" onClick={() => void loadInbox()}><Icon name="refresh" size={16} /></button>
       <button className="mail-head-action" type="button" title="New message" aria-label="New message" disabled={!can(access, 'compose')} onClick={() => { setDraft(EMPTY_DRAFT); onRoute('new') }}><Icon name="edit" size={16} /></button>
-      <button className="button mail-head-summarize" type="button" disabled={busy} onClick={() => void ask('triage', 'Unread summary', {})}><Icon name="spark" size={15} /> Summarize unread</button>
+      <button className="button mail-head-summarize" type="button" disabled={busy} onClick={() => void ask('summarize-unread', 'Unread summary', {})}><Icon name="spark" size={15} /> Summarize unread</button>
     </div>}
   </div>
 
@@ -493,6 +503,10 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
                 ? <ThreadView thread={thread} access={access} busy={busy} labels={labels} readingMore={readingMore} onReply={reply} onDraft={() => void draftReply()} onModify={modify} onAsk={ask} onAssign={assign} onReadMore={(mail) => void readMore(mail)} />
                 : <div className="mail-wait"><WaitLine label="Reading the thread…" /></div>
               : <Inbox inbox={visible} access={access} onOpen={(mail) => onRoute(mail.threadId)} onModify={modify} onMore={loadMore} loading={pageLoading} nextPage={nextPage} narrowed={narrowed} onClear={clearNarrowing} />}
+            {asking && <section className="mail-assist">
+              <h3>{asking.title}</h3>
+              <div className="mail-assist-wait"><WaitLine label={asking.label} /></div>
+            </section>}
             {assist && <section className="mail-assist">
               <h3>{assist.title}</h3>
               <p className="mail-assist-text">{assist.text || 'The model had nothing to add.'}</p>

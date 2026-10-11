@@ -19,12 +19,12 @@ function provider(text: string, seen: string[] = []): Provider {
 describe('the mail assistant', () => {
   it('answers with the model text, trimmed', async () => {
     const got = await emailAssist({
-      provider: provider('  Nothing needs you.\n'),
+      provider: provider('  Ana is waiting on the nota.\n'),
       model: 'm',
-      mode: 'triage',
+      mode: 'summarize-unread',
       mail: '- ana — a nota',
     })
-    expect(got).toEqual({ ok: true, text: 'Nothing needs you.' })
+    expect(got).toEqual({ ok: true, text: 'Ana is waiting on the nota.' })
   })
 
   it('treats an empty answer as a failure, not as a quiet nothing', async () => {
@@ -48,7 +48,7 @@ describe('the mail assistant', () => {
         throw new Error('connection reset')
       },
     } as unknown as Provider
-    const got = await emailAssist({ provider: broken, model: 'm', mode: 'triage', mail: 'x' })
+    const got = await emailAssist({ provider: broken, model: 'm', mode: 'summarize-unread', mail: 'x' })
     expect(got.ok).toBe(false)
     if (got.ok) return
     expect(got.error).toContain('connection reset')
