@@ -2,13 +2,15 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
 import { formatBytes, formatWhen, message, splitNames } from '../lib/format.js'
 import { CLASSIFIER_LABELS, EFFORT_LABELS, PERMISSION_LABELS, SEARCH_LABELS, skillOriginLabel } from '../lib/labels.js'
-import { normalizeModels, type ModelInfo } from '../../../src/core/providers/models.js'
+import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { Select } from '../ui/Select.js'
-import { ModelDetails } from '../ui/ModelDetails.js'
+import { usePhone } from '../lib/phone.js'
+import { settingsSections } from './sections.js'
 import { ModelPicker } from './ModelPicker.js'
+import { MobileModelSheet } from './MobileModelPicker.js'
 import { DisplayPreview } from './DisplayPreview.js'
 import { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from '@protocol'
 import { GOOGLE_SHORTCUT, GOOGLE_STEPS } from '../../../src/core/google/walkthrough.ts'
@@ -53,6 +55,46 @@ function tierOf(tiers: GoogleTier[], id: GoogleTier['id']): GoogleTier | undefin
   return tiers.find((tier) => tier.id === id)
 }
 
+function restartReasonsFor(keys: ReadonlyArray<keyof SettingsConfig>, draft: SettingsConfig, saved: SettingsConfig): string[] {
+  const reasons: string[] = []
+  if (keys.includes('browser') && JSON.stringify(draft.browser) !== JSON.stringify(saved.browser)) reasons.push('Browser')
+  if (keys.includes('web') && JSON.stringify(draft.web) !== JSON.stringify(saved.web)) reasons.push('Web host and port')
+  if (keys.includes('classifier') && JSON.stringify(draft.classifier) !== JSON.stringify(saved.classifier)) reasons.push('Reviewer model')
+  if (keys.includes('google') && JSON.stringify(draft.google) !== JSON.stringify(saved.google)) reasons.push('Google tools')
+  return reasons
+}
+
+/**
+ * The config keys each section edits, so a section can be saved, kept and put back on
+ * its own: one section's edits never ride along with another's. API keys are not in the
+ * config at all — they are stored one by one, and `secrets` holds the ones not kept yet.
+ */
+const SECTION_KEYS: Record<string, ReadonlyArray<keyof SettingsConfig>> = {
+  provider: ['provider', 'model', 'providers', 'media', 'reasoningEffort', 'maxTokens'],
+  memory: ['memory'],
+  gateways: ['gateways'],
+  web: ['web'],
+  tools: ['search', 'google', 'browser'],
+  permissions: ['permissions', 'classifier'],
+  display: ['display'],
+  sessions: ['sessions'],
+}
+
+/** Which of these keys differ between the draft and what is saved. */
+function changedKeys(draft: SettingsConfig, saved: SettingsConfig, keys: ReadonlyArray<keyof SettingsConfig>): Array<keyof SettingsConfig> {
+  return keys.filter((key) => JSON.stringify(draft[key]) !== JSON.stringify(saved[key]))
+}
+
+/** `target` with each of these keys taken from `source`, and removed where `source` has none. */
+function withKeys(target: SettingsConfig, source: SettingsConfig, keys: ReadonlyArray<keyof SettingsConfig>): SettingsConfig {
+  const next = structuredClone(target) as unknown as Record<string, unknown>
+  for (const key of keys) {
+    if (source[key] === undefined) delete next[key]
+    else next[key] = structuredClone(source[key])
+  }
+  return next as unknown as SettingsConfig
+}
+
 type SettingsData = {
   config: SettingsConfig
   auth: Record<string, Record<string, { set: boolean; masked?: string }>>
@@ -94,8 +136,10 @@ function describeMcpServer(server: McpServer): string {
 const TOOL_DETAIL_LABELS: Record<(typeof TOOL_LEVELS)[number], string> = { full: 'Full detail', name: 'Name only', off: 'Hidden' }
 const REASONING_LABELS: Record<(typeof THINKING_LEVELS)[number], string> = { on: 'Shown', off: 'Hidden' }
 
-export function Settings({ section, conversationId, sessionId, onClose, onSessionChange, theme, onThemeChange, onDirtyChange }: {
-  section: string
+export function Settings({ section, onSection, conversationId, sessionId, onClose, onSessionChange, theme, onThemeChange, onDirtyChange }: {
+  /** The open section; null is the index of them, which a phone shows and a wide screen replaces with the first. */
+  section: string | null
+  onSection(section: string | null): void
   conversationId: string
   sessionId: string
   onClose(): void
@@ -123,12 +167,15 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   const [mcp, setMcp] = useState<McpReport | null>(null)
   const [browsers, setBrowsers] = useState<Browser[] | null>(null)
   const [profiles, setProfiles] = useState<Profile[] | null>(null)
+  const [modelSheetOpen, setModelSheetOpen] = useState(false)
+  const phone = usePhone()
+  const current = section ?? (phone ? null : 'provider')
 
   const reload = useCallback(async (): Promise<void> => {
     try {
       const result = await api<SettingsData>('overview')
       setData(result)
-      setDraft({ ...structuredClone(result.config), media: { audio: 'whisper-large-v3-turbo', ...result.config.media } })
+      setDraft(structuredClone(result.config))
     } catch (error) { setNotice({ text: message(error), error: true }) }
   }, [])
 
@@ -152,7 +199,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
     catch (error) { setNotice({ text: message(error), error: true }) }
   }, [])
 
-  useEffect(() => { if (section === 'memory') void refreshNotes() }, [section, refreshNotes])
+  useEffect(() => { if (current === 'memory') void refreshNotes() }, [current, refreshNotes])
 
   // The report rides along with the overview, and a toggle answers with the new
   // one — so this only seeds the screen, it never asks a server anything.
@@ -173,33 +220,20 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   }, [])
 
   const currentProvider = draft?.provider ?? ''
-  const preset = data?.presets.find((item) => item.id === currentProvider)
-  const models = preset?.models ?? []
   const browsedProvider = browsing ?? currentProvider
 
   // What the provider itself reports, through the same call the composer's model
   // menu makes, so the two pickers cannot offer different models.
   useEffect(() => {
-    if (section !== 'provider' || !browsedProvider) return
+    if (current !== 'provider' || !browsedProvider) return
     let live = true
     setCatalog(null)
     void api<ModelInfo[]>('models', { provider: browsedProvider })
       .then((list) => { if (live) setCatalog(list) })
       .catch(() => { if (live) setCatalog([]) })
     return () => { live = false }
-  }, [section, browsedProvider])
+  }, [current, browsedProvider])
 
-  /** The catalog, the preset's own list, and whatever is set now, in that order. */
-  const modelOptions = (() => {
-    const byId = new Map<string, ModelInfo>()
-    for (const item of normalizeModels(catalog ?? [])) byId.set(item.id, item)
-    for (const item of normalizeModels(models)) if (!byId.has(item.id)) byId.set(item.id, item)
-    if (draft?.model && !byId.has(draft.model)) {
-      const [selected] = normalizeModels([draft.model])
-      if (selected) byId.set(selected.id, selected)
-    }
-    return [...byId]
-  })()
 
   const saved = data?.config
   // What the running process cannot take on now, named one by one so the notice
@@ -217,9 +251,65 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
   ]
   const requiresRestart = restartReasons.length > 0
 
-  useEffect(() => {
-    onDirtyChange?.(Boolean(draft && saved && JSON.stringify(draft) !== JSON.stringify(saved)))
-  }, [draft, saved, onDirtyChange])
+  /** Whether a given section has unsaved edits in the draft. */
+  const isSectionDirty = useCallback((id: string | null): boolean => {
+    if (!id || !saved || !draft) return false
+    if (id === 'keys') return Object.keys(secrets).length > 0
+    const keys = SECTION_KEYS[id]
+    if (!keys) return false
+    return changedKeys(draft, saved, keys).length > 0
+  }, [draft, saved, secrets])
+
+  const sectionDirty = isSectionDirty(current)
+  const anyDirty = settingsSections.some(([id]) => isSectionDirty(id))
+
+  useEffect(() => { onDirtyChange?.(anyDirty) }, [anyDirty, onDirtyChange])
+
+  /** Discards unsaved edits in the currently viewed section. */
+  function discardCurrent(): void {
+    if (!saved || !current) return
+    if (current === 'keys') {
+      setSecrets({})
+      setEditingSecret(null)
+      return
+    }
+    const keys = SECTION_KEYS[current]
+    if (!keys) return
+    setDraft((cur) => cur ? withKeys(cur, saved, keys) : cur)
+    if (current === 'provider') setBrowsing(null)
+  }
+
+  /** Saves only the currently viewed section. */
+  async function saveCurrent(): Promise<void> {
+    if (!draft || !saved || !current) return
+    setSaving(true)
+    try {
+      if (current === 'keys') {
+        for (const [slot, value] of Object.entries(secrets)) {
+          const [group, id] = slot.split(':')
+          await api('save-secret', { group, id, value })
+        }
+        setSecrets({})
+        setEditingSecret(null)
+        await load()
+        setNotice({ text: 'API keys saved.', error: false })
+      } else {
+        const keys = SECTION_KEYS[current]
+        if (!keys) return
+        const toSave = withKeys(saved, draft, keys)
+        await api('save-config', { config: toSave })
+        const reasons = restartReasonsFor(keys, draft, saved)
+        await load()
+        setNotice({
+          text: reasons.length > 0
+            ? `Settings saved. Restart the web server to apply: ${reasons.join(', ')}.`
+            : 'Settings saved.',
+          error: false,
+        })
+      }
+    } catch (error) { setNotice({ text: message(error), error: true }) }
+    finally { setSaving(false) }
+  }
 
   /**
    * Switching the provider carries its own details across — the endpoint it talks
@@ -260,22 +350,6 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
     })
   }
 
-  async function save(): Promise<void> {
-    if (!draft) return
-    setSaving(true)
-    try {
-      await api('save-config', { config: draft })
-      for (const [slot, value] of Object.entries(secrets)) {
-        const [group, id] = slot.split(':')
-        await api('save-secret', { group, id, value })
-      }
-      setSecrets({})
-      setEditingSecret(null)
-      await load()
-      setNotice({ text: requiresRestart ? `Settings saved. Restart the web server to apply: ${restartReasons.join(', ')}.` : 'Settings saved.', error: false })
-    } catch (error) { setNotice({ text: message(error), error: true }) }
-    finally { setSaving(false) }
-  }
 
   /** Writes the config straight away, for a control that acts rather than edits. */
   async function saveNow(patch: (config: SettingsConfig) => void, note: string): Promise<void> {
@@ -342,57 +416,92 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
     catch (error) { setNotice({ text: message(error), error: true }) }
   }
 
+  const notices = <>
+    <Notice notice={notice} onDismiss={() => setNotice(null)} />
+    {job.job && <JobLog job={job.job} onClose={() => job.clear()} />}
+    {requiresRestart && <p className="notice restart-notice" role="status">Restart the web server to reach the chat with: {restartReasons.join(', ')}.</p>}
+  </>
+
   return <main className="settings-workspace">
-    <div className="settings-inner">
-      {busy && <p role="status">Reading Milo’s settings…</p>}
-      {!busy && !data && <div className="notice error">{notice?.text ?? 'Could not open settings.'} <button className="button" type="button" onClick={() => void load()}>Try again</button></div>}
-      {data && draft && <>
-        <Notice notice={notice} onDismiss={() => setNotice(null)} />
-        {job.job && <JobLog job={job.job} onClose={() => job.clear()} />}
-        {requiresRestart && <p className="notice restart-notice" role="status">Restart the web server to reach the chat with: {restartReasons.join(', ')}.</p>}
+    {busy && <div className="settings-inner"><p role="status">Reading Milo’s settings…</p></div>}
+    {!busy && !data && <div className="settings-inner"><div className="notice error">{notice?.text ?? 'Could not open settings.'} <button className="button" type="button" onClick={() => void load()}>Try again</button></div></div>}
+    {data && draft && <div className="settings-layout">
+      {(!phone || current === null) && <SettingsIndex
+        current={current}
+        summary={(id) => summarize(id, draft, data, theme)}
+        isDirty={isSectionDirty}
+        onSelect={onSection}
+        onBack={onClose}
+      >{phone && notices}</SettingsIndex>}
+      {current !== null && <div className="settings-inner">
+        {phone && <header className="settings-mobile-head">
+          <button className="settings-strip-back" type="button" aria-label="Settings" title="Settings" onClick={() => onSection(null)}><Icon name="arrow-left" size={17} /></button>
+          <h1>{settingsSections.find(([id]) => id === current)?.[2]}</h1>
+        </header>}
+        {!phone && notices}
         <div className="settings-panel-stack">
-        <Section title="Provider & model" description="Choose the service that produces the replies." active={section === 'provider'}>
-          {/* The pair is chosen through two dropdowns on a phone, and through the
-              two panes below wherever there is room for them. */}
-          <div className="form-grid model-pair">
-            <Field label="Provider"><Select
-              label="Provider"
-              value={draft.provider}
-              choices={data.presets.map((item) => ({ value: item.id, label: item.name }))}
-              onChange={switchProvider}
-            /></Field>
-            <Field label="Model"><Select
-              label="Model"
-              value={draft.model}
-              choices={modelOptions.map(([id, info]) => ({
-                value: id, label: id, meta: <ModelDetails model={info} />,
-              }))}
-              onChange={pickModel}
-            /></Field>
-          </div>
-          <ModelPicker
-            presets={data.presets}
-            provider={draft.provider}
-            model={draft.model}
-            browsing={browsedProvider}
-            catalog={catalog}
-            onBrowse={setBrowsing}
-            onPick={pickModel}
-          />
-          <div className="form-grid model-url">
-            <Field className="full" label="API URL"><input value={draft.providers?.[currentProvider]?.baseURL ?? ''} onChange={(event) => update(['providers', currentProvider, 'baseURL'], event.target.value)} /></Field>
-          </div>
+        <Section title="Provider & model" description="Choose the service that produces the replies." active={current === 'provider'}>
+          {phone ? (
+            <>
+              <div className="mobile-model-card">
+                <div className="mobile-model-card-info">
+                  <span className="mobile-model-card-label">Active model</span>
+                  <span className="mobile-model-card-name">{draft.model}</span>
+                  <span className="mobile-model-card-provider">
+                    {data.presets.find((item) => item.id === draft.provider)?.name ?? draft.provider}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  className="button"
+                  onClick={() => {
+                    setBrowsing(draft.provider)
+                    setModelSheetOpen(true)
+                  }}
+                >
+                  Change
+                </button>
+              </div>
+              {modelSheetOpen && (
+                <MobileModelSheet
+                  presets={data.presets}
+                  provider={draft.provider}
+                  model={draft.model}
+                  browsing={browsedProvider}
+                  catalog={catalog}
+                  onBrowse={setBrowsing}
+                  onPick={pickModel}
+                  onClose={() => setModelSheetOpen(false)}
+                />
+              )}
+            </>
+          ) : (
+            <ModelPicker
+              presets={data.presets}
+              provider={draft.provider}
+              model={draft.model}
+              browsing={browsedProvider}
+              catalog={catalog}
+              onBrowse={setBrowsing}
+              onPick={pickModel}
+            />
+          )}
           <div className="form-grid">
+            <Field label="Reasoning effort"><Select label="Reasoning effort" value={draft.reasoningEffort} choices={EFFORT_LEVELS.map((value) => ({ value, label: EFFORT_LABELS[value] }))} onChange={(next) => update(['reasoningEffort'], next)} /><small>How hard the model thinks before it answers; every request carries it.</small></Field>
+          </div>
+          <Advanced>
+            <div className="form-grid model-url">
+            <Field className="full" label="API URL"><input value={draft.providers?.[currentProvider]?.baseURL ?? ''} onChange={(event) => update(['providers', currentProvider, 'baseURL'], event.target.value)} /></Field>
+            </div>
+            <div className="form-grid">
             <Field label="Vision model"><input value={draft.media?.vision ?? ''} placeholder="Use the main model" onChange={(event) => update(['media', 'vision'], event.target.value || undefined)} /><small>Milo checks model metadata for image input support. Set a model here if its provider does not report that.</small></Field>
             <Field label="Audio transcription model"><input value={draft.media?.audio ?? 'whisper-large-v3-turbo'} onChange={(event) => update(['media', 'audio'], event.target.value)} /><small>Groq Whisper. Add a Groq API key under API keys.</small></Field>
             <Field label="Document model"><input value={draft.media?.document ?? ''} placeholder="Use the main model" onChange={(event) => update(['media', 'document'], event.target.value || undefined)} /></Field>
-          </div>
-          <div className="form-grid">
-            <Field label="Reasoning effort"><Select label="Reasoning effort" value={draft.reasoningEffort} choices={EFFORT_LEVELS.map((value) => ({ value, label: EFFORT_LABELS[value] }))} onChange={(next) => update(['reasoningEffort'], next)} /><small>How hard the model thinks before it answers; every request carries it.</small></Field>
             <Field label="Output limit (tokens)"><input type="number" min="1" value={draft.maxTokens ?? ''} onChange={(event) => update(['maxTokens'], event.target.value ? Number(event.target.value) : undefined)} /><small>Most tokens one reply may use. Empty, the provider’s own limit applies.</small></Field>
-          </div>
+            </div>
+          </Advanced>
         </Section>
-        <Section title="API keys" description="Stored keys stay hidden. Add or replace one, then save changes below." active={section === 'keys'}>
+        <Section title="API keys" description="Stored keys stay hidden. Add or replace one, then save changes below." active={current === 'keys'}>
           <div className="secret-groups">
             {(['providers', 'audio', 'search', 'gateways'] as const).map((group) => {
               const ids = group === 'providers' ? [...new Set([...data.presets.map((item) => item.id), ...Object.keys(data.auth.providers)])].filter((id) => id !== 'groq') : group === 'audio' ? ['groq'] : group === 'search' ? ['tavily', 'exa', 'parallel'] : ['telegram', 'discord']
@@ -435,7 +544,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             })}
           </div>
         </Section>
-        <Section title="Memory" description="What Milo keeps between sessions, and how it looks it up later." active={section === 'memory'}>
+        <Section title="Memory" description="What Milo keeps between sessions, and how it looks it up later." active={current === 'memory'}>
           <div className="form-grid">
             <Field label="Recent messages kept"><input type="number" min="1" value={draft.memory.keepSaid ?? ''} onChange={(event) => update(['memory', 'keepSaid'], event.target.value ? Number(event.target.value) : undefined)} /><small>Leave empty to use Milo’s default.</small></Field>
             <Field label="Notes used per reply"><input type="number" min="1" value={draft.memory.recallLimit ?? ''} onChange={(event) => update(['memory', 'recallLimit'], event.target.value ? Number(event.target.value) : undefined)} /><small>How many memories enter each question. Empty uses the default.</small></Field>
@@ -461,13 +570,13 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             : notes.length === 0 ? <p className="list-empty">Nothing is remembered yet.</p>
             : notes.map((note) => <div className="entry-row" key={note.id}><div><div className="secret-name">{note.text}</div><div className="secret-state">{formatWhen(note.createdAt)} · {note.id.slice(0, 8)}</div></div><button className="button danger" type="button" onClick={() => void forgetNote(note.id)}>Forget</button></div>)}
         </Section>
-        <Section title="Gateways" description="Optional chat channels; tokens are stored locally." active={section === 'gateways'}>
+        <Section title="Gateways" description="Optional chat channels; tokens are stored locally." active={current === 'gateways'}>
           {(['telegram', 'discord'] as const).map((gateway) => <div key={gateway}>
             <label className="check-row"><input type="checkbox" checked={Boolean(draft.gateways[gateway]?.enabled)} onChange={(event) => update(['gateways', gateway], { enabled: event.target.checked, allowlist: draft.gateways[gateway]?.allowlist ?? [] })} /> Enable {gateway}</label>
             <Field label={`${gateway} · allowed people`}><input value={(draft.gateways[gateway]?.allowlist ?? []).join(', ')} onChange={(event) => update(['gateways', gateway], { enabled: Boolean(draft.gateways[gateway]?.enabled), allowlist: splitNames(event.target.value) })} /><small>Leave empty to allow anyone who finds the bot.</small></Field>
           </div>)}
         </Section>
-        <Section title="Web" description="The browser chat: whether it is served, and where it listens." active={section === 'web'}>
+        <Section title="Web" description="The browser chat: whether it is served, and where it listens." active={current === 'web'}>
           <label className="check-row"><input type="checkbox" checked={draft.web.enabled} onChange={(event) => update(['web', 'enabled'], event.target.checked)} /> Serve it with <code className="mono">milo serve</code> (restart to apply)</label>
           <div className="form-grid">
             <Field label="Bind address"><input value={draft.web.host} onChange={(event) => update(['web', 'host'], event.target.value)} placeholder="127.0.0.1" /></Field>
@@ -476,7 +585,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           <p className="panel-note">Both are read when <code className="mono">milo serve</code> starts, and the URL it prints carries the token that authorizes the page. <code className="mono">milo web</code> runs this screen alone, with <code className="mono">--host</code> and <code className="mono">--port</code> overriding them for one run.</p>
           <p className="panel-note">Anything but loopback is reachable from the network, and that token is then the only thing between a stranger and this install.</p>
         </Section>
-        <Section title="Tools" description="Optional capabilities Milo can use." active={section === 'tools'}>
+        <Section title="Tools" description="Optional capabilities Milo can use." active={current === 'tools'}>
           <Field label="Web search"><Select label="Web search" value={draft.search?.provider ?? 'off'} choices={SEARCH_PROVIDERS.map((value) => ({ value, label: SEARCH_LABELS[value] }))} onChange={(next) => update(['search'], next === 'off' ? undefined : { provider: next })} /><small>Which service answers a search. Off, the web search tool is not offered at all.</small></Field>
 
           <h3 className="section-label" style={{ paddingInline: 0 }}>Google</h3>
@@ -574,18 +683,22 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           </div>
           <p className="panel-note">Every tool a server offers arrives as <code className="mono">mcp__server__tool</code>, and it asks before it runs unless the file declares it read-only. Milo starts with what each server last said its tools were and connects in the background, so a server that never answers costs nothing at startup. <span className="mono">{mcp?.file ?? '~/.milo/mcp.json'}</span> is the file; Save below does not touch it.</p>
         </Section>
-        <Section title="Permissions" description="The policy applies to tools that can cause effects." active={section === 'permissions'}>
+        <Section title="Permissions" description="The policy applies to tools that can cause effects." active={current === 'permissions'}>
           <div className="form-grid">
             <Field label="Mode"><Select label="Mode" value={draft.permissions.mode} choices={PERMISSION_MODES.map((value) => ({ value, label: PERMISSION_LABELS[value] }))} onChange={(next) => update(['permissions', 'mode'], next)} /><small>Ask confirms every tool that can cause an effect. Auto lets a reviewing model allow the safe ones. YOLO runs everything without asking.</small></Field>
-            <Field label="Reviewer threshold"><input type="number" min="0" max="1" step="0.05" value={draft.permissions.jevThreshold} onChange={(event) => update(['permissions', 'jevThreshold'], Number(event.target.value))} /><small>Danger score the reviewer tolerates: below it the tool runs, at or above it asks. Default 0.35.</small></Field>
             <Field label="Always-allowed tools"><input value={draft.permissions.allow.join(', ')} onChange={(event) => update(['permissions', 'allow'], splitNames(event.target.value))} /><small>Tool names never asked about. Beats the rules, so it is a blanket yes.</small></Field>
             <Field label="Blocked tools"><input value={draft.permissions.deny.join(', ')} onChange={(event) => update(['permissions', 'deny'], splitNames(event.target.value))} /><small>Tool names refused outright. Outranked only by YOLO.</small></Field>
+          </div>
+          <Advanced>
+            <div className="form-grid">
+            <Field label="Reviewer threshold"><input type="number" min="0" max="1" step="0.05" value={draft.permissions.jevThreshold} onChange={(event) => update(['permissions', 'jevThreshold'], Number(event.target.value))} /><small>Danger score the reviewer tolerates: below it the tool runs, at or above it asks. Default 0.35.</small></Field>
             <Field label="Classifier backend"><Select label="Classifier backend" value={draft.classifier.backend} choices={CLASSIFIER_BACKENDS.map((value) => ({ value, label: CLASSIFIER_LABELS[value] }))} onChange={(next) => update(['classifier', 'backend'], next)} /><small>Hosted rides on the chat provider; OpenAI, OpenRouter, a local Ollaya or a custom endpoint stands on its own. Applies on the next start.</small></Field>
             <Field label="Classifier model"><input value={draft.classifier.model ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'model'], event.target.value || undefined)} /><small>The model to ask, e.g. typesafe/jev, gpt-6-luna, winnow:e4b, laya. Empty uses the backend’s default.</small></Field>
             <Field label="Classifier URL"><input value={draft.classifier.url ?? ''} placeholder="backend default" onChange={(event) => update(['classifier', 'url'], event.target.value || undefined)} /><small>An endpoint of your own. Empty uses the backend default: Ollaya on 127.0.0.1:11435, or the OpenAI or OpenRouter API.</small></Field>
-          </div>
+            </div>
+          </Advanced>
         </Section>
-        <Section title="Display" description="Choose what shows in the chat and how much the model thinks." active={section === 'display'}>
+        <Section title="Display" description="Choose what shows in the chat and how much the model thinks." active={current === 'display'}>
           <DisplayPreview tools={draft.display.tools} thinking={draft.display.thinking} />
           <div className="form-grid">
             <Field label="Appearance"><Select label="Appearance" value={theme} choices={[{ value: 'system', label: 'System theme' }, { value: 'light', label: 'Light theme' }, { value: 'dark', label: 'Dark theme' }]} onChange={onThemeChange} /><small>Applies to this browser only.</small></Field>
@@ -609,7 +722,7 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             </button>
           </div>
         </Section>
-        <Section title="Skills" description="Skills are instructions the model can run. Install only what you have read and trust." active={section === 'skills'}>
+        <Section title="Skills" description="Skills are instructions the model can run. Install only what you have read and trust." active={current === 'skills'}>
           <h3 className="section-label" style={{ paddingInline: 0 }}>Installed</h3>
           {data.skills.length === 0 ? <p className="list-empty">No skills installed.</p> : data.skills.map((skill) => <div className="entry-row" key={skill.name}>
             <div><div className="secret-name">{skill.name}</div><div className="secret-state">{skill.description ? `${skillOriginLabel(skill.origin)} · ${skill.description}` : skillOriginLabel(skill.origin)}</div></div>
@@ -633,15 +746,19 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
             </div>)}
           </>}
         </Section>
-        <Section title="Sessions" description="Saved sessions, and how the transcript is kept." active={section === 'sessions'}>
+        <Section title="Sessions" description="Saved sessions, and how the transcript is kept." active={current === 'sessions'}>
           <div className="form-grid">
             <Field label="Compact when the context is (%)"><input type="number" min="1" max="100" value={Math.round(draft.sessions.compactAt * 100)} onChange={(event) => update(['sessions', 'compactAt'], Number(event.target.value) / 100)} /><small>Share of the model’s window that triggers a fold.</small></Field>
             <Field label="Turns kept verbatim"><input type="number" min="1" value={draft.sessions.keepTurns} onChange={(event) => update(['sessions', 'keepTurns'], Number(event.target.value))} /><small>Turns kept word for word when compacting; older ones are summarized.</small></Field>
-            <Field label="Fallback budget (tokens)"><input type="number" min="1024" value={draft.sessions.maxInputTokens} onChange={(event) => update(['sessions', 'maxInputTokens'], Number(event.target.value))} /><small>Used only when the model’s window is unknown.</small></Field>
-            <Field label="Context window (tokens)"><input type="number" min="1024" value={draft.sessions.contextWindow ?? ''} onChange={(event) => update(['sessions', 'contextWindow'], event.target.value ? Number(event.target.value) : undefined)} /><small>Overrides the catalog, for a model it does not know.</small></Field>
             <Field label="Sessions kept"><input type="number" min="1" value={draft.sessions.maxSessions} onChange={(event) => update(['sessions', 'maxSessions'], Number(event.target.value))} /><small>How many sessions stay on disk.</small></Field>
           </div>
           <label className="check-row"><input type="checkbox" checked={draft.sessions.compaction} onChange={(event) => update(['sessions', 'compaction'], event.target.checked)} /> Compact long sessions automatically</label>
+          <Advanced>
+            <div className="form-grid">
+            <Field label="Fallback budget (tokens)"><input type="number" min="1024" value={draft.sessions.maxInputTokens} onChange={(event) => update(['sessions', 'maxInputTokens'], Number(event.target.value))} /><small>Used only when the model’s window is unknown.</small></Field>
+            <Field label="Context window (tokens)"><input type="number" min="1024" value={draft.sessions.contextWindow ?? ''} onChange={(event) => update(['sessions', 'contextWindow'], event.target.value ? Number(event.target.value) : undefined)} /><small>Overrides the catalog, for a model it does not know.</small></Field>
+            </div>
+          </Advanced>
 
           <h3 className="section-label" style={{ paddingInline: 0 }}>Saved sessions</h3>
           {data.sessions.length === 0 ? <p className="list-empty">No saved sessions yet.</p> : data.sessions.map((session) => <div className="entry-row" key={session.id}>
@@ -656,13 +773,83 @@ export function Settings({ section, conversationId, sessionId, onClose, onSessio
           </div>)}
         </Section>
         </div>
-        <div className="settings-save">
-          <div className="save-actions"><button className="button" type="button" onClick={onClose}>Cancel</button>
-          <button className="button primary" type="button" disabled={saving} onClick={() => void save()}>{saving ? 'Saving…' : 'Save changes'}</button></div>
-        </div>
-      </>}
-    </div>
+        {sectionDirty && <div className="settings-save">
+          <div className="save-actions"><button className="button" type="button" disabled={saving} onClick={discardCurrent}>Discard</button>
+          <button className="button primary" type="button" disabled={saving} onClick={() => void saveCurrent()}>{saving ? 'Saving…' : 'Save changes'}</button></div>
+        </div>}
+      </div>}
+    </div>}
   </main>
+}
+
+/** What a section holds right now, in a few words, for its row in the index. */
+function summarize(id: string, draft: SettingsConfig, data: SettingsData, theme: string): string {
+  const keys = Object.values(data.auth).reduce((total, group) => total + Object.values(group).filter((entry) => entry.set).length, 0)
+  const gateways = Object.entries(draft.gateways).filter(([, gateway]) => gateway.enabled).map(([name]) => name)
+  switch (id) {
+    case 'provider': return `${data.presets.find((item) => item.id === draft.provider)?.name ?? draft.provider} · ${draft.model}`
+    case 'keys': return keys === 0 ? 'None set' : `${keys} set`
+    case 'memory': return `${data.memoryStats.facts} fact${data.memoryStats.facts === 1 ? '' : 's'}`
+    case 'gateways': return gateways.length === 0 ? 'Off' : gateways.join(', ')
+    case 'web': return draft.web.enabled ? `${draft.web.host}:${draft.web.port}` : 'Off'
+    case 'tools': return `Search ${SEARCH_LABELS[draft.search?.provider ?? 'off']} · Browser ${draft.browser.enabled ? 'on' : 'off'}`
+    case 'permissions': return PERMISSION_LABELS[draft.permissions.mode]
+    case 'display': return theme === 'system' ? 'System theme' : theme === 'dark' ? 'Dark theme' : 'Light theme'
+    case 'skills': return `${data.skills.length} installed`
+    default: return `${data.sessions.length} saved`
+  }
+}
+
+/**
+ * The sections as a list: a column beside the one that is open on a wide screen, and
+ * the whole screen on a phone, where picking a row opens that section by itself.
+ * It is the one place that leaves Settings, so the way back lives in its head.
+ */
+function SettingsIndex({ current, summary, isDirty, onSelect, onBack, children }: {
+  current: string | null
+  summary(id: string): string
+  isDirty(id: string): boolean
+  onSelect(id: string): void
+  onBack(): void
+  children?: ReactNode
+}) {
+  return <nav className="settings-index" aria-label="Settings sections">
+    <header className="settings-index-head">
+      <button className="settings-strip-back" type="button" aria-label="Back to chat" title="Back to chat" onClick={onBack}><Icon name="arrow-left" size={17} /></button>
+      <h1>Settings</h1>
+    </header>
+    {children}
+    <div className="settings-index-list">
+      {settingsSections.map(([id, icon, label]) => {
+        const dirty = isDirty(id)
+        return <button
+          type="button"
+          key={id}
+          className={`settings-index-row${current === id ? ' active' : ''}`}
+          aria-current={current === id ? 'page' : undefined}
+          onClick={() => onSelect(id)}
+        >
+          <Icon name={icon} size={18} />
+          <span className="settings-index-text">
+            <span className="settings-index-label-row">
+              <span className="settings-index-label">{label}</span>
+              {dirty && <span className="settings-index-dirty-dot" title="Unsaved changes" />}
+            </span>
+            <span className="settings-index-summary">{summary(id)}</span>
+          </span>
+          <Icon name="chevron" size={15} />
+        </button>
+      })}
+    </div>
+  </nav>
+}
+
+/** The settings most people never change, folded away so the ones that matter read first. */
+function Advanced({ children }: { children: ReactNode }) {
+  return <details className="settings-advanced">
+    <summary>Advanced</summary>
+    <div className="settings-advanced-body">{children}</div>
+  </details>
 }
 
 function Section({ title, description, active = false, children }: { title: string; description: string; active?: boolean; children: ReactNode }) {

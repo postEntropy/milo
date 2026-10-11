@@ -1,3 +1,5 @@
+import { useSyncExternalStore } from 'react'
+
 /**
  * The width at or under which this is a phone: the layout scrolls the document
  * there — iOS Safari shows the page behind its own bar only then (see
@@ -12,4 +14,16 @@ export const PHONE_QUERY = '(max-width: 900px)'
 /** Whether what is showing is a phone, at the moment it is asked. */
 export function isPhone(): boolean {
   return window.matchMedia(PHONE_QUERY).matches
+}
+
+/** Whether what is showing is a phone, kept current as the window changes size. */
+export function usePhone(): boolean {
+  return useSyncExternalStore(
+    (notify) => {
+      const media = window.matchMedia(PHONE_QUERY)
+      media.addEventListener('change', notify)
+      return () => media.removeEventListener('change', notify)
+    },
+    isPhone,
+  )
 }

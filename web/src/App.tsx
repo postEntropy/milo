@@ -13,6 +13,7 @@ import { Routines } from './routines/Routines.js'
 import { TaskLists } from './tasks/TaskLists.js'
 import { Email } from './email/Email.js'
 import { Settings } from './settings/Settings.js'
+import { settingsSectionFromPath } from './settings/sections.js'
 import { Panel } from './panel/Panel.js'
 import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, TranscriptPart } from '@protocol'
 import { toolText } from '../../src/gateways/tool-line.ts'
@@ -31,19 +32,6 @@ type View = 'chat' | 'settings' | 'routines' | 'tasks' | 'email'
 
 /** The address each screen lives at, so a link can be shared and Back works. */
 const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', tasks: '/tasks', email: '/email', settings: '/settings' }
-
-const settingsSections = [
-  ['provider', 'cpu', 'Provider & model'], ['keys', 'key', 'API keys'], ['memory', 'database', 'Memory'],
-  ['gateways', 'server', 'Gateways'], ['web', 'globe', 'Web'],
-  ['tools', 'settings', 'Tools'], ['permissions', 'shield', 'Permissions'], ['display', 'eye', 'Display'],
-  ['skills', 'spark', 'Skills'], ['sessions', 'history', 'Sessions'],
-] as const
-
-/** The section a settings path names, e.g. `/settings/display`; null for a plain `/settings`. */
-function settingsSectionFromPath(pathname: string): string | null {
-  const id = /^\/settings\/([a-z]+)\/?$/.exec(pathname)?.[1]
-  return id && settingsSections.some(([section]) => section === id) ? id : null
-}
 
 /** Which screen a path names; anything that is not one of them is the chat. */
 function viewFromPath(pathname: string): View {
@@ -93,14 +81,20 @@ export default function App() {
   const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium')
   const [identity, setIdentity] = useState({ provider: 'milo', providerName: 'Milo', model: '' })
   const [connection, setConnection] = useState<ConnectionStatus>({ state: 'connecting' })
-  const [view, setView] = useState<View>(() => viewFromPath(location.pathname))
+  const [view, setViewRaw] = useState<View>(() => viewFromPath(location.pathname))
   /** The Email screen's place within its own path: null inbox, `new` compose, else a thread. */
   const [emailRoute, setEmailRoute] = useState<string | null>(() => emailRouteFromPath(location.pathname))
   /** Mail that arrived since the person last looked at the inbox, for the Email tab's badge. */
   const [mailUnread, setMailUnread] = useState<{ count: number; more: boolean } | null>(null)
-  const [settingsSection, setSettingsSection] = useState(() => settingsSectionFromPath(location.pathname) ?? 'provider')
+  /** The section open in Settings; null is the index of them, which a phone shows first. */
+  const [settingsSection, setSettingsSection] = useState<string | null>(() => settingsSectionFromPath(location.pathname))
   /** Whether the settings hold edits that were never saved. */
   const [settingsDirty, setSettingsDirty] = useState(false)
+  /** Changes screen, asking first when leaving Settings would throw away edits. */
+  const setView = useCallback((next: View): void => {
+    if (view === 'settings' && next !== 'settings' && settingsDirty && !window.confirm('Discard unsaved settings changes?')) return
+    setViewRaw(next)
+  }, [view, settingsDirty])
   const [sidebarOpen, setSidebarOpen] = useState(false)
   /** The phone's session search, folded behind its own icon until it is asked for. */
   const [searchOpen, setSearchOpen] = useState(false)
@@ -276,7 +270,7 @@ export default function App() {
    */
   useEffect(() => {
     const target = view === 'settings'
-      ? `/settings/${settingsSection}`
+      ? settingsSection ? `/settings/${settingsSection}` : VIEW_PATH.settings
       : view === 'email' && emailRoute
         ? `${VIEW_PATH.email}/${encodeURIComponent(emailRoute)}`
         : VIEW_PATH[view]
@@ -284,20 +278,13 @@ export default function App() {
     // The token rides on every address the app writes, so moving between screens
     // never drops it: an icon added from any of them has to carry it home.
     const address = withToken(target)
-    // A bare `/settings` is the provider section written shorter: normalize it in
-    // place, so Back never lands on a sectionless URL that would push again.
-    if (view === 'settings' && location.pathname.replace(/\/+$/, '') === '/settings') {
-      window.history.replaceState(null, '', address)
-      return
-    }
     window.history.pushState(null, '', address)
   }, [view, settingsSection, emailRoute])
 
   useEffect(() => {
     const fromPath = (): void => {
-      setView(viewFromPath(location.pathname))
-      const section = settingsSectionFromPath(location.pathname)
-      if (section) setSettingsSection(section)
+      setViewRaw(viewFromPath(location.pathname))
+      setSettingsSection(settingsSectionFromPath(location.pathname))
       setEmailRoute(emailRouteFromPath(location.pathname))
     }
     window.addEventListener('popstate', fromPath)
@@ -374,7 +361,7 @@ export default function App() {
       pendingSend.current = null
       fail(error)
     }
-  }, [sessionId, socket, fail])
+  }, [sessionId, socket, fail, setView])
 
   const regenerate = useCallback((text: string, upToTurn: number): void => { void redo(text, upToTurn) }, [redo])
 
@@ -583,7 +570,7 @@ export default function App() {
       fail(error)
       return false
     }
-  }, [socket, fail])
+  }, [socket, fail, setView])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-render triggers, not closure values — the list has already grown by the time this runs, and the scroll follows the rendered height
   useEffect(() => {
@@ -762,7 +749,7 @@ export default function App() {
       setView('chat')
       setSidebarOpen(false)
     } catch (error) { fail(error) }
-  }, [socket, fail])
+  }, [socket, fail, setView])
 
   const forkSession = useCallback(async (upToTurn: number): Promise<void> => {
     if (!sessionId) return
@@ -785,7 +772,7 @@ export default function App() {
       setSidebarOpen(false)
       setNotice({ text: 'Branched into a new session.', error: false })
     } catch (error) { fail(error) }
-  }, [sessionId, socket, fail])
+  }, [sessionId, socket, fail, setView])
 
   const handleAction = useCallback((actionId: string, messageId?: string) => {
     if (actionId.startsWith('resume:')) {
@@ -851,7 +838,7 @@ export default function App() {
   /** Leaving the settings, which asks first when edits would be thrown away. */
   const leaveSettings = useCallback((): void => {
     if (settingsDirty && !window.confirm('Discard unsaved settings changes?')) return
-    setView('chat')
+    setViewRaw('chat')
     setSidebarOpen(false)
   }, [settingsDirty])
 
@@ -941,7 +928,7 @@ export default function App() {
 
   return <div className={`app-shell ${sidebarOpen ? 'drawer-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'chat' && panelOpen && panel && panel.tabs.length > 0 ? 'panel-open' : ''}`}>
     {sidebarOpen && <button className="sidebar-scrim" type="button" aria-label="Close menu" onClick={() => setSidebarOpen(false)} />}
-    <aside className={`sidebar ${view === 'settings' ? 'settings-mode' : ''}`} aria-label="Main navigation">
+    <aside className="sidebar" aria-label="Main navigation">
       <div className="sidebar-chat-nav">
         <div className="brand-row"><img className="brand-mark" src={miloAvatar} alt="" /><span className="brand-name" translate="no">Milo</span><button className="sidebar-toggle" type="button" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><Icon name="panel-left" size={17} /></button></div>
         <div className="sidebar-pad">
@@ -973,19 +960,12 @@ export default function App() {
           </div>
           <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /><span className="new-chat-label">New session</span></button>
           <button className="sidebar-search-toggle" type="button" title="Search sessions" aria-label="Search sessions" aria-expanded={searchOpen} onClick={() => setSearchOpen((open) => !open)}><Icon name="search" size={18} /></button>
-          <button className={`sidebar-settings-toggle ${view === 'settings' ? 'active' : ''}`} type="button" title="Settings" aria-label="Settings" onClick={() => { setView('settings'); setSidebarOpen(false) }}><Icon name="settings" size={18} /></button>
+          <button className={`sidebar-settings-toggle ${view === 'settings' ? 'active' : ''}`} type="button" title="Settings" aria-label="Settings" onClick={() => { if (view === 'settings') { leaveSettings(); return } setSettingsSection(null); setView('settings'); setSidebarOpen(false) }}><Icon name="settings" size={18} /></button>
         </div>
-      </div>
-      <div className="sidebar-settings-nav">
-        <div className="settings-nav-heading"><h2>Settings</h2><p>For this installation</p></div>
-        <button className="settings-back" type="button" onClick={leaveSettings}><Icon name="arrow-left" /><span>Back to chat</span></button>
-        <nav className="settings-nav" aria-label="Settings sections">
-          {settingsSections.map(([id, icon, label]) => <button type="button" key={id} className={`settings-nav-item ${settingsSection === id ? 'active' : ''}`} onClick={() => { setSettingsSection(id); setSidebarOpen(false) }}><Icon name={icon} /><span>{label}</span></button>)}
-        </nav>
       </div>
     </aside>
 
-    <main className={`main ${view === 'settings' ? 'has-settings-strip' : ''}`}>
+    <main className={`main ${view === 'settings' ? 'in-settings' : ''}`}>
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
         <button className="sidebar-expand" type="button" aria-label="Show sidebar" title="Show sidebar" onClick={() => setSidebarCollapsed(false)}><Icon name="panel-left" size={17} /></button>
@@ -996,24 +976,8 @@ export default function App() {
           {view === 'chat' && connection.state !== 'online' && <span className={`connection-status ${connection.state}`} title={connection.reason}><span />{connection.state === 'refused' ? 'Disconnected' : connection.state === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
         </div>
       </header>
-      {/* On a phone the sections ride in a strip under the topbar instead of the
-          drawer, so switching costs one tap and the drawer keeps the sessions.
-          The arrow leads back to the chat — where the sessions are — since the
-          menu button stands down here. */}
-      {view === 'settings' && <div className="settings-mobile-nav">
-        <button className="settings-strip-back" type="button" aria-label="Back to chat" title="Back to chat" onClick={leaveSettings}><Icon name="arrow-left" size={17} /></button>
-        <nav className="settings-section-strip" aria-label="Settings sections">
-          {settingsSections.map(([id, icon, label]) => <button
-            type="button"
-            key={id}
-            className={`settings-strip-item ${settingsSection === id ? 'active' : ''}`}
-            aria-current={settingsSection === id ? 'true' : undefined}
-            onClick={() => setSettingsSection(id)}
-          ><Icon name={icon} size={15} /><span>{label}</span></button>)}
-        </nav>
-      </div>}
       {view === 'settings'
-        ? <Settings section={settingsSection} conversationId={conversationId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} onDirtyChange={noteDirty} />
+        ? <Settings section={settingsSection} onSection={setSettingsSection} conversationId={conversationId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} onDirtyChange={noteDirty} />
         : view === 'routines'
         ? <Routines conversationId={conversationId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : view === 'tasks'
