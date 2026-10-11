@@ -2,6 +2,7 @@ import DOMPurify from 'dompurify'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { carryingLabel } from '../../../src/core/google/label-match.js'
 import { api } from '../lib/api.js'
+import { useCopy } from '../lib/clipboard.js'
 import { formatWhen, message } from '../lib/format.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
@@ -521,8 +522,9 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
   </main>
 }
 
-/** What to do before there is anything to draw: the one command, and the levels. */
+/** What to do before there is anything to draw: the command to run, and the levels. */
 function NotConnected({ status }: { status: Status }) {
+  const { state, copy } = useCopy('milo google connect')
   return <div className="panel-empty">
     <span className="panel-empty-mark"><Icon name="mail" size={22} /></span>
     <h3>{status.kind === 'wanted' ? 'Google is on, but no account answered' : 'Connect Gmail'}</h3>
@@ -530,11 +532,19 @@ function NotConnected({ status }: { status: Status }) {
       Reading and acting on mail needs a Google account connected to this Milo. On the machine that
       runs it:
     </p>
-    <code className="mail-command">milo google connect</code>
-    <p className="panel-empty-copy">
-      It asks how much access to allow — {status.tiers.map((tier) => tier.label).join(', ')}. Reading
-      is the base, and you can reconnect for more.
-    </p>
+    <ol className="mail-setup">
+      <li className="mail-setup-item">
+        <span className="mail-setup-step">Run this command</span>
+        <span className="mail-command-row">
+          <code className="mail-command">milo google connect</code>
+          <button className="button mail-command-copy" type="button" onClick={copy}>{state === 'copied' ? 'Copied' : state === 'failed' ? 'Select it' : 'Copy'}</button>
+        </span>
+      </li>
+      <li className="mail-setup-item">
+        <span className="mail-setup-step">Choose how much access to allow</span>
+        <span className="mail-setup-note">{status.tiers.map((tier) => tier.label).join(', ')}. Reading is the base, and you can reconnect for more.</span>
+      </li>
+    </ol>
   </div>
 }
 

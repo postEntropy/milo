@@ -1,5 +1,5 @@
 /** The marks a card may wear; kept a plain union so this file stays pure. */
-export type SuggestionIcon = 'history' | 'spark' | 'file' | 'terminal' | 'settings'
+export type SuggestionIcon = 'history' | 'spark' | 'file' | 'terminal' | 'settings' | 'mail' | 'list-check' | 'repeat'
 
 export interface Suggestion {
   icon: SuggestionIcon
@@ -13,10 +13,10 @@ export interface Suggestion {
 
 /** What stands on the welcome screen when nothing better is known. */
 export const defaultSuggestions: Suggestion[] = [
-  { icon: 'file', title: 'Summarize a file', detail: 'Read and explain a document', prompt: 'Help me summarize a file in this project.' },
-  { icon: 'terminal', title: 'Investigate an error', detail: 'Step-by-step diagnosis', prompt: 'Help me investigate this build error.' },
-  { icon: 'settings', title: 'Tune Milo', detail: 'Set up the model and tools', prompt: 'I want to adjust Milo’s settings.' },
-  { icon: 'spark', title: 'Plan a change', detail: 'Break it into safe steps', prompt: 'Help me plan a change in the project.' },
+  { icon: 'mail', title: 'Triage my inbox', detail: 'Say what actually needs an answer', prompt: 'Go through my inbox and tell me what actually needs me.' },
+  { icon: 'list-check', title: 'Plan today', detail: 'Shape what is open into a short list', prompt: 'Look at my task lists and help me plan today.' },
+  { icon: 'repeat', title: 'Set up a routine', detail: 'Put a job on a schedule', prompt: 'Help me set up a routine that runs on a schedule.' },
+  { icon: 'file', title: 'Summarize a file', detail: 'Read a document back in plain words', prompt: 'Help me summarize a file in this project.' },
 ]
 
 export interface SuggestInput {

@@ -1307,6 +1307,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* The head's own text action, sized to sit with the 32px icons it stands beside. */
 .mail-head-summarize { min-height: var(--control-md); padding: 0 var(--space-6); font-size: var(--text-sm); }
 .mail-command { display: inline-block; margin: 0 0 var(--space-2); border-radius: var(--radius-sm); background: var(--surface-warm); padding: var(--space-5) var(--space-7); color: var(--fg-2); font: var(--text-sm) var(--font-mono); }
+/* The connect steps: numbered and left-aligned inside the centred empty state, so the
+   command reads as something to run rather than a paragraph to parse through. */
+.mail-setup { display: flex; max-width: 360px; flex-direction: column; gap: var(--space-7); margin: 0; padding: 0; list-style: none; text-align: start; counter-reset: mail-step; }
+.mail-setup > .mail-setup-item { display: flex; flex-direction: column; gap: var(--space-4); }
+.mail-setup-step { display: flex; align-items: center; gap: var(--space-5); color: var(--fg-2); font-size: var(--text-sm); font-weight: 500; }
+.mail-setup-step::before { counter-increment: mail-step; content: counter(mail-step); display: grid; width: 20px; height: 20px; flex: none; place-items: center; border-radius: var(--radius-pill); background: var(--surface-warm); color: var(--muted); font: var(--text-2xs) var(--font-mono); }
+.mail-setup-note { color: var(--muted); font-size: var(--text-sm); line-height: 1.55; }
+.mail-command-row { display: flex; max-width: 100%; align-items: center; gap: var(--space-4); }
+.mail-command-row .mail-command { flex: 1; min-width: 0; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mail-command-copy { min-height: var(--control-md); padding: 0 var(--space-6); font-size: var(--text-sm); }
 
 /* The inbox's own controls, above the labels: a search over what the inbox holds and
    the quick filters. The labels — Milo's, coloured — sit below as their own row, so a
