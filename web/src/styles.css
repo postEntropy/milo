@@ -192,7 +192,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    sidebar and on the lighter fill its tab takes when hovered or active. */
 .sidebar-badge { flex: none; margin-inline-start: auto; border-radius: var(--radius-pill); background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px var(--space-4); color: var(--fg); font: var(--text-2xs) var(--font-mono); font-variant-numeric: tabular-nums; animation: fade-in var(--motion-base) var(--ease-standard) backwards; }
 .sidebar-actions { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-7) var(--space-7); }
-.new-chat { display: flex; width: auto; flex: 1; min-height: var(--control-lg); align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--surface-raised); padding: 0 var(--space-7); color: var(--fg-2); font-size: var(--text-sm); font-weight: 500; transition: background var(--motion-fast); }
+/* The two rows the sidebar is for — the way into a session, and the sessions themselves
+   below — take the sidebar's own small step rather than the base UI size: both are one
+   line to scan in a column, and at the base size the column read heavier than the
+   content it indexes. */
+.new-chat { display: flex; width: auto; flex: 1; min-height: var(--control-lg); align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--surface-raised); padding: 0 var(--space-7); color: var(--fg-2); font-size: var(--text-xs); font-weight: 500; transition: background var(--motion-fast); }
 .new-chat:hover { background: var(--border-soft); }
 .new-chat.is-hidden { display: none; }
 /* The search folds behind the magnifier at the end of the row at every width, so the
@@ -243,7 +247,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-row:focus-visible { outline: 0; }
 .session-content { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--space-2); }
 .session-title, .session-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-title { font-size: var(--text-sm); line-height: 1.35; }
+.session-title { font-size: var(--text-xs); line-height: 1.35; }
 .session-preview { color: var(--muted); font-size: var(--text-2xs); line-height: 1.35; }
 .session-row-actions { position: relative; display: flex; align-items: center; flex: none; }
 .session-more-btn { display: flex; align-items: center; justify-content: center; width: var(--control-sm); height: var(--control-sm); flex: none; margin-inline-end: var(--space-3); border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
@@ -1127,10 +1131,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   /* The head says which section this is; the description is what is left to add. */
   .settings-section .panel-head h2 { display: none; }
   .settings-save { bottom: max(12px, env(safe-area-inset-bottom)); }
-  /* The drawer's list and controls, one step up: at the sidebar's width on a phone, 13px
-     read too fine. Kept at the 14px the Settings screen already uses on a phone, so the
-     app still holds one mobile size rather than the sidebar inventing another. The page
-     tabs stand one step above even this — the sidebar's largest text, here as there. */
+  /* The drawer's list and controls, up from the sidebar's own small step: at the
+     sidebar's width on a phone that step reads too fine. Kept at the 15px the Settings
+     screen already uses on a phone, so the app still holds one mobile size rather than
+     the sidebar inventing another. The page tabs ride at that same size here, having no
+     room to stand above it. */
   .sidebar-tab { font-size: var(--text-md); }
   .session-title, .new-chat { font-size: var(--text-md); }
   .sidebar-search input { font-size: var(--text-md); }
