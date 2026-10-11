@@ -251,10 +251,10 @@ export default function App() {
       root.dataset.theme = theme === 'dark' || (theme === 'system' && media.matches) ? 'dark' : 'light'
       const chrome = getComputedStyle(root).getPropertyValue('--bg').trim()
       // A phone says nothing here on purpose: the tag is what fills Safari's own bar
-      // with a solid colour, and left unset Safari samples the page (the
-      // `.chrome-tint` strips) and draws the bar translucent instead — the installed
-      // app included, whose content runs under the status bar. A wide screen's
-      // browser is not what the bar question was ever about.
+      // with a solid colour, and what makes a Home Screen app's bar translucent over
+      // the page is its own key in the markup (`black-translucent`). A colour declared
+      // here could only ever answer one of the two themes. A wide screen's browser is
+      // not what the bar question was ever about.
       const solid = !isPhone()
       document.querySelectorAll('meta[name=theme-color]').forEach((meta) => {
         meta.remove()
@@ -940,10 +940,6 @@ export default function App() {
   </>
 
   return <div className={`app-shell ${sidebarOpen ? 'drawer-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'chat' && panelOpen && panel && panel.tabs.length > 0 ? 'panel-open' : ''}`}>
-    {/* The colour iOS 26 Safari reads for its own bars; see the `.chrome-tint`
-        rules. They sit off screen and take no pointer. */}
-    <div className="chrome-tint top" aria-hidden="true" />
-    <div className="chrome-tint bottom" aria-hidden="true" />
     {sidebarOpen && <button className="sidebar-scrim" type="button" aria-label="Close menu" onClick={() => setSidebarOpen(false)} />}
     <aside className={`sidebar ${view === 'settings' ? 'settings-mode' : ''}`} aria-label="Main navigation">
       <div className="sidebar-chat-nav">

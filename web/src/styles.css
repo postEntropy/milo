@@ -160,17 +160,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    shell shortens with the keys and follows the browser's pan; the moment it closes
    they are dropped, and `100dvh` at the top of the screen is the shell again. */
 .app-shell { position: relative; inset-block-start: var(--app-top, 0); display: grid; grid-template-columns: 286px minmax(0, 1fr); height: var(--app-height, 100dvh); background: var(--bg); }
-/* iOS 26 Safari stopped reading `theme-color` and now takes the colour of its own
-   status bar and address bar from the page: it samples a `position: fixed`
-   element that reaches within a few pixels of the viewport edge, is at least 80%
-   wide and at least 3px tall. Left to itself it finds the drawer — fixed, touching
-   both edges, but a different surface from the chat — and paints the bars in that
-   tone. These two strips are the sample it should find instead, painted with the
-   page's own background. All but 3px of each sits off screen, and they take no
-   pointer. */
-.chrome-tint { position: fixed; z-index: 1; inset-inline: 0; height: 12px; pointer-events: none; background: var(--bg); }
-.chrome-tint.top { top: -9px; }
-.chrome-tint.bottom { bottom: -9px; }
+/* The phone's own bars are left to themselves: no strip of ours sits at the edge for
+   Safari to take a colour from, so its bar stays its own material and the page shows
+   through it. Painting one there is what made the bar a solid band in the theme's
+   colour — the app's own background, handed over as a paint. The installed app needs
+   nothing either: `apple-mobile-web-app-status-bar-style` in the markup is what makes
+   its bar translucent over the page. */
 .sidebar { grid-column: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--surface-warm); }
 .sidebar-chat-nav, .sidebar-settings-nav { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .brand-row { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-8) var(--space-8) var(--space-7); }
@@ -1014,9 +1009,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      is. Neither ever leaves bare page showing. The rounded edge goes on the chat,
      which is the panel on top, and its own surface on the drawer is what the
      corner cuts against. */
-  /* Absolute, not fixed: Safari's sampler ignores absolutely positioned elements,
-     leaving the `.chrome-tint` strips as the only thing it can read the bar colour
-     from. It spans the whole page, but the page is locked while it is open. */
+  /* Absolute, not fixed: it spans the whole page rather than the visible part of
+     it, which is what the drawer rests behind. The page is locked while it is up. */
   .sidebar { position: absolute; z-index: 1; inset-block: 0; inset-inline-start: 0; width: var(--drawer-width); transform: none; padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom); }
   .main { grid-column: 1; z-index: 2; transition: transform var(--motion-drawer) var(--ease-standard); }
   /* Clipped while it is a panel, so the chat's own bars cannot square the corner
@@ -1028,11 +1022,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      wide as the chat travels, so the cut would open onto bare page of the same
      colour and read as a square edge. */
   .app-shell { background: var(--surface-warm); }
-  /* The strips are the sample Safari reads for its own bars, across the whole width
-     (see the base rule). With the drawer open the edge beneath them is the drawer,
-     not the chat, so they take its tone: left on `--bg` the bar sits a shade lighter
-     than the drawer, a border laid over content that is not there. */
-  .app-shell.drawer-open .chrome-tint { background: var(--surface-warm); }
   /* The shadow is what lifts the chat off the drawer; kept tight on purpose, since
      a wide one is a band across the drawer's surface rather than a shadow, which
      reads as a border left behind. The corner goes on the layer that travels over —

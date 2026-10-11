@@ -3,7 +3,6 @@
   "short_name": "Milo",
   "display": "standalone",
   "background_color": "#F5F3ED",
-  "theme_color": "#F5F3ED",
   "icons": [
     { "src": "/apple-touch-icon.png", "sizes": "180x180", "type": "image/png" }
   ]
