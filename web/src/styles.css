@@ -1152,13 +1152,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   /* The head says which section this is; the description is what is left to add. */
   .settings-section .panel-head h2 { display: none; }
   .settings-save { bottom: max(12px, env(safe-area-inset-bottom)); }
-  /* The drawer's list and controls, up from the sidebar's own small step: at the
-     sidebar's width on a phone that step reads too fine. Kept at the 15px the Settings
-     screen already uses on a phone, so the app still holds one mobile size rather than
-     the sidebar inventing another. The page tabs ride at that same size here, having no
-     room to stand above it. */
+  /* The drawer's controls, up from the sidebar's own small step: at the sidebar's
+     width on a phone that step reads too fine. Kept at the 15px the Settings screen
+     already uses on a phone, so the app still holds one mobile size rather than the
+     sidebar inventing another — the page tabs ride at that size here, having no room
+     to stand above it, and the New session button beside them. A session's own title
+     is one step under it, the size the ladder gives a row: a column of them at the
+     controls' size read as loud as the navigation over it. */
   .sidebar-tab { font-size: var(--text-md); }
-  .session-title, .new-chat { font-size: var(--text-md); }
+  .new-chat { font-size: var(--text-md); }
+  .session-title { font-size: var(--text-sm); }
   .sidebar-search input { font-size: var(--text-md); }
 }
 @media (max-width: 620px) {
