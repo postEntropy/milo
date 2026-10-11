@@ -2,7 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import type { AgentEvent } from '../src/core/agent/events.js'
 import { runAgent } from '../src/core/agent/loop.js'
-import type { ChatRequest, Message, Provider, StreamEvent } from '../src/core/providers/types.js'
+import type {
+  ChatRequest,
+  Message,
+  Provider,
+  StreamEvent,
+  ToolCallPart,
+  ToolResultPart,
+} from '../src/core/providers/types.js'
 import { ToolRegistry } from '../src/core/tools/registry.js'
 import type { Tool } from '../src/core/tools/types.js'
 import { TracedProvider, type TraceEvent } from '../src/core/traces.js'
@@ -470,6 +477,43 @@ describe('runAgent — stopping', () => {
     // The call already in flight ran and was reported; the next one never started.
     expect(events.filter((event) => event.type === 'tool-end')).toHaveLength(1)
     expect(events.some((event) => event.type === 'tool-start' && event.id === 'c2')).toBe(false)
+  })
+
+  it('answers the calls a stop never reached, so the next request is one the wires accept', async () => {
+    const provider = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'fake_read', args: { path: 'a' } },
+        { type: 'tool-call', id: 'c2', name: 'fake_read', args: { path: 'b' } },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+    ])
+    const registry = new ToolRegistry([fakeTool])
+    const controller = new AbortController()
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'read a and b' }] }]
+
+    await expect(async () => {
+      for await (const event of runAgent({
+        provider,
+        model: 'm',
+        tools: registry.specs(),
+        registry,
+        messages,
+        context: { cwd: process.cwd(), signal: controller.signal },
+      })) {
+        if (event.type === 'tool-end') controller.abort()
+      }
+    }).rejects.toThrow('the turn was stopped')
+
+    // An assistant turn whose calls are not all answered is one every wire after
+    // it refuses, so the calls that never ran are answered as stopped: each one
+    // the model made names a result in the transcript.
+    const parts = messages.flatMap((message) => message.content)
+    const called = parts.filter((part): part is ToolCallPart => part.type === 'tool-call').map((part) => part.id)
+    const answered = parts
+      .filter((part): part is ToolResultPart => part.type === 'tool-result')
+      .map((part) => part.id)
+    expect(called).toEqual(['c1', 'c2'])
+    expect(answered).toEqual(['c1', 'c2'])
   })
 })
 

@@ -121,6 +121,14 @@ const OUT_OF_STEPS = [
 ].join(' ')
 
 /**
+ * What a call the turn never reached is answered as, when a stop lands between
+ * two of them. It is a result, not a run: the call did not happen, and the
+ * transcript has to say so — an assistant turn whose calls are not all answered
+ * is one every wire after it refuses.
+ */
+const STOPPED_CALL_RESULT = 'The turn was stopped before this call ran.'
+
+/**
  * The agent loop. Appends to `options.messages` in place so the caller's
  * conversation history stays in sync. Yields normalized events as they happen.
  */
@@ -245,7 +253,30 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       // and the provider reads `signal`; either being set is the turn stopped. A
       // call already in flight observed the same signal and is dealt with when it
       // settles.
-      if (options.signal?.aborted || options.context.signal.aborted) throw abortError()
+      if (options.signal?.aborted || options.context.signal.aborted) {
+        // The assistant message above already named every call this step made, so
+        // the ones not reached here have no result to answer them. Left that way
+        // the transcript is one the wires refuse — an assistant turn whose calls
+        // are not all answered — and the refusal outlives this turn, failing every
+        // request that follows until the history is repaired by hand. Each call
+        // that never ran is answered as stopped instead, so the history stays one
+        // the model can be sent again.
+        for (const call of toolCalls.slice(index)) {
+          messages.push({
+            role: 'tool',
+            content: [
+              {
+                type: 'tool-result',
+                id: call.id,
+                name: call.name,
+                content: STOPPED_CALL_RESULT,
+                isError: true,
+              },
+            ],
+          })
+        }
+        throw abortError()
+      }
       // A run of calls that hold no shared state is started together, then read
       // back in the order the model made them: the events stay exactly as a
       // serial run's would — a start and its end for each call, in order — so
