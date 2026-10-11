@@ -666,10 +666,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .main.in-settings .topbar-title { display: none; }
 .settings-index-list { display: flex; flex-direction: column; gap: var(--space-1); }
 .settings-index-row { display: flex; align-items: center; gap: var(--space-6); width: 100%; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-4) var(--space-6); color: var(--fg-2); text-align: start; transition: background var(--motion-fast); }
-.settings-index-row > svg { flex: none; color: var(--muted); }
+.settings-index-row > svg.icon { flex: none; color: var(--muted); }
 .settings-index-row:hover, .settings-index-row.active { background: var(--surface); }
 .settings-index-row.active { color: var(--fg); }
-.settings-index-row > svg:last-child { display: none; }
+.settings-index-row > svg.icon:last-child { display: none; }
 .settings-index-text { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: var(--space-1); }
 .settings-index-label-row { display: flex; align-items: center; gap: var(--space-3); }
 .settings-index-label { font-size: var(--text-sm); font-weight: 500; }
