@@ -1100,8 +1100,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      is drawn takes taps: the rest of the strip stays see-through to the page.
      The chat names its session here, centred between the pills — the one screen
      with no heading of its own below to carry the name; every other screen names
-     itself in its own head. The per-session actions are desktop affordances. */
-  .topbar { position: fixed; z-index: 6; inset-inline: 0; top: var(--app-top, 0); min-height: 0; background: none; padding: max(8px, env(safe-area-inset-top)) 12px 8px; pointer-events: none; }
+     itself in its own head. The per-session actions are desktop affordances.
+     The safe area is not the whole status bar on iOS 26: its own blur reaches a
+     step past it, so a step of air is kept under it before the pills. */
+  .topbar { position: fixed; z-index: 6; inset-inline: 0; top: var(--app-top, 0); min-height: 0; background: none; padding: calc(max(8px, env(safe-area-inset-top)) + var(--space-4)) 12px 8px; pointer-events: none; }
   .topbar > *, .topbar-actions > * { pointer-events: auto; }
   .topbar-actions { margin-inline-start: auto; }
   .topbar-action { display: none; }
@@ -1138,8 +1140,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      its head leads back to the list, and the drawer's menu button stands down. */
   .main.in-settings .mobile-menu { display: none; }
   .settings-layout { display: block; width: 100%; }
-  .settings-layout .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 16px) 20px 0; }
-  .settings-index { position: static; width: auto; padding: calc(max(8px, env(safe-area-inset-top)) + 16px) 20px var(--space-9); border-inline-end: 0; }
+  /* The two heads these screens open with — the index, and the section it opens —
+     carry their own way back, and they sit under the same status bar the topbar's
+     pills do, so they keep the same step of air under it (see the topbar above). */
+  .settings-layout .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + var(--space-4) + 16px) 20px 0; }
+  .settings-index { position: static; width: auto; padding: calc(max(8px, env(safe-area-inset-top)) + var(--space-4) + 16px) 20px var(--space-9); border-inline-end: 0; }
   .settings-index-row { min-height: 56px; }
   .settings-index-row > svg:last-child { display: block; }
   .settings-index-label { font-size: var(--text-md); }
