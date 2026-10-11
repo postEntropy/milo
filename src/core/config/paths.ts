@@ -46,6 +46,8 @@ export const tracesFile = (): string => path.join(MILO_HOME, 'traces.jsonl')
 export const embedEngineDir = (): string => path.join(MILO_HOME, 'embed')
 /** Sessions written out to be read or handed on, one file per export. */
 export const exportsDir = (): string => path.join(MILO_HOME, 'exports')
+/** Throwaway files a turn makes for itself: scripts, temp data, anything not the person's. */
+export const scratchDir = (): string => path.join(MILO_HOME, 'scratch')
 /** The prompts Milo runs on a timer, one list for the whole install. */
 export const routinesFile = (): string => path.join(MILO_HOME, 'routines.json')
 /** Named task lists shared by every session in this Milo install. */

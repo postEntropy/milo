@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { DEFAULT_SYSTEM_PROMPT, buildSystemPrompt, formatToolSignature, type PanelFacts } from '../src/core/agent/system.js'
+import { scratchDir } from '../src/core/config/paths.js'
 import type { ToolSpec } from '../src/core/providers/types.js'
 import type { McpFacts } from '../src/core/mcp/servers.js'
 import type { GoogleState } from '../src/core/google/state.js'
@@ -75,6 +76,31 @@ describe('buildSystemPrompt', () => {
       memories: [],
     })
     expect(prompt).toContain('do not recite it back')
+  })
+
+  it('answers first and ends the turn once', () => {
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/lead with the answer/i)
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/second sign-off/i)
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/never answer a question you just asked/i)
+  })
+
+  it('will not assert an unverified fact or start heavy work unannounced', () => {
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/hardware/i)
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/gigabytes/i)
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/background process/i)
+  })
+
+  it('names the scratch space for throwaway files', () => {
+    const prompt = buildSystemPrompt({
+      base: 'BASE',
+      cwd: '/a',
+      provider: 'p',
+      model: 'm',
+      tools: [],
+      memories: [],
+    })
+    expect(prompt).toContain(scratchDir())
+    expect(prompt).toMatch(/throwaway/i)
   })
 
   it('tells the model which surface it is on', () => {

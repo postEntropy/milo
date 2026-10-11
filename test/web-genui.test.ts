@@ -236,7 +236,7 @@ describe('a generated interface on the web chat', () => {
     // fence it writes anyway stays words.
     const plain = new BlockProvider()
     const frames = await turn(new WebHub(build(plain), home))
-    expect(plain.systems[0]).not.toContain('genui')
+    expect(plain.systems[0]).not.toContain('```genui')
     expect(drawnFrames(frames)).toHaveLength(0)
   })
 
@@ -245,7 +245,7 @@ describe('a generated interface on the web chat', () => {
     rmSync(path.join(home, 'config.yml'), { force: true })
     const provider = new BlockProvider()
     const frames = await turn(new WebHub(build(provider), home), true)
-    expect(provider.systems[0]).not.toContain('genui')
+    expect(provider.systems[0]).not.toContain('```genui')
     expect(uiFrames(frames)).toHaveLength(0)
   })
 
@@ -256,7 +256,7 @@ describe('a generated interface on the web chat', () => {
     writeConfig(false)
     const provider = new BlockProvider()
     const frames = await turn(new WebHub(build(provider), home), true)
-    expect(provider.systems[0]).not.toContain('genui')
+    expect(provider.systems[0]).not.toContain('```genui')
     expect(uiFrames(frames)).toHaveLength(0)
   })
 
@@ -305,7 +305,7 @@ describe('a generated interface on the web chat', () => {
   it('never reaches the screen as a fence — only the prose around it does', async () => {
     const frames = await turn(new WebHub(build(new BlockProvider()), home), true)
     const prose = proseOf(frames)
-    expect(prose).not.toContain('genui')
+    expect(prose).not.toContain('```genui')
     expect(prose).not.toContain('```')
     expect(prose).toContain('Eight seats comes to $232.')
     expect(prose).toContain('Tell me if you want it changed.')

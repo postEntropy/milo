@@ -414,7 +414,7 @@ describe('Session compaction', () => {
     // above the fixed cost of a request — the system prompt *and* the tool
     // schemas that go beside it — and this test is about folding a transcript,
     // not about how big the catalog happens to be.
-    const { provider, session } = await compactingSession(longSeed(), { maxInputTokens: 8600 })
+    const { provider, session } = await compactingSession(longSeed(), { maxInputTokens: 9000 })
 
     expect(provider.systems.some((system) => system.includes('compress a conversation'))).toBe(true)
 
@@ -432,7 +432,7 @@ describe('Session compaction', () => {
   })
 
   it('still fits the request when the summary call fails', async () => {
-    const { provider, session, events } = await compactingSession(longSeed(), { failing: true, maxInputTokens: 8600 })
+    const { provider, session, events } = await compactingSession(longSeed(), { failing: true, maxInputTokens: 9000 })
 
     const system = provider.systems.at(-1)!
     expect(system).not.toContain('## Earlier in this conversation')
@@ -443,7 +443,7 @@ describe('Session compaction', () => {
   })
 
   it('reports what the summary cost, before the turn produces anything', async () => {
-    const { events } = await compactingSession(longSeed(), { maxInputTokens: 8600 })
+    const { events } = await compactingSession(longSeed(), { maxInputTokens: 9000 })
 
     const at = events.findIndex((event) => event.type === 'compacted')
     expect(at).toBeGreaterThanOrEqual(0)

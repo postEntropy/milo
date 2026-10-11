@@ -237,7 +237,12 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     for (const call of toolCalls) {
       parts.push({ type: 'tool-call', id: call.id, name: call.name, args: call.args })
     }
-    messages.push({ role: 'assistant', content: parts.length > 0 ? parts : [{ type: 'text', text: '' }], at: Date.now() })
+    // A step that produced nothing — no words, no thought, no call — leaves no empty
+    // assistant message behind: there is nothing to say back to it, and the turn is
+    // over anyway (no tool calls, nothing steered in).
+    if (parts.length > 0) {
+      messages.push({ role: 'assistant', content: parts, at: Date.now() })
+    }
 
     // No tool calls and nothing new to answer means the turn is over. A
     // correction that landed while this step was streaming keeps it going

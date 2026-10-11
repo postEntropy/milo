@@ -191,6 +191,30 @@ describe('runAgent', () => {
     })
   })
 
+  it('leaves no empty assistant message when a step produces nothing', async () => {
+    const provider = new ScriptedProvider([[{ type: 'done', finishReason: 'stop' }]])
+    const registry = new ToolRegistry([fakeTool])
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]
+
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider,
+      model: 'm',
+      tools: [],
+      registry,
+      messages,
+      context: { cwd: process.cwd(), signal: new AbortController().signal },
+    })) {
+      events.push(event)
+    }
+
+    expect(events.at(-1)).toMatchObject({ type: 'done' })
+    // Nothing was said and nothing was called: there is no assistant turn to store,
+    // and an empty one is a message every later request has to carry.
+    expect(messages).toHaveLength(1)
+    expect(messages[0]?.role).toBe('user')
+  })
+
   it('stops after maxSteps when the model keeps calling tools', async () => {
     const provider = new ScriptedProvider([
       [{ type: 'tool-call', id: 'c1', name: 'fake_read', args: { path: 'a' } }, { type: 'done', finishReason: 'tool_calls' }],
