@@ -451,9 +451,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .reasoning-reveal-hint { color: var(--accent); opacity: 0; transition: opacity var(--motion-fast); }
 .reasoning-reveal:hover .reasoning-reveal-hint { opacity: 1; }
 /* The wait for the model's next output, before there is anything of its own to
-   show: the glyph the terminal uses, steady, and a light that travels along the
-   word — so the row says it is working without anything blinking, and without
-   wearing the alarm colour. An output arriving takes its place. */
+   show: the glyph the terminal uses, steady, the word — which names what is being
+   waited on — and three dots breathing after it, without wearing the alarm colour.
+   The light along the word is a texture; the dots are the pulse, and a turn that is
+   working has to read as working at a glance. An output arriving takes its place. */
 .wait-line { display: flex; align-items: center; gap: var(--space-4); width: fit-content; color: var(--muted); font-size: var(--text-xs); }
 .wait-line svg.icon { flex: none; }
 .wait-label {
@@ -468,6 +469,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   from { background-position: 150% 0; }
   to { background-position: -50% 0; }
 }
+.wait-dots { display: inline-flex; gap: 3px; }
+.wait-dot { width: 3px; height: 3px; border-radius: 50%; background: currentColor; opacity: .3; animation: wait-dot 1.2s var(--ease-standard) infinite; }
+.wait-dot:nth-child(2) { animation-delay: .16s; }
+.wait-dot:nth-child(3) { animation-delay: .32s; }
+@keyframes wait-dot { 0%, 100% { opacity: .3; } 40% { opacity: 1; } }
 /* The rows a list holds while it is being read: a card per row, with the name and its
    meta standing in as bars, under the same light as the wait line. The row is drawn at
    the weight the lists themselves use, so the shape that arrives is the shape that was
