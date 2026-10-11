@@ -8,6 +8,7 @@ import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { PageHeader } from '../ui/PageHeader.js'
+import { SkeletonList } from '../ui/Skeleton.js'
 import { WaitLine } from '../ui/WaitLine.js'
 
 /**
@@ -586,7 +587,7 @@ function Inbox({
     return () => observer.disconnect()
   }, [nextPage, onMore])
 
-  if (inbox === null) return <div className="mail-wait"><WaitLine label="Reading the inbox…" /></div>
+  if (inbox === null) return <SkeletonList rows={6} label="Reading the inbox…" />
   if (inbox.length === 0) return <div className="panel-empty">
     <span className="panel-empty-mark"><Icon name="inbox" size={22} /></span>
     <h3>{narrowed ? 'Nothing matches' : 'The inbox is empty'}</h3>

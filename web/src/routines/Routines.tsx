@@ -8,6 +8,7 @@ import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { PageHeader } from '../ui/PageHeader.js'
 import { Select } from '../ui/Select.js'
+import { SkeletonList } from '../ui/Skeleton.js'
 import { MessageList, type ChatMessage } from '../chat/MessageList.js'
 import { Permissions } from '../chat/Permissions.js'
 
@@ -218,7 +219,7 @@ function RoutineList({
   >
     {routines === null ? notice?.error
       ? <div className="panel-state"><p>Could not read routines.</p><button className="button" type="button" onClick={onRetry}>Try again</button></div>
-      : <p className="list-empty">Reading routines…</p>
+      : <SkeletonList rows={4} label="Reading routines…" />
       : routines.length === 0 ? <div className="panel-empty">
         <span className="panel-empty-mark"><Icon name="repeat" size={22} /></span>
         <h3>No routines yet</h3>

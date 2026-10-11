@@ -5,6 +5,7 @@ import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { PageHeader } from '../ui/PageHeader.js'
+import { SkeletonList } from '../ui/Skeleton.js'
 
 type TaskItem = { id: string; content: string; completed: boolean; createdAt: number }
 type TaskList = { id: string; name: string; createdAt: number; items: TaskItem[] }
@@ -144,7 +145,7 @@ function TaskListIndex({
     {lists === null
       ? loadError
         ? <div className="panel-state"><p>Could not read your task lists: {loadError}</p><button className="button" type="button" onClick={onRetry}>Try again</button></div>
-        : <p className="list-empty">Reading your task lists…</p>
+        : <SkeletonList rows={3} label="Reading your task lists…" />
       : lists.length === 0
         ? <div className="panel-empty">
           <span className="panel-empty-mark"><Icon name="list-check" size={22} /></span>

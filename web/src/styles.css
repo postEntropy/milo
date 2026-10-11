@@ -31,6 +31,11 @@
   --label-plum: #8A4E86;
   --label-rose: #B44A63;
   --knob: #FFFEFA;
+  /* What a list holds while it is being read: a bar one step off the card it is drawn
+     on, and the light that travels along it. A pair of its own because the step is the
+     other way round in the dark theme — there the bar is lighter than the card. */
+  --skeleton: #EAE4D8;
+  --skeleton-sheen: #F6F3EA;
   --shadow: 0 4px 16px rgb(39 39 36 / 7%);
   --shadow-sm: 0 1px 2px rgb(39 39 36 / 7%);
   --shadow-menu: 0 12px 30px rgb(39 39 36 / 15%), 0 2px 6px rgb(39 39 36 / 7%);
@@ -131,6 +136,8 @@
   --label-plum: #C79AD0;
   --label-rose: #E88FA6;
   --knob: #EFEEE9;
+  --skeleton: #34352F;
+  --skeleton-sheen: #41423B;
   --shadow: 0 4px 18px rgb(0 0 0 / 45%);
   --shadow-sm: 0 1px 2px rgb(0 0 0 / 38%);
   --shadow-menu: 0 12px 30px rgb(0 0 0 / 55%), 0 2px 6px rgb(0 0 0 / 30%);
@@ -457,6 +464,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   from { background-position: 150% 0; }
   to { background-position: -50% 0; }
 }
+/* The rows a list holds while it is being read: a card per row, with the name and its
+   meta standing in as bars, under the same light as the wait line. The row is drawn at
+   the weight the lists themselves use, so the shape that arrives is the shape that was
+   promised. */
+.skeleton-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.skeleton-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 68px; align-items: center; gap: var(--space-6); border-radius: var(--radius-md); background: var(--surface); padding: var(--space-6) var(--space-7); }
+.skeleton-lines { display: flex; min-width: 0; flex-direction: column; gap: var(--space-3); }
+.skeleton-line, .skeleton-mark { background-image: linear-gradient(90deg, var(--skeleton) 0%, var(--skeleton) 42%, var(--skeleton-sheen) 50%, var(--skeleton) 58%, var(--skeleton) 100%); background-size: 250% 100%; animation: wait-shimmer 1.9s linear infinite; }
+.skeleton-line { height: 9px; border-radius: var(--radius-pill); }
+.skeleton-line-name { width: 34%; height: 12px; }
+.skeleton-line-meta { width: 20%; }
+.skeleton-mark { width: 44px; height: 16px; border-radius: var(--radius-sm); }
 .tool-line { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); min-height: var(--control-md); border: 1px solid var(--border-soft); border-radius: var(--radius-md); background: var(--surface); padding: var(--space-4) var(--space-6); color: var(--fg-2); font-size: var(--text-xs); }
 /* Heavier than the rest of the set on purpose: at 14px a 1.8 stroke thins to about
    a pixel, and the tool lines were reading as pencil. */
