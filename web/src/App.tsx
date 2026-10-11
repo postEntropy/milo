@@ -938,6 +938,7 @@ export default function App() {
         </div>
         <div className="session-region">
           <nav className="session-list" aria-label="Sessions">
+            <div className="section-label sidebar-sessions-label">Sessions</div>
             {historyHits && historyHits.length > 0 && <div className="history-hits">
               <div className="section-label">In past turns</div>
               {historyHits.map((hit) => <button className="history-hit" key={`${hit.session}-${hit.at}-${hit.text.slice(0, 32)}`} type="button" title={hit.session} onClick={() => void openSession(hit.session)}>

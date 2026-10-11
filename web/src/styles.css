@@ -206,6 +206,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-search.open ~ .sidebar-search-toggle { display: none; }
 .session-region { display: flex; flex: 1; min-height: 0; }
 .session-list { flex: 1; min-height: 0; overflow: auto; padding: var(--space-3) var(--space-7) var(--space-6); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+/* The three page tabs above and the sessions below are two different things: the
+   label says where the second begins, and the day labels under it read as its groups. */
+.sidebar-sessions-label { margin-top: var(--space-6); }
 .session-group + .session-group { margin-top: var(--space-4); }
 .section-label { padding: var(--space-7) var(--space-4) var(--space-3); color: var(--muted); font-size: var(--text-2xs); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
 /* What the past turns said about the search, over the matching sessions: the log
@@ -217,7 +220,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .history-hit-where { color: var(--muted); font: var(--text-2xs) var(--font-mono); }
 .session-item { position: relative; display: flex; align-items: center; width: 100%; margin: var(--space-1) 0; border-radius: var(--radius-md); background: transparent; transition: background var(--motion-fast) var(--ease-standard); }
 .session-item:hover, .session-item.menu-open { background: var(--surface); }
-.session-item.active { background: var(--surface); }
+/* The one you are in, lifted off the warm sidebar rather than merely tinted into it:
+   white and a hairline shadow say which session the chat belongs to. */
+.session-item.active { background: var(--surface-raised); box-shadow: var(--shadow-sm); }
 .session-row { display: flex; align-items: center; gap: var(--space-5); flex: 1; min-width: 0; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-4) var(--space-3) var(--space-4) var(--space-5); color: var(--fg-2); text-align: start; }
 .session-item.active .session-row { color: var(--fg); font-weight: 500; }
 /* The row's focus is the row's, not the button's: the ring wraps the whole card — the
@@ -243,6 +248,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-rename-input { width: 100%; height: 32px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); padding: var(--space-2) var(--space-4); color: var(--fg); font-size: var(--text-sm); font-family: inherit; outline: none; }
 .session-rename-input:focus { border-color: var(--accent); }
 .list-empty { padding: var(--space-7) var(--space-5); color: var(--muted); font-size: var(--text-sm); text-align: center; }
+/* In the sidebar the empty line sits where a row would — left, at the rows' own width —
+   rather than floating centred in the space the list is about to fill. */
+.session-list > .list-empty { padding: var(--space-4) var(--space-5); font-size: var(--text-xs); text-align: start; }
 /* A reading wait, centred where a list or a thread is about to be: the mail's own
    loading line, drawn with the same shimmer the chat waits with. */
 .mail-wait { display: flex; justify-content: center; padding: var(--space-7) var(--space-5); }
