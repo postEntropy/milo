@@ -2,6 +2,7 @@ import type { Message, Provider, ReasoningEffort, ToolResultPart, ToolSpec } fro
 import type { SessionsConfig } from '../config/schema.js'
 import { errorMessage } from '../../util/errors.js'
 import { logDebug, logWarn } from '../../util/log.js'
+import { fetchedPagePath, hasFetchedPage } from '../fetched.js'
 import { IMAGE_TOKENS } from '../images.js'
 
 /** Rough token estimate. Cheap on purpose: no tokenizer, ~4 chars per token. */
@@ -257,6 +258,69 @@ export function dropOldSnapshots(messages: Message[], keep = KEEP_SNAPSHOTS_IN_C
 /** The tools that answer with the page as it is, and whose answers are big. */
 function isSnapshot(name: string): boolean {
   return name === 'browser_open' || name === 'browser_snapshot' || name === 'browser_act'
+}
+
+/**
+ * How many fetched pages stay in the transcript, verbatim. A page is tens of
+ * thousands of characters and a research turn reads several; kept, they ride
+ * every later request of the session, and the oldest are no longer what the
+ * answer is being written from.
+ */
+export const KEEP_PAGES_IN_CONTEXT = 2
+
+/**
+ * Only a result this long is worth trimming. A short page says everything it has
+ * to in a line or two, and rewriting it would lose detail to save nothing.
+ */
+const PAGE_CHARS = 2000
+
+/**
+ * Forgets the body of fetched pages older than the last `keep`, leaving a line
+ * that names the file the page was kept in. `fetch_url` writes every page it
+ * reads to `~/.milo/fetched`, so the text is not lost — only lifted out of the
+ * request — and the model can read that file when it needs the detail again.
+ *
+ * A result whose page is not on disk is left alone: the fetch tool keeps none
+ * larger than it can hold, and dropping a body that cannot be handed back is the
+ * one loss this exists to avoid.
+ *
+ * Idempotent, like `dropOldImages`: the note it writes is short, so a second
+ * pass finds nothing long enough to drop.
+ */
+export function dropOldFetchedPages(messages: Message[], keep = KEEP_PAGES_IN_CONTEXT): void {
+  if (keep < 0) return
+  // Which call asked for which page, so a dropped body can name its file.
+  const urls = new Map<string, string>()
+  for (const message of messages) {
+    for (const part of message.content) {
+      if (part.type !== 'tool-call' || part.name !== 'fetch_url') continue
+      const url = urlOfFetchCall(part.args)
+      if (url) urls.set(part.id, url)
+    }
+  }
+
+  const pages: ToolResultPart[] = []
+  for (const message of messages) {
+    for (const part of message.content) {
+      if (part.type !== 'tool-result' || part.name !== 'fetch_url') continue
+      if (part.content.length <= PAGE_CHARS) continue
+      pages.push(part)
+    }
+  }
+  for (const part of pages.slice(0, Math.max(0, pages.length - keep))) {
+    const url = urls.get(part.id)
+    if (!url || !hasFetchedPage(url)) continue
+    part.content = `[page body dropped to keep the request small — the full text of ${url} is kept at ${fetchedPagePath(url)}; read it there if a detail is needed]`
+  }
+}
+
+/** The URL a `fetch_url` call carried, when it carried one. */
+function urlOfFetchCall(args: unknown): string | null {
+  if (args && typeof args === 'object' && 'url' in args) {
+    const url = (args as { url?: unknown }).url
+    if (typeof url === 'string' && url.length > 0) return url
+  }
+  return null
 }
 
 export interface SummarizeOptions {

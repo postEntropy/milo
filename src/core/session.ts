@@ -29,6 +29,7 @@ import {
   dropOldImages,
   dropOldAudio,
   dropOldSnapshots,
+  dropOldFetchedPages,
   estimateText,
   estimateTokens,
   estimateTools,
@@ -965,12 +966,13 @@ export class Session {
     // lookup only if it has not finished already.
     await this.resolving
 
-    // Pictures and page snapshots first: both are the parts of a transcript that
-    // a handful of turns can push over the ceiling on their own, and the oldest
-    // of each is no longer what the next action is chosen from.
+    // Pictures, page snapshots and fetched pages first: they are the parts of a
+    // transcript that a handful of turns can push over the ceiling on their own,
+    // and the oldest of each is no longer what the next action is chosen from.
     dropOldImages(this.messages)
     dropOldAudio(this.messages)
     dropOldSnapshots(this.messages, this.options.keepSnapshots)
+    dropOldFetchedPages(this.messages)
 
     const cut = planCut(this.messages, config.keepTurns)
     if (cut <= 0) {
@@ -1046,13 +1048,14 @@ export class Session {
     await this.resolving
     const ceiling = this.ceiling ?? config.maxInputTokens
 
-    // Before the budget is counted: pictures and page snapshots are the parts of
-    // a transcript that a handful of turns can push over the ceiling on their
-    // own, and the oldest of each is no longer what the next action is chosen
-    // from.
+    // Before the budget is counted: pictures, page snapshots and fetched pages
+    // are the parts of a transcript that a handful of turns can push over the
+    // ceiling on their own, and the oldest of each is no longer what the next
+    // action is chosen from.
     dropOldImages(this.messages)
     dropOldAudio(this.messages)
     dropOldSnapshots(this.messages, this.options.keepSnapshots)
+    dropOldFetchedPages(this.messages)
 
     // Everything a request carries that is not the transcript: the system
     // prompt, the tool schemas, the memories and the running summary. Read once

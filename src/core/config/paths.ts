@@ -17,6 +17,11 @@ export const skillsDir = (): string => path.join(MILO_HOME, 'skills')
 /** Pictures Milo's tools produced. The transcript points here instead of holding them. */
 export const imagesDir = (): string => path.join(MILO_HOME, 'images')
 /**
+ * Pages `fetch_url` read, kept so a later window is served without a second
+ * fetch — and so a page the context has let go of is not lost with it.
+ */
+export const fetchedDir = (): string => path.join(MILO_HOME, 'fetched')
+/**
  * Everything the browser owns: the profile its cookies and sign-ins live in,
  * and a Chrome Milo downloaded for itself when the machine had none. It belongs
  * to the browser Milo starts, never to the one the person is using.

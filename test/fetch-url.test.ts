@@ -1,7 +1,19 @@
+import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
+import os from 'node:os'
+import path from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { clearPageCache, fetchUrlTool } from '../src/core/tools/fetch-url.js'
 import type { ToolContext } from '../src/core/tools/types.js'
+
+// The store pages are kept in is Milo's own, so it is pointed at a scratch home
+// for the run instead of the real one — set before the module reads it, which is
+// why the import below is dynamic.
+const home = mkdtempSync(path.join(os.tmpdir(), 'milo-fetch-'))
+process.env.MILO_HOME = home
+
+const { clearPageCache, fetchUrlTool } = await import('../src/core/tools/fetch-url.js')
+const { prunePages } = await import('../src/core/fetched.js')
+const { fetchedDir } = await import('../src/core/config/paths.js')
 
 const ctx: ToolContext = { cwd: process.cwd(), signal: new AbortController().signal }
 
@@ -21,7 +33,12 @@ const stubFetch = (
 ) => vi.stubGlobal('fetch', vi.fn(async () => respond(body, init)))
 
 afterEach(() => vi.unstubAllGlobals())
-beforeEach(() => clearPageCache())
+beforeEach(() => {
+  clearPageCache()
+  // The store on disk is shared across tests otherwise: wipe it between them.
+  rmSync(fetchedDir(), { recursive: true, force: true })
+})
+afterAll(() => rmSync(home, { recursive: true, force: true }))
 
 describe('fetch_url', () => {
   it('is read-only, and says the page is untrusted', () => {
@@ -194,19 +211,38 @@ describe('fetch_url page cache', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('drops the oldest page instead of growing', async () => {
+  it('keeps a page on disk, so a later window survives the memory cache', async () => {
+    const fetchMock = vi.fn(async () => respond(doc, { type: 'text/plain' }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const first = await fetchUrlTool.execute(
+      { url: 'https://example.test/kept', limit: 30_000 },
+      ctx,
+    )
+    // As if the process had restarted: the memory cache is empty, the file is not.
+    clearPageCache()
+    const second = await fetchUrlTool.execute(
+      { url: 'https://example.test/kept', limit: 30_000, offset: 30_000 },
+      ctx,
+    )
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(first.content).toContain('continue with offset=30000')
+    expect(second.content).toHaveLength(30_000)
+  })
+
+  it('reads a page again once the store has dropped it', async () => {
     const fetchMock = vi.fn(async (input: string | URL) =>
       respond(`page of ${String(input)}`, { type: 'text/plain' }),
     )
     vi.stubGlobal('fetch', fetchMock)
 
-    await fetchUrlTool.execute({ url: 'https://example.test/a' }, ctx)
-    await fetchUrlTool.execute({ url: 'https://example.test/b' }, ctx)
-    await fetchUrlTool.execute({ url: 'https://example.test/c' }, ctx)
-    // `a` was the oldest, so it is gone and has to be read again.
-    await fetchUrlTool.execute({ url: 'https://example.test/a', offset: 5 }, ctx)
+    await fetchUrlTool.execute({ url: 'https://example.test/gone' }, ctx)
+    clearPageCache()
+    prunePages(0) // nothing is kept: the file is gone too
+    await fetchUrlTool.execute({ url: 'https://example.test/gone', offset: 5 }, ctx)
 
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 })
 

@@ -10,6 +10,7 @@ export {
   contextBudget,
   digest,
   dropOldAudio,
+  dropOldFetchedPages,
   dropOldImages,
   dropOldSnapshots,
   estimateText,

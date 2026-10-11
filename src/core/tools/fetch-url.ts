@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
+import { MAX_PAGE_CHARS, readPage, savePage } from '../fetched.js'
 import { htmlToText } from './html.js'
 import type { Tool, ToolResult } from './types.js'
 
@@ -26,8 +27,6 @@ const MAX_MB = 5
 const MAX_BYTES = MAX_MB * 1024 * 1024
 const TIMEOUT_MS = 20_000
 
-/** A page larger than this is read but not kept — the cache has to stay small. */
-const CACHE_MAX_CHARS = 1_000_000
 const CACHE_PAGES = 2
 
 /** Content types worth handing to the model as they came. */
@@ -74,10 +73,11 @@ export const fetchUrlTool: Tool<FetchUrlArgs> = {
     const offset = args.offset ?? 0
     const limit = Math.min(args.limit ?? MAX_CHARS, MAX_CHARS)
 
-    // A continuation is served from the page just read; a fresh read always
-    // goes to the network, so the cache can never answer "what does this say
-    // now?" with what it said a minute ago.
-    const kept = offset > 0 ? take(url.href) : undefined
+    // A continuation is served from the page just read, or — once the memory
+    // cache has let it go, or after a restart — from the copy on disk. A fresh
+    // read always goes to the network, so the cache can never answer "what does
+    // this say now?" with what it said a minute ago.
+    const kept = offset > 0 ? take(url.href) ?? fromStore(url.href) : undefined
     if (kept) return cut(kept, url.href, offset, limit)
 
     // The caller's stop signal, plus a ceiling of our own.
@@ -130,7 +130,8 @@ export const fetchUrlTool: Tool<FetchUrlArgs> = {
     if (!text.trim()) return { content: `(${url.href} returned no text)` }
 
     const page: Page = { text, truncated: read.truncated }
-    if (text.length <= CACHE_MAX_CHARS) keep(url.href, page)
+    if (text.length <= MAX_PAGE_CHARS) keep(url.href, page)
+    await savePage(url.href, text)
     return cut(page, url.href, offset, limit)
   },
 }
@@ -207,6 +208,17 @@ function keep(href: string, page: Page): void {
     if (oldest === undefined) break
     pages.delete(oldest)
   }
+}
+
+/**
+ * The page kept on disk as a cache entry, or undefined when there is none. It
+ * outlives the memory cache and the process, so a window asked for later — or
+ * after a restart — is served without going back to the network. Never
+ * truncated: a capped read is larger than what the store keeps at all.
+ */
+function fromStore(url: string): Page | undefined {
+  const text = readPage(url)
+  return text === null ? undefined : { text, truncated: false }
 }
 
 /** The body as text, or null when the type is something we will not guess at. */
