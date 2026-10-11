@@ -3,7 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { buildSystemPrompt } from '../src/core/agent/system.js'
-import { findHardcodedRadius, findOutlinedControls, findPortugueseCopy, sourceFiles, type Hit } from './conventions.js'
+import { findHardcodedRadius, findHardcodedType, findOutlinedControls, findPortugueseCopy, sourceFiles, type Hit } from './conventions.js'
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 
@@ -100,6 +100,21 @@ describe('corner rounding comes from the shared scale', () => {
     expect(findHardcodedRadius('a.css', '.card { border-radius: 12px; }')).toHaveLength(1)
     expect(findHardcodedRadius('a.css', '.card { border-radius: var(--radius-lg); }')).toEqual([])
     expect(findHardcodedRadius('a.css', '.dot { border-radius: 50%; }')).toEqual([])
+  })
+})
+
+describe('type sizes come from the shared ladder', () => {
+  it('writes no raw pixel size into the stylesheet', () => {
+    const hits = cssFiles.flatMap((file) => findHardcodedType(file, readFileSync(file, 'utf8')))
+
+    expect(report(hits)).toEqual([])
+  })
+
+  it('flags a raw pixel size, in the shorthand too, and leaves a token or a relative unit alone', () => {
+    expect(findHardcodedType('a.css', '.row { font-size: 12.5px; }')).toHaveLength(1)
+    expect(findHardcodedType('a.css', '.row { font: 600 11px/1.2 var(--font-body); }')).toHaveLength(1)
+    expect(findHardcodedType('a.css', '.row { font-size: var(--text-sm); }')).toEqual([])
+    expect(findHardcodedType('a.css', '.row { font-size: 1rem; }')).toEqual([])
   })
 })
 

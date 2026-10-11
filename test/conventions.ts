@@ -195,3 +195,27 @@ export function findHardcodedRadius(file: string, css: string): Hit[] {
   }
   return hits
 }
+
+const TYPE_LITERAL = /\bfont(?:-size)?\s*:\s*([^;{}]+)/gi
+
+/**
+ * A type size written as a raw pixel instead of the shared ladder. Every size the
+ * interface draws comes from `--text-*`; a relative `rem`/`em` or a `0` is not a level of
+ * it and is left alone.
+ */
+export function findHardcodedType(file: string, css: string): Hit[] {
+  const hits: Hit[] = []
+  for (const block of ruleBlocks(css)) {
+    for (const match of block.body.matchAll(TYPE_LITERAL)) {
+      const value = match[1]!.trim()
+      if (!/\d[\d.]*px/.test(value)) continue
+      hits.push({
+        file,
+        line: block.line,
+        text: block.selector,
+        detail: match[0].replace(/\s+/g, ' ').trim(),
+      })
+    }
+  }
+  return hits
+}
