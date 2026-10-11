@@ -969,7 +969,11 @@ export default function App() {
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
         <button className="sidebar-expand" type="button" aria-label="Show sidebar" title="Show sidebar" onClick={() => setSidebarCollapsed(false)}><Icon name="panel-left" size={17} /></button>
-        <div className="topbar-title"><h1>{view === 'settings' ? 'Settings' : view === 'routines' ? 'Routines' : view === 'tasks' ? 'Task lists' : view === 'email' ? 'Email' : currentSession ? sessionLabel(currentSession) : 'New session'}</h1></div>
+        {/* The bar names the chat alone: every other screen wears its own heading below,
+            and the bar saying it again was a second naming. The chat has no such heading,
+            so the name of the session it is showing lives here — and, on a phone, this is
+            the only place that names it. */}
+        <div className="topbar-title">{view === 'chat' && <h1>{currentSession ? sessionLabel(currentSession) : 'New session'}</h1>}</div>
         <div className="topbar-actions">
           {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelVisible(!panelOpen)}><Icon name="panel-right" size={18} /></button>}
           {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>}

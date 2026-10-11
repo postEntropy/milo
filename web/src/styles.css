@@ -662,8 +662,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-strip-back { display: grid; width: var(--control-md); height: var(--control-md); flex: none; place-items: center; border: 0; border-radius: var(--radius-pill); background: var(--surface-warm); color: var(--accent); transition: background var(--motion-fast); }
 .settings-strip-back:hover { background: var(--border-soft); }
 .settings-mobile-head { padding-top: 0; }
-/* The index head already names the screen; the bar would say it a second time. */
-.main.in-settings .topbar-title { display: none; }
 .settings-index-list { display: flex; flex-direction: column; gap: var(--space-1); }
 .settings-index-row { display: flex; align-items: center; gap: var(--space-6); width: 100%; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-4) var(--space-6); color: var(--fg-2); text-align: start; transition: background var(--motion-fast); }
 .settings-index-row > svg.icon { flex: none; color: var(--muted); }
@@ -1048,15 +1046,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .sidebar-scrim { position: fixed; z-index: 3; inset-block: 0; inset-inline-start: var(--drawer-width); inset-inline-end: 0; display: block; border: 0; background: transparent; }
   .mobile-menu, .topbar-new { display: grid; }
   /* The bar floats over the content instead of taking a band above it, so the
-     screen belongs to what it is showing and the buttons ride on top. Only the
-     buttons take taps: the rest of the strip stays see-through to the page.
-     Every screen names itself below — the chat in the sidebar, Settings in its
-     own nav and panel head, Routines in its panel head — and the per-session
-     actions are desktop affordances. */
+     screen belongs to what it is showing and the buttons ride on top. Only what
+     is drawn takes taps: the rest of the strip stays see-through to the page.
+     The chat names its session here, centred between the pills — the one screen
+     with no heading of its own below to carry the name; every other screen names
+     itself in its own head. The per-session actions are desktop affordances. */
   .topbar { position: fixed; z-index: 6; inset-inline: 0; top: var(--app-top, 0); min-height: 0; background: none; padding: max(8px, env(safe-area-inset-top)) 12px 8px; pointer-events: none; }
   .topbar > *, .topbar-actions > * { pointer-events: auto; }
   .topbar-actions { margin-inline-start: auto; }
-  .topbar-action, .topbar-title { display: none; }
+  .topbar-action { display: none; }
+  /* The name gives way to the pills rather than sliding under them, and it is
+     clipped rather than wrapped, so the bar stays one line — and stays see-through
+     to the thread below it. */
+  .topbar-title { max-width: min(56vw, 240px); pointer-events: none; }
+  .topbar-title h1 { font-size: var(--text-sm); font-weight: 550; color: var(--fg-2); }
   .session-more-btn { opacity: 1; }
   /* The pills ride over the thread, which scrolls under them. A frosted fill let the
      text show through and left them lost in it; solid, with a shadow to lift them,
