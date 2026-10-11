@@ -52,8 +52,8 @@
      sizes between 10 and 14px doing one job each are why text read uneven everywhere. */
   --text-2xs: 11px; /* eyebrows, micro labels, badges */
   --text-xs: 12px; /* meta, previews, notes */
-  --text-sm: 13px; /* base UI: labels, rows, buttons, prose */
-  --text-md: 14px; /* emphasized body, form fields */
+  --text-sm: 14px; /* base UI: labels, rows, buttons, prose */
+  --text-md: 15px; /* emphasized body, form fields */
   --text-lg: 17px; /* section and card headings */
   --text-xl: 22px; /* page title */
   --text-display: clamp(28px, 3.8vw, 36px); /* the welcome heading, and only it */
