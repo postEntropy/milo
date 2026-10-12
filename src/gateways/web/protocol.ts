@@ -16,8 +16,8 @@ export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
  * said here, so the page, the server and the test that reads a refusal word for word
  * are all reading the same one.
  */
-export function protocolRefusal(pageVersion: number): string {
-  return `This page speaks protocol ${pageVersion} and this server speaks ${PROTOCOL_VERSION}. Rebuild the web bundle, or restart the server, and reload.`
+export function protocolRefusal(clientVersion: number): string {
+  return `This client speaks protocol ${clientVersion} and this server speaks ${PROTOCOL_VERSION}. Update the client, or restart the server, and reconnect.`
 }
 
 export const PERMISSION_MODES = ['ask', 'auto', 'yolo'] as const

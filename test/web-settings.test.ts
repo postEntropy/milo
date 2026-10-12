@@ -91,6 +91,30 @@ function buildSwitchable(): InstanceType<typeof AgentRuntime> {
   })
 }
 
+/**
+ * A runtime where a model names its own provider, the way a real boot resolves
+ * the pair from disk — which is what `set-model` has to write back.
+ */
+function buildModelAware(): InstanceType<typeof AgentRuntime> {
+  return new AgentRuntime({
+    provider: { id: 'test', stream: async function* () {} },
+    providerFor: (model: string) => ({
+      id: model.startsWith('other/') ? 'other' : 'test',
+      stream: async function* () {},
+    }),
+    model: 'test-model',
+    system: '',
+    registry: { specs: () => [] } as never,
+    memory: {
+      remember: async () => undefined,
+      recall: async () => [],
+      list: async () => [],
+      forget: async () => false,
+    } as never,
+    cwd: home,
+  })
+}
+
 /** A runtime whose model answers with `answer`, for the mail assistant. */
 function buildModel(answer: string): InstanceType<typeof AgentRuntime> {
   return new AgentRuntime({
@@ -396,6 +420,21 @@ describe('web Settings config', () => {
     expect(readConfig()?.model).toBe('another-model')
   })
 
+  it('writes the provider with the model, because the model implies it', async () => {
+    writeTwoProviders()
+    const runtime = buildModelAware()
+    const settings = new WebSettings(runtime, home)
+
+    await settings.handle('set-model', { model: 'other/model-x' })
+
+    // The model resolved to the other provider, so the pair is written down
+    // together: the model alone would leave the file claiming a provider that
+    // does not serve it, and the next start would build the wrong one.
+    expect(runtime.provider.id).toBe('other')
+    expect(readConfig()?.model).toBe('other/model-x')
+    expect(readConfig()?.provider).toBe('other')
+  })
+
   it('sets reasoning effort on runtime and persists to config', async () => {
     writeConfig()
     const runtime = build({})
@@ -438,6 +477,24 @@ describe('web provider switching', () => {
 
     await expect(settings.handle('set-provider', { provider: 'other' })).rejects.toThrow(/no key|not configured/)
     expect(runtime.provider.id).toBe('test')
+  })
+
+  it('projects the model labels, so a client that cannot import them reads the same words', async () => {
+    writeFileSync(path.join(home, 'config.yml'), stringify({
+      provider: 'commandcode',
+      model: 'deepseek/deepseek-v4.1-flash',
+      providers: { commandcode: { baseURL: 'https://api.commandcode.ai/provider/v1' } },
+    }))
+    const settings = new WebSettings(build({}), home)
+
+    const models = await settings.handle('models', { provider: 'commandcode' }) as { id: string; label: string }[]
+
+    expect(models.length).toBeGreaterThan(0)
+    // The short name drops the vendor prefix, and the full id rides along: the
+    // phone draws the label, `/model` still takes the id.
+    const prefixed = models.find((model) => model.id.includes('/'))
+    expect(prefixed).toBeDefined()
+    expect(prefixed?.label).toBe(prefixed?.id.slice(prefixed.id.lastIndexOf('/') + 1))
   })
 })
 

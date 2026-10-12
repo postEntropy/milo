@@ -40,7 +40,6 @@ import {
   readDisplay,
   saveConfig,
   setDisplay,
-  setModel as persistModel,
   setPermissionMode,
   setProvider as persistProvider,
   setReasoningEffort,
@@ -48,6 +47,8 @@ import {
 import { browserChromeDir, browserProfilesDir, embedEngineDir, memoryDir, skillsDir } from '../../core/config/paths.js'
 import { mcpFacts } from '../../core/mcp/servers.js'
 import { toolDisplayName } from '../tool-line.js'
+import { modelNote, shortModel } from '../model-label.js'
+import { EFFORT_LEVELS, PERMISSION_MODES, THINKING_LEVELS, TOOL_LEVELS } from './protocol.js'
 import {
   ConfigSchema,
   DEFAULT_LOCAL_EMBED_MODEL,
@@ -478,6 +479,15 @@ export class WebSettings {
         writeTools: googleWriteToolNames(auth.google ?? null),
         tiers: GOOGLE_TIERS.map(({ id, label, description }) => ({ id, label, description })),
       },
+      // The values a settings screen may offer, said once here rather than copied
+      // into every client: a client draws what the server accepts, so a mode this
+      // app has never heard of still reaches the screen.
+      options: {
+        permissionModes: PERMISSION_MODES,
+        toolLevels: TOOL_LEVELS,
+        thinkingLevels: THINKING_LEVELS,
+        efforts: EFFORT_LEVELS,
+      },
     }
   }
 
@@ -571,12 +581,18 @@ export class WebSettings {
     })
   }
 
-  /** Switches the running model and writes it down, so the next turn uses it. */
+  /**
+   * Switches the running model and writes the pair down, so the next start
+   * builds what this one is running. `runtime.setModel` resolves which provider
+   * serves the model, and that provider is written with it: a model id belongs
+   * to a provider, so recording one alone would leave the file claiming a
+   * provider the model does not come from.
+   */
   private setModel(body: Record<string, unknown>): unknown {
     const model = typeof body.model === 'string' ? body.model.trim() : ''
     if (!model) throw new Error('A model id is required.')
     this.runtime.setModel(model)
-    persistModel(model)
+    persistProvider(this.runtime.provider.id, model)
     return { model }
   }
 
@@ -609,8 +625,15 @@ export class WebSettings {
   private async models(body: Record<string, unknown>): Promise<unknown> {
     const id = typeof body.provider === 'string' ? body.provider : ''
     // The same catalog `/model` reads, so the picker and the chat command cannot
-    // come to disagree about what a configured provider serves.
-    return listProviderModels(id)
+    // come to disagree about what a configured provider serves. The two labels
+    // are projected here, from the one shortening every surface shares, so a
+    // client that cannot import it — the phone — reads the same words instead of
+    // keeping a copy that would drift.
+    return (await listProviderModels(id)).map((model) => ({
+      ...model,
+      label: shortModel(model.id),
+      note: modelNote(model),
+    }))
   }
 
   private skills(): unknown {
