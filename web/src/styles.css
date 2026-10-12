@@ -408,7 +408,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .suggestion > svg:first-child { flex: none; color: var(--fg-2); }
 .suggestion-grid .suggestion > span { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--space-2); }
 .suggestion strong { font-size: var(--text-sm); font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
-.suggestion small { color: var(--muted); font-size: var(--text-xs); line-height: 1.35; overflow-wrap: anywhere; }
+.suggestion small { color: var(--muted); font-size: var(--text-2xs); line-height: 1.35; overflow-wrap: anywhere; }
 .suggestion-arrow { flex: none; color: var(--muted); }
 .message { display: flex; max-width: 940px; gap: var(--space-7); margin: 0 auto; padding: var(--space-6) 0; }
 /* The person's own message is a bubble with its controls beneath it. On a pointer

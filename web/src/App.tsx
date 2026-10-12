@@ -61,8 +61,6 @@ export default function App() {
   const [sessionId, setSessionId] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [sessions, setSessions] = useState<SessionSummary[]>([])
-  /** What Milo keeps, for the cards the welcome screen draws; null until read. */
-  const [notes, setNotes] = useState<{ text: string }[] | null>(null)
   /** Ideas the model drew for the empty home; null until they arrive. */
   const [ideas, setIdeas] = useState<{ title: string; prompt: string }[] | null>(null)
   /** The budget the request is measured against, for the meter; null until read. */
@@ -299,17 +297,6 @@ export default function App() {
     try { setSessions(await api<SessionSummary[]>('sessions')) }
     catch (error) { fail(error) }
   }, [fail])
-
-  // What Milo keeps, read while the welcome screen is what is showing — the only
-  // place the cards draw on it. A failure is quiet: the standing four still stand.
-  useEffect(() => {
-    if (messages.length > 0 || notes !== null) return
-    let live = true
-    void api<{ notes: { text: string }[] }>('memory-notes')
-      .then((result) => { if (live) setNotes(result.notes) })
-      .catch(() => { if (live) setNotes([]) })
-    return () => { live = false }
-  }, [messages.length, notes])
 
   // The budget the request is measured against — the window times the share that
   // makes Milo fold — read once per model. Same rule the core folds by, so the
@@ -961,8 +948,8 @@ export default function App() {
     .sort((a, b) => b.updatedAt - a.updatedAt)
   const sessionGroups = groupSessions(visibleSessions)
   const suggestions = useMemo(
-    () => buildSuggestions({ sessions, notes, ideas, currentId: sessionId }),
-    [sessions, notes, ideas, sessionId],
+    () => buildSuggestions({ sessions, ideas, currentId: sessionId }),
+    [sessions, ideas, sessionId],
   )
   // The size of what the model last read is the size of the conversation, which is
   // what the meter measures against the window.
@@ -976,7 +963,7 @@ export default function App() {
 
   /** The main chat's thread: prose, tools, the plan and anything the model drew. */
   const thread = <>
-    <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} />
+    <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} />
     {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
   </>
 

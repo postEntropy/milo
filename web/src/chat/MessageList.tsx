@@ -199,6 +199,7 @@ export function MessageList({
   onEdit,
   onRegenerate,
   suggestions,
+  hasIdeas,
   busy,
 }: {
   messages: ChatMessage[]
@@ -214,13 +215,17 @@ export function MessageList({
   onRegenerate?(text: string, upToTurn: number): void
   /** What the welcome screen offers; absent: the standing four. */
   suggestions?: Suggestion[]
+  /** Whether the model's ideas have replaced the standing four on the home. */
+  hasIdeas?: boolean
   busy?: boolean
 }) {
   if (messages.length === 0) return (
     <section className="empty-state" aria-labelledby="welcome-title">
       <img className="empty-brand" src={miloAvatar} alt="" />
       <h1 id="welcome-title">How can I help today?</h1>
-      <div className="suggestion-grid">
+      {/* Remounted when the ideas take over from the standing four, so the cards
+          fade in rather than the set jumping in place. */}
+      <div className="suggestion-grid" key={hasIdeas ? 'ideas' : 'standing'}>
         {(suggestions ?? defaultSuggestions).map((item) => (
           <button
             className="suggestion"

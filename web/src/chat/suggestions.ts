@@ -22,8 +22,6 @@ export const defaultSuggestions: Suggestion[] = [
 export interface SuggestInput {
   /** Saved sessions, newest first, as the sidebar lists them. */
   sessions: { id: string; title?: string; preview: string; messageCount: number; recap?: string }[]
-  /** What Milo keeps about the person, or null while it is still being read. */
-  notes: { text: string }[] | null
   /** Ideas the model drew from what Milo knows; null until they arrive. */
   ideas?: { title: string; prompt: string }[] | null
   /** The session on screen, which is never offered back to itself. */
@@ -32,29 +30,22 @@ export interface SuggestInput {
 
 /**
  * The cards on the welcome screen, drawn from what is actually here: the last
- * few conversations, opened again with one press; a way into what Milo
- * remembers; and the ideas the model drew from both. Ideas take the slots the
+ * conversation, opened again with one press, and the ideas the model drew from
+ * what Milo knows. One recent session, not several: the rest of the sidebar is a
+ * press away, so the screen spends its slots on what is new — the ideas — instead
+ * of listing what is already in front of the person. Ideas take the slots the
  * standing four would hold, and the standing four pad a shorter list, so the
  * screen is never bare and never two cards of the same thing.
  */
-export function buildSuggestions({ sessions, notes, ideas, currentId }: SuggestInput): Suggestion[] {
+export function buildSuggestions({ sessions, ideas, currentId }: SuggestInput): Suggestion[] {
   const cards: Suggestion[] = []
 
   for (const session of sessions) {
-    if (cards.length >= 3) break
+    if (cards.length >= 1) break
     if (session.id === currentId || session.messageCount === 0) continue
     const label = session.title || session.preview || session.recap
     if (!label) continue
     cards.push({ icon: 'history', title: label, detail: 'Pick up where you left off', action: `resume:${session.id}` })
-  }
-
-  if (notes && notes.length > 0) {
-    cards.push({
-      icon: 'spark',
-      title: 'What Milo remembers',
-      detail: `${notes.length} ${notes.length === 1 ? 'note' : 'notes'} about you and this project`,
-      prompt: 'What do you remember about me and this project?',
-    })
   }
 
   const generated: Suggestion[] = (ideas ?? []).map((idea) => ({

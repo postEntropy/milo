@@ -45,14 +45,6 @@ const IDEAS_NOTES_LIMIT = 200
 /** How many recent sessions are named as grounding. */
 const IDEAS_SESSIONS = 5
 
-/**
- * Whether an empty home asks for ideas. Off at the owner's request: a product
- * decision to keep the standing four and not spend the call — not the token/URL
- * fragility that was once credited here. Flip this to `true` and un-skip
- * `test/web-ideas.test.ts` to bring it back; nothing else changes.
- */
-const IDEAS_ENABLED = false
-
 export interface WebClient {
   send(frame: ServerFrame): void
 }
@@ -158,8 +150,9 @@ export class WebHub {
       jobs: this.jobsView(),
     })
     this.sendState(conversationId)
-    // Parked (see `IDEAS_ENABLED`): the standing four stand, and no call is made.
-    if (IDEAS_ENABLED && conversation.session.messages.length === 0) this.ensureIdeas()
+    // An empty home asks for ideas in the background: the page is already drawn
+    // from the standing four, which the ideas arrive to take the place of.
+    if (conversation.session.messages.length === 0) this.ensureIdeas()
   }
 
   /**

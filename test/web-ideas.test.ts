@@ -74,9 +74,7 @@ function build(
 const ideasOf = (frames: ServerFrame[]): Extract<ServerFrame, { type: 'suggestions' }>[] =>
   frames.filter((frame): frame is Extract<ServerFrame, { type: 'suggestions' }> => frame.type === 'suggestions')
 
-// Parked with `IDEAS_ENABLED` in src/gateways/web/hub.ts — un-skip when it is turned
-// back on. See `worklog.md`.
-describe.skip('ideas on the empty web home', () => {
+describe('ideas on the empty web home', () => {
   it('derives them in the background and pushes them to the page', async () => {
     const provider = new IdeaProvider()
     const hub = new WebHub(build(provider))
