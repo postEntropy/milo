@@ -26,6 +26,31 @@ const RULES: Rule[] = [
   },
   { rule: 'mkfs', pattern: /\bmkfs(\.[a-z0-9]+)?\b/, reason: 'formats a filesystem' },
   {
+    rule: 'parted-edit',
+    pattern: /\bparted\b[^;&|\n]*\s(mklabel|mkpart|resizepart|rm)\b/,
+    reason: 'changes or deletes a partition in the table',
+  },
+  {
+    rule: 'wipefs',
+    pattern: /\bwipefs\b[^;&|\n]*\s(-[a-z]*a|--all)/,
+    reason: 'erases filesystem signatures on a device',
+  },
+  {
+    rule: 'sfdisk-write',
+    pattern: /\bsfdisk\b[^;&|\n]*</,
+    reason: 'writes a partition table from stdin',
+  },
+  {
+    rule: 'sgdisk',
+    pattern: /\bsgdisk\b[^;&|\n]*\s(-[A-Za-z]*[dZo]|--(clear|zap-all|delete))/,
+    reason: 'deletes or clears entries in the partition table',
+  },
+  {
+    rule: 'blkdiscard',
+    pattern: /\bblkdiscard\b/,
+    reason: 'discards the contents of a block device',
+  },
+  {
     rule: 'dd-to-device',
     pattern: /\bdd\b[^\n]*\bof=\/dev\/(sd|nvme|hd|vd|mmcblk)/,
     reason: 'writes raw data to a disk device',
