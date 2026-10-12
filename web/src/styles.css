@@ -1171,8 +1171,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      with no heading of its own below to carry the name; every other screen names
      itself in its own head. The per-session actions are desktop affordances.
      The safe area is not the whole status bar on iOS 26: its own blur reaches a
-     step past it, so a step of air is kept under it before the pills. */
-  .topbar { position: fixed; z-index: 6; inset-inline: 0; top: var(--app-top, 0); min-height: 0; background: none; padding: calc(max(8px, env(safe-area-inset-top)) + var(--space-4)) 12px 8px; pointer-events: none; }
+     step past it, so the pills, the session title and the settings heads all keep
+     `--phone-top` of air under it — one value, so the screens cannot drift. */
+  :root { --phone-top: calc(max(8px, env(safe-area-inset-top)) + var(--space-4) + 16px); }
+  .topbar { position: fixed; z-index: 6; inset-inline: 0; top: var(--app-top, 0); min-height: 0; background: none; padding: var(--phone-top) 12px 8px; pointer-events: none; }
   .topbar > *, .topbar-actions > * { pointer-events: auto; }
   .topbar-actions { margin-inline-start: auto; }
   .topbar-action { display: none; }
@@ -1195,8 +1197,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      second tab is reachable without a swipe. */
   .panel-tab-name { max-width: 132px; padding: var(--space-5) var(--space-2) var(--space-5) var(--space-5); }
   .panel-tab-x { width: 30px; height: 34px; }
-  /* The content starts below the pills, wherever the screen's own bars put them. */
-  .messages { padding: calc(max(8px, env(safe-area-inset-top)) + 44px) 18px 8px; }
+  /* The content starts below the pills: their own line, from the same air the bar
+     above them keeps under the status bar. */
+  .messages { padding: calc(var(--phone-top) + 36px) 18px 8px; }
   /* Hug the bottom: the browser's own bar already supplies the breathing room,
      and the safe area only pushes it up when that bar has scrolled away. */
   /* No backdrop: the thread passes behind the dock and reaches the bottom edge, the
@@ -1212,8 +1215,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   /* The two heads these screens open with — the index, and the section it opens —
      carry their own way back, and they sit under the same status bar the topbar's
      pills do, so they keep the same step of air under it (see the topbar above). */
-  .settings-layout .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + var(--space-4) + 16px) 20px 0; }
-  .settings-index { position: static; width: auto; padding: calc(max(8px, env(safe-area-inset-top)) + var(--space-4) + 16px) 20px var(--space-9); border-inline-end: 0; }
+  .settings-layout .settings-inner { padding: var(--phone-top) 20px 0; }
+  .settings-index { position: static; width: auto; padding: var(--phone-top) 20px var(--space-9); border-inline-end: 0; }
   .settings-index-row { min-height: 56px; }
   /* Qualified with the icon class like the rule it overrides: the bare `svg` was one
      class lighter, so the desktop `display: none` kept winning and the arrow never
