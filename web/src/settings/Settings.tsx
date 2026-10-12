@@ -555,14 +555,22 @@ export function Settings({ section, onSection, conversationId, sessionId, onClos
           <p className="panel-note">
             {draft.memory.embedding
               ? `On — ${draft.memory.embedding.provider === 'ollama' ? 'on this machine' : 'on OpenRouter'}${draft.memory.embedding.model ? ` (${draft.memory.embedding.model})` : ''}. Restart to apply.`
-              : 'Off — recall matches words only.'}
+              : 'Off.'}
           </p>
-          <div className="button-row">
-            <button className="button" type="button" disabled={saving} onClick={() => void startJob('embed-provision')}><Icon name="download" size={14} /> Use this machine</button>
-            <button className="button" type="button" disabled={saving} onClick={() => void saveNow((config) => { config.memory.embedding = { provider: 'openrouter' } }, 'Embeddings set to OpenRouter — it uses the OpenRouter key from API keys. Restart to apply.')}>Use OpenRouter</button>
-            <button className="button danger" type="button" disabled={saving || !draft.memory.embedding} onClick={() => void saveNow((config) => { delete config.memory.embedding }, 'Embeddings off. Restart to apply.')}>Turn off</button>
+          <div className="option-list">
+            <button className="option" type="button" disabled={saving} onClick={() => void startJob('embed-provision')}>
+              <span className="option-name">Use this machine</span>
+              <span className="option-note">Downloads the engine (~1.9 GB) and a model, and runs them here. Nothing leaves this machine.</span>
+            </button>
+            <button className="option" type="button" disabled={saving} onClick={() => void saveNow((config) => { config.memory.embedding = { provider: 'openrouter' } }, 'Embeddings set to OpenRouter — it uses the OpenRouter key from API keys. Restart to apply.')}>
+              <span className="option-name">Use OpenRouter</span>
+              <span className="option-note">Uses the OpenRouter key from API keys. The notes leave this machine.</span>
+            </button>
+            <button className="option danger" type="button" disabled={saving || !draft.memory.embedding} onClick={() => void saveNow((config) => { delete config.memory.embedding }, 'Embeddings off. Restart to apply.')}>
+              <span className="option-name">Turn off</span>
+              <span className="option-note">Recall goes back to matching words only.</span>
+            </button>
           </div>
-          <p className="panel-note">Local embeddings download the engine (~1.9 GB) and a model, and run on this machine; nothing leaves it. OpenRouter sends the notes off the machine.</p>
 
           <h3 className="section-label" style={{ paddingInline: 0 }}>Notes</h3>
           {data.memoryStats && <p className="panel-note">{data.memoryStats.facts} fact{data.memoryStats.facts === 1 ? '' : 's'} · {formatBytes(data.memoryStats.bytes)} · {data.memoryStats.location}</p>}

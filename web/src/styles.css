@@ -766,6 +766,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .check-row { display: flex; min-height: var(--control-lg); align-items: center; gap: var(--space-5); border-radius: var(--radius-md); background: var(--surface); padding: var(--space-4) var(--space-6); color: var(--fg); font-size: var(--text-sm); transition: background var(--motion-fast); }
 .check-row:hover { background: var(--surface-warm); }
 .check-row input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+/* The ways a capability can be turned on, each carrying its own cost: the choice
+   says what it does and what it costs, so nothing above the list has to explain
+   the lot of them in a paragraph of its own. A filled row, like every control —
+   the whole row is the button. */
+.option-list { display: flex; flex-direction: column; gap: var(--space-4); margin-top: var(--space-5); }
+.option { display: flex; width: 100%; flex-direction: column; align-items: flex-start; gap: var(--space-2); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-5) var(--space-6); text-align: start; transition: background var(--motion-fast); }
+.option:hover { background: var(--surface-warm); }
+.option-name { color: var(--fg); font-size: var(--text-sm); font-weight: 550; }
+.option-note { color: var(--muted); font-size: var(--text-xs); line-height: 1.5; }
+.option.danger .option-name { color: var(--danger); }
 /* A setting that is not settled yet, said on the setting itself: a filled pill, the
    same shape the sidebar's count wears, because it is a word about the row and not
    something to press. */
