@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- The daemon speaks plain http and ws. The encryption is the tailnet the
+	     phone and the machine already share, so the app must be allowed to reach
+	     it by address and by name alike — a tailnet address is neither the
+	     loopback nor a private range iOS exempts on its own, and without this the
+	     socket is refused before Milo ever sees the token. -->
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+	</dict>
+	<key>CFBundleDisplayName</key>
+	<string>Milo</string>
+	<!-- Scanning the QR `milo pair` draws is how a phone is paired without typing
+	     an address or a code. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Milo uses the camera to scan the pairing code from `milo pair`.</string>
+</dict>
+</plist>
