@@ -14,6 +14,8 @@ export type Command =
   | 'google'
   | 'mcp'
   | 'web'
+  | 'pair'
+  | 'devices'
 
 /** What the command line asks for, or the message to say instead of running. */
 export function validateArgs(args: Args): string | null {
@@ -47,6 +49,8 @@ export function resolveCommand(command: string): Command | null {
     case 'google':
     case 'mcp':
     case 'web':
+    case 'pair':
+    case 'devices':
     case 'chat':
       return command
     default:

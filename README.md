@@ -260,6 +260,30 @@ One thing to know before pointing a browser at it:
 - **The frontend has to be built.** `npm run build:web` compiles `web/` into `web/dist`, which the
   server serves; after any change under `web/src` the served UI is stale until it is rebuilt.
 
+### Pairing a phone
+
+A browser you opened yourself holds the token in its URL. A phone is a different client, and is given
+an identity of its own. `milo pair` opens a six-digit code — good for two minutes, used once — and
+prints it **as a QR** (and in words, for a phone that cannot scan) with the addresses the machine
+answers on; an app redeems it at `POST /pair/claim` and is handed a token of its own, kept **hashed**
+in `~/.milo/devices.json` (`0600`), never in the clear. That token opens the same gate the install's
+own does, and taking it back closes only that device:
+
+```bash
+milo pair                  # print a QR and a code to give the app
+milo devices               # the devices paired with this Milo
+milo devices revoke <id>   # take one back — its token stops working at once
+```
+
+The QR is drawn here rather than by a package: `src/core/qr.ts` is the one symbol the product needs
+(byte mode, level M, versions 1–6), and `test/qr.test.ts` checks it against structure and a
+round-trip. A phone reaches the daemon over the network, so `web.host` has to name an address it can
+use — the machine's tailnet or LAN one, or `0.0.0.0` — and not the loopback default; the QR is only
+drawn when there is such an address. `/pair/claim` is the one route that answers without a token; the
+code is what it spends instead, and the tries are capped per address. The open code is written to
+`~/.milo/pairing.json`, which is why the terminal that prints it and the daemon that redeems it can be
+two processes.
+
 ## Documentation
 
 The deep reference lives in `docs/`:

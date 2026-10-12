@@ -8,6 +8,20 @@ export const DEFAULT_WORKING_DIRECTORY = os.homedir()
 
 export const configFile = (): string => path.join(MILO_HOME, 'config.yml')
 export const authFile = (): string => path.join(MILO_HOME, 'auth.json')
+/**
+ * The phones and other machines that have paired with this Milo, each with the
+ * hash of the token it was handed. Its own file rather than a corner of
+ * `auth.json`: it is written by the running daemon, and taking a device back must
+ * not touch the keys next door.
+ */
+export const devicesFile = (): string => path.join(MILO_HOME, 'devices.json')
+/**
+ * The one pairing code still open: the terminal that prints it writes it here,
+ * the daemon that redeems it reads it. A file because those are two processes,
+ * and 0600 like everything else under `~/.milo` — it is good for two minutes and
+ * then spent.
+ */
+export const pairingFile = (): string => path.join(MILO_HOME, 'pairing.json')
 export const memoryDir = (): string => path.join(MILO_HOME, 'memory')
 export const sessionsDir = (): string => path.join(MILO_HOME, 'sessions')
 /** One JSON per session: what that conversation was about, kept out of it. */

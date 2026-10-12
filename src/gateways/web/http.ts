@@ -12,6 +12,8 @@ import { hyperlink } from '../../util/terminal.js'
 import { parseClientFrame, PROTOCOL_VERSION, protocolRefusal, type ServerFrame } from './protocol.js'
 import { WebHub } from './hub.js'
 import { WebSettings } from './settings.js'
+import { addDevice, deviceForToken } from './devices.js'
+import { ClaimLimiter, redeemPairing } from './pair.js'
 
 const MAX_BODY = 1024 * 1024
 
@@ -95,8 +97,10 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
   const hub = new WebHub(options.runtime, options.cwd)
   const settings = new WebSettings(options.runtime, options.cwd, hub)
   const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
+  // Per server, so one daemon's failed pairings do not slow another's down.
+  const claims = new ClaimLimiter()
   const server = createServer((request, response) => {
-    void handleHttp(request, response, token, settings, hub).catch((error: unknown) => {
+    void handleHttp(request, response, token, settings, hub, claims).catch((error: unknown) => {
       if (!response.headersSent) json(response, 500, { error: error instanceof Error ? error.message : String(error) })
       else response.destroy()
     })
@@ -222,8 +226,38 @@ export function panelHeaders(mimeType: string, size: number): Record<string, str
   }
 }
 
-async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, settings: WebSettings, hub: WebHub): Promise<void> {
+async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, settings: WebSettings, hub: WebHub, claims: ClaimLimiter): Promise<void> {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
+  // Redeeming a pairing code: the one route with no token behind it, because the
+  // app is here to get its first one. The code is what it spends instead — six
+  // digits from `milo pair`, good for two minutes, single use, and only an address
+  // that can reach this port may try, with the tries capped per address. Anything
+  // else is behind `authorized()`.
+  if (url.pathname === '/pair/claim') {
+    if (request.method !== 'POST') return json(response, 405, { error: 'Use POST.' })
+    if (!claims.allow(request.socket.remoteAddress ?? 'unknown')) {
+      return json(response, 429, { error: 'Too many pairing attempts. Wait a minute and try again.' })
+    }
+    let body: Record<string, unknown>
+    try {
+      body = await readBody(request)
+    } catch {
+      return json(response, 400, { error: 'Expected a JSON object.' })
+    }
+    if (!redeemPairing(String(body.code ?? '').trim())) {
+      return json(response, 401, { error: 'That pairing code is wrong, used, or expired.' })
+    }
+    const { device, token: deviceToken } = addDevice({
+      name: String(body.name ?? '').trim() || 'Paired device',
+      platform: String(body.platform ?? '').trim() || 'unknown',
+    })
+    return json(response, 200, {
+      deviceId: device.id,
+      token: deviceToken,
+      name: device.name,
+      protocolVersion: PROTOCOL_VERSION,
+    })
+  }
   if (url.pathname === '/upload') {
     if (!authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
     if (request.method !== 'POST') return json(response, 405, { error: 'Use POST.' })
@@ -404,17 +438,27 @@ function headerName(name: string): string {
 }
 
 /**
- * The whole of the authorization: holding the token is being the owner. It rides
- * a header where one is sent and the URL query where it is not — an `<img>` and a
+ * The whole of the authorization: holding a token is being the owner. It rides a
+ * header where one is sent and the URL query where it is not — an `<img>` and a
  * WebSocket cannot set a header — and nothing else gates a request. A `Bearer`
  * token is immune to a cross-site request on its own: another origin cannot read
  * this one's token, so it cannot send it.
+ *
+ * Two kinds of token open it: the install's own, and one minted for a device at
+ * pairing. The second is why a phone can be let in without being handed the key
+ * that also writes the config — and why it can be taken back on its own.
  */
 function authorized(request: IncomingMessage, token: string, queryToken?: string | null): boolean {
   const header = request.headers.authorization
   const supplied = header?.startsWith('Bearer ')
     ? header.slice(7)
     : queryToken ?? ''
+  if (matches(supplied, token)) return true
+  return deviceForToken(supplied) !== undefined
+}
+
+/** Constant-time: a length difference is not a match, and neither is a differing byte. */
+function matches(supplied: string, token: string): boolean {
   const left = Buffer.from(token)
   const right = Buffer.from(supplied)
   return left.length === right.length && timingSafeEqual(left, right)
@@ -463,7 +507,7 @@ export function webReachLines(host: string, urls: string[]): string[] {
  * is what another device opens; typed on the machine itself, any of them works,
  * which is why the list is offered rather than one host picked for the reader.
  */
-function reachableHosts(): string[] {
+export function reachableHosts(): string[] {
   const hosts: string[] = []
   for (const entries of Object.values(networkInterfaces())) {
     for (const entry of entries ?? []) {

@@ -36,6 +36,8 @@ Usage:
   milo log                   What the execution log holds (status | tail | follow | trim)
   milo routines              The prompts Milo runs on a timer (list | add | remove | enable | run)
   milo google                Connect a Google account, read-only (connect | status | forget)
+  milo pair                  Let a phone in: prints a one-time code and the address to give
+  milo devices               The devices paired with this Milo (list | revoke)
   milo mcp                   The external tool servers (list | check | enable | disable)
   milo serve                 Run the enabled bot gateways and the web UI
   milo web                   Run only the web UI (opens the browser)
@@ -188,6 +190,16 @@ async function main(): Promise<void> {
     case 'google': {
       const { runGoogle } = await import('./google.js')
       process.exitCode = await runGoogle(process.argv.slice(2))
+      return
+    }
+    case 'pair': {
+      const { runPair } = await import('./pair.js')
+      process.exitCode = await runPair(process.argv.slice(2))
+      return
+    }
+    case 'devices': {
+      const { runDevices } = await import('./devices.js')
+      process.exitCode = await runDevices(process.argv.slice(2))
       return
     }
     case 'setup':
