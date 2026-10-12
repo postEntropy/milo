@@ -1,7 +1,7 @@
 import type { AgentRuntime } from '../core/runtime.js'
 import type { Session } from '../core/session.js'
 import type { MemoryScope } from '../core/memory/index.js'
-import { listProviderModels, listProviders, readDisplay, setDisplay, setPermissionMode, setModel, setProvider, setReasoningEffort } from '../core/config/load.js'
+import { listProviderModels, listProviders, readDisplay, setDisplay, setPermissionMode, setProvider, setReasoningEffort } from '../core/config/load.js'
 import { describeExport, writeSessionExport, type ExportFormat } from '../core/export.js'
 import { formatStats, formatWhen } from '../core/sessions/index.js'
 import type { CompactResult, SessionStats, SessionSummary } from '../core/sessions/index.js'
@@ -324,7 +324,9 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
     currentModel: runtime.model,
     persistModel: (id) => {
       runtime.setModel(id)
-      setModel(runtime.model)
+      // The model resolved its own provider on the line above; the pair is
+      // written together, from that resolution.
+      setProvider(runtime.provider.id, runtime.model)
       return { model: runtime.model }
     },
     modelLocked: modelLockMessage(lock),

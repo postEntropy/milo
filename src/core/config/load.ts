@@ -138,18 +138,11 @@ export function setReasoningEffort(effort: ReasoningEffort): void {
   saveConfig({ ...config, reasoningEffort: effort })
 }
 
-/** Writes down the model, so a switch made in a chat outlives the process. */
-export function setModel(model: string): void {
-  const config = readConfigOrNull()
-  if (!config) return
-  saveConfig({ ...config, model })
-}
-
 /**
  * Writes down the provider and its model together, so a switch made in a chat
  * outlives the process. The two travel as a pair: a model id belongs to the
  * provider that serves it, so persisting one without the other would leave the
- * file inconsistent.
+ * file inconsistent — and there is deliberately no model-only writer here.
  */
 export function setProvider(id: string, model: string): void {
   const config = readConfigOrNull()
