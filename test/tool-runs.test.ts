@@ -12,6 +12,11 @@ function keyed(parts: TranscriptPart[]): KeyedPart[] {
   })
 }
 
+/** The turn as the chat draws it, with the thinking shown unless told otherwise. */
+function draw(parts: TranscriptPart[], showReasoning = true): ReturnType<typeof toolRows> {
+  return toolRows(keyed(parts), showReasoning)
+}
+
 const call = (name: string, value: string): TranscriptPart => ({ kind: 'tool', tool: { name, text: `${name} ${value}` } })
 const said = (text: string): TranscriptPart => ({ kind: 'text', text })
 const thought = (text: string): TranscriptPart => ({ kind: 'reasoning', text })
@@ -23,13 +28,13 @@ function callsIn(rows: ReturnType<typeof toolRows>): Array<Array<{ name: string;
 
 describe('one turn, grouped for drawing', () => {
   it('draws a call on its own as a line, not a thread', () => {
-    const rows = toolRows(keyed([call('grep', 'retry')]))
+    const rows = draw([call('grep', 'retry')])
 
     expect(rows).toEqual([{ kind: 'part', part: call('grep', 'retry'), key: 'tool-0' }])
   })
 
   it('draws two calls that came back to back as one thread', () => {
-    const rows = toolRows(keyed([call('grep', 'retry'), call('read_file', 'src/core/retry.ts')]))
+    const rows = draw([call('grep', 'retry'), call('read_file', 'src/core/retry.ts')])
 
     expect(rows[0]?.kind).toBe('spine')
     expect(callsIn(rows)).toEqual([[
@@ -41,20 +46,29 @@ describe('one turn, grouped for drawing', () => {
   })
 
   it('keeps the steps of a thread in the order they were called', () => {
-    const rows = toolRows(keyed([call('a', '1'), call('b', '2'), call('c', '3')]))
+    const rows = draw([call('a', '1'), call('b', '2'), call('c', '3')])
 
     expect(callsIn(rows)[0]?.map((tool) => tool.name)).toEqual(['a', 'b', 'c'])
   })
 
-  it('ends the thread at a thought, because thinking is not a call', () => {
-    const rows = toolRows(keyed([call('a', '1'), thought('now the other one'), call('b', '2')]))
+  it('ends the thread at a thought the surface is drawing, because thinking is not a call', () => {
+    const rows = draw([call('a', '1'), thought('now the other one'), call('b', '2')])
 
     // Two calls with a thought between them were not made back to back.
     expect(rows.map((row) => row.kind)).toEqual(['part', 'part', 'part'])
   })
 
+  it('keeps the thread across a thought the surface is hiding', () => {
+    const rows = draw([call('a', '1'), thought('now the other one'), call('b', '2')], false)
+
+    // A hidden thought is not on screen, so nothing of the model's stands between the
+    // two calls: they read as back to back even though one was had in between.
+    expect(rows.map((row) => row.kind)).toEqual(['spine'])
+    expect(callsIn(rows)[0]?.map((tool) => tool.name)).toEqual(['a', 'b'])
+  })
+
   it('ends the thread at prose, and starts a new one after it', () => {
-    const rows = toolRows(keyed([call('a', '1'), call('b', '2'), said('both failed'), call('c', '3'), call('d', '4')]))
+    const rows = draw([call('a', '1'), call('b', '2'), said('both failed'), call('c', '3'), call('d', '4')])
 
     expect(rows.map((row) => row.kind)).toEqual(['spine', 'part', 'spine'])
     expect(rows[1]?.kind === 'part' ? rows[1].part : null).toEqual(said('both failed'))
@@ -62,14 +76,14 @@ describe('one turn, grouped for drawing', () => {
 
   it('leaves a plan or a widget between calls to end the thread too', () => {
     const plan: TranscriptPart = { kind: 'todo', items: [{ content: 'Step', status: 'pending' }] }
-    const rows = toolRows(keyed([call('a', '1'), plan, call('b', '2')]))
+    const rows = draw([call('a', '1'), plan, call('b', '2')])
 
     expect(rows.map((row) => row.kind)).toEqual(['part', 'part', 'part'])
   })
 
   it('draws every part of a turn with none of them dropped', () => {
     const parts = [said('before'), call('a', '1'), call('b', '2'), said('after')]
-    const drawn = toolRows(keyed(parts))
+    const drawn = draw(parts)
 
     expect(drawn).toHaveLength(3)
     expect(drawn[0]?.kind === 'part' ? drawn[0].part : null).toEqual(said('before'))
@@ -79,7 +93,7 @@ describe('one turn, grouped for drawing', () => {
   it('carries what the calls said about themselves, state included', () => {
     const done: TranscriptPart = { kind: 'tool', tool: { name: 'a', text: 'a 1', state: 'done' } }
     const running: TranscriptPart = { kind: 'tool', tool: { name: 'b', text: 'b 2', state: 'running' } }
-    const rows = toolRows(keyed([done, running]))
+    const rows = draw([done, running])
 
     expect(callsIn(rows)[0]?.map((tool) => tool.state)).toEqual(['done', 'running'])
   })

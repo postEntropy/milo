@@ -55,12 +55,11 @@ function formatBytes(bytes: number): string {
  * No box. A call is the turn's own activity, not an object sitting in it, and the
  * box it used to be drawn in gave every call the same weight as a paragraph of the
  * answer. The name carries the colour and the value stays quiet, so the eye can
- * find a call by what it was — which is what tells one from another.
- *
- * `step` is what the thread adds: a call in a run of them hangs off the thread, so
- * it takes the dot its own line does not have.
+ * find a call by what it was — which is what tells one from another. The dot in the
+ * gutter beside it is the call's state, drawn for every call alike, so a lone call
+ * is not pushed aside into an empty column.
  */
-function ToolLine({ tool, step = false }: { tool: ToolMark; step?: boolean }) {
+function ToolLine({ tool }: { tool: ToolMark }) {
   const { state: copied, copy } = useCopy(tool.text)
   const label = copyLabel(copied)
   const brand = toolBrand(tool.name)
@@ -72,7 +71,7 @@ function ToolLine({ tool, step = false }: { tool: ToolMark; step?: boolean }) {
   const value = tool.text.startsWith(name) ? tool.text.slice(name.length).trim() : ''
 
   return (
-    <div className={`tool-line${step ? ' tool-step' : ''}${tool.state ? ` ${tool.state}` : ''}`}>
+    <div className={`tool-line${tool.state ? ` ${tool.state}` : ''}`}>
       <code>
         <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />{' '}
         <span className="tool-name">{value ? name : tool.text}</span>
@@ -101,7 +100,7 @@ function ToolLine({ tool, step = false }: { tool: ToolMark; step?: boolean }) {
  */
 function ToolRun({ steps }: { steps: Array<{ tool: ToolMark; key: string }> }) {
   return <div className="tool-run">
-    {steps.map((step) => <ToolLine key={step.key} tool={step.tool} step />)}
+    {steps.map((step) => <ToolLine key={step.key} tool={step.tool} />)}
   </div>
 }
 
@@ -395,13 +394,13 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
           onSelect={(id) => onAction?.(`resume:${id}`, message.id)}
         />
       ) : (
-        toolRows(keyed).map((row) => {
+        toolRows(keyed, showReasoning).map((row) => {
           if (row.kind === 'spine') return <ToolRun key={row.key} steps={row.steps} />
           const { part, key } = row
           if (part.kind === 'reasoning') {
-            return showReasoning
-              ? <Reasoning key={key} text={part.text} thoughtMs={key === firstReasoning ? message.thoughtMs : undefined} animateIn={!thinking} />
-              : null
+            // A part only ever reaches here when the surface is drawing thinking:
+            // `toolRows` drops the hidden ones before they are grouped.
+            return <Reasoning key={key} text={part.text} thoughtMs={key === firstReasoning ? message.thoughtMs : undefined} animateIn={!thinking} />
           }
           if (part.kind === 'text') return <Markdown key={key} text={part.text} />
           if (part.kind === 'tool') return <ToolLine key={key} tool={part.tool} />

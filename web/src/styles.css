@@ -460,33 +460,25 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .reasoning-reveal-hint { color: var(--accent); opacity: 0; transition: opacity var(--motion-fast); }
 .reasoning-reveal:hover .reasoning-reveal-hint { opacity: 1; }
 /* The wait for the model's next output, before there is anything of its own to
-   show: the glyph the terminal uses, steady, and a light travelling along the word,
+   show: the glyph the terminal uses, steady, and the glare travelling along the word,
    so the row says it is working without anything blinking and without wearing the
-   alarm colour. The word sits dim under the light's path — a light is only visible
-   against something dark, and two pale greys travelling past each other read as
-   nothing at all. An output arriving takes its place. */
+   alarm colour. The glare itself is defined with the call's line below, since a turn
+   thinking and a call running are lit the same way. An output arriving takes its
+   place. */
 .wait-line { display: flex; align-items: center; gap: var(--space-4); width: fit-content; color: var(--muted); font-size: var(--text-xs); }
 .wait-line svg.icon { flex: none; }
-.wait-label {
-  background-image: linear-gradient(90deg, var(--wait-dim) 0%, var(--wait-dim) 42%, var(--fg) 50%, var(--wait-dim) 58%, var(--wait-dim) 100%);
-  background-size: 250% 100%;
-  background-clip: text;
-  -webkit-background-clip: text;
-  color: transparent;
-  animation: wait-shimmer 1.9s linear infinite;
-}
-@keyframes wait-shimmer {
+@keyframes glare {
   from { background-position: 150% 0; }
   to { background-position: -50% 0; }
 }
 /* The rows a list holds while it is being read: a card per row, with the name and its
-   meta standing in as bars, under the same light as the wait line. The row is drawn at
+   meta standing in as bars, under the same glare as the wait line. The row is drawn at
    the weight the lists themselves use, so the shape that arrives is the shape that was
    promised. */
 .skeleton-list { display: flex; flex-direction: column; gap: var(--space-3); }
 .skeleton-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; min-height: 68px; align-items: center; gap: var(--space-6); border-radius: var(--radius-md); background: var(--surface); padding: var(--space-6) var(--space-7); }
 .skeleton-lines { display: flex; min-width: 0; flex-direction: column; gap: var(--space-3); }
-.skeleton-line, .skeleton-mark { background-image: linear-gradient(90deg, var(--skeleton) 0%, var(--skeleton) 42%, var(--skeleton-sheen) 50%, var(--skeleton) 58%, var(--skeleton) 100%); background-size: 250% 100%; animation: wait-shimmer 1.9s linear infinite; }
+.skeleton-line, .skeleton-mark { background-image: linear-gradient(90deg, var(--skeleton) 0%, var(--skeleton) 42%, var(--skeleton-sheen) 50%, var(--skeleton) 58%, var(--skeleton) 100%); background-size: 250% 100%; animation: glare 1.9s linear infinite; }
 .skeleton-line { height: 9px; border-radius: var(--radius-pill); }
 .skeleton-line-name { width: 34%; height: 12px; }
 .skeleton-line-meta { width: 20%; }
@@ -494,14 +486,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* A call is drawn, not boxed: the mark, the name and the one value worth showing, on
    the page's own ground. The box it used to wear gave a call the same weight as the
    paragraph beside it, and a turn with eight of them read as eight objects instead of
-   as activity. The column it is indented by is where a run of calls hangs its thread —
-   kept on every line, even a lone one, so a second call arriving cannot shift what is
-   already on screen. */
-.tool-line { position: relative; display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); min-height: var(--control-sm); padding: var(--space-2) 0 var(--space-2) 24px; color: var(--fg-2); font-size: var(--text-xs); }
+   as activity. The column it is indented by is the dot's — the dot is the call's own
+   state, so the gutter is filled on every line rather than held empty for a mark a
+   lone call never drew. */
+.tool-line { position: relative; display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); min-height: var(--control-sm); padding: var(--space-2) var(--control-sm) var(--space-2) 24px; color: var(--fg-2); font-size: var(--text-xs); }
 /* Heavier than the rest of the set on purpose: at 14px a 1.8 stroke thins to about
    a pixel, and the tool lines were reading as pencil. */
 .tool-line svg.icon { color: var(--muted); stroke-width: 2.5; }
-.message-content .tool-line code { display: flex; min-width: 0; flex: 1; align-items: baseline; gap: var(--space-3); overflow: hidden; font: 500 var(--text-xs) var(--font-mono); white-space: nowrap; }
+.message-content .tool-line code { display: flex; min-width: 0; flex: 1; align-items: baseline; gap: var(--space-3); font: 500 var(--text-xs) var(--font-mono); white-space: nowrap; }
 /* The name carries the colour and the value stays quiet: what a call *was* is what
    tells it from the next one, and the value is only worth reading once the name has
    said whether this is the call being looked for. */
@@ -519,31 +511,70 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    is where the eye reads it as sitting on the same line; the old `vertical-align`
    nudge stopped meaning anything the moment this row became a flex one. */
 .tool-line code .tool-mark { flex: none; align-self: center; }
+/* The glare: a light travelling along what is being worked on — the wait line's own
+   word, and the whole of the call running now, the name and the args beside it as one
+   line, so a command in hand reads the way a turn thinking does. The dot says what the
+   call's state is; the glare says this is the one being worked on.
+   `--glare-dim` is the tone the row sits in while the light is elsewhere: a light is
+   only visible against something darker, and two pale greys travelling past each other
+   read as nothing at all. The box takes its own width, so a short line is not lit
+   across the empty space beside it. */
+.glare, .message-content .tool-line.running code {
+  --glare-dim: var(--wait-dim);
+  flex: 0 1 auto;
+  background-image: linear-gradient(90deg, var(--glare-dim) 0%, var(--glare-dim) 42%, var(--fg) 50%, var(--glare-dim) 58%, var(--glare-dim) 100%);
+  background-size: 250% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation: glare 1.9s linear infinite;
+}
+/* A call's line carries a command to read, so it sits a step above the wait line's
+   word — the muted tone rather than the dimmer one — and a run never reads paler than
+   the calls that have already finished. */
+.message-content .tool-line.running code { --glare-dim: var(--muted); }
+/* The name and the value carry a colour of their own, which would paint over the
+   glare: both go transparent with it while the call runs. */
+.message-content .tool-line.running .tool-name,
+.message-content .tool-line.running .tool-value { color: transparent; }
+
+/* The dot every call wears, in the column the line is indented by. Its shape is the
+   state — hollow while a call said nothing about itself, filled and quiet once it is
+   done, accent while it runs, red on a failure — so a lone call and a step of a thread
+   are drawn the same, and the state reads without colour.
+
+   A flex item of the line's `code`, so it reaches into the gutter without a box of its
+   own: the start margin pulls it out of the row, the end margin plus the row's own gap
+   leave the 10px between the dot and the call it names. Centred on the code's line,
+   which is where the text sits. `box-sizing` is spelled out because the reset's `*`
+   stops at elements and never reached this pseudo-element: left to content-box, the
+   10px would be the inside and the border would be drawn around it. */
+.message-content .tool-line code::before { content: ''; box-sizing: border-box; flex: none; align-self: center; width: 10px; height: 10px; margin-inline: -23px 4px; border-radius: 50%; border: 1.5px solid var(--border); background: var(--bg); }
+.message-content .tool-line.done code::before { border-color: var(--muted); background: var(--muted); }
+/* Only the one running is drawn in the accent: the accent is a pointer, and what it
+   points at here is the call the turn is on. */
+.message-content .tool-line.running code::before { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
+.message-content .tool-line.failed code::before { border-color: var(--danger); background: var(--danger); }
 
 /* ── a run of calls, drawn as one sequence ────────────────────────────────────
-   Calls made one after another are steps of one thing, so they hang off a thread
-   with a dot each. The thread is the one line in the product that is allowed:
-   without it the dots would say nothing about belonging together, and the whole
-   point of the shape is that these calls are a sequence and not a list. */
-.tool-run { position: relative; display: flex; flex-direction: column; gap: var(--space-6); padding-inline-start: 24px; }
-/* Inset by half a row, so the thread starts at the first dot's centre and ends at the
-   last one's instead of running past both ends like a divider. */
-.tool-run::before { content: ''; position: absolute; inset-inline-start: 4px; top: 14px; bottom: 14px; width: 1px; background: var(--border); }
-/* A step takes the thread's own gutter, which the line already has, so its dot sits
-   in the same column as a lone line's. */
-.tool-run .tool-step { padding-inline-start: 0; }
-.tool-run .tool-step::before { content: ''; position: absolute; inset-inline-start: -23px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; border: 1.5px solid var(--border); background: var(--bg); }
-.tool-run .tool-step.done::before { border-color: var(--muted); background: var(--muted); }
-/* Only the one running is drawn in the accent: the accent is a pointer, and what it
-   points at here is the step the turn is on. */
-.tool-run .tool-step.running::before { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
-.tool-run .tool-step.failed::before { border-color: var(--danger); background: var(--danger); }
-/* A lone call shows no dot once it is over — there is no sequence for it to belong
-   to, so a mark would be decoration. While it runs it is still the step in hand. */
-.tool-line.running:not(.tool-step)::before { content: ''; position: absolute; inset-inline-start: 1px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; border: 1.5px solid var(--accent); background: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
-.tool-line.failed:not(.tool-step)::before { content: ''; position: absolute; inset-inline-start: 1px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; border: 1.5px solid var(--danger); background: var(--danger); }
+   Calls made one after another are steps of one thing, so a thread joins their dots.
+   The thread is the one line in the product that is allowed: without it the dots would
+   say nothing about belonging together, and the whole point of the shape is that these
+   calls are a sequence and not a list. A step sits on the line's own indent, so its dot
+   lands in the same column as a lone call's. */
+.tool-run { position: relative; display: flex; flex-direction: column; gap: var(--space-6); }
+/* Inset by half a row at each end, so the thread starts at the first dot's centre and
+   ends at the last one's instead of running past both ends like a divider. Across, it
+   sits on the dot's centre column: the dot starts 1px into the line and is 10px across,
+   so its centre is at 6px and the 1px thread straddles it at 5.5px. */
+.tool-run::before { content: ''; position: absolute; inset-inline-start: 5.5px; top: 14px; bottom: 14px; width: 1px; background: var(--border); }
 
-.tool-copy-btn { display: inline-flex; align-items: center; justify-content: center; width: var(--control-sm); height: var(--control-sm); flex: none; border: 0; border-radius: var(--radius-xs); background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
+/* Out of the flow: the copy control is a hover affordance, so it must not set the
+   line's height. In the flow its 28px box padded a lone call out to 36 — every call
+   sat in a taller row than the text it holds, which spread a run's steps apart and
+   left the thread overshooting its own dots. Absolute, the row is the text's own
+   height and the button rides at its right end. */
+.tool-copy-btn { position: absolute; inset-inline-end: 0; top: 50%; display: inline-flex; align-items: center; justify-content: center; width: var(--control-sm); height: var(--control-sm); transform: translateY(-50%); border: 0; border-radius: var(--radius-xs); background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
 .tool-line:hover .tool-copy-btn, .tool-copy-btn:focus-visible { opacity: 1; }
 .tool-copy-btn:hover { background: var(--surface-warm); color: var(--fg); }
 /* The buttons under a turn are always there, each showing only its mark; the word
@@ -1200,6 +1231,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   /* The content starts below the pills: their own line, from the same air the bar
      above them keeps under the status bar. */
   .messages { padding: calc(var(--phone-top) + 36px) 18px 8px; }
+  /* A run of calls is one thing the turn did, so on the phone its steps sit a hair
+     apart instead of a row's worth: the vertical room the small screen is short of is
+     exactly this air. */
+  .tool-run { gap: var(--space-2); }
   /* Hug the bottom: the browser's own bar already supplies the breathing room,
      and the safe area only pushes it up when that bar has scrolled away. */
   /* No backdrop: the thread passes behind the dock and reaches the bottom edge, the
