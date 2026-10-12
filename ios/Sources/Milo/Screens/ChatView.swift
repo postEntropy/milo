@@ -43,12 +43,17 @@ struct ChatView: View {
                     .ignoresSafeArea()
                 }
                 .offset(x: drawer ? Self.drawerWidth : 0)
-                // While the sessions are open, the chat is a lid: a tap anywhere
-                // on it closes them instead of reaching what is underneath.
+                // While the sessions are open, the chat is a lid: a tap on it closes
+                // them instead of reaching what is underneath. The lid starts where
+                // the chat does — its frame still spans the whole screen, because an
+                // offset moves what is drawn and not what the view occupies, and a lid
+                // over the whole frame swallowed the taps on the sessions below it, so
+                // choosing one closed the list and changed nothing.
                 .overlay {
                     if drawer {
                         Color.clear
                             .contentShape(Rectangle())
+                            .padding(.leading, Self.drawerWidth)
                             .onTapGesture { drawer = false }
                     }
                 }
@@ -124,8 +129,8 @@ struct ChatView: View {
                 // swipe on the screen cannot swallow it.
                 Button { openDrawer() } label: {
                     Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 16, weight: .semibold))
-                        .frame(width: 24, height: 24)
+                        .font(.system(size: 20, weight: .semibold))
+                        .frame(width: 30, height: 30)
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
