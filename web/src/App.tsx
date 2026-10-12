@@ -16,7 +16,7 @@ import { Settings } from './settings/Settings.js'
 import { settingsSectionFromPath } from './settings/sections.js'
 import { Panel } from './panel/Panel.js'
 import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, TranscriptPart } from '@protocol'
-import { toolText } from '../../src/gateways/tool-line.ts'
+import { drawsToolFailure, toolText } from '../../src/gateways/tool-line.ts'
 import { describeRebase } from '../../src/core/sessions/format.ts'
 import { Icon } from './ui/Icons.js'
 import { Notice, useAutoDismiss } from './ui/Notice.js'
@@ -465,15 +465,30 @@ export default function App() {
         if (event.type === 'tool-start') {
           // Reasoning deltas do not end a wait — they are what fills it. A tool
           // call is an output of its own, and the wait before it was thinking.
-          // From here the wait belongs to the tool, and is named after it.
           const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-          return { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name, event.args) } }], waitingSince: undefined, runningTool: event.name, ...(thoughtMsFor(waited, message)) }
+          return { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name, event.args), state: 'running' } }], waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
         }
         if (event.type === 'tool-end') {
           // The result is in: the model is thinking again about what to do with it.
-          return event.isError
-            ? { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: `${toolText(event.name)} failed` } }], waitingSince: Date.now(), runningTool: undefined }
-            : { ...message, waitingSince: Date.now(), runningTool: undefined }
+          // The call that just ended is the one still marked running, which is how the
+          // line knows to stop saying it is underway — no second source of truth for
+          // what is running, and no name matched against names that repeat.
+          let running = -1
+          for (let index = message.parts.length - 1; index >= 0; index -= 1) {
+            const part = message.parts[index]
+            if (part?.kind === 'tool' && part.tool.state === 'running') { running = index; break }
+          }
+          const parts: TranscriptPart[] = running === -1
+            // A call whose own line is not drawn — the plan, a widget — still has a
+            // failure worth saying, unless it is a tool that is not one any more.
+            // Nothing goes wrong in silence.
+            ? event.isError && drawsToolFailure(event.name)
+              ? [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name), state: 'failed' } }]
+              : message.parts
+            : message.parts.map((part, index): TranscriptPart => index === running && part.kind === 'tool'
+              ? { ...part, tool: { ...part.tool, state: event.isError ? 'failed' : 'done' } }
+              : part)
+          return { ...message, parts, waitingSince: Date.now() }
         }
         if (event.type === 'todo') return event.items.length > 0
           ? { ...message, parts: [...message.parts, { kind: 'todo', items: event.items }] }
@@ -489,8 +504,8 @@ export default function App() {
         if (event.type === 'compacted') return { ...message, status: `Tidying the context (${formatMs(event.ms)}).` }
         if (event.type === 'rebased') return { ...message, status: `Session updated by another surface (${describeRebase(event)}).` }
         if (event.type === 'steer') return { ...message, status: 'Correction received by Milo.' }
-        if (event.type === 'error') return { ...message, status: `Error: ${event.message}`, runningTool: undefined }
-        if (event.type === 'aborted') return { ...message, status: 'Stopped · the partial reply was kept.', runningTool: undefined }
+        if (event.type === 'error') return { ...message, parts: settled(message.parts), status: `Error: ${event.message}` }
+        if (event.type === 'aborted') return { ...message, parts: settled(message.parts), status: 'Stopped · the partial reply was kept.' }
         if (event.type === 'done' && event.finishReason === 'length') return { ...message, status: 'The reply hit the output limit.' }
         if (event.type === 'usage') return { ...message, tokens: { input: event.inputTokens, output: event.outputTokens } }
         return message
@@ -501,7 +516,7 @@ export default function App() {
     if (frame.type === 'permission-result') { setPendingPermission((current) => current?.id === frame.id ? null : current); return }
     if (frame.type === 'turn-end') {
       setMessages((current) => current.map((message) => message.id === frame.id
-        ? { ...message, waitingSince: undefined, runningTool: undefined, ...(frame.raw ? { raw: frame.raw } : {}), ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
+        ? { ...message, parts: settled(message.parts), waitingSince: undefined, ...(frame.raw ? { raw: frame.raw } : {}), ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
         : message))
       setPendingPermission(null)
       setTurnEnds((current) => current + 1)
@@ -1187,6 +1202,18 @@ function formatMs(ms: number): string {
 function thoughtMsFor(waited: number, message: ChatMessage): { thoughtMs?: number } {
   if (message.thoughtMs !== undefined || waited < 1000) return {}
   return { thoughtMs: waited }
+}
+
+/**
+ * A call left marked running when the turn ended — a stop, an error, a dropped
+ * connection — never heard back from. The line stops saying it is underway rather
+ * than guessing how it went, which is the same thing a call read back from disk
+ * with no result beside it says: nothing.
+ */
+function settled(parts: TranscriptPart[]): TranscriptPart[] {
+  return parts.map((part) => part.kind === 'tool' && part.tool.state === 'running'
+    ? { ...part, tool: { ...part.tool, state: undefined } }
+    : part)
 }
 
 /** What a session is called on screen: its message, never the generated id. */

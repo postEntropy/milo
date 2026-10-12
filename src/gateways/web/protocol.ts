@@ -194,6 +194,13 @@ export type ServerFrame =
   | { type: 'error'; message: string }
 
 /**
+ * How far along a call is, as the line beside it draws it. Unset where a stored
+ * call has no result beside it — a turn cut short mid-call did not finish, and
+ * saying either way would be a guess.
+ */
+export type ToolState = 'running' | 'done' | 'failed'
+
+/**
  * A tool call as a surface draws it. The words and the icon travel apart because
  * only one of them is a character: a chat client pastes the emoji into the line,
  * and the browser draws the service's mark beside it.
@@ -201,6 +208,7 @@ export type ServerFrame =
 export interface ToolMark {
   name: string
   text: string
+  state?: ToolState
 }
 
 /** One piece of a turn as the page draws it, in the order it happened. */

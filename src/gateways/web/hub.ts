@@ -935,9 +935,11 @@ export class WebHub {
       }))
   }
 
-  /** A session's history as the page renders it; see `transcriptOf`. */
+  /** A session's history as the page renders it; see `transcriptOf`. The display
+   *  setting is read now rather than remembered, so a level changed mid-session
+   *  reaches the history the next time it is drawn. */
   private transcript(session: Session): TranscriptMessage[] {
-    return transcriptOf(session.messages, (file) => this.register(file))
+    return transcriptOf(session.messages, (file) => this.register(file), readDisplay().tools)
   }
 }
 

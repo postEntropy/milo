@@ -12,6 +12,20 @@ const register = (file: { path: string; name: string; mimeType: string }) => ({
 
 const of = (messages: Message[]) => transcriptOf(messages, register)
 
+/** One turn: prose, a call, and the result that came back for it. */
+function turn(call: { id: string; name: string; args?: unknown }, result?: { isError?: boolean }): Message[] {
+  return [
+    { role: 'user', content: [{ type: 'text', text: 'look' }] },
+    { role: 'assistant', content: [{ type: 'text', text: 'Checking.' }, { type: 'tool-call', id: call.id, name: call.name, args: call.args ?? { path: 'a.txt' } }] },
+    ...(result
+      ? [{ role: 'tool' as const, content: [{ type: 'tool-result' as const, id: call.id, name: call.name, content: 'ok', isError: result.isError === true }] }]
+      : []),
+  ]
+}
+
+const toolParts = (messages: Message[], level?: 'full' | 'name' | 'off') =>
+  transcriptOf(messages, register, level).flatMap((message) => message.parts).filter((part) => part.kind === 'tool')
+
 describe('transcriptOf — a turn keeps the order it happened in', () => {
   it('draws a tool line between the prose around it', () => {
     const messages: Message[] = [
@@ -33,7 +47,7 @@ describe('transcriptOf — a turn keeps the order it happened in', () => {
     expect(of(messages).at(-1)?.parts).toEqual([
       { kind: 'reasoning', text: 'reading first' },
       { kind: 'text', text: 'Checking the file.' },
-      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt' } },
+      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt', state: 'done' } },
       { kind: 'text', text: 'It is fine.' },
     ])
   })
@@ -120,5 +134,70 @@ describe('transcriptOf — a turn keeps the order it happened in', () => {
     ]
 
     expect(of(messages).at(-1)).not.toHaveProperty('raw')
+  })
+})
+
+describe('transcriptOf — the display level is applied the same way the live turn applies it', () => {
+  const messages = turn({ id: 'c1', name: 'read_file' }, {})
+
+  it('draws the value beside the name at full detail', () => {
+    expect(toolParts(messages, 'full')).toEqual([
+      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt', state: 'done' } },
+    ])
+  })
+
+  it('withholds the value at name detail, rather than shortening the line', () => {
+    expect(toolParts(messages, 'name')).toEqual([
+      { kind: 'tool', tool: { name: 'read_file', text: 'read_file', state: 'done' } },
+    ])
+  })
+
+  it('leaves the call out entirely at off, which is what the live turn does', () => {
+    expect(toolParts(messages, 'off')).toEqual([])
+  })
+
+  it('defaults to full, so a caller that says nothing draws what it always did', () => {
+    expect(toolParts(messages)).toEqual(toolParts(messages, 'full'))
+  })
+})
+
+describe('transcriptOf — how a call ended', () => {
+  it('says a call failed, which a reload used to hide', () => {
+    expect(toolParts(turn({ id: 'c1', name: 'shell_command', args: { command: 'npm test' } }, { isError: true }))).toEqual([
+      { kind: 'tool', tool: { name: 'shell_command', text: 'shell_command npm test', state: 'failed' } },
+    ])
+  })
+
+  it('says a call finished when its result came back clean', () => {
+    expect(toolParts(turn({ id: 'c1', name: 'grep' }, {}))).toEqual([
+      { kind: 'tool', tool: { name: 'grep', text: 'grep a.txt', state: 'done' } },
+    ])
+  })
+
+  it('says nothing about a call whose result never came, rather than guessing', () => {
+    expect(toolParts(turn({ id: 'c1', name: 'grep' }))).toEqual([
+      { kind: 'tool', tool: { name: 'grep', text: 'grep a.txt' } },
+    ])
+  })
+
+  it('still says a call failed when the call itself is not drawn', () => {
+    // `todo` draws the checklist in its own place, but a failure of it is news.
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'plan it' }] },
+      { role: 'assistant', content: [{ type: 'tool-call', id: 'c1', name: 'todo', args: { todos: [{ content: 'Step', status: 'pending' }] } }] },
+      { role: 'tool', content: [{ type: 'tool-result', id: 'c1', name: 'todo', content: 'no', isError: true }] },
+    ]
+
+    expect(toolParts(messages)).toEqual([{ kind: 'tool', tool: { name: 'todo', text: 'todo', state: 'failed' } }])
+  })
+
+  it('leaves a hidden call that went fine out of the transcript', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'plan it' }] },
+      { role: 'assistant', content: [{ type: 'tool-call', id: 'c1', name: 'todo', args: { todos: [{ content: 'Step', status: 'pending' }] } }] },
+      { role: 'tool', content: [{ type: 'tool-result', id: 'c1', name: 'todo', content: 'ok', isError: false }] },
+    ]
+
+    expect(toolParts(messages)).toEqual([])
   })
 })

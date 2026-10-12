@@ -491,14 +491,58 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .skeleton-line-name { width: 34%; height: 12px; }
 .skeleton-line-meta { width: 20%; }
 .skeleton-mark { width: 44px; height: 16px; border-radius: var(--radius-sm); }
-.tool-line { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); min-height: var(--control-md); border: 1px solid var(--border-soft); border-radius: var(--radius-md); background: var(--surface); padding: var(--space-4) var(--space-6); color: var(--fg-2); font-size: var(--text-xs); }
+/* A call is drawn, not boxed: the mark, the name and the one value worth showing, on
+   the page's own ground. The box it used to wear gave a call the same weight as the
+   paragraph beside it, and a turn with eight of them read as eight objects instead of
+   as activity. The column it is indented by is where a run of calls hangs its thread —
+   kept on every line, even a lone one, so a second call arriving cannot shift what is
+   already on screen. */
+.tool-line { position: relative; display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); min-height: var(--control-sm); padding: var(--space-2) 0 var(--space-2) 24px; color: var(--fg-2); font-size: var(--text-xs); }
 /* Heavier than the rest of the set on purpose: at 14px a 1.8 stroke thins to about
    a pixel, and the tool lines were reading as pencil. */
 .tool-line svg.icon { color: var(--muted); stroke-width: 2.5; }
-.message-content .tool-line code { overflow: hidden; color: var(--fg); font: 500 var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
-/* The service's mark is a drawing on the text's baseline, not a character: it
-   needs the nudge a glyph does not. */
-.tool-line code .tool-mark { flex: none; vertical-align: -3px; }
+.message-content .tool-line code { display: flex; min-width: 0; flex: 1; align-items: baseline; gap: var(--space-3); overflow: hidden; font: 500 var(--text-xs) var(--font-mono); white-space: nowrap; }
+/* The name carries the colour and the value stays quiet: what a call *was* is what
+   tells it from the next one, and the value is only worth reading once the name has
+   said whether this is the call being looked for. */
+.message-content .tool-line .tool-name { flex: none; color: var(--fg); }
+/* The value is what gives way when a line is too long for the column, and it is the
+   only part that may be cut: a name with its tail missing names nothing. It does not
+   grow, so the word after it stays against it rather than across the row. */
+.message-content .tool-line .tool-value { overflow: hidden; flex: 0 1 auto; min-width: 0; color: var(--muted); text-overflow: ellipsis; }
+/* A failure is said in a word, right after the call it belongs to, and not only in
+   colour — the mark turning red says nothing to whoever cannot see it. */
+.message-content .tool-line .tool-failed { flex: none; color: var(--danger); font-family: var(--font-body); }
+/* The service's mark is a drawing on the text's baseline, not a character: it needs
+   the nudge a glyph does not — and a flex item has no baseline of its own, so the
+   nudge is `align-self`. Centred on the row, it lands on the text's x-height, which
+   is where the eye reads it as sitting on the same line; the old `vertical-align`
+   nudge stopped meaning anything the moment this row became a flex one. */
+.tool-line code .tool-mark { flex: none; align-self: center; }
+
+/* ── a run of calls, drawn as one sequence ────────────────────────────────────
+   Calls made one after another are steps of one thing, so they hang off a thread
+   with a dot each. The thread is the one line in the product that is allowed:
+   without it the dots would say nothing about belonging together, and the whole
+   point of the shape is that these calls are a sequence and not a list. */
+.tool-run { position: relative; display: flex; flex-direction: column; gap: var(--space-6); padding-inline-start: 24px; }
+/* Inset by half a row, so the thread starts at the first dot's centre and ends at the
+   last one's instead of running past both ends like a divider. */
+.tool-run::before { content: ''; position: absolute; inset-inline-start: 4px; top: 14px; bottom: 14px; width: 1px; background: var(--border); }
+/* A step takes the thread's own gutter, which the line already has, so its dot sits
+   in the same column as a lone line's. */
+.tool-run .tool-step { padding-inline-start: 0; }
+.tool-run .tool-step::before { content: ''; position: absolute; inset-inline-start: -23px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; border: 1.5px solid var(--border); background: var(--bg); }
+.tool-run .tool-step.done::before { border-color: var(--muted); background: var(--muted); }
+/* Only the one running is drawn in the accent: the accent is a pointer, and what it
+   points at here is the step the turn is on. */
+.tool-run .tool-step.running::before { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
+.tool-run .tool-step.failed::before { border-color: var(--danger); background: var(--danger); }
+/* A lone call shows no dot once it is over — there is no sequence for it to belong
+   to, so a mark would be decoration. While it runs it is still the step in hand. */
+.tool-line.running:not(.tool-step)::before { content: ''; position: absolute; inset-inline-start: 1px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; border: 1.5px solid var(--accent); background: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
+.tool-line.failed:not(.tool-step)::before { content: ''; position: absolute; inset-inline-start: 1px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 50%; border: 1.5px solid var(--danger); background: var(--danger); }
+
 .tool-copy-btn { display: inline-flex; align-items: center; justify-content: center; width: var(--control-sm); height: var(--control-sm); flex: none; border: 0; border-radius: var(--radius-xs); background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
 .tool-line:hover .tool-copy-btn, .tool-copy-btn:focus-visible { opacity: 1; }
 .tool-copy-btn:hover { background: var(--surface-warm); color: var(--fg); }

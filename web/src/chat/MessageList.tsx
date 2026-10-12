@@ -4,7 +4,8 @@ import { formatTokens } from '../lib/format.js'
 import { formatWhen, formatSeconds } from '../../../src/core/sessions/format.ts'
 import type { ActionRow, FrameAttachment, SessionCardItem, ToolMark, TranscriptMessage, TranscriptPart } from '@protocol'
 import { proseOf } from '@protocol'
-import { toolBrand } from '../../../src/gateways/tool-line.ts'
+import { toolBrand, toolLabel } from '../../../src/gateways/tool-line.ts'
+import { toolRows } from './tool-runs.js'
 import type { TodoItem, TodoStatus } from '../../../src/core/todos.ts'
 import { toolIconName } from '../ui/tool-icons.js'
 import { attachmentUrl } from '../lib/api.js'
@@ -25,8 +26,6 @@ export interface ChatMessage extends TranscriptMessage {
   /** When the turn's wait for its next output began: what the thought time is
    *  measured from, and that its own line belongs on screen. */
   waitingSince?: number
-  /** The tool call running right now, so the wait is shown while it executes. */
-  runningTool?: string
   /** Already on screen when the session was opened, so it does not settle in again. */
   loaded?: boolean
   actions?: ActionRow[]
@@ -50,29 +49,60 @@ function formatBytes(bytes: number): string {
   return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
 }
 
-function ToolLine({ tool }: { tool: ToolMark }) {
-  const { state, copy } = useCopy(tool.text)
-  const label = copyLabel(state)
+/**
+ * One call, as a line: the mark, the tool's name, and the one value worth showing.
+ *
+ * No box. A call is the turn's own activity, not an object sitting in it, and the
+ * box it used to be drawn in gave every call the same weight as a paragraph of the
+ * answer. The name carries the colour and the value stays quiet, so the eye can
+ * find a call by what it was — which is what tells one from another.
+ *
+ * `step` is what the thread adds: a call in a run of them hangs off the thread, so
+ * it takes the dot its own line does not have.
+ */
+function ToolLine({ tool, step = false }: { tool: ToolMark; step?: boolean }) {
+  const { state: copied, copy } = useCopy(tool.text)
+  const label = copyLabel(copied)
   const brand = toolBrand(tool.name)
+  // The text is the name and its value in one string. Splitting on the name is what
+  // lets the name be loud and the value quiet — and where a line does not begin with
+  // its own name (an MCP tool's display name, most often) the whole of it is the name,
+  // which is the honest reading rather than a guess at where the value starts.
+  const name = toolLabel(tool.name, false)
+  const value = tool.text.startsWith(name) ? tool.text.slice(name.length).trim() : ''
 
   return (
-    <div className="tool-line">
+    <div className={`tool-line${step ? ' tool-step' : ''}${tool.state ? ` ${tool.state}` : ''}`}>
       <code>
         <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />{' '}
-        {tool.text}
+        <span className="tool-name">{value ? name : tool.text}</span>
+        {value && <span className="tool-value">{value}</span>}
+        {tool.state === 'failed' && <span className="tool-failed">failed</span>}
       </code>
       <button
-        className={`tool-copy-btn${state === 'failed' ? ' failed' : ''}`}
+        className={`tool-copy-btn${copied === 'failed' ? ' failed' : ''}`}
         type="button"
         title={label}
         aria-label={label}
         onClick={copy}
       >
-        <Icon name={state === 'copied' ? 'check' : 'copy'} size={13} />
-        {state === 'failed' && <span className="message-tool-label">Copy failed</span>}
+        <Icon name={copied === 'copied' ? 'check' : 'copy'} size={13} />
+        {copied === 'failed' && <span className="message-tool-label">Copy failed</span>}
       </button>
     </div>
   )
+}
+
+/**
+ * Calls that came one after another, drawn as one sequence: a thread with a dot
+ * per step. The dot is the state — accent on the call running now, filled and
+ * quiet on the ones that finished, red on one that failed — so which step is
+ * underway is read off the line rather than said again underneath it.
+ */
+function ToolRun({ steps }: { steps: Array<{ tool: ToolMark; key: string }> }) {
+  return <div className="tool-run">
+    {steps.map((step) => <ToolLine key={step.key} tool={step.tool} step />)}
+  </div>
 }
 
 /** A shape per state, so the step is told apart without leaning on colour. */
@@ -331,7 +361,6 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
   const parts = message.parts
   const hasReasoning = parts.some((part) => part.kind === 'reasoning')
   const showReasoning = thinking || revealed
-  const firstReasoning = parts.findIndex((part) => part.kind === 'reasoning')
   // A part's place is its identity: parts only ever append, so a running count
   // per kind names each one for as long as the turn streams.
   const seen = new Map<string, number>()
@@ -340,6 +369,9 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
     seen.set(part.kind, occurrence + 1)
     return { part, key: `${part.kind}-${occurrence}` }
   })
+  // Named by position rather than by counting again once the calls are grouped: the
+  // settle-in time belongs to the turn's first thought, wherever the thread lands.
+  const firstReasoning = keyed.find(({ part }) => part.kind === 'reasoning')?.key
   const prose = proseOf(message)
   return <article className={`message ${message.role}${message.loaded ? ' is-loaded' : ''}`}>
     <div className="message-content">
@@ -358,10 +390,12 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
           onSelect={(id) => onAction?.(`resume:${id}`, message.id)}
         />
       ) : (
-        keyed.map(({ part, key }, index) => {
+        toolRows(keyed).map((row) => {
+          if (row.kind === 'spine') return <ToolRun key={row.key} steps={row.steps} />
+          const { part, key } = row
           if (part.kind === 'reasoning') {
             return showReasoning
-              ? <Reasoning key={key} text={part.text} thoughtMs={index === firstReasoning ? message.thoughtMs : undefined} animateIn={!thinking} />
+              ? <Reasoning key={key} text={part.text} thoughtMs={key === firstReasoning ? message.thoughtMs : undefined} animateIn={!thinking} />
               : null
           }
           if (part.kind === 'text') return <Markdown key={key} text={part.text} />
@@ -445,7 +479,6 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
         </div>
       )}
       {message.waitingSince !== undefined && !drawingADraft(parts) && <WaitLine label="Thinking" />}
-      {message.runningTool !== undefined && <WaitLine label={`${message.runningTool}…`} />}
       {message.status && <div className="message-status">{message.status}</div>}
     </div>
     {/* The person's own message is a filled bubble: its controls sit under it, not

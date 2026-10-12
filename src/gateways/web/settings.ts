@@ -37,6 +37,7 @@ import {
   listProviderModels,
   readAuth,
   readConfig,
+  readDisplay,
   saveConfig,
   setDisplay,
   setModel as persistModel,
@@ -856,7 +857,7 @@ export class WebSettings {
     const register = this.files?.register ?? ((file: { name: string }) => {
       throw new Error(`Serving ${file.name} needs the web server's file registry.`)
     })
-    return transcriptOf(record.messages, register)
+    return transcriptOf(record.messages, register, readDisplay().tools)
   }
 
   private async browsers(): Promise<unknown> {

@@ -1,5 +1,4 @@
 import { MessageList } from '../chat/MessageList.js'
-import { toolText } from '../../../src/gateways/tool-line.ts'
 import { previewTurn, type PreviewTools } from './preview-turn.js'
 
 /**
@@ -11,7 +10,7 @@ export function DisplayPreview({ tools, thinking }: { tools: PreviewTools; think
   return <>
     <h3 className="section-label">Preview</h3>
     <div className="settings-preview">
-      <MessageList messages={previewTurn(tools, toolText)} thinking={thinking === 'on'} />
+      <MessageList messages={previewTurn(tools)} thinking={thinking === 'on'} />
     </div>
   </>
 }

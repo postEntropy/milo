@@ -90,22 +90,68 @@ export function isExternalTool(name: string): boolean {
 }
 
 /**
- * Tools whose own activity is not drawn. Reaching for one should read as the
- * answer itself, not as a call: `send_file` is the case — the file lands in the
- * chat, and a line announcing it is a line between the person and the picture —
- * and `todo`, whose whole point is the checklist drawn in its place. `panel` is
- * the same: its result is the panel itself, so a line announcing it would stand
- * between the person and what they are looking at. `render_ui` is no longer a
- * tool at all; it is here for a session stored while it was one, whose widget is
- * drawn from the call's arguments and whose line would be a line about a call
- * nobody watching ever made. A failure is still reported, so nothing goes wrong
- * in silence.
+ * Tools whose own activity is not drawn, because their result is drawn in its place.
+ * Reaching for one should read as the answer itself, not as a call: `send_file` is
+ * the case — the file lands in the chat, and a line announcing it is a line between
+ * the person and the picture — and `todo`, whose whole point is the checklist drawn
+ * in its place. `panel` is the same: its result is the panel itself, so a line
+ * announcing it would stand between the person and what they are looking at. A
+ * failure of any of these is still said: the picture that never arrived is news.
  */
-const HIDDEN = new Set(['send_file', 'todo', 'panel', 'render_ui'])
+const QUIET = new Set(['send_file', 'todo', 'panel'])
+
+/**
+ * Tools that are not tools any more, kept out of the transcript for the sake of a
+ * history written while they existed. `render_ui` is the case: its call carried a
+ * widget, the widget is what such a session draws, and its line would be a line
+ * about a call nobody watching ever made. Neither the call nor a failure of it
+ * belongs on a line — a failure beside that widget could only be the note that the
+ * tool has since been removed, which is not news about the turn it was written in.
+ */
+const RETIRED = new Set(['render_ui'])
 
 /** Whether a tool's own call is drawn as a line on the surfaces. */
 export function showsToolCall(name: string): boolean {
-  return !HIDDEN.has(name)
+  return !QUIET.has(name) && !RETIRED.has(name)
+}
+
+/** Whether a failure of this tool's call still needs saying. */
+export function drawsToolFailure(name: string): boolean {
+  return !RETIRED.has(name)
+}
+
+/**
+ * How much of a call a surface draws: the value beside the name, the name alone,
+ * or nothing at all. The same three the display setting offers, declared here
+ * because this file is where the decision is made and it depends on nothing —
+ * the config's own type is the schema's, which this cannot reach for without
+ * dragging zod into the browser bundle.
+ */
+export type ToolLevel = 'full' | 'name' | 'off'
+
+/** A call as a surface draws it. Structurally the web's `ToolMark`, spelled here
+ *  so this module stays free of any protocol. */
+export interface DrawnTool {
+  name: string
+  text: string
+}
+
+/**
+ * The call as a line, or null where this level does not draw one.
+ *
+ * The one place that decides what a level means, so the live turn, a session read
+ * back from disk and the settings preview cannot answer it three ways — which they
+ * did: the live path applied the level, the read-back ignored it, and the preview
+ * faked it by pre-formatting a shorter string. With the level at `name`, that made
+ * a reopened session draw the full line the live turn never showed.
+ *
+ * A hidden tool is null at every level: its own activity is drawn in its place. A
+ * caller that needs to report its *failure* asks `showsToolCall` instead — hiding
+ * that something went wrong is worse than the noise.
+ */
+export function toolDraw(name: string, args: unknown, level: ToolLevel): DrawnTool | null {
+  if (level === 'off' || !showsToolCall(name)) return null
+  return { name, text: toolText(name, level === 'name' ? undefined : args) }
 }
 
 /** The icon alone, for surfaces that draw their own line (the CLI). */
