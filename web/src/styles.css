@@ -1156,7 +1156,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .settings-layout .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + var(--space-4) + 16px) 20px 0; }
   .settings-index { position: static; width: auto; padding: calc(max(8px, env(safe-area-inset-top)) + var(--space-4) + 16px) 20px var(--space-9); border-inline-end: 0; }
   .settings-index-row { min-height: 56px; }
-  .settings-index-row > svg:last-child { display: block; }
+  /* Qualified with the icon class like the rule it overrides: the bare `svg` was one
+     class lighter, so the desktop `display: none` kept winning and the arrow never
+     reached the phone. */
+  .settings-index-row > svg.icon:last-child { display: block; }
   .settings-index-label { font-size: var(--text-md); }
   .settings-index-summary { font-size: var(--text-xs); }
   /* The head says which section this is; the description is what is left to add. */
