@@ -1185,6 +1185,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .settings-index { padding-inline: 16px; }
   .form-grid { grid-template-columns: 1fr; }
   .field.full { grid-column: auto; }
+  /* One step between the blocks a phone stacks, so a section reads as groups rather
+     than one run of text: each block only spaced itself from the one it expected
+     above it, which left the checkbox row flush under the grid it follows and two
+     list rows touching. */
+  .settings-section .panel-body > * + * { margin-top: var(--space-7); }
+  /* Said again for a paragraph: the plain `> p` rule is one class more specific. */
+  .settings-section .panel-body > * + p { margin-top: var(--space-7); }
+  /* A row's actions drop under its text instead of squeezing it — three buttons
+     beside a title left the text a column a few words wide. The same shape the key
+     rows take, so a list row reads the same wherever it is. */
+  .entry-row { flex-wrap: wrap; }
+  .entry-row > div:first-child { flex-basis: 100%; }
+  .entry-row > .row-actions, .entry-row > .button-row { flex-basis: 100%; justify-content: flex-end; margin-top: 0; }
+  .entry-row > .button { margin-inline-start: auto; }
   .secret-row { flex-wrap: wrap; }
   .secret-row input { flex-basis: 100%; order: 2; }
   .secret-row .button { order: 3; margin-inline-start: auto; }
