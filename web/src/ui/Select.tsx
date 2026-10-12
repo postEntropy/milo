@@ -31,6 +31,7 @@ export function Select({
   triggerLabel,
   filterExtra,
   foot,
+  body,
   onOpen,
   onClose,
 }: {
@@ -64,6 +65,15 @@ export function Select({
    * reasoning-effort segments below the model list.
    */
   foot?: ReactNode
+  /**
+   * The menu's own body, in place of the rows — for a list that is not one list,
+   * e.g. the composer's model picker, whose providers and models are two panes.
+   * It brings its own filter, so this component's rows and their filter are left
+   * out entirely: there is never a second search box. It is handed the way to
+   * close the panel, because a body that chooses something is done with the menu
+   * — the rows get that for free from `pick`.
+   */
+  body?: (close: () => void) => ReactNode
   onOpen?(): void
   onClose?(): void
 }) {
@@ -86,15 +96,27 @@ export function Select({
   }, [onClose])
 
   // Opened, the menu is the only thing that takes a click: anywhere else is the
-  // way out, the same as pressing Escape.
+  // way out, the same as pressing Escape. The key is heard on the document
+  // because the focus may be anywhere inside the menu — including controls the
+  // caller put in the body, which this component never sees.
   useEffect(() => {
     if (!open) return
     search.current?.focus()
     const onDown = (event: MouseEvent): void => {
       if (!box.current?.contains(event.target as Node)) close()
     }
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      close()
+      trigger.current?.focus()
+    }
     document.addEventListener('mousedown', onDown)
-    return () => document.removeEventListener('mousedown', onDown)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onDown)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [open, close])
 
   function expand(): void {
@@ -113,12 +135,6 @@ export function Select({
   /** One keyboard model for the whole widget, whether the filter has the focus. */
   function key(event: ReactKeyboardEvent): void {
     if (!open) return
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      close()
-      trigger.current?.focus()
-      return
-    }
     if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
       event.preventDefault()
       setHighlight((at) => {
@@ -139,7 +155,7 @@ export function Select({
       ref={trigger}
       type="button"
       className={`select-trigger ${className}`}
-      aria-haspopup="listbox"
+      aria-haspopup={body ? 'dialog' : 'listbox'}
       aria-expanded={open}
       onClick={() => (open ? close() : expand())}
       onKeyDown={(event) => {
@@ -158,40 +174,49 @@ export function Select({
       {current?.meta}
       {caret && <Icon className="select-caret" name="chevron" size={15} />}
     </button>
-    {open && <div className="select-menu" role="listbox" aria-label={label}>
-      {(filterExtra || choices.length >= searchFrom) && <div className="select-head">
-        {choices.length >= searchFrom && <label className="select-search">
-          <Icon name="search" size={14} />
-          <input
-            ref={search}
-            aria-label={`Filter ${label.toLowerCase()}`}
-            placeholder="Filter"
-            value={filter}
-            onChange={(event) => { setFilter(event.target.value); setHighlight(0) }}
-            onKeyDown={key}
-          />
-        </label>}
-        {filterExtra}
-      </div>}
-      <div className="select-options">
-        {shown.length === 0
-          ? <div className="select-note">{note ?? 'Nothing here.'}</div>
-          : shown.map((choice, index) => <button
-            key={choice.value}
-            type="button"
-            role="option"
-            aria-selected={choice.value === value}
-            className={`select-option ${index === highlight ? 'active' : ''} ${choice.value === value ? 'chosen' : ''}`}
-            onMouseEnter={() => setHighlight(index)}
-            onClick={() => pick(choice.value)}
-          >
-            <span className="select-option-label">{choice.label}</span>
-            {choice.meta}
-            {choice.badge ? <span className="size-badge">{choice.badge}</span> : null}
-            {choice.value === value ? <Icon name="check" size={14} /> : null}
-          </button>)}
+    {/* A body is not a list of options, so it is not marked as one: the panel is a
+        dialog holding whatever the caller drew, and the trigger says so. The plain
+        menu keeps its role on the rows themselves, where a listbox belongs — the
+        panel also holds the filter, which a listbox has no room for. */}
+    {open && (body
+      ? <div className="select-menu select-menu-panel" role="dialog" aria-label={label}>
+        {body(close)}
+        {foot}
       </div>
-      {foot}
-    </div>}
+      : <div className="select-menu">
+        {(filterExtra || choices.length >= searchFrom) && <div className="select-head">
+          {choices.length >= searchFrom && <label className="select-search">
+            <Icon name="search" size={14} />
+            <input
+              ref={search}
+              aria-label={`Filter ${label.toLowerCase()}`}
+              placeholder="Filter"
+              value={filter}
+              onChange={(event) => { setFilter(event.target.value); setHighlight(0) }}
+              onKeyDown={key}
+            />
+          </label>}
+          {filterExtra}
+        </div>}
+        <div className="select-options" role="listbox" aria-label={label}>
+          {shown.length === 0
+            ? <div className="select-note">{note ?? 'Nothing here.'}</div>
+            : shown.map((choice, index) => <button
+              key={choice.value}
+              type="button"
+              role="option"
+              aria-selected={choice.value === value}
+              className={`select-option ${index === highlight ? 'active' : ''} ${choice.value === value ? 'chosen' : ''}`}
+              onMouseEnter={() => setHighlight(index)}
+              onClick={() => pick(choice.value)}
+            >
+              <span className="select-option-label">{choice.label}</span>
+              {choice.meta}
+              {choice.badge ? <span className="size-badge">{choice.badge}</span> : null}
+              {choice.value === value ? <Icon name="check" size={14} /> : null}
+            </button>)}
+        </div>
+        {foot}
+      </div>)}
   </div>
 }

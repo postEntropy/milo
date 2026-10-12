@@ -916,13 +916,26 @@ export default function App() {
     } catch (error) { fail(error) }
   }
 
-  const changeModel = useCallback(async (model: string): Promise<void> => {
+  /**
+   * Setting the pair, the same act the settings screen calls `pickModel`: a model
+   * taken from another provider's list moves the provider with it, because the
+   * choice is the model and it fixes the pair at once. In that order, so the model
+   * being set belongs to the provider being set. One write, one notice, one
+   * failure — the two calls are one act, and firing them side by side would let
+   * `set-provider` land last and overwrite the model with that provider's default.
+   */
+  const pickModel = useCallback(async (model: string, provider: string): Promise<void> => {
     try {
+      let next = identity
+      if (provider !== identity.provider) {
+        const moved = await api<{ provider: string; providerName: string; model: string }>('set-provider', { provider })
+        next = { provider: moved.provider, providerName: moved.providerName, model: moved.model }
+      }
       const result = await api<{ model: string }>('set-model', { model })
-      setIdentity((current) => ({ ...current, model: result.model }))
+      setIdentity({ ...next, model: result.model })
       setNotice(null)
     } catch (error) { fail(error) }
-  }, [fail])
+  }, [identity, fail])
 
   const changeProvider = useCallback(async (provider: string): Promise<void> => {
     try {
@@ -1034,7 +1047,7 @@ export default function App() {
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock" ref={composerDockRef}>
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={(model) => void changeModel(model)} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={(provider) => void changeProvider(provider)} />
+            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
           </div>
         </section>
         : null}

@@ -1,7 +1,7 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api } from '../lib/api.js'
 import { formatTokens } from '../lib/format.js'
-import { isPhone } from '../lib/phone.js'
+import { isPhone, usePhone } from '../lib/phone.js'
 import { EFFORT_LABELS } from '../lib/labels.js'
 import { shortModel } from '../../../src/gateways/model-label.ts'
 import { formatDuration } from '../../../src/util/format.ts'
@@ -10,6 +10,7 @@ import { EFFORT_LEVELS, type JobView } from '@protocol'
 import { Icon } from '../ui/Icons.js'
 import { Select } from '../ui/Select.js'
 import { ModelDetails } from '../ui/ModelDetails.js'
+import { ModelPicker } from '../ui/ModelPicker.js'
 
 interface Props {
   busy: boolean
@@ -34,9 +35,10 @@ interface Props {
   focusSignal: number
   onSend(text: string, intent: 'steer' | 'queue', files?: File[]): void
   onStop(): void
-  onModelChange(model: string): void
+  /** Sets the pair: the model, and the provider it answers through. */
+  onModelChange(model: string, provider: string): Promise<void>
   onEffortChange(effort: 'low' | 'medium' | 'high'): void
-  onProviderChange(provider: string): void
+  onProviderChange(provider: string): Promise<void>
 }
 
 
@@ -51,22 +53,24 @@ export interface ComposerHandle {
 }
 
 /** The width at or under which the two toolbar pills fold into one menu. */
-const PHONE_QUERY = '(max-width: 520px)'
+const FOLD_QUERY = '(max-width: 520px)'
 
 /**
- * Whether the composer is on a phone, where the model and effort pills do not
- * both fit and become one control instead of two.
+ * Whether the model and effort pills fold into one control. A narrower question
+ * than the app's own phone width — `usePhone` in `lib/phone.ts` — because between
+ * the two the pills still fit side by side while the window already counts as a
+ * phone for everything else. Two lets named alike would be swapped by accident.
  */
-function usePhone(): boolean {
-  const [phone, setPhone] = useState(() => window.matchMedia(PHONE_QUERY).matches)
+function useFoldedToolbar(): boolean {
+  const [folded, setFolded] = useState(() => window.matchMedia(FOLD_QUERY).matches)
   useEffect(() => {
-    const media = window.matchMedia(PHONE_QUERY)
-    const update = (): void => setPhone(media.matches)
+    const media = window.matchMedia(FOLD_QUERY)
+    const update = (): void => setFolded(media.matches)
     update()
     media.addEventListener('change', update)
     return () => media.removeEventListener('change', update)
   }, [])
-  return phone
+  return folded
 }
 
 /**
@@ -126,9 +130,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const drafts = useRef(new Map<string, string>())
   const fileDrafts = useRef(new Map<string, File[]>())
   const shownKey = useRef(draftKey)
-  const [models, setModels] = useState<ModelInfo[] | null>(null)
-  /** Which provider the loaded catalog belongs to, so a switch reloads it. */
-  const modelsFor = useRef<string | null>(null)
+  const [catalog, setCatalog] = useState<ModelInfo[] | null>(null)
+  /** Which provider the loaded catalog belongs to, so the list follows the eye. */
+  const catalogFor = useRef<string | null>(null)
+  /** Every provider's catalog already read, so the rail can be walked back and
+   *  forth without spending a call on a provider already seen. */
+  const catalogs = useRef(new Map<string, ModelInfo[]>())
+  /** The provider being looked at, and the one that was set when the eye moved:
+   *  a browse stops counting the moment the provider is set to something else. */
+  const [browsed, setBrowsed] = useState<{ from: string; provider: string } | null>(null)
+  const browsing = browsed && browsed.from === provider ? browsed.provider : provider
   const [providers, setProviders] = useState<{ id: string; name: string }[] | null>(null)
   const providersLoaded = useRef(false)
   /** Whether the picker has been opened; before that a provider move spends no call. */
@@ -141,7 +152,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const [files, setFiles] = useState<File[]>([])
   const [uploadError, setUploadError] = useState('')
   const uploadRef = useRef<HTMLInputElement>(null)
-  const phone = usePhone()
+  const folded = useFoldedToolbar()
+  /** A screen with room for the two panes: the providers and the models side by
+   *  side. The app's own phone width is where the settings screen draws this
+   *  same pair, so the composer asks the same question in the same place. */
+  const wide = !usePhone()
 
   const palette = useMemo(() => {
     if (!draft.startsWith('/') || draft.includes(' ') || dismissed === draft) return []
@@ -282,34 +297,61 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     }
   }
 
-  /** The provider's own catalog, read the first time the picker is opened, and
-   *  again when the provider moves so the list on screen follows it. */
-  const loadModels = useCallback(async (): Promise<void> => {
-    if (!provider || modelsFor.current === provider) return
-    const wanted = provider
-    modelsFor.current = wanted
+  /** One provider's catalog: from memory when it has already been read, from the
+   *  provider otherwise. Asking again for one already being read would spend a
+   *  second call on the same provider for the same answer. */
+  const loadCatalog = useCallback(async (wanted: string): Promise<void> => {
+    if (!wanted) return
+    const remembered = catalogs.current.get(wanted)
+    if (remembered) {
+      catalogFor.current = wanted
+      setCatalog(remembered)
+      setLoading(false)
+      setError('')
+      return
+    }
+    if (catalogFor.current === wanted) return
+    catalogFor.current = wanted
+    setCatalog(null)
     setLoading(true)
     setError('')
     try {
       const list = await api<ModelInfo[]>('models', { provider: wanted })
-      if (modelsFor.current !== wanted) return
-      setModels(list)
+      catalogs.current.set(wanted, list)
+      if (catalogFor.current !== wanted) return
+      setCatalog(list)
     } catch (err) {
-      if (modelsFor.current !== wanted) return
-      modelsFor.current = null
+      if (catalogFor.current !== wanted) return
+      catalogFor.current = null
+      // An empty list rather than a missing one: the pane says what went wrong
+      // instead of sitting on "reading this provider's models" forever.
+      setCatalog([])
       setError(err instanceof Error ? err.message : String(err))
     } finally {
-      if (modelsFor.current === wanted) setLoading(false)
+      if (catalogFor.current === wanted) setLoading(false)
     }
-  }, [provider])
+  }, [])
 
-  // A provider switch reloads the catalog under the open menu; before the picker
-  // has ever opened there is nothing to refresh, so no call is spent.
+  // The catalog under the open menu follows the provider being looked at; before
+  // the picker has ever opened there is nothing to refresh, so no call is spent.
   useEffect(() => {
     if (!pickerOpened.current) return
-    setModels(null)
-    void loadModels()
-  }, [loadModels])
+    void loadCatalog(browsing)
+  }, [browsing, loadCatalog])
+
+  /** Clicks a provider in the rail: it only moves the eye, never the choice. */
+  function browse(next: string): void {
+    setBrowsed({ from: provider, provider: next })
+  }
+
+  /**
+   * Choosing a model sets the pair, the same act as in the settings screen: a
+   * model taken from another provider's list moves the provider with it. The app
+   * serialises the two calls, so this hands over the pair and lets it answer.
+   */
+  function chooseModel(id: string): void {
+    void onModelChange(id, browsing)
+  }
 
   /** The providers this install can talk through, read once when the picker opens. */
   async function loadProviders(): Promise<void> {
@@ -369,20 +411,31 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           <div className="composer-model-wrap">
             <Select
               className="composer-pill"
-              label={phone ? 'Model and reasoning effort' : `${providerName} models`}
+              label={folded ? 'Model and reasoning effort' : `${providerName} models`}
               icon="spark"
-              filterExtra={<div className="composer-provider">
+              body={wide ? (close) => <ModelPicker
+                className="composer-model-panes"
+                presets={providers ?? []}
+                provider={provider}
+                model={model}
+                browsing={browsing}
+                catalog={catalog}
+                note={error || 'This provider reports no models.'}
+                onBrowse={browse}
+                onPick={(id) => { chooseModel(id); close() }}
+              /> : undefined}
+              filterExtra={wide ? undefined : <div className="composer-provider">
                 <Select
                   label="Provider"
                   value={provider}
                   triggerLabel={providerName}
                   choices={(providers ?? []).map((item) => ({ value: item.id, label: item.name }))}
-                  onChange={onProviderChange}
+                  onChange={(next) => void onProviderChange(next)}
                   onOpen={() => void loadProviders()}
                   note="No other provider with a key is configured."
                 />
               </div>}
-              foot={phone ? <div className="composer-effort-seg">
+              foot={folded ? <div className="composer-effort-seg">
                 {EFFORT_LEVELS.map((level) => <button
                   key={level}
                   type="button"
@@ -392,15 +445,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               </div> : undefined}
               value={model}
               triggerLabel={model ? shortModel(model) : 'Model'}
-              choices={(models ?? []).map((item) => ({
+              choices={(catalog ?? []).map((item) => ({
                 value: item.id, label: item.id, meta: <ModelDetails model={item} />,
               }))}
-              onChange={onModelChange}
-              onOpen={() => { pickerOpened.current = true; void loadProviders(); void loadModels() }}
+              onChange={chooseModel}
+              onOpen={() => { pickerOpened.current = true; void loadProviders(); void loadCatalog(browsing) }}
               note={loading ? 'Loading models…' : error || 'No models found.'}
             />
           </div>
-          {!phone && <div className="composer-effort-wrap">
+          {!folded && <div className="composer-effort-wrap">
             <Select
               className="composer-pill"
               label="Reasoning effort"
