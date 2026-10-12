@@ -1138,9 +1138,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      is. Neither ever leaves bare page showing. The rounded edge goes on the chat,
      which is the panel on top, and its own surface on the drawer is what the
      corner cuts against. */
-  /* Absolute, not fixed: it spans the whole page rather than the visible part of
-     it, which is what the drawer rests behind. The page is locked while it is up. */
-  .sidebar { position: absolute; z-index: 1; inset-block: 0; inset-inline-start: 0; width: var(--drawer-width); transform: none; padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom); }
+  /* Fixed, not absolute: the document is the scroller here, and opening a session
+     leaves it scrolled to the end — an absolute drawer would then sit off-screen
+     above, over a panel that reads as empty. Pinned to the visible area while the
+     page is locked, the drawer is always where the finger left it, and its own
+     list scrolls instead of the page. */
+  .sidebar { position: fixed; z-index: 1; inset-block: 0; inset-inline-start: 0; width: var(--drawer-width); transform: none; padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom); }
   .main { grid-column: 1; z-index: 2; transition: transform var(--motion-drawer) var(--ease-standard); }
   /* Clipped while it is a panel, so the chat's own bars cannot square the corner
      off: the composer paints its background right up to the edge. No shadow: the
