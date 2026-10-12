@@ -208,6 +208,16 @@ describe('what Milo knows about its own setup', () => {
     expect(build([tool, { ...tool, name: 'browser_act' }])).toContain('a browser')
   })
 
+  it('teaches the shell only when the shell is a tool it has', () => {
+    const withShell = build([tool, { ...tool, name: 'shell_command' }])
+    expect(withShell).toContain('## Shell')
+    // The probes and the discipline, not just the existence of the tool.
+    expect(withShell).toMatch(/command -v/)
+    expect(withShell).toMatch(/let each check stand on its own/)
+    // A run without the shell tool carries no shell section at all.
+    expect(build([tool])).not.toContain('## Shell')
+  })
+
   it('names the tabs on the panel, and where each one is', () => {
     const panel = build([tool, { ...tool, name: 'panel' }], 0, undefined, undefined, {
       tabs: [

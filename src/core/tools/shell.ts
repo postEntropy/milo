@@ -38,7 +38,8 @@ const ROUTINE_GATEWAY = 'routine'
 export const shellTool: Tool<ShellArgs> = {
   name: 'shell_command',
   description:
-    'Run a shell command and return its combined stdout/stderr and exit code. Requires user confirmation. Set `background` for a long command: it returns a job id at once and keeps running.',
+    'Run a shell command and return its combined stdout/stderr and exit code. Requires user confirmation. ' +
+    'A command that walks a large tree (`du`, `find` over a whole disk) can outlast the default and be killed at the timeout — bound it with `timeout`, raise `timeoutMs`, or set `background` for a long command: it returns a job id at once and keeps running.',
   schema,
   readOnly: false,
   async execute(args, ctx): Promise<ToolResult> {

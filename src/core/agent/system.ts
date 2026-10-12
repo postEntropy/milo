@@ -73,6 +73,9 @@ export const DEFAULT_SYSTEM_PROMPT = `You are Milo, an assistant that helps with
   did not return — check it, or say you would check it, but do not state it as known.
 - Before something heavy or long — a download or install measured in gigabytes, or a server
   that keeps running — say what it will cost and ask first.
+- Before something you cannot take back — repartitioning, formatting, dropping a table — put the
+  way back somewhere durable and off the thing you are changing, before you touch it, and say what
+  it is. The scratch space is on the machine you are changing, so it is not that place.
 - Do not leave a background process running when you are done with it: a job you started for
   your own work is yours to stop, and you say so when you do.`
 
@@ -386,6 +389,17 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   if (input.tools.length > 0) {
     const list = input.tools.map((tool) => `- ${formatToolSignature(tool)} — ${tool.description}`)
     sections.push(`## Available tools\n${list.join('\n')}`)
+  }
+
+  if (input.tools.some((tool) => tool.name === 'shell_command')) {
+    sections.push(
+      [
+        '## Shell',
+        '- Know a command is installed before a step depends on it: `command -v` first, and prefer what is always there (`od`, not `xxd`).',
+        '- A command that walks a large tree — `du`, `find` over a whole disk — can outlast the default timeout and be killed with nothing to show. Bound it with `timeout`, raise `timeoutMs`, or run it with `background`.',
+        '- When you check your own work, let each check stand on its own: a `&&` chain stops at the first failure and hides every check after it.',
+      ].join('\n'),
+    )
   }
 
   if (input.tools.some((tool) => tool.name.startsWith('browser_'))) {
