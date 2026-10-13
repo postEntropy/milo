@@ -25,7 +25,10 @@ enum ClientFrame {
         case .hello(let conversationId):
             // The phone draws a generated interface, so it says so: without it the
             // daemon never teaches the model to draw one and no `ui` event is ever sent.
-            return ["type": "hello", "version": miloProtocolVersion, "conversationId": conversationId, "genui": true]
+            // It names itself too: this app and the browser reach the daemon through the
+            // same web gateway, and that is what lets it hold the turn for a phone —
+            // shorter answers, spoken to a small screen.
+            return ["type": "hello", "version": miloProtocolVersion, "conversationId": conversationId, "genui": true, "client": "ios"]
         case .send(let text, let intent):
             guard let intent else { return ["type": "send", "text": text] }
             return ["type": "send", "text": text, "intent": intent.rawValue]

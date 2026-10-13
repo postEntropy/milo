@@ -16,7 +16,7 @@ import type { ClientFrame, FrameAttachment, JobView, PanelInput, PanelKind, Pane
 import { PERMISSION_TIMEOUT_MS } from './protocol.js'
 import { displayEvent } from './turn.js'
 import { panelsOf, transcriptOf } from './transcript.js'
-import type { PanelFacts } from '../../core/agent/system.js'
+import type { ClientKind, PanelFacts } from '../../core/agent/system.js'
 import { resolveToolPath } from '../../core/tools/walk.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
@@ -61,6 +61,13 @@ interface Conversation {
    * and is taught nothing.
    */
   genui?: boolean
+  /**
+   * The client app that last named itself on this conversation, when one did. The
+   * phone and the browser reach the same gateway, so this is what lets a turn be
+   * held for the phone. Declared on connect and read on every turn, like `genui` —
+   * a client that says nothing leaves it as it was.
+   */
+  client?: ClientKind
   /**
    * The panel's tabs, in the order they opened, and the one in front. The requests
    * that made them, not the resolved views: a tab is read from disk afresh each
@@ -120,7 +127,7 @@ export class WebHub {
       }) ?? null
   }
 
-  async connect(client: WebClient, conversationId: string, genui?: boolean): Promise<void> {
+  async connect(client: WebClient, conversationId: string, genui?: boolean, clientKind?: ClientKind): Promise<void> {
     if (!/^[0-9a-f-]{36}$/i.test(conversationId)) throw new Error('Invalid conversation id.')
     let conversation = this.conversations.get(conversationId)
     if (!conversation) {
@@ -133,6 +140,7 @@ export class WebHub {
     // A client that says nothing leaves the capability as it was: the plain chat
     // and a reload that does not repeat it must not take it away mid-session.
     if (genui !== undefined) conversation.genui = genui
+    if (clientKind !== undefined) conversation.client = clientKind
     conversation.clients.add(client)
     client.send({
       type: 'ready',
@@ -758,6 +766,10 @@ export class WebHub {
             // it draws one, and the setting has been turned on (unset is off — the
             // feature is experimental, and the teaching rides every turn).
             genui: conversation.genui === true && display.genui === true,
+            // Who is holding the conversation: the phone said it is the phone, which
+            // the gateway alone cannot tell from a browser. Named per turn, like
+            // `genui`, and absent until a client declares one.
+            client: conversation.client,
             ...(currentImages.length ? { images: currentImages } : {}),
             ...(currentAudio.length ? { audio: currentAudio } : {}),
             ...(currentModel ? { model: currentModel } : {}),

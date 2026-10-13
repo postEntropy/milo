@@ -20,7 +20,7 @@ import type { AgentEvent } from './agent/events.js'
 import { runAgent, type RunTrace } from './agent/loop.js'
 import type { TraceWriter } from './traces.js'
 import { runSubagent } from './agent/subagent.js'
-import { buildSystemPrompt, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
+import { buildSystemPrompt, type ClientKind, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import {
   contextBudget,
   countMessages,
@@ -48,10 +48,24 @@ import {
   type SessionSummary,
 } from './sessions/index.js'
 
-const SURFACES: SurfaceKind[] = ['cli', 'telegram', 'discord', 'web']
+const SURFACES: SurfaceKind[] = ['cli', 'telegram', 'discord', 'web', 'ios']
 
 function asSurface(gateway: string): SurfaceKind | undefined {
   return (SURFACES as string[]).includes(gateway) ? (gateway as SurfaceKind) : undefined
+}
+
+/**
+ * Where this turn is being held. The gateway alone cannot say it: the phone reaches
+ * the same web gateway the browser does, so a client that named itself in the
+ * handshake is what tells the two apart — and its kind is the surface it is.
+ */
+function surfaceOf(gateway: string, client?: ClientKind): SurfaceKind | undefined {
+  return client ?? asSurface(gateway)
+}
+
+/** Whether a surface can draw a generated interface: the browser and the phone. */
+function canDraw(surface: SurfaceKind | undefined): boolean {
+  return surface === 'web' || surface === 'ios'
 }
 
 /**
@@ -205,6 +219,13 @@ export interface SendOptions {
    * here on every turn. Absent, or any surface but the web, draws nothing.
    */
   genui?: boolean
+  /**
+   * The client app this turn is talking to, when it named itself — the phone says
+   * it is the phone. It reaches the same web gateway the browser does, so this is
+   * what makes the surface the phone rather than a browser. Absent, the gateway
+   * names the surface on its own.
+   */
+  client?: ClientKind
 }
 
 export class Session {
@@ -485,15 +506,15 @@ export class Session {
     // surface that can draw one, which is the web app alone, so it is withheld
     // from every other catalog the same way. (A subagent filters `task` out of its
     // own list too.)
-    const surface = asSurface(this.scope.gateway)
+    const surface = surfaceOf(this.scope.gateway, opts?.client)
     const canSendFiles = this.options.deliverTo !== undefined || receivesFiles(surface)
     // A generated interface needs a surface that can draw one *and* a client that
-    // said it would draw it: the web surface alone is not enough, or every web
+    // said it would draw it: a surface that draws alone is not enough, or every web
     // chat would draw and a plain one could not exist beside it. There is no tool
     // to withhold — the teaching goes in the prompt — so this is the whole gate.
     // Nothing is taught to a surface that cannot draw it: a widget sent to a chat
     // with no way to show it is a thing that vanishes rather than fails.
-    const draws = surface === 'web' ? opts?.genui : undefined
+    const draws = canDraw(surface) ? opts?.genui : undefined
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
       .filter((tool) => tool.name !== 'panel' || surface === 'web')
     // An instruction-only turn has nothing of the person's to recall against.

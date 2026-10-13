@@ -10,21 +10,45 @@ import type { JobFacts } from '../jobs/index.js'
 import { GENUI_SECTION } from '../genui.js'
 import { formatDuration, plural } from '../../util/format.js'
 
-export type SurfaceKind = 'cli' | 'telegram' | 'discord' | 'web'
+export type SurfaceKind = 'cli' | 'telegram' | 'discord' | 'web' | 'ios'
+
+/**
+ * The client apps that name themselves in the handshake, beside the gateway they
+ * reach. The browser sends nothing — it is the default — and the phone says it is
+ * the phone. Both reach the web gateway, so this is what tells the two apart, and
+ * what lets the prompt speak to a small screen instead of to a browser.
+ */
+export const CLIENT_KINDS = ['ios'] as const
+export type ClientKind = (typeof CLIENT_KINDS)[number]
 
 const SURFACE_LABEL: Record<SurfaceKind, string> = {
   cli: 'terminal (the Milo CLI chat)',
   telegram: 'a Telegram chat',
   discord: 'a Discord channel',
   web: 'the Milo web app (a browser chat)',
+  ios: 'the Milo iOS app (a chat on a phone)',
 }
+
+/** The phone draws what the browser draws: one renderer, the same blocks. */
+const FULL_MARKDOWN = 'Markdown renders (headings, bold, italics, lists, code blocks, tables) — use it'
 
 const SURFACE_FORMATTING: Record<SurfaceKind, string> = {
   cli: 'light markdown — code fences, inline code, bold and headings render; avoid tables and nested lists',
   telegram:
     'Markdown renders (bold, italics, inline code, fenced code blocks, quotes, links); a heading comes out as a bold line, and lists and tables come out as plain text',
   discord: 'Markdown renders (bold, italics, code blocks); keep it light',
-  web: 'Markdown renders (headings, bold, italics, lists, code blocks, tables) — use it',
+  web: FULL_MARKDOWN,
+  ios: FULL_MARKDOWN,
+}
+
+/**
+ * How long an answer should run, where the surface asks for a length of its own.
+ * A phone gives a reply a few lines and no more, so what is said there has to earn
+ * each one; the other surfaces hold every kind of turn and take the base style as
+ * it stands.
+ */
+const SURFACE_LENGTH: Partial<Record<SurfaceKind, string>> = {
+  ios: 'a phone screen — a sentence or two by default, and only expand when the person asks for detail',
 }
 
 /**
@@ -368,6 +392,8 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   if (surface) {
     environment.push(`- You are talking through ${SURFACE_LABEL[surface]}`)
     environment.push(`- Formatting: ${SURFACE_FORMATTING[surface]}`)
+    const length = SURFACE_LENGTH[surface]
+    if (length) environment.push(`- Length: ${length}`)
     if (surface !== 'cli') {
       environment.push("- Your tools run on the machine hosting Milo, not on the user's device")
     }

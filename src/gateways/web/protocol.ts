@@ -2,6 +2,7 @@ import type { GenUiRender } from '../../core/genui.js'
 import type { Idea } from '../../core/ideas.js'
 import type { PanelRequest } from '../../core/panel.js'
 import type { TodoItem } from '../../core/todos.js'
+import { CLIENT_KINDS, type ClientKind } from '../../core/agent/system.js'
 
 // 9: a `ui` event carries `draft` while the block is still being written, so the
 // widget fills in as the tree arrives. A page from 8 would drop the flag and draw
@@ -84,7 +85,7 @@ export interface SessionCardItem {
 }
 
 export type ClientFrame =
-  | { type: 'hello'; version: number; conversationId: string; genui?: boolean }
+  | { type: 'hello'; version: number; conversationId: string; genui?: boolean; client?: ClientKind }
   | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[] }
   | { type: 'control'; action: 'stop' | 'allow' | 'deny'; id?: string }
   /** Stop a background job. Pressing the control is the confirmation. */
@@ -249,7 +250,7 @@ export function proseOf(message: { parts: TranscriptPart[] }): string {
 export function parseClientFrame(value: unknown): ClientFrame | null {
   if (!value || typeof value !== 'object') return null
   const frame = value as Record<string, unknown>
-  if (frame.type === 'hello' && typeof frame.conversationId === 'string' && typeof frame.version === 'number' && (frame.genui === undefined || typeof frame.genui === 'boolean')) {
+  if (frame.type === 'hello' && typeof frame.conversationId === 'string' && typeof frame.version === 'number' && (frame.genui === undefined || typeof frame.genui === 'boolean') && (frame.client === undefined || (CLIENT_KINDS as readonly string[]).includes(String(frame.client)))) {
     return frame as ClientFrame
   }
   if (
