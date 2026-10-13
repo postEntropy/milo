@@ -67,10 +67,22 @@ final class AppModel {
     }
     /// Counters, not flags: a haptic fires on an edge, so what it watches is the
     /// moment the answer begins and the moment it lands. `busy` cannot be the
-    /// trigger — it goes up on the send, before the daemon has said anything.
+    /// trigger — it goes up on the send — and neither can `turn-start`, which the
+    /// daemon sends on acknowledging the send, still the person's own thumb. The
+    /// beginning is the turn's first output, whenever that arrives.
     private(set) var answerBegan = 0
     private(set) var answerEnded = 0
     private(set) var connection: MiloClient.State = .idle
+    /**
+     What the chat says about the socket, when it is worth saying. Held back for a
+     moment: leaving the app drops the socket and coming back dials again in a second
+     or two, and a line that appears and clears inside that is a flicker about a wait
+     that was over before it could be read. The hold starts when the socket goes down
+     and not at each state on the way back — passing through `offline` and `connecting`
+     is one wait, not two. A refusal is not a wait: the daemon answered, so it is said
+     at once, the way it always was.
+     */
+    private(set) var connectionLine: String?
     private(set) var pending: (id: String, request: PermissionRequest, expiresAt: Double)?
 
     // The drawer.
@@ -89,10 +101,16 @@ final class AppModel {
 
     private let client = MiloClient()
     private var turnStarted: Date?
+    /// Whether the turn in flight has announced its first output yet, so the beginning
+    /// is said once however many pieces arrive.
+    private var began = false
     /// How long a wait lasts before it earns the line, and the hold itself while it
     /// is running — one hold for the whole outage.
     private static let lineDelay: Duration = .seconds(2)
     private var lineWork: Task<Void, Never>?
+    /// The words a fork owes: sent once the socket is speaking to the copy, the way
+    /// the browser's own regenerate does it.
+    private var owed: String?
 
     private var account: Account? {
         if case .chat(let account) = phase { return account }
@@ -354,6 +372,7 @@ final class AppModel {
         sessionId = ""
         pending = nil
         turnStarted = nil
+        began = false
         busy = false
         client.connect(to: account)
     }
@@ -493,6 +512,7 @@ final class AppModel {
             pending = nil
             queued = 0
             turnStarted = nil
+            began = false
             // A turn still being written when this screen opened: its `turn-start`
             // arrived before the app was listening, so the row it is writing into is
             // opened here and the events still to come land in it. No thought time is
@@ -502,7 +522,7 @@ final class AppModel {
             }
         case .turnStart:
             busy = true
-            answerBegan += 1
+            began = false
             turnStarted = Date()
             messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil))
         case .event(_, let event):
@@ -545,13 +565,25 @@ final class AppModel {
         }
     }
 
+    /// The turn's first output. The haptic waits for this rather than the send or the
+    /// daemon's `turn-start`, so the tap lands when Milo actually starts — said once,
+    /// whichever piece of the answer arrives first.
+    private func beganSpeaking() {
+        guard !began else { return }
+        began = true
+        answerBegan += 1
+    }
+
     private func apply(_ event: AgentEvent) {
         switch event {
         case .textDelta(let delta):
+            beganSpeaking()
             append(delta, reasoning: false)
         case .reasoningDelta(let delta):
+            beganSpeaking()
             append(delta, reasoning: true)
         case .toolStart(_, let name, let text):
+            beganSpeaking()
             // `text` is the server's own line (name and the one value worth showing),
             // the same the read-back transcript carries; the name alone is the fallback.
             mutateLast { $0.append(.tool(ToolMark(name: name, text: text ?? name, state: "running"))) }
@@ -566,6 +598,7 @@ final class AppModel {
                 parts[index] = .tool(tool)
             }
         case .todo(let items):
+            beganSpeaking()
             mutateLast { parts in
                 let index = parts.lastIndex { part in
                     if case .todo = part { return true }
@@ -574,6 +607,7 @@ final class AppModel {
                 if let index { parts[index] = .todo(items) } else { parts.append(.todo(items)) }
             }
         case .ui(let widget, let draft):
+            beganSpeaking()
             // A widget arrives many times over as the model writes it: each draft takes
             // the place of the one before it, and the closed block takes the last draft's.
             mutateLast { parts in AppModel.place(widget: widget, draft: draft, in: &parts) }
