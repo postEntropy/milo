@@ -60,7 +60,9 @@ struct SessionsDrawer: View {
                 LazyVStack(alignment: .leading, spacing: MiloTheme.Space.one) {
                     ForEach(groups, id: \.title) { group in
                         Text(group.title)
-                            .font(MiloTheme.Text.small.weight(.semibold))
+                            .font(MiloTheme.Text.meta.weight(.medium))
+                            .textCase(.uppercase)
+                            .tracking(0.7)
                             .foregroundStyle(MiloTheme.muted)
                             .padding(.horizontal, MiloTheme.Space.three)
                             .padding(.top, MiloTheme.Space.three)
@@ -76,25 +78,26 @@ struct SessionsDrawer: View {
         }
     }
 
-    /// The list the way a person looks for a session: by when it last spoke.
+    /// The list the way the browser buckets it: how recent, newest group first, with the
+    /// same four headings and the same boundaries — a session sits under the same one on
+    /// both surfaces. `updatedAt` is in milliseconds, as the daemon sends it.
     private var groups: [(title: String, sessions: [SessionSummary])] {
-        let calendar = Calendar.current
-        var today: [SessionSummary] = []
-        var yesterday: [SessionSummary] = []
-        var earlier: [SessionSummary] = []
-        for session in model.sessions {
-            let date = Date(timeIntervalSince1970: session.updatedAt / 1000)
-            if calendar.isDateInToday(date) {
-                today.append(session)
-            } else if calendar.isDateInYesterday(date) {
-                yesterday.append(session)
-            } else {
-                earlier.append(session)
+        let day: Double = 86_400_000
+        let startOfToday = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970 * 1000
+        let ranges: [(title: String, from: Double, to: Double)] = [
+            ("Today", startOfToday, .infinity),
+            ("Yesterday", startOfToday - day, startOfToday),
+            ("Previous 7 days", startOfToday - 7 * day, startOfToday - day),
+            ("Older", -.infinity, startOfToday - 7 * day),
+        ]
+        return ranges
+            .map { range in
+                (
+                    title: range.title,
+                    sessions: model.sessions.filter { $0.updatedAt >= range.from && $0.updatedAt < range.to }
+                )
             }
-        }
-        return [("Today", today), ("Yesterday", yesterday), ("Earlier", earlier)]
-            .filter { !$0.1.isEmpty }
-            .map { (title: $0.0, sessions: $0.1) }
+            .filter { !$0.sessions.isEmpty }
     }
 
     private func row(_ session: SessionSummary) -> some View {
