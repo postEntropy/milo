@@ -1,5 +1,21 @@
 import SwiftUI
 
+/// The frames, in the window's own space, of every box in the thread that scrolls sideways
+/// on its own — a code block, a table. A drag that begins inside one belongs to the box,
+/// not to the sessions drawer.
+struct ScrollBoxKey: PreferenceKey {
+    static var defaultValue: [CGRect] { [] }
+    static func reduce(value: inout [CGRect], nextValue: () -> [CGRect]) {
+        value.append(contentsOf: nextValue())
+    }
+}
+
+/// Where those frames are kept: a plain reference, so a scroll that moves the boxes writes
+/// them without re-rendering the screen, which reads them only when a drag has ended.
+final class ScrollBoxes {
+    var frames: [CGRect] = []
+}
+
 /// The session on screen: a floating top bar, the thread, and a floating
 /// composer pinned above the keyboard. No rules between the regions — each is
 /// carried by its own surface and spacing.
@@ -16,6 +32,10 @@ struct ChatView: View {
     /// Whether the thread is at its end, read off the scroll itself. What the arrow
     /// above the composer answers to.
     @State private var atEnd = true
+    /// The boxes in the thread that scroll sideways on their own — a code block, a table.
+    /// Their frames ride up as a preference so a drag can be told where it began; held in
+    /// a plain reference, so a scroll that moves them does not re-render the screen.
+    @State private var boxes = ScrollBoxes()
     @FocusState private var composing: Bool
 
     var body: some View {
@@ -73,23 +93,26 @@ struct ChatView: View {
         // would land on the person's own thumb.
         .sensoryFeedback(.impact(weight: .medium, intensity: 0.6), trigger: model.answerBegan)
         .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.5), trigger: model.answerEnded)
-        // A swipe from the left edge opens the sessions and a swipe back closes them — the
-        // gesture the platform's own sidebars answer to, and the reason it is the edge: a
-        // code block scrolls sideways, and a drag that starts inside one is the block's to
-        // answer. From anywhere, the box could never be read along its longest line. Only a
-        // mostly horizontal drag counts, so scrolling the thread is never mistaken for it.
+        // A swipe across the thread opens the sessions and a swipe back closes them — the
+        // gesture the platform's own sidebars answer to, from wherever the person swipes.
+        // Only a mostly horizontal drag counts, so scrolling the thread is never mistaken
+        // for it; and a drag that began inside a box with its own sideways scroll is the
+        // box's, not the drawer's.
         .simultaneousGesture(
-            DragGesture(minimumDistance: 24)
+            DragGesture(minimumDistance: 24, coordinateSpace: .global)
                 .onEnded { drag in
                     let across = drag.translation.width
                     guard abs(across) > abs(drag.translation.height) * 1.5 else { return }
-                    if !drawer, across > 60, drag.startLocation.x <= Self.edge {
+                    // Inside a box that scrolls sideways, the drag is the box's to answer.
+                    guard !boxes.frames.contains(where: { $0.contains(drag.startLocation) }) else { return }
+                    if !drawer, across > 60 {
                         openDrawer()
                     } else if drawer, across < -60 {
                         drawer = false
                     }
                 }
         )
+        .onPreferenceChange(ScrollBoxKey.self) { boxes.frames = $0 }
         .task {
             composing = true
             await model.begin(at: account)
@@ -101,9 +124,6 @@ struct ChatView: View {
     }
 
     private static let drawerWidth: CGFloat = 300
-    /// How far from the left edge a drag counts as pulling the sessions out. Wide enough
-    /// for a thumb to find, narrow enough to leave the thread its own gestures.
-    private static let edge: CGFloat = 28
     /// The slide of the chat uncovering the sessions. One value for the move and for
     /// the moment the list under it comes back, so the two cannot drift apart.
     private static let drawerDuration: Double = 0.28

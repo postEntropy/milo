@@ -104,6 +104,7 @@ struct Prose: View {
             .padding(.vertical, MiloTheme.Space.one)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        .marksScrollBox()
     }
 
     private enum Block {
@@ -285,6 +286,22 @@ struct Prose: View {
     }
 }
 
+/// Marks a view as a box that scrolls sideways on its own, publishing its frame so a drag
+/// on the screen can be told whether it began inside one — the drag then belongs to the box.
+private struct ScrollBoxMark: ViewModifier {
+    func body(content: Content) -> some View {
+        content.background {
+            GeometryReader { geo in
+                Color.clear.preference(key: ScrollBoxKey.self, value: [geo.frame(in: .global)])
+            }
+        }
+    }
+}
+
+private extension View {
+    func marksScrollBox() -> some View { modifier(ScrollBoxMark()) }
+}
+
 /// A fenced block: monospaced on its own surface, scrolling sideways rather than
 /// wrapping, because a wrapped line of code stops being the line that was written.
 /// No language label — the browser does not draw one, and the two surfaces say the
@@ -309,6 +326,7 @@ struct CodeBlock: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
         .overlay(alignment: .topTrailing) { copyControl }
+        .marksScrollBox()
     }
 
     private var copyControl: some View {
