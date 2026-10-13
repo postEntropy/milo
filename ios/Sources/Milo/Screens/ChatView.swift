@@ -244,7 +244,7 @@ struct Composer: View {
                 // The model lives behind this, not on the bar: what belongs to the
                 // message is the field and the way to send it.
                 Menu {
-                    Button { openPicker() } label: { Label("Model", systemImage: "cpu") }
+                    Button { openPicker() } label: { menuLine("Model", "cpu") }
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 20, weight: .semibold))
@@ -409,18 +409,18 @@ struct MessageRow: View {
         Button {
             UIPasteboard.general.string = prose
         } label: {
-            Label("Copy", systemImage: "doc.on.doc")
+            menuLine("Copy", "doc.on.doc")
         }
         if let raw = message.raw {
             Button {
                 UIPasteboard.general.string = raw
             } label: {
-                Label("Copy raw", systemImage: "curlybraces")
+                menuLine("Copy raw", "curlybraces")
             }
         }
         if let tokens = message.tokens {
             Button {} label: {
-                Label("\(tokens.input) in · \(tokens.output) out", systemImage: "cpu")
+                menuLine("\(tokens.input) in · \(tokens.output) out", "cpu")
             }
             .disabled(true)
         }

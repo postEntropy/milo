@@ -61,6 +61,18 @@ struct MiloIconButton: View {
     }
 }
 
+/// A menu line and its mark. The mark keeps the tone of the words beside it: a menu is
+/// not where the accent points at anything, and a list of tinted glyphs is paint. A
+/// destructive line is drawn as a plain `Label` instead — there the red *is* the words'
+/// own colour, and a mark set apart from them would sit grey beside red.
+func menuLine(_ title: String, _ symbol: String) -> some View {
+    Label {
+        Text(title)
+    } icon: {
+        Image(systemName: symbol).foregroundStyle(MiloTheme.foreground)
+    }
+}
+
 /// The press every filled control shares: it gives a little under the finger and
 /// springs back, so a tap is felt without drawing anything around the control.
 struct PressableStyle: ButtonStyle {
