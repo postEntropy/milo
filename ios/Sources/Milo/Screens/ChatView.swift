@@ -179,7 +179,7 @@ struct ChatView: View {
                         .padding(.horizontal, 64)
                 }
             }
-            if let state = statusLine {
+            if let state = model.connectionLine {
                 Text(state)
                     .font(MiloTheme.Text.meta)
                     .foregroundStyle(MiloTheme.danger)
@@ -190,14 +190,6 @@ struct ChatView: View {
         .padding(.bottom, MiloTheme.Space.two)
     }
 
-    /// Nothing is said while the socket is up: a state line is only worth its
-    /// pixels when it is not the normal one. The words come from the state itself,
-    /// so a state added there cannot go unworded here.
-    private var statusLine: String? {
-        switch model.connection {
-        case .online, .idle: return nil
-        default: return model.connection.wording
-        }
     /// The mark a glass control in the top bar wears: one size, so the row's buttons
     /// cannot come out at three different weights.
     private func topGlyph(_ name: String) -> some View {

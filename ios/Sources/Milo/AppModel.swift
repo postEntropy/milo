@@ -89,6 +89,10 @@ final class AppModel {
 
     private let client = MiloClient()
     private var turnStarted: Date?
+    /// How long a wait lasts before it earns the line, and the hold itself while it
+    /// is running — one hold for the whole outage.
+    private static let lineDelay: Duration = .seconds(2)
+    private var lineWork: Task<Void, Never>?
 
     private var account: Account? {
         if case .chat(let account) = phase { return account }
@@ -96,7 +100,7 @@ final class AppModel {
     }
 
     init() {
-        client.onState = { [weak self] state in self?.connection = state }
+        client.onState = { [weak self] state in self?.moved(to: state) }
         client.onFrame = { [weak self] frame in self?.received(frame) }
         client.onSendFailed = { [weak self] in self?.unsent() }
     }
@@ -109,12 +113,49 @@ final class AppModel {
         }
     }
 
+    /**
+     The socket moved. `connection` is the truth of it and is current from the moment
+     it happens — the settings screen reads it as it is; the line the chat draws is
+     what waits, and only for a wait.
+     */
+    private func moved(to state: MiloClient.State) {
+        connection = state
+        switch state {
+        case .online, .idle:
+            clearHold()
+            connectionLine = nil
+        case .refused(let reason):
+            // The daemon spoke, so this is an answer rather than an outage.
+            clearHold()
+            connectionLine = reason
+        case .unreadable:
+            clearHold()
+            connectionLine = state.wording
+        case .connecting, .offline:
+            // Already holding: this is the same outage passing through another state,
+            // and the line reads whatever the socket is doing when the hold expires.
+            guard lineWork == nil else { return }
+            lineWork = Task { [weak self] in
+                try? await Task.sleep(for: Self.lineDelay)
+                guard !Task.isCancelled, let self else { return }
+                self.lineWork = nil
+                self.connectionLine = self.connection.wording
+            }
+        }
+    }
+
+    private func clearHold() {
+        lineWork?.cancel()
+        lineWork = nil
+    }
+
     /// What a call that came back wrong has to say. One place, so every failure reads
     /// the same way — the daemon's own words when it gave a reason, the system's
     /// otherwise.
     private func failed(_ error: Error) {
         note = Note((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
     }
+
     /// The app opens on a new session, ready to type into. The socket is opened
     /// either way: if the daemon could not start a session, the note says so and
     /// the last bound one is what the socket replays.
