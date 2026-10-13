@@ -54,17 +54,20 @@ interface Conversation {
   session: Session
   clients: Set<WebClient>
   /**
-   * The turn running now, with the frames of the step it is on. A client can arrive
-   * in the middle of an answer — a phone that was locked, a page reloaded — and long
-   * after its `turn-start` went out. The session on disk is written a step at a time,
-   * so what the step in flight has said exists nowhere else, and it is kept here until
-   * the step ends and handed to whoever connects.
+   * The turn running now, with every frame it has said. A client can arrive in the
+   * middle of an answer — a phone that was locked, a page reloaded — and long after
+   * its `turn-start` went out. The session on disk is written a step at a time, so
+   * the answer as it stands exists nowhere else; it is kept here, whole, and replayed
+   * to whoever connects.
    *
-   * `held` is how much of the session was written when these frames began: a step that
-   * lands there is history the ready already draws, and replaying its frames would put
-   * it on the screen twice.
+   * `from` is where the turn began in the session — the index of its own user
+   * message. The ready handed to a late client is cut there (drawing the history up
+   * to and including those words), and the frames carry everything the turn has said
+   * since. So the answer is drawn once, as the one row the client that watched it
+   * live drew — not split in two, the written steps in the history and the rest
+   * beside them.
    */
-  activeTurn?: { id: string; at: number; frames: ServerFrame[]; held: number }
+  activeTurn?: { id: string; at: number; from: number; frames: ServerFrame[] }
   /**
    * The permission the turn is waiting on, when it is waiting on one. It goes out as
    * its own frame, so a client that arrives after it did never saw it — and a
@@ -167,7 +170,11 @@ export class WebHub {
       type: 'ready',
       version: 1,
       sessionId: conversation.session.id,
-      messages: this.transcript(conversation.session),
+      // A late client is handed the history up to and including the running turn's own
+      // user message. Everything after it is that turn's output, which the frames below
+      // replay — so the answer is drawn once, as one row, and not as the steps already
+      // written with the rest of it opening a second row beside them.
+      messages: this.transcript(conversation.session, running ? running.from + 1 : undefined),
       thinking: readDisplay().thinking,
       // Read from the runtime, not a startup snapshot: a provider switch made at
       // runtime shows on the next connection without the page reconnecting.
@@ -749,7 +756,7 @@ export class WebHub {
           id,
           at: Date.now(),
           frames: [],
-          held: activeConversation.session.messages.length,
+          from: activeConversation.session.messages.length,
         }
       }
       this.broadcast(conversationId, { type: 'turn-start', id, text: files?.length
@@ -771,6 +778,10 @@ export class WebHub {
           let session = await this.runtime.getSession(conversation.scope)
           conversation.session = session
           if (runFrom === undefined) runFrom = session.messages.length
+          // Grounded on the session actually in hand, not the cached copy the turn
+          // opened with: this is the index the turn's own user message is written at,
+          // and what a late client's ready is cut at.
+          if (activeConversation?.activeTurn?.id === id) activeConversation.activeTurn.from = runFrom
           if (currentFiles?.length) {
             const prepared = await prepareIncoming(currentFiles, { model: session.model })
             currentText = [currentText, currentFiles.map((file) => `Attached ${file.name}`).join('\n'), ...prepared.text].filter(Boolean).join('\n\n') || 'Please inspect the attached media.'
@@ -969,25 +980,17 @@ export class WebHub {
 
   /**
    * A frame belonging to the turn running now: sent to everyone watching, and kept
-   * for whoever arrives late. Only the turn's own frames go through here — they are
-   * the ones a client that missed the `turn-start` has no other way to see.
+   * whole for whoever arrives late. Only the turn's own frames go through here — they
+   * are the ones a client that missed the `turn-start` has no other way to see.
    *
-   * A step that has ended is written into the session, message by message, and the
-   * transcript a late client is handed already draws it — so its frames are dropped
-   * the moment that happens. What is kept is the step still in flight, which exists
-   * nowhere else. Replaying the ones behind it said the beginning of the answer twice.
+   * Every frame is kept, the steps already written to the session among them: the
+   * ready a late client is handed is cut at the turn's start, so those steps are drawn
+   * from these frames and nowhere else. Replaying them alongside a ready that also
+   * held them is what split one answer into two rows.
    */
   private emitTurn(conversationId: string, frame: ServerFrame): void {
     const conversation = this.conversations.get(conversationId)
-    const turn = conversation?.activeTurn
-    if (conversation && turn) {
-      const written = conversation.session.messages.length
-      if (written > turn.held) {
-        turn.frames.length = 0
-        turn.held = written
-      }
-      turn.frames.push(frame)
-    }
+    if (conversation?.activeTurn) conversation.activeTurn.frames.push(frame)
     this.broadcast(conversationId, frame)
   }
 
@@ -1016,9 +1019,11 @@ export class WebHub {
 
   /** A session's history as the page renders it; see `transcriptOf`. The display
    *  setting is read now rather than remembered, so a level changed mid-session
-   *  reaches the history the next time it is drawn. */
-  private transcript(session: Session): TranscriptMessage[] {
-    return transcriptOf(session.messages, (file) => this.register(file), readDisplay().tools)
+   *  reaches the history the next time it is drawn. `through` cuts the history at a
+   *  message index — how a late client is handed everything before the running turn. */
+  private transcript(session: Session, through?: number): TranscriptMessage[] {
+    const messages = through === undefined ? session.messages : session.messages.slice(0, through)
+    return transcriptOf(messages, (file) => this.register(file), readDisplay().tools)
   }
 }
 

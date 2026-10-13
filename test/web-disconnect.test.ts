@@ -80,7 +80,9 @@ function until(open: Promise<void>, signal?: AbortSignal): Promise<void> {
 /**
  * A turn of two steps: the first is over — it said its words, asked for a read and
  * had it — and the second is held open, so a client can arrive while that step is the
- * one in flight. What it must not be handed is the first step again.
+ * one in flight. A client arriving now must be handed the whole answer, both steps, so
+ * it draws the one row it would have drawn watching it live — not the first step as
+ * history and the second opening a row beside it.
  */
 class StepwiseProvider implements Provider {
   readonly id = 'stepwise'
@@ -285,7 +287,7 @@ describe('a client arriving in the middle of a turn', () => {
 })
 
 describe('the step behind the one in flight', () => {
-  it('is not said again to the client that arrives', async () => {
+  it('is replayed with it, in order, so the answer is one row', async () => {
     const provider = new StepwiseProvider()
     const runtime = build(provider, {
       permissionPolicy: new DefaultPermissionPolicy(),
@@ -307,24 +309,23 @@ describe('the step behind the one in flight', () => {
 
     const ready = arriving.find((frame) => frame.type === 'ready')
     expect(ready?.activeTurn?.id).toEqual(expect.any(String))
-    // The step that landed is history, and the transcript handed over draws it.
-    expect(transcriptText(ready)).toContain('the step that landed')
-
-    // So its frames must not come with it: both together is the same words on the
-    // screen twice — the beginning of the answer, said again.
-    expect(arriving).not.toContainEqual(expect.objectContaining({
-      type: 'event',
-      event: expect.objectContaining({ delta: 'the step that landed' }),
-    }))
-    // The step in flight exists nowhere else, so it is replayed.
-    expect(arriving).toContainEqual(expect.objectContaining({
-      type: 'event',
-      turnId: ready?.activeTurn?.id,
-      event: expect.objectContaining({ delta: 'the step still in flight' }),
-    }))
+    // The history stops at the turn's own words: the step that landed is part of the
+    // answer being written, so it comes with the frames below, not from the ready. Both
+    // would be the same words on the screen twice — the beginning of the answer, said
+    // again — which is what split one answer into two rows.
+    expect(transcriptText(ready)).toEqual(['go'])
 
     provider.answer()
     expect(await waitFor(() => arriving.some((frame) => frame.type === 'turn-end'))).toBe(true)
+
+    // Every word of the turn is replayed once, in the order it was said: the step that
+    // landed, the step that was in flight, and its end. The client assembles them into
+    // the one row the client that watched it live had.
+    const deltas = arriving
+      .filter((frame) => frame.type === 'event')
+      .map((frame) => frame.event?.delta)
+      .filter((delta): delta is string => typeof delta === 'string')
+    expect(deltas).toEqual(['the step that landed', 'the step still in flight', ', and its end'])
   })
 })
 
