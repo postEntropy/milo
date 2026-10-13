@@ -257,7 +257,8 @@ struct GenUiView: View {
     }
 
     /// The one door back to the model: the message is the model's own, with the state
-    /// the person set filled in.
+    /// the person set filled in. The control hugs its label, as the browser draws it —
+    /// a widget with a row of buttons must not read as a stack of full-width bars.
     private func actionView(_ button: GenUiNode.Button) -> some View {
         Button {
             onSend(interpolate(button.send, values))
@@ -265,7 +266,7 @@ struct GenUiView: View {
             Text(button.label)
                 .font(MiloTheme.Text.base)
                 .foregroundStyle(MiloTheme.accentOn)
-                .frame(maxWidth: .infinity)
+                .padding(.horizontal, MiloTheme.Space.five)
                 .frame(height: 44)
                 .background(MiloTheme.accent, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
         }

@@ -4,12 +4,20 @@ import SwiftUI
  The settings the daemon owns. Nothing is kept on the phone: the screen reads the
  daemon's `overview` and writes with the daemon's own actions, so the terminal,
  the browser and this cannot come to disagree about what is configured.
+
+ One exception, marked where it sits: how this screen folds a chain of tool calls. The
+ browser draws every link of it and has nothing to fold, so a setting the daemon held
+ would be a rule one surface quietly ignored — this is a decision about a phone's
+ screen, and it is kept where it is made.
  */
 struct SettingsView: View {
     let account: Account
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var picker = false
+    /// Read and written straight through: the chain under a message reads the same key,
+    /// so a toggle here is a toggle there the moment it moves.
+    @AppStorage("tools-folded") private var foldedTools = false
 
     var body: some View {
         NavigationStack {
@@ -50,6 +58,7 @@ struct SettingsView: View {
                         }
                     }
                     Toggle("Reasoning shown", isOn: thinking)
+                    Toggle("Tool calls folded", isOn: $foldedTools)
                 }
 
                 Section("Daemon") {

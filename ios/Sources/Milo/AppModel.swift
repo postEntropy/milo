@@ -89,6 +89,16 @@ final class AppModel {
     private(set) var sessions: [SessionSummary] = []
     private(set) var sessionsLoading = false
 
+    /// The ideas the model drew from what Milo knows, for the welcome screen. Empty
+    /// until the daemon draws them; the standing four stand in meanwhile.
+    private(set) var ideas: [Idea] = []
+
+    /// The lines the welcome screen draws, from what is actually here — the browser's
+    /// own builder, over the session list and the ideas.
+    var suggestions: [Suggestion] {
+        buildSuggestions(sessions: sessions, ideas: ideas, currentId: sessionId)
+    }
+
     // The model picker.
     private(set) var providers: [ProviderInfo] = []
     private(set) var models: [ModelInfo] = []
@@ -244,6 +254,7 @@ final class AppModel {
         AccountStore.clear()
         messages = []
         sessions = []
+        ideas = []
         pending = nil
         note = nil
         phase = .pairing
@@ -401,6 +412,9 @@ final class AppModel {
         turnStarted = nil
         began = false
         busy = false
+        // The ideas belonged to the session being left; the daemon draws new ones for
+        // the one the socket is about to replay.
+        ideas = []
         client.connect(to: account)
     }
 
@@ -592,7 +606,9 @@ final class AppModel {
             queued = count
         case .error(let message):
             note = Note(message)
-        case .jobs, .suggestions, .routinesChanged, .unknown:
+        case .suggestions(let items):
+            ideas = items
+        case .jobs, .routinesChanged, .unknown:
             break
         }
     }

@@ -12,9 +12,13 @@ func sessionActions(
     onExport: @escaping () -> Void,
     onDelete: @escaping () -> Void
 ) -> some View {
-    Button(action: onRename) { menuLine("Rename", "pencil") }
-    Button(action: onExport) { menuLine("Export", "arrow.down.doc") }
+    menuItem("Rename", "pencil", action: onRename)
+    menuItem("Export", "arrow.down.doc", action: onExport)
+    // A destructive line: the menu draws its words in the platform's own red, and the mark
+    // beside them wears whatever tone the line is told — so it is told that same red, since
+    // the accent it would otherwise take makes the trash the loudest thing on the row.
     Button(role: .destructive, action: onDelete) { Label("Delete", systemImage: "trash") }
+        .tint(Color(.systemRed))
 }
 
 /**

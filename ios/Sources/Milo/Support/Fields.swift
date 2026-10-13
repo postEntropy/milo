@@ -61,16 +61,31 @@ struct MiloIconButton: View {
     }
 }
 
-/// A menu line and its mark. The mark keeps the tone of the words beside it: a menu is
-/// not where the accent points at anything, and a list of tinted glyphs is paint. A
-/// destructive line is drawn as a plain `Label` instead — there the red *is* the words'
-/// own colour, and a mark set apart from them would sit grey beside red.
-func menuLine(_ title: String, _ symbol: String) -> some View {
-    Label {
-        Text(title)
-    } icon: {
-        Image(systemName: symbol).foregroundStyle(MiloTheme.foreground)
+/// A line in a menu: its words, its mark, and the tone the mark is told to wear.
+///
+/// A menu paints the mark of every item with the surface's tint — the accent, which this
+/// app spends on the pointer and on nothing else — and it reads that tone off the *button*
+/// the item is made of, not off the mark inside it: a mark given a colour of its own comes
+/// out orange anyway. So the line is declared whole here, button and all, and no call site
+/// can hand over a mark the menu will not listen to.
+///
+/// A destructive line is left to the platform instead: there the red *is* the words' own
+/// colour, and the mark is drawn in it.
+func menuItem(
+    _ title: String,
+    _ symbol: String,
+    disabled: Bool = false,
+    action: @escaping () -> Void
+) -> some View {
+    Button(action: action) {
+        Label {
+            Text(title)
+        } icon: {
+            Image(systemName: symbol)
+        }
     }
+    .tint(MiloTheme.foreground)
+    .disabled(disabled)
 }
 
 /// The press every filled control shares: it gives a little under the finger and

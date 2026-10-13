@@ -25,7 +25,10 @@ enum ToolIcons {
         "web_search": "globe",
         "read_skill": "note.text",
         "task": "sparkles",
-        "shell_command": "terminal",
+        // The browser's own mark for this is a bare prompt; SF's `terminal` is a wide
+        // window, which reads as a different tool at the size the row draws. This is the
+        // square that says the same thing as its neighbours.
+        "shell_command": "apple.terminal",
         "browser_open": "safari",
         "browser_snapshot": "eye",
         "browser_screenshot": "camera",

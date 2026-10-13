@@ -46,14 +46,6 @@ enum ClientFrame {
 struct TodoItem: Decodable, Hashable {
     let content: String
     let status: String
-
-    var mark: String {
-        switch status {
-        case "completed": return "[x]"
-        case "in_progress": return "[>]"
-        default: return "[ ]"
-        }
-    }
 }
 
 /// A tool call as a surface draws it. `text` is the server's own rendering, which
@@ -139,6 +131,9 @@ struct SessionCardItem: Decodable, Identifiable, Hashable {
 struct Idea: Decodable, Hashable {
     let title: String
     let prompt: String
+    /// The SF Symbol the card wears, as the model chose it. Absent when it named none —
+    /// the line then falls back to the standing spark.
+    let symbol: String?
 }
 
 struct CommandResult: Decodable {

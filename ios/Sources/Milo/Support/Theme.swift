@@ -50,6 +50,15 @@ enum MiloTheme {
         static let six: CGFloat = 24
     }
 
+    /// How much extra space a line of reading text gets, in points. The platform's own
+    /// leading is about 1.3× the size of the body and the browser reads its prose at 1.65×;
+    /// this is 1.5×, which is what those three and a half points come to at 17pt.
+    static let leading: CGFloat = 3.5
+
+    /// The margin the reading column and the bars above and below it share, so the text,
+    /// the composer and the controls line up on the same two edges.
+    static let margin: CGFloat = Space.five
+
     /// Roles, not sizes: the platform's own ladder, so a screen cannot pick a
     /// type size the rest of the system does not know.
     enum Text {
@@ -58,11 +67,9 @@ enum MiloTheme {
         static let base = Font.subheadline
         static let body = Font.body
         static let title = Font.title2.weight(.semibold)
+        /// The answer's code, a step under the body size: monospace sits larger at the same
+        /// one, so this is what reads level with the prose it sits between.
         static let mono = Font.system(.subheadline, design: .monospaced)
-        /// A call's line, the one monospace a step smaller: the browser sets a tool line
-        /// under the code blocks it sits between, and the phone draws the same line at
-        /// the same step.
-        static let monoSmall = Font.system(.caption, design: .monospaced)
     }
 }
 
