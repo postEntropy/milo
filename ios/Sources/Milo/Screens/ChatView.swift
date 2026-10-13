@@ -138,6 +138,20 @@ struct ChatView: View {
                 .accessibilityLabel("Sessions")
 
                 Spacer(minLength: MiloTheme.Space.two)
+
+                // Starting a new session is offered only where there is one to leave: on
+                // a fresh session there is nothing to walk away from.
+                if !model.messages.isEmpty {
+                    Button { Task { await model.newSession() } } label: {
+                        Image(systemName: "square.and.pencil")
+                            .font(.system(size: 20, weight: .semibold))
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.regular)
+                    .accessibilityLabel("New session")
+                }
             }
             .overlay {
                 if let title = model.title {
