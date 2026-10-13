@@ -7,10 +7,12 @@ import type { Provider } from './providers/types.js'
  *
  * Nobody is waiting on this: the welcome screen is drawn from the standing four
  * the moment it appears, and the ideas arrive only to replace them. It is a small
- * request — four short lines — so the budget is short, and a call that overruns
- * leaves the standing four exactly where they were.
+ * request — four short lines — but small is tokens, not wall-clock: a real provider
+ * answers even a short call in a dozen seconds or more, and a 10s budget cut almost
+ * every one. The budget is set to clear that. A call that still overruns leaves the
+ * standing four exactly where they were, and a turn that starts cuts it at once.
  */
-const DEFAULT_IDEAS_TIMEOUT_MS = 10_000
+const DEFAULT_IDEAS_TIMEOUT_MS = 30_000
 
 /** The most ideas the welcome screen has room for. */
 const MAX_IDEAS = 4
