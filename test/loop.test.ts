@@ -42,6 +42,26 @@ class DyingProvider implements Provider {
   }
 }
 
+/**
+ * A provider whose stream dies once before any of the answer has gone out — the
+ * reasoning has started, but no word of the answer and no tool call have — which
+ * is the one failure a step is asked again for.
+ */
+class FlakyProvider implements Provider {
+  readonly id = 'flaky'
+  calls = 0
+
+  async *stream(): AsyncGenerator<StreamEvent> {
+    this.calls += 1
+    if (this.calls === 1) {
+      yield { type: 'reasoning', delta: 'thinking it over' }
+      throw new Error('terminated (read ECONNRESET)')
+    }
+    yield { type: 'text', delta: 'the answer' }
+    yield { type: 'done', finishReason: 'stop' }
+  }
+}
+
 const fakeTool: Tool<{ path: string }> = {
   name: 'fake_read',
   description: 'fake read',
@@ -129,6 +149,98 @@ describe('runAgent', () => {
     // A call that half-arrived is dropped: without its result it is a request the
     // Anthropic wire refuses, and the turn ended in the error anyway.
     expect(assistant.content.some((part) => part.type === 'tool-call')).toBe(false)
+  })
+
+  it('asks the model again when the stream dies before any of the answer has gone out', async () => {
+    // A reset socket after the 200, with only the reasoning streamed: nothing of
+    // this step is anywhere yet — the transcript is not written until the step
+    // ends — so a second try is worth the wait.
+    const provider = new FlakyProvider()
+    const registry = new ToolRegistry([fakeTool])
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }]
+
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider,
+      model: 'm',
+      tools: [],
+      registry,
+      messages,
+      context: { cwd: process.cwd(), signal: new AbortController().signal },
+    })) {
+      events.push(event)
+    }
+
+    expect(provider.calls).toBe(2)
+    expect(events.at(-1)).toMatchObject({ type: 'done', finishReason: 'stop' })
+    // The transcript holds the answer, not the scratch the dead first try left behind.
+    expect(messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'the answer' }],
+    })
+  })
+
+  it('gives up after a few tries when the stream keeps dying before the answer', async () => {
+    class AlwaysDyingProvider implements Provider {
+      readonly id = 'always-dying'
+      calls = 0
+
+      async *stream(): AsyncGenerator<StreamEvent> {
+        this.calls += 1
+        yield { type: 'reasoning', delta: 'thinking' }
+        throw new Error('terminated (read ECONNRESET)')
+      }
+    }
+    const provider = new AlwaysDyingProvider()
+    const registry = new ToolRegistry([fakeTool])
+
+    await expect(async () => {
+      for await (const _event of runAgent({
+        provider,
+        model: 'm',
+        tools: [],
+        registry,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+        context: { cwd: process.cwd(), signal: new AbortController().signal },
+      })) {
+        // drain
+      }
+    }).rejects.toThrow('terminated (read ECONNRESET)')
+
+    // The first try and the two retries it is allowed, and no more.
+    expect(provider.calls).toBe(3)
+  })
+
+  it('does not ask again once the turn has been stopped', async () => {
+    class StoppedProvider implements Provider {
+      readonly id = 'stopped'
+      calls = 0
+
+      async *stream(): AsyncGenerator<StreamEvent> {
+        this.calls += 1
+        yield { type: 'reasoning', delta: 'thinking' }
+        const error = new Error('This operation was aborted.')
+        error.name = 'AbortError'
+        throw error
+      }
+    }
+    const provider = new StoppedProvider()
+    const registry = new ToolRegistry([fakeTool])
+
+    await expect(async () => {
+      for await (const _event of runAgent({
+        provider,
+        model: 'm',
+        tools: [],
+        registry,
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+        context: { cwd: process.cwd(), signal: new AbortController().signal },
+      })) {
+        // drain
+      }
+    }).rejects.toThrow('This operation was aborted.')
+
+    expect(provider.calls).toBe(1)
   })
 
   it('hands the reasoning effort to the provider', async () => {

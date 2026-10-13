@@ -40,7 +40,7 @@ function parseRetryAfter(header: string | null, maxDelayMs: number): number | nu
   return null
 }
 
-function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(signal.reason ?? new Error('Aborted'))

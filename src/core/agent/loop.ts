@@ -1,4 +1,6 @@
+import { isAbort } from '../../util/errors.js'
 import { saveImage } from '../images.js'
+import { sleep } from '../providers/retry.js'
 import { thinkingBudgetFor } from '../providers/thinking.js'
 import { dropOldSnapshots } from '../sessions/compact.js'
 import type {
@@ -104,6 +106,16 @@ export interface RunAgentOptions {
 const DEFAULT_MAX_STEPS = 75
 
 /**
+ * How a step whose stream died before the answer is asked again. A reset socket
+ * is the common case, and it is transient: a second ask usually gets the answer
+ * the first could not. Small and bounded — a stream that keeps dying is a
+ * failure to report, not to spin on.
+ */
+const STREAM_RETRY_LIMIT = 2
+const STREAM_RETRY_DELAY_MS = 500
+const STREAM_RETRY_MAX_DELAY_MS = 4000
+
+/**
  * What the model is told when the steps run out.
  *
  * A ceiling that ends in an error and nothing to read throws the turn away: the
@@ -164,66 +176,94 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     // is that it is sent again on every step that follows it.
     dropOldSnapshots(messages, options.keepSnapshots)
 
-    try {
-      // A block is written where the prose is, so it is split out of the stream
-      // here, at the one place every surface listens. Fresh per request, not per
-      // turn: a block left open when a request ends belongs to that request, and
-      // must not swallow the next one's answer.
-      const fence = options.genui ? new GenUiFence({ drafts: true }) : null
-      for await (const event of provider.stream({
-        model: options.model,
-        messages,
-        system: options.system,
-        tools: options.tools.length > 0 ? options.tools : undefined,
-        temperature: options.temperature,
-        maxTokens: options.maxTokens,
-        reasoningEffort: options.reasoningEffort,
-        // Read off the effort, so the two wires mean the same thing by it: OpenAI
-        // takes the level, Anthropic takes a token budget. Absent effort means
-        // neither asks to think.
-        thinkingBudget: options.reasoningEffort ? thinkingBudgetFor(options.reasoningEffort) : undefined,
-        signal: options.signal,
-        ...(tag ? { trace: tag } : {}),
-      })) {
-        if (event.type === 'text') {
-          // The transcript keeps the answer as the model wrote it, block and all:
-          // its own words are what the next request should see. Only what the
-          // surface is handed is split.
-          text += event.delta
-          if (fence) {
-            for (const part of fenceEvents(fence.push(event.delta))) yield part
-          } else {
-            yield { type: 'text-delta', delta: event.delta }
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        // A block is written where the prose is, so it is split out of the stream
+        // here, at the one place every surface listens. Fresh per request, not per
+        // turn: a block left open when a request ends belongs to that request, and
+        // must not swallow the next one's answer.
+        const fence = options.genui ? new GenUiFence({ drafts: true }) : null
+        for await (const event of provider.stream({
+          model: options.model,
+          messages,
+          system: options.system,
+          tools: options.tools.length > 0 ? options.tools : undefined,
+          temperature: options.temperature,
+          maxTokens: options.maxTokens,
+          reasoningEffort: options.reasoningEffort,
+          // Read off the effort, so the two wires mean the same thing by it: OpenAI
+          // takes the level, Anthropic takes a token budget. Absent effort means
+          // neither asks to think.
+          thinkingBudget: options.reasoningEffort ? thinkingBudgetFor(options.reasoningEffort) : undefined,
+          signal: options.signal,
+          ...(tag ? { trace: tag } : {}),
+        })) {
+          if (event.type === 'text') {
+            // The transcript keeps the answer as the model wrote it, block and all:
+            // its own words are what the next request should see. Only what the
+            // surface is handed is split.
+            text += event.delta
+            if (fence) {
+              for (const part of fenceEvents(fence.push(event.delta))) yield part
+            } else {
+              yield { type: 'text-delta', delta: event.delta }
+            }
+          } else if (event.type === 'reasoning') {
+            reasoning += event.delta
+            yield { type: 'reasoning-delta', delta: event.delta }
+          } else if (event.type === 'reasoning-signature') {
+            signature = event.signature
+          } else if (event.type === 'tool-call') {
+            toolCalls.push({ id: event.id, name: event.name, args: event.args })
+          } else if (event.type === 'usage') {
+            yield event
+          } else if (event.type === 'done') {
+            finish = event.finishReason
           }
-        } else if (event.type === 'reasoning') {
-          reasoning += event.delta
-          yield { type: 'reasoning-delta', delta: event.delta }
-        } else if (event.type === 'reasoning-signature') {
-          signature = event.signature
-        } else if (event.type === 'tool-call') {
-          toolCalls.push({ id: event.id, name: event.name, args: event.args })
-        } else if (event.type === 'usage') {
-          yield event
-        } else if (event.type === 'done') {
-          finish = event.finishReason
         }
+        if (fence) {
+          for (const part of fenceEvents(fence.finish())) yield part
+        }
+        break
+      } catch (error) {
+        // A stream can die on the way — a reset socket, a connection that was fine
+        // a moment ago and is not now — after the provider had already taken the
+        // request. Until the answer itself has started to go out, nothing of this
+        // step exists anywhere: the transcript is written only once the step ends,
+        // and all the surface has been handed is the model's own scratch, its
+        // reasoning. Asking again there costs nothing but the wait, and it is what
+        // turns a severed connection into a slower answer instead of a lost one.
+        // Once the answer has begun to stream the words are already on the
+        // surface, and the step is left as it fell: asking again would say
+        // everything twice.
+        const retry =
+          !isAbort(error, options.signal) &&
+          text.length === 0 &&
+          toolCalls.length === 0 &&
+          attempt < STREAM_RETRY_LIMIT
+        if (!retry) {
+          // What was shown goes into the transcript before the failure is
+          // reported: the next request must not be missing words the person has
+          // just read. A tool call that half-arrived is left out — a call without
+          // its result is a request the Anthropic wire refuses — and the turn ends
+          // in the error either way.
+          const shown: ContentPart[] = []
+          if (reasoning) {
+            shown.push({ type: 'reasoning', text: reasoning, ...(signature ? { signature } : {}) })
+          }
+          if (text) shown.push({ type: 'text', text })
+          if (shown.length > 0) messages.push({ role: 'assistant', content: shown, at: Date.now() })
+          throw error
+        }
+        // The half-formed step is dropped and written again from the top: the
+        // reasoning already drawn is the model's scratch, not its answer, and the
+        // answer it is replaced by is the one worth the wait.
+        text = ''
+        reasoning = ''
+        signature = ''
+        finish = 'stop'
+        await sleep(Math.min(STREAM_RETRY_DELAY_MS * 2 ** attempt, STREAM_RETRY_MAX_DELAY_MS), options.signal)
       }
-      if (fence) {
-        for (const part of fenceEvents(fence.finish())) yield part
-      }
-    } catch (error) {
-      // The stream died after the surface had already drawn part of it. What was
-      // shown goes into the transcript before the failure is reported: the next
-      // request must not be missing words the person has just read. A tool call
-      // that half-arrived is left out — a call without its result is a request the
-      // Anthropic wire refuses — and the turn ends in the error either way.
-      const shown: ContentPart[] = []
-      if (reasoning) {
-        shown.push({ type: 'reasoning', text: reasoning, ...(signature ? { signature } : {}) })
-      }
-      if (text) shown.push({ type: 'text', text })
-      if (shown.length > 0) messages.push({ role: 'assistant', content: shown, at: Date.now() })
-      throw error
     }
 
     // The thought comes first because that is how it arrived; it stays in the

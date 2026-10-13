@@ -1,4 +1,4 @@
-import { errorMessage } from '../util/errors.js'
+import { errorMessage, isAbort } from '../util/errors.js'
 import { closeParagraph } from '../util/format.js'
 import { logDebug, logWarn } from '../util/log.js'
 import type { SessionsConfig } from './config/schema.js'
@@ -75,16 +75,6 @@ function canDraw(surface: SurfaceKind | undefined): boolean {
  */
 function receivesFiles(surface: SurfaceKind | undefined): boolean {
   return surface !== undefined && surface !== 'cli'
-}
-
-/**
- * Whether the error means "the caller stopped us". A cancelled fetch rejects
- * with an `AbortError`, but the signal is checked too: a provider is free to
- * fail in its own way once the request is already gone.
- */
-function isAbort(error: unknown, signal?: AbortSignal): boolean {
-  if (signal?.aborted) return true
-  return error instanceof Error && error.name === 'AbortError'
 }
 
 export interface SessionOptions {

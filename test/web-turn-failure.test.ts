@@ -130,8 +130,10 @@ describe('a web turn that fails', () => {
   })
 })
 
+/** A failed stream is asked again before it is given up on, so a turn ending in
+ *  the error can take a few tries — with their waits — first. */
 async function waitFor(condition: () => boolean): Promise<void> {
-  for (let attempt = 0; attempt < 200; attempt += 1) {
+  for (let attempt = 0; attempt < 800; attempt += 1) {
     if (condition()) return
     await new Promise((resolve) => setTimeout(resolve, 5))
   }
