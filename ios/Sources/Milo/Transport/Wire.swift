@@ -23,7 +23,9 @@ enum ClientFrame {
     var json: [String: Any] {
         switch self {
         case .hello(let conversationId):
-            return ["type": "hello", "version": miloProtocolVersion, "conversationId": conversationId]
+            // The phone draws a generated interface, so it says so: without it the
+            // daemon never teaches the model to draw one and no `ui` event is ever sent.
+            return ["type": "hello", "version": miloProtocolVersion, "conversationId": conversationId, "genui": true]
         case .send(let text, let intent):
             guard let intent else { return ["type": "send", "text": text] }
             return ["type": "send", "text": text, "intent": intent.rawValue]
@@ -79,10 +81,12 @@ enum WirePart: Decodable {
     case todo([TodoItem])
     /// The widget the turn drew beside its words. It used to decode as `other` and
     /// vanish without a word, which is the one thing a drawn thing may not do.
-    case ui(GenUi)
+    /// `draft` is a widget still being written, drawn in place as it grows — a stored
+    /// session is read back as it ended, so its parts are never drafts.
+    case ui(GenUi, draft: Bool)
     case other
 
-    private enum CodingKeys: String, CodingKey { case kind, text, tool, items, render }
+    private enum CodingKeys: String, CodingKey { case kind, text, tool, items, render, draft }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -91,7 +95,11 @@ enum WirePart: Decodable {
         case "reasoning": self = .reasoning(try container.decode(String.self, forKey: .text))
         case "tool": self = .tool(try container.decode(ToolMark.self, forKey: .tool))
         case "todo": self = .todo(try container.decode([TodoItem].self, forKey: .items))
-        case "ui": self = .ui((try? container.decode(GenUi.self, forKey: .render)) ?? .unreadable)
+        case "ui":
+            self = .ui(
+                (try? container.decode(GenUi.self, forKey: .render)) ?? .unreadable,
+                draft: (try? container.decodeIfPresent(Bool.self, forKey: .draft)) ?? false
+            )
         default: self = .other
         }
     }
@@ -135,44 +143,80 @@ struct CommandResult: Decodable {
     let markdown: String?
     let sessionId: String?
     let cards: [SessionCardItem]?
+    /// Files delivered with the reply — a routine's answer, or a `send_file` — shown
+    /// the way a message's own attachments are.
+    let attachments: [FrameAttachment]?
 }
 
-/// The pieces of a streaming turn the chat actually draws.
+/// The pieces of a streaming turn the chat actually draws. Every kind is read
+/// tolerantly — a shape this build does not know is `other` and draws nothing,
+/// rather than taking the frame down with it.
 enum AgentEvent: Decodable {
     case textDelta(String)
     case reasoningDelta(String)
-    case toolStart(id: String, name: String)
+    case toolStart(id: String, name: String, text: String?)
     case toolEnd(id: String, name: String, isError: Bool)
     case todo([TodoItem])
+    /// A widget as the model writes it: the same tree at longer and longer prefixes,
+    /// `draft` while the block is still open. It is drawn in place as it grows.
+    case ui(GenUi, draft: Bool)
+    case usage(inputTokens: Int, outputTokens: Int)
+    case compacted(ms: Int)
+    case rebased(added: Int, removed: Int, compacted: Bool)
     case waiting
-    case done
+    case waited(ms: Int)
+    case steer(String)
+    case done(finishReason: String)
     case aborted
     case error(String)
     case other
 
-    private enum CodingKeys: String, CodingKey { case type, delta, id, name, isError, items, message }
+    private enum CodingKeys: String, CodingKey {
+        case type, delta, id, name, isError, items, message, render, draft, text, finishReason
+        case inputTokens, outputTokens, ms, added, removed, compacted
+    }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        switch try container.decode(String.self, forKey: .type) {
-        case "text-delta": self = .textDelta(try container.decode(String.self, forKey: .delta))
-        case "reasoning-delta": self = .reasoningDelta(try container.decode(String.self, forKey: .delta))
+
+        func read<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
+            (try? container.decode(T.self, forKey: key)) ?? fallback
+        }
+        func readText(_ key: CodingKeys) -> String? {
+            (try? container.decodeIfPresent(String.self, forKey: key)) ?? nil
+        }
+
+        switch (try? container.decode(String.self, forKey: .type)) ?? "" {
+        case "text-delta": self = .textDelta(read(.delta, ""))
+        case "reasoning-delta": self = .reasoningDelta(read(.delta, ""))
         case "tool-start":
-            self = .toolStart(
-                id: try container.decode(String.self, forKey: .id),
-                name: try container.decode(String.self, forKey: .name)
-            )
+            // `text` is the line the server already drew — the phone cannot import
+            // the formatter, so it reads the result rather than keeping a copy.
+            self = .toolStart(id: read(.id, ""), name: read(.name, ""), text: readText(.text))
         case "tool-end":
             self = .toolEnd(
-                id: try container.decode(String.self, forKey: .id),
-                name: try container.decode(String.self, forKey: .name),
-                isError: try container.decode(Bool.self, forKey: .isError)
+                id: read(.id, ""),
+                name: read(.name, ""),
+                isError: read(.isError, false)
             )
-        case "todo": self = .todo(try container.decode([TodoItem].self, forKey: .items))
+        case "todo": self = .todo(read(.items, []))
+        case "ui":
+            self = .ui((try? container.decode(GenUi.self, forKey: .render)) ?? .unreadable, draft: read(.draft, false))
+        case "usage":
+            self = .usage(inputTokens: read(.inputTokens, 0), outputTokens: read(.outputTokens, 0))
+        case "compacted": self = .compacted(ms: read(.ms, 0))
+        case "rebased":
+            self = .rebased(
+                added: read(.added, 0),
+                removed: read(.removed, 0),
+                compacted: read(.compacted, false)
+            )
         case "waiting": self = .waiting
-        case "done": self = .done
+        case "waited": self = .waited(ms: read(.ms, 0))
+        case "steer": self = .steer(readText(.text) ?? "")
+        case "done": self = .done(finishReason: readText(.finishReason) ?? "")
         case "aborted": self = .aborted
-        case "error": self = .error(try container.decode(String.self, forKey: .message))
+        case "error": self = .error(read(.message, ""))
         default: self = .other
         }
     }
@@ -197,7 +241,7 @@ enum ServerFrame: Decodable {
     case event(turnId: String, event: AgentEvent)
     case permission(id: String, request: PermissionRequest, expiresAt: Double)
     case permissionResult(id: String, allowed: Bool)
-    case turnEnd(id: String, status: String)
+    case turnEnd(id: String, status: String, raw: String?)
     case commandResult(CommandResult)
     case state(busy: Bool, queued: Int)
     case jobs([JobView])
@@ -207,7 +251,7 @@ enum ServerFrame: Decodable {
     case unknown
 
     private enum CodingKeys: String, CodingKey {
-        case type, id, text, turnId, event, request, expiresAt, allowed, status
+        case type, id, text, turnId, event, request, expiresAt, allowed, status, raw
         case busy, queued, jobs, items, message
     }
 
@@ -239,7 +283,8 @@ enum ServerFrame: Decodable {
         case "turn-end":
             self = .turnEnd(
                 id: try container.decode(String.self, forKey: .id),
-                status: try container.decode(String.self, forKey: .status)
+                status: try container.decode(String.self, forKey: .status),
+                raw: try container.decodeIfPresent(String.self, forKey: .raw)
             )
         case "command-result": self = .commandResult(try CommandResult(from: decoder))
         case "state":

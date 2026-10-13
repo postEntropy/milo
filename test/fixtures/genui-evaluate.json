@@ -1,0 +1,120 @@
+{
+  "formula": [
+    {
+      "name": "computes arithmetic over the inputs",
+      "formula": "seats * 29",
+      "values": { "seats": 8 },
+      "expected": 232
+    },
+    {
+      "name": "respects precedence, parentheses and a leading sign",
+      "formula": "2 + 3 * 4",
+      "values": {},
+      "expected": 14
+    },
+    {
+      "name": "respects precedence, parentheses and a leading sign",
+      "formula": "(2 + 3) * 4",
+      "values": {},
+      "expected": 20
+    },
+    {
+      "name": "respects precedence, parentheses and a leading sign",
+      "formula": "-3 + 10",
+      "values": {},
+      "expected": 7
+    },
+    {
+      "name": "divides with the same precedence as multiplication",
+      "formula": "20 / 4",
+      "values": {},
+      "expected": 5
+    },
+    {
+      "name": "counts a checkbox as one or zero",
+      "formula": "base * extra",
+      "values": { "base": 10, "extra": true },
+      "expected": 10
+    },
+    {
+      "name": "counts a checkbox as one or zero",
+      "formula": "base * extra",
+      "values": { "base": 10, "extra": false },
+      "expected": 0
+    },
+    {
+      "name": "refuses anything that is not arithmetic",
+      "formula": "fetch(\"/etc/passwd\")",
+      "values": {},
+      "expected": null
+    },
+    {
+      "name": "refuses anything that is not arithmetic",
+      "formula": "a.b",
+      "values": {},
+      "expected": null
+    },
+    {
+      "name": "refuses anything that is not arithmetic",
+      "formula": "1 +",
+      "values": {},
+      "expected": null
+    },
+    {
+      "name": "refuses anything that is not arithmetic",
+      "formula": "(1 + 2",
+      "values": {},
+      "expected": null
+    },
+    {
+      "name": "refuses anything that is not arithmetic",
+      "formula": "1/0",
+      "values": {},
+      "expected": null
+    },
+    {
+      "name": "refuses a number left mid-write",
+      "formula": "12.",
+      "values": {},
+      "expected": null
+    },
+    {
+      "name": "is null when an id is missing or is not a number",
+      "formula": "seats * 29",
+      "values": { "seats": "many" },
+      "expected": null
+    },
+    {
+      "name": "is null when an id is missing or is not a number",
+      "formula": "seats * 29",
+      "values": {},
+      "expected": null
+    }
+  ],
+  "template": [
+    {
+      "name": "fills {id} from the current values",
+      "text": "{seats} seats at $29 each",
+      "values": { "seats": 8 },
+      "expected": "8 seats at $29 each"
+    },
+    {
+      "name": "leaves a reference to nothing alone",
+      "text": "{nope} seats",
+      "values": {},
+      "expected": "{nope} seats"
+    },
+    {
+      "name": "says a checkbox in words",
+      "text": "extra: {extra}",
+      "values": { "extra": true },
+      "expected": "extra: true"
+    },
+    {
+      "name": "fills a non-numeric value as it was written",
+      "text": "size {size}",
+      "values": { "size": "large" },
+      "expected": "size large"
+    }
+  ]
+}

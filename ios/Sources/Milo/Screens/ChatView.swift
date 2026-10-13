@@ -212,54 +212,103 @@ struct Composer: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: MiloTheme.Space.one) {
-            // The model lives behind this, not on the bar: what belongs to the
-            // message is the field and the way to send it.
-            Menu {
-                Button { openPicker() } label: { Label("Model", systemImage: "cpu") }
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundStyle(MiloTheme.foreground)
-                    .frame(width: 40, height: 40)
-                    .contentShape(Circle())
+        VStack(spacing: MiloTheme.Space.two) {
+            if model.queued > 0 {
+                HStack(spacing: MiloTheme.Space.two) {
+                    Image(systemName: "clock.arrow.circlepath")
+                    Text(model.queued == 1 ? "1 message queued" : "\(model.queued) messages queued")
+                    Spacer(minLength: 0)
+                }
+                .font(MiloTheme.Text.small)
+                .foregroundStyle(MiloTheme.muted)
+                .padding(.horizontal, MiloTheme.Space.five)
             }
-            .accessibilityLabel("More")
 
-            TextField("Ask Milo anything", text: $draft, axis: .vertical)
-                .lineLimit(1...8)
-                .focused($focused)
-                .font(.body)
-                .foregroundStyle(MiloTheme.foreground)
-                .padding(.vertical, MiloTheme.Space.two + 2)
+            // Centred against the field: the send control is shorter than a line of text,
+            // so bottom-aligning it left the air above it and read as a bump at the top.
+            HStack(alignment: .center, spacing: MiloTheme.Space.one) {
+                // The model lives behind this, not on the bar: what belongs to the
+                // message is the field and the way to send it.
+                Menu {
+                    Button { openPicker() } label: { Label("Model", systemImage: "cpu") }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundStyle(MiloTheme.foreground)
+                        .frame(width: 40, height: 40)
+                        .contentShape(Circle())
+                }
+                .accessibilityLabel("More")
 
-            // The same span as the `+` opposite it, with no padding of its own: two
-            // controls on one row line up because they are the same height, not
-            // because each was nudged to look like the other.
-            MiloIconButton(
-                systemName: model.busy ? "stop.fill" : "paperplane.fill",
-                size: 16,
-                span: 40,
-                primary: true,
-                disabled: !model.busy && draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-                action: send
-            )
-            .accessibilityLabel(model.busy ? "Stop" : "Send")
+                TextField("Ask Milo anything", text: $draft, axis: .vertical)
+                    .lineLimit(1...8)
+                    .focused($focused)
+                    .font(.body)
+                    .foregroundStyle(MiloTheme.foreground)
+                    .padding(.vertical, MiloTheme.Space.two + 2)
+
+                // The same span as the `+` opposite it, with no padding of its own: two
+                // controls on one row line up because they are the same height, not
+                // because each was nudged to look like the other.
+                if model.busy {
+                    // Stop is its own control while a turn runs, so the way to send is
+                    // still there: the message queues behind this turn, and a long press
+                    // hands it to the turn now as a steer.
+                    MiloIconButton(systemName: "stop.fill", size: 16, span: 36, primary: true, action: model.stop)
+                        .accessibilityLabel("Stop")
+                    sendControl
+                } else {
+                    MiloIconButton(
+                        systemName: "paperplane.fill",
+                        size: 16,
+                        span: 36,
+                        primary: true,
+                        disabled: !canSend,
+                        action: { submit() }
+                    )
+                    .accessibilityLabel("Send")
+                }
+            }
+            .padding(.horizontal, MiloTheme.Space.two)
+            // A little air above and below the row, so the send control does not read
+            // as the composer's whole height — the capsule stands taller than what it
+            // holds.
+            .padding(.vertical, MiloTheme.Space.one)
+            .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 26))
+            .padding(.horizontal, MiloTheme.Space.four)
+            .padding(.bottom, MiloTheme.Space.two)
+            .padding(.top, MiloTheme.Space.two)
         }
-        .padding(.horizontal, MiloTheme.Space.two)
-        .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 26))
-        .padding(.horizontal, MiloTheme.Space.three)
-        .padding(.bottom, MiloTheme.Space.two)
-        .padding(.top, MiloTheme.Space.two)
     }
 
+    private var canSend: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
 
-    private func send() {
-        if model.busy {
-            model.stop()
-            return
+    /// While a turn runs, the send control queues by the tap and steers on the long
+    /// press — the two intents the browser offers on Enter and Cmd+Enter.
+    private var sendControl: some View {
+        Menu {
+            Button { submit(intent: .steer) } label: {
+                Label("Steer the running turn", systemImage: "arrow.turn.down.right")
+            }
+        } label: {
+            Image(systemName: "paperplane.fill")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundStyle(MiloTheme.accentOn)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(MiloTheme.accent))
+        } primaryAction: {
+            submit(intent: .queue)
         }
-        model.send(draft)
+        .disabled(!canSend)
+        .opacity(canSend ? 1 : 0.35)
+        .accessibilityLabel("Send")
+    }
+
+    private func submit(intent: ClientFrame.Intent = .queue) {
+        guard canSend else { return }
+        model.send(draft, intent: intent)
         draft = ""
         // The next message is typed where the last one was, not on the button.
         focused = true
@@ -274,12 +323,21 @@ struct MessageRow: View {
         if message.isUser {
             HStack {
                 Spacer(minLength: 48)
-                Prose(text: prose)
-                    .padding(.horizontal, MiloTheme.Space.four)
-                    .padding(.vertical, MiloTheme.Space.three)
-                    .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+                VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                    if !prose.isEmpty {
+                        Prose(text: prose)
+                    }
+                    // Guarded like the assistant side: an empty `Attachments` is still a
+                    // child, and the stack's spacing would show up as a chin under the text.
+                    if !message.attachments.isEmpty {
+                        Attachments(items: message.attachments)
+                    }
+                }
+                .padding(.horizontal, MiloTheme.Space.four)
+                .padding(.vertical, MiloTheme.Space.three)
+                .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
             }
-            .contextMenu { copyButton }
+            .contextMenu { menu }
         } else {
             VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
                 if let thought = message.thought {
@@ -309,24 +367,48 @@ struct MessageRow: View {
                         PartView(part: part)
                     }
                 }
+                if !message.attachments.isEmpty {
+                    Attachments(items: message.attachments)
+                }
                 if message.streaming, !message.parts.contains(where: { part in
                     if case .text = part { return true }
                     return false
                 }) {
                     WaitLine()
                 }
+                if let status = message.status {
+                    Text(status)
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contextMenu { copyButton }
+            .contextMenu { menu }
         }
     }
 
+    /// What can be done with the message: its words, and — when the turn is more than
+    /// prose — the turn copied whole, where the tool arguments and results the drawn
+    /// parts leave out still live. The cost rides here too, as the browser shows it.
     @ViewBuilder
-    private var copyButton: some View {
+    private var menu: some View {
         Button {
             UIPasteboard.general.string = prose
         } label: {
             Label("Copy", systemImage: "doc.on.doc")
+        }
+        if let raw = message.raw {
+            Button {
+                UIPasteboard.general.string = raw
+            } label: {
+                Label("Copy raw", systemImage: "curlybraces")
+            }
+        }
+        if let tokens = message.tokens {
+            Button {} label: {
+                Label("\(tokens.input) in · \(tokens.output) out", systemImage: "cpu")
+            }
+            .disabled(true)
         }
     }
 
@@ -340,8 +422,59 @@ struct MessageRow: View {
     }
 }
 
+/// The files delivered into this conversation. A picture shows itself; anything else is
+/// a row to open. The bytes are fetched from the daemon behind the attachment's id, with
+/// the token in the query because an image loader sends no header — the same request the
+/// browser makes.
+struct Attachments: View {
+    let items: [FrameAttachment]
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            ForEach(items) { item in
+                if let url = model.attachmentURL(item.id) {
+                    if item.image {
+                        AsyncImage(url: url) { image in
+                            image.resizable().scaledToFit()
+                        } placeholder: {
+                            RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
+                                .fill(MiloTheme.surface)
+                                .frame(height: 160)
+                        }
+                        .frame(maxWidth: 280, alignment: .leading)
+                        .clipShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                    } else {
+                        Link(destination: url) {
+                            HStack(spacing: MiloTheme.Space.two) {
+                                Image(systemName: "doc")
+                                Text(item.name).lineLimit(1)
+                                Spacer(minLength: MiloTheme.Space.two)
+                                Text(bytes(item.size))
+                                    .font(MiloTheme.Text.small)
+                                    .foregroundStyle(MiloTheme.muted)
+                            }
+                            .font(MiloTheme.Text.base)
+                            .foregroundStyle(MiloTheme.foreground)
+                            .padding(MiloTheme.Space.three)
+                            .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func bytes(_ count: Int) -> String {
+        if count < 1024 { return "\(count) B" }
+        if count < 1024 * 1024 { return "\(Int((Double(count) / 1024).rounded())) KB" }
+        return String(format: "%.1f MB", Double(count) / (1024 * 1024))
+    }
+}
+
 struct PartView: View {
     let part: WirePart
+    @Environment(AppModel.self) private var model
 
     var body: some View {
         switch part {
@@ -351,37 +484,68 @@ struct PartView: View {
             ToolRow(tool: tool)
         case .todo(let items):
             TodoRow(items: items)
-        case .ui(let widget):
-            GenUiView(widget: widget)
+        case .ui(let widget, _):
+            // A widget's button speaks the same way the composer does, so the message
+            // it builds lands in the conversation as an ordinary turn.
+            GenUiView(widget: widget) { model.send($0) }
         case .reasoning, .other:
             EmptyView()
         }
     }
 }
 
-/// One tool call: the state is the dot, the name is the line.
+/// One tool call: the tool's mark says what it was and carries the state, the name
+/// carries the colour and the one value worth showing stays quiet beside it.
 struct ToolRow: View {
     let tool: ToolMark
 
     var body: some View {
-        HStack(spacing: MiloTheme.Space.two) {
-            Circle().fill(dot).frame(width: 6, height: 6)
-            Text(tool.text.isEmpty ? tool.name : tool.text)
+        HStack(alignment: .center, spacing: MiloTheme.Space.two) {
+            // The mark is the state: quiet at rest, accent for the call running now, red
+            // on a failure — and the word beside it says the failure for whoever cannot
+            // see the colour.
+            Image(systemName: ToolIcons.symbol(tool.name))
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(state)
+            Text(name)
                 .font(MiloTheme.Text.mono)
-                .foregroundStyle(tool.state == "failed" ? MiloTheme.danger : MiloTheme.muted)
+                .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.foreground)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            if tool.state == "failed" {
+            if !value.isEmpty {
+                Text(value)
+                    .font(MiloTheme.Text.mono)
+                    .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.muted)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            if failed {
                 Text("failed").font(MiloTheme.Text.meta).foregroundStyle(MiloTheme.danger)
             }
         }
     }
 
-    private var dot: Color {
+    /// The line the server drew is the name and its value in one string; splitting on
+    /// the name is what lets the name be loud and the value quiet. Where the line does
+    /// not begin with the raw name — an MCP tool's display name — the whole of it is the
+    /// name, the honest reading rather than a guess at where the value starts.
+    private var name: String {
+        if tool.text.isEmpty { return tool.name }
+        return tool.text.hasPrefix(tool.name) ? tool.name : tool.text
+    }
+
+    private var value: String {
+        guard tool.text.hasPrefix(tool.name) else { return "" }
+        return String(tool.text.dropFirst(tool.name.count)).trimmingCharacters(in: .whitespaces)
+    }
+
+    private var failed: Bool { tool.state == "failed" }
+
+    private var state: Color {
         switch tool.state {
         case "running": return MiloTheme.accent
         case "failed": return MiloTheme.danger
-        default: return MiloTheme.success
+        default: return MiloTheme.muted
         }
     }
 }
@@ -417,7 +581,7 @@ struct TodoRow: View {
 
 /// The confirmation a tool call needs, waiting where the reply would land.
 struct PermissionBar: View {
-    let pending: (id: String, request: PermissionRequest)
+    let pending: (id: String, request: PermissionRequest, expiresAt: Double)
     @Environment(AppModel.self) private var model
 
     var body: some View {
@@ -439,9 +603,20 @@ struct PermissionBar: View {
                 .buttonStyle(.glassProminent)
                 .controlSize(.large)
             }
+            // The daemon lets a prompt expire; the countdown says how long it holds.
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                Label(remaining(at: context.date), systemImage: "clock")
+                    .font(MiloTheme.Text.meta)
+                    .foregroundStyle(MiloTheme.muted)
+            }
         }
         .padding(MiloTheme.Space.four)
         .glassEffect(in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
         .padding(.horizontal, MiloTheme.Space.three)
+    }
+
+    private func remaining(at now: Date) -> String {
+        let left = max(0, Int((pending.expiresAt / 1000 - now.timeIntervalSince1970).rounded(.up)))
+        return String(format: "%d:%02d", left / 60, left % 60)
     }
 }

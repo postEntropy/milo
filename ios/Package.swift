@@ -22,11 +22,17 @@ let package = Package(
         // The connection layer, in its own package so it can be run under
         // `swift test` on this machine — see `Connection/Package.swift`.
         .package(path: "Connection"),
+        // The widget arithmetic, apart from the app for the same reason and held to
+        // the browser's own cases — see `GenUi/Package.swift`.
+        .package(path: "GenUi"),
     ],
     targets: [
         .target(
             name: "Milo",
-            dependencies: [.product(name: "MiloConnection", package: "Connection")]
+            dependencies: [
+                .product(name: "MiloConnection", package: "Connection"),
+                .product(name: "MiloGenUi", package: "GenUi"),
+            ]
         ),
     ]
 )

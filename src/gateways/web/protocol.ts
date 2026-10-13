@@ -36,7 +36,7 @@ export interface PermissionRequest {
 export type AgentEvent =
   | { type: 'text-delta'; delta: string }
   | { type: 'reasoning-delta'; delta: string }
-  | { type: 'tool-start'; id: string; name: string; args: unknown }
+  | { type: 'tool-start'; id: string; name: string; args: unknown; text?: string }
   | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean }
   | { type: 'todo'; items: TodoItem[] }
   | { type: 'panel'; request: PanelRequest }

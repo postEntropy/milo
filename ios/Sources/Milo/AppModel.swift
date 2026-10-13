@@ -23,11 +23,21 @@ final class AppModel {
         var streaming: Bool
         /// How long the turn thought, said once when it is over.
         var thought: Double?
+        /// A line the turn leaves behind — a wait, a rebase, a stop — drawn where the
+        /// reply lands.
+        var status: String? = nil
+        /// The turn copied whole, for "Copy raw": the model's words, its thinking and
+        /// every tool call with its arguments and result.
+        var raw: String? = nil
+        /// What the turn cost the model, shown in the message's own menu.
+        var tokens: (input: Int, output: Int)? = nil
     }
 
     private(set) var phase: Phase = .pairing
     private(set) var messages: [Message] = []
     private(set) var busy = false
+    /// Messages stacked behind the turn running now, for the composer's queue chip.
+    private(set) var queued = 0
     private(set) var note: String?
     private(set) var modelName = ""
     private(set) var providerId = ""
@@ -45,7 +55,7 @@ final class AppModel {
     private(set) var answerBegan = 0
     private(set) var answerEnded = 0
     private(set) var connection: MiloClient.State = .idle
-    private(set) var pending: (id: String, request: PermissionRequest)?
+    private(set) var pending: (id: String, request: PermissionRequest, expiresAt: Double)?
 
     // The drawer.
     private(set) var sessions: [SessionSummary] = []
@@ -160,18 +170,30 @@ final class AppModel {
 
     // MARK: - The turn
 
-    func send(_ text: String) {
+    /// Sends as its own turn, or — with `intent` — steers the turn already running.
+    func send(_ text: String, intent: ClientFrame.Intent? = nil) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         messages.append(Message(isUser: true, parts: [.text(trimmed)], attachments: [], streaming: false))
         busy = true
-        if !client.send(.send(text: trimmed)) { unsent() }
+        if !client.send(.send(text: trimmed, intent: intent)) { unsent() }
     }
 
     /// Said the same way wherever a message fails to leave, so the two paths cannot
     /// describe one failure differently.
     private func unsent() {
         note = "That did not reach the daemon. Check the connection and try again."
+    }
+
+    /// Where a delivered file is fetched, for the image loader: the daemon serves only
+    /// the id it registered, and the token rides in the query because a loader sends no
+    /// header — the very request the browser builds for its own `<img>`.
+    func attachmentURL(_ id: String) -> URL? {
+        guard let account,
+              let encodedId = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let encodedToken = account.token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+        else { return nil }
+        return account.url("/attachment/\(encodedId)?t=\(encodedToken)")
     }
 
     func stop() {
@@ -374,7 +396,8 @@ final class AppModel {
                     parts: $0.parts,
                     attachments: $0.attachments ?? [],
                     streaming: false,
-                    thought: nil
+                    thought: nil,
+                    raw: $0.raw
                 )
             }
             modelName = ready.model
@@ -382,6 +405,7 @@ final class AppModel {
             sessionId = ready.sessionId
             note = nil
             pending = nil
+            queued = 0
             turnStarted = nil
         case .turnStart:
             busy = true
@@ -390,25 +414,37 @@ final class AppModel {
             messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil))
         case .event(_, let event):
             apply(event)
-        case .permission(let id, let request, _):
-            pending = (id, request)
+        case .permission(let id, let request, let expiresAt):
+            pending = (id, request, expiresAt)
         case .permissionResult(let id, _):
             if pending?.id == id { pending = nil }
-        case .turnEnd(_, let status):
+        case .turnEnd(_, let status, let raw):
             busy = false
             answerEnded += 1
             if let index = messages.lastIndex(where: { $0.streaming }) {
                 messages[index].streaming = false
                 messages[index].thought = turnStarted.map { Date().timeIntervalSince($0) }
+                // A call left marked running never heard back from; the line stops
+                // saying it is underway rather than guessing how it went.
+                messages[index].parts = AppModel.settled(messages[index].parts)
+                if let raw { messages[index].raw = raw }
+                if status == "stopped" { messages[index].status = "Stopped · the partial reply was kept." }
             }
             turnStarted = nil
             if status == "error" { note = "That turn ended in an error." }
         case .commandResult(let result):
             messages.append(
-                Message(isUser: false, parts: [.text(result.reply)], attachments: [], streaming: false, thought: nil)
+                Message(
+                    isUser: false,
+                    parts: [.text(result.reply)],
+                    attachments: result.attachments ?? [],
+                    streaming: false,
+                    thought: nil
+                )
             )
-        case .state(let isBusy, _):
+        case .state(let isBusy, let count):
             busy = isBusy
+            queued = count
         case .error(let message):
             note = message
         case .jobs, .suggestions, .routinesChanged, .unknown:
@@ -422,8 +458,10 @@ final class AppModel {
             append(delta, reasoning: false)
         case .reasoningDelta(let delta):
             append(delta, reasoning: true)
-        case .toolStart(_, let name):
-            mutateLast { $0.append(.tool(ToolMark(name: name, text: name, state: "running"))) }
+        case .toolStart(_, let name, let text):
+            // `text` is the server's own line (name and the one value worth showing),
+            // the same the read-back transcript carries; the name alone is the fallback.
+            mutateLast { $0.append(.tool(ToolMark(name: name, text: text ?? name, state: "running"))) }
         case .toolEnd(_, let name, let isError):
             mutateLast { parts in
                 let index = parts.lastIndex { part in
@@ -442,15 +480,43 @@ final class AppModel {
                 }
                 if let index { parts[index] = .todo(items) } else { parts.append(.todo(items)) }
             }
+        case .ui(let widget, let draft):
+            // A widget arrives many times over as the model writes it: each draft takes
+            // the place of the one before it, and the closed block takes the last draft's.
+            mutateLast { parts in AppModel.place(widget: widget, draft: draft, in: &parts) }
+        case .usage(let input, let output):
+            mutatingLast { $0.tokens = (input, output) }
+        case .waiting:
+            mutatingLast { $0.status = "Waiting for this session to free up…" }
+        case .waited(let ms):
+            mutatingLast { $0.status = "Session freed after \(AppModel.formatMs(ms))." }
+        case .compacted(let ms):
+            mutatingLast { $0.status = "Tidying the context (\(AppModel.formatMs(ms)))." }
+        case .rebased(let added, let removed, let compacted):
+            mutatingLast {
+                $0.status = "Session updated by another surface (\(AppModel.describeRebase(added: added, removed: removed, compacted: compacted)))."
+            }
+        case .steer:
+            mutatingLast { $0.status = "Correction received by Milo." }
+        case .done(let finishReason):
+            if finishReason == "length" { mutatingLast { $0.status = "The reply hit the output limit." } }
+        case .aborted:
+            mutatingLast {
+                $0.status = "Stopped · the partial reply was kept."
+                $0.parts = AppModel.settled($0.parts)
+            }
         case .error(let message):
             note = message
-        case .waiting, .done, .aborted, .other:
+        case .other:
             break
         }
     }
 
     private func append(_ delta: String, reasoning: Bool) {
         mutateLast { parts in
+            // Words arriving mean the block being written was not a widget after all —
+            // its draft goes, rather than sitting above the words it is not.
+            if !reasoning { parts = AppModel.droppingDraft(parts) }
             switch (reasoning, parts.last) {
             case (false, .text(let existing)?):
                 parts[parts.count - 1] = .text(existing + delta)
@@ -467,5 +533,64 @@ final class AppModel {
     private func mutateLast(_ change: (inout [WirePart]) -> Void) {
         guard let index = messages.lastIndex(where: { $0.streaming }) else { return }
         change(&messages[index].parts)
+    }
+
+    /// The same, for the pieces a turn keeps outside its parts — its status and its cost.
+    private func mutatingLast(_ change: (inout Message) -> Void) {
+        guard let index = messages.lastIndex(where: { $0.streaming }) else { return }
+        change(&messages[index])
+    }
+
+    // MARK: - Widget parts
+
+    /// Where the block being written left its draft: nil when there is none. Only the
+    /// last widget matters — an earlier one is a finished block, a widget of its own.
+    private static func draftIndex(_ parts: [WirePart]) -> Int? {
+        for index in stride(from: parts.count - 1, through: 0, by: -1) {
+            if case .ui(_, let draft) = parts[index] { return draft ? index : nil }
+        }
+        return nil
+    }
+
+    /// A draft takes the place of the draft before it; the finished tree takes the place
+    /// of the draft it grew out of. Only a block after a finished one is another widget.
+    private static func place(widget: GenUi, draft: Bool, in parts: inout [WirePart]) {
+        let part = WirePart.ui(widget, draft: draft)
+        if let at = draftIndex(parts) {
+            parts[at] = part
+        } else {
+            parts.append(part)
+        }
+    }
+
+    private static func droppingDraft(_ parts: [WirePart]) -> [WirePart] {
+        guard let at = draftIndex(parts) else { return parts }
+        var kept = parts
+        kept.remove(at: at)
+        return kept
+    }
+
+    /// A call left marked running when the turn ended — a stop, an error, a dropped
+    /// connection — never heard back from. It stops saying it is underway.
+    private static func settled(_ parts: [WirePart]) -> [WirePart] {
+        parts.map { part in
+            guard case .tool(var tool) = part, tool.state == "running" else { return part }
+            tool.state = nil
+            return .tool(tool)
+        }
+    }
+
+    /// A duration as the terminal says it: seconds to one decimal, or milliseconds.
+    private static func formatMs(_ ms: Int) -> String {
+        ms >= 1000 ? String(format: "%.1f s", Double(ms) / 1000) : "\(ms) ms"
+    }
+
+    /// What another holder of this session left in it, in one clause.
+    private static func describeRebase(added: Int, removed: Int, compacted: Bool) -> String {
+        var says: [String] = []
+        if added > 0 { says.append("\(added) new message\(added == 1 ? "" : "s")") }
+        if removed > 0 { says.append("\(removed) message\(removed == 1 ? "" : "s") dropped elsewhere") }
+        if compacted { says.append("the earlier turns are summarized") }
+        return says.joined(separator: " and ")
     }
 }

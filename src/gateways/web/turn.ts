@@ -11,8 +11,17 @@ export function displayEvent(event: AgentEvent, turnId: string, display: Display
     // no longer disagree. What is left here is the wire's shape of that answer:
     // `name` withholds the args rather than pre-formatting a shorter string, so
     // the one formatter still decides the line's shape.
-    if (!toolDraw(event.name, event.args, display.tools)) return
-    send({ type: 'event', turnId, event: { ...event, args: display.tools === 'name' ? undefined : event.args } })
+    const mark = toolDraw(event.name, event.args, display.tools)
+    if (!mark) return
+    // The line is sent as well as the arguments. The browser re-reads the args
+    // through the same formatter it imports, but a surface that cannot import the
+    // TypeScript — the phone — reads this instead of keeping a copy that would
+    // drift, the way `ToolMark.text` already carries a stored call's line.
+    send({
+      type: 'event',
+      turnId,
+      event: { ...event, text: mark.text, args: display.tools === 'name' ? undefined : event.args },
+    })
     return
   }
   if (event.type === 'reasoning-delta' && display.thinking === 'off') return

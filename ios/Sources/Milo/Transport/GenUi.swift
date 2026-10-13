@@ -36,6 +36,15 @@ enum GenUiNode: Decodable {
     case steps(title: String?, entries: [Step])
     case facts(title: String?, entries: [Fact])
     case table(columns: [String], rows: [[String]])
+    case stat(Stat)
+    /// A control the person moves. The four carry the values a `stat` and a `text`
+    /// read, so the surface holds them by `id`.
+    case slider(Slider)
+    case number(NumberField)
+    case checkbox(Checkbox)
+    case select(Select)
+    /// The only way a widget speaks back: pressing it sends `send` as a new turn.
+    case button(Button)
     case unknown
 
     struct Step: Decodable {
@@ -48,8 +57,56 @@ enum GenUiNode: Decodable {
         let value: String
     }
 
+    struct Stat {
+        let label: String
+        let formula: String
+        let prefix: String?
+        let suffix: String?
+        let decimals: Int?
+    }
+
+    struct Slider {
+        let id: String
+        let label: String
+        let min: Double
+        let max: Double
+        let step: Double?
+        let value: Double
+        let prefix: String?
+        let suffix: String?
+    }
+
+    struct NumberField {
+        let id: String
+        let label: String
+        let value: Double
+        let min: Double?
+        let max: Double?
+        let prefix: String?
+        let suffix: String?
+    }
+
+    struct Checkbox {
+        let id: String
+        let label: String
+        let value: Bool?
+    }
+
+    struct Select {
+        let id: String
+        let label: String
+        let options: [String]
+        let value: String
+    }
+
+    struct Button {
+        let label: String
+        let send: String
+    }
+
     private enum CodingKeys: String, CodingKey {
         case kind, text, size, direction, gap, padding, children, title, entries, items, columns, rows
+        case label, formula, prefix, suffix, decimals, id, min, max, step, value, options, send
     }
 
     init(from decoder: Decoder) throws {
@@ -83,9 +140,82 @@ enum GenUiNode: Decodable {
             self = .facts(title: readText(.title), entries: read(.entries, []))
         case "table":
             self = .table(columns: read(.columns, []), rows: read(.rows, []))
+        case "stat":
+            // A `stat` without its label or its formula has nothing to show; the same
+            // holds for a control with no `id` to key its value by.
+            guard let label = readText(.label), let formula = readText(.formula) else {
+                self = .unknown
+                return
+            }
+            self = .stat(
+                Stat(
+                    label: label,
+                    formula: formula,
+                    prefix: readText(.prefix),
+                    suffix: readText(.suffix),
+                    decimals: read(.decimals, nil as Int?)
+                )
+            )
+        case "slider":
+            guard let id = readText(.id), let label = readText(.label),
+                  let min = read(.min, nil as Double?), let max = read(.max, nil as Double?),
+                  let value = read(.value, nil as Double?)
+            else {
+                self = .unknown
+                return
+            }
+            self = .slider(
+                Slider(
+                    id: id,
+                    label: label,
+                    min: min,
+                    max: max,
+                    step: read(.step, nil as Double?),
+                    value: value,
+                    prefix: readText(.prefix),
+                    suffix: readText(.suffix)
+                )
+            )
+        case "number":
+            guard let id = readText(.id), let label = readText(.label),
+                  let value = read(.value, nil as Double?)
+            else {
+                self = .unknown
+                return
+            }
+            self = .number(
+                NumberField(
+                    id: id,
+                    label: label,
+                    value: value,
+                    min: read(.min, nil as Double?),
+                    max: read(.max, nil as Double?),
+                    prefix: readText(.prefix),
+                    suffix: readText(.suffix)
+                )
+            )
+        case "checkbox":
+            guard let id = readText(.id), let label = readText(.label) else {
+                self = .unknown
+                return
+            }
+            self = .checkbox(Checkbox(id: id, label: label, value: read(.value, nil as Bool?)))
+        case "select":
+            guard let id = readText(.id), let label = readText(.label) else {
+                self = .unknown
+                return
+            }
+            self = .select(
+                Select(id: id, label: label, options: read(.options, []), value: read(.value, ""))
+            )
+        case "button":
+            guard let label = readText(.label), let send = readText(.send) else {
+                self = .unknown
+                return
+            }
+            self = .button(Button(label: label, send: send))
         default:
-            // A `stat`, a control, a button, or a kind added to the catalog after this
-            // build. Decoded as nothing until the pass that draws them.
+            // A kind added to the catalog after this build.
             self = .unknown
         }
     }
