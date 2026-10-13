@@ -21,9 +21,9 @@ const GROUNDING_NOTES = 40
 const IDEAS_SYSTEM = `You suggest what a person might want to do next with their coding assistant, from what is known about them.
 
 Write up to four ideas, one per line, each in the form:
-Title | the message the person would send
+Title | the message the person would send | sf:the-icon-name
 
-A title is a few words at most — "Investigate the deploy failure", "Tidy the memory list". After the pipe comes the sentence the assistant will receive: specific and short, in the language of the person's own work.
+A title is a few words at most — "Investigate the deploy failure", "Tidy the memory list". After the first pipe comes the sentence the assistant will receive: specific and short, in the language of the person's own work. The line ends with "sf:" and the name of an SF Symbol — an Apple system icon such as "envelope", "checklist" or "chart.line.uptrend.xyaxis" — the one you think fits the idea and looks best beside it.
 
 Ground every idea in the notes and the recent session titles you are given, and in nothing else. Never invent a file, a project or a fact that is not there. If nothing is worth offering, answer with exactly NONE. No preamble, no numbering, no blank lines.`
 
@@ -31,6 +31,12 @@ Ground every idea in the notes and the recent session titles you are given, and 
 export interface Idea {
   title: string
   prompt: string
+  /**
+   * The SF Symbol the card wears, when the model named one. Only the phone draws it —
+   * the browser keeps its own fixed set — so the field is optional, and its absence
+   * costs nothing.
+   */
+  symbol?: string
 }
 
 export interface IdeaInput {
@@ -73,9 +79,19 @@ function parseIdeas(text: string): Idea[] {
     const pipe = trimmed.indexOf('|')
     if (pipe === -1) continue
     const title = trimmed.slice(0, pipe).trim()
-    const prompt = trimmed.slice(pipe + 1).trim()
+    let rest = trimmed.slice(pipe + 1)
+    // The line ends with ` | sf:<name>` — the SF Symbol the card wears; what is left is
+    // the message, which may itself hold a pipe. A line that names no symbol is read as
+    // it always was.
+    const mark = rest.match(/\|\s*sf:([a-z0-9.]+)\s*$/i)
+    let symbol: string | undefined
+    if (mark?.[1]) {
+      symbol = mark[1].toLowerCase()
+      rest = rest.slice(0, mark.index ?? rest.length)
+    }
+    const prompt = rest.trim()
     if (!title || !prompt) continue
-    ideas.push({ title, prompt })
+    ideas.push(symbol ? { title, prompt, symbol } : { title, prompt })
     if (ideas.length >= MAX_IDEAS) break
   }
   return ideas

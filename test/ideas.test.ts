@@ -39,6 +39,17 @@ describe('deriveIdeas', () => {
     ])
   })
 
+  it('reads the SF Symbol the model chose for a card, when it names one', async () => {
+    const provider = new ScriptedProvider([
+      answered('Triage the inbox | Go through my inbox. | sf:envelope\nPlan a change | Help me plan this.'),
+    ])
+
+    expect(await deriveIdeas(input(provider))).toEqual([
+      { title: 'Triage the inbox', prompt: 'Go through my inbox.', symbol: 'envelope' },
+      { title: 'Plan a change', prompt: 'Help me plan this.' },
+    ])
+  })
+
   it('drops lines that are not in the shape, and blank ones', async () => {
     const provider = new ScriptedProvider([
       answered('\n- No pipe here\nPlan a change | Help me plan this.\nA title with nothing after |\n'),
