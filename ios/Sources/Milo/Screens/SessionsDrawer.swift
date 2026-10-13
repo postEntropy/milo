@@ -15,6 +15,10 @@ struct SessionsDrawer: View {
         HStack(spacing: 0) {
             column
                 .frame(width: 300, alignment: .leading)
+                // The way into the settings floats at the drawer's own end, over the list,
+                // on the right, in the platform's glass — the one control here that is not
+                // a session.
+                .overlay(alignment: .bottomTrailing) { settings }
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -36,8 +40,6 @@ struct SessionsDrawer: View {
                     }
                 }
                 .accessibilityLabel("New session")
-                MiloIconButton(systemName: "gearshape", size: 16, span: 36) { onSettings() }
-                    .accessibilityLabel("Settings")
             }
             .padding(.horizontal, MiloTheme.Space.four)
             .padding(.top, MiloTheme.Space.four)
@@ -67,9 +69,27 @@ struct SessionsDrawer: View {
                     }
                 }
                 .padding(.horizontal, MiloTheme.Space.three)
-                .padding(.bottom, MiloTheme.Space.four)
+                .padding(.bottom, Self.settingsClearance)
             }
         }
+    }
+
+    /// The tap target of the floating settings control, and the room the list keeps under
+    /// it so the last session is not lost behind the glass.
+    private static let settingsSpan: CGFloat = 44
+    private static let settingsClearance = settingsSpan + MiloTheme.Space.four + MiloTheme.Space.three
+
+    private var settings: some View {
+        Button { onSettings() } label: {
+            Image(systemName: "gearshape")
+                .font(.system(size: 22, weight: .semibold))
+                .foregroundStyle(MiloTheme.foreground)
+                .frame(width: Self.settingsSpan, height: Self.settingsSpan)
+        }
+        .glassEffect(.regular.interactive(), in: Circle())
+        .accessibilityLabel("Settings")
+        .padding(.trailing, MiloTheme.Space.four)
+        .padding(.bottom, MiloTheme.Space.four)
     }
 
     /// The list the way the browser buckets it: how recent, newest group first, with the
