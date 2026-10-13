@@ -143,11 +143,21 @@ enum MiloApi {
         _ = try await call("session-rename", ["id": id, "title": title], account: account, as: Ack.self)
     }
 
-    static func deleteSession(_ account: Account, id: String, current: String?) async throws {
-        var body: [String: Any] = ["id": id]
-        if let current { body["current"] = current }
-        _ = try await call("session-delete", body, account: account, as: Ack.self)
+    static func deleteSession(_ account: Account, id: String) async throws {
+        _ = try await call("session-delete", ["id": id], account: account, as: Ack.self)
     }
+
+    /**
+     Writes the session out on the machine hosting Milo — the log it was read from,
+     as markdown, in the daemon's exports directory — and hands back where it landed.
+     Null when there is no log to write, which the daemon says by answering `null`.
+     */
+    static func exportSession(_ account: Account, id: String) async throws -> String? {
+        let written = try await call("export", ["id": id, "format": "md"], account: account, as: Written?.self)
+        return written?.path
+    }
+
+    private struct Written: Decodable { let path: String }
 
     static func setModel(_ account: Account, model: String) async throws {
         _ = try await call("set-model", ["model": model], account: account, as: Ack.self)

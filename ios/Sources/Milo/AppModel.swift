@@ -265,8 +265,31 @@ final class AppModel {
     func delete(_ id: String) async {
         guard let account else { return }
         do {
-            try await MiloApi.deleteSession(account, id: id, current: sessionId.isEmpty ? nil : sessionId)
+            // Move off it first, and only delete once that worked: the daemon refuses
+            // to remove the session its conversation is bound to, and ending up on one
+            // the delete removed is worse than not deleting at all — the browser's own
+            // order, for the browser's own reason.
+            if id == sessionId {
+                try await MiloApi.newSession(account)
+                await reopen(account)
+            }
+            try await MiloApi.deleteSession(account, id: id)
             await refreshSessions()
+        } catch {
+            failed(error)
+        }
+    }
+
+    /// Writes the session out on the machine hosting Milo. Nothing here changes, so
+    /// the one thing it has to say is where the file landed — or that there was no log
+    /// to write, which is the daemon answering nothing rather than refusing.
+    func export(_ id: String) async {
+        guard let account else { return }
+        do {
+            let path = try await MiloApi.exportSession(account, id: id)
+            note = path
+                .map { Note("Exported to \($0)", failed: false) }
+                ?? Note("Nothing to export yet — this session has no log.")
         } catch {
             failed(error)
         }

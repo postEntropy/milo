@@ -10,6 +10,9 @@ struct ChatView: View {
     @State private var drawer = false
     @State private var picker = false
     @State private var settings = false
+    /// The session being renamed from this screen — the dots in the top bar name it,
+    /// and the shared alert does the rest.
+    @State private var renaming: String?
     @FocusState private var composing: Bool
 
     var body: some View {
@@ -89,6 +92,7 @@ struct ChatView: View {
         }
         .sheet(isPresented: $picker) { ModelPickerSheet() }
         .sheet(isPresented: $settings) { SettingsView(account: account) }
+        .sessionRename($renaming)
     }
 
     private static let drawerWidth: CGFloat = 300
@@ -128,9 +132,7 @@ struct ChatView: View {
                 // The platform's own glass button: it takes the tap itself, so the
                 // swipe on the screen cannot swallow it.
                 Button { openDrawer() } label: {
-                    Image(systemName: "line.3.horizontal")
-                        .font(.system(size: 20, weight: .semibold))
-                        .frame(width: 30, height: 30)
+                    topGlyph("line.3.horizontal")
                 }
                 .buttonStyle(.glass)
                 .buttonBorderShape(.circle)
@@ -139,18 +141,33 @@ struct ChatView: View {
 
                 Spacer(minLength: MiloTheme.Space.two)
 
-                // Starting a new session is offered only where there is one to leave: on
-                // a fresh session there is nothing to walk away from.
+                // Starting a new session and acting on this one: one pair, glued, the
+                // way the platform pairs two controls that belong together. Both are
+                // offered only where there is a session to leave.
                 if !model.messages.isEmpty {
-                    Button { Task { await model.newSession() } } label: {
-                        Image(systemName: "square.and.pencil")
-                            .font(.system(size: 20, weight: .semibold))
-                            .frame(width: 30, height: 30)
+                    HStack(spacing: MiloTheme.Space.one) {
+                        Button { Task { await model.newSession() } } label: {
+                            topGlyph("square.and.pencil")
+                        }
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .controlSize(.regular)
+                        .accessibilityLabel("New session")
+
+                        Menu {
+                            sessionActions(
+                                onRename: { renaming = model.sessionId },
+                                onExport: { Task { await model.export(model.sessionId) } },
+                                onDelete: { Task { await model.delete(model.sessionId) } }
+                            )
+                        } label: {
+                            topGlyph("ellipsis")
+                        }
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .controlSize(.regular)
+                        .accessibilityLabel("Session actions")
                     }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.regular)
-                    .accessibilityLabel("New session")
                 }
             }
             .overlay {
@@ -181,6 +198,12 @@ struct ChatView: View {
         case .online, .idle: return nil
         default: return model.connection.wording
         }
+    /// The mark a glass control in the top bar wears: one size, so the row's buttons
+    /// cannot come out at three different weights.
+    private func topGlyph(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 20, weight: .semibold))
+            .frame(width: 30, height: 30)
     }
 
     private var bottom: some View {

@@ -7,8 +7,9 @@ struct SessionsDrawer: View {
     let onClose: () -> Void
     let onSettings: () -> Void
     @Environment(AppModel.self) private var model
-    @State private var renaming: SessionSummary?
-    @State private var draftName = ""
+    /// The session being renamed, by id: the row's own press names one, and the alert
+    /// the modifier presents does the rest.
+    @State private var renaming: String?
 
     var body: some View {
         HStack(spacing: 0) {
@@ -18,14 +19,7 @@ struct SessionsDrawer: View {
         }
         .frame(maxHeight: .infinity, alignment: .top)
         .background(MiloTheme.background.ignoresSafeArea())
-        .alert("Rename session", isPresented: renameBinding) {
-            TextField("Name", text: $draftName)
-            Button("Save") {
-                if let id = renaming?.id { Task { await model.rename(id, to: draftName) } }
-                renaming = nil
-            }
-            Button("Cancel", role: .cancel) { renaming = nil }
-        }
+        .sessionRename($renaming)
     }
 
     private var column: some View {
@@ -126,21 +120,11 @@ struct SessionsDrawer: View {
         .buttonStyle(PressableStyle())
 
         .contextMenu {
-            Button {
-                draftName = session.title ?? ""
-                renaming = session
-            } label: {
-                Label("Rename", systemImage: "pencil")
-            }
-            Button(role: .destructive) {
-                Task { await model.delete(session.id) }
-            } label: {
-                Label("Delete", systemImage: "trash")
-            }
+            sessionActions(
+                onRename: { renaming = session.id },
+                onExport: { Task { await model.export(session.id) } },
+                onDelete: { Task { await model.delete(session.id) } }
+            )
         }
-    }
-
-    private var renameBinding: Binding<Bool> {
-        Binding(get: { renaming != nil }, set: { if !$0 { renaming = nil } })
     }
 }
