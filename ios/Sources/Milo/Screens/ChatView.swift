@@ -186,9 +186,9 @@ struct ChatView: View {
     private var bottom: some View {
         VStack(spacing: MiloTheme.Space.two) {
             if let note = model.note {
-                Text(note)
+                Text(note.text)
                     .font(MiloTheme.Text.small)
-                    .foregroundStyle(MiloTheme.danger)
+                    .foregroundStyle(note.failed ? MiloTheme.danger : MiloTheme.foreground2)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, MiloTheme.Space.five)
             }

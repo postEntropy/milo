@@ -38,7 +38,23 @@ final class AppModel {
     private(set) var busy = false
     /// Messages stacked behind the turn running now, for the composer's queue chip.
     private(set) var queued = 0
-    private(set) var note: String?
+    /**
+     A line the app has to say, where the reply would land, and whether it is a
+     failure: a thing that went right is not said in the red a refusal wears. The
+     browser draws the same pair — its notice is red only for an error.
+     */
+    struct Note: Equatable {
+        let text: String
+        var failed = true
+
+        /// A line to say. A failure unless the caller says otherwise, because that is
+        /// what nearly every line here is.
+        init(_ text: String, failed: Bool = true) {
+            self.text = text
+            self.failed = failed
+        }
+    }
+    private(set) var note: Note?
     private(set) var modelName = ""
     private(set) var providerId = ""
     private(set) var sessionId = ""
@@ -93,6 +109,12 @@ final class AppModel {
         }
     }
 
+    /// What a call that came back wrong has to say. One place, so every failure reads
+    /// the same way — the daemon's own words when it gave a reason, the system's
+    /// otherwise.
+    private func failed(_ error: Error) {
+        note = Note((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+    }
     /// The app opens on a new session, ready to type into. The socket is opened
     /// either way: if the daemon could not start a session, the note says so and
     /// the last bound one is what the socket replays.
@@ -100,7 +122,7 @@ final class AppModel {
         do {
             try await MiloApi.newSession(account)
         } catch {
-            note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            failed(error)
         }
         client.connect(to: account)
     }
@@ -182,7 +204,7 @@ final class AppModel {
     /// Said the same way wherever a message fails to leave, so the two paths cannot
     /// describe one failure differently.
     private func unsent() {
-        note = "That did not reach the daemon. Check the connection and try again."
+        note = Note("That did not reach the daemon. Check the connection and try again.")
     }
 
     /// Where a delivered file is fetched, for the image loader: the daemon serves only
@@ -216,7 +238,7 @@ final class AppModel {
             sessions = try await MiloApi.sessions(account).sorted { $0.updatedAt > $1.updatedAt }
             note = nil
         } catch {
-            note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            failed(error)
         }
     }
 
@@ -226,7 +248,7 @@ final class AppModel {
             try await MiloApi.newSession(account)
             await reopen(account)
         } catch {
-            note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            failed(error)
         }
     }
 
@@ -236,7 +258,7 @@ final class AppModel {
             try await MiloApi.resumeSession(account, id: id)
             await reopen(account)
         } catch {
-            note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            failed(error)
         }
     }
 
@@ -246,7 +268,7 @@ final class AppModel {
             try await MiloApi.deleteSession(account, id: id, current: sessionId.isEmpty ? nil : sessionId)
             await refreshSessions()
         } catch {
-            note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            failed(error)
         }
     }
 
@@ -256,7 +278,7 @@ final class AppModel {
             try await MiloApi.renameSession(account, id: id, title: name)
             await refreshSessions()
         } catch {
-            note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            failed(error)
         }
     }
 
@@ -281,7 +303,7 @@ final class AppModel {
             let wanted = providers.contains { $0.id == providerId } ? providerId : (providers.first?.id ?? "")
             await loadModels(from: wanted)
         } catch {
-            note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            failed(error)
         }
     }
 
@@ -293,7 +315,7 @@ final class AppModel {
             models = try await MiloApi.models(account, provider: provider)
         } catch {
             models = []
-            note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            failed(error)
         }
     }
 
@@ -303,7 +325,7 @@ final class AppModel {
             try await MiloApi.setModel(account, model: model)
             modelName = model
         } catch {
-            note = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            failed(error)
         }
     }
 
@@ -438,7 +460,7 @@ final class AppModel {
                 if status == "stopped" { messages[index].status = "Stopped · the partial reply was kept." }
             }
             turnStarted = nil
-            if status == "error" { note = "That turn ended in an error." }
+            if status == "error" { note = Note("That turn ended in an error.") }
         case .commandResult(let result):
             messages.append(
                 Message(
@@ -453,7 +475,7 @@ final class AppModel {
             busy = isBusy
             queued = count
         case .error(let message):
-            note = message
+            note = Note(message)
         case .jobs, .suggestions, .routinesChanged, .unknown:
             break
         }
@@ -513,7 +535,7 @@ final class AppModel {
                 $0.parts = AppModel.settled($0.parts)
             }
         case .error(let message):
-            note = message
+            note = Note(message)
         case .other:
             break
         }
