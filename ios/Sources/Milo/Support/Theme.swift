@@ -59,6 +59,10 @@ enum MiloTheme {
         static let body = Font.body
         static let title = Font.title2.weight(.semibold)
         static let mono = Font.system(.subheadline, design: .monospaced)
+        /// A call's line, the one monospace a step smaller: the browser sets a tool line
+        /// under the code blocks it sits between, and the phone draws the same line at
+        /// the same step.
+        static let monoSmall = Font.system(.caption, design: .monospaced)
     }
 }
 

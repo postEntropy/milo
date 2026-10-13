@@ -519,25 +519,37 @@ struct ToolRow: View {
             // on a failure — and the word beside it says the failure for whoever cannot
             // see the colour.
             Image(systemName: ToolIcons.symbol(tool.name))
-                .font(.system(size: 14, weight: .medium))
+                .font(.system(size: 12, weight: .medium))
                 .foregroundStyle(state)
-            Text(name)
-                .font(MiloTheme.Text.mono)
-                .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.foreground)
-                .lineLimit(1)
-                .truncationMode(.middle)
-            if !value.isEmpty {
-                Text(value)
-                    .font(MiloTheme.Text.mono)
-                    .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.muted)
+            // A call in flight is one swept line — the name and its value as the server
+            // drew them, lit together, which is the browser's own treatment. Settled, the
+            // name stands loud and the value stays quiet beside it.
+            if running {
+                Glare(text: line, font: MiloTheme.Text.monoSmall)
+                    .lineLimit(1)
+            } else {
+                Text(name)
+                    .font(MiloTheme.Text.monoSmall)
+                    .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.foreground)
                     .lineLimit(1)
                     .truncationMode(.middle)
+                if !value.isEmpty {
+                    Text(value)
+                        .font(MiloTheme.Text.monoSmall)
+                        .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
             if failed {
                 Text("failed").font(MiloTheme.Text.meta).foregroundStyle(MiloTheme.danger)
             }
         }
     }
+
+    /// The whole line, for the sweep to travel along: the name and its value in one
+    /// string, as the server drew it.
+    private var line: String { tool.text.isEmpty ? tool.name : tool.text }
 
     /// The line the server drew is the name and its value in one string; splitting on
     /// the name is what lets the name be loud and the value quiet. Where the line does
@@ -554,6 +566,8 @@ struct ToolRow: View {
     }
 
     private var failed: Bool { tool.state == "failed" }
+
+    private var running: Bool { tool.state == "running" }
 
     private var state: Color {
         switch tool.state {
