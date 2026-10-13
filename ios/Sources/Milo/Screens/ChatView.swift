@@ -287,7 +287,7 @@ struct Composer: View {
                 }
                 .font(MiloTheme.Text.small)
                 .foregroundStyle(MiloTheme.muted)
-                .padding(.horizontal, MiloTheme.Space.five)
+                .padding(.horizontal, MiloTheme.Space.six + MiloTheme.Space.four)
             }
 
             // Centred against the field: the send control is shorter than a line of text,
@@ -317,12 +317,10 @@ struct Composer: View {
                 // controls on one row line up because they are the same height, not
                 // because each was nudged to look like the other.
                 if model.busy {
-                    // Stop is its own control while a turn runs, so the way to send is
-                    // still there: the message queues behind this turn, and a long press
-                    // hands it to the turn now as a steer.
-                    MiloIconButton(systemName: "stop.fill", size: 16, span: 36, primary: true, action: model.stop)
-                        .accessibilityLabel("Stop")
-                    sendControl
+                    // The way to send becomes the way to stop — one control, as the
+                    // browser draws it: the turn that is running is stopped by the same
+                    // control that ran it, not by a second one standing beside it.
+                    stopControl
                 } else {
                     MiloIconButton(
                         systemName: "paperplane.fill",
@@ -351,25 +349,40 @@ struct Composer: View {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// While a turn runs, the send control queues by the tap and steers on the long
-    /// press — the two intents the browser offers on Enter and Cmd+Enter.
-    private var sendControl: some View {
-        Menu {
-            Button { submit(intent: .steer) } label: {
-                Label("Steer the running turn", systemImage: "arrow.turn.down.right")
+    /// While a turn runs, the control stops it. What is typed meanwhile still has the
+    /// two send intents — the browser offers them on Enter and Cmd+Enter; a phone has
+    /// no keys, so they ride the long press this control already answers to. Stop stays
+    /// the tap, so the way out of a turn is never behind a press-and-hold.
+    @ViewBuilder
+    private var stopControl: some View {
+        if canSend {
+            Menu {
+                Button { submit(intent: .steer) } label: {
+                    menuLine("Steer the running turn", "arrow.turn.down.right")
+                }
+                Button { submit(intent: .queue) } label: {
+                    menuLine("Send after this turn", "text.append")
+                }
+            } label: {
+                stopGlyph
+            } primaryAction: {
+                model.stop()
             }
-        } label: {
-            Image(systemName: "paperplane.fill")
-                .font(.system(size: 16, weight: .semibold))
-                .foregroundStyle(MiloTheme.accentOn)
-                .frame(width: 36, height: 36)
-                .background(Circle().fill(MiloTheme.accent))
-        } primaryAction: {
-            submit(intent: .queue)
+            .accessibilityLabel("Stop")
+        } else {
+            Button(action: model.stop) { stopGlyph }
+                .buttonStyle(PressableStyle())
+                .accessibilityLabel("Stop")
         }
-        .disabled(!canSend)
-        .opacity(canSend ? 1 : 0.35)
-        .accessibilityLabel("Send")
+    }
+
+    /// A quiet fill — the accent stays on the one thing to press when nothing runs.
+    private var stopGlyph: some View {
+        Image(systemName: "stop.fill")
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(MiloTheme.foreground)
+            .frame(width: 36, height: 36)
+            .background(Circle().fill(MiloTheme.surface))
     }
 
     private func submit(intent: ClientFrame.Intent = .queue) {
