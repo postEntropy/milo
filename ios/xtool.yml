@@ -1,3 +1,4 @@
 version: 1
 bundleID: dev.milo.app
 infoPath: Info.plist
+iconPath: Resources/AppIcon.png
