@@ -274,9 +274,7 @@ struct MessageRow: View {
         if message.isUser {
             HStack {
                 Spacer(minLength: 48)
-                Text(prose)
-                    .font(.body)
-                    .foregroundStyle(MiloTheme.foreground)
+                Prose(text: prose)
                     .padding(.horizontal, MiloTheme.Space.four)
                     .padding(.vertical, MiloTheme.Space.three)
                     .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
@@ -348,14 +346,13 @@ struct PartView: View {
     var body: some View {
         switch part {
         case .text(let text):
-            Text(text)
-                .font(.body)
-                .foregroundStyle(MiloTheme.foreground)
-                .textSelection(.enabled)
+            Prose(text: text)
         case .tool(let tool):
             ToolRow(tool: tool)
         case .todo(let items):
             TodoRow(items: items)
+        case .ui(let widget):
+            GenUiView(widget: widget)
         case .reasoning, .other:
             EmptyView()
         }

@@ -70,16 +70,19 @@ struct FrameAttachment: Decodable, Identifiable, Hashable {
     let image: Bool
 }
 
-/// One piece of a turn, in the order it happened. The kinds the phone does not
-/// draw (a generated widget) decode to `other` rather than failing the message.
+/// One piece of a turn, in the order it happened. A kind this build has never heard of
+/// decodes to `other` rather than failing the message.
 enum WirePart: Decodable {
     case text(String)
     case reasoning(String)
     case tool(ToolMark)
     case todo([TodoItem])
+    /// The widget the turn drew beside its words. It used to decode as `other` and
+    /// vanish without a word, which is the one thing a drawn thing may not do.
+    case ui(GenUi)
     case other
 
-    private enum CodingKeys: String, CodingKey { case kind, text, tool, items }
+    private enum CodingKeys: String, CodingKey { case kind, text, tool, items, render }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -88,6 +91,7 @@ enum WirePart: Decodable {
         case "reasoning": self = .reasoning(try container.decode(String.self, forKey: .text))
         case "tool": self = .tool(try container.decode(ToolMark.self, forKey: .tool))
         case "todo": self = .todo(try container.decode([TodoItem].self, forKey: .items))
+        case "ui": self = .ui((try? container.decode(GenUi.self, forKey: .render)) ?? .unreadable)
         default: self = .other
         }
     }
