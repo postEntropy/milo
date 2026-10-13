@@ -407,6 +407,13 @@ final class AppModel {
             pending = nil
             queued = 0
             turnStarted = nil
+            // A turn still being written when this screen opened: its `turn-start`
+            // arrived before the app was listening, so the row it is writing into is
+            // opened here and the events still to come land in it. No thought time is
+            // claimed — this app watched none of that thinking.
+            if ready.activeTurn != nil {
+                messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil))
+            }
         case .turnStart:
             busy = true
             answerBegan += 1

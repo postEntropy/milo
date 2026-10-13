@@ -225,6 +225,18 @@ enum AgentEvent: Decodable {
     }
 }
 
+/**
+ A turn that is still being written when this screen opens. Its `turn-start` went
+ out before the app was listening, and the daemon writes a session a step at a
+ time, so the middle of an answer sits in neither the transcript nor a frame this
+ app ever saw — the events it has already said follow, in order, right after the
+ `ready`. This is what says a row has to be open for them to land in; `id` names it
+ for the surfaces that key a row on one.
+ */
+struct ActiveTurn: Decodable {
+    let id: String
+}
+
 struct Ready: Decodable {
     let version: Int
     let sessionId: String
@@ -234,6 +246,7 @@ struct Ready: Decodable {
     let providerName: String
     let model: String
     let effort: String?
+    let activeTurn: ActiveTurn?
 }
 
 // MARK: - What the server sends

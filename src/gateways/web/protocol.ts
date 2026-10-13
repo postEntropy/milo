@@ -172,8 +172,26 @@ export type PanelInput =
   | { kind: 'key'; key: string; modifiers?: number }
   | { kind: 'type'; text: string }
 
+/**
+ * A turn that is still being written when a client arrives. Its own `turn-start`
+ * went out before this client was listening, and the session on disk is only written
+ * a step at a time — so the middle of an answer is nowhere: neither in the transcript
+ * nor on the wire. The daemon hands back the id the turn is drawn under, and the
+ * events it has already said follow, in order, right after the `ready`.
+ *
+ * Additive, like the handshake's `client`: a client that does not know the field
+ * draws nothing of the turn and is no worse off than before, and a server that does
+ * not send it is the one that never had it.
+ */
+export interface ActiveTurn {
+  id: string
+  /** When the turn began, for a surface that says when a message was said. No
+   *  thinking time rides with it: this client did not watch the turn think. */
+  at: number
+}
+
 export type ServerFrame =
-  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: 'on' | 'off'; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[] }
+  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: 'on' | 'off'; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn }
   | { type: 'turn-start'; id: string; text: string }
   | { type: 'event'; turnId: string; event: AgentEvent }
   | { type: 'permission'; id: string; request: PermissionRequest; expiresAt: number }

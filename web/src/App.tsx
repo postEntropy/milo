@@ -407,7 +407,16 @@ export default function App() {
       // A session opens at its end, where the conversation is — the whole thread
       // is here at once, so there is no "scrolled there" to respect.
       pinToEnd.current = true
-      setMessages(frame.messages.map((message, index) => ({ ...message, id: `loaded-${index}`, loaded: true })))
+      const opened: ChatMessage[] = frame.messages.map((message, index) => ({ ...message, id: `loaded-${index}`, loaded: true }))
+      // A turn that is still running: this page was not here for its `turn-start`,
+      // and the daemon writes a session a step at a time, so the answer being written
+      // is in neither the transcript below nor a frame this page ever saw. The row is
+      // opened under the id it is drawn with, and the events it has already said
+      // arrive right behind this frame and land in it.
+      if (frame.activeTurn) {
+        opened.push({ id: frame.activeTurn.id, role: 'assistant', parts: [], at: frame.activeTurn.at, waitingSince: Date.now() })
+      }
+      setMessages(opened)
       // A redo forks the session and owes the words: they go out now that the new
       // session is the one this socket is speaking to.
       if (pendingSend.current !== null) {

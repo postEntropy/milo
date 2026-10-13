@@ -12,7 +12,7 @@ import { buildCommandContext, handleCommand, handleTurnControl, turnOf, type Com
 import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
 import { rawTurn } from '../raw.js'
-import type { ClientFrame, FrameAttachment, JobView, PanelInput, PanelKind, PanelState, PanelTab, PanelView, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
+import type { ClientFrame, FrameAttachment, JobView, PanelInput, PanelKind, PanelState, PanelTab, PanelView, PermissionRequest, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
 import { PERMISSION_TIMEOUT_MS } from './protocol.js'
 import { displayEvent } from './turn.js'
 import { panelsOf, transcriptOf } from './transcript.js'
@@ -53,7 +53,24 @@ interface Conversation {
   scope: MemoryScope
   session: Session
   clients: Set<WebClient>
-  activeTurnId?: string
+  /**
+   * The turn running now, with the frames of the step it is on. A client can arrive
+   * in the middle of an answer — a phone that was locked, a page reloaded — and long
+   * after its `turn-start` went out. The session on disk is written a step at a time,
+   * so what the step in flight has said exists nowhere else, and it is kept here until
+   * the step ends and handed to whoever connects.
+   *
+   * `held` is how much of the session was written when these frames began: a step that
+   * lands there is history the ready already draws, and replaying its frames would put
+   * it on the screen twice.
+   */
+  activeTurn?: { id: string; at: number; frames: ServerFrame[]; held: number }
+  /**
+   * The permission the turn is waiting on, when it is waiting on one. It goes out as
+   * its own frame, so a client that arrives after it did never saw it — and a
+   * question nobody can see is a question that expires as a denial.
+   */
+  permission?: { id: string; request: PermissionRequest; expiresAt: number }
   /**
    * Whether a client on this conversation said it draws a generated interface.
    * Declared on connect and read on every turn, so drawing is taught only where
@@ -142,6 +159,10 @@ export class WebHub {
     if (genui !== undefined) conversation.genui = genui
     if (clientKind !== undefined) conversation.client = clientKind
     conversation.clients.add(client)
+    // The turn running now, when there is one: this client missed its `turn-start`,
+    // so the id it is drawn under rides with the ready and the events it has already
+    // said are replayed under it, in order, before anything new arrives.
+    const running = conversation.activeTurn
     client.send({
       type: 'ready',
       version: 1,
@@ -156,7 +177,16 @@ export class WebHub {
       effort: this.runtime.reasoningEffort,
       panel: this.panelFor(conversation),
       jobs: this.jobsView(),
+      ...(running ? { activeTurn: { id: running.id, at: running.at } } : {}),
     })
+    if (running) for (const frame of running.frames) client.send(frame)
+    // A question the turn is still waiting on, sent again under the id it already
+    // had: the deadline is the daemon's, so the countdown this client draws is the
+    // one that is actually running rather than a fresh five minutes.
+    const asking = conversation.permission
+    if (asking) {
+      client.send({ type: 'permission', id: asking.id, request: asking.request, expiresAt: asking.expiresAt })
+    }
     this.sendState(conversationId)
     // An empty home asks for ideas in the background: the page is already drawn
     // from the standing four, which the ideas arrive to take the place of.
@@ -222,8 +252,8 @@ export class WebHub {
       if (frame.intent === 'steer') {
         const steered = this.turns.steer(conversationId, frame.text)
         if (steered) {
-          const turnId = this.conversations.get(conversationId)?.activeTurnId
-          if (turnId) this.broadcast(conversationId, { type: 'event', turnId, event: { type: 'steer', text: frame.text } })
+          const turnId = this.conversations.get(conversationId)?.activeTurn?.id
+          if (turnId) this.emitTurn(conversationId, { type: 'event', turnId, event: { type: 'steer', text: frame.text } })
           return
         }
       }
@@ -711,7 +741,17 @@ export class WebHub {
     this.turns.run(conversationId, async (inbox, signal) => {
       const id = randomUUID()
       const activeConversation = this.conversations.get(conversationId)
-      if (activeConversation) activeConversation.activeTurnId = id
+      // Kept as it is said, frame by frame, for a client that arrives in the middle
+      // of it: by then the `turn-start` below is long gone, and the session on disk
+      // grows only a step at a time.
+      if (activeConversation) {
+        activeConversation.activeTurn = {
+          id,
+          at: Date.now(),
+          frames: [],
+          held: activeConversation.session.messages.length,
+        }
+      }
       this.broadcast(conversationId, { type: 'turn-start', id, text: files?.length
         ? [text, files.map((file) => `Attached ${file.name}`).join(', ')].filter(Boolean).join('\n')
         : text })
@@ -782,13 +822,20 @@ export class WebHub {
             panel: this.panelFacts(conversation),
             ask: async (request) => {
               const permissionId = randomUUID()
+              const expiresAt = Date.now() + PERMISSION_TIMEOUT_MS
+              // Held for the conversation while it waits: the frame below reaches the
+              // clients that are here, and this is what a client arriving later is told.
+              const asking = this.conversations.get(conversationId)
+              if (asking) asking.permission = { id: permissionId, request, expiresAt }
               this.broadcast(conversationId, {
                 type: 'permission',
                 id: permissionId,
                 request,
-                expiresAt: Date.now() + PERMISSION_TIMEOUT_MS,
+                expiresAt,
               })
               const allowed = await this.pending.wait(permissionId, PERMISSION_TIMEOUT_MS, signal, conversationId)
+              const answered = this.conversations.get(conversationId)
+              if (answered?.permission?.id === permissionId) answered.permission = undefined
               this.broadcast(conversationId, { type: 'permission-result', id: permissionId, allowed })
               return { allowed }
             },
@@ -804,7 +851,7 @@ export class WebHub {
               this.broadcast(conversationId, { type: 'panel', panel: this.panelView(conversation) })
               continue
             }
-            displayEvent(event, id, display, (frame) => this.broadcast(conversationId, frame))
+            displayEvent(event, id, display, (frame) => this.emitTurn(conversationId, frame))
           }
           currentImages = []
           currentAudio = []
@@ -833,13 +880,16 @@ export class WebHub {
         }
       } finally {
         const endedConversation = this.conversations.get(conversationId)
+        // Cleared before the `turn-end` goes out: the step that just finished is in
+        // the session by now, so a client connecting in this gap is handed the whole
+        // turn as history instead of a live row nothing would ever close.
+        if (endedConversation?.activeTurn?.id === id) endedConversation.activeTurn = undefined
         // The answer's raw copy rides with the turn, so the just-streamed answer has it
         // too — not only a reload, which reads the same rendering back from the transcript.
         const raw = endedConversation && runFrom !== undefined
           ? rawTurn(endedConversation.session.messages.slice(runFrom))
           : null
         this.broadcast(conversationId, { type: 'turn-end', id, status, ...(raw ? { raw } : {}) })
-        if (endedConversation?.activeTurnId === id) endedConversation.activeTurnId = undefined
       }
     }, () => this.sendState(conversationId))
     this.sendState(conversationId)
@@ -915,6 +965,30 @@ export class WebHub {
 
   private broadcast(conversationId: string, frame: ServerFrame): void {
     for (const client of this.conversations.get(conversationId)?.clients ?? []) client.send(frame)
+  }
+
+  /**
+   * A frame belonging to the turn running now: sent to everyone watching, and kept
+   * for whoever arrives late. Only the turn's own frames go through here — they are
+   * the ones a client that missed the `turn-start` has no other way to see.
+   *
+   * A step that has ended is written into the session, message by message, and the
+   * transcript a late client is handed already draws it — so its frames are dropped
+   * the moment that happens. What is kept is the step still in flight, which exists
+   * nowhere else. Replaying the ones behind it said the beginning of the answer twice.
+   */
+  private emitTurn(conversationId: string, frame: ServerFrame): void {
+    const conversation = this.conversations.get(conversationId)
+    const turn = conversation?.activeTurn
+    if (conversation && turn) {
+      const written = conversation.session.messages.length
+      if (written > turn.held) {
+        turn.frames.length = 0
+        turn.held = written
+      }
+      turn.frames.push(frame)
+    }
+    this.broadcast(conversationId, frame)
   }
 
   /** The same frame to every open page: jobs belong to the process, not a chat. */
