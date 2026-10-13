@@ -364,6 +364,33 @@ final class AppModel {
         }
     }
 
+    /**
+     Forking: the session is cut at a turn and this conversation is bound to the copy,
+     so the next turn is said from there instead. Nothing is lost — the session it was
+     cut from keeps its place in the drawer — and nothing is deleted.
+     */
+    func fork(from turn: Int) async {
+        await fork(from: turn, then: nil)
+    }
+
+    /// Asking again from an earlier point: the fork, and the words that asked the
+    /// first time sent into it.
+    func regenerate(prompt: String, upToTurn: Int) async {
+        await fork(from: upToTurn, then: prompt)
+    }
+
+    private func fork(from turn: Int, then prompt: String?) async {
+        guard let account, !sessionId.isEmpty else { return }
+        owed = prompt
+        do {
+            try await MiloApi.forkSession(account, id: sessionId, upToTurn: turn)
+            await reopen(account)
+        } catch {
+            owed = nil
+            failed(error)
+        }
+    }
+
     /// After the bound session changes, the socket is reopened so the daemon
     /// replays the session that is actually bound now.
     private func reopen(_ account: Account) async {
@@ -519,6 +546,11 @@ final class AppModel {
             // claimed — this app watched none of that thinking.
             if ready.activeTurn != nil {
                 messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil))
+            }
+            // The words a fork owes go out now that the socket is speaking to the copy.
+            if let owed {
+                self.owed = nil
+                send(owed)
             }
         case .turnStart:
             busy = true
@@ -719,5 +751,18 @@ final class AppModel {
         if removed > 0 { says.append("\(removed) message\(removed == 1 ? "" : "s") dropped elsewhere") }
         if compacted { says.append("the earlier turns are summarized") }
         return says.joined(separator: " and ")
+    }
+}
+
+extension AppModel.Message {
+    /// The words of a message, everything that is not prose left out — what Copy takes,
+    /// and what asking again sends back.
+    var prose: String {
+        parts
+            .compactMap { part in
+                if case .text(let text) = part { return text }
+                return nil
+            }
+            .joined(separator: "\n\n")
     }
 }

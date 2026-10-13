@@ -139,6 +139,22 @@ enum MiloApi {
         )
     }
 
+    /**
+     Cuts the session at a turn: the daemon makes the copy and binds this conversation
+     to it, so everything after that point is said afresh from the fork. The session
+     it was cut from keeps its place in the drawer — the browser forks into a
+     conversation of its own, and this app holds one, so the old one is left behind
+     rather than deleted.
+     */
+    static func forkSession(_ account: Account, id: String, upToTurn: Int) async throws {
+        _ = try await call(
+            "fork-session",
+            ["conversationId": account.conversationId, "sessionId": id, "upToTurn": upToTurn],
+            account: account,
+            as: Ack.self
+        )
+    }
+
     static func renameSession(_ account: Account, id: String, title: String) async throws {
         _ = try await call("session-rename", ["id": id, "title": title], account: account, as: Ack.self)
     }

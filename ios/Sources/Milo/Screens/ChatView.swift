@@ -100,6 +100,39 @@ struct ChatView: View {
     /// the moment the list under it comes back, so the two cannot drift apart.
     private static let drawerDuration: Double = 0.28
 
+    /// Which turn each message belongs to: the person's own line opens one, so a
+    /// message's place is how many of them came before it. What a fork cuts at.
+    private var turns: [UUID: Int] {
+        var turns: [UUID: Int] = [:]
+        var turn = 0
+        for message in model.messages {
+            if message.isUser { turn += 1 }
+            turns[message.id] = turn
+        }
+        return turns
+    }
+
+    /// What asking again would redo: the last answer, with the words that asked for it
+    /// and the turn before them. Offered only when nothing is running — a turn in
+    /// flight is not asked again, the browser's own rule.
+    private var regenerate: (message: UUID, prompt: String, upToTurn: Int)? {
+        guard !model.busy else { return nil }
+        var answer: AppModel.Message?
+        var asked: AppModel.Message?
+        for message in model.messages {
+            if message.isUser { asked = message; continue }
+            if !message.streaming, !message.prose.isEmpty { answer = message }
+        }
+        guard let answer, let asked, let turn = turns[asked.id] else { return nil }
+        return (answer.id, asked.prose, turn - 1)
+    }
+
+    /// The offer, on the one message it belongs to.
+    private func regeneration(for message: AppModel.Message) -> (prompt: String, upToTurn: Int)? {
+        guard let offer = regenerate, offer.message == message.id else { return nil }
+        return (offer.prompt, offer.upToTurn)
+    }
+
     /// Opening the sessions is leaving the thread: the keys go down with it rather
     /// than sitting under a list that has nothing to type into.
     private func openDrawer() {
@@ -112,7 +145,11 @@ struct ChatView: View {
             LazyVStack(alignment: .leading, spacing: MiloTheme.Space.six) {
                 if model.messages.isEmpty { WelcomeView() }
                 ForEach(model.messages) { message in
-                    MessageRow(message: message)
+                    MessageRow(
+                        message: message,
+                        turn: turns[message.id] ?? 1,
+                        regenerate: regeneration(for: message)
+                    )
                 }
             }
             .padding(.horizontal, MiloTheme.Space.four)
@@ -346,6 +383,10 @@ struct Composer: View {
 
 struct MessageRow: View {
     let message: AppModel.Message
+    /// Which turn this message belongs to — what a fork cuts at.
+    let turn: Int
+    /// The words asking again would send, on the one answer it belongs to.
+    let regenerate: (prompt: String, upToTurn: Int)?
     @State private var showReasoning = false
 
     var body: some View {
@@ -353,8 +394,8 @@ struct MessageRow: View {
             HStack {
                 Spacer(minLength: 48)
                 VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-                    if !prose.isEmpty {
-                        Prose(text: prose)
+                    if !message.prose.isEmpty {
+                        Prose(text: message.prose)
                     }
                     // Guarded like the assistant side: an empty `Attachments` is still a
                     // child, and the stack's spacing would show up as a chin under the text.
@@ -410,19 +451,25 @@ struct MessageRow: View {
                         .font(MiloTheme.Text.small)
                         .foregroundStyle(MiloTheme.muted)
                 }
+                // The controls the browser draws under an answer. A turn still being
+                // written has nothing to act on yet, and a message with no words has
+                // nothing to copy.
+                if !message.streaming, !message.prose.isEmpty {
+                    MessageToolbar(message: message, turn: turn, regenerate: regenerate)
+                }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .contextMenu { menu }
         }
     }
 
-    /// What can be done with the message: its words, and — when the turn is more than
-    /// prose — the turn copied whole, where the tool arguments and results the drawn
-    /// parts leave out still live. The cost rides here too, as the browser shows it.
+    /// What can be done with the person's own message, behind the press: its words,
+    /// and — when the turn is more than prose — the turn copied whole, where the tool
+    /// arguments and results the drawn parts leave out still live. The answer's own
+    /// controls stand under it instead, so nothing here is said twice.
     @ViewBuilder
     private var menu: some View {
         Button {
-            UIPasteboard.general.string = prose
+            UIPasteboard.general.string = message.prose
         } label: {
             menuLine("Copy", "doc.on.doc")
         }
@@ -440,14 +487,98 @@ struct MessageRow: View {
             .disabled(true)
         }
     }
+}
 
-    private var prose: String {
-        message.parts
-            .compactMap { part in
-                if case .text(let text) = part { return text }
-                return nil
+/// The controls under a finished answer, the four the browser draws there: the words
+/// copied, the session forked from this turn, the answer asked again, and — behind the
+/// dots — what the turn cost and the turn copied whole.
+///
+/// The glyph and nothing around it, which is the same control the page draws: with no
+/// pointer to hover with, a phone leaves to the press what the browser saves for the
+/// hover. The cost and the raw copy are not repeated beside it — the browser keeps
+/// those behind the dots too.
+struct MessageToolbar: View {
+    let message: AppModel.Message
+    /// Which turn this answer belongs to, and what asking again would send.
+    let turn: Int
+    let regenerate: (prompt: String, upToTurn: Int)?
+    @Environment(AppModel.self) private var model
+    @State private var copied = false
+
+    var body: some View {
+        // The browser's own rhythm: the controls sit as close as their own boxes allow,
+        // and the box around a mark is what keeps them apart. Nothing between them but
+        // the height of the row.
+        HStack(spacing: MiloTheme.Space.one) {
+            control(copied ? "checkmark" : "doc.on.doc", label: copied ? "Copied" : "Copy") {
+                UIPasteboard.general.string = message.prose
+                copied = true
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    copied = false
+                }
             }
-            .joined(separator: "\n\n")
+            control("arrow.trianglehead.branch", label: "Fork session from here", disabled: model.busy) {
+                Task { await model.fork(from: turn) }
+            }
+            if let regenerate {
+                control("arrow.clockwise", label: "Ask this again", disabled: model.busy) {
+                    Task { await model.regenerate(prompt: regenerate.prompt, upToTurn: regenerate.upToTurn) }
+                }
+            }
+            // Only where it holds something: an answer read back from the transcript
+            // carries neither its cost nor its raw copy, and dots over an empty menu
+            // are a control that promises what it cannot do.
+            if message.tokens != nil || message.raw != nil {
+                more
+            }
+        }
+    }
+
+    /// What the dots hold: what the answer cost, and the turn as it was said — the
+    /// model's words, its thinking and every call with its arguments and result.
+    private var more: some View {
+        Menu {
+            if let tokens = message.tokens {
+                Button {} label: {
+                    menuLine("\(tokens.input) in · \(tokens.output) out", "cpu")
+                }
+                .disabled(true)
+            }
+            if let raw = message.raw {
+                Button {
+                    UIPasteboard.general.string = raw
+                } label: {
+                    menuLine("Copy raw", "curlybraces")
+                }
+            }
+        } label: {
+            glyph("ellipsis")
+        }
+        .accessibilityLabel("More")
+    }
+
+    private func control(
+        _ name: String,
+        label: String,
+        disabled: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) { glyph(name) }
+            .buttonStyle(PressableStyle())
+            .disabled(disabled)
+            .opacity(disabled ? 0.35 : 1)
+            .accessibilityLabel(label)
+    }
+
+    /// The mark itself, in the box a finger needs — the shape every one of these
+    /// controls shares, so the row lines up whatever the glyph is.
+    private func glyph(_ name: String) -> some View {
+        Image(systemName: name)
+            .font(.system(size: 15, weight: .medium))
+            .foregroundStyle(MiloTheme.muted)
+            .frame(width: 36, height: 28)
+            .contentShape(Rectangle())
     }
 }
 
