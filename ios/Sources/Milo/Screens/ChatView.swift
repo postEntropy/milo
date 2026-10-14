@@ -33,6 +33,9 @@ struct ChatView: View {
     /// The words picked out of an answer, held until the reply is sent — the phone's half
     /// of the strip the browser keeps above its field.
     @State private var quote: String?
+    /// A message being edited: the turn just before it, which the session is forked at so
+    /// the edited words replace it rather than stacking a second copy on top.
+    @State private var editing: Int?
     @State private var drawer = false
     @State private var picker = false
     @State private var settings = false
@@ -182,10 +185,15 @@ struct ChatView: View {
         // changes — a new one started, another resumed — that passage is no longer there
         // to answer, so the strip goes with it instead of following into a session it was
         // never picked from.
-        .onChange(of: model.sessionId) { _, _ in quote = nil }
+        .onChange(of: model.sessionId) { _, _ in
+            quote = nil
+            // An edit belongs to the session it was made in; a new one is not the one to
+            // fork, so the request is dropped rather than carried over.
+            editing = nil
             // What a panel offered belonged to the session that was on screen — a running
             // turn that this one does not have among them.
             closeMenu()
+        }
         .sheet(isPresented: $picker) { ModelPickerSheet() }
         .sheet(isPresented: $settings) { SettingsView(account: account) }
         .sessionRename($renaming)
@@ -248,6 +256,16 @@ struct ChatView: View {
         composing = true
     }
 
+    /// The person's own message, back in the composer to be said again. The session forks
+    /// at the turn before it, so sending edits the message rather than adding a second one
+    /// — the browser's own Edit, over its own fork. `upToTurn` is that turn.
+    private func editMessage(_ text: String, upToTurn: Int) {
+        draft = text
+        quote = nil
+        editing = upToTurn
+        composing = true
+    }
+
     /// Putting the composer's panel away: from the layer under it, from a line of it that
     /// leaves the composer, and from a screen that leaves the composer behind. Raising one is
     /// the control's own — and both motions are the same, because the stack animates on the
@@ -267,6 +285,10 @@ struct ChatView: View {
         let outgoing = (quote.map(quotedLead) ?? "") + draft
         draft = ""
         quote = nil
+        if let upToTurn = editing {
+            editing = nil
+            Task { await model.regenerate(prompt: outgoing, upToTurn: upToTurn) }
+        } else {
         // The keys come down with the words: the room the keyboard was holding is where the
         // reply is about to write itself, and the person's own words have gone up to the top
         // of the thread to open it.
@@ -344,7 +366,8 @@ struct ChatView: View {
                             message: message,
                             turn: turns[message.id] ?? 1,
                             regenerate: regeneration(for: message),
-                            onQuote: quoteIt
+                            onQuote: quoteIt,
+                            onEdit: editMessage
                         )
                     }
                     // The end of the thread, as something to be pointed at: where the arrow
@@ -529,6 +552,7 @@ struct ChatView: View {
             Composer(
                 draft: $draft,
                 quote: $quote,
+                editing: $editing,
                 focused: $composing,
                 menu: $menu,
                 send: send
@@ -617,6 +641,8 @@ struct Composer: View {
     @Binding var draft: String
     /// The words picked out of an answer, held until the reply is sent.
     @Binding var quote: String?
+    /// The turn an edit forks at, when the draft is an edit rather than a new message.
+    @Binding var editing: Int?
     @FocusState.Binding var focused: Bool
     /// The panel this composer's controls raise, held by the screen: the panel is drawn over
     /// the composer — above the layer that dismisses it — rather than inside it.
@@ -921,6 +947,10 @@ struct MessageRow: View {
     /// The words picked out of this answer, handed to the composer. Only the answer wears
     /// it: the person's own bubble is read, not answered.
     let onQuote: (String) -> Void
+    /// The person's own message, back in the composer to be said again — with the turn the
+    /// session is forked at, so the edit replaces the message rather than following it.
+    let onEdit: (String, Int) -> Void
+    @Environment(AppModel.self) private var model
     @State private var showReasoning = false
 
     /// The answer's parts as they are drawn: a run of consecutive calls is one chain,
@@ -1050,9 +1080,18 @@ struct MessageRow: View {
         }
     }
 
+    /// What can be done with the person's own message, behind the press: its words, the
+    /// words again as an edit, and — when the turn is more than prose — the turn copied
+    /// whole or, without the tool output, the path it walked, where the arguments and
+    /// results the drawn parts leave out still live. The answer's own controls stand under
+    /// it instead, so nothing here is said twice.
     @ViewBuilder
     private var menu: some View {
         menuItem("Copy", "doc.on.doc") { UIPasteboard.general.string = message.prose }
+        // The words back in the composer and said again: the session forks before them, so
+        // the edit replaces the message instead of following it. Not while a turn runs —
+        // it would fork mid-answer.
+        menuItem("Edit", "pencil", disabled: model.busy) { onEdit(message.prose, turn - 1) }
         if let raw = message.raw {
             rawCopyMenu(raw: raw, rawNoOutput: message.rawNoOutput)
         }
