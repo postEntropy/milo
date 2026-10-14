@@ -27,6 +27,11 @@ enum MiloTheme {
     static let foreground = Color(.label)
     static let foreground2 = Color(.label).opacity(0.85)
     static let muted = Color(.secondaryLabel)
+    /// A step under `muted`, for a line that has to be quieter than the platform's own
+    /// secondary still allows. A fixed light/dark pair rather than an opacity on `label`:
+    /// an opacity blends toward the page, so it would dim in the dark and turn pale in the
+    /// light, where this darkens in both.
+    static let muted2 = Color.milo(light: 0x5A5A61, dark: 0x87878F)
 
     // Hairlines — for fields, panels and content chrome; never for a control.
     static let border = Color.milo(light: 0xDED8CB, dark: 0x3A3B34)

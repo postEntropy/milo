@@ -642,7 +642,7 @@ struct WelcomeView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
             Text("What's on your mind?")
-                .font(.title3.weight(.semibold))
+                .font(MiloTheme.Text.title)
                 .foregroundStyle(MiloTheme.foreground)
                 .padding(.top, MiloTheme.Space.two)
 
@@ -675,11 +675,11 @@ struct WelcomeView: View {
             HStack(spacing: MiloTheme.Space.three) {
                 Image(systemName: suggestion.symbol)
                     .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(MiloTheme.foreground2)
+                    .foregroundStyle(MiloTheme.muted2)
                     .frame(width: 28, alignment: .center)
                 Text(suggestion.title)
                     .font(MiloTheme.Text.body)
-                    .foregroundStyle(MiloTheme.foreground2)
+                    .foregroundStyle(MiloTheme.muted2)
                     .lineLimit(1)
                     .truncationMode(.tail)
                 Spacer(minLength: 0)
