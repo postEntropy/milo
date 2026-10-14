@@ -189,7 +189,9 @@ struct ChatView: View {
         ScrollViewReader { proxy in
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MiloTheme.Space.six) {
-                    if model.messages.isEmpty { WelcomeView() }
+                    // The empty state wears an id of its own, so a session that opens can
+                    // put the scroll back on it — see the reset below.
+                    if model.messages.isEmpty { WelcomeView().id(Self.threadTop) }
                     ForEach(model.messages) { message in
                         MessageRow(
                             message: message,
@@ -207,7 +209,12 @@ struct ChatView: View {
                 // The thread sits close over the composer: the last line belongs to the
                 // thing being typed, not a hand's width above it.
             }
+            // The thread's end stays in view as it grows, and a screen with no words in it
+            // rests against the composer — the ways in are the field's companion, not a
+            // banner on an empty page. The role that places content shorter than the room is
+            // named on its own rather than left to the other anchor to imply.
             .defaultScrollAnchor(.bottom)
+            .defaultScrollAnchor(.bottom, for: .alignment)
             .scrollDismissesKeyboard(.interactively)
             .scrollEdgeEffectStyle(.soft, for: .vertical)
             // Asked of the scroll box, the way the browser asks its own: the end is the
@@ -224,6 +231,14 @@ struct ChatView: View {
                 guard model.messages.last?.isUser == true else { return }
                 withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(Self.threadEnd, anchor: .bottom) }
             }
+            // A session opens on its own content. The thread is emptied before the daemon
+            // replays, and a scroll left where the old thread was leaves the empty state
+            // outside the visible region — where a lazy stack draws nothing, so the screen
+            // comes out blank. Putting the scroll back on it makes the welcome appear every
+            // time, and a thread with words in it takes over from there as it grows.
+            .onChange(of: model.sessionId) { _, _ in
+                proxy.scrollTo(Self.threadTop, anchor: .top)
+            }
             .safeAreaInset(edge: .top, spacing: 0) { topbar }
             .safeAreaInset(edge: .bottom, spacing: 0) { bottom(proxy) }
         }
@@ -231,6 +246,8 @@ struct ChatView: View {
 
     /// The end of the thread, as an id the scroll view answers to.
     private static let threadEnd = "thread-end"
+    /// The empty state's own id, so a session that opens can put the scroll back on it.
+    private static let threadTop = "thread-top"
     /// The way back to the end: the box the thumb finds, and how far it floats above the
     /// composer it rides over.
     private static let jumpSpan: CGFloat = 40
