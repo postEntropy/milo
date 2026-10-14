@@ -5,6 +5,7 @@ import SwiftUI
 /// the sidebar's own tone, full-bleed to the screen's edges.
 struct SessionsDrawer: View {
     let onClose: () -> Void
+    let onNewSession: () -> Void
     let onSettings: () -> Void
     @Environment(AppModel.self) private var model
     /// The session being renamed, by id: the row's own press names one, and the alert
@@ -15,10 +16,10 @@ struct SessionsDrawer: View {
         HStack(spacing: 0) {
             column
                 .frame(width: 300, alignment: .leading)
-                // The way into the settings floats at the drawer's own end, over the list,
-                // on the right, in the platform's glass — the one control here that is not
-                // a session.
-                .overlay(alignment: .bottomTrailing) { settings }
+                // What starts a session and what sets one up float at the drawer's own
+                // end, over the list, on the right, in the platform's glass — the controls
+                // here that are not sessions themselves.
+                .overlay(alignment: .bottomTrailing) { controls }
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -59,25 +60,47 @@ struct SessionsDrawer: View {
                     }
                 }
                 .padding(.horizontal, MiloTheme.Space.three)
-                .padding(.bottom, Self.settingsClearance)
+                .padding(.bottom, Self.controlsClearance)
             }
         }
     }
 
-    /// The tap target of the floating settings control, and the room the list keeps under
-    /// it so the last session is not lost behind the glass.
-    private static let settingsSpan: CGFloat = 44
-    private static let settingsClearance = settingsSpan + MiloTheme.Space.four + MiloTheme.Space.three
+    /// The tap target of each floating control, and the room the list keeps under them so
+    /// the last session is not lost behind the glass. They sit side by side, so it is their
+    /// height the list has to clear, not their width.
+    private static let controlSpan: CGFloat = 44
+    private static let controlsClearance = controlSpan + MiloTheme.Space.four + MiloTheme.Space.three
 
-    private var settings: some View {
-        Button { onSettings() } label: {
-            Image(systemName: "gearshape")
-                .font(.system(size: 22, weight: .semibold))
-                .foregroundStyle(MiloTheme.foreground)
-                .frame(width: Self.settingsSpan, height: Self.settingsSpan)
+    /// Starting a session and setting one up, at the drawer's own end. New session states
+    /// what it does in words — a disc with a mark on it would leave the mark to be read —
+    /// and wears the accent as the glass's tint, in the tone the composer spends on the way
+    /// to send; the way into the settings keeps the plain glass of a control that only goes
+    /// somewhere, and the gear says that much on its own.
+    private var controls: some View {
+        HStack(spacing: MiloTheme.Space.three) {
+            Button { onNewSession() } label: {
+                HStack(spacing: MiloTheme.Space.two) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("New session")
+                        .font(MiloTheme.Text.base)
+                }
+                .foregroundStyle(MiloTheme.accentOn)
+                .padding(.horizontal, MiloTheme.Space.five)
+                .frame(height: Self.controlSpan)
+                .contentShape(Capsule())
+            }
+            .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
+
+            Button { onSettings() } label: {
+                Image(systemName: "gearshape")
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(MiloTheme.foreground)
+                    .frame(width: Self.controlSpan, height: Self.controlSpan)
+            }
+            .glassEffect(.regular.interactive(), in: Circle())
+            .accessibilityLabel("Settings")
         }
-        .glassEffect(.regular.interactive(), in: Circle())
-        .accessibilityLabel("Settings")
         .padding(.trailing, MiloTheme.Space.four)
         .padding(.bottom, MiloTheme.Space.four)
     }

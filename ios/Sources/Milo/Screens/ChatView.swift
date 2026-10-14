@@ -69,10 +69,22 @@ struct ChatView: View {
             // them, as the ChatGPT app does. The sessions are only drawn while
             // they are open — and until the chat has slid back over them — so
             // nothing of the sidebar can show through the chat at rest.
-            SessionsDrawer(onClose: { drawer = false }, onSettings: {
-                drawer = false
-                settings = true
-            })
+            SessionsDrawer(
+                onClose: { drawer = false },
+                onNewSession: {
+                    // Inside the tap that asked for it, before the session moves: the
+                    // cursor is in the field the press just opened, so the next thing
+                    // said is typed rather than looked for. The browser's own new
+                    // session takes focus the same way.
+                    drawer = false
+                    composing = true
+                    Task { await model.newSession() }
+                },
+                onSettings: {
+                    drawer = false
+                    settings = true
+                }
+            )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
                 .opacity(drawer ? 1 : 0)
                 .animation(drawer ? nil : .linear(duration: 0.01).delay(Self.drawerDuration), value: drawer)
