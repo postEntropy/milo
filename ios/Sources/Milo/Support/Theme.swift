@@ -15,6 +15,14 @@ enum MiloTheme {
     static let surfaceWarm = Color(.tertiarySystemFill)
     static let surfaceRaised = Color(.tertiarySystemBackground)
 
+    /// What the travelling chat casts on the sessions behind it, at the seam where the
+    /// two layers meet — the shadow belongs to the layer on top. A dark page leaves a
+    /// shadow almost nothing to darken, so it takes a heavier alpha there: the same
+    /// pairing the browser keeps for its own `--shadow-seam`.
+    static let seamShadow = Color(UIColor { traits in
+        UIColor.black.withAlphaComponent(traits.userInterfaceStyle == .dark ? 0.6 : 0.18)
+    })
+
     // Text.
     static let foreground = Color(.label)
     static let foreground2 = Color(.label).opacity(0.85)

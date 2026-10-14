@@ -22,27 +22,17 @@ struct SessionsDrawer: View {
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(MiloTheme.background.ignoresSafeArea())
+        .background(MiloTheme.surface.ignoresSafeArea())
         .sessionRename($renaming)
     }
 
     private var column: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-            HStack {
-                Text("Sessions")
-                    .font(.title2.weight(.bold))
-                    .foregroundStyle(MiloTheme.foreground)
-                Spacer(minLength: MiloTheme.Space.two)
-                MiloIconButton(systemName: "square.and.pencil", size: 16, span: 36) {
-                    Task {
-                        await model.newSession()
-                        onClose()
-                    }
-                }
-                .accessibilityLabel("New session")
-            }
-            .padding(.horizontal, MiloTheme.Space.four)
-            .padding(.top, MiloTheme.Space.four)
+            Text("Sessions")
+                .font(.title.weight(.bold))
+                .foregroundStyle(MiloTheme.foreground)
+                .padding(.horizontal, MiloTheme.Space.four)
+                .padding(.top, MiloTheme.Space.four)
 
             if model.sessions.isEmpty {
                 Text("No sessions yet")
@@ -124,15 +114,15 @@ struct SessionsDrawer: View {
         } label: {
             HStack(spacing: MiloTheme.Space.two) {
                 Text(session.label)
-                    .font(MiloTheme.Text.base)
+                    .font(MiloTheme.Text.body)
                     .foregroundStyle(MiloTheme.foreground)
                     .lineLimit(1)
                 Spacer(minLength: MiloTheme.Space.two)
             }
             .padding(.horizontal, MiloTheme.Space.three)
-            .padding(.vertical, MiloTheme.Space.three)
+            .padding(.vertical, MiloTheme.Space.two)
             .background(
-                current ? MiloTheme.surface : .clear,
+                current ? MiloTheme.surfaceRaised : .clear,
                 in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
             )
             .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))

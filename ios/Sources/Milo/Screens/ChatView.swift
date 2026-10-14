@@ -68,7 +68,7 @@ struct ChatView: View {
                         bottomLeadingRadius: drawer ? 28 : 0
                     )
                     .fill(MiloTheme.background)
-                    .shadow(color: .black.opacity(drawer ? 0.18 : 0), radius: 14, x: -2, y: 0)
+                    .shadow(color: drawer ? MiloTheme.seamShadow : .clear, radius: 14, x: -2, y: 0)
                     .ignoresSafeArea()
                 }
                 .offset(x: drawer ? Self.drawerWidth : 0)
@@ -165,10 +165,12 @@ struct ChatView: View {
     }
 
     /// Opening the sessions is leaving the thread: the keys go down with it rather
-    /// than sitting under a list that has nothing to type into.
+    /// than sitting under a list that has nothing to type into. The list is re-read
+    /// as it opens, so a session started on another surface is there when it does.
     private func openDrawer() {
         composing = false
         drawer = true
+        Task { await model.refreshSessions() }
     }
 
     /// The words picked out of an answer come to rest in the composer, focused, so what is
