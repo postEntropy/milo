@@ -4,7 +4,7 @@ import { formatTokens } from '../lib/format.js'
 import { formatWhen, formatSeconds } from '../../../src/core/sessions/format.ts'
 import type { ActionRow, FrameAttachment, SessionCardItem, ToolMark, TranscriptMessage, TranscriptPart } from '@protocol'
 import { proseOf } from '@protocol'
-import { toolBrand, toolLabel } from '../../../src/gateways/tool-line.ts'
+import { toolBrand, toolLabel, toolResultPreview } from '../../../src/gateways/tool-line.ts'
 import { toolRows } from './tool-runs.js'
 import type { TodoItem, TodoStatus } from '../../../src/core/todos.ts'
 import { toolIconName } from '../ui/tool-icons.js'
@@ -103,7 +103,7 @@ function ToolLine({ tool }: { tool: ToolMark }) {
  */
 function ToolResult({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
-  const first = text.split('\n', 1)[0] ?? ''
+  const first = toolResultPreview(text)
   return (
     <div className={`tool-result${open ? ' open' : ''}`}>
       <button

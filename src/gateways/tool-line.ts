@@ -237,6 +237,21 @@ export function toolResult(content: string): string {
   return text.length > RESULT_LIMIT ? `${text.slice(0, RESULT_LIMIT - 1)}…` : text
 }
 
+/**
+ * The first line of a result, for the fold a surface draws under a call.
+ *
+ * A `shell_command` result begins with `exit <n>` (see `tools/shell.ts`), so the plain
+ * first line of one is `exit 0` — a status the tool line already carries, and a preview
+ * that says only that says nothing. A leading `exit <n>` line is skipped and the first
+ * line of what the command actually printed is shown instead. The whole record, exit line
+ * and all, is still there when the fold is opened.
+ */
+export function toolResultPreview(content: string): string {
+  const lines = toolResult(content).split('\n')
+  if (/^exit \d+$/.test(lines[0] ?? '')) lines.shift()
+  return lines[0] ?? ''
+}
+
 /** One value flattened onto the line and cut to the gist's length. */
 function gist(value: string): string {
   const flat = value.trim().replace(/\s+/g, ' ')

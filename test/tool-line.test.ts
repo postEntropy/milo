@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isExternalTool, toolBrand, toolDisplayName, toolDraw, toolIcon, toolLine, toolResult, toolText } from '../src/gateways/tool-line.js'
+import { isExternalTool, toolBrand, toolDisplayName, toolDraw, toolIcon, toolLine, toolResult, toolResultPreview, toolText } from '../src/gateways/tool-line.js'
 
 describe('toolLine', () => {
   it('shows a shell command like any other tool, with the command beside it', () => {
@@ -166,6 +166,23 @@ describe('toolResult', () => {
     expect(capped.endsWith('…')).toBe(true)
     // A result at the ceiling is not cut.
     expect(toolResult('y'.repeat(4000))).toBe('y'.repeat(4000))
+  })
+})
+
+describe('toolResultPreview', () => {
+  it('skips the exit line a shell command leads with, showing what it printed', () => {
+    expect(toolResultPreview('exit 0\nbuilt 3 packages')).toBe('built 3 packages')
+    // A non-zero exit is skipped the same way: the tool line already says the failure.
+    expect(toolResultPreview('exit 1\ncommand not found: foo')).toBe('command not found: foo')
+  })
+
+  it('leaves every other result as its own first line', () => {
+    expect(toolResultPreview('a\nb')).toBe('a')
+    expect(toolResultPreview('single line')).toBe('single line')
+  })
+
+  it('is empty when the exit line was all there was to say', () => {
+    expect(toolResultPreview('exit 0')).toBe('')
   })
 })
 
