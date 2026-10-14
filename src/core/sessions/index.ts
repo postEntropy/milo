@@ -28,5 +28,6 @@ export {
   formatSessionList,
   formatStats,
   formatWhen,
+  quotedLead,
   summarizeRecap,
 } from './format.js'

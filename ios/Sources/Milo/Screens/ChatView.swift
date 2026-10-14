@@ -23,6 +23,9 @@ struct ChatView: View {
     let account: Account
     @Environment(AppModel.self) private var model
     @State private var draft = ""
+    /// The words picked out of an answer, held until the reply is sent — the phone's half
+    /// of the strip the browser keeps above its field.
+    @State private var quote: String?
     @State private var drawer = false
     @State private var picker = false
     @State private var settings = false
@@ -168,6 +171,13 @@ struct ChatView: View {
         drawer = true
     }
 
+    /// The words picked out of an answer come to rest in the composer, focused, so what is
+    /// typed next is written as the reply to them.
+    private func quoteIt(_ words: String) {
+        quote = words
+        composing = true
+    }
+
     private var chat: some View {
         ScrollViewReader { proxy in
             ScrollView {
@@ -177,7 +187,8 @@ struct ChatView: View {
                         MessageRow(
                             message: message,
                             turn: turns[message.id] ?? 1,
-                            regenerate: regeneration(for: message)
+                            regenerate: regeneration(for: message),
+                            onQuote: quoteIt
                         )
                     }
                     // The end of the thread, as something to be pointed at: where the arrow
@@ -336,7 +347,7 @@ struct ChatView: View {
             if let pending = model.pending {
                 PermissionBar(pending: pending)
             }
-            Composer(draft: $draft, focused: $composing, openPicker: { picker = true })
+            Composer(draft: $draft, quote: $quote, focused: $composing, openPicker: { picker = true })
                 // The way back to the end, floating over the composer's own edge. An
                 // overlay draws and takes taps without taking room, so the column under the
                 // thread is the same whether the arrow is up or not.
@@ -412,6 +423,8 @@ struct WelcomeView: View {
 /// with what is typed, on a single row between the model menu and the way to send.
 struct Composer: View {
     @Binding var draft: String
+    /// The words picked out of an answer, held until the reply is sent.
+    @Binding var quote: String?
     @FocusState.Binding var focused: Bool
     let openPicker: () -> Void
     @Environment(AppModel.self) private var model
@@ -427,6 +440,11 @@ struct Composer: View {
                 .font(MiloTheme.Text.small)
                 .foregroundStyle(MiloTheme.muted)
                 .padding(.horizontal, MiloTheme.Space.six + MiloTheme.Space.four)
+            }
+
+            if let quote {
+                quoteStrip(quote)
+                    .padding(.horizontal, MiloTheme.margin)
             }
 
             // Centred against the field: the send control is shorter than a line of text,
@@ -484,6 +502,35 @@ struct Composer: View {
         }
     }
 
+    /// What is being answered, held at the composer until the reply is sent: the words
+    /// picked out, and the way to drop them. The browser keeps the same strip above its own
+    /// field, and both take the same shape on the wire — see `quotedLead`.
+    private func quoteStrip(_ words: String) -> some View {
+        HStack(alignment: .top, spacing: MiloTheme.Space.three) {
+            Image(systemName: "quote.opening")
+                .font(MiloTheme.Text.small)
+                .foregroundStyle(MiloTheme.accent)
+            Text(words)
+                .font(MiloTheme.Text.small)
+                .foregroundStyle(MiloTheme.foreground2)
+                .lineLimit(3)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                quote = nil
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(MiloTheme.muted)
+                    .frame(width: 24, height: 24)
+                    .contentShape(Rectangle())
+            }
+            .accessibilityLabel("Remove quote")
+        }
+        .padding(.horizontal, MiloTheme.Space.three)
+        .padding(.vertical, MiloTheme.Space.two)
+        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+    }
+
     private var canSend: Bool {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
@@ -526,8 +573,11 @@ struct Composer: View {
 
     private func submit(intent: ClientFrame.Intent = .queue) {
         guard canSend else { return }
-        model.send(draft, intent: intent)
+        // The words picked out travel as a quotation ahead of the reply, so what was
+        // answered is part of the message and not only in the reader's head.
+        model.send((quote.map(quotedLead) ?? "") + draft, intent: intent)
         draft = ""
+        quote = nil
         // The next message is typed where the last one was, not on the button.
         focused = true
     }
@@ -539,6 +589,9 @@ struct MessageRow: View {
     let turn: Int
     /// The words asking again would send, on the one answer it belongs to.
     let regenerate: (prompt: String, upToTurn: Int)?
+    /// The words picked out of this answer, handed to the composer. Only the answer wears
+    /// it: the person's own bubble is read, not answered.
+    let onQuote: (String) -> Void
     @State private var showReasoning = false
 
     /// The answer's parts as they are drawn: a run of consecutive calls is one chain,
@@ -619,7 +672,7 @@ struct MessageRow: View {
                     case .calls(let calls):
                         ToolChain(calls: calls)
                     case .one(let part):
-                        PartView(part: part)
+                        PartView(part: part, onQuote: onQuote)
                     }
                 }
                 if !message.attachments.isEmpty {
@@ -640,7 +693,7 @@ struct MessageRow: View {
                 // written has nothing to act on yet, and a message with no words has
                 // nothing to copy.
                 if !message.streaming, !message.prose.isEmpty {
-                    MessageToolbar(message: message, turn: turn, regenerate: regenerate)
+                    MessageToolbar(message: message, turn: turn, regenerate: regenerate, onQuote: onQuote)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -686,8 +739,8 @@ func rawCopyMenu(raw: String, rawNoOutput: String?) -> some View {
 }
 
 /// The controls under a finished answer, the ones the browser draws there: the words
-/// copied, the answer asked again, and — behind the dots — the session forked from this
-/// turn, what it cost and the turn copied whole.
+/// copied, the answer quoted whole and the answer asked again, and — behind the dots — the
+/// session forked from this turn, what it cost and the turn copied whole.
 ///
 /// The glyph and nothing around it, which is the same control the page draws: with no
 /// pointer to hover with, a phone leaves to the press what the browser saves for the
@@ -698,6 +751,8 @@ struct MessageToolbar: View {
     /// Which turn this answer belongs to, and what asking again would send.
     let turn: Int
     let regenerate: (prompt: String, upToTurn: Int)?
+    /// The words picked out of this answer, handed to the composer.
+    let onQuote: (String) -> Void
     @Environment(AppModel.self) private var model
     @State private var copied = false
 
@@ -714,11 +769,9 @@ struct MessageToolbar: View {
                     copied = false
                 }
             }
-            // SF's branch arrows each carry a triangle, and at this size the triangle is
-            // the whole mark; the branch alone reads as the one thing it says.
-            control("arrow.branch", label: "Fork session from here", disabled: model.busy) {
-                Task { await model.fork(from: turn) }
-            }
+            // The answer whole, to answer. The browser keeps this a press deeper, in the
+            // message's own menu; a phone has the room, and one press is what it has.
+            control("text.quote", label: "Quote") { onQuote(message.prose) }
             if let regenerate {
                 control("arrow.clockwise", label: "Ask this again", disabled: model.busy) {
                     Task { await model.regenerate(prompt: regenerate.prompt, upToTurn: regenerate.upToTurn) }
@@ -833,12 +886,14 @@ struct Attachments: View {
 /// chain it arrived in, and the chain is what knows how much of it to draw.
 struct PartView: View {
     let part: WirePart
+    /// The words picked out of this part of an answer, handed to the composer.
+    let onQuote: (String) -> Void
     @Environment(AppModel.self) private var model
 
     var body: some View {
         switch part {
         case .text(let text):
-            Prose(text: text)
+            Prose(text: text, onQuote: onQuote)
         case .todo(let items):
             TodoRow(items: items)
         case .ui(let widget, _):

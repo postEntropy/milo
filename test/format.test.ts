@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { humanSize, shortenPath } from '../src/util/format.js'
-import { formatSessionList, summarizeRecap } from '../src/core/sessions/index.js'
+import { formatSessionList, quotedLead, summarizeRecap } from '../src/core/sessions/index.js'
 
 describe('humanSize', () => {
   it('says a size as a person reads it', () => {
@@ -93,5 +93,16 @@ describe('formatSessionList', () => {
     expect(p2).toContain('s-6')
     expect(p2).toContain('s-7')
     expect(p2).not.toContain('Next: /sessions')
+  })
+})
+
+describe('quotedLead', () => {
+  it('quotes every line of the words picked out of an answer', () => {
+    expect(quotedLead('one line')).toBe('> one line\n\n')
+    expect(quotedLead('first\nsecond')).toBe('> first\n> second\n\n')
+  })
+
+  it('keeps an empty line as a quoted empty line', () => {
+    expect(quotedLead('first\n\nsecond')).toBe('> first\n> \n> second\n\n')
   })
 })

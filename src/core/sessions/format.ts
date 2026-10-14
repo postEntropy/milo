@@ -134,6 +134,24 @@ function quote(text: string, markdown: boolean): string {
     .join('\n')
 }
 
+/**
+ * The words a person picked out of an answer, as they lead the reply to it: every
+ * line quoted, then the blank line that separates them from what is said back. The
+ * browser's composer and the phone build their message from this one shape, so a
+ * quotation reads the same on both.
+ *
+ * Unlike `quote()` above, nothing is dropped: an empty line inside what was picked
+ * out stays a quoted empty line, because these are the words themselves and not a
+ * report of them.
+ */
+export function quotedLead(text: string): string {
+  const quoted = text
+    .split('\n')
+    .map((line) => `> ${line}`)
+    .join('\n')
+  return `${quoted}\n\n`
+}
+
 export function formatStats(stats: SessionStats): string {
   const name = stats.title ? `${stats.id} — ${stats.title}` : stats.id
   // The ceiling the request is measured against, so the count means something:

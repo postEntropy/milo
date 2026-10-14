@@ -6,6 +6,7 @@ import { EFFORT_LABELS } from '../lib/labels.js'
 import { shortModel } from '../../../src/gateways/model-label.ts'
 import { formatDuration } from '../../../src/util/format.ts'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
+import { quotedLead } from '../../../src/core/sessions/format.ts'
 import { EFFORT_LEVELS, type JobView } from '@protocol'
 import { Icon } from '../ui/Icons.js'
 import { Select } from '../ui/Select.js'
@@ -242,7 +243,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     else ref.current?.focus({ preventScroll: true })
     // The picked-out words travel as a quotation ahead of the reply, so what was
     // answered is part of the message and not only in the reader's head.
-    const quoted = quote ? `${quote.split('\n').map((line) => `> ${line}`).join('\n')}\n\n` : ''
+    const quoted = quote ? quotedLead(quote) : ''
     setUploadError('')
     onSend(quoted + text, intent, files)
     setFiles([])
