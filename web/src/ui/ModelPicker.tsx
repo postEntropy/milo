@@ -56,23 +56,27 @@ export function ModelPicker({ presets, provider, model, browsing, catalog, onBro
       <label className="model-picker-search">
         <Icon name="search" size={14} />
         <input aria-label="Filter models" placeholder="Filter models" value={filter} onChange={(event) => setFilter(event.target.value)} />
+        {filter && <button type="button" className="icon-button" aria-label="Clear filter" onClick={() => setFilter('')}>
+          <Icon name="x" size={14} />
+        </button>}
       </label>
       <div className="model-picker-list">
         {catalog === null ? <p className="model-picker-note">Reading this provider’s models…</p>
           : shown.length === 0 ? <p className="model-picker-note">{catalog.length === 0 ? note ?? 'This provider reports no models. Type an id below if you know it.' : 'No model matches that.'}</p>
-            : shown.map((item) => <button
-              key={item.id}
-              type="button"
-              className={`model-picker-row ${item.id === model && browsing === provider ? 'chosen' : ''}`}
-              aria-current={item.id === model && browsing === provider ? 'true' : undefined}
-              onClick={() => onPick(item.id)}
-            >
-              <span className="model-picker-name">{item.id}</span>
-              <ModelDetails model={item} />
-              <span className="model-picker-tail">
-                {item.id === model && browsing === provider ? <Icon name="check" size={14} /> : null}
-              </span>
-            </button>)}
+            : shown.map((item) => {
+              const isChosen = item.id === model && browsing === provider
+              return <button
+                key={item.id}
+                type="button"
+                className={`model-picker-row ${isChosen ? 'chosen' : ''}`}
+                aria-current={isChosen ? 'true' : undefined}
+                onClick={() => onPick(item.id)}
+              >
+                <span className="model-picker-name">{item.id}</span>
+                <ModelDetails model={item} />
+                {isChosen && <Icon name="check" size={14} />}
+              </button>
+            })}
       </div>
     </div>
   </div>

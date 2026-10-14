@@ -60,6 +60,7 @@ export function MobileModelSheet({
             onClick={() => onBrowse(preset.id)}
           >
             {preset.name}
+            {preset.id === provider && <Icon name="check" size={12} />}
           </button>
         ))}
       </div>
