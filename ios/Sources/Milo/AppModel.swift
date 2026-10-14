@@ -75,6 +75,16 @@ final class AppModel {
     private(set) var providerId = ""
     private(set) var sessionId = ""
 
+    /// The running model without its vendor prefix, from the catalog's projected
+    /// label when loaded or after the last `/` before the picker has been opened.
+    var modelLabel: String {
+        if let label = models.first(where: { $0.id == modelName })?.label {
+            return label
+        }
+        guard let slash = modelName.lastIndex(of: "/") else { return modelName }
+        return String(modelName[modelName.index(after: slash)...])
+    }
+
     /// The name of the session on screen, when the list knows it — the `ready`
     /// frame carries no title, so it comes from the sessions themselves.
     var title: String? {
@@ -119,6 +129,12 @@ final class AppModel {
     private(set) var providers: [ProviderInfo] = []
     private(set) var models: [ModelInfo] = []
     private(set) var modelsLoading = false
+    /**
+     Why a catalog came back empty, when it did not simply come back empty: the picker
+     draws this instead of the line about no models, so a refusal is never reported as
+     a catalog with nothing in it. The browser keeps the same distinction.
+     */
+    private(set) var modelsError: String?
 
     var pairingHost = ""
     var pairingCode = ""
@@ -492,11 +508,16 @@ final class AppModel {
     func loadModels(from provider: String) async {
         guard let account else { return }
         modelsLoading = true
+        modelsError = nil
         defer { modelsLoading = false }
         do {
             models = try await MiloApi.models(account, provider: provider)
         } catch {
             models = []
+            // Kept here as well as said in the note: the picker is a sheet over the
+            // screen the note is drawn on, so the note alone says it where nobody is
+            // looking.
+            modelsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             failed(error)
         }
     }
@@ -535,6 +556,9 @@ final class AppModel {
         defer { settingsLoading = false }
         do {
             let overview = try await MiloApi.overview(account)
+            if modelName.isEmpty, let running = overview.live?.model, !running.isEmpty {
+                modelName = running
+            }
             effort = overview.live?.effort ?? overview.config?.reasoningEffort ?? "medium"
             permissionMode = overview.live?.permissionMode ?? overview.config?.permissions?.mode ?? "ask"
             toolDisplay = overview.config?.display?.tools ?? "full"
@@ -607,6 +631,10 @@ final class AppModel {
             }
             modelName = ready.model
             providerId = ready.provider
+            // How hard the running model thinks, when this session was opened with one:
+            // the handshake says so, so the composer's own control is on the right line
+            // before the settings screen has ever been read.
+            if let running = ready.effort { effort = running }
             sessionId = ready.sessionId
             note = nil
             pending = nil
