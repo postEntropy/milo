@@ -37,8 +37,13 @@ export function useCopy(text: string): { state: CopyState; copy(): void } {
   return { state, copy }
 }
 
-/** Puts `text` on the clipboard and says whether it landed. */
-async function copyText(text: string): Promise<boolean> {
+/**
+ * Puts `text` on the clipboard and says whether it landed.
+ *
+ * Exported for a caller that is not a component and so holds no `useCopy` state to
+ * flash: a menu action answers with the app's own notice instead.
+ */
+export async function copyText(text: string): Promise<boolean> {
   const clipboard: Clipboard | undefined = navigator.clipboard
   if (clipboard?.writeText) {
     try {

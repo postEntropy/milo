@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, uploadFile, withToken } from './lib/api.js'
+import { copyText } from './lib/clipboard.js'
 import { isPhone, usePhone } from './lib/phone.js'
 import { randomUUID } from './lib/uuid.js'
 import { trackVisualViewport } from './lib/viewport.js'
@@ -916,6 +917,20 @@ export default function App() {
   }
 
   /**
+   * The id the session goes by on the machine hosting Milo — the handle to name it
+   * from a shell or hand to another surface. The same notice the row's other actions
+   * raise, so a copy the browser refused says so rather than leaving the reader
+   * believing the id is on the clipboard when it never landed.
+   */
+  function copySessionId(id: string): void {
+    void copyText(id).then((copied) => {
+      setNotice(copied
+        ? { text: 'Session ID copied.', error: false }
+        : { text: 'Could not copy the session ID.', error: true })
+    })
+  }
+
+  /**
    * Setting the pair, the same act the settings screen calls `pickModel`: a model
    * taken from another provider's list moves the provider with it, because the
    * choice is the model and it fixes the pair at once. In that order, so the model
@@ -999,7 +1014,7 @@ export default function App() {
                 <span className="history-hit-where">{hit.kind} · {hit.session}</span>
               </button>)}
             </div>}
-            {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} onRename={renameSession} onExport={exportSession} onDelete={deleteSession} />)}</div>)}
+            {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} onRename={renameSession} onExport={exportSession} onCopy={copySessionId} onDelete={deleteSession} />)}</div>)}
             {visibleSessions.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
           </nav>
         </div>
@@ -1065,6 +1080,7 @@ function SessionRow({
   onClick,
   onRename,
   onExport,
+  onCopy,
   onDelete,
 }: {
   session: SessionSummary
@@ -1072,6 +1088,7 @@ function SessionRow({
   onClick(): void
   onRename(id: string, title: string): Promise<void>
   onExport(id: string): Promise<void>
+  onCopy(id: string): void
   onDelete(id: string): Promise<void>
 }) {
   const [editing, setEditing] = useState(false)
@@ -1180,6 +1197,19 @@ function SessionRow({
             >
               <Icon name="download" size={16} />
               <span>Export</span>
+            </button>
+            <button
+              className="session-dropdown-item"
+              type="button"
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation()
+                setMenuOpen(false)
+                onCopy(session.id)
+              }}
+            >
+              <Icon name="copy" size={16} />
+              <span>Copy ID</span>
             </button>
             <button
               className="session-dropdown-item danger"
