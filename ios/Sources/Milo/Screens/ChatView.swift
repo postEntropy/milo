@@ -775,6 +775,13 @@ struct MessageRow: View {
         case calls([ToolMark])
     }
 
+    /// Whether the block being written is a widget: it is drawn as it grows, so the wait
+    /// line has nothing to add while it is. The browser's own rule, read the same way.
+    private var drawingADraft: Bool {
+        if case .ui(_, true)? = message.parts.last { return true }
+        return false
+    }
+
     var body: some View {
         if message.isUser {
             HStack {
@@ -830,6 +837,15 @@ struct MessageRow: View {
                     }
                     if !message.attachments.isEmpty {
                         Attachments(items: message.attachments)
+                    }
+                    // The wait for the model's next output, wherever it falls: the line
+                    // belongs to the turn's own state, not to the gap before its first
+                    // words — so a turn thinking about a tool's result says so instead of
+                    // going quiet. A widget being drawn is the work showing itself, which
+                    // is why the browser leaves its own line off while one is.
+                    if message.waiting, !drawingADraft {
+                        WaitLine()
+                    }
                     if let status = message.status {
                         Text(status)
                             .font(MiloTheme.Text.small)
@@ -841,12 +857,6 @@ struct MessageRow: View {
                     if !message.streaming, !message.prose.isEmpty {
                         MessageToolbar(message: message, turn: turn, regenerate: regenerate, onQuote: onQuote)
                     }
-                }
-                if message.streaming, !message.parts.contains(where: { part in
-                    if case .text = part { return true }
-                    return false
-                }) {
-                    WaitLine()
                 }
                 // The buttons a command drew, under its cards or its words: the pages of
                 // `/sessions`, and anything else the daemon offers there.

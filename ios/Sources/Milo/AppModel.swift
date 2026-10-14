@@ -23,6 +23,11 @@ final class AppModel {
         var streaming: Bool
         /// How long the turn thought, said once when it is over.
         var thought: Double?
+        /// Whether the turn is waiting for the model's next output — what the wait line is
+        /// drawn from. Words end the wait, a call running takes the line's place, and the
+        /// model thinking about a result starts it again: the browser reads the same turn
+        /// the same way, so neither surface goes quiet where the other is lit.
+        var waiting = false
         /// A line the turn leaves behind — a wait, a rebase, a stop — drawn where the
         /// reply lands.
         var status: String? = nil
@@ -616,7 +621,7 @@ final class AppModel {
             // opened here and the events still to come land in it. No thought time is
             // claimed — this app watched none of that thinking.
             if ready.activeTurn != nil {
-                messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil))
+                messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil, waiting: true))
             }
             // The words a fork owes go out now that the socket is speaking to the copy.
             if let owed {
@@ -627,7 +632,7 @@ final class AppModel {
             busy = true
             began = false
             turnStarted = Date()
-            messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil))
+            messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil, waiting: true))
         case .event(_, let event):
             apply(event)
         case .permission(let id, let request, let expiresAt):
@@ -639,6 +644,7 @@ final class AppModel {
             answerEnded += 1
             if let index = messages.lastIndex(where: { $0.streaming }) {
                 messages[index].streaming = false
+                messages[index].waiting = false
                 messages[index].thought = turnStarted.map { Date().timeIntervalSince($0) }
                 // A call left marked running never heard back from; the line stops
                 // saying it is underway rather than guessing how it went.
@@ -710,7 +716,12 @@ final class AppModel {
             beganSpeaking()
             // `text` is the server's own line (name and the one value worth showing),
             // the same the read-back transcript carries; the name alone is the fallback.
-            mutateLast { $0.append(.tool(ToolMark(name: name, text: text ?? name, state: "running"))) }
+            // The call's own line is what says the turn is working from here, so the wait
+            // for the model's next output is over until the call comes back.
+            mutatingLast { message in
+                message.waiting = false
+                message.parts.append(.tool(ToolMark(name: name, text: text ?? name, state: "running")))
+            }
         case .toolEnd(_, let name, let isError, let result):
             mutateLast { parts in
                 let index = parts.lastIndex { part in
@@ -724,6 +735,9 @@ final class AppModel {
                 if let result, !result.isEmpty { tool.result = result }
                 parts[index] = .tool(tool)
             }
+            // The result is in, so the model is thinking again about what to do with it:
+            // the wait line comes back, which is the browser's own reading of this moment.
+            mutatingLast { $0.waiting = true }
         case .todo(let items):
             beganSpeaking()
             mutateLast { parts in
@@ -767,10 +781,16 @@ final class AppModel {
     }
 
     private func append(_ delta: String, reasoning: Bool) {
-        mutateLast { parts in
-            // Words arriving mean the block being written was not a widget after all —
-            // its draft goes, rather than sitting above the words it is not.
-            if !reasoning { parts = AppModel.droppingDraft(parts) }
+        mutatingLast { message in
+            var parts = message.parts
+            // Words arriving mean the block being written was not a widget after all — its
+            // draft goes, rather than sitting above the words it is not — and they end the
+            // wait line's wait. Thinking is what fills that wait, so a reasoning delta is
+            // the same wait still running.
+            if !reasoning {
+                message.waiting = false
+                parts = AppModel.droppingDraft(parts)
+            }
             switch (reasoning, parts.last) {
             case (false, .text(let existing)?):
                 parts[parts.count - 1] = .text(existing + delta)
@@ -781,6 +801,7 @@ final class AppModel {
             case (true, _):
                 parts.append(.reasoning(delta))
             }
+            message.parts = parts
         }
     }
 
