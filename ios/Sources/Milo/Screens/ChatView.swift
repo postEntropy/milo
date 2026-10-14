@@ -306,7 +306,14 @@ struct ChatView: View {
                 // where there is a session to leave.
                 if !model.messages.isEmpty {
                     HStack(spacing: 0) {
-                        Button { Task { await model.newSession() } } label: {
+                        Button {
+                            // Inside the tap that asked for it, before the session moves:
+                            // the cursor is in the field the press just opened, so the next
+                            // thing said is typed rather than looked for. The browser's own
+                            // new session takes focus the same way.
+                            composing = true
+                            Task { await model.newSession() }
+                        } label: {
                             topGlyph("square.and.pencil")
                                 .frame(width: 46, height: 46)
                         }
