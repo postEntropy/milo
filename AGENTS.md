@@ -69,6 +69,12 @@ form of the author's own taste notes, which live outside the repo in
 - Before calling anything done:
   `npm test`, `npm run typecheck`, `npm --prefix web run typecheck`, `npm run lint`.
 
+## iOS
+
+- The iOS app is built and installed straight onto the device over the network with
+  `xtool dev run`; there is no simulator and no Xcode project to open — xtool is the
+  whole loop.
+
 ## Commits
 
 - `area: what the change does`, lowercase and plain — for example
