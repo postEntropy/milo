@@ -336,6 +336,7 @@ struct ChatView: View {
                             sessionActions(
                                 onRename: { renaming = model.sessionId },
                                 onExport: { Task { await model.export(model.sessionId) } },
+                                onCopy: { model.copyId(model.sessionId) },
                                 onDelete: { Task { await model.delete(model.sessionId) } }
                             )
                         } label: {

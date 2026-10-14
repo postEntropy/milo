@@ -3,17 +3,19 @@ import SwiftUI
 /**
  The controls a session answers to, wherever they are offered: the press on its own row
  in the drawer, and the dots beside the new-session control in the session's own header.
- One declaration, so the two cannot drift — and the browser's own three, in the browser's
+ One declaration, so the two cannot drift — and the browser's own four, in the browser's
  own order.
  */
 @ViewBuilder
 func sessionActions(
     onRename: @escaping () -> Void,
     onExport: @escaping () -> Void,
+    onCopy: @escaping () -> Void,
     onDelete: @escaping () -> Void
 ) -> some View {
     menuItem("Rename", "pencil", action: onRename)
     menuItem("Export", "arrow.down.doc", action: onExport)
+    menuItem("Copy ID", "doc.on.doc", action: onCopy)
     // A destructive line: the menu draws its words in the platform's own red, and the mark
     // beside them wears whatever tone the line is told — so it is told that same red, since
     // the accent it would otherwise take makes the trash the loudest thing on the row.

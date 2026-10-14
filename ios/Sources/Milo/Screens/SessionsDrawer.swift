@@ -133,6 +133,7 @@ struct SessionsDrawer: View {
             sessionActions(
                 onRename: { renaming = session.id },
                 onExport: { Task { await model.export(session.id) } },
+                onCopy: { model.copyId(session.id) },
                 onDelete: { Task { await model.delete(session.id) } }
             )
         }

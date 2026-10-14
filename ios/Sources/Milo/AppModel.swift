@@ -369,6 +369,17 @@ final class AppModel {
         }
     }
 
+    /// The id this session goes by on the machine hosting Milo — the handle to name
+    /// it from a shell, or hand to another surface. It is not the words on the row, so
+    /// the menu offers it by name and the app says it landed, the same line export
+    /// raises; a copy the pasteboard refused would otherwise leave the reader
+    /// believing the id is in hand when it never was.
+    func copyId(_ id: String) {
+        guard !id.isEmpty else { return }
+        UIPasteboard.general.string = id
+        note = Note("Session ID copied", failed: false)
+    }
+
     func rename(_ id: String, to name: String) async {
         guard let account else { return }
         do {
