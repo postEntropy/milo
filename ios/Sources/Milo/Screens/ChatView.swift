@@ -1568,21 +1568,40 @@ struct ToolChain: View {
                     .foregroundStyle(MiloTheme.danger)
             }
         }
+        // The sweep handing over to the settled count, drawn rather than swapped.
+        .animation(.easeInOut(duration: 0.22), value: running)
     }
 }
 
-/// One tool call: the tool's mark says what it was and carries the state, the name
-/// carries the colour and the one value worth showing stays quiet beside it — and, under
-/// it, what the call came back with, folded until a tap opens it.
+/// One tool call: the tool's mark says what it was and carries the state, the name carries
+/// the colour and the one value worth showing stays quiet beside it. The call itself is the
+/// control where there is something under it — a press opens what it came back with, whole,
+/// and no line of its own stands between the call and the answer.
 struct ToolRow: View {
     let tool: ToolMark
     @State private var showingResult = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
-            line
-            if let result = tool.result, !result.isEmpty { resultDetail(result) }
+            if let result = tool.result, !result.isEmpty {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.22)) { showingResult.toggle() }
+                } label: {
+                    line
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressableStyle())
+                .accessibilityLabel(showingResult ? "Hide the tool result" : "Show the tool result")
+
+                if showingResult { resultBody(result) }
+            } else {
+                line
+            }
         }
+        // A call changing state — running to kept, or to failed — is drawn as a change and not
+        // a swap: the mark's colour, and the sweep handing over to the settled line.
+        .animation(.easeInOut(duration: 0.22), value: tool.state)
     }
 
     private var line: some View {
@@ -1621,46 +1640,19 @@ struct ToolRow: View {
         }
     }
 
-    /// What the call came back with, under its line and on the line's own indent: the
-    /// first line while it is shut, the whole of it when the tap opens it. Capped on the
-    /// server, so what is folded and what is opened are one reading — the whole record is
-    /// the turn's Copy raw.
-    private func resultDetail(_ result: String) -> some View {
-        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.22)) { showingResult.toggle() }
-            } label: {
-                HStack(spacing: MiloTheme.Space.two) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundStyle(MiloTheme.muted)
-                        .rotationEffect(.degrees(showingResult ? 90 : 0))
-                    Text(result.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? "")
-                        .font(MiloTheme.Text.small.monospaced())
-                        .foregroundStyle(MiloTheme.muted)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
-                    Spacer(minLength: 0)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(PressableStyle())
-            .accessibilityLabel(showingResult ? "Hide the tool result" : "Show the tool result")
-
-            if showingResult {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    Text(result)
-                        .font(MiloTheme.Text.mono)
-                        .foregroundStyle(MiloTheme.foreground2)
-                        .textSelection(.enabled)
-                        .padding(MiloTheme.Space.three)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
-            }
+    /// What the call came back with, whole, once the call is pressed: set past the mark's
+    /// own column so it lines up with the name it belongs to rather than with the mark.
+    /// Capped on the server, so the whole record still lives in the turn's Copy raw.
+    private func resultBody(_ result: String) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(result)
+                .font(MiloTheme.Text.mono)
+                .foregroundStyle(MiloTheme.foreground2)
+                .textSelection(.enabled)
+                .padding(MiloTheme.Space.three)
         }
-        // Under the text, past the mark's own column, so a result lines up with the name
-        // it belongs to rather than with the mark.
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
         .padding(.leading, 22)
     }
 
