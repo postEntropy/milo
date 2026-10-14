@@ -53,10 +53,21 @@ struct ChatView: View {
     /// Whether the thread is at its end, read off the scroll itself. What the arrow
     /// above the composer answers to.
     @State private var atEnd = true
-    /// The room the thread draws in, and how tall its last message came out. What the tail
-    /// under the thread measures itself against — see the thread's end below.
+    /// The room the thread keeps under its words: exactly what it takes for the message a send
+    /// has just put in to sit at the top of the box, and not a point more, so the thread has
+    /// nowhere to scroll but back to that message. It is only opened for a send — a thread
+    /// nobody has just written into is left alone, and one that fits gets no room and no
+    /// scroll at all. A screen with no words on it rests against the composer, the room's own
+    /// floor.
+    @State private var room: CGFloat = 1
+    /// The thread's own box, and where the send's own message sits inside it: what the room is
+    /// measured from.
     @State private var threadHeight: CGFloat = 0
-    @State private var lastHeight: CGFloat = 0
+    @State private var sentTop: CGFloat = 0
+    /// The message a send has just put in — the one the room is opened for, and the one the
+    /// scroll waits on — and whether that scroll has been made.
+    @State private var sent: UUID?
+    @State private var placed = true
     /// The boxes in the thread that scroll sideways on their own — a code block, a table.
     /// Their frames ride up as a preference so a drag can be told where it began; held in
     /// a plain reference, so a scroll that moves them does not re-render the screen.
@@ -308,6 +319,11 @@ struct ChatView: View {
             // The arrival the bubble is drawn with is this transaction: a send moves the
             // control that carried it the way the thread moves, so it reads as one motion.
             withAnimation(SettlesIn.motion) { model.send(outgoing, intent: intent) }
+            // Named here, inside the same update the words went in with: the row is told where
+            // it sits as it is laid out, and a name set any later would arrive after the
+            // measuring it is there for.
+            sent = model.messages.last?.id
+            placed = false
         }
         // The keys come down with the words: the room the keyboard was holding is where the
         // reply is about to write itself, and the person's own words have gone up to the top
@@ -393,14 +409,14 @@ struct ChatView: View {
                         // everything else that lands in it is simply there — see
                         // `SettlesIn`.
                         .transition(SettlesIn())
-                        // Named so a send can put these words at the top of the thread — and
-                        // measured when they are the last of them, so the room under the thread
-                        // only holds what the words have not taken of it.
+                        // Named so a send can put these words at the top of the thread — and,
+                        // for the message the send just put in, told where it sits in the
+                        // thread, which is what the room under the words is measured from.
                         .id(message.id)
                         .onGeometryChange(for: CGFloat.self) { proxy in
-                            proxy.size.height
-                        } action: { _, height in
-                            if message.id == model.messages.last?.id { lastHeight = height }
+                            proxy.frame(in: .named(Self.threadSpace)).minY
+                        } action: { _, top in
+                            if message.id == sent { sentTop = top }
                         }
                     }
                     // The end of the thread, as something to be pointed at: where the arrow goes
@@ -409,15 +425,13 @@ struct ChatView: View {
                     // send can put the person's own message at the top with the reply's space
                     // open beneath it, and so the room gives way to the reply as it grows and
                     // the thread's end stays where the words end.
-                    // The room belongs to a thread that has words in it: a screen with nothing
-                    // on it yet rests against the composer, its prompt standing where the reply
-                    // will land rather than up at the top of an empty page.
-                    Color.clear
-                        .frame(height: model.messages.isEmpty ? 1 : max(1, threadHeight - lastHeight))
-                        .id(Self.threadEnd)
+                    Color.clear.frame(height: room).id(Self.threadEnd)
                 }
                 .padding(.horizontal, MiloTheme.margin)
                 .padding(.top, MiloTheme.Space.four)
+                // The thread's own space: a message's place in it is measured here, where the
+                // scroll cannot move it.
+                .coordinateSpace(.named(Self.threadSpace))
                 // The thread sits close over the composer: the last line belongs to the
                 // thing being typed, not a hand's width above it.
             }
@@ -440,7 +454,21 @@ struct ChatView: View {
             } action: { _, atEnd in
                 self.atEnd = atEnd
             }
-            // The room the thread draws in, off the scroll's own box — see the thread's end.
+            // What the thread measures with the room in it, and how tall its box is. The room
+            // is what the send's message needs under it to sit at the top: a boxful, less what
+            // the thread already takes above it — so the most the thread can be scrolled is
+            // exactly that message, and a thread that fits is left with no scroll at all.
+            .onScrollGeometryChange(for: CGSize.self) { geometry in
+                geometry.contentSize
+            } action: { _, size in
+                guard sent != nil else {
+                    if room != 1 { room = 1 }
+                    return
+                }
+                let bare = size.height - room
+                let next = max(1, sentTop + threadHeight - bare)
+                if abs(next - room) > 0.5 { room = next }
+            }
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 geometry.containerSize.height
             } action: { _, height in
@@ -448,12 +476,19 @@ struct ChatView: View {
             }
             // A send puts the person's own words at the top of the thread, never at its end:
             // the keyboard goes down with the send, and the room it was taking is where the
-            // answer writes itself. What came before scrolls away above the bubble, so the
-            // reply has the screen — the way the chat apps do it.
+            // answer writes itself. The scroll waits for that room to measure itself — the room
+            // is only known once the words are in — and settles again as the reply takes the
+            // room over, which moves nothing: the message is already where it is going.
             .onChange(of: model.messages.last?.id) { _, _ in
-                guard let sent = model.messages.last, sent.isUser else { return }
-                withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo(sent.id, anchor: .top) }
+                guard let words = model.messages.last, words.isUser else { return }
+                sent = words.id
+                placed = false
             }
+            .onChange(of: room) { _, _ in place(proxy) }
+            .onChange(of: sentTop) { _, _ in place(proxy) }
+            // The reply taking the room over is where the send is done with it: from there the
+            // thread is the person's own to move.
+            .onChange(of: model.answerBegan) { _, _ in placed = true }
             // A session opens on its own content. The thread is emptied before the daemon
             // replays, and a scroll left where the old thread was leaves the empty state
             // outside the visible region — where a lazy stack draws nothing, so the screen
@@ -462,7 +497,9 @@ struct ChatView: View {
             .onChange(of: model.sessionId) { _, _ in
                 // The room is measured off the last message, and the last message is the one
                 // session's; the next thread measures its own before the room means anything.
-                lastHeight = 0
+                sentTop = 0
+                sent = nil
+                placed = true
                 proxy.scrollTo(Self.threadTop, anchor: .top)
             }
             .safeAreaInset(edge: .top, spacing: 0) { topbar }
@@ -472,6 +509,8 @@ struct ChatView: View {
 
     /// The end of the thread, as an id the scroll view answers to.
     private static let threadEnd = "thread-end"
+    /// The thread's own space, for measuring where a message sits in it.
+    private static let threadSpace = "thread-space"
     /// The empty state's own id, so a session that opens can put the scroll back on it.
     private static let threadTop = "thread-top"
     /// The way back to the end: the box the thumb finds, and how far it floats above the
@@ -505,6 +544,13 @@ struct ChatView: View {
         .allowsHitTesting(showJump)
         .accessibilityHidden(!showJump)
         .animation(.smooth(duration: 0.22), value: showJump)
+    }
+
+    /// Sitting the message a send just put in at the top of the thread, once the room beneath
+    /// it has measured itself. One already made is not made again.
+    private func place(_ proxy: ScrollViewProxy) {
+        guard let sent, !placed else { return }
+        withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo(sent, anchor: .top) }
     }
 
     private var topbar: some View {
