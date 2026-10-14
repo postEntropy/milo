@@ -29,6 +29,10 @@ final class AppModel {
         /// The turn copied whole, for "Copy raw": the model's words, its thinking and
         /// every tool call with its arguments and result.
         var raw: String? = nil
+        /// The same turn with the tool results' own text left out — the path it walked,
+        /// every call still named and a failed one still said. Absent when it would read
+        /// as `raw`, so the copy control offers it only where it differs.
+        var rawNoOutput: String? = nil
         /// What the turn cost the model, shown in the message's own menu.
         var tokens: (input: Int, output: Int)? = nil
     }
@@ -543,7 +547,8 @@ final class AppModel {
                     attachments: $0.attachments ?? [],
                     streaming: false,
                     thought: nil,
-                    raw: $0.raw
+                    raw: $0.raw,
+                    rawNoOutput: $0.rawNoOutput
                 )
             }
             modelName = ready.model
@@ -577,7 +582,7 @@ final class AppModel {
             pending = (id, request, expiresAt)
         case .permissionResult(let id, _):
             if pending?.id == id { pending = nil }
-        case .turnEnd(_, let status, let raw):
+        case .turnEnd(_, let status, let raw, let rawNoOutput):
             busy = false
             answerEnded += 1
             if let index = messages.lastIndex(where: { $0.streaming }) {
@@ -587,6 +592,7 @@ final class AppModel {
                 // saying it is underway rather than guessing how it went.
                 messages[index].parts = AppModel.settled(messages[index].parts)
                 if let raw { messages[index].raw = raw }
+                if let rawNoOutput { messages[index].rawNoOutput = rawNoOutput }
                 if status == "stopped" { messages[index].status = "Stopped · the partial reply was kept." }
             }
             turnStarted = nil
@@ -635,7 +641,7 @@ final class AppModel {
             // `text` is the server's own line (name and the one value worth showing),
             // the same the read-back transcript carries; the name alone is the fallback.
             mutateLast { $0.append(.tool(ToolMark(name: name, text: text ?? name, state: "running"))) }
-        case .toolEnd(_, let name, let isError):
+        case .toolEnd(_, let name, let isError, let result):
             mutateLast { parts in
                 let index = parts.lastIndex { part in
                     if case .tool(let tool) = part { return tool.state == "running" && tool.name == name }
@@ -643,6 +649,9 @@ final class AppModel {
                 }
                 guard let index, case .tool(var tool) = parts[index] else { return }
                 tool.state = isError ? "failed" : "done"
+                // Empty below `full`, where the server withholds it: an empty result draws
+                // nothing, so only a real one is kept.
+                if let result, !result.isEmpty { tool.result = result }
                 parts[index] = .tool(tool)
             }
         case .todo(let items):

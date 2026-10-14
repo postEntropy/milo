@@ -5,7 +5,7 @@ import type { PanelRequest } from '../../core/panel.js'
 import type { Message } from '../../core/providers/types.js'
 import { todosFromArgs } from '../../core/todos.js'
 import { rawTurn } from '../raw.js'
-import { drawsToolFailure, toolDraw, toolText, type ToolLevel } from '../tool-line.js'
+import { drawsToolFailure, toolDraw, toolResult, toolText, type ToolLevel } from '../tool-line.js'
 import type { FrameAttachment, ToolState, TranscriptMessage, TranscriptPart } from './protocol.js'
 
 /** Notes a file a transcript drew and describes it for the browser. */
@@ -38,26 +38,41 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
 
   // What became of each call. The result rides on a message of its own, after the
   // call, so every outcome is gathered before anything is drawn: a line that cannot
-  // say it failed is a line that lies.
-  const outcomes = new Map<string, boolean>()
+  // say it failed is a line that lies — and the result is kept with it for the detail
+  // under the line.
+  const outcomes = new Map<string, { failed: boolean; result: string }>()
   for (const message of messages) {
     if (message.role !== 'tool') continue
     for (const part of message.content) {
-      if (part.type === 'tool-result') outcomes.set(part.id, part.isError === true)
+      if (part.type === 'tool-result') outcomes.set(part.id, { failed: part.isError === true, result: part.content })
     }
   }
 
-  /** How a call ended, for the line beside it. Nothing to say where no result came. */
-  const endingOf = (id: string): { state?: ToolState } => {
-    const failed = outcomes.get(id)
-    return failed === undefined ? {} : { state: failed ? 'failed' : 'done' }
+  /**
+   * How a call ended, for the line beside it. Nothing to say where no result came. The
+   * result is offered only at `full`: below it the line is the name alone, and a detail
+   * under a name the person asked to keep short is the level not being honoured.
+   */
+  const endingOf = (id: string): { state?: ToolState; result?: string } => {
+    const outcome = outcomes.get(id)
+    if (!outcome) return {}
+    const result = level === 'full' ? toolResult(outcome.result) : ''
+    return { state: outcome.failed ? 'failed' : 'done', ...(result ? { result } : {}) }
   }
 
-  /** Seals the open group: its raw is rendered now that the last of its steps is in. */
+  /**
+   * Seals the open group: its raw is rendered now that the last of its steps is in, and
+   * the copy without the output beside it when that reads any differently — a group with
+   * no result to leave out offers one copy, not two.
+   */
   const closeAssistant = (): void => {
     if (currentAssistant) {
       const raw = rawTurn(sources)
-      if (raw) currentAssistant.raw = raw
+      if (raw) {
+        currentAssistant.raw = raw
+        const noOutput = rawTurn(sources, { output: false })
+        if (noOutput && noOutput !== raw) currentAssistant.rawNoOutput = noOutput
+      }
     }
     currentAssistant = null
     sources = []
@@ -100,7 +115,7 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
           if (todos.length > 0) parts.push({ kind: 'todo', items: todos })
           const mark = toolDraw(part.name, part.args, level)
           if (mark) parts.push({ kind: 'tool', tool: { ...mark, ...endingOf(part.id) } })
-          else if (drawsToolFailure(part.name) && outcomes.get(part.id) === true) {
+          else if (drawsToolFailure(part.name) && outcomes.get(part.id)?.failed === true) {
             // The call draws nothing of its own — its result is what the person is
             // looking at — but a failure is still said. Nothing goes wrong in silence.
             parts.push({ kind: 'tool', tool: { name: part.name, text: toolText(part.name), state: 'failed' } })

@@ -71,23 +71,52 @@ function ToolLine({ tool }: { tool: ToolMark }) {
   const value = tool.text.startsWith(name) ? tool.text.slice(name.length).trim() : ''
 
   return (
-    <div className={`tool-line${tool.state ? ` ${tool.state}` : ''}`}>
-      <code>
-        <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />{' '}
-        <span className="tool-name">{value ? name : tool.text}</span>
-        {value && <span className="tool-value">{value}</span>}
-        {tool.state === 'failed' && <span className="tool-failed">failed</span>}
-      </code>
+    <div className="tool-call">
+      <div className={`tool-line${tool.state ? ` ${tool.state}` : ''}`}>
+        <code>
+          <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />{' '}
+          <span className="tool-name">{value ? name : tool.text}</span>
+          {value && <span className="tool-value">{value}</span>}
+          {tool.state === 'failed' && <span className="tool-failed">failed</span>}
+        </code>
+        <button
+          className={`tool-copy-btn${copied === 'failed' ? ' failed' : ''}`}
+          type="button"
+          title={label}
+          aria-label={label}
+          onClick={copy}
+        >
+          <Icon name={copied === 'copied' ? 'check' : 'copy'} size={13} />
+          {copied === 'failed' && <span className="message-tool-label">Copy failed</span>}
+        </button>
+      </div>
+      {tool.result && <ToolResult text={tool.result} />}
+    </div>
+  )
+}
+
+/**
+ * What the call came back with, under its own line. Folded to the first line: the answer
+ * is the turn's words, and a result spread whole through the thread pushes them apart.
+ * Opening it draws all of what the server sent — already capped there, so the whole record
+ * lives in Copy raw and this is a reading of it.
+ */
+function ToolResult({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const first = text.split('\n', 1)[0] ?? ''
+  return (
+    <div className={`tool-result${open ? ' open' : ''}`}>
       <button
-        className={`tool-copy-btn${copied === 'failed' ? ' failed' : ''}`}
+        className="tool-result-head"
         type="button"
-        title={label}
-        aria-label={label}
-        onClick={copy}
+        aria-expanded={open}
+        title={open ? 'Hide result' : 'Show result'}
+        onClick={() => setOpen((value) => !value)}
       >
-        <Icon name={copied === 'copied' ? 'check' : 'copy'} size={13} />
-        {copied === 'failed' && <span className="message-tool-label">Copy failed</span>}
+        <Icon name="chevron" size={12} />
+        <span className="tool-result-preview">{first}</span>
       </button>
+      {open && <pre className="tool-result-body">{text}</pre>}
     </div>
   )
 }
@@ -453,19 +482,6 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
       {message.role === 'assistant' && prose && message.waitingSince === undefined && !running && (
         <div className="message-toolbar">
           <CopyButton text={prose} />
-          {onFork && (
-            <button
-              className="message-tool-btn"
-              type="button"
-              disabled={busy}
-              title="Fork session from here"
-              aria-label="Fork session from here"
-              onClick={() => onFork(turn)}
-            >
-              <Icon name="branch" size={15} />
-              <span className="message-tool-label">Fork</span>
-            </button>
-          )}
           {onRegenerate && regenPrompt !== undefined && (
             <button
               className="message-tool-btn"
@@ -479,7 +495,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
               <span className="message-tool-label">Regenerate</span>
             </button>
           )}
-          <MessageMenu at={message.at} tokens={message.tokens} thoughtMs={message.thoughtMs} prose={prose} raw={message.raw} onQuote={onQuote} />
+          <MessageMenu at={message.at} tokens={message.tokens} thoughtMs={message.thoughtMs} prose={prose} raw={message.raw} rawNoOutput={message.rawNoOutput} onFork={onFork} turn={turn} busy={busy} onQuote={onQuote} />
         </div>
       )}
       {message.waitingSince !== undefined && !drawingADraft(parts) && <WaitLine label="Thinking" />}
@@ -526,16 +542,17 @@ function thoughtLabel(ms?: number): string {
 }
 
 /**
- * What a message is and what can be done with it, behind the three dots: when it
- * was said, what an answer cost (tokens and thinking time, when the turn that
- * produced it is still the one on screen), and the way to answer it as a whole.
+ * What a message is and what can be done with it, behind the three dots: when it was
+ * said, what an answer cost (tokens and thinking time, when the turn that produced it is
+ * still the one on screen), the session forked up to that answer, and the way to answer
+ * it as a whole.
  *
  * The panel is placed against the window rather than the thread: opened near an
  * edge it flips and slides to stay whole instead of spilling off the screen, and
  * a scroll moves it with its button rather than leaving it behind or cutting it
  * at the scroller's edge.
  */
-function MessageMenu({ at, tokens, thoughtMs, prose, raw, onQuote }: {
+function MessageMenu({ at, tokens, thoughtMs, prose, raw, rawNoOutput, onFork, turn, busy, onQuote }: {
   at?: number
   tokens?: { input: number; output: number }
   thoughtMs?: number
@@ -543,18 +560,35 @@ function MessageMenu({ at, tokens, thoughtMs, prose, raw, onQuote }: {
   /** The turn copied whole — words, thinking, tool calls and their results. Absent when
    *  the turn is only prose, which the plain Copy already covers. */
   raw?: string
+  /** The same turn with the tool results' own text left out — the path it walked.
+   *  Absent where it would read as the whole copy, so the second choice is offered only
+   *  where it says something the first does not. */
+  rawNoOutput?: string
+  /** The session forked up to the turn this answer ended. It sits behind the dots with
+   *  the rest of what a press can reach rather than in the toolbar, where a fork and a
+   *  hover-only label crowded the very menu they belonged to. */
+  onFork?(upToTurn: number): void
+  /** Which turn this answer belongs to — what a fork copies up to. */
+  turn?: number
+  busy?: boolean
   onQuote?(text: string): void
 }) {
   const [open, setOpen] = useState(false)
-  const { state: rawState, copy: copyRaw } = useCopy(raw ?? '')
+  const [copyOpen, setCopyOpen] = useState(false)
+  const { state: withState, copy: copyWith } = useCopy(raw ?? '')
+  const { state: withoutState, copy: copyWithout } = useCopy(rawNoOutput ?? '')
   const [spot, setSpot] = useState<{ left: number; top: number; up: boolean } | null>(null)
+  const [subSpot, setSubSpot] = useState<{ left: number; top: number; leftOf: boolean } | null>(null)
   // Armed one frame after the panel mounts: an element that gets its entrance
   // animation in the very style pass it first appears in does not always travel,
   // so the growth is held a frame and then let go.
   const [shown, setShown] = useState(false)
+  const [subShown, setSubShown] = useState(false)
   const box = useRef<HTMLSpanElement>(null)
   const anchor = useRef<HTMLButtonElement>(null)
   const panel = useRef<HTMLDivElement>(null)
+  const subRow = useRef<HTMLButtonElement>(null)
+  const subPanel = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (!open) return
@@ -573,10 +607,16 @@ function MessageMenu({ at, tokens, thoughtMs, prose, raw, onQuote }: {
   }, [open])
 
   useEffect(() => {
-    if (!open) { setShown(false); return }
+    if (!open) { setShown(false); setCopyOpen(false); return }
     const frame = requestAnimationFrame(() => setShown(true))
     return () => cancelAnimationFrame(frame)
   }, [open])
+
+  useEffect(() => {
+    if (!copyOpen) { setSubShown(false); return }
+    const frame = requestAnimationFrame(() => setSubShown(true))
+    return () => cancelAnimationFrame(frame)
+  }, [copyOpen])
 
   useLayoutEffect(() => {
     if (!open) { setSpot(null); return }
@@ -601,6 +641,30 @@ function MessageMenu({ at, tokens, thoughtMs, prose, raw, onQuote }: {
       document.removeEventListener('scroll', place, true)
     }
   }, [open])
+
+  useLayoutEffect(() => {
+    if (!open || !copyOpen) { setSubSpot(null); return }
+    const place = (): void => {
+      const from = subRow.current?.getBoundingClientRect()
+      const size = subPanel.current?.getBoundingClientRect()
+      if (!from || !size) return
+      const margin = 10
+      const gap = 8
+      // Beside the row it belongs to — to the right while that fits, to the left
+      // otherwise — so the choices never open over the menu they came from.
+      const leftOf = from.right + gap + size.width > window.innerWidth - margin
+      const left = leftOf ? from.left - gap - size.width : from.right + gap
+      const top = Math.min(Math.max(margin, from.top), Math.max(margin, window.innerHeight - size.height - margin))
+      setSubSpot({ left: Math.max(margin, left), top, leftOf })
+    }
+    place()
+    window.addEventListener('resize', place)
+    document.addEventListener('scroll', place, true)
+    return () => {
+      window.removeEventListener('resize', place)
+      document.removeEventListener('scroll', place, true)
+    }
+  }, [open, copyOpen])
 
   const thinking = thoughtMs !== undefined && thoughtMs >= 1000
   const hasInfo = at !== undefined || tokens !== undefined || thinking
@@ -636,18 +700,50 @@ function MessageMenu({ at, tokens, thoughtMs, prose, raw, onQuote }: {
         <Icon name="spark" size={14} />
         <span>{thoughtLabel(thoughtMs)}</span>
       </div>}
-      {hasInfo && (raw || onQuote) && <div className="message-menu-sep" />}
-      {/* Copying the raw leaves the menu open: unlike Quote, which shows its work in the
-          composer, a copy has nothing else to say it landed but this row's own label. */}
-      {raw && <button
+      {hasInfo && (raw || onQuote || onFork) && <div className="message-menu-sep" />}
+      {onFork && turn !== undefined && <button
         className="message-menu-action"
         type="button"
         role="menuitem"
-        onClick={copyRaw}
+        disabled={busy}
+        onClick={() => onFork(turn)}
       >
-        <Icon name={rawState === 'copied' ? 'check' : 'copy'} size={15} />
-        <span>{rawLabel(rawState)}</span>
+        <Icon name="branch" size={15} />
+        <span>Fork session from here</span>
       </button>}
+      {/* The copy is one control with two choices, so this row opens them instead of
+          copying: with the output is the turn whole, without it the path it walked.
+          Either choice leaves the menu open — unlike Quote, which shows its work in the
+          composer, a copy has nothing else to say it landed but its own label. */}
+      {raw && <button
+        ref={subRow}
+        className={`message-menu-action has-more${copyOpen ? ' open' : ''}`}
+        type="button"
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={copyOpen}
+        onClick={() => setCopyOpen((value) => !value)}
+      >
+        <Icon name="copy" size={15} />
+        <span>Copy raw</span>
+        <Icon className="menu-more" name="chevron" size={14} />
+      </button>}
+      {copyOpen && raw && <div
+        ref={subPanel}
+        className={`message-submenu${subShown ? ' in' : ''}${subSpot?.leftOf ? ' left' : ''}`}
+        role="menu"
+        aria-label="Copy raw"
+        style={subSpot ? { left: subSpot.left, top: subSpot.top } : undefined}
+      >
+        <button className="message-menu-action" type="button" role="menuitem" onClick={copyWith}>
+          <Icon name={withState === 'copied' ? 'check' : 'copy'} size={15} />
+          <span>{copyLabelFor(withState, 'With output')}</span>
+        </button>
+        {rawNoOutput && <button className="message-menu-action" type="button" role="menuitem" onClick={copyWithout}>
+          <Icon name={withoutState === 'copied' ? 'check' : 'copy'} size={15} />
+          <span>{copyLabelFor(withoutState, 'Without output')}</span>
+        </button>}
+      </div>}
       {onQuote && <button
         className="message-menu-action"
         type="button"
@@ -688,11 +784,11 @@ function copyLabel(state: CopyState): string {
   return 'Copy'
 }
 
-/** What the raw copy says — named for what it is, so it is not read as the plain Copy. */
-function rawLabel(state: CopyState): string {
+/** What a copy choice says: its own name, then the one note a copy has to give. */
+function copyLabelFor(state: CopyState, name: string): string {
   if (state === 'copied') return 'Copied'
   if (state === 'failed') return 'Copy raw failed — select the text and copy it by hand'
-  return 'Copy raw'
+  return name
 }
 
 /**

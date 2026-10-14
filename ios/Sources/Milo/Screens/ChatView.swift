@@ -648,14 +648,15 @@ struct MessageRow: View {
     }
 
     /// What can be done with the person's own message, behind the press: its words,
-    /// and — when the turn is more than prose — the turn copied whole, where the tool
-    /// arguments and results the drawn parts leave out still live. The answer's own
-    /// controls stand under it instead, so nothing here is said twice.
+    /// and — when the turn is more than prose — the turn copied whole or, without the
+    /// tool output, the path it walked, where the arguments and results the drawn parts
+    /// leave out still live. The answer's own controls stand under it instead, so nothing
+    /// here is said twice.
     @ViewBuilder
     private var menu: some View {
         menuItem("Copy", "doc.on.doc") { UIPasteboard.general.string = message.prose }
         if let raw = message.raw {
-            menuItem("Copy raw", "curlybraces") { UIPasteboard.general.string = raw }
+            rawCopyMenu(raw: raw, rawNoOutput: message.rawNoOutput)
         }
         if let tokens = message.tokens {
             menuItem("\(tokens.input) in · \(tokens.output) out", "cpu", disabled: true) {}
@@ -663,14 +664,35 @@ struct MessageRow: View {
     }
 }
 
-/// The controls under a finished answer, the four the browser draws there: the words
-/// copied, the session forked from this turn, the answer asked again, and — behind the
-/// dots — what the turn cost and the turn copied whole.
+/// One turn copied raw, the two ways, behind the one control both menus offer. With the
+/// output is the turn whole; without it is the path it walked — the thinking, the words
+/// and every call with its arguments, a failed result still said — offered only where it
+/// reads any differently from the whole. Declared once here, so the person's menu and the
+/// answer's dots cannot draw the pair differently.
+func rawCopyMenu(raw: String, rawNoOutput: String?) -> some View {
+    Menu {
+        menuItem("With output", "doc.plaintext") { UIPasteboard.general.string = raw }
+        if let rawNoOutput {
+            menuItem("Without output", "text.badge.minus") { UIPasteboard.general.string = rawNoOutput }
+        }
+    } label: {
+        Label {
+            Text("Copy raw")
+        } icon: {
+            Image(systemName: "curlybraces")
+        }
+    }
+    .tint(MiloTheme.foreground)
+}
+
+/// The controls under a finished answer, the ones the browser draws there: the words
+/// copied, the answer asked again, and — behind the dots — the session forked from this
+/// turn, what it cost and the turn copied whole.
 ///
 /// The glyph and nothing around it, which is the same control the page draws: with no
 /// pointer to hover with, a phone leaves to the press what the browser saves for the
-/// hover. The cost and the raw copy are not repeated beside it — the browser keeps
-/// those behind the dots too.
+/// hover. The fork, the cost and the raw copy are not repeated beside it — the browser
+/// keeps those behind the dots too.
 struct MessageToolbar: View {
     let message: AppModel.Message
     /// Which turn this answer belongs to, and what asking again would send.
@@ -711,15 +733,21 @@ struct MessageToolbar: View {
         }
     }
 
-    /// What the dots hold: what the answer cost, and the turn as it was said — the
-    /// model's words, its thinking and every call with its arguments and result.
+    /// What the dots hold: the session forked from this turn, what the answer cost, and
+    /// the turn as it was said — the model's words, its thinking and every call with its
+    /// arguments and result, or the same path with the results' own text left out.
     private var more: some View {
         Menu {
             if let tokens = message.tokens {
                 menuItem("\(tokens.input) in · \(tokens.output) out", "cpu", disabled: true) {}
             }
+            // SF's branch arrows each carry a triangle, and at this size the triangle is
+            // the whole mark; the branch alone reads as the one thing it says.
+            menuItem("Fork session from here", "arrow.branch", disabled: model.busy) {
+                Task { await model.fork(from: turn) }
+            }
             if let raw = message.raw {
-                menuItem("Copy raw", "curlybraces") { UIPasteboard.general.string = raw }
+                rawCopyMenu(raw: raw, rawNoOutput: message.rawNoOutput)
             }
         } label: {
             glyph("ellipsis")
@@ -896,11 +924,20 @@ struct ToolChain: View {
 }
 
 /// One tool call: the tool's mark says what it was and carries the state, the name
-/// carries the colour and the one value worth showing stays quiet beside it.
+/// carries the colour and the one value worth showing stays quiet beside it — and, under
+/// it, what the call came back with, folded until a tap opens it.
 struct ToolRow: View {
     let tool: ToolMark
+    @State private var showingResult = false
 
     var body: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            line
+            if let result = tool.result, !result.isEmpty { resultDetail(result) }
+        }
+    }
+
+    private var line: some View {
         HStack(alignment: .center, spacing: MiloTheme.Space.two) {
             // The mark is the state: quiet at rest, accent for the call running now, red
             // on a failure — and the word beside it says the failure for whoever cannot
@@ -914,7 +951,7 @@ struct ToolRow: View {
             // state: it sits in the answer's own text, and the grey is what sets it
             // apart from it.
             if running {
-                Glare(text: line, font: MiloTheme.Text.body)
+                Glare(text: wholeLine, font: MiloTheme.Text.body)
                     .lineLimit(1)
             } else {
                 Text(name)
@@ -936,9 +973,52 @@ struct ToolRow: View {
         }
     }
 
+    /// What the call came back with, under its line and on the line's own indent: the
+    /// first line while it is shut, the whole of it when the tap opens it. Capped on the
+    /// server, so what is folded and what is opened are one reading — the whole record is
+    /// the turn's Copy raw.
+    private func resultDetail(_ result: String) -> some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { showingResult.toggle() }
+            } label: {
+                HStack(spacing: MiloTheme.Space.two) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(MiloTheme.muted)
+                        .rotationEffect(.degrees(showingResult ? 90 : 0))
+                    Text(result.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? "")
+                        .font(MiloTheme.Text.small.monospaced())
+                        .foregroundStyle(MiloTheme.muted)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 0)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel(showingResult ? "Hide the tool result" : "Show the tool result")
+
+            if showingResult {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    Text(result)
+                        .font(MiloTheme.Text.mono)
+                        .foregroundStyle(MiloTheme.foreground2)
+                        .textSelection(.enabled)
+                        .padding(MiloTheme.Space.three)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+            }
+        }
+        // Under the text, past the mark's own column, so a result lines up with the name
+        // it belongs to rather than with the mark.
+        .padding(.leading, 22)
+    }
+
     /// The whole line, for the sweep to travel along: the name and its value in one
     /// string, as the server drew it.
-    private var line: String { tool.text.isEmpty ? tool.name : tool.text }
+    private var wholeLine: String { tool.text.isEmpty ? tool.name : tool.text }
 
     /// The line the server drew is the name and its value in one string; splitting on
     /// the name is what lets the name be loud and the value quiet. Where the line does

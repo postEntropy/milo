@@ -57,6 +57,11 @@ struct ToolMark: Decodable, Hashable {
     /// Mutable because a live call is drawn before it has an answer: `tool-start`
     /// arrives running, and `tool-end` names how it ended.
     var state: String?
+    /// What the call came back with, for the detail under the line. Absent where there is
+    /// nothing to show — a call still running, or a level below `full`, where the server
+    /// sends it empty. Capped on the server, so what is folded and what is opened are one
+    /// reading; the whole of it is in the turn's raw copy.
+    var result: String?
 }
 
 struct FrameAttachment: Decodable, Identifiable, Hashable {
@@ -106,6 +111,8 @@ struct WireMessage: Decodable {
     let attachments: [FrameAttachment]?
     let at: Double?
     let raw: String?
+    /// The same turn with the tool results' own text left out — the path it walked.
+    let rawNoOutput: String?
 }
 
 struct PermissionRequest: Decodable, Hashable {
@@ -153,7 +160,7 @@ enum AgentEvent: Decodable {
     case textDelta(String)
     case reasoningDelta(String)
     case toolStart(id: String, name: String, text: String?)
-    case toolEnd(id: String, name: String, isError: Bool)
+    case toolEnd(id: String, name: String, isError: Bool, result: String?)
     case todo([TodoItem])
     /// A widget as the model writes it: the same tree at longer and longer prefixes,
     /// `draft` while the block is still open. It is drawn in place as it grows.
@@ -170,7 +177,7 @@ enum AgentEvent: Decodable {
     case other
 
     private enum CodingKeys: String, CodingKey {
-        case type, delta, id, name, isError, items, message, render, draft, text, finishReason
+        case type, delta, id, name, isError, items, message, render, draft, text, finishReason, result
         case inputTokens, outputTokens, ms, added, removed, compacted
     }
 
@@ -195,7 +202,8 @@ enum AgentEvent: Decodable {
             self = .toolEnd(
                 id: read(.id, ""),
                 name: read(.name, ""),
-                isError: read(.isError, false)
+                isError: read(.isError, false),
+                result: readText(.result)
             )
         case "todo": self = .todo(read(.items, []))
         case "ui":
@@ -252,7 +260,7 @@ enum ServerFrame: Decodable {
     case event(turnId: String, event: AgentEvent)
     case permission(id: String, request: PermissionRequest, expiresAt: Double)
     case permissionResult(id: String, allowed: Bool)
-    case turnEnd(id: String, status: String, raw: String?)
+    case turnEnd(id: String, status: String, raw: String?, rawNoOutput: String?)
     case commandResult(CommandResult)
     case state(busy: Bool, queued: Int)
     case jobs([JobView])
@@ -262,7 +270,7 @@ enum ServerFrame: Decodable {
     case unknown
 
     private enum CodingKeys: String, CodingKey {
-        case type, id, text, turnId, event, request, expiresAt, allowed, status, raw
+        case type, id, text, turnId, event, request, expiresAt, allowed, status, raw, rawNoOutput
         case busy, queued, jobs, items, message
     }
 
@@ -295,7 +303,8 @@ enum ServerFrame: Decodable {
             self = .turnEnd(
                 id: try container.decode(String.self, forKey: .id),
                 status: try container.decode(String.self, forKey: .status),
-                raw: try container.decodeIfPresent(String.self, forKey: .raw)
+                raw: try container.decodeIfPresent(String.self, forKey: .raw),
+                rawNoOutput: try container.decodeIfPresent(String.self, forKey: .rawNoOutput)
             )
         case "command-result": self = .commandResult(try CommandResult(from: decoder))
         case "state":

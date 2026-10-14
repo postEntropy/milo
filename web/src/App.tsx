@@ -469,6 +469,9 @@ export default function App() {
           // The call that just ended is the one still marked running, which is how the
           // line knows to stop saying it is underway — no second source of truth for
           // what is running, and no name matched against names that repeat.
+          // The result rides the same part, for the detail under the line; the server
+          // sends it empty below the `full` level, so an empty one draws nothing.
+          const result = event.result ? { result: event.result } : {}
           let running = -1
           for (let index = message.parts.length - 1; index >= 0; index -= 1) {
             const part = message.parts[index]
@@ -479,10 +482,10 @@ export default function App() {
             // failure worth saying, unless it is a tool that is not one any more.
             // Nothing goes wrong in silence.
             ? event.isError && drawsToolFailure(event.name)
-              ? [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name), state: 'failed' } }]
+              ? [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name), state: 'failed', ...result } }]
               : message.parts
             : message.parts.map((part, index): TranscriptPart => index === running && part.kind === 'tool'
-              ? { ...part, tool: { ...part.tool, state: event.isError ? 'failed' : 'done' } }
+              ? { ...part, tool: { ...part.tool, state: event.isError ? 'failed' : 'done', ...result } }
               : part)
           return { ...message, parts, waitingSince: Date.now() }
         }
@@ -512,7 +515,7 @@ export default function App() {
     if (frame.type === 'permission-result') { setPendingPermission((current) => current?.id === frame.id ? null : current); return }
     if (frame.type === 'turn-end') {
       setMessages((current) => current.map((message) => message.id === frame.id
-        ? { ...message, parts: settled(message.parts), waitingSince: undefined, ...(frame.raw ? { raw: frame.raw } : {}), ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
+        ? { ...message, parts: settled(message.parts), waitingSince: undefined, ...(frame.raw ? { raw: frame.raw } : {}), ...(frame.rawNoOutput ? { rawNoOutput: frame.rawNoOutput } : {}), ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
         : message))
       setPendingPermission(null)
       setTurnEnds((current) => current + 1)

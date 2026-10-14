@@ -47,7 +47,7 @@ describe('transcriptOf — a turn keeps the order it happened in', () => {
     expect(of(messages).at(-1)?.parts).toEqual([
       { kind: 'reasoning', text: 'reading first' },
       { kind: 'text', text: 'Checking the file.' },
-      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt', state: 'done' } },
+      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt', state: 'done', result: 'ok' } },
       { kind: 'text', text: 'It is fine.' },
     ])
   })
@@ -140,13 +140,13 @@ describe('transcriptOf — a turn keeps the order it happened in', () => {
 describe('transcriptOf — the display level is applied the same way the live turn applies it', () => {
   const messages = turn({ id: 'c1', name: 'read_file' }, {})
 
-  it('draws the value beside the name at full detail', () => {
+  it('draws the value beside the name, and the result under it, at full detail', () => {
     expect(toolParts(messages, 'full')).toEqual([
-      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt', state: 'done' } },
+      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt', state: 'done', result: 'ok' } },
     ])
   })
 
-  it('withholds the value at name detail, rather than shortening the line', () => {
+  it('withholds the value and the result at name detail, rather than shortening the line', () => {
     expect(toolParts(messages, 'name')).toEqual([
       { kind: 'tool', tool: { name: 'read_file', text: 'read_file', state: 'done' } },
     ])
@@ -164,13 +164,25 @@ describe('transcriptOf — the display level is applied the same way the live tu
 describe('transcriptOf — how a call ended', () => {
   it('says a call failed, which a reload used to hide', () => {
     expect(toolParts(turn({ id: 'c1', name: 'shell_command', args: { command: 'npm test' } }, { isError: true }))).toEqual([
-      { kind: 'tool', tool: { name: 'shell_command', text: 'shell_command npm test', state: 'failed' } },
+      { kind: 'tool', tool: { name: 'shell_command', text: 'shell_command npm test', state: 'failed', result: 'ok' } },
     ])
   })
 
   it('says a call finished when its result came back clean', () => {
     expect(toolParts(turn({ id: 'c1', name: 'grep' }, {}))).toEqual([
-      { kind: 'tool', tool: { name: 'grep', text: 'grep a.txt', state: 'done' } },
+      { kind: 'tool', tool: { name: 'grep', text: 'grep a.txt', state: 'done', result: 'ok' } },
+    ])
+  })
+
+  it('leaves the result off a call that came back with nothing worth a line', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'look' }] },
+      { role: 'assistant', content: [{ type: 'tool-call', id: 'c1', name: 'grep', args: { pattern: 'x' } }] },
+      { role: 'tool', content: [{ type: 'tool-result', id: 'c1', name: 'grep', content: '   \n' }] },
+    ]
+
+    expect(toolParts(messages)).toEqual([
+      { kind: 'tool', tool: { name: 'grep', text: 'grep x', state: 'done' } },
     ])
   })
 
@@ -199,5 +211,42 @@ describe('transcriptOf — how a call ended', () => {
     ]
 
     expect(toolParts(messages)).toEqual([])
+  })
+})
+describe('transcriptOf — the second copy, without the tool output', () => {
+  it('carries the copy without the output beside the whole one', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'look' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'text', text: 'Checking.' },
+          { type: 'tool-call', id: 'c1', name: 'read_file', args: { path: 'a.txt' } },
+        ],
+      },
+      { role: 'tool', content: [{ type: 'tool-result', id: 'c1', name: 'read_file', content: 'ok' }] },
+    ]
+
+    const message = of(messages).at(-1)
+    expect(message?.raw).toContain('ok')
+    // The path: the call and its arguments stay, the result's own words go.
+    expect(message?.rawNoOutput).toContain('**read_file**')
+    expect(message?.rawNoOutput).toContain('a.txt')
+    expect(message?.rawNoOutput).not.toContain('ok')
+  })
+
+  it('leaves the no-output copy off when it would read as the whole one', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'look' }] },
+      {
+        role: 'assistant',
+        content: [{ type: 'reasoning', text: 'thinking it over' }, { type: 'text', text: 'It is fine.' }],
+      },
+    ]
+
+    const message = of(messages).at(-1)
+    expect(message).toHaveProperty('raw')
+    // Nothing came back to leave out, so there is no second copy to offer.
+    expect(message).not.toHaveProperty('rawNoOutput')
   })
 })

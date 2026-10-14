@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isExternalTool, toolBrand, toolDisplayName, toolIcon, toolLine, toolText } from '../src/gateways/tool-line.js'
+import { isExternalTool, toolBrand, toolDisplayName, toolDraw, toolIcon, toolLine, toolResult, toolText } from '../src/gateways/tool-line.js'
 
 describe('toolLine', () => {
   it('shows a shell command like any other tool, with the command beside it', () => {
@@ -51,6 +51,15 @@ describe('toolLine', () => {
     expect(toolLine('task', { description: 'survey deps', prompt: 'a long instruction' })).toBe(
       '🤖 task survey deps',
     )
+  })
+
+  it('shows the fact Milo kept, and counts the others rather than dumping the list', () => {
+    expect(toolLine('remember', { facts: ['Prefers TypeScript over JavaScript.'] })).toBe(
+      '🧠 remember Prefers TypeScript over JavaScript.',
+    )
+    expect(
+      toolLine('remember', { facts: ['Prefers TypeScript.', 'Lives in São Paulo.', 'Ships on Fridays.'] }),
+    ).toBe('🧠 remember Prefers TypeScript. (+2 more)')
   })
 
   it('names the skill being loaded and the URL being fetched', () => {
@@ -128,6 +137,35 @@ describe('toolText', () => {
     expect(toolText('gmail_search', { query: 'is:unread' })).toBe('gmail_search is:unread')
     expect(toolText('read_file')).toBe('read_file')
     expect(toolText('read_file', { path: 'a.txt' }, { markdown: true })).toBe('**read_file** a.txt')
+  })
+})
+
+describe('toolDraw', () => {
+  it('draws the remembered fact at full, and the name alone at name', () => {
+    const args = { facts: ['Prefers TypeScript over JavaScript.'] }
+    expect(toolDraw('remember', args, 'full')).toEqual({
+      name: 'remember',
+      text: 'remember Prefers TypeScript over JavaScript.',
+    })
+    expect(toolDraw('remember', args, 'name')).toEqual({ name: 'remember', text: 'remember' })
+    expect(toolDraw('remember', args, 'off')).toBeNull()
+  })
+})
+
+describe('toolResult', () => {
+  it('hands back what came with no trailing whitespace, and nothing for an empty one', () => {
+    expect(toolResult('ok\n')).toBe('ok')
+    expect(toolResult('a\nb')).toBe('a\nb')
+    expect(toolResult('   ')).toBe('')
+    expect(toolResult('')).toBe('')
+  })
+
+  it('caps a long result with an ellipsis, the whole of it left to the raw copy', () => {
+    const capped = toolResult('x'.repeat(5000))
+    expect(capped.length).toBe(4000)
+    expect(capped.endsWith('…')).toBe(true)
+    // A result at the ceiling is not cut.
+    expect(toolResult('y'.repeat(4000))).toBe('y'.repeat(4000))
   })
 })
 

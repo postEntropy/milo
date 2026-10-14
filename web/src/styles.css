@@ -556,6 +556,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-content .tool-line.running code::before { border-color: var(--accent); background: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash); }
 .message-content .tool-line.failed code::before { border-color: var(--danger); background: var(--danger); }
 
+/* ── what a call came back with ───────────────────────────────────────────────
+   A result hangs under its own line, on the line's indent, folded to the first line
+   so the answer keeps the thread: the call is what happened, the result is what came
+   back, and the whole of it is what Copy raw is for. */
+.tool-call { display: flex; flex-direction: column; gap: var(--space-3); }
+.tool-result { padding-inline-start: 24px; }
+.tool-result-head { display: flex; width: 100%; align-items: center; gap: var(--space-3); border: 0; background: transparent; padding: 0; color: var(--muted); font: 500 var(--text-xs) var(--font-mono); text-align: start; cursor: pointer; }
+.tool-result-head:hover { color: var(--fg-2); }
+.tool-result-head .icon { flex: none; transition: transform var(--motion-fast); }
+.tool-result.open .tool-result-head .icon { transform: rotate(90deg); }
+.tool-result-preview { overflow: hidden; flex: 1; min-width: 0; white-space: nowrap; text-overflow: ellipsis; }
+.tool-result-body { margin: var(--space-3) 0 0; overflow: auto; max-height: 320px; border-radius: var(--radius-md); background: var(--surface-warm); padding: var(--space-4) var(--space-5); color: var(--fg-2); font: 400 var(--text-xs)/1.6 var(--font-mono); white-space: pre; }
+
 /* ── a run of calls, drawn as one sequence ────────────────────────────────────
    Calls made one after another are steps of one thing, so a thread joins their dots.
    The thread is the one line in the product that is allowed: without it the dots would
@@ -617,6 +630,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-menu-action { display: flex; align-items: center; gap: var(--space-5); width: 100%; min-height: var(--control-md); border: 0; border-radius: var(--radius-sm); background: transparent; padding: var(--space-3) var(--space-5); color: var(--fg-2); font-size: var(--text-sm); font-weight: 500; text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
 .message-menu-action svg.icon { flex: none; color: var(--muted); }
 .message-menu-action:hover { background: var(--surface-warm); color: var(--fg); }
+/* A row that cannot be pressed — the fork while a turn is being written — reads inert
+   rather than promising a press that would do nothing. */
+.message-menu-action:disabled { color: var(--muted); cursor: not-allowed; }
+/* The copy is one control with two choices: the row that opens them says so with the
+   chevron pointing at what comes next, and lights up while they are out. */
+.message-menu-action.has-more .menu-more { margin-inline-start: auto; color: var(--muted); }
+.message-menu-action.open { background: var(--surface-warm); color: var(--fg); }
+/* The choices come out beside the row rather than below it, so the menu's own height
+   never changes with what a turn holds. */
+.message-submenu { position: fixed; z-index: 61; display: flex; min-width: 190px; max-width: min(300px, calc(100vw - 20px)); flex-direction: column; gap: var(--space-1); border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface-raised); box-shadow: var(--shadow-menu); padding: var(--space-3); }
+.message-submenu:not(.in) { visibility: hidden; }
+/* It travels out of the edge it shares with the row, the side it opens towards. */
+.message-submenu.in { --menu-from: -6px; animation: menu-in-side var(--motion-base) var(--ease-standard); transform-origin: top left; }
+.message-submenu.in.left { --menu-from: 6px; transform-origin: top right; }
+@keyframes menu-in-side {
+  from { opacity: 0; transform: translateX(var(--menu-from, 6px)) scale(.85); }
+  to { opacity: 1; transform: none; }
+}
 .attachments { display: flex; flex-direction: column; gap: var(--space-4); }
 .attachment-image { display: block; width: fit-content; max-width: 100%; }
 .attachment-image img { display: block; max-width: min(420px, 100%); max-height: 420px; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--surface); }

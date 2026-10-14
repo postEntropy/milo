@@ -898,10 +898,14 @@ export class WebHub {
         if (endedConversation?.activeTurn?.id === id) endedConversation.activeTurn = undefined
         // The answer's raw copy rides with the turn, so the just-streamed answer has it
         // too — not only a reload, which reads the same rendering back from the transcript.
-        const raw = endedConversation && runFrom !== undefined
-          ? rawTurn(endedConversation.session.messages.slice(runFrom))
+        // The copy without the output rides beside it, and only where it differs: the two
+        // are choices under one control, not two copies of the same words.
+        const messages = endedConversation && runFrom !== undefined
+          ? endedConversation.session.messages.slice(runFrom)
           : null
-        this.broadcast(conversationId, { type: 'turn-end', id, status, ...(raw ? { raw } : {}) })
+        const raw = messages ? rawTurn(messages) : null
+        const noOutput = messages ? rawTurn(messages, { output: false }) : null
+        this.broadcast(conversationId, { type: 'turn-end', id, status, ...(raw ? { raw } : {}), ...(noOutput && noOutput !== raw ? { rawNoOutput: noOutput } : {}) })
       }
     }, () => this.sendState(conversationId))
     this.sendState(conversationId)

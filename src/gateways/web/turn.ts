@@ -1,4 +1,4 @@
-import { toolDraw } from '../tool-line.js'
+import { toolDraw, toolResult } from '../tool-line.js'
 import type { DisplayConfig } from '../../core/config/schema.js'
 import type { AgentEvent, ServerFrame } from './protocol.js'
 
@@ -22,6 +22,15 @@ export function displayEvent(event: AgentEvent, turnId: string, display: Display
       turnId,
       event: { ...event, text: mark.text, args: display.tools === 'name' ? undefined : event.args },
     })
+    return
+  }
+  if (event.type === 'tool-end') {
+    // The result rides the same level as the line: at `full` the call shows what it came
+    // back with, and below it the line is a name alone, so the result is not offered at
+    // all. Empty rather than absent, because the event's own shape carries a string — the
+    // surfaces read an empty result as "draw nothing".
+    const result = display.tools === 'full' ? toolResult(event.result) : ''
+    send({ type: 'event', turnId, event: { ...event, result } })
     return
   }
   if (event.type === 'reasoning-delta' && display.thinking === 'off') return

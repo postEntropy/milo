@@ -88,3 +88,55 @@ describe('rawTurn — a turn copied whole', () => {
     expect(rawTurn(messages)).toBeNull()
   })
 })
+describe('rawTurn — the turn without its output', () => {
+  it('keeps the thought, the words and the call, and leaves the result out', () => {
+    const messages: Message[] = [
+      {
+        role: 'assistant',
+        content: [
+          { type: 'reasoning', text: 'let me look' },
+          { type: 'text', text: 'Checking.' },
+          { type: 'tool-call', id: 'c1', name: 'read_file', args: { path: 'a.txt' } },
+        ],
+      },
+      { role: 'tool', content: [{ type: 'tool-result', id: 'c1', name: 'read_file', content: 'hello' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+    ]
+
+    const path = rawTurn(messages, { output: false }) ?? ''
+    expect(path).toContain('**Reasoning**')
+    expect(path).toContain('let me look')
+    expect(path).toContain('Checking.')
+    expect(path).toContain('**read_file**')
+    expect(path).toContain('"path": "a.txt"')
+    expect(path).toContain('Done.')
+    // What came back is not the path: the result's own words are left out.
+    expect(path).not.toContain('hello')
+    expect(path).not.toContain('**Result**')
+    // And the whole copy still holds them.
+    expect(rawTurn(messages)).toContain('hello')
+  })
+
+  it('still says a call failed, without the words it failed with', () => {
+    const messages: Message[] = [
+      { role: 'assistant', content: [{ type: 'tool-call', id: 'c1', name: 'shell_command', args: { command: 'false' } }] },
+      { role: 'tool', content: [{ type: 'tool-result', id: 'c1', name: 'shell_command', content: 'it could not run', isError: true }] },
+    ]
+
+    const path = rawTurn(messages, { output: false }) ?? ''
+    expect(path).toContain('**shell_command**')
+    expect(path).toContain('**Result — it failed**')
+    // A failure the path would otherwise swallow is said; the words are not read back.
+    expect(path).not.toContain('it could not run')
+    expect(rawTurn(messages)).toContain('it could not run')
+  })
+
+  it('is nothing at all for a turn that is only prose', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'hi' }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Hello there.' }] },
+    ]
+
+    expect(rawTurn(messages, { output: false })).toBeNull()
+  })
+})

@@ -196,7 +196,7 @@ export type ServerFrame =
   | { type: 'event'; turnId: string; event: AgentEvent }
   | { type: 'permission'; id: string; request: PermissionRequest; expiresAt: number }
   | { type: 'permission-result'; id: string; allowed: boolean }
-  | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error'; raw?: string }
+  | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error'; raw?: string; rawNoOutput?: string }
   | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; attachments?: FrameAttachment[]; actions?: ActionRow[]; messageId?: string; cards?: SessionCardItem[] }
   | { type: 'state'; busy: boolean; queued: number }
   /** A routine ran somewhere in this install: re-read whatever shows the history. */
@@ -228,6 +228,13 @@ export interface ToolMark {
   name: string
   text: string
   state?: ToolState
+  /**
+   * What the call came back with, for the detail under its line — capped where the live
+   * turn and a read-back both build it, so the two draw the same thing. Absent rather than
+   * empty where there is nothing to show (a call still running, a level below `full`, a
+   * result that was only whitespace); the whole of it stays in the turn's raw copy.
+   */
+  result?: string
 }
 
 /** One piece of a turn as the page draws it, in the order it happened. */
@@ -255,6 +262,13 @@ export interface TranscriptMessage {
    * prose, and on a person's own message, where the words are the whole of it.
    */
   raw?: string
+  /**
+   * The same turn with the tool results' own text left out — the path it walked: every
+   * call still named, a failed one still said — the other choice under the same copy.
+   * Absent when it would read word for word as `raw` (a turn with no result to leave
+   * out), so a second copy that repeats the first is never offered.
+   */
+  rawNoOutput?: string
 }
 
 /** The words of a message, everything that is not prose left out. */

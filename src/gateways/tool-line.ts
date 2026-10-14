@@ -217,6 +217,32 @@ export function shellCommand(args: unknown): string {
 
 const GIST_LIMIT = 120
 
+/** How much of what a tool came back with a surface is handed: past this it is the
+ *  turn's raw copy that holds the whole, and a line drawn from a wall of output helps
+ *  nobody. */
+const RESULT_LIMIT = 4000
+
+/**
+ * What a tool came back with, for the detail under its call.
+ *
+ * Trailing whitespace is dropped; a result longer than the limit is cut with a trailing
+ * ellipsis, which is honest about what it is — the whole of it is in the turn's raw copy.
+ * Empty where there is nothing worth a line, which a surface reads as "draw nothing".
+ *
+ * One function, so the live turn and a session read back from disk hand a surface the
+ * same string, and the two drawable surfaces cannot cut it two ways.
+ */
+export function toolResult(content: string): string {
+  const text = content.replace(/\s+$/, '')
+  return text.length > RESULT_LIMIT ? `${text.slice(0, RESULT_LIMIT - 1)}…` : text
+}
+
+/** One value flattened onto the line and cut to the gist's length. */
+function gist(value: string): string {
+  const flat = value.trim().replace(/\s+/g, ' ')
+  return flat.length > GIST_LIMIT ? `${flat.slice(0, GIST_LIMIT - 1)}…` : flat
+}
+
 /**
  * The one interesting value of a call, for the line next to the tool name.
  *
@@ -243,15 +269,22 @@ export function toolDetail(args: unknown): string {
     )
     return `${action}${typeof target === 'string' ? ` ${target.trim()}` : ''}`
   }
+  // `remember` keeps a list of facts, not one value: the line shows the first — the
+  // fact kept is the news, and what it was is what a person wants to read here — and
+  // counts the rest rather than dumping a list into a line meant for a gist.
+  const facts = Array.isArray(record.facts)
+    ? record.facts.filter((fact): fact is string => typeof fact === 'string' && fact.trim() !== '')
+    : []
+  if (facts.length > 0) {
+    const first = gist(facts[0])
+    return facts.length > 1 ? `${first} (+${facts.length - 1} more)` : first
+  }
   // `description` is the `task` tool's label for a subtask (its `prompt` is the
   // whole instruction, and has no place on a one-line activity log); `url` and
   // `name` are the one interesting value of `fetch_url` and `read_skill`.
   for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name', 'app']) {
     const value = record[key]
-    if (typeof value === 'string' && value.trim()) {
-      const flat = value.trim().replace(/\s+/g, ' ')
-      return flat.length > GIST_LIMIT ? `${flat.slice(0, GIST_LIMIT - 1)}…` : flat
-    }
+    if (typeof value === 'string' && value.trim()) return gist(value)
   }
   return ''
 }
