@@ -16,6 +16,13 @@ final class ScrollBoxes {
     var frames: [CGRect] = []
 }
 
+/// The panel a composer control has raised: what belongs to the message being written, or
+/// what a running turn answers to. One at a time, and never in place of the composer.
+enum ComposerMenu: Equatable {
+    case actions
+    case running
+}
+
 /// The session on screen: a floating top bar, the thread, and a floating
 /// composer pinned above the keyboard. No rules between the regions — each is
 /// carried by its own surface and spacing.
@@ -29,6 +36,13 @@ struct ChatView: View {
     @State private var drawer = false
     @State private var picker = false
     @State private var settings = false
+    /// The composer's panel, when one is open — raised by the `+` or by a long press on the
+    /// send control, drawn over the composer, dismissed by a tap anywhere but itself.
+    @State private var menu: ComposerMenu?
+    /// How tall the composer came out, so the panel opens above it instead of through it.
+    /// Read off the composer itself: it grows with the draft and with every strip above the
+    /// field, so no constant would place the panel right.
+    @State private var composerHeight: CGFloat = 0
     @State private var liveActivity = MiloLiveActivityController()
     /// The session being renamed from this screen — the dots in the top bar name it,
     /// and the shared alert does the rest.
@@ -88,8 +102,38 @@ struct ChatView: View {
                     }
                 }
 
+            // The panel a composer control raised, and the layer that puts it away: a tap
+            // anywhere but the panel closes it, the way the platform's own menu answers a tap
+            // outside. That layer is under the panel and over everything else, so the first
+            // touch after opening is spent closing rather than reaching the thread or the
+            // field behind it.
+            if let open = menu {
+                let alignment: Alignment = open == .running ? .bottomTrailing : .bottomLeading
+                let anchor: UnitPoint = open == .running ? .bottomTrailing : .bottomLeading
+
+                Color.clear
+                    .contentShape(Rectangle())
+                    .ignoresSafeArea()
+                    .onTapGesture { closeMenu() }
+
+                panel(open)
+                    .transition(MenuBloom(anchor: anchor))
+                    // The composer's own height, and a step of air: the panel stands over
+                    // the field rather than covering what is being typed into.
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: alignment)
+                    .padding(.horizontal, MiloTheme.margin)
+                    .padding(.bottom, composerHeight + MiloTheme.Space.two)
+            }
         }
         .animation(.smooth(duration: Self.drawerDuration), value: drawer)
+        // The panel's own motion, in one place: the control that raises a panel and the layer
+        // that dismisses it then cannot animate apart. Opening blooms with a gentle bounce;
+        // closing folds straight back into the control.
+        .animation(
+            menu != nil ? .spring(duration: 0.35, bounce: 0.18) : .spring(duration: 0.22, bounce: 0),
+            value: menu
+        )
+        .sensoryFeedback(.impact(weight: .light, intensity: 0.7), trigger: menu != nil)
         .sensoryFeedback(.impact(weight: .light), trigger: drawer)
         // The two edges of an answer: a firmer tap when the daemon begins to
         // speak, a softer one when it lands. `busy` cannot be the trigger — it
@@ -139,6 +183,9 @@ struct ChatView: View {
         // to answer, so the strip goes with it instead of following into a session it was
         // never picked from.
         .onChange(of: model.sessionId) { _, _ in quote = nil }
+            // What a panel offered belonged to the session that was on screen — a running
+            // turn that this one does not have among them.
+            closeMenu()
         .sheet(isPresented: $picker) { ModelPickerSheet() }
         .sheet(isPresented: $settings) { SettingsView(account: account) }
         .sessionRename($renaming)
@@ -187,6 +234,9 @@ struct ChatView: View {
     /// as it opens, so a session started on another surface is there when it does.
     private func openDrawer() {
         composing = false
+        // The panel belongs to the composer this screen is showing, and the sessions are
+        // leaving it: it goes with the field rather than floating over the list.
+        closeMenu()
         drawer = true
         Task { await model.refreshSessions() }
     }
@@ -196,6 +246,90 @@ struct ChatView: View {
     private func quoteIt(_ words: String) {
         quote = words
         composing = true
+    }
+
+    /// Putting the composer's panel away: from the layer under it, from a line of it that
+    /// leaves the composer, and from a screen that leaves the composer behind. Raising one is
+    /// the control's own — and both motions are the same, because the stack animates on the
+    /// panel's own value rather than each caller asking for it.
+    private func closeMenu() {
+        menu = nil
+    }
+
+    /// Sending, from wherever it is asked for: the field's control and the panel the send
+    /// control raises are one action, so they are one function. The words picked out travel
+    /// as a quotation ahead of the reply, so what was answered is part of the message and not
+    /// only in the reader's head; an edit is a redo from the turn before the message it
+    /// changed, so the words go again with the session forked there rather than a second copy
+    /// piling on top.
+    private func send(_ intent: ClientFrame.Intent = .queue) {
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        let outgoing = (quote.map(quotedLead) ?? "") + draft
+        draft = ""
+        quote = nil
+        // The keys come down with the words: the room the keyboard was holding is where the
+        // reply is about to write itself, and the person's own words have gone up to the top
+        // of the thread to open it.
+        composing = false
+    }
+
+    /// What a panel says, per control that raises one. Every line carries the mark of what it
+    /// does: a list of words alone is what the platform's own menu draws, and this panel is
+    /// drawn here so it can say more than that.
+    private func panel(_ which: ComposerMenu) -> some View {
+        let rows: [MenuRow]
+        switch which {
+        case .actions:
+            let modelRow = MenuRow(
+                title: "Model",
+                subtitle: model.modelLabel.isEmpty ? nil : model.modelLabel,
+                symbol: "cpu"
+            ) {
+                closeMenu()
+                picker = true
+            }
+            // The bulb is the browser's own mark for this control, off its reasoning pill;
+            // the levels live inside it as a submenu, so the root panel names what is being
+            // chosen and a press unfolds the levels in place.
+            if model.efforts.isEmpty {
+                rows = [modelRow]
+            } else {
+                rows = [
+                    modelRow,
+                    MenuRow(
+                        title: "Reasoning effort",
+                        symbol: "lightbulb",
+                        children: model.efforts.map { value in
+                            MenuRow(
+                                title: SettingsWording.of(value),
+                                chosen: value == model.effort
+                            ) {
+                                // The panel stays open: choosing how hard to think is not
+                                // leaving, and the tick has to be seen moving onto what was
+                                // chosen.
+                                Task { await model.setEffort(value) }
+                            }
+                        }
+                    ),
+                ]
+            }
+        case .running:
+            rows = [
+                MenuRow(title: "Steer the running turn", symbol: "arrow.turn.down.right") {
+                    closeMenu()
+                    send(.steer)
+                },
+                MenuRow(title: "Send after this turn", symbol: "text.append") {
+                    closeMenu()
+                    send(.queue)
+                },
+                MenuRow(title: "Stop the turn", symbol: "stop.fill") {
+                    closeMenu()
+                    model.stop()
+                },
+            ]
+        }
+        return MenuPanel(rows: rows).id(which)
     }
 
     private var chat: some View {
@@ -392,7 +526,20 @@ struct ChatView: View {
             if let pending = model.pending {
                 PermissionBar(pending: pending)
             }
-            Composer(draft: $draft, quote: $quote, focused: $composing, openPicker: { picker = true })
+            Composer(
+                draft: $draft,
+                quote: $quote,
+                focused: $composing,
+                menu: $menu,
+                send: send
+            )
+                // How tall the composer came out, so the panel opens above it rather than
+                // through it — see `composerHeight`.
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.height
+                } action: { _, height in
+                    composerHeight = height
+                }
                 // The way back to the end, floating over the composer's own edge. An
                 // overlay draws and takes taps without taking room, so the column under the
                 // thread is the same whether the arrow is up or not.
@@ -471,8 +618,17 @@ struct Composer: View {
     /// The words picked out of an answer, held until the reply is sent.
     @Binding var quote: String?
     @FocusState.Binding var focused: Bool
-    let openPicker: () -> Void
+    /// The panel this composer's controls raise, held by the screen: the panel is drawn over
+    /// the composer — above the layer that dismisses it — rather than inside it.
+    @Binding var menu: ComposerMenu?
+    /// Sending, wherever it is asked for. The field's own control and the lines of the panel
+    /// the send control raises are one action, so they are one function, on the screen.
+    let send: (ClientFrame.Intent) -> Void
     @Environment(AppModel.self) private var model
+    /// Whether the send control is under a finger, for the give every filled control here has.
+    /// A control driven by gestures rather than by a `Button` — the long press the panel hangs
+    /// on — has to ask for that itself.
+    @State private var pressed = false
 
     var body: some View {
         VStack(spacing: MiloTheme.Space.two) {
@@ -501,10 +657,16 @@ struct Composer: View {
             // Centred against the field: the send control is shorter than a line of text,
             // so bottom-aligning it left the air above it and read as a bump at the top.
             HStack(alignment: .center, spacing: MiloTheme.Space.one) {
-                // The model lives behind this, not on the bar: what belongs to the
-                // message is the field and the way to send it.
-                Menu {
-                    menuItem("Model", "cpu") { openPicker() }
+                // The composer's own actions live behind this, not on the bar: what belongs
+                // to the message is the field and the way to send it. Chosen model and how
+                // hard it thinks are the two the browser keeps on its own composer, and they
+                // are the shape a way to attach a file takes when the phone grows one.
+                //
+                // A press raises the panel rather than opening a menu of the platform's: a
+                // platform menu takes the shape of the control it came from as it opens, and a
+                // control inside the composer then reads as the composer becoming the menu.
+                Button {
+                    menu = menu == .actions ? nil : .actions
                 } label: {
                     Image(systemName: "plus")
                         .font(.system(size: 20, weight: .semibold))
@@ -512,7 +674,13 @@ struct Composer: View {
                         .frame(width: 40, height: 40)
                         .contentShape(Circle())
                 }
+                .buttonStyle(PressableStyle())
                 .accessibilityLabel("More")
+                // The choices are the settings screen's own read, so this asks for them
+                // once when it does not have them — one reader, two places that show it.
+                .onAppear {
+                    if model.efforts.isEmpty { Task { await model.loadSettings() } }
+                }
 
                 TextField("Ask Milo anything", text: $draft, axis: .vertical)
                     .lineLimit(1...8)
@@ -525,10 +693,10 @@ struct Composer: View {
                 // controls on one row line up because they are the same height, not
                 // because each was nudged to look like the other.
                 if model.busy {
-                    // The way to send becomes the way to stop — one control, as the
-                    // browser draws it: the turn that is running is stopped by the same
-                    // control that ran it, not by a second one standing beside it.
-                    stopControl
+                    // While a turn runs the same control sends or stops, and what is in
+                    // the field decides which — see `busyControl`. One control, never a
+                    // second one standing beside it.
+                    busyControl
                 } else {
                     MiloIconButton(
                         systemName: "paperplane.fill",
@@ -536,7 +704,7 @@ struct Composer: View {
                         span: 36,
                         primary: true,
                         disabled: !canSend,
-                        action: { submit() }
+                        action: { send(.queue) }
                     )
                     .accessibilityLabel("Send")
                 }
@@ -590,31 +758,52 @@ struct Composer: View {
         !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
-    /// While a turn runs, the control stops it. What is typed meanwhile still has the
-    /// two send intents — the browser offers them on Enter and Cmd+Enter; a phone has
-    /// no keys, so they ride the long press this control already answers to. Stop stays
-    /// the tap, so the way out of a turn is never behind a press-and-hold.
+    /// While a turn runs the field's own text decides this control. Empty, it stops: a tap
+    /// ends the turn, and there is nothing typed that wants sending. With words in it, the
+    /// tap sends them as a **steer** — the correction the browser puts on Ctrl/Cmd+Enter,
+    /// which on a phone with no keys is the plain tap — and the press held down raises the
+    /// panel naming all three things a running turn answers to, so neither queuing nor
+    /// stopping nor the steering the tap already does is left for the reader to guess.
+    /// Stopping never needs the field cleared first. A deliberate divergence from the
+    /// browser, whose tap stays stop and whose plain Enter queues.
+    ///
+    /// Gestures rather than a button, so the platform tells the tap and the hold apart: a
+    /// button answers the finger lifting after a hold as well as the hold itself, and
+    /// steering on the way into the panel is not what a long press is asking for.
     @ViewBuilder
-    private var stopControl: some View {
+    private var busyControl: some View {
         if canSend {
-            Menu {
-                menuItem("Steer the running turn", "arrow.turn.down.right") {
-                    submit(intent: .steer)
+            steerGlyph
+                .contentShape(Circle())
+                // A lift that came after a hold is the hold's, not a steer: with the panel
+                // already up, the tap has nothing to send.
+                .onTapGesture { if menu == nil { send(.steer) } }
+                .onLongPressGesture(pressing: { pressing in
+                    pressed = pressing
+                }) {
+                    menu = .running
                 }
-                menuItem("Send after this turn", "text.append") {
-                    submit(intent: .queue)
-                }
-            } label: {
-                stopGlyph
-            } primaryAction: {
-                model.stop()
-            }
-            .accessibilityLabel("Stop")
+                .scaleEffect(pressed ? 0.97 : 1)
+                .opacity(pressed ? 0.85 : 1)
+                .animation(.snappy(duration: 0.18), value: pressed)
+                .accessibilityAddTraits(.isButton)
+                .accessibilityLabel("Steer")
         } else {
             Button(action: model.stop) { stopGlyph }
                 .buttonStyle(PressableStyle())
                 .accessibilityLabel("Stop")
         }
+    }
+
+    /// The way to send, wearing what it does: the filled accent the idle send wears, so it
+    /// is still read as the way to send, but the turn arrow says the tap steers the running
+    /// turn rather than opening a new one — the same mark the panel names that line with.
+    private var steerGlyph: some View {
+        Image(systemName: "arrow.turn.down.right")
+            .font(.system(size: 16, weight: .semibold))
+            .foregroundStyle(MiloTheme.accentOn)
+            .frame(width: 36, height: 36)
+            .background(Circle().fill(MiloTheme.accent))
     }
 
     /// A quiet fill — the accent stays on the one thing to press when nothing runs.
@@ -625,16 +814,8 @@ struct Composer: View {
             .frame(width: 36, height: 36)
             .background(Circle().fill(MiloTheme.surface))
     }
+}
 
-    private func submit(intent: ClientFrame.Intent = .queue) {
-        guard canSend else { return }
-        // The words picked out travel as a quotation ahead of the reply, so what was
-        // answered is part of the message and not only in the reader's head.
-        model.send((quote.map(quotedLead) ?? "") + draft, intent: intent)
-        draft = ""
-        quote = nil
-        // The next message is typed where the last one was, not on the button.
-        focused = true
 /// The background jobs still running, in a strip above the composer — the browser's own,
 /// drawn from the same `jobs` frame. A job is one filled chip: what it is running, how long
 /// it has been going, and the tail of what it has printed, folded until a tap opens it; the
