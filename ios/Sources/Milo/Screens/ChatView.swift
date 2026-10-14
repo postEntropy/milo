@@ -487,6 +487,12 @@ struct Composer: View {
                 .padding(.horizontal, MiloTheme.Space.six + MiloTheme.Space.four)
             }
 
+            // The background jobs still running, above the field and below the queued
+            // count — the browser's own order. Nothing of the strip is drawn at rest.
+            if !model.jobs.isEmpty {
+                JobStrip(jobs: model.jobs)
+            }
+
             if let quote {
                 quoteStrip(quote)
                     .padding(.horizontal, MiloTheme.margin)
@@ -629,6 +635,99 @@ struct Composer: View {
         quote = nil
         // The next message is typed where the last one was, not on the button.
         focused = true
+/// The background jobs still running, in a strip above the composer — the browser's own,
+/// drawn from the same `jobs` frame. A job is one filled chip: what it is running, how long
+/// it has been going, and the tail of what it has printed, folded until a tap opens it; the
+/// control beside the chip stops it. Only running jobs are ever in the list, so an ended one
+/// leaves the strip on its own.
+struct JobStrip: View {
+    let jobs: [JobView]
+    @Environment(AppModel.self) private var model
+    /// The job whose output is open, by id — one at a time, as the browser keeps it.
+    @State private var open: String?
+
+    var body: some View {
+        // A clock only while a job is on screen: the elapsed counter has to move, and a
+        // timer left running under an empty strip would wake the screen for nothing.
+        TimelineView(.periodic(from: .now, by: 1)) { context in
+            VStack(spacing: MiloTheme.Space.two) {
+                ForEach(jobs) { job in
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                        chip(job, now: context.date.timeIntervalSince1970)
+                        if open == job.id { log(job) }
+                    }
+                }
+            }
+        }
+        .padding(.horizontal, MiloTheme.margin)
+    }
+
+    private func chip(_ job: JobView, now: Double) -> some View {
+        HStack(spacing: MiloTheme.Space.two) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { open = open == job.id ? nil : job.id }
+            } label: {
+                HStack(spacing: MiloTheme.Space.two) {
+                    Image(systemName: "terminal")
+                        .font(.system(size: 15, weight: .regular))
+                        .foregroundStyle(MiloTheme.muted)
+                    Text(Self.oneLine(job.command))
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.foreground2)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: MiloTheme.Space.two)
+                    Text(RelativeTime.elapsed(max(0, now - job.startedAt)))
+                        .font(MiloTheme.Text.meta)
+                        .foregroundStyle(MiloTheme.muted)
+                        .monospacedDigit()
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundStyle(MiloTheme.muted)
+                        .rotationEffect(.degrees(open == job.id ? 90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel(open == job.id ? "Hide the job's output" : "Show the job's output")
+
+            // Filled, not outlined: the chip is the surface and this is the one control on
+            // it. Pressing it is the confirmation the wire wants.
+            Button { model.killJob(job.id) } label: {
+                Image(systemName: "stop.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(MiloTheme.foreground)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(MiloTheme.surface))
+            }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel("Stop this job")
+        }
+        .padding(.leading, MiloTheme.Space.three)
+        .padding(.trailing, MiloTheme.Space.two)
+        .padding(.vertical, MiloTheme.Space.two)
+        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.sm))
+    }
+
+    private func log(_ job: JobView) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(job.lines.isEmpty ? "No output yet." : job.lines.joined(separator: "\n"))
+                .font(MiloTheme.Text.mono)
+                .foregroundStyle(MiloTheme.foreground2)
+                .textSelection(.enabled)
+                .padding(MiloTheme.Space.three)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.sm))
+    }
+
+    /// The command on one line: the browser's own `oneLine` clips at eighty characters, so
+    /// a long command cannot take the strip's height.
+    private static func oneLine(_ command: String) -> String {
+        String(command.replacingOccurrences(of: "\n", with: " ").prefix(80))
+    }
+}
+
     }
 }
 

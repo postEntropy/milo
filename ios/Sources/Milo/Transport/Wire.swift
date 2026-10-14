@@ -17,6 +17,8 @@ enum ClientFrame {
     case send(text: String, intent: Intent? = nil)
     case control(Control, id: String? = nil)
     case command(text: String)
+    /// Stop a background job. Pressing the control is the confirmation.
+    case jobKill(id: String)
 
     /// A flat object per frame, so the encoder is `JSONSerialization` and there is
     /// no second spelling of the wire to keep in step with the server's.
@@ -37,6 +39,8 @@ enum ClientFrame {
             return ["type": "control", "action": action.rawValue, "id": id]
         case .command(let text):
             return ["type": "command", "text": text]
+        case .jobKill(let id):
+            return ["type": "job-kill", "id": id]
         }
     }
 }
@@ -250,6 +254,9 @@ struct Ready: Decodable {
     let model: String
     let effort: String?
     let activeTurn: ActiveTurn?
+    /// The background jobs still running when this screen opened, so the strip is drawn
+    /// without waiting for the next change broadcast.
+    let jobs: [JobView]?
 }
 
 // MARK: - What the server sends

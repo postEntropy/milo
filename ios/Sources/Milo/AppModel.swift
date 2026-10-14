@@ -42,6 +42,9 @@ final class AppModel {
     private(set) var busy = false
     /// Messages stacked behind the turn running now, for the composer's queue chip.
     private(set) var queued = 0
+    /// The background jobs still running, for the strip above the composer. They belong
+    /// to the process, not to this chat, so every screen is told the same list.
+    private(set) var jobs: [JobView] = []
     /**
      A line the app has to say, where the reply would land, and whether it is a
      failure: a thing that went right is not said in the red a refusal wears. The
@@ -259,6 +262,7 @@ final class AppModel {
         messages = []
         sessions = []
         ideas = []
+        jobs = []
         pending = nil
         note = nil
         phase = .pairing
@@ -273,6 +277,13 @@ final class AppModel {
         messages.append(Message(isUser: true, parts: [.text(trimmed)], attachments: [], streaming: false))
         busy = true
         if !client.send(.send(text: trimmed, intent: intent)) { unsent() }
+    }
+
+    /// Stops a background job. Pressing the control is the confirmation; the daemon
+    /// answers only when there was nothing left to stop, and the redrawn strip is what
+    /// takes the job away.
+    func killJob(_ id: String) {
+        client.send(.jobKill(id: id))
     }
 
     /// Said the same way wherever a message fails to leave, so the two paths cannot
@@ -568,6 +579,9 @@ final class AppModel {
             note = nil
             pending = nil
             queued = 0
+            // The jobs running when this screen opened: the strip is drawn from the
+            // handshake rather than waiting for the next change to reach it.
+            jobs = ready.jobs ?? []
             turnStarted = nil
             began = false
             // A turn still being written when this screen opened: its `turn-start`
@@ -625,7 +639,9 @@ final class AppModel {
             note = Note(message)
         case .suggestions(let items):
             ideas = items
-        case .jobs, .routinesChanged, .unknown:
+        case .jobs(let running):
+            jobs = running
+        case .routinesChanged, .unknown:
             break
         }
     }
