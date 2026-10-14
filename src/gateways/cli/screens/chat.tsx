@@ -190,14 +190,15 @@ export function ChatScreen({
   const [runningJobs, setRunningJobs] = useState(0)
 
   // The manager changes under the UI — a job started a moment ago by a tool call,
-  // one that just ended — so the count is read live rather than threaded down.
+  // one that just ended — so the count is read live rather than threaded down. Only
+  // this session's: another conversation's work is not this terminal's.
   useEffect(() => {
     const jobs = runtime.jobs
     if (!jobs) return
-    const sync = () => setRunningJobs(jobs.list().filter((job) => job.state === 'running').length)
+    const sync = () => setRunningJobs(jobs.list(sessionId ?? undefined).filter((job) => job.state === 'running').length)
     sync()
     return jobs.onChange(sync)
-  }, [runtime])
+  }, [runtime, sessionId])
 
   const busy = phase !== 'idle'
   const elapsed = useElapsed(busy, startedAt)

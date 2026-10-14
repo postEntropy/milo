@@ -35,6 +35,9 @@ struct RootView: View {
         .onChange(of: scenePhase) { _, phase in
             guard phase == .active else { return }
             Task { await model.refreshSessions() }
+            // The routines too: what the daemon ran while the phone slept is on the
+            // list, and the reminders are re-scheduled from it for the next stretch.
+            Task { await model.refreshRoutines() }
         }
     }
 }

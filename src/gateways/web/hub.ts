@@ -140,11 +140,11 @@ export class WebHub {
    * how a bare path is resolved everywhere else.
    */
   constructor(private readonly runtime: AgentRuntime, private readonly cwd: string = process.cwd()) {
-    // A job starts and ends on the process, not on one conversation, so every
-    // open page is told and each draws the same strip.
+    // A job belongs to the session that started it, so each open chat is told about
+    // its own and its strip never draws another conversation's work.
     this.detachJobs =
       this.runtime.jobs?.onChange(() => {
-        this.broadcastAll({ type: 'jobs', jobs: this.jobsView() })
+        this.broadcastJobs()
       }) ?? null
   }
 
@@ -184,7 +184,7 @@ export class WebHub {
       model: this.runtime.model,
       effort: this.runtime.reasoningEffort,
       panel: this.panelFor(conversation),
-      jobs: this.jobsView(),
+      jobs: this.jobsView(conversation.session.id),
       ...(running ? { activeTurn: { id: running.id, at: running.at } } : {}),
     })
     if (running) for (const frame of running.frames) client.send(frame)
@@ -238,8 +238,9 @@ export class WebHub {
 
     if (frame.type === 'job-kill') {
       // The person pressing stop is the confirmation; the manager kills the child
-      // and its change broadcast redraws the strip without this job.
-      const killed = this.runtime.jobs?.kill(frame.id) ?? false
+      // and its change broadcast redraws the strip without this job. Scoped to the
+      // session this client is in: another conversation's job is not theirs to stop.
+      const killed = this.runtime.jobs?.kill(frame.id, conversation.session.id) ?? false
       if (!killed) client.send({ type: 'error', message: `No running job "${frame.id}".` })
       return
     }
@@ -999,20 +1000,25 @@ export class WebHub {
     this.broadcast(conversationId, frame)
   }
 
-  /** The same frame to every open page: jobs belong to the process, not a chat. */
-  private broadcastAll(frame: ServerFrame): void {
+  /**
+   * Each open chat the jobs of the session it is bound to, and nothing else. Sent to
+   * every conversation, empty included, so a strip clears the moment its job ends.
+   */
+  private broadcastJobs(): void {
     for (const conversation of this.conversations.values()) {
+      if (conversation.clients.size === 0) continue
+      const frame: ServerFrame = { type: 'jobs', jobs: this.jobsView(conversation.session.id) }
       for (const client of conversation.clients) client.send(frame)
     }
   }
 
   /**
-   * The jobs still running, as the strip draws them. Only the ones still going:
-   * a job that ended is announced in the chat, and a strip that kept it would be
-   * saying something the conversation already said.
+   * The jobs still running in one session, as its strip draws them. Only the ones
+   * still going: a job that ended is announced in the chat, and a strip that kept it
+   * would be saying something the conversation already said.
    */
-  private jobsView(): JobView[] {
-    return (this.runtime.jobs?.list() ?? [])
+  private jobsView(sessionId: string): JobView[] {
+    return (this.runtime.jobs?.list(sessionId) ?? [])
       .filter((job) => job.state === 'running')
       .map((job) => ({
         id: job.id,

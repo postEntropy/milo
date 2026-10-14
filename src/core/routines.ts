@@ -222,6 +222,22 @@ export function nextRunAt(when: RoutineWhen, from: Date): Date {
   return fallback
 }
 
+/**
+ * The next `count` times a routine fires, strictly after `from`. The schedule's
+ * arithmetic lives in `nextRunAt`; a surface that wants to show or schedule what is
+ * coming asks for it here rather than keeping a second reading of `when`.
+ */
+export function upcomingRuns(when: RoutineWhen, from: Date, count: number): Date[] {
+  const times: Date[] = []
+  let cursor = from
+  for (let i = 0; i < count; i += 1) {
+    const next = nextRunAt(when, cursor)
+    times.push(next)
+    cursor = next
+  }
+  return times
+}
+
 /** `every 2h`, `08:00, mon-fri`, `09:00, day 25 of December` — the time, said plainly. */
 export function describeWhen(when: RoutineWhen): string {
   if (when.kind === 'every') return `every ${describeMinutes(when.minutes)}`

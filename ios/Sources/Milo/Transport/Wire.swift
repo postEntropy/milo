@@ -9,12 +9,25 @@ let miloProtocolVersion = 9
 
 // MARK: - What the app sends
 
+/// Where a turn's answer goes, when it is not the chat it was asked in. Pinned on the
+/// `send` frame so a routine's destination is the one the person picked rather than
+/// something the sentence has to say — the browser's own `SendTarget`.
+struct SendTarget: Equatable {
+    enum Gateway: String {
+        case telegram, discord, web, none
+    }
+    let gateway: Gateway
+    /// The chat to post into. Required even for `none`: the server takes half a target
+    /// as none at all, and the phone passes its own conversation the way the browser does.
+    let conversationId: String
+}
+
 enum ClientFrame {
     enum Intent: String { case steer, queue }
     enum Control: String { case stop, allow, deny }
 
     case hello(conversationId: String)
-    case send(text: String, intent: Intent? = nil)
+    case send(text: String, intent: Intent? = nil, target: SendTarget? = nil)
     case control(Control, id: String? = nil)
     case command(text: String)
     /// Stop a background job. Pressing the control is the confirmation.
@@ -37,9 +50,13 @@ enum ClientFrame {
             // same web gateway, and that is what lets it hold the turn for a phone —
             // shorter answers, spoken to a small screen.
             return ["type": "hello", "version": miloProtocolVersion, "conversationId": conversationId, "genui": true, "client": "ios"]
-        case .send(let text, let intent):
-            guard let intent else { return ["type": "send", "text": text] }
-            return ["type": "send", "text": text, "intent": intent.rawValue]
+        case .send(let text, let intent, let target):
+            var frame: [String: Any] = ["type": "send", "text": text]
+            if let intent { frame["intent"] = intent.rawValue }
+            if let target {
+                frame["target"] = ["gateway": target.gateway.rawValue, "conversationId": target.conversationId]
+            }
+            return frame
         case .control(let action, let id):
             guard let id else { return ["type": "control", "action": action.rawValue] }
             return ["type": "control", "action": action.rawValue, "id": id]

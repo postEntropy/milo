@@ -7,6 +7,7 @@ struct SessionsDrawer: View {
     let onClose: () -> Void
     let onNewSession: () -> Void
     let onSettings: () -> Void
+    let onRoutines: () -> Void
     @Environment(AppModel.self) private var model
     /// The session being renamed, by id: the row's own press names one, and the alert
     /// the modifier presents does the rest.
@@ -29,11 +30,13 @@ struct SessionsDrawer: View {
 
     private var column: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            routinesTab
+                .padding(.top, MiloTheme.Space.four)
+
             Text("Sessions")
                 .font(.title.weight(.bold))
                 .foregroundStyle(MiloTheme.foreground)
                 .padding(.horizontal, MiloTheme.Space.four)
-                .padding(.top, MiloTheme.Space.four)
 
             if model.sessions.isEmpty {
                 Text("No sessions yet")
@@ -103,6 +106,30 @@ struct SessionsDrawer: View {
         }
         .padding(.trailing, MiloTheme.Space.four)
         .padding(.bottom, MiloTheme.Space.four)
+    }
+
+    /// The way into the routines, at the sidebar's own top — the browser's own place for it,
+    /// above the sessions rather than among the controls at the foot: routines are something
+    /// you go to, like a page, not something that starts a session. A filled row with its mark
+    /// and its name, in the quiet tone a destination wears until it is pressed.
+    private var routinesTab: some View {
+        Button { onRoutines() } label: {
+            HStack(spacing: MiloTheme.Space.three) {
+                Image(systemName: "repeat")
+                    .font(.system(size: 18, weight: .medium))
+                Text("Routines")
+                    .font(MiloTheme.Text.base)
+                Spacer(minLength: 0)
+            }
+            .foregroundStyle(MiloTheme.foreground2)
+            .padding(.horizontal, MiloTheme.Space.four)
+            .frame(height: 46)
+            .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+            .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+        }
+        .buttonStyle(PressableStyle())
+        .padding(.horizontal, MiloTheme.Space.three)
+        .accessibilityLabel("Routines")
     }
 
     /// The list the way the browser buckets it: how recent, newest group first, with the

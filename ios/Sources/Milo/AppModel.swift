@@ -51,8 +51,9 @@ final class AppModel {
     private(set) var busy = false
     /// Messages stacked behind the turn running now, for the composer's queue chip.
     private(set) var queued = 0
-    /// The background jobs still running, for the strip above the composer. They belong
-    /// to the process, not to this chat, so every screen is told the same list.
+    /// The background jobs still running in this session, for the strip above the
+    /// composer. The daemon scopes them to the chat, so the strip never draws another
+    /// conversation's work.
     private(set) var jobs: [JobView] = []
     /**
      A line the app has to say, where the reply would land, and whether it is a
@@ -115,6 +116,17 @@ final class AppModel {
     private(set) var sessions: [SessionSummary] = []
     private(set) var sessionsLoading = false
 
+    // The routines, and the reminders the phone schedules from them.
+    private(set) var routines: [RoutineSummary] = []
+    private(set) var routinesLoading = false
+    /// Why the routines could not be read, or why an action on one was refused — the
+    /// Routines screen draws this where the note would land.
+    private(set) var routinesError: String?
+    /// A routine a tapped reminder asked to open; the Routines screen reads it, then
+    /// clears it.
+    var pendingRoutine: String?
+    private let reminders = RoutineReminders()
+
     /// The ideas the model drew from what Milo knows, for the welcome screen. Empty
     /// until the daemon draws them; the standing four stand in meanwhile.
     private(set) var ideas: [Idea] = []
@@ -163,6 +175,8 @@ final class AppModel {
         client.onState = { [weak self] state in self?.moved(to: state) }
         client.onFrame = { [weak self] frame in self?.received(frame) }
         client.onSendFailed = { [weak self] in self?.unsent() }
+        // A tapped reminder names the routine it was about, so the app opens on it.
+        reminders.onTap = { [weak self] id in self?.pendingRoutine = id }
     }
 
     func load() async {
@@ -288,9 +302,13 @@ final class AppModel {
         sessions = []
         ideas = []
         jobs = []
+        routines = []
         pending = nil
         note = nil
         phase = .pairing
+        // The reminders belonged to the install just left; an empty sync takes them off
+        // the system without touching anything else the app may hold.
+        Task { await reminders.sync([]) }
     }
 
     // MARK: - The turn
@@ -311,6 +329,17 @@ final class AppModel {
         }
         busy = true
         if !client.send(.send(text: trimmed, intent: intent)) { unsent() }
+    }
+
+    /// Sends a turn whose destination is pinned on it — how the Routines screen makes
+    /// one for a chat that is not this one. Same path as any send, so the answer lands
+    /// in the thread like everything else.
+    func send(_ text: String, target: SendTarget) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        messages.append(Message(isUser: true, parts: [.text(trimmed)], attachments: [], streaming: false))
+        busy = true
+        if !client.send(.send(text: trimmed, target: target)) { unsent() }
     }
 
     /// Stops a background job. Pressing the control is the confirmation; the daemon
@@ -439,6 +468,14 @@ final class AppModel {
         note = Note("Session ID copied", failed: false)
     }
 
+    /// Taking the line back off the screen. A notice says what just happened and then gets
+    /// out of the way — by the tap on its own way out, or when its own life runs out — so an
+    /// action does not leave a sentence standing over the composer after it. The browser's
+    /// notice keeps the same life.
+    func dismissNote() {
+        note = nil
+    }
+
     func rename(_ id: String, to name: String) async {
         guard let account else { return }
         do {
@@ -489,7 +526,90 @@ final class AppModel {
         // The ideas belonged to the session being left; the daemon draws new ones for
         // the one the socket is about to replay.
         ideas = []
+        // The jobs belonged to that session too, and the handshake that follows brings
+        // the new one's own — so the strip never stands showing the strip of the chat
+        // that was left.
+        jobs = []
         client.connect(to: account)
+    }
+
+    // MARK: - Routines
+
+    /// Re-reads the routines and re-schedules the phone's reminders from what came back.
+    /// The one place a reminder is written, so a routine that is paused or removed takes
+    /// its reminders with it.
+    func refreshRoutines() async {
+        guard let account else { return }
+        routinesLoading = true
+        defer { routinesLoading = false }
+        do {
+            routines = try await MiloApi.routines(account)
+            routinesError = nil
+            await reminders.sync(routines)
+        } catch {
+            routinesError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Asks for the permission the reminders need, once, when the screen first opens,
+    /// then schedules from the routines already read.
+    func askToRemind() async {
+        await reminders.requestAuthorization()
+        await reminders.sync(routines)
+    }
+
+    /// Whether reminders may be raised: nil until the person has been asked.
+    var remindersAllowed: Bool? { reminders.authorized }
+
+    /// Fires one now and re-reads the list, so the caller can open the run it made.
+    func runRoutine(_ id: String) async -> RoutineRunResult? {
+        guard let account else { return nil }
+        do {
+            let result = try await MiloApi.runRoutine(account, id: id)
+            await refreshRoutines()
+            return result
+        } catch {
+            routinesError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return nil
+        }
+    }
+
+    func setRoutineEnabled(_ id: String, enabled: Bool) async {
+        guard let account else { return }
+        do {
+            try await MiloApi.setRoutineEnabled(account, id: id, enabled: enabled)
+            await refreshRoutines()
+        } catch {
+            routinesError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func removeRoutine(_ id: String) async {
+        guard let account else { return }
+        do {
+            try await MiloApi.removeRoutine(account, id: id)
+            await refreshRoutines()
+        } catch {
+            routinesError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// One routine's run history and a run read back whole. Throwing rather than noted:
+    /// the surface that asked keeps its own error, so a failed page never replaces the
+    /// list that is already there.
+    func routineRuns(_ id: String, offset: Int, limit: Int) async throws -> RoutineRuns {
+        guard let account else { throw ApiError.badAddress }
+        return try await MiloApi.routineRuns(account, id: id, offset: offset, limit: limit)
+    }
+
+    func routineTranscript(_ id: String) async throws -> [WireMessage] {
+        guard let account else { throw ApiError.badAddress }
+        return try await MiloApi.routineTranscript(account, id: id)
+    }
+
+    func routineFeed() async throws -> [RoutineFeedEntry] {
+        guard let account else { throw ApiError.badAddress }
+        return try await MiloApi.routineFeed(account)
     }
 
     // MARK: - Models
@@ -656,6 +776,9 @@ final class AppModel {
                 self.owed = nil
                 send(owed)
             }
+            // The routines are read at connect, so the reminders are scheduled from what
+            // is actually there before the screen is ever opened.
+            Task { await refreshRoutines() }
         case .turnStart:
             busy = true
             began = false
@@ -718,7 +841,11 @@ final class AppModel {
             ideas = items
         case .jobs(let running):
             jobs = running
-        case .routinesChanged, .unknown:
+        case .routinesChanged:
+            // The daemon says a routine ran; the list and the reminders are re-read from
+            // what it left rather than from the frame, which carries nothing.
+            Task { await refreshRoutines() }
+        case .unknown:
             break
         }
     }

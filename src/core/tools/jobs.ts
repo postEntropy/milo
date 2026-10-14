@@ -1,6 +1,15 @@
 import { z } from 'zod'
-import { describeJob, type JobManager } from '../jobs/index.js'
+import { describeJob, type JobInfo, type JobManager } from '../jobs/index.js'
 import type { Tool, ToolResult } from './types.js'
+
+/**
+ * Whether a job belongs to the turn asking about it. A job is the session's that
+ * started it, so a turn in another conversation is not told about it — the strip
+ * draws the same rule.
+ */
+function isMine(job: JobInfo, sessionId?: string): boolean {
+  return sessionId === undefined || job.sessionId === sessionId
+}
 
 const statusSchema = z.object({
   id: z
@@ -21,13 +30,13 @@ export function createJobStatusTool(jobs: JobManager): Tool<z.infer<typeof statu
     schema: statusSchema,
     readOnly: true,
     concurrent: true,
-    async execute(args): Promise<ToolResult> {
+    async execute(args, ctx): Promise<ToolResult> {
       if (args.id) {
         const job = jobs.get(args.id)
-        if (!job) return { content: `No job "${args.id}".` }
+        if (!job || !isMine(job, ctx.sessionId)) return { content: `No job "${args.id}".` }
         return { content: describeJob(job, 40).trimEnd() }
       }
-      const all = jobs.list()
+      const all = jobs.list(ctx.sessionId)
       if (all.length === 0) return { content: 'No background jobs.' }
       return { content: all.map((job) => describeJob(job, 8)).join('\n\n').trimEnd() }
     },
@@ -45,11 +54,11 @@ export function createJobKillTool(jobs: JobManager): Tool<z.infer<typeof killSch
     description: 'Stops a running background job. Requires user confirmation.',
     schema: killSchema,
     readOnly: false,
-    async execute(args): Promise<ToolResult> {
+    async execute(args, ctx): Promise<ToolResult> {
       const job = jobs.get(args.id)
-      if (!job) return { content: `No job "${args.id}".`, isError: true }
+      if (!job || !isMine(job, ctx.sessionId)) return { content: `No job "${args.id}".`, isError: true }
       if (job.state !== 'running') return { content: `Job ${args.id} is already ${job.state}.` }
-      return jobs.kill(args.id)
+      return jobs.kill(args.id, ctx.sessionId)
         ? { content: `Stopped job ${args.id}.` }
         : { content: `Could not stop job ${args.id}.`, isError: true }
     },

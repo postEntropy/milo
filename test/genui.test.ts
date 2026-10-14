@@ -59,6 +59,29 @@ describe('the generated interface schema', () => {
     for (let level = 0; level < 10; level += 1) tree = { kind: 'box', children: [tree] }
     expect(genUiSchema.safeParse({ tree }).success).toBe(false)
   })
+
+  it('cuts a cell or an item that runs long instead of refusing the whole widget', () => {
+    // A listing crammed into a cell — the shape a directory inventory makes — used to
+    // take the widget down with it. It is cut now, so the table still draws.
+    const long = 'a'.repeat(300)
+    const cut = `${'a'.repeat(199)}…`
+    const parsed = genUiSchema.safeParse({
+      tree: {
+        kind: 'box',
+        children: [
+          { kind: 'table', columns: ['Folder', 'Holds'], rows: [['02-agentes', long]] },
+          { kind: 'list', items: [long] },
+        ],
+      },
+    })
+    expect(parsed.success).toBe(true)
+    if (!parsed.success) return
+    const tree = parsed.data.tree
+    if (tree.kind !== 'box') throw new Error('expected a box back')
+    const [table, list] = tree.children
+    expect(table?.kind === 'table' && table.rows[0]?.[1]).toBe(cut)
+    expect(list?.kind === 'list' && list.items[0]).toBe(cut)
+  })
 })
 
 describe('reading a widget back out of a tool call', () => {

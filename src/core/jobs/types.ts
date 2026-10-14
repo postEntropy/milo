@@ -20,6 +20,12 @@ export interface JobStartInput {
   cwd: string
   /** The conversation to tell when it ends. */
   origin: MemoryScope
+  /**
+   * The session that started it. A job belongs to that session: its strip is drawn
+   * only there, and only there may it be stopped. Absent on a job started with no
+   * session behind it — the terminal's own bootstrap, a bare test.
+   */
+  sessionId?: string
   notify?: JobNotify
 }
 
@@ -30,6 +36,8 @@ export interface JobMeta {
   cwd: string
   notify: JobNotify
   origin: MemoryScope
+  /** The session that started it; see `JobStartInput`. Absent on an older record. */
+  sessionId?: string
   state: JobState
   startedAt: number
   endedAt?: number

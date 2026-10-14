@@ -523,7 +523,11 @@ private struct ScrollBoxMark: ViewModifier {
     }
 }
 
-private extension View {
+extension View {
+    /// Marks a view as a box that scrolls sideways on its own, so the screen-wide drag that
+    /// opens the sessions drawer stands down where the finger began inside one. Every box
+    /// that scrolls sideways wears this — a code block, a table, a generated widget's table,
+    /// a tool's output — or the two scrolls fight over the same drag.
     func marksScrollBox() -> some View { modifier(ScrollBoxMark()) }
 }
 

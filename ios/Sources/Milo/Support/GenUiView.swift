@@ -171,6 +171,7 @@ struct GenUiView: View {
             }
             .padding(.vertical, MiloTheme.Space.one)
         }
+        .marksScrollBox()
     }
 
     // MARK: - The controls

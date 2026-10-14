@@ -16,6 +16,18 @@ enum RelativeTime {
         return "\(Int(seconds / 604_800))w"
     }
 
+    /// When something is due, in the same short form, read forward: "in 5m", "in 2h",
+    /// "in 3d". The coming half of `when`, for a routine's next run.
+    static func ahead(_ timestamp: Double) -> String {
+        let seconds = timestamp / 1000 - Date().timeIntervalSince1970
+        if seconds <= 0 { return "now" }
+        if seconds < 60 { return "in <1m" }
+        if seconds < 3600 { return "in \(Int(seconds / 60))m" }
+        if seconds < 86_400 { return "in \(Int(seconds / 3600))h" }
+        if seconds < 604_800 { return "in \(Int(seconds / 86_400))d" }
+        return "in \(Int(seconds / 604_800))w"
+    }
+
     /// How long something has been running, in the short form the browser's own
     /// `formatDuration` writes (`src/util/format.ts`): seconds under a minute, then
     /// minutes and seconds, then hours. The running counter beside a background job.

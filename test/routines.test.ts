@@ -26,6 +26,7 @@ const {
   removeRoutine,
   RoutineScheduler,
   setEnabled,
+  upcomingRuns,
   updateRoutine,
   writeRoutines,
 } = await import('../src/core/routines.js')
@@ -164,6 +165,27 @@ describe('nextRunAt', () => {
     const from = new Date(2026, 0, 1, 7, 0, 0)
     expect(nextRunAt({ kind: 'at', time: '09:00', dayOfMonth: [29], month: [2] }, from))
       .toEqual(new Date(2028, 1, 29, 9, 0, 0))
+  })
+})
+
+describe('upcomingRuns', () => {
+  it('steps an interval forward, one after another', () => {
+    const from = new Date(2026, 8, 25, 10, 0, 0)
+    expect(upcomingRuns(every(30), from, 3).map((at) => at.getTime())).toEqual([
+      from.getTime() + 30 * 60_000,
+      from.getTime() + 60 * 60_000,
+      from.getTime() + 90 * 60_000,
+    ])
+  })
+
+  it('lands on the days a clock schedule allows, skipping the rest', () => {
+    const from = new Date(2026, 8, 25, 7, 0, 0)
+    const times = upcomingRuns(at('08:00', [1, 3]), from, 3)
+    expect(times).toEqual([
+      new Date(2026, 8, 28, 8, 0, 0),
+      new Date(2026, 8, 30, 8, 0, 0),
+      new Date(2026, 9, 5, 8, 0, 0),
+    ])
   })
 })
 

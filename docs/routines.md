@@ -44,3 +44,11 @@ The answer is posted at the target when the run finishes, split if long. A run c
 and the same tool works in any live chat, so *"screenshot the screen and send it"* is not only a
 routine. A failure is posted too (`⚠ routine "…" failed: …`), a run still going when its next time
 comes is skipped rather than stacked, and a routine cannot create routines.
+
+The browser and the phone have a **Routines** screen: the list, one routine's own page — the schedule,
+where it delivers, its run history read back as the same thread a conversation draws — run it now,
+pause or remove it, and a new one made the same conversational way, as a turn. On the phone the screen
+also asks to **remind** you: it schedules a local notification at each of a routine's next fire times,
+because the daemon cannot reach a closed phone any other way. That is a reminder that a routine is
+*due*, not its answer — it still comes if `milo serve` is asleep — and a tap opens the app on the
+routine to read what the run said.

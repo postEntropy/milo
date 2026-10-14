@@ -51,6 +51,7 @@ export const shellTool: Tool<ShellArgs> = {
         command: args.command,
         cwd,
         origin: ctx.origin ?? { gateway: 'local', conversationId: 'install' },
+        sessionId: ctx.sessionId,
         notify: args.notify,
       })
       if (!started.ok) return { content: started.error, isError: true }

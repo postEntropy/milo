@@ -70,6 +70,7 @@ import {
   ROUTINE_GATEWAYS,
   runRoutineOnce,
   setEnabled,
+  upcomingRuns,
   type Routine,
   type RoutineGateway,
   type RoutineTarget,
@@ -87,6 +88,13 @@ import { transcriptOf, type RegisterFile } from './transcript.js'
 
 /** How many runs the front page's timeline shows, newest across every routine. */
 const FEED_LIMIT = 20
+
+/**
+ * How many future fire times a routine carries, for a surface that schedules on them
+ * — the phone's own reminders. Small: the schedule's arithmetic stays in `nextRunAt`,
+ * and a client takes what it needs rather than this guessing how far ahead it looks.
+ */
+const UPCOMING_RUNS = 5
 
 const SESSION_ID = /^[a-z]+-[a-z]+-\d{1,3}$/
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
@@ -969,11 +977,15 @@ export class WebSettings {
   }
 
   private routineView(routine: Routine): Record<string, unknown> {
+    const now = new Date()
     return {
       ...routine,
       whenLabel: describeWhen(routine.when),
       targetLabel: describeTarget(routine.target),
-      nextRunAt: routine.enabled ? nextRunAt(routine.when, new Date()).getTime() : null,
+      nextRunAt: routine.enabled ? nextRunAt(routine.when, now).getTime() : null,
+      // When it next fires, and the few after that, so a client that reminds on them
+      // schedules what the schedule itself says rather than its own reading of `when`.
+      nextRuns: routine.enabled ? upcomingRuns(routine.when, now, UPCOMING_RUNS).map((at) => at.getTime()) : [],
     }
   }
 

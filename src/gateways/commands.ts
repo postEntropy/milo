@@ -340,8 +340,10 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
     listSessions: () => runtime.listSessions(),
     skills: () => runtime.skills,
     sessionStats: () => session.stats(),
-    jobs: () => runtime.jobs?.list() ?? [],
-    killJob: (id) => runtime.jobs?.kill(id) ?? false,
+    // This session's own work: `/jobs` in one chat shows what that chat left running,
+    // not what another conversation is doing.
+    jobs: () => runtime.jobs?.list(session.id) ?? [],
+    killJob: (id) => runtime.jobs?.kill(id, session.id) ?? false,
     compactSession: () => session.compact(signal),
     memories: (limit) => session.memories(limit),
     forgetMemory: (id) => session.forget(id),

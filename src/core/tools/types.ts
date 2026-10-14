@@ -81,6 +81,12 @@ export interface ToolContext {
    */
   origin?: MemoryScope
   /**
+   * The session this turn is running in. A background job it starts belongs to it:
+   * the strip is drawn only there and only there may the job be stopped, so the id
+   * rides along for `shell_command` to stamp on what it leaves running.
+   */
+  sessionId?: string
+  /**
    * Absent on a context that cannot touch routines. A routine's own run is one of
    * them, so a routine cannot make, change or drop another.
    */

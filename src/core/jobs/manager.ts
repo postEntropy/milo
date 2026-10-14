@@ -99,6 +99,7 @@ export class JobManager {
       cwd: input.cwd,
       notify: input.notify ?? 'auto',
       origin: input.origin,
+      sessionId: input.sessionId,
       state: 'running',
       startedAt: Date.now(),
       logPath: jobLogFile(id),
@@ -150,16 +151,21 @@ export class JobManager {
     return { ok: true, job: this.info(job) }
   }
 
-  /** Every job this process knows, newest first. */
-  list(): JobInfo[] {
+  /**
+   * Every job this process knows, newest first. With a `sessionId`, only the ones
+   * that session started — a job belongs to the conversation that ran it, and a
+   * surface drawing another session's work would be saying something false.
+   */
+  list(sessionId?: string): JobInfo[] {
     return [...this.jobs.values()]
+      .filter((job) => sessionId === undefined || job.sessionId === sessionId)
       .map((job) => this.info(job))
       .sort((a, b) => b.startedAt - a.startedAt)
   }
 
-  /** Live state for the system prompt: the jobs still running. */
-  facts(): JobFacts {
-    return { jobs: this.list() }
+  /** Live state for the system prompt: the jobs still running in this session. */
+  facts(sessionId?: string): JobFacts {
+    return { jobs: this.list(sessionId) }
   }
 
   get(id: string): JobInfo | null {
@@ -167,10 +173,15 @@ export class JobManager {
     return job ? this.info(job) : null
   }
 
-  /** Stops a running job. False when there is no such job, or it already ended. */
-  kill(id: string): boolean {
+  /**
+   * Stops a running job. False when there is no such job, it already ended, or it
+   * belongs to another session — a client may only stop the work its own session
+   * started, the same rule its permission prompts follow.
+   */
+  kill(id: string, sessionId?: string): boolean {
     const job = this.jobs.get(id)
     if (!job || job.state !== 'running') return false
+    if (sessionId !== undefined && job.sessionId !== sessionId) return false
     job.killing = true
     this.terminate(job)
     return true
@@ -295,6 +306,7 @@ export class JobManager {
       cwd: job.cwd,
       notify: job.notify,
       origin: job.origin,
+      sessionId: job.sessionId,
       state: job.state,
       startedAt: job.startedAt,
       endedAt: job.endedAt,
@@ -320,6 +332,7 @@ export class JobManager {
       cwd: job.cwd,
       notify: job.notify,
       origin: job.origin,
+      sessionId: job.sessionId,
       state: job.state,
       startedAt: job.startedAt,
       endedAt: job.endedAt,
@@ -386,6 +399,7 @@ export class JobManager {
         cwd: typeof parsed.cwd === 'string' ? parsed.cwd : '',
         notify: (parsed.notify as JobNotify) ?? 'auto',
         origin: parsed.origin ?? { gateway: 'local', conversationId: 'install' },
+        sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : undefined,
         state: (parsed.state as JobState) ?? 'error',
         startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : 0,
         endedAt: typeof parsed.endedAt === 'number' ? parsed.endedAt : undefined,

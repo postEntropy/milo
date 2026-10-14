@@ -250,3 +250,40 @@ describe('the announcement', () => {
     await jobs.close()
   })
 })
+
+describe('a job belongs to the session that started it', () => {
+  it('is listed and stopped only by that session', async () => {
+    const jobs = new JobManager()
+    const started = jobs.start({ command: 'sleep 30', cwd: process.cwd(), origin, sessionId: 'sess-a' })
+    expect(started.ok).toBe(true)
+    if (!started.ok) return
+
+    // Another session neither sees it nor may stop it.
+    expect(jobs.list('sess-b')).toEqual([])
+    expect(jobs.list('sess-a').map((job) => job.id)).toEqual([started.job.id])
+    expect(jobs.kill(started.job.id, 'sess-b')).toBe(false)
+    expect(jobs.get(started.job.id)?.state).toBe('running')
+
+    // Its own session stops it.
+    expect(jobs.kill(started.job.id, 'sess-a')).toBe(true)
+    await jobs.close()
+  })
+
+  it('is hidden from another session by the tools', async () => {
+    const jobs = new JobManager()
+    const started = jobs.start({ command: 'sleep 30', cwd: process.cwd(), origin, sessionId: 'sess-a' })
+    expect(started.ok).toBe(true)
+    if (!started.ok) return
+
+    const other = { ...ctx(jobs), sessionId: 'sess-b' }
+    const status = await createJobStatusTool(jobs).execute({ id: started.job.id }, other)
+    expect(status.content).toBe(`No job "${started.job.id}".`)
+    const kill = await createJobKillTool(jobs).execute({ id: started.job.id }, other)
+    expect(kill.content).toBe(`No job "${started.job.id}".`)
+
+    // The session that made it still sees it.
+    const mine = { ...ctx(jobs), sessionId: 'sess-a' }
+    expect((await createJobStatusTool(jobs).execute({ id: started.job.id }, mine)).content).toContain('running')
+    await jobs.close()
+  })
+})

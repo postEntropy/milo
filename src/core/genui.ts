@@ -214,9 +214,23 @@ const formulaSchema = z
   .max(140)
   .regex(/^[\dA-Za-z_+\-*/(). \t]+$/, 'a formula is numbers, input ids, + - * / and parentheses')
 
-const labelSchema = z.string().min(1).max(120)
+/**
+ * A string the person reads, held to `max`: one that runs long is cut with an ellipsis
+ * rather than refusing the tree. The caps below are about keeping a widget a glance, but
+ * a model that writes a long line — a directory listing, a list of packages, a sentence
+ * where a phrase was asked for — was losing the whole widget to one over-long cell, which
+ * is the worse trade. The cut *is* the cap: `overwrite` runs after the checks and leaves
+ * the schema the catalog sends on the wire untouched, so the shape stays readable as a
+ * JSON Schema. The strings that are not read keep their strict limits: an `id` that is cut
+ * keys nothing and a formula that is cut computes nothing, so those still refuse rather
+ * than arrive quietly wrong.
+ */
+const shown = (max: number, min = 0): z.ZodType<string> =>
+  z.string().min(min).overwrite((text) => (text.length > max ? `${text.slice(0, max - 1)}…` : text))
+
+const labelSchema = shown(120, 1)
 const scaleSchema = z.union([z.literal(1), z.literal(2), z.literal(3), z.literal(4)])
-const money = z.string().max(12)
+const money = shown(12)
 
 /** A JSON number, whole: `3.` is a number being written, not one that is finished. */
 const NUMBER_RE = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/
@@ -231,7 +245,7 @@ const genUiNodeSchema: z.ZodType<GenUiNode> = z.lazy(() =>
       children: z.array(genUiNodeSchema).min(1).max(24),
     }),
     z.object({ kind: z.literal('title'), text: labelSchema, size: z.enum(GENUI_TITLE_SIZES).optional() }),
-    z.object({ kind: z.literal('text'), text: z.string().min(1).max(600) }),
+    z.object({ kind: z.literal('text'), text: shown(600, 1) }),
     z.object({
       kind: z.literal('stat'),
       label: labelSchema,
@@ -245,29 +259,29 @@ const genUiNodeSchema: z.ZodType<GenUiNode> = z.lazy(() =>
       // A name may be empty: the corner cell above a column of row labels has none,
       // and that table is the first one every model writes. Refusing it refuses the
       // whole widget over a cell that was never going to hold anything.
-      columns: z.array(z.string().max(60)).min(1).max(8),
-      // 200, the same as a `list` item: a cell holding a short phrase with its own
-      // punctuation is an ordinary cell, not a widget turning into a page.
-      rows: z.array(z.array(z.string().max(200)).max(8)).min(1).max(50),
+      columns: z.array(shown(60)).min(1).max(8),
+      // A cell is a phrase, and one that runs longer is cut rather than refused: a
+      // listing crammed into a cell is a long line, not a reason to lose the table.
+      rows: z.array(z.array(shown(200)).max(8)).min(1).max(50),
     }),
-    z.object({ kind: z.literal('list'), items: z.array(z.string().min(1).max(200)).min(1).max(24) }),
+    z.object({ kind: z.literal('list'), items: z.array(shown(200, 1)).min(1).max(24) }),
     z.object({
       kind: z.literal('steps'),
-      title: z.string().min(1).max(120).optional(),
+      title: shown(120, 1).optional(),
       entries: z
-        .array(z.object({ title: z.string().min(1).max(120), detail: z.string().min(1).max(240).optional() }))
+        .array(z.object({ title: shown(120, 1), detail: shown(240, 1).optional() }))
         .min(1)
         .max(12),
     }),
     z.object({
       kind: z.literal('facts'),
-      title: z.string().min(1).max(120).optional(),
+      title: shown(120, 1).optional(),
       entries: z
         // A pair is a name and what it says, and what it says is a clause: 60 refused
         // three of the four pairs a model wrote for a real question — each a sentence
         // that belonged there — and took the whole widget with them. The label is the
         // same label a `stat` carries; the value holds what a `list` item holds.
-        .array(z.object({ label: labelSchema, value: z.string().min(1).max(200) }))
+        .array(z.object({ label: labelSchema, value: shown(200, 1) }))
         .min(1)
         .max(12),
     }),
@@ -297,8 +311,8 @@ const genUiNodeSchema: z.ZodType<GenUiNode> = z.lazy(() =>
       kind: z.literal('select'),
       id: idSchema,
       label: labelSchema,
-      options: z.array(z.string().min(1).max(60)).min(1).max(12),
-      value: z.string().max(60),
+      options: z.array(shown(60, 1)).min(1).max(12),
+      value: shown(60),
     }),
     z.object({ kind: z.literal('button'), label: labelSchema, send: z.string().min(1).max(1000) }),
   ]),
@@ -307,7 +321,7 @@ const genUiNodeSchema: z.ZodType<GenUiNode> = z.lazy(() =>
 /** The shape a widget arrives in, whatever carried it: a heading, and its tree. */
 export const genUiSchema = z
   .object({
-    title: z.string().min(1).max(120).optional(),
+    title: shown(120, 1).optional(),
     tree: genUiNodeSchema,
   })
   .superRefine((value, ctx) => {
@@ -596,8 +610,8 @@ export const GENUI_SECTION = [
   '- `title`: `text`, and `size` ("sm", "md", "lg" or "xl").',
   '- `text`: `text` — a `{id}` in it shows that input\'s current value.',
   '- `stat`: `label` and `formula`, and optionally `prefix`, `suffix`, `decimals`.',
-  '- `table`: `columns` (at most 8) and `rows` — one array of cell strings per row, at most 50.',
-  '- `list`: `items`, at most 24.',
+  '- `table`: `columns` (at most 8) and `rows` — one array of cell strings per row, at most 50. A cell is a phrase, not a sentence: the detail that does not fit belongs in the prose beside it.',
+  '- `list`: `items`, at most 24. An item is a line, not a paragraph.',
   '- `steps`: an optional `title`, and `entries` — `{title, detail?}`, at most 12.',
   '- `facts`: an optional `title`, and `entries` — `{label, value}`, at most 12.',
   '- `slider`: `id`, `label`, `min`, `max`, `value`, and optionally `step`, `prefix`, `suffix`.',

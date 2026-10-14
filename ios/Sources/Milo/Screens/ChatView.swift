@@ -39,6 +39,7 @@ struct ChatView: View {
     @State private var drawer = false
     @State private var picker = false
     @State private var settings = false
+    @State private var routines = false
     /// The composer's panel, when one is open — raised by the `+` or by a long press on the
     /// send control, drawn over the composer, dismissed by a tap anywhere but itself.
     @State private var menu: ComposerMenu?
@@ -46,7 +47,8 @@ struct ChatView: View {
     /// Read off the composer itself: it grows with the draft and with every strip above the
     /// field, so no constant would place the panel right.
     @State private var composerHeight: CGFloat = 0
-    @State private var liveActivity = MiloLiveActivityController()
+    /// How tall the top bar came out, so the line under it is placed where the bar ends.
+    @State private var topbarHeight: CGFloat = 0
     /// The session being renamed from this screen — the dots in the top bar name it,
     /// and the shared alert does the rest.
     @State private var renaming: String?
@@ -94,6 +96,10 @@ struct ChatView: View {
                 onSettings: {
                     drawer = false
                     settings = true
+                },
+                onRoutines: {
+                    drawer = false
+                    routines = true
                 }
             )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -171,18 +177,6 @@ struct ChatView: View {
         // would land on the person's own thumb.
         .sensoryFeedback(.impact(weight: .medium, intensity: 0.6), trigger: model.answerBegan)
         .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.5), trigger: model.answerEnded)
-        .onChange(of: model.busy) { _, busy in
-            Task {
-                if busy {
-                    await liveActivity.start(sessionID: model.sessionId)
-                } else {
-                    await liveActivity.finish()
-                }
-            }
-        }
-        .onChange(of: model.answerBegan) { _, _ in
-            Task { await liveActivity.update(.replying) }
-        }
         // A swipe across the thread opens the sessions and a swipe back closes them — the
         // gesture the platform's own sidebars answer to, from wherever the person swipes.
         // Only a mostly horizontal drag counts, so scrolling the thread is never mistaken
@@ -223,6 +217,15 @@ struct ChatView: View {
         }
         .sheet(isPresented: $picker) { ModelPickerSheet() }
         .sheet(isPresented: $settings) { SettingsView(account: account) }
+        .sheet(isPresented: $routines) { RoutinesView(account: account) }
+        // A tapped reminder asks for the Routines screen: it is drawn over the chat, so
+        // the routine it named can open without the person finding the drawer first.
+        .onChange(of: model.pendingRoutine) { _, id in
+            if id != nil { routines = true }
+        }
+        .onAppear {
+            if model.pendingRoutine != nil { routines = true }
+        }
         .sessionRename($renaming)
     }
 
@@ -448,9 +451,13 @@ struct ChatView: View {
             .scrollEdgeEffectStyle(.soft, for: .vertical)
             // Asked of the scroll box, the way the browser asks its own: the end is the
             // end within a hundred points, so the arrow does not appear while the last
-            // line is still in sight.
+            // line is still in sight. The room under the words is not content the arrow
+            // could be pointing at — it is empty by design, held for the reply — so the
+            // end is measured from where the words stop rather than from the box's own
+            // bottom; otherwise a flick of the thumb reads as having left the thread
+            // behind while every word of it is still on screen.
             .onScrollGeometryChange(for: Bool.self) { geometry in
-                geometry.contentSize.height - geometry.contentOffset.y - geometry.containerSize.height < 120
+                geometry.contentSize.height - room - geometry.contentOffset.y - geometry.containerSize.height < 120
             } action: { _, atEnd in
                 self.atEnd = atEnd
             }
@@ -502,8 +509,20 @@ struct ChatView: View {
                 placed = true
                 proxy.scrollTo(Self.threadTop, anchor: .top)
             }
-            .safeAreaInset(edge: .top, spacing: 0) { topbar }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                topbar
+                    // How tall the bar came out, so the line under it knows where it starts.
+                    .onGeometryChange(for: CGFloat.self) { proxy in
+                        proxy.size.height
+                    } action: { _, height in
+                        topbarHeight = height
+                    }
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) { bottom(proxy) }
+            // The line floats over the thread, under the bar: it takes no room from what is
+            // being read, and comes and goes as a fade rather than a jump.
+            .overlay(alignment: .top) { noteToast }
+            .animation(.smooth(duration: 0.22), value: model.note)
         }
     }
 
@@ -639,15 +658,57 @@ struct ChatView: View {
             .frame(width: 30, height: 30)
     }
 
+    /// What just happened, floated under the top bar and worn in the platform's own glass —
+    /// the material every control here is made of — so the line reads as part of the surface
+    /// rather than a bare sentence on the page. It is as wide as its own words need and no
+    /// wider: a two-word confirmation is a small bubble, and a long line grows the bubble with
+    /// it, held between the thread's own margins.
+    @ViewBuilder private var noteToast: some View {
+        if let note = model.note {
+            // The two spacers are what make the bubble take only its own width — a short line a
+            // small bubble, a long one wrapping against the margin — and hold it centred, the
+            // same shape the person's own message is given.
+            HStack(spacing: 0) {
+                Spacer(minLength: MiloTheme.margin)
+                HStack(alignment: .top, spacing: MiloTheme.Space.three) {
+                    Image(systemName: note.failed ? "exclamationmark.circle.fill" : "checkmark.circle.fill")
+                        .font(MiloTheme.Text.body)
+                        .foregroundStyle(note.failed ? MiloTheme.danger : MiloTheme.success)
+                    Text(note.text)
+                        .font(MiloTheme.Text.body)
+                        .foregroundStyle(note.failed ? MiloTheme.danger : MiloTheme.foreground)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button {
+                        model.dismissNote()
+                    } label: {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(MiloTheme.muted)
+                            .frame(width: 26, height: 26)
+                            .contentShape(Rectangle())
+                    }
+                    .accessibilityLabel("Dismiss")
+                }
+                .padding(.horizontal, MiloTheme.Space.four)
+                .padding(.vertical, MiloTheme.Space.three)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+                Spacer(minLength: MiloTheme.margin)
+            }
+            .padding(.top, topbarHeight + MiloTheme.Space.two)
+            .transition(.opacity)
+            // A notice is not a thing to keep: it says what just happened and then gets out of
+            // the way, an error holding longer because it is the one worth reading. The same
+            // life the browser's own notice keeps.
+            .task(id: note) {
+                try? await Task.sleep(for: .seconds(note.failed ? 9 : 5))
+                model.dismissNote()
+            }
+        }
+    }
+
     private func bottom(_ proxy: ScrollViewProxy) -> some View {
         VStack(spacing: MiloTheme.Space.two) {
-            if let note = model.note {
-                Text(note.text)
-                    .font(MiloTheme.Text.small)
-                    .foregroundStyle(note.failed ? MiloTheme.danger : MiloTheme.foreground2)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, MiloTheme.Space.five)
-            }
             if let pending = model.pending {
                 PermissionBar(pending: pending)
             }
@@ -952,7 +1013,7 @@ struct Composer: View {
 }
 
 /// The background jobs still running, in a strip above the composer — the browser's own,
-/// drawn from the same `jobs` frame. A job is one filled chip: what it is running, how long
+/// drawn from the same `jobs` frame. A job is one glass chip: what it is running, how long
 /// it has been going, and the tail of what it has printed, folded until a tap opens it; the
 /// control beside the chip stops it. Only running jobs are ever in the list, so an ended one
 /// leaves the strip on its own.
@@ -1019,10 +1080,10 @@ struct JobStrip: View {
             .buttonStyle(PressableStyle())
             .accessibilityLabel("Stop this job")
         }
-        .padding(.leading, MiloTheme.Space.three)
+        .padding(.leading, MiloTheme.Space.four)
         .padding(.trailing, MiloTheme.Space.two)
         .padding(.vertical, MiloTheme.Space.two)
-        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.sm))
+        .glassEffect(.regular, in: Capsule())
     }
 
     private func log(_ job: JobView) -> some View {
@@ -1034,7 +1095,8 @@ struct JobStrip: View {
                 .padding(MiloTheme.Space.three)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.sm))
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+        .marksScrollBox()
     }
 
     /// The command on one line: the browser's own `oneLine` clips at eighty characters, so
@@ -1077,6 +1139,9 @@ struct MessageRow: View {
     /// The person's own message, back in the composer to be said again — with the turn the
     /// session is forked at, so the edit replaces the message rather than following it.
     let onEdit: (String, Int) -> Void
+    /// A message read back rather than spoken to — a routine's run. The controls that
+    /// answer it (quote, ask again, fork) are left off, so a past run is read, not acted on.
+    var readOnly = false
     @Environment(AppModel.self) private var model
     @State private var showReasoning = false
 
@@ -1200,7 +1265,7 @@ struct MessageRow: View {
                     // written has nothing to act on yet, and a message with no words has
                     // nothing to copy.
                     if !message.streaming, !message.prose.isEmpty {
-                        MessageToolbar(message: message, turn: turn, regenerate: regenerate, onQuote: onQuote)
+                        MessageToolbar(message: message, turn: turn, regenerate: regenerate, onQuote: onQuote, readOnly: readOnly)
                     }
                 }
                 // The buttons a command drew, under its cards or its words: the pages of
@@ -1274,6 +1339,8 @@ struct MessageToolbar: View {
     let regenerate: (prompt: String, upToTurn: Int)?
     /// The words picked out of this answer, handed to the composer.
     let onQuote: (String) -> Void
+    /// A message read back rather than answered: only Copy is offered.
+    var readOnly = false
     @Environment(AppModel.self) private var model
     @State private var copied = false
 
@@ -1292,7 +1359,9 @@ struct MessageToolbar: View {
             }
             // The answer whole, to answer. The browser keeps this a press deeper, in the
             // message's own menu; a phone has the room, and one press is what it has.
-            control("text.quote", label: "Quote") { onQuote(message.prose) }
+            if !readOnly {
+                control("text.quote", label: "Quote") { onQuote(message.prose) }
+            }
             if let regenerate {
                 control("arrow.clockwise", label: "Ask this again", disabled: model.busy) {
                     Task { await model.regenerate(prompt: regenerate.prompt, upToTurn: regenerate.upToTurn) }
@@ -1301,7 +1370,7 @@ struct MessageToolbar: View {
             // Only where it holds something: an answer read back from the transcript
             // carries neither its cost nor its raw copy, and dots over an empty menu
             // are a control that promises what it cannot do.
-            if message.tokens != nil || message.raw != nil {
+            if !readOnly, message.tokens != nil || message.raw != nil {
                 more
             }
         }
@@ -1699,6 +1768,7 @@ struct ToolRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+        .marksScrollBox()
         .padding(.leading, 22)
     }
 

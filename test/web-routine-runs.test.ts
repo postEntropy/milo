@@ -147,4 +147,29 @@ describe('web Settings reads a routine’s runs', () => {
     await expect(settings.handle('run-transcript', { id: 'nope-nope-9' })).rejects.toThrow('No such run')
     await expect(settings.handle('routine-runs', { id: 'no-such-routine' })).rejects.toThrow('No routine')
   })
+
+  it('carries the times a routine will next fire, for a surface that reminds on them', async () => {
+    writeConfig()
+    const settings = new WebSettings(build(), home, registry())
+    const created = await settings.handle('routine-add', {
+      prompt: 'look at the repo',
+      every: '6h',
+      target: { gateway: 'web', conversationId: CONVERSATION },
+    }) as { routine: { id: string } }
+
+    type View = { id: string; nextRunAt: number | null; nextRuns: number[] }
+    const listed = await settings.handle('routines') as View[]
+    const view = listed.find((routine) => routine.id === created.routine.id)
+    expect(view?.nextRuns).toHaveLength(5)
+    // The first is the routine's own next run, and each one follows the last.
+    expect(view?.nextRuns[0]).toBe(view?.nextRunAt)
+    expect(view?.nextRuns.every((at, index) => index === 0 || at > (view?.nextRuns[index - 1] ?? 0))).toBe(true)
+    expect(view?.nextRuns.every((at) => at > Date.now())).toBe(true)
+
+    // A paused routine fires at nothing, so it carries nothing to schedule.
+    await settings.handle('routine-enable', { id: created.routine.id, enabled: false })
+    const paused = (await settings.handle('routines') as View[]).find((routine) => routine.id === created.routine.id)
+    expect(paused?.nextRuns).toEqual([])
+    expect(paused?.nextRunAt).toBeNull()
+  })
 })

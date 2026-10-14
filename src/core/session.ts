@@ -564,8 +564,9 @@ export class Session {
       // and what the model opens mid-turn is reported by its own tool result.
       panel: opts?.panel ?? null,
       // Read live, like the panel: a job started a step ago is in the line the
-      // next turn sees, and one that ended is not.
-      jobs: this.options.jobs?.facts() ?? null,
+      // next turn sees, and one that ended is not. Only this session's: another
+      // conversation's work is not this turn's to report.
+      jobs: this.options.jobs?.facts(this.id) ?? null,
     }
 
     // Measured against the request that will actually be sent: the tool list,
@@ -650,6 +651,7 @@ export class Session {
           remember,
           recall,
           origin,
+          sessionId: this.id,
           routine,
           sessionAdmin,
           sendFile,

@@ -197,6 +197,43 @@ enum MiloApi {
     static func overview(_ account: Account) async throws -> SettingsOverview {
         try await call("overview", account: account, as: SettingsOverview.self)
     }
+
+    // MARK: - Routines
+
+    /// Every routine the install has, as its own screen draws them.
+    static func routines(_ account: Account) async throws -> [RoutineSummary] {
+        try await call("routines", account: account, as: [RoutineSummary].self)
+    }
+
+    /// Fires one now and answers with what it said. It does not deliver — the chat it
+    /// is bound to would get it twice — so the run is opened to read.
+    static func runRoutine(_ account: Account, id: String) async throws -> RoutineRunResult {
+        try await call("routine-run", ["id": id], account: account, as: RoutineRunResult.self)
+    }
+
+    static func setRoutineEnabled(_ account: Account, id: String, enabled: Bool) async throws {
+        _ = try await call("routine-enable", ["id": id, "enabled": enabled], account: account, as: Ack.self)
+    }
+
+    static func removeRoutine(_ account: Account, id: String) async throws {
+        _ = try await call("routine-remove", ["id": id], account: account, as: Ack.self)
+    }
+
+    /// What a routine has produced, newest first, a page at a time.
+    static func routineRuns(_ account: Account, id: String, offset: Int, limit: Int) async throws -> RoutineRuns {
+        try await call("routine-runs", ["id": id, "offset": offset, "limit": limit], account: account, as: RoutineRuns.self)
+    }
+
+    /// One run read back whole: the same transcript a conversation draws. Read-only,
+    /// so opening a past run never takes the conversation over.
+    static func routineTranscript(_ account: Account, id: String) async throws -> [WireMessage] {
+        try await call("run-transcript", ["id": id], account: account, as: [WireMessage].self)
+    }
+
+    /// The most recent runs across every routine, newest first.
+    static func routineFeed(_ account: Account) async throws -> [RoutineFeedEntry] {
+        try await call("routine-feed", account: account, as: [RoutineFeedEntry].self)
+    }
 }
 
 struct SettingsOverview: Decodable {
@@ -236,5 +273,126 @@ struct SettingsOverview: Decodable {
         let permissionModes: [String]?
         let toolLevels: [String]?
         let efforts: [String]?
+    }
+}
+
+/// A scheduled routine, as the Routines screen lists it. Read leniently, like a session
+/// row: the daemon's own labels are drawn rather than recomputed here, so a shape this
+/// build does not know costs that field, never the list.
+struct RoutineSummary: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String?
+    let prompt: String
+    /// The schedule and the destination, said by the daemon's own describers.
+    let whenLabel: String
+    let targetLabel: String
+    let nextRunAt: Double?
+    /// The next few fire times, for the reminders. Absent from an older daemon, which
+    /// then carries only `nextRunAt`.
+    let nextRuns: [Double]
+    let enabled: Bool
+    /// The tools it may use unattended, approved when it was made.
+    let allow: [String]
+    let lastRunAt: Double?
+    let lastResult: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, prompt, whenLabel, targetLabel, nextRunAt, nextRuns, enabled, allow, lastRunAt, lastResult
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        prompt = try container.decodeIfPresent(String.self, forKey: .prompt) ?? ""
+        whenLabel = try container.decodeIfPresent(String.self, forKey: .whenLabel) ?? ""
+        targetLabel = try container.decodeIfPresent(String.self, forKey: .targetLabel) ?? ""
+        nextRunAt = try container.decodeIfPresent(Double.self, forKey: .nextRunAt)
+        nextRuns = try container.decodeIfPresent([Double].self, forKey: .nextRuns) ?? []
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        allow = try container.decodeIfPresent([String].self, forKey: .allow) ?? []
+        lastRunAt = try container.decodeIfPresent(Double.self, forKey: .lastRunAt)
+        lastResult = try container.decodeIfPresent(String.self, forKey: .lastResult)
+    }
+
+    /// What the row says: the name it was given, or the words it opened with.
+    var label: String {
+        let named = (name ?? "").trimmingCharacters(in: .whitespaces)
+        if !named.isEmpty { return named }
+        let opening = prompt.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
+        return opening.isEmpty ? "Routine" : String(opening.prefix(70))
+    }
+
+    /// When it will fire, from the schedule itself: the projected list, or the one time
+    /// an older daemon sends. Empty while it is paused.
+    var upcoming: [Double] {
+        nextRuns.isEmpty ? (nextRunAt.map { [$0] } ?? []) : nextRuns
+    }
+
+    var failed: Bool { lastResult == "error" }
+}
+
+/// One run of a routine, as the history lists it.
+struct RoutineRun: Decodable, Identifiable, Hashable {
+    let id: String
+    let at: Double
+}
+
+/// A page of a routine's runs, with the count behind it so the list knows when to stop.
+struct RoutineRuns: Decodable {
+    let total: Int
+    let runs: [RoutineRun]
+
+    private enum CodingKeys: String, CodingKey { case total, runs }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        total = try container.decodeIfPresent(Int.self, forKey: .total) ?? 0
+        runs = try container.decodeIfPresent([RoutineRun].self, forKey: .runs) ?? []
+    }
+}
+
+/// What firing a routine now answered, and the id of the run it made.
+struct RoutineRunResult: Decodable {
+    let runId: String?
+    let answer: String
+    let failure: String?
+
+    private enum CodingKeys: String, CodingKey { case runId, answer, failure }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        runId = try container.decodeIfPresent(String.self, forKey: .runId)
+        answer = try container.decodeIfPresent(String.self, forKey: .answer) ?? ""
+        failure = try container.decodeIfPresent(String.self, forKey: .failure)
+    }
+}
+
+/// One run as the front page's timeline lists it, across every routine.
+struct RoutineFeedEntry: Decodable, Identifiable, Hashable {
+    /// The routine the run belongs to — the id a tap opens its page by.
+    let routineId: String
+    let runId: String
+    /// The routine's name, or the words it opened with.
+    let routine: String
+    let at: Double
+    let answer: String
+
+    /// The run is the row, so it is what a list keys on — a routine's page is reached
+    /// through `routineId` on a tap, not by the row's identity.
+    var id: String { runId }
+
+    private enum CodingKeys: String, CodingKey {
+        case routineId = "id"
+        case runId, routine, at, answer
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        routineId = try container.decode(String.self, forKey: .routineId)
+        runId = try container.decodeIfPresent(String.self, forKey: .runId) ?? routineId
+        routine = try container.decodeIfPresent(String.self, forKey: .routine) ?? ""
+        at = try container.decodeIfPresent(Double.self, forKey: .at) ?? 0
+        answer = try container.decodeIfPresent(String.self, forKey: .answer) ?? ""
     }
 }
