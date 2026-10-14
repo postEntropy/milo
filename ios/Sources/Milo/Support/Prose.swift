@@ -16,6 +16,9 @@ struct Prose: View {
     /// of an accent when the words sit on the person's own bubble. The decorative marks
     /// (a list's bullet, a table's headers) keep their own muted tone.
     var color: Color = MiloTheme.foreground
+    /// Whether this text is still arriving from the model. New glyphs fade into place;
+    /// settled prose keeps selection and the quote action.
+    var isStreaming = false
     /// What to do with words picked out of this prose, or nil where they cannot be quoted.
     /// Where it is set every block of words is drawn by a text view that can raise the
     /// offer; where it is not, by `Text` — the branch the person's own bubble keeps.
@@ -152,7 +155,9 @@ struct Prose: View {
     /// the surface the words are painted on, never the words themselves.
     @ViewBuilder
     private func words(_ attributed: AttributedString, font: Font, face: UIFont, tone: Color) -> some View {
-        if let onQuote {
+        if isStreaming {
+            StreamingText(attributed: attributed, font: font, tone: tone)
+        } else if let onQuote {
             SelectableText(attributed: attributed, face: face, tone: UIColor(tone), onQuote: onQuote)
         } else {
             Text(attributed)

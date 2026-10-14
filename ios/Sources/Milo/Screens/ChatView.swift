@@ -833,6 +833,7 @@ struct MessageRow: View {
                             case .calls(let calls):
                                 ToolChain(calls: calls)
                             case .one(let part):
+                                PartView(part: part, onQuote: onQuote, isStreaming: message.streaming)
                             }
                     }
                     if !message.attachments.isEmpty {
@@ -1166,12 +1167,13 @@ struct PartView: View {
     let part: WirePart
     /// The words picked out of this part of an answer, handed to the composer.
     let onQuote: (String) -> Void
+    var isStreaming = false
     @Environment(AppModel.self) private var model
 
     var body: some View {
         switch part {
         case .text(let text):
-            Prose(text: text, onQuote: onQuote)
+            Prose(text: text, isStreaming: isStreaming, onQuote: isStreaming ? nil : onQuote)
         case .todo(let items):
             TodoRow(items: items)
         case .ui(let widget, _):
