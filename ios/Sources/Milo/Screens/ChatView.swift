@@ -53,6 +53,10 @@ struct ChatView: View {
     /// Whether the thread is at its end, read off the scroll itself. What the arrow
     /// above the composer answers to.
     @State private var atEnd = true
+    /// The room the thread draws in, and how tall its last message came out. What the tail
+    /// under the thread measures itself against — see the thread's end below.
+    @State private var threadHeight: CGFloat = 0
+    @State private var lastHeight: CGFloat = 0
     /// The boxes in the thread that scroll sideways on their own — a code block, a table.
     /// Their frames ride up as a preference so a drag can be told where it began; held in
     /// a plain reference, so a scroll that moves them does not re-render the screen.
@@ -369,22 +373,43 @@ struct ChatView: View {
                             onQuote: quoteIt,
                             onEdit: editMessage
                         )
+                        // Named so a send can put these words at the top of the thread — and
+                        // measured when they are the last of them, so the room under the thread
+                        // only holds what the words have not taken of it.
+                        .id(message.id)
+                        .onGeometryChange(for: CGFloat.self) { proxy in
+                            proxy.size.height
+                        } action: { _, height in
+                            if message.id == model.messages.last?.id { lastHeight = height }
+                        }
                     }
-                    // The end of the thread, as something to be pointed at: where the arrow
-                    // goes back to, and where a send takes the person.
-                    Color.clear.frame(height: 1).id(Self.threadEnd)
+                    // The end of the thread, as something to be pointed at: where the arrow goes
+                    // back to, and where a send takes the person. It carries the room under the
+                    // last words — a screenful of the thread, less what they already take — so a
+                    // send can put the person's own message at the top with the reply's space
+                    // open beneath it, and so the room gives way to the reply as it grows and
+                    // the thread's end stays where the words end.
+                    // The room belongs to a thread that has words in it: a screen with nothing
+                    // on it yet rests against the composer, its prompt standing where the reply
+                    // will land rather than up at the top of an empty page.
+                    Color.clear
+                        .frame(height: model.messages.isEmpty ? 1 : max(1, threadHeight - lastHeight))
+                        .id(Self.threadEnd)
                 }
                 .padding(.horizontal, MiloTheme.margin)
                 .padding(.top, MiloTheme.Space.four)
                 // The thread sits close over the composer: the last line belongs to the
                 // thing being typed, not a hand's width above it.
             }
-            // The thread's end stays in view as it grows, and a screen with no words in it
-            // rests against the composer — the ways in are the field's companion, not a
-            // banner on an empty page. The role that places content shorter than the room is
-            // named on its own rather than left to the other anchor to imply.
-            .defaultScrollAnchor(.bottom)
-            .defaultScrollAnchor(.bottom, for: .alignment)
+            // The thread hangs from its own top: a send puts the person's words up there and
+            // the reply writes itself downward in the room below, and nothing carries the
+            // thread along while it does — what has grown past the screen is read by scrolling
+            // to it. A screen with no words in it still rests against the composer, the ways in
+            // being the field's companion rather than a banner on an empty page. The role that
+            // places content shorter than the room is named on its own rather than left to the
+            // other anchor to imply.
+            .defaultScrollAnchor(model.messages.isEmpty ? .bottom : .top)
+            .defaultScrollAnchor(model.messages.isEmpty ? .bottom : .top, for: .alignment)
             .scrollDismissesKeyboard(.interactively)
             .scrollEdgeEffectStyle(.soft, for: .vertical)
             // Asked of the scroll box, the way the browser asks its own: the end is the
@@ -395,11 +420,19 @@ struct ChatView: View {
             } action: { _, atEnd in
                 self.atEnd = atEnd
             }
-            // A send takes the person to the end of the thread: their own words are the
-            // last thing said, and the answer is about to grow under them.
+            // The room the thread draws in, off the scroll's own box — see the thread's end.
+            .onScrollGeometryChange(for: CGFloat.self) { geometry in
+                geometry.containerSize.height
+            } action: { _, height in
+                threadHeight = height
+            }
+            // A send puts the person's own words at the top of the thread, never at its end:
+            // the keyboard goes down with the send, and the room it was taking is where the
+            // answer writes itself. What came before scrolls away above the bubble, so the
+            // reply has the screen — the way the chat apps do it.
             .onChange(of: model.messages.last?.id) { _, _ in
-                guard model.messages.last?.isUser == true else { return }
-                withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(Self.threadEnd, anchor: .bottom) }
+                guard let sent = model.messages.last, sent.isUser else { return }
+                withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo(sent.id, anchor: .top) }
             }
             // A session opens on its own content. The thread is emptied before the daemon
             // replays, and a scroll left where the old thread was leaves the empty state
@@ -407,6 +440,9 @@ struct ChatView: View {
             // comes out blank. Putting the scroll back on it makes the welcome appear every
             // time, and a thread with words in it takes over from there as it grows.
             .onChange(of: model.sessionId) { _, _ in
+                // The room is measured off the last message, and the last message is the one
+                // session's; the next thread measures its own before the room means anything.
+                lastHeight = 0
                 proxy.scrollTo(Self.threadTop, anchor: .top)
             }
             .safeAreaInset(edge: .top, spacing: 0) { topbar }
@@ -598,13 +634,20 @@ struct WelcomeView: View {
             .animation(.easeInOut(duration: 0.3), value: model.ideas)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The empty state is the thread's only content, but the stack still leaves its
+        // own gap before the one-point end sentinel below it — and with the whole block
+        // anchored to the bottom, that gap comes out as air between the last way in and
+        // the field. Pulled back by exactly it, so the ways in rest against the composer
+        // they feed; a thread with messages keeps its spacing untouched.
+        .padding(.bottom, -MiloTheme.Space.six)
     }
 
     /// One way in: its mark, its words, and what a press does — the prompt said as a
     /// message, or the session it names opened.
     ///
     /// The line is drawn a step off the heading's white: the mark and the words share
-    /// one near-white grey, so the row reads as a quiet way in rather than as the answer.
+    /// one quiet grey — a tone down from the platform's own secondary — so the row reads
+    /// as a way in rather than as the answer.
     private func line(_ suggestion: Suggestion) -> some View {
         Button {
             press(suggestion)
