@@ -35,6 +35,10 @@ final class AppModel {
         var rawNoOutput: String? = nil
         /// What the turn cost the model, shown in the message's own menu.
         var tokens: (input: Int, output: Int)? = nil
+        /// The button rows a command drew, under its reply.
+        var actions: [ActionRow]? = nil
+        /// The sessions a `/sessions` reply drew as cards, in place of its words.
+        var cards: [SessionCardItem]? = nil
     }
 
     private(set) var phase: Phase = .pairing
@@ -275,6 +279,15 @@ final class AppModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         messages.append(Message(isUser: true, parts: [.text(trimmed)], attachments: [], streaming: false))
+        // A slash command goes as its own frame, never as a turn the model answers: the
+        // daemon runs it out of band and replies with a `command-result`. Sent as a turn
+        // it would be handled inside the turn body and leave an empty row beside the
+        // answer. No `busy` either — a command finishes at once, the daemon's own `state`
+        // frame says whether anything is running. The browser's own rule.
+        if trimmed.hasPrefix("/") {
+            if !client.send(.command(text: trimmed)) { unsent() }
+            return
+        }
         busy = true
         if !client.send(.send(text: trimmed, intent: intent)) { unsent() }
     }
@@ -284,6 +297,20 @@ final class AppModel {
     /// takes the job away.
     func killJob(_ id: String) {
         client.send(.jobKill(id: id))
+    }
+
+    /**
+     A press on a `command-result` control. The cards open the session they name — the
+     web's own `resume:` convention, handled here rather than on the wire — and a button
+     travels as an `action` carrying the message it belongs to, so the daemon's answer
+     takes that bubble's place.
+     */
+    func act(_ actionId: String, messageId: String?) {
+        if actionId.hasPrefix("resume:") {
+            Task { await resume(String(actionId.dropFirst("resume:".count))) }
+            return
+        }
+        client.send(.action(actionId: actionId, messageId: messageId))
     }
 
     /// Said the same way wherever a message fails to leave, so the two paths cannot
@@ -623,15 +650,31 @@ final class AppModel {
             turnStarted = nil
             if status == "error" { note = Note("That turn ended in an error.") }
         case .commandResult(let result):
-            messages.append(
-                Message(
-                    isUser: false,
-                    parts: [.text(result.reply)],
-                    attachments: result.attachments ?? [],
-                    streaming: false,
-                    thought: nil
+            // The reply as prose, preferring the markdown the daemon rendered beside the
+            // plain words — the same choice the browser makes.
+            let parts: [WirePart] = [.text(result.markdown ?? result.reply)]
+            // A reply that names the message it answers takes that message's place: the
+            // `/sessions` pagination redraws one bubble rather than stacking a new one
+            // under it. The id is this app's own — see `act` — echoed back by the daemon.
+            if let messageId = result.messageId,
+               let index = messages.firstIndex(where: { $0.id.uuidString == messageId }) {
+                messages[index].parts = parts
+                messages[index].attachments = result.attachments ?? []
+                messages[index].actions = result.actions
+                messages[index].cards = result.cards
+            } else {
+                messages.append(
+                    Message(
+                        isUser: false,
+                        parts: parts,
+                        attachments: result.attachments ?? [],
+                        streaming: false,
+                        thought: nil,
+                        actions: result.actions,
+                        cards: result.cards
+                    )
                 )
-            )
+            }
         case .state(let isBusy, let count):
             busy = isBusy
             queued = count

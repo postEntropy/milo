@@ -815,16 +815,32 @@ struct MessageRow: View {
                         }
                     }
                 }
-                ForEach(Array(drawn.enumerated()), id: \.offset) { _, group in
-                    switch group {
-                    case .calls(let calls):
-                        ToolChain(calls: calls)
-                    case .one(let part):
-                        PartView(part: part, onQuote: onQuote)
+                // A `/sessions` answer is its cards: the words the command replied with are
+                // the same list in text, and drawing both would say it twice. The parts and
+                // the toolbar step aside for them, as the browser's own do.
+                if let cards = message.cards, !cards.isEmpty {
+                    SessionCards(cards: cards)
+                } else {
+                    ForEach(Array(drawn.enumerated()), id: \.offset) { _, group in
+                            switch group {
+                            case .calls(let calls):
+                                ToolChain(calls: calls)
+                            case .one(let part):
+                            }
                     }
-                }
-                if !message.attachments.isEmpty {
-                    Attachments(items: message.attachments)
+                    if !message.attachments.isEmpty {
+                        Attachments(items: message.attachments)
+                    if let status = message.status {
+                        Text(status)
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                    }
+                    // The controls the browser draws under an answer. A turn still being
+                    // written has nothing to act on yet, and a message with no words has
+                    // nothing to copy.
+                    if !message.streaming, !message.prose.isEmpty {
+                        MessageToolbar(message: message, turn: turn, regenerate: regenerate, onQuote: onQuote)
+                    }
                 }
                 if message.streaming, !message.parts.contains(where: { part in
                     if case .text = part { return true }
@@ -832,27 +848,16 @@ struct MessageRow: View {
                 }) {
                     WaitLine()
                 }
-                if let status = message.status {
-                    Text(status)
-                        .font(MiloTheme.Text.small)
-                        .foregroundStyle(MiloTheme.muted)
-                }
-                // The controls the browser draws under an answer. A turn still being
-                // written has nothing to act on yet, and a message with no words has
-                // nothing to copy.
-                if !message.streaming, !message.prose.isEmpty {
-                    MessageToolbar(message: message, turn: turn, regenerate: regenerate, onQuote: onQuote)
+                // The buttons a command drew, under its cards or its words: the pages of
+                // `/sessions`, and anything else the daemon offers there.
+                if let actions = message.actions, !actions.isEmpty {
+                    ActionRows(rows: actions, messageId: message.id.uuidString)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
-    /// What can be done with the person's own message, behind the press: its words,
-    /// and — when the turn is more than prose — the turn copied whole or, without the
-    /// tool output, the path it walked, where the arguments and results the drawn parts
-    /// leave out still live. The answer's own controls stand under it instead, so nothing
-    /// here is said twice.
     @ViewBuilder
     private var menu: some View {
         menuItem("Copy", "doc.on.doc") { UIPasteboard.general.string = message.prose }
@@ -977,6 +982,121 @@ struct MessageToolbar: View {
             .foregroundStyle(MiloTheme.muted)
             .frame(width: 32, height: 28)
             .contentShape(Rectangle())
+    }
+}
+
+/// The sessions a `/sessions` command drew, in place of its words: one filled row each, the
+/// way this platform lists a choice. A press opens the session it names — choosing one is
+/// what the command was for. The command's own text listing is the same list, so it is not
+/// drawn beside these.
+struct SessionCards: View {
+    let cards: [SessionCardItem]
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(spacing: MiloTheme.Space.two) {
+            ForEach(cards) { card in
+                Button { model.act("resume:\(card.id)", messageId: nil) } label: {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                        HStack(spacing: MiloTheme.Space.two) {
+                            Text(card.title ?? card.id)
+                                .font(MiloTheme.Text.base.weight(.semibold))
+                                .foregroundStyle(MiloTheme.foreground)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer(minLength: MiloTheme.Space.two)
+                            Text(card.id)
+                                .font(MiloTheme.Text.meta.monospaced())
+                                .foregroundStyle(MiloTheme.muted)
+                                .lineLimit(1)
+                        }
+                        HStack(spacing: MiloTheme.Space.three) {
+                            Text("\(card.messageCount) msgs")
+                            Text(card.when)
+                            Spacer(minLength: 0)
+                        }
+                        .font(MiloTheme.Text.meta)
+                        .foregroundStyle(MiloTheme.muted)
+                        if !card.summary.isEmpty {
+                            Text(card.summary)
+                                .font(MiloTheme.Text.small)
+                                .foregroundStyle(MiloTheme.foreground2)
+                                .lineLimit(2)
+                        }
+                    }
+                    .padding(MiloTheme.Space.three)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(PressableStyle())
+                .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+            }
+        }
+    }
+}
+
+/// The buttons a command drew, under its reply: one filled row each, the browser's own shape.
+/// A button that is not actionable is drawn inert — a marker such as the page count, never a
+/// control that promises what it cannot do — and the rest travel as an `action` naming this
+/// message, so the daemon answers back into the same bubble.
+struct ActionRows: View {
+    let rows: [ActionRow]
+    let messageId: String
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                HStack(spacing: MiloTheme.Space.one) {
+                    ForEach(row) { button in
+                        item(button)
+                    }
+                }
+                .padding(.horizontal, MiloTheme.Space.one)
+                .padding(.vertical, MiloTheme.Space.one)
+                .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func item(_ button: ActionButton) -> some View {
+        if button.disabled == true {
+            Text(button.label)
+                .font(MiloTheme.Text.small.monospaced())
+                .foregroundStyle(MiloTheme.muted)
+                .padding(.horizontal, MiloTheme.Space.three)
+                .padding(.vertical, MiloTheme.Space.two)
+        } else if let url = button.url.flatMap(URL.init(string:)) {
+            Link(destination: url) { label(button) }
+        } else {
+            Button { model.act(button.id, messageId: messageId) } label: { label(button) }
+                .buttonStyle(PressableStyle())
+        }
+    }
+
+    private func label(_ button: ActionButton) -> some View {
+        Text(button.label)
+            .font(MiloTheme.Text.base)
+            .foregroundStyle(tone(button))
+            .padding(.horizontal, MiloTheme.Space.three)
+            .padding(.vertical, MiloTheme.Space.two)
+            .background {
+                RoundedRectangle(cornerRadius: MiloTheme.Radius.sm)
+                    .fill(button.style == "primary" ? MiloTheme.accent : Color.clear)
+            }
+    }
+
+    /// The tone a button's words wear: the accent only on the one the person is meant to
+    /// press, the semantic colours where the daemon names one, and the quiet foreground
+    /// otherwise.
+    private func tone(_ button: ActionButton) -> Color {
+        switch button.style {
+        case "primary": return MiloTheme.accentOn
+        case "danger": return MiloTheme.danger
+        case "success": return MiloTheme.success
+        default: return MiloTheme.foreground2
+        }
     }
 }
 

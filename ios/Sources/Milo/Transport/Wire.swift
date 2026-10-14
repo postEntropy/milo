@@ -19,6 +19,12 @@ enum ClientFrame {
     case command(text: String)
     /// Stop a background job. Pressing the control is the confirmation.
     case jobKill(id: String)
+    /**
+     A press on a `command-result` control. `messageId` is this app's own message the
+     control belongs to, echoed back by the daemon so the answer takes that bubble's
+     place rather than opening a second one.
+     */
+    case action(actionId: String, messageId: String? = nil)
 
     /// A flat object per frame, so the encoder is `JSONSerialization` and there is
     /// no second spelling of the wire to keep in step with the server's.
@@ -41,6 +47,9 @@ enum ClientFrame {
             return ["type": "command", "text": text]
         case .jobKill(let id):
             return ["type": "job-kill", "id": id]
+        case .action(let actionId, let messageId):
+            guard let messageId else { return ["type": "action", "actionId": actionId] }
+            return ["type": "action", "actionId": actionId, "messageId": messageId]
         }
     }
 }
@@ -139,6 +148,21 @@ struct SessionCardItem: Decodable, Identifiable, Hashable {
     let summary: String
 }
 
+/// A button a `command-result` carries, for the row it belongs to: an id a press names,
+/// the words, a tone, and — for a link or an inert marker like the page count — a url or
+/// a disabled flag. The page's own shape, `ActionButton` in the protocol.
+struct ActionButton: Decodable, Identifiable, Hashable {
+    let id: String
+    let label: String
+    let style: String?
+    let url: String?
+    let disabled: Bool?
+}
+
+/// One row of buttons. A row is how they sit together, so the shape is kept rather than
+/// flattened into a single list.
+typealias ActionRow = [ActionButton]
+
 struct Idea: Decodable, Hashable {
     let title: String
     let prompt: String
@@ -152,6 +176,12 @@ struct CommandResult: Decodable {
     let markdown: String?
     let sessionId: String?
     let cards: [SessionCardItem]?
+    /// The button rows a command carries, the `/sessions` pagination among them.
+    let actions: [ActionRow]?
+    /// Echoed back only where this client sent one: the message whose words the reply
+    /// takes the place of, so pagination redraws one bubble instead of stacking a new
+    /// one under it.
+    let messageId: String?
     /// Files delivered with the reply — a routine's answer, or a `send_file` — shown
     /// the way a message's own attachments are.
     let attachments: [FrameAttachment]?
