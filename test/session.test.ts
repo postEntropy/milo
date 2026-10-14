@@ -2,6 +2,7 @@ import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { z } from 'zod'
 import type { AgentEvent } from '../src/core/agent/events.js'
 import { SqliteMemory } from '../src/core/memory/sqlite.js'
 import { DEFAULT_RECALL_LIMIT, type Memory, type MemoryScope } from '../src/core/memory/index.js'
@@ -12,11 +13,14 @@ import type {
   StreamEvent,
 } from '../src/core/providers/types.js'
 import type { HistoryEntry } from '../src/core/history.js'
-import { Session, type SessionOptions } from '../src/core/session.js'
+import { ROUTINE_GATEWAY } from '../src/core/routines.js'
+import { Session, type SendOptions, type SessionOptions } from '../src/core/session.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
 import { MemoryRecapStore } from '../src/core/sessions/recap.js'
 import { FileSessionStore } from '../src/core/sessions/file-store.js'
-import { createToolRegistry } from '../src/core/tools/index.js'
+import { createToolRegistry, sessionsTool } from '../src/core/tools/index.js'
+import { ToolRegistry } from '../src/core/tools/registry.js'
+import type { Tool, ToolContext } from '../src/core/tools/types.js'
 
 type Extra = Omit<SessionOptions, 'record' | 'scope' | 'store' | 'provider' | 'memory'>
 
@@ -955,5 +959,85 @@ describe('delegation to a subagent', () => {
     ])
     const toolMessage = onDisk.messages.find((message) => message.role === 'tool')
     expect(toolMessage?.content[0]).toMatchObject({ content: 'SUBAGENT REPORT' })
+  })
+})
+
+describe('what a turn may do with the install\'s sessions', () => {
+  class ProbeArgs {
+    note?: string
+  }
+
+  class ProbeProvider implements Provider {
+    readonly id = 'probe'
+    calls: string[][] = []
+    async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+      this.calls.push((req.tools ?? []).map((tool) => tool.name))
+      yield { type: 'tool-call', id: 'c1', name: 'probe', args: {} }
+      yield { type: 'done', finishReason: 'tool_calls' }
+    }
+  }
+
+  async function turn(extra: Partial<SessionOptions> = {}, send: SendOptions = {}) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-sessions-'))
+    const store = new MemorySessionStore()
+    const record = await store.create()
+    const provider = new ProbeProvider()
+    let seen: ToolContext | undefined
+    const probe: Tool<ProbeArgs> = {
+      name: 'probe',
+      description: '',
+      schema: z.object({ note: z.string().optional() }),
+      readOnly: true,
+      async execute(_args, ctx) {
+        seen = ctx
+        return { content: 'ok' }
+      },
+    }
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: new ToolRegistry([sessionsTool, probe]),
+      memory: new SqliteMemory({ dir }),
+      store,
+      scope: { gateway: 'cli', conversationId: 't' },
+      record,
+      cwd: process.cwd(),
+      provider,
+      maxSteps: 1,
+      ...extra,
+    })
+    for await (const _event of session.send('go', send)) {
+      // drain
+    }
+    return { session, provider, seen }
+  }
+
+  const store = () => ({ list: async () => [], remove: async () => false })
+
+  it('hands the turn the id it is in, and the list and drop behind it', async () => {
+    const { session, provider, seen } = await turn({ sessionAdmin: store() })
+    expect(provider.calls[0]).toContain('sessions')
+    expect(seen?.sessionAdmin?.current).toBe(session.id)
+  })
+
+  it('withholds the tool when the runtime has no store to back it', async () => {
+    const { provider, seen } = await turn()
+    expect(provider.calls[0]).not.toContain('sessions')
+    expect(seen?.sessionAdmin).toBeUndefined()
+  })
+
+  it('withholds it from a bot that answers several people', async () => {
+    const { provider, seen } = await turn({ sessionAdmin: store() }, { sessionsAllowed: false })
+    expect(provider.calls[0]).not.toContain('sessions')
+    expect(seen?.sessionAdmin).toBeUndefined()
+  })
+
+  it('withholds it from a routine\'s own run', async () => {
+    const { provider, seen } = await turn({
+      sessionAdmin: store(),
+      scope: { gateway: ROUTINE_GATEWAY, conversationId: 'r' },
+    })
+    expect(provider.calls[0]).not.toContain('sessions')
+    expect(seen?.sessionAdmin).toBeUndefined()
   })
 })

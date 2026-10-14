@@ -568,6 +568,11 @@ export class AgentRuntime {
       history: this.options.history,
       traces: this.options.traces,
       routine: this.options.routine,
+      // The same list and drop the `/sessions` surface reads, so the agent's view
+      // of the install's sessions cannot drift from the person's: one
+      // implementation per behaviour. `listSessions` already hides routine runs,
+      // and `removeSession` takes the recap and the cache entry with the record.
+      sessionAdmin: { list: () => this.listSessions(), remove: (id) => this.removeSession(id) },
       lookupContextWindow: this.options.lookupContextWindow,
       keepSnapshots: this.options.keepSnapshots,
       // A getter, so the prompt says what the browser is now rather than what it

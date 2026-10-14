@@ -25,6 +25,16 @@ describe('toolLine', () => {
     expect(toolLine('drive_search', { query: 'budget' })).toBe('📂 drive_search budget')
   })
 
+  it('names the thing a verb acts on, by its path or its id', () => {
+    expect(toolLine('sessions', { action: 'list' })).toBe('🗃 sessions list')
+    expect(toolLine('sessions', { action: 'remove', id: 'merry-badger-52' })).toBe(
+      '🗃 sessions remove merry-badger-52',
+    )
+    expect(toolLine('routine', { action: 'remove', id: 'calm-otter-7' })).toBe(
+      '🔧 routine remove calm-otter-7',
+    )
+  })
+
   it('writes a file change the same way, by its path', () => {
     expect(toolLine('write_file', { path: 'src/a.ts', content: 'x' })).toBe('📝 write_file src/a.ts')
     expect(toolLine('edit_file', { path: 'src/a.ts', old_string: 'a', new_string: 'b' })).toBe(

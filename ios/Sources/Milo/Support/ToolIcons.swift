@@ -22,6 +22,8 @@ enum ToolIcons {
         "remember": "cylinder",
         "recall": "clock.arrow.circlepath",
         "search_history": "clock.arrow.circlepath",
+        // The saved sessions: a box of them, the box the browser draws for the same tool.
+        "sessions": "archivebox",
         "web_search": "globe",
         "read_skill": "note.text",
         "task": "sparkles",

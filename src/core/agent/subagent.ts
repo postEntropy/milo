@@ -51,8 +51,10 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
   // Everything the parent has, except `task` itself: a subagent cannot delegate
   // again, so delegation stays one level deep instead of a chain that nothing
   // but maxSteps would stop. And except `todo`: the plan exists to be watched by
-  // a person, and a subagent has no surface to draw it on.
-  const tools = options.registry.specs().filter((tool) => tool.name !== 'task' && tool.name !== 'todo')
+  // a person, and a subagent has no surface to draw it on. And except `sessions`:
+  // pruning the install's conversations is the main turn's act, and the subagent's
+  // context carries no session to manage or refuse against.
+  const tools = options.registry.specs().filter((tool) => tool.name !== 'task' && tool.name !== 'todo' && tool.name !== 'sessions')
   const system = buildSystemPrompt({
     base: SUBAGENT_SYSTEM_PROMPT,
     cwd: options.cwd,

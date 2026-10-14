@@ -31,6 +31,14 @@ remembers. Leaving a session writes a short **recap** in the model's own words, 
 file in `sessions/recaps/<id>.json` and shown by `/sessions`. On Telegram and Discord, `/new`,
 `/sessions` and `/resume` only work on a single-person bot (exactly one id in the allowlist).
 
+The agent has its own view of the same list. It knows which session it is in — the id rides the
+system prompt, so "which session am I in?" is answered without reading the directory — and it carries a
+`sessions` tool: **list** the saved ones with what each was about, or **remove** one by its id. A
+removal asks before it happens, will not take the session it is running in, and is withheld where the
+`/sessions` command is locked (a shared bot) and from a routine's own run. It reads and drops through
+the same `listSessions`/`removeSession` the surfaces use, so the agent's view of the list cannot drift
+from the person's.
+
 ## Task lists
 
 The other thing that outlives a session. The `task_lists` tool keeps named checklists for the person —

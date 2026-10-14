@@ -289,6 +289,12 @@ describe('summarizeToolCall', () => {
     expect(summary).toContain('look at the repo')
     expect(summary).toContain('shell_command')
   })
+
+  it('says a session is being dropped, not a routine, though both carry an id', () => {
+    const args = { action: 'remove', id: 'calm-otter-7' }
+    expect(summarizeToolCall(args, 'sessions')).toBe('Remove session calm-otter-7')
+    expect(summarizeToolCall(args, 'routine')).toBe('Remove routine calm-otter-7')
+  })
 })
 
 describe('a tool whose danger is in its arguments', () => {

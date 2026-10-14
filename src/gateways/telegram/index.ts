@@ -16,6 +16,7 @@ import {
   handleCommand,
   handleTurnControl,
   parseTurnControl,
+  sessionLockMessage,
   turnOf,
   type CommandResult,
 } from '../commands.js'
@@ -249,6 +250,13 @@ export class TelegramGateway implements Gateway {
   ): Promise<void> {
     const scope: MemoryScope = { gateway: 'telegram', conversationId: chatId }
     const session = await this.options.runtime.sessionFor(scope)
+    // Who is asking decides whether the single-person lock opens: an allowlist
+    // naming this chat is a room, and a room is not one person. The same answer
+    // gates the agent's `sessions` tool as locks `/sessions`, so the two cannot
+    // disagree about a bot that answers several people.
+    const userId = ctx.from?.id === undefined ? undefined : String(ctx.from.id)
+    const sessionsAllowed =
+      sessionLockMessage({ allowlist: this.options.allowlist, userId }) === undefined
 
     let command: Awaited<ReturnType<typeof handleCommand>>
     try {
@@ -261,9 +269,7 @@ export class TelegramGateway implements Gateway {
               scope,
               session,
               allowlist: this.options.allowlist,
-              // Who is asking decides whether the single-person lock opens: an
-              // allowlist naming this chat is a room, and a room is not one person.
-              userId: ctx.from?.id === undefined ? undefined : String(ctx.from.id),
+              userId,
               signal,
             }),
           )
@@ -320,6 +326,7 @@ export class TelegramGateway implements Gateway {
       signal,
       images,
       files,
+      sessionsAllowed,
     })
     // A stop is not a failure, and it is already on screen as "🛑 stopped".
     if (failure) {

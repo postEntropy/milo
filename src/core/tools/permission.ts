@@ -196,7 +196,7 @@ export function withGrants(
  * not a decision, and the reviewer already gets that; the human who is actually
  * asked was the one left out.
  */
-export function summarizeToolCall(args: unknown): string {
+export function summarizeToolCall(args: unknown, tool?: string): string {
   if (args && typeof args === 'object') {
     const record = args as Record<string, unknown>
     if (typeof record.command === 'string') {
@@ -228,9 +228,13 @@ export function summarizeToolCall(args: unknown): string {
       return `${verb[record.op] ?? record.op} message ${record.id}`
     }
     // Changing or dropping a routine: the id is what it acts on, and a standing
-    // grant is still the half that has to be seen before it is approved.
+    // grant is still the half that has to be seen before it is approved. The same
+    // shape says a session is being dropped — both carry `action: "remove"` and an
+    // id — so the tool's own name is what tells the two apart, and a prompt about a
+    // session must not read as one about a routine.
     if (record.action === 'remove') {
-      return `Remove routine ${typeof record.id === 'string' ? record.id : ''}`.trim()
+      const id = typeof record.id === 'string' ? record.id : ''
+      return (tool === 'sessions' ? `Remove session ${id}` : `Remove routine ${id}`).trim()
     }
     if (record.action === 'update') {
       const granted =

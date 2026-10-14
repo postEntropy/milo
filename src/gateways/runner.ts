@@ -27,6 +27,12 @@ export interface RunTurnOptions {
    * and the caller runs it as its own turn.
    */
   steering?: string[]
+  /**
+   * Whether this surface may manage the install's sessions. False on a bot that
+   * answers several people, where the `/sessions` command is locked too and the
+   * agent must be held to the same rule. Absent: allowed.
+   */
+  sessionsAllowed?: boolean
 }
 
 const DEFAULT_FLUSH_MS = 900
@@ -178,6 +184,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
       images,
       audio,
       ...(mediaModel ? { model: mediaModel } : {}),
+      ...(options.sessionsAllowed === false ? { sessionsAllowed: false } : {}),
       ask: async (request) => ({
         allowed: await surface.ask(conversationId, messageId, request),
       }),

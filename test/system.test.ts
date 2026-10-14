@@ -58,6 +58,15 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('## Environment')
   })
 
+  it('names the session it is running in, when it has one', () => {
+    const base = { base: 'BASE', cwd: '/a', provider: 'p', model: 'm', tools: [], memories: [] }
+    expect(buildSystemPrompt({ ...base, sessionId: 'calm-otter-7' })).toContain(
+      'You are in session `calm-otter-7`',
+    )
+    // Absent on a turn with no session behind it, rather than an empty line.
+    expect(buildSystemPrompt(base)).not.toContain('You are in session')
+  })
+
   it('does not claim a surface in the base prompt', () => {
     expect(DEFAULT_SYSTEM_PROMPT.toLowerCase()).not.toContain('terminal')
     expect(DEFAULT_SYSTEM_PROMPT.toLowerCase()).not.toContain('telegram')

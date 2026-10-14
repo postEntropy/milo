@@ -4,7 +4,7 @@ import type { AgentEvent } from '../src/core/agent/events.js'
 import { runAgent } from '../src/core/agent/loop.js'
 import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
 import { DefaultPermissionPolicy, type PermissionAsker } from '../src/core/tools/permission.js'
-import { builtinTools } from '../src/core/tools/index.js'
+import { builtinTools, sessionsTool } from '../src/core/tools/index.js'
 import { ToolRegistry } from '../src/core/tools/registry.js'
 import type { Tool } from '../src/core/tools/types.js'
 
@@ -72,6 +72,7 @@ describe('tool permission gating', () => {
       edit_file: false,
       remember: false,
       recall: true,
+      sessions: false,
       search_history: true,
       routine: false,
       send_file: false,
@@ -93,6 +94,13 @@ describe('tool permission gating', () => {
     const internal = builtinTools.filter((tool) => tool.internal).map((tool) => tool.name)
 
     expect(internal).toEqual(['remember', 'panel', 'todo', 'task_lists'])
+  })
+
+  it('asks before a session is removed, but not before the list is read', () => {
+    // The danger is in the arguments, not the name: a reader is not a deleter.
+    expect(sessionsTool.asksWhen?.({ action: 'list' })).toBe(false)
+    expect(sessionsTool.asksWhen?.({})).toBe(false)
+    expect(sessionsTool.asksWhen?.({ action: 'remove', id: 'calm-otter-7' })).toBe(true)
   })
 
   it('runs the tool when allowed', async () => {

@@ -12,6 +12,7 @@ import {
   handleCommand,
   handleTurnControl,
   parseTurnControl,
+  sessionLockMessage,
   turnOf,
 } from '../commands.js'
 import { runTurns } from '../runner.js'
@@ -279,6 +280,12 @@ export class DiscordGateway implements Gateway {
   ): Promise<void> {
     const scope: MemoryScope = { gateway: 'discord', conversationId: message.channelId }
     const session = await this.options.runtime.sessionFor(scope)
+    // The same answer that decides whether `/sessions` is locked decides whether the
+    // agent sees the `sessions` tool: an allowlist naming this channel is a room, and
+    // a room is not one person.
+    const sessionsAllowed =
+      sessionLockMessage({ allowlist: this.options.allowlist, userId: message.author.id }) ===
+      undefined
 
     let command: Awaited<ReturnType<typeof handleCommand>>
     try {
@@ -352,6 +359,7 @@ export class DiscordGateway implements Gateway {
       signal,
       images,
       files,
+      sessionsAllowed,
     })
     // A stop is not a failure, and it is already on screen as "🛑 stopped".
     if (failure) {

@@ -42,6 +42,7 @@ const TOOLS: Record<string, { icon: string; brand?: ToolBrand }> = {
   edit_file: { icon: '✏️' },
   remember: { icon: '🧠' },
   recall: { icon: '🗂' },
+  sessions: { icon: '🗃' },
   search_history: { icon: '🕘' },
   web_search: { icon: '🌐' },
   read_skill: { icon: '📘' },
@@ -231,13 +232,16 @@ const GIST_LIMIT = 120
 export function toolDetail(args: unknown): string {
   if (!args || typeof args !== 'object') return ''
   const record = args as Record<string, unknown>
-  // A verb-plus-target tool — the git reads, a browser action — is named by its
-  // verb, with the path it acted on beside it. Read before the flat list below,
-  // where `path` alone would otherwise answer for it and lose the verb.
+  // A verb-plus-target tool — the git reads, a browser action, `sessions remove` —
+  // is named by its verb, with the thing it acted on beside it: the path for a read,
+  // the id for a session or a routine. Read before the flat list below, where `path`
+  // alone would otherwise answer for it and lose the verb.
   if (typeof record.action === 'string' && record.action.trim()) {
     const action = record.action.trim()
-    const path = typeof record.path === 'string' ? record.path.trim() : ''
-    return `${action}${path ? ` ${path}` : ''}`
+    const target = [record.path, record.id].find(
+      (value) => typeof value === 'string' && value.trim() !== '',
+    )
+    return `${action}${typeof target === 'string' ? ` ${target.trim()}` : ''}`
   }
   // `description` is the `task` tool's label for a subtask (its `prompt` is the
   // whole instruction, and has no place on a one-line activity log); `url` and

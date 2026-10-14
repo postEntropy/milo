@@ -13,7 +13,7 @@ import type { SkillSummary } from './skills/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
 import { describeOutgoing, type OutgoingFile } from './outgoing.js'
 import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
-import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, ToolRegistry } from './tools/index.js'
+import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, SessionAdmin, ToolRegistry } from './tools/index.js'
 import type { JobManager } from './jobs/index.js'
 import { withGrants } from './tools/index.js'
 import type { AgentEvent } from './agent/events.js'
@@ -121,6 +121,12 @@ export interface SessionOptions {
    */
   routine?: RoutineStore
   /**
+   * The install's session list, for a turn that may read it and prune it. Absent
+   * on a bare test session; a routine's own run and a surface that pools several
+   * people's sessions withhold it the same way the routine tool is withheld.
+   */
+  sessionAdmin?: { list(): Promise<SessionSummary[]>; remove(id: string): Promise<boolean> }
+  /**
    * The chat this session's turns deliver files to, when it is not the chat they
    * are already in. Set on a routine's own run, whose target was named when it
    * was made and must not be rerouted to whichever surface is live. Absent
@@ -216,6 +222,14 @@ export interface SendOptions {
    * names the surface on its own.
    */
   client?: ClientKind
+  /**
+   * Whether this surface may manage the install's sessions. False on a bot that
+   * answers several people — one member listing or pruning them would expose the
+   * others' — so the `sessions` tool is withheld from that turn's catalog, the
+   * same rule the `/sessions` command is locked by. Defaults to true; the
+   * terminal and the web are single-person and never pass it.
+   */
+  sessionsAllowed?: boolean
 }
 
 export class Session {
@@ -505,8 +519,23 @@ export class Session {
     // Nothing is taught to a surface that cannot draw it: a widget sent to a chat
     // with no way to show it is a thing that vanishes rather than fails.
     const draws = canDraw(surface) ? opts?.genui : undefined
+    // What this turn may read and prune. A routine's own run gets none — like the
+    // routine list, sessions are the install's, and a run that fired on a timer is
+    // not the place to sweep them. A bot answering several people gets none either:
+    // the list pools every member's sessions, which is why `/sessions` is locked
+    // there, and the agent is held to the same rule.
+    const adminSource = this.options.sessionAdmin
+    const sessionAdmin: SessionAdmin | undefined =
+      adminSource && this.scope.gateway !== ROUTINE_GATEWAY && (opts?.sessionsAllowed ?? true)
+        ? {
+            current: this.id,
+            list: () => adminSource.list(),
+            remove: (id) => adminSource.remove(id),
+          }
+        : undefined
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
       .filter((tool) => tool.name !== 'panel' || surface === 'web')
+      .filter((tool) => tool.name !== 'sessions' || sessionAdmin !== undefined)
     // An instruction-only turn has nothing of the person's to recall against.
     const recalled = opts?.notice
       ? []
@@ -521,6 +550,9 @@ export class Session {
       cwd,
       provider: provider.id,
       model,
+      // The session this turn is in, so a question about it is answerable without
+      // going to read the sessions directory.
+      sessionId: this.id,
       tools,
       skills: this.options.skills?.(),
       // How this turn draws, when it draws: `block` is taught the block here,
@@ -618,6 +650,7 @@ export class Session {
           recall,
           origin,
           routine,
+          sessionAdmin,
           sendFile,
           jobs: this.options.jobs ?? undefined,
           // A subtask runs in its own context, but under this turn's model,

@@ -23,6 +23,8 @@ const TOOL_ICONS: Record<string, IconName> = {
   remember: 'database',
   recall: 'history',
   search_history: 'history',
+  // The saved sessions: a box of them, the mark the emoji table wears for the same tool.
+  sessions: 'archive',
   web_search: 'globe',
   read_skill: 'note',
   task: 'spark',

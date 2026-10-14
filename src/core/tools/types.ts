@@ -19,6 +19,18 @@ export type RememberFn = (items: MemoryInput[]) => Promise<void>
 export type RecallFn = (query: string, opts?: { limit?: number }) => Promise<SessionSummary[]>
 
 /**
+ * How a session hands a tool the install's own sessions: read the list, and drop
+ * one. `current` is the id of the session this turn is running in, so a tool can
+ * refuse to delete the conversation it is answering in — that veto belongs to the
+ * caller, not to the store, which deletes whatever it is asked for.
+ */
+export interface SessionAdmin {
+  current: string
+  list(): Promise<SessionSummary[]>
+  remove(id: string): Promise<boolean>
+}
+
+/**
  * Runs a subtask in its own agent loop — its own transcript, its own tool
  * calls — and returns only what it finally answers. Delegation is one level:
  * the context handed to the subagent carries no `task` of its own.
@@ -53,6 +65,12 @@ export interface ToolContext {
   remember?: RememberFn
   /** Absent on a context with no session store behind it, so `recall` does too. */
   recall?: RecallFn
+  /**
+   * Absent where a turn may not touch sessions — a surface that pools several
+   * people's sessions, a routine's own run — so `sessions` is withheld from that
+   * catalog rather than offered and refused.
+   */
+  sessionAdmin?: SessionAdmin
   /** Absent on a context that cannot delegate (a subagent's own, a bare test one). */
   task?: TaskFn
   /**

@@ -24,6 +24,7 @@ import { panelTool } from './panel.js'
 import { routineTool } from './routine.js'
 import { searchHistoryTool } from './search-history.js'
 import { sendFileTool } from './send-file.js'
+import { sessionsTool } from './sessions.js'
 import { ToolRegistry } from './registry.js'
 import { shellTool } from './shell.js'
 import { createReadSkillTool } from './read-skill.js'
@@ -48,6 +49,7 @@ export { writeFileTool } from './write-file.js'
 export { editFileTool } from './edit-file.js'
 export { rememberTool } from './remember.js'
 export { recallTool } from './recall.js'
+export { sessionsTool } from './sessions.js'
 export { panelTool } from './panel.js'
 export { routineTool } from './routine.js'
 export { searchHistoryTool } from './search-history.js'
@@ -73,6 +75,7 @@ export const builtinTools = [
   editFileTool,
   rememberTool,
   recallTool,
+  sessionsTool,
   searchHistoryTool,
   routineTool,
   sendFileTool,

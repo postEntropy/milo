@@ -119,6 +119,8 @@ export interface SystemPromptInput {
   cwd: string
   provider: string
   model: string
+  /** The session this turn is running in (`calm-otter-7`), so the model can name it. */
+  sessionId?: string
   tools: ToolSpec[]
   /** Index of the skills on disk; the bodies are loaded on demand, not here. */
   skills?: SkillSummary[]
@@ -400,6 +402,7 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   }
   environment.push(`- Today: ${localDate(input.now ?? new Date())}`)
   environment.push(`- Model: ${input.provider}/${input.model}`)
+  if (input.sessionId) environment.push(`- You are in session \`${input.sessionId}\``)
   environment.push(
     input.cwd === DEFAULT_WORKING_DIRECTORY
       ? '- No project is selected; you can work across this machine.'
