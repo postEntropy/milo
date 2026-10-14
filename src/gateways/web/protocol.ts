@@ -2,7 +2,7 @@ import type { GenUiRender } from '../../core/genui.js'
 import type { Idea } from '../../core/ideas.js'
 import type { PanelRequest } from '../../core/panel.js'
 import type { TodoItem } from '../../core/todos.js'
-import { CLIENT_KINDS, type ClientKind } from '../../core/agent/system.js'
+import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
 
 // 9: a `ui` event carries `draft` while the block is still being written, so the
 // widget fills in as the tree arrives. A page from 8 would drop the flag and draw

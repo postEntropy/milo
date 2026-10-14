@@ -20,7 +20,8 @@ import type { AgentEvent } from './agent/events.js'
 import { runAgent, type RunTrace } from './agent/loop.js'
 import type { TraceWriter } from './traces.js'
 import { runSubagent } from './agent/subagent.js'
-import { buildSystemPrompt, type ClientKind, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
+import { buildSystemPrompt, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
+import type { ClientKind } from './client.js'
 import {
   contextBudget,
   countMessages,
