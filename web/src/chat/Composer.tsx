@@ -222,12 +222,15 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     drafts.current.set(draftKey, next)
   }
 
-  // Swapping conversations brings the other one's draft back in.
+  // Swapping conversations brings the other one's draft back in. The quote does not
+  // follow: it is the reply to words picked out of that thread, held only until the
+  // answer is sent, so a session it was never picked from opens without it.
   useEffect(() => {
     if (shownKey.current === draftKey) return
     shownKey.current = draftKey
     setDraft(drafts.current.get(draftKey) ?? '')
     setFiles(fileDrafts.current.get(draftKey) ?? [])
+    setQuote(null)
   }, [draftKey])
 
   async function submit(intent: 'steer' | 'queue'): Promise<void> {

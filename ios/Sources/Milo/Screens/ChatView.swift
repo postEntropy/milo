@@ -121,6 +121,11 @@ struct ChatView: View {
             await model.begin(at: account)
             await model.refreshSessions()
         }
+        // The strip answers words picked out of the thread on screen. When the session
+        // changes — a new one started, another resumed — that passage is no longer there
+        // to answer, so the strip goes with it instead of following into a session it was
+        // never picked from.
+        .onChange(of: model.sessionId) { _, _ in quote = nil }
         .sheet(isPresented: $picker) { ModelPickerSheet() }
         .sheet(isPresented: $settings) { SettingsView(account: account) }
         .sessionRename($renaming)
@@ -507,6 +512,10 @@ struct Composer: View {
     /// What is being answered, held at the composer until the reply is sent: the words
     /// picked out, and the way to drop them. The browser keeps the same strip above its own
     /// field, and both take the same shape on the wire — see `quotedLead`.
+    ///
+    /// It wears the platform's own glass, the material the composer below it is made of:
+    /// the faint tint it carried before barely showed against the page, so the strip
+    /// vanished instead of standing over the thread it was picked from.
     private func quoteStrip(_ words: String) -> some View {
         HStack(alignment: .top, spacing: MiloTheme.Space.three) {
             Image(systemName: "quote.opening")
@@ -530,7 +539,7 @@ struct Composer: View {
         }
         .padding(.horizontal, MiloTheme.Space.three)
         .padding(.vertical, MiloTheme.Space.two)
-        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
     }
 
     private var canSend: Bool {
