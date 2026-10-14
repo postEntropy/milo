@@ -17,6 +17,10 @@ let package = Package(
             name: "Milo",
             targets: ["Milo"]
         ),
+        .library(
+            name: "MiloLiveActivityWidget",
+            targets: ["MiloLiveActivityWidget"]
+        ),
     ],
     dependencies: [
         // The connection layer, in its own package so it can be run under
@@ -28,8 +32,18 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "MiloActivity",
+            path: "Activity/Sources/MiloActivity"
+        ),
+        .target(
+            name: "MiloLiveActivityWidget",
+            dependencies: ["MiloActivity"],
+            path: "ActivityWidget/Sources/MiloLiveActivityWidget"
+        ),
+        .target(
             name: "Milo",
             dependencies: [
+                "MiloActivity",
                 .product(name: "MiloConnection", package: "Connection"),
                 .product(name: "MiloGenUi", package: "GenUi"),
             ]

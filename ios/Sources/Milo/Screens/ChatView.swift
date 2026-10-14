@@ -29,6 +29,7 @@ struct ChatView: View {
     @State private var drawer = false
     @State private var picker = false
     @State private var settings = false
+    @State private var liveActivity = MiloLiveActivityController()
     /// The session being renamed from this screen — the dots in the top bar name it,
     /// and the shared alert does the rest.
     @State private var renaming: String?
@@ -96,6 +97,18 @@ struct ChatView: View {
         // would land on the person's own thumb.
         .sensoryFeedback(.impact(weight: .medium, intensity: 0.6), trigger: model.answerBegan)
         .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.5), trigger: model.answerEnded)
+        .onChange(of: model.busy) { _, busy in
+            Task {
+                if busy {
+                    await liveActivity.start(sessionID: model.sessionId)
+                } else {
+                    await liveActivity.finish()
+                }
+            }
+        }
+        .onChange(of: model.answerBegan) { _, _ in
+            Task { await liveActivity.update(.replying) }
+        }
         // A swipe across the thread opens the sessions and a swipe back closes them — the
         // gesture the platform's own sidebars answer to, from wherever the person swipes.
         // Only a mostly horizontal drag counts, so scrolling the thread is never mistaken

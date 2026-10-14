@@ -14,6 +14,8 @@
 	</dict>
 	<key>CFBundleDisplayName</key>
 	<string>Milo</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
 	<!-- Scanning the QR `milo pair` draws is how a phone is paired without typing
 	     an address or a code. -->
 	<key>NSCameraUsageDescription</key>
