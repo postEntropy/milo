@@ -293,6 +293,10 @@ struct ChatView: View {
             editing = nil
             Task { await model.regenerate(prompt: outgoing, upToTurn: upToTurn) }
         } else {
+            // The arrival the bubble is drawn with is this transaction: a send moves the
+            // control that carried it the way the thread moves, so it reads as one motion.
+            withAnimation(SettlesIn.motion) { model.send(outgoing, intent: intent) }
+        }
         // The keys come down with the words: the room the keyboard was holding is where the
         // reply is about to write itself, and the person's own words have gone up to the top
         // of the thread to open it.
@@ -373,6 +377,10 @@ struct ChatView: View {
                             onQuote: quoteIt,
                             onEdit: editMessage
                         )
+                        // A send is what draws this: the words rise into the thread, and
+                        // everything else that lands in it is simply there — see
+                        // `SettlesIn`.
+                        .transition(SettlesIn())
                         // Named so a send can put these words at the top of the thread — and
                         // measured when they are the last of them, so the room under the thread
                         // only holds what the words have not taken of it.
@@ -672,7 +680,7 @@ struct WelcomeView: View {
 
     private func press(_ suggestion: Suggestion) {
         switch suggestion.act {
-        case .send(let prompt): model.send(prompt)
+        case .send(let prompt): withAnimation(SettlesIn.motion) { model.send(prompt) }
         case .resume(let id): Task { await model.resume(id) }
         }
     }
@@ -978,6 +986,24 @@ struct JobStrip: View {
     }
 }
 
+/// Anything landing in the thread coming in: it rises a little and clears as it lands. The
+/// browser's own entrance for what appears there — a message, a call line, a to-do card, the
+/// wait line — at the duration the browser gives them, so an arrival is drawn the same way on
+/// both surfaces.
+///
+/// The entrance belongs to the transaction the thing arrives in and not to the row: what a turn
+/// writes mid-stream is `StreamingText`'s to draw, line by line, and a thread replayed from a
+/// stored session — where every row lands in one update and nothing is animated — is simply
+/// there.
+struct SettlesIn: Transition {
+    /// How long it takes: the browser's own 380ms for something coming in.
+    static let motion: Animation = .smooth(duration: 0.38)
+
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        content
+            .opacity(phase.isIdentity ? 1 : 0)
+            .blur(radius: phase.isIdentity ? 0 : 6)
+            .offset(y: phase.isIdentity ? 0 : 12)
     }
 }
 
@@ -1083,12 +1109,18 @@ struct MessageRow: View {
                     SessionCards(cards: cards)
                 } else {
                     ForEach(Array(drawn.enumerated()), id: \.offset) { _, group in
+                        // What appears in an answer settles in as it lands — a call, a
+                        // to-do list, a widget, the paragraph after a call — which is the
+                        // browser's own entrance for those same pieces.
+                        Group {
                             switch group {
                             case .calls(let calls):
                                 ToolChain(calls: calls)
                             case .one(let part):
                                 PartView(part: part, onQuote: onQuote, isStreaming: message.streaming)
                             }
+                        }
+                        .transition(SettlesIn())
                     }
                     if !message.attachments.isEmpty {
                         Attachments(items: message.attachments)
@@ -1120,6 +1152,10 @@ struct MessageRow: View {
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
+            // A piece of the answer appearing — a call, a to-do list, a widget — is what
+            // animates here, told from the number of parts. Words growing inside a piece are
+            // not: those fade in line by line where they are drawn.
+            .animation(SettlesIn.motion, value: message.parts.count)
         }
     }
 
@@ -1442,7 +1478,9 @@ struct PartView: View {
         case .ui(let widget, _):
             // A widget's button speaks the same way the composer does, so the message
             // it builds lands in the conversation as an ordinary turn.
-            GenUiView(widget: widget) { model.send($0) }
+            GenUiView(widget: widget) { words in
+                withAnimation(SettlesIn.motion) { model.send(words) }
+            }
         case .tool, .reasoning, .other:
             EmptyView()
         }
