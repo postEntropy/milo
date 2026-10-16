@@ -29,7 +29,8 @@ struct PairingView: View {
 
                 MiloWideButton(
                     title: "Scan the QR from milo pair",
-                    systemImage: "qrcode.viewfinder"
+                    systemImage: "qrcode.viewfinder",
+                    glass: true
                 ) {
                     scanning = true
                 }
@@ -63,6 +64,7 @@ struct PairingView: View {
                 MiloWideButton(
                     title: model.pairing ? "Pairing…" : "Pair",
                     primary: true,
+                    glass: true,
                     busy: model.pairing
                 ) {
                     Task { await model.pair() }

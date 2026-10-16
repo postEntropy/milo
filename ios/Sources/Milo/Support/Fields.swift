@@ -20,13 +20,10 @@ struct MiloField: View {
                 .autocorrectionDisabled()
                 .font(MiloTheme.Text.body)
                 .foregroundStyle(MiloTheme.foreground)
-                .padding(.horizontal, MiloTheme.Space.four)
+                .padding(.horizontal, MiloTheme.Space.five)
                 .padding(.vertical, MiloTheme.Space.three)
-                .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
-                .overlay(
-                    RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
-                        .stroke(MiloTheme.borderSoft, lineWidth: 1)
-                )
+                .background(MiloTheme.surface, in: Capsule())
+                .overlay(Capsule().stroke(MiloTheme.borderSoft, lineWidth: 1))
         }
     }
 }
@@ -104,8 +101,19 @@ struct MiloWideButton: View {
     let title: String
     var systemImage: String?
     var primary = false
+    /// Liquid Glass instead of a filled surface: the platform's own material, wearing
+    /// the accent as its tint when the control is the screen's primary action.
+    var glass = false
     var busy = false
     let action: () -> Void
+
+    private var shape: Capsule { Capsule() }
+
+    /// What a glass control wears: the accent as its tint when it is the screen's primary
+    /// action, the plain glass of a control that only goes somewhere otherwise.
+    private var material: Glass {
+        (primary ? Glass.regular.tint(MiloTheme.accent) : .regular).interactive()
+    }
 
     var body: some View {
         Button(action: action) {
@@ -118,10 +126,10 @@ struct MiloWideButton: View {
             .foregroundStyle(primary ? MiloTheme.accentOn : MiloTheme.foreground)
             .frame(maxWidth: .infinity)
             .frame(height: 50)
-            .background(
-                primary ? MiloTheme.accent : MiloTheme.surface,
-                in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
-            )
+            .background {
+                if !glass { shape.fill(primary ? MiloTheme.accent : MiloTheme.surface) }
+            }
+            .glassEffect(glass ? material : .identity, in: shape)
         }
         .buttonStyle(PressableStyle())
         .disabled(busy)

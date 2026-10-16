@@ -24,6 +24,29 @@ func sessionActions(
 }
 
 /**
+ The way back to the sessions, wherever there is one: the drawer belongs to the chat, but
+ every screen the card can show reaches it through this same control, so the mark, the
+ material and the words cannot drift between them.
+ */
+struct SessionsButton: View {
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "line.3.horizontal")
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundStyle(MiloTheme.foreground)
+                .frame(width: 30, height: 30)
+        }
+        .buttonStyle(.glass)
+        .buttonBorderShape(.circle)
+        .controlSize(.regular)
+        .tint(MiloTheme.foreground)
+        .accessibilityLabel("Sessions")
+    }
+}
+
+/**
  Renaming, wherever it is asked for: one alert, one starting point, one call. Presented
  with the id of the session to rename, nil for none, so a surface only has to name one.
  */

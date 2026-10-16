@@ -628,15 +628,10 @@ struct ChatView: View {
         VStack(spacing: MiloTheme.Space.one) {
             HStack(spacing: MiloTheme.Space.three) {
                 // The platform's own glass button: it takes the tap itself, so the
-                // swipe on the screen cannot swallow it.
-                Button { openDrawer() } label: {
-                    topGlyph("line.3.horizontal")
-                }
-                .buttonStyle(.glass)
-                .buttonBorderShape(.circle)
-                .controlSize(.regular)
-                .tint(MiloTheme.foreground)
-                .accessibilityLabel("Sessions")
+                // swipe on the screen cannot swallow it. The routines screen offers the
+                // same control over its own top, so the way back to the sessions is one
+                // press away on either screen — see `SessionsButton`.
+                SessionsButton(action: openDrawer)
 
                 Spacer(minLength: MiloTheme.Space.two)
 
