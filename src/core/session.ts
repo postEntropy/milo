@@ -611,6 +611,22 @@ export class Session {
     const remember = (items: MemoryInput[]) => memory.remember(this.scope, items)
     const recall = (query: string, options?: { limit?: number }) =>
       this.recallSessions(query, options)
+    // What the `memories` tool reads and drops: the list `/memory` shows, and the
+    // mirror of `remember`. The ids are the fronts the prompt shows, and the ones
+    // that matched nothing come back so the tool can say so rather than claim a
+    // deletion that never happened.
+    const memories = {
+      list: (opts?: { limit?: number; offset?: number }) => memory.list(this.scope, opts),
+      forget: async (ids: string[]) => {
+        const forgotten: string[] = []
+        const unknown: string[] = []
+        for (const id of ids) {
+          if (await memory.forget(this.scope, id)) forgotten.push(id)
+          else unknown.push(id)
+        }
+        return { forgotten, unknown }
+      },
+    }
     // A routine's own run is the one conversation that must not touch routines:
     // without this, a routine could add, change or drop routines every time it
     // fires.
@@ -650,6 +666,7 @@ export class Session {
           cwd,
           signal: abort,
           remember,
+          memories,
           recall,
           origin,
           sessionId: this.id,
@@ -679,7 +696,7 @@ export class Session {
               temperature,
               reasoningEffort: effort,
               input,
-              context: { remember, recall, origin, routine, sendFile },
+              context: { remember, memories, recall, origin, routine, sendFile },
               trace: this.runTrace('task'),
             }),
         },

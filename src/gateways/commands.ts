@@ -15,7 +15,7 @@ import {
 } from '../core/providers/types.js'
 import type { ModelInfo } from '../core/providers/models.js'
 import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.js'
-import type { MemoryItem } from '../core/memory/index.js'
+import { MEMORY_ID_CHARS, shortId, type MemoryItem } from '../core/memory/index.js'
 import type { TurnQueue } from './turns.js'
 import { buildSessionsList, type ActionRow, type SessionCardItem } from './actions.js'
 import { normalize } from './access.js'
@@ -351,10 +351,6 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
   }
 }
 
-
-/** Enough of a note's id to name it without pasting a whole uuid into a chat. */
-const MEMORY_ID_CHARS = 8
-
 /** One note per line: what `/memory` shows on every surface. */
 export function formatMemoryList(notes: MemoryItem[]): string {
   if (notes.length === 0) {
@@ -366,7 +362,7 @@ export function formatMemoryList(notes: MemoryItem[]): string {
     // moment there is no telling a stale one from one from this morning. It is
     // when the note was last said, which is also what recall orders by.
     ...notes.map(
-      (note) => `${note.id.slice(0, MEMORY_ID_CHARS)}  ${formatWhen(note.createdAt)}  ${note.text}`,
+      (note) => `${shortId(note.id)}  ${formatWhen(note.createdAt)}  ${note.text}`,
     ),
     '',
     `Dropping one: /memory forget <id> — the first ${MEMORY_ID_CHARS} characters are enough.`,

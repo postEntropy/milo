@@ -185,6 +185,22 @@ describe('SqliteMemory', () => {
     expect(notes[0]!.id).toBeTruthy()
   })
 
+  it('reads the list a page at a time when an offset is given', async () => {
+    const { memory } = open()
+    const scope = { gateway: 'cli', conversationId: 'page' }
+    await memory.remember(scope, [{ text: 'um' }, { text: 'dois' }, { text: 'tres' }])
+
+    expect((await memory.list(scope, { limit: 2 })).map((note) => note.text)).toEqual([
+      'tres',
+      'dois',
+    ])
+    expect((await memory.list(scope, { limit: 2, offset: 2 })).map((note) => note.text)).toEqual([
+      'um',
+    ])
+    // Past the end is an empty page, not an error and not a wrapped-around one.
+    expect(await memory.list(scope, { limit: 2, offset: 9 })).toEqual([])
+  })
+
   it('drops one note by the front of its id, and only then', async () => {
     const { memory } = open()
     const scope = { gateway: 'cli', conversationId: 'forget' }

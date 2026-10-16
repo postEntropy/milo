@@ -34,8 +34,11 @@ export interface MemoryStatus {
 export interface Memory {
   remember(scope: MemoryScope, items: MemoryInput[]): Promise<void>
   recall(scope: MemoryScope, query: string, opts?: { limit?: number }): Promise<MemoryItem[]>
-  /** Everything kept, newest first — what `/memory` shows. */
-  list(scope: MemoryScope, opts?: { limit?: number }): Promise<MemoryItem[]>
+  /**
+   * What is kept, newest first — what `/memory` shows. `offset` skips that many,
+   * so a caller can read the store a page at a time rather than all at once.
+   */
+  list(scope: MemoryScope, opts?: { limit?: number; offset?: number }): Promise<MemoryItem[]>
   /**
    * Drops one note. A full id, or as much of the front of one as stays
    * unambiguous; false when nothing was removed.
@@ -75,3 +78,16 @@ export function scopeKey(scope: MemoryScope): string {
  * that is the part that stays per chat.
  */
 export const INSTALL_SCOPE: MemoryScope = { gateway: 'local', conversationId: 'install' }
+
+/**
+ * Enough of a note's id to name it without pasting a whole uuid: the prefix a
+ * surface shows beside a note, and the one the model is given so it can ask for
+ * that exact note to be dropped. One number, so the id a person reads in
+ * `/memory` is the id the model is handed.
+ */
+export const MEMORY_ID_CHARS = 8
+
+/** The front of a note's id, as a surface and the prompt both read it. */
+export function shortId(uid: string): string {
+  return uid.slice(0, MEMORY_ID_CHARS)
+}

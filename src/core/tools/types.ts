@@ -1,6 +1,6 @@
 import type { z } from 'zod'
 import type { JobManager } from '../jobs/index.js'
-import type { MemoryInput, MemoryScope } from '../memory/types.js'
+import type { MemoryInput, MemoryItem, MemoryScope } from '../memory/types.js'
 import type { OutgoingFile } from '../outgoing.js'
 import type { PanelRequest } from '../panel.js'
 import type { ImageMime } from '../providers/types.js'
@@ -17,6 +17,19 @@ export type RememberFn = (items: MemoryInput[]) => Promise<void>
 
 /** The same, for looking a past conversation back up by what it was about. */
 export type RecallFn = (query: string, opts?: { limit?: number }) => Promise<SessionSummary[]>
+
+/**
+ * The mirror of `RememberFn`, for the notes the install keeps: read the list, and
+ * drop one. One object rather than two functions, the way `SessionAdmin` is — so
+ * the gate that keeps a note out of the model's reach is a single thing to
+ * withhold. The ids are the fronts a surface and the prompt show, and the ones
+ * that matched nothing come back, so the tool can say so rather than claim a
+ * deletion that never happened.
+ */
+export interface MemoryAdmin {
+  list(opts?: { limit?: number; offset?: number }): Promise<MemoryItem[]>
+  forget(ids: string[]): Promise<{ forgotten: string[]; unknown: string[] }>
+}
 
 /**
  * How a session hands a tool the install's own sessions: read the list, and drop
@@ -63,6 +76,8 @@ export interface ToolContext {
   signal: AbortSignal
   /** Absent on a context with no memory behind it, so `remember` fails cleanly. */
   remember?: RememberFn
+  /** The same store the `remember` write goes to, for the `memories` tool. */
+  memories?: MemoryAdmin
   /** Absent on a context with no session store behind it, so `recall` does too. */
   recall?: RecallFn
   /**

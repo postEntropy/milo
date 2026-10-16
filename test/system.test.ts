@@ -41,7 +41,10 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('Model: commandcode/some-model')
     expect(prompt).toContain('read_file(path, limit?) — Read a file')
     expect(prompt).toContain('What you remember')
-    expect(prompt).toContain('- likes tmux')
+    // Each note carries the front of its id, so the model can name the exact one
+    // to drop; the fence says what the prefix is for.
+    expect(prompt).toContain('- 1  likes tmux')
+    expect(prompt).toContain('`memories` tool takes to forget one')
   })
 
   it('omits empty sections', () => {

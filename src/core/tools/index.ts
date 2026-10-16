@@ -20,6 +20,7 @@ import { listDirTool } from './list-dir.js'
 import { readFileTool } from './read-file.js'
 import { recallTool } from './recall.js'
 import { rememberTool } from './remember.js'
+import { memoriesTool } from './memories.js'
 import { panelTool } from './panel.js'
 import { routineTool } from './routine.js'
 import { searchHistoryTool } from './search-history.js'
@@ -48,6 +49,7 @@ export { gitTool, gitCommitTool } from './git.js'
 export { writeFileTool } from './write-file.js'
 export { editFileTool } from './edit-file.js'
 export { rememberTool } from './remember.js'
+export { memoriesTool } from './memories.js'
 export { recallTool } from './recall.js'
 export { sessionsTool } from './sessions.js'
 export { panelTool } from './panel.js'
@@ -74,6 +76,7 @@ export const builtinTools = [
   writeFileTool,
   editFileTool,
   rememberTool,
+  memoriesTool,
   recallTool,
   sessionsTool,
   searchHistoryTool,

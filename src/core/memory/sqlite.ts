@@ -201,7 +201,7 @@ export class SqliteMemory implements Memory {
         from memories
        where scope = ?
        order by created_at desc, id desc
-       limit ?
+       limit ? offset ?
     `)
     this.forgetStmt = this.db.prepare('delete from memories where uid = ? and scope = ?')
     // Bounded: this is the comparison set for a fact about to be written, and a
@@ -515,11 +515,12 @@ export class SqliteMemory implements Memory {
     if (this.debug) console.error('[memory] dropped the copied turns; recall reads the history now')
   }
 
-  async list(scope: MemoryScope, opts?: { limit?: number }): Promise<MemoryItem[]> {
+  async list(scope: MemoryScope, opts?: { limit?: number; offset?: number }): Promise<MemoryItem[]> {
     try {
       const rows = this.listStmt.all(
         scopeKey(scope),
         opts?.limit ?? DEFAULT_LIST_LIMIT,
+        opts?.offset ?? 0,
       ) as unknown as Row[]
       return rows.map((row) => ({
         id: row.uid,
