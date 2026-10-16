@@ -6,6 +6,11 @@
  * answered and said no; repeating it is how the chip once spun with nothing
  * said. `offline` is the server simply not being there, where the next attempt
  * may well find it.
+ *
+ * `offline` means a drop — the page was online and lost the socket. Before it was
+ * ever online there is nothing to reconnect *to*, and the page is still making its
+ * first connection, so that reads as `connecting`: the chip names the wait it is
+ * actually in instead of promising a connection the page never had.
  */
 export type ConnectionState = 'connecting' | 'online' | 'offline' | 'refused'
 
@@ -31,7 +36,9 @@ const REFUSED_REASON =
  * Once online, a close is a drop and the page retries. Before the handshake
  * finished, the server either refused the page or was not there at all: an
  * explicit refusal (`error`) is taken as the reason, otherwise the answer turns
- * on whether the server is reachable at all (`reachable`).
+ * on whether the server is reachable at all (`reachable`). A server that was not
+ * there is retried, but it is still a first connection and not a reconnect, so it
+ * stays `connecting`.
  */
 export function closeOutcome(input: { everOnline: boolean; error?: string; reachable: boolean }): {
   retry: boolean
@@ -40,5 +47,5 @@ export function closeOutcome(input: { everOnline: boolean; error?: string; reach
   if (input.everOnline) return { retry: true, status: { state: 'offline' } }
   if (input.error) return { retry: false, status: { state: 'refused', reason: input.error } }
   if (input.reachable) return { retry: false, status: { state: 'refused', reason: REFUSED_REASON } }
-  return { retry: true, status: { state: 'offline' } }
+  return { retry: true, status: { state: 'connecting' } }
 }

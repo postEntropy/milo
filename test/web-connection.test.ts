@@ -24,6 +24,8 @@ describe('what a closed web socket means', () => {
   })
 
   it('keeps retrying a server that was not there to answer, so a restart reconnects', () => {
-    expect(closeOutcome({ everOnline: false, reachable: false })).toEqual({ retry: true, status: { state: 'offline' } })
+    // Still a first connection, not a reconnect: the page has never been online, so it
+    // says it is connecting rather than promising a connection it never had.
+    expect(closeOutcome({ everOnline: false, reachable: false })).toEqual({ retry: true, status: { state: 'connecting' } })
   })
 })

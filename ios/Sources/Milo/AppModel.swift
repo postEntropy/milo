@@ -101,15 +101,35 @@ final class AppModel {
     private(set) var answerEnded = 0
     private(set) var connection: MiloClient.State = .idle
     /**
-     What the chat says about the socket, when it is worth saying. Held back for a
-     moment: leaving the app drops the socket and coming back dials again in a second
-     or two, and a line that appears and clears inside that is a flicker about a wait
-     that was over before it could be read. The hold starts when the socket goes down
-     and not at each state on the way back — passing through `offline` and `connecting`
-     is one wait, not two. A refusal is not a wait: the daemon answered, so it is said
-     at once, the way it always was.
+     Whether the socket is worth a line yet. Held back for a moment: leaving the app
+     drops the socket and coming back dials again in a second or two, and a line that
+     appears and clears inside that is a flicker about a wait that was over before it
+     could be read. The hold starts when the socket goes down and not at each state on
+     the way back — passing through `offline` and `connecting` is one wait, not two. A
+     refusal is not a wait: the daemon answered, so it is said at once, the way it
+     always was.
      */
-    private(set) var connectionLine: String?
+    private var connectionSaid = false
+    /**
+     What the chat draws about the socket, or nothing when there is nothing worth
+     saying. Read off the state rather than copied out of it when the line is earned, so
+     the words always name the socket as it is now — a wait moving from `offline` to
+     `connecting` says the one it is in, not the one the hold began on. An outage is
+     what waits; a state the daemon itself gave — a refusal, a frame this app cannot
+     read — is an answer, and answers are not held back.
+     */
+    var connectionLine: String? {
+        switch connection {
+        case .online, .idle:
+            return nil
+        case .refused(let reason):
+            return reason
+        case .unreadable:
+            return connection.wording
+        case .connecting, .offline:
+            return connectionSaid ? connection.wording : nil
+        }
+    }
     private(set) var pending: (id: String, request: PermissionRequest, expiresAt: Double)?
 
     // The drawer.
@@ -197,14 +217,11 @@ final class AppModel {
         switch state {
         case .online, .idle:
             clearHold()
-            connectionLine = nil
-        case .refused(let reason):
-            // The daemon spoke, so this is an answer rather than an outage.
+        case .refused, .unreadable:
+            // The daemon spoke, so this is an answer rather than an outage: it is said at
+            // once, and `connectionLine` reads its words — a reason it gave, or this app's
+            // own account of a frame it could not make out — straight off the state.
             clearHold()
-            connectionLine = reason
-        case .unreadable:
-            clearHold()
-            connectionLine = state.wording
         case .connecting, .offline:
             // Already holding: this is the same outage passing through another state,
             // and the line reads whatever the socket is doing when the hold expires.
@@ -213,7 +230,7 @@ final class AppModel {
                 try? await Task.sleep(for: Self.lineDelay)
                 guard !Task.isCancelled, let self else { return }
                 self.lineWork = nil
-                self.connectionLine = self.connection.wording
+                self.connectionSaid = true
             }
         }
     }
@@ -221,6 +238,7 @@ final class AppModel {
     private func clearHold() {
         lineWork?.cancel()
         lineWork = nil
+        connectionSaid = false
     }
 
     /// What a call that came back wrong has to say. One place, so every failure reads

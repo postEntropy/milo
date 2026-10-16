@@ -176,7 +176,13 @@ final class MiloClient {
             state = .refused(reason)
             return
         }
-        state = .offline
+        // Having been online, a close is a drop and reads as reconnecting. Before that
+        // there is nothing to reconnect *to*: a daemon that was not up when the app
+        // opened is still being reached for the first time, and naming it a reconnect
+        // would say a connection this device never had. Appointing it a `connecting`
+        // that keeps trying is the honest reading, and it is what spares the screen a
+        // "Reconnecting…" over a socket that has yet to connect once.
+        state = everOnline ? .offline : .connecting
         retry += 1
         let delay = min(0.5 * pow(2, Double(retry)), 8)
         reconnect?.cancel()
