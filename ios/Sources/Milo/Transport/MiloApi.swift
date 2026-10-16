@@ -23,9 +23,12 @@ struct SessionSummary: Decodable, Identifiable, Hashable {
     let messageCount: Int
     let preview: String
     let recap: String?
+    /// Whether a turn holds this session right now — anywhere in the install, the
+    /// daemon or a terminal. A row draws its running mark from this.
+    let running: Bool?
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, createdAt, updatedAt, messageCount, preview, recap
+        case id, title, createdAt, updatedAt, messageCount, preview, recap, running
     }
 
     /// Read leniently, and only `id` as the one thing it cannot do without: a row
@@ -36,6 +39,7 @@ struct SessionSummary: Decodable, Identifiable, Hashable {
         id = try container.decode(String.self, forKey: .id)
         title = try container.decodeIfPresent(String.self, forKey: .title)
         recap = try container.decodeIfPresent(String.self, forKey: .recap)
+        running = try container.decodeIfPresent(Bool.self, forKey: .running)
         preview = try container.decodeIfPresent(String.self, forKey: .preview) ?? ""
         messageCount = try container.decodeIfPresent(Int.self, forKey: .messageCount) ?? 0
         createdAt = try container.decodeIfPresent(Double.self, forKey: .createdAt) ?? 0

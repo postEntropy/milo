@@ -202,6 +202,8 @@ export type ServerFrame =
   | { type: 'state'; busy: boolean; queued: number }
   /** A routine ran somewhere in this install: re-read whatever shows the history. */
   | { type: 'routines-changed' }
+  /** A session's turn began or ended here: re-read the list that shows it running. */
+  | { type: 'sessions-changed' }
   /** The panel beside the chat changed; null takes it down. */
   | { type: 'panel'; panel: PanelView | null }
   /** The background jobs still running, for the strip above the composer. */

@@ -168,6 +168,14 @@ struct SessionsDrawer: View {
                     .foregroundStyle(MiloTheme.foreground)
                     .lineLimit(1)
                 Spacer(minLength: MiloTheme.Space.two)
+                // A session running now, said with the accent the way the accent already
+                // points: one dot at the row's own edge, no words.
+                if session.running == true {
+                    Circle()
+                        .fill(MiloTheme.accent)
+                        .frame(width: 7, height: 7)
+                        .accessibilityLabel("Running")
+                }
             }
             .padding(.horizontal, MiloTheme.Space.three)
             .padding(.vertical, MiloTheme.Space.two)

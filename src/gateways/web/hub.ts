@@ -50,31 +50,41 @@ export interface WebClient {
   send(frame: ServerFrame): void
 }
 
-interface Conversation {
-  scope: MemoryScope
-  session: Session
-  clients: Set<WebClient>
-  /**
-   * The turn running now, with every frame it has said. A client can arrive in the
-   * middle of an answer — a phone that was locked, a page reloaded — and long after
-   * its `turn-start` went out. The session on disk is written a step at a time, so
-   * the answer as it stands exists nowhere else; it is kept here, whole, and replayed
-   * to whoever connects.
-   *
-   * `from` is where the turn began in the session — the index of its own user
-   * message. The ready handed to a late client is cut there (drawing the history up
-   * to and including those words), and the frames carry everything the turn has said
-   * since. So the answer is drawn once, as the one row the client that watched it
-   * live drew — not split in two, the written steps in the history and the rest
-   * beside them.
-   */
-  activeTurn?: { id: string; at: number; from: number; frames: ServerFrame[] }
+/**
+ * The turn running on a session right now, with every frame it has said.
+ *
+ * Keyed by the session, not the conversation: two screens bound to one session —
+ * the desktop tab left open and the phone that picked it up — are two conversations
+ * over one `Session`, and both are owed the same live answer. A client can arrive in
+ * the middle of it — a phone that was locked, a page reloaded — long after its
+ * `turn-start` went out, and the session on disk is written a step at a time, so the
+ * answer as it stands exists nowhere else; it is kept here, whole, and replayed.
+ *
+ * `from` is where the turn began in the session — the index of its own user message.
+ * The ready handed to a late client is cut there (drawing the history up to and
+ * including those words), and the frames carry everything the turn has said since. So
+ * the answer is drawn once, as the one row the client that watched it live drew — not
+ * split in two, the written steps in the history and the rest beside them.
+ */
+interface LiveTurn {
+  id: string
+  at: number
+  from: number
+  frames: ServerFrame[]
+  /** The conversation whose queue runs this turn; a sibling's own message joins it. */
+  owner: string
   /**
    * The permission the turn is waiting on, when it is waiting on one. It goes out as
    * its own frame, so a client that arrives after it did never saw it — and a
    * question nobody can see is a question that expires as a denial.
    */
   permission?: { id: string; request: PermissionRequest; expiresAt: number }
+}
+
+interface Conversation {
+  scope: MemoryScope
+  session: Session
+  clients: Set<WebClient>
   /**
    * Whether a client on this conversation said it draws a generated interface.
    * Declared on connect and read on every turn, so drawing is taught only where
@@ -99,6 +109,12 @@ interface Conversation {
 
 export class WebHub {
   private readonly conversations = new Map<string, Conversation>()
+  /**
+   * The turn running on each session, by session id. One session can be open in
+   * several conversations — the desktop and the phone — and this is what makes the
+   * live answer theirs in common rather than each conversation's own.
+   */
+  private readonly live = new Map<string, LiveTurn>()
   private readonly turns = new TurnQueue()
   private readonly pending = new PendingDecisions()
   /**
@@ -166,7 +182,7 @@ export class WebHub {
     // The turn running now, when there is one: this client missed its `turn-start`,
     // so the id it is drawn under rides with the ready and the events it has already
     // said are replayed under it, in order, before anything new arrives.
-    const running = conversation.activeTurn
+    const running = this.live.get(conversation.session.id)
     client.send({
       type: 'ready',
       version: 1,
@@ -191,7 +207,7 @@ export class WebHub {
     // A question the turn is still waiting on, sent again under the id it already
     // had: the deadline is the daemon's, so the countdown this client draws is the
     // one that is actually running rather than a fresh five minutes.
-    const asking = conversation.permission
+    const asking = running?.permission
     if (asking) {
       client.send({ type: 'permission', id: asking.id, request: asking.request, expiresAt: asking.expiresAt })
     }
@@ -220,14 +236,17 @@ export class WebHub {
 
     if (frame.type === 'control') {
       if (frame.action === 'stop') {
-        const result = this.turns.stop(conversationId)
+        // The turn may be running in a sibling's queue: stopping is the session's own
+        // act, not the asking conversation's, so it lands on whoever owns it.
+        const result = this.turns.stop(this.liveOwner(conversation.session.id) ?? conversationId)
         this.sendState(conversationId)
         if (!result.stopped) client.send({ type: 'error', message: 'Nothing is running to stop.' })
       } else if (frame.id) {
         const allowed = frame.action === 'allow'
         // The permission belongs to the session it was raised in: a client of another
-        // session cannot answer it, even holding the id.
-        if (this.pending.resolve(frame.id, allowed, conversationId)) {
+        // session cannot answer it, even holding the id — and a client of a sibling
+        // conversation can, because the question is the session's own.
+        if (this.pending.resolve(frame.id, allowed, conversation.session.id)) {
           client.send({ type: 'permission-result', id: frame.id, allowed })
         } else {
           client.send({ type: 'error', message: 'That permission is no longer waiting.' })
@@ -254,19 +273,25 @@ export class WebHub {
         return
       }
       if (!frame.text.trim() && !files.length) return
+      // A message from a sibling goes into the queue the session's turn lives in, so
+      // it runs after the one in flight and its frames reach both screens. With
+      // nothing live, the queue is this conversation's own — the cross-process case,
+      // which the lease serialises into `waiting`/`waited` exactly as before.
+      const sessionId = conversation.session.id
+      const key = this.liveOwner(sessionId) ?? conversationId
       if (files.length) {
-        this.startTurn(conversationId, frame.text, frame.target, [], files)
+        this.startTurn(key, frame.text, frame.target, [], files)
         return
       }
       if (frame.intent === 'steer') {
-        const steered = this.turns.steer(conversationId, frame.text)
+        const steered = this.turns.steer(key, frame.text)
         if (steered) {
-          const turnId = this.conversations.get(conversationId)?.activeTurn?.id
-          if (turnId) this.emitTurn(conversationId, { type: 'event', turnId, event: { type: 'steer', text: frame.text } })
+          const turnId = this.live.get(sessionId)?.id
+          if (turnId) this.emitTurn(sessionId, { type: 'event', turnId, event: { type: 'steer', text: frame.text } })
           return
         }
       }
-      this.startTurn(conversationId, frame.text, frame.target)
+      this.startTurn(key, frame.text, frame.target)
       return
     }
 
@@ -374,6 +399,18 @@ export class WebHub {
   }
 
   /**
+   * A session started or ended a turn here. Like `routinesChanged`, this is not about
+   * one conversation — the sessions list shows the same session running on every
+   * surface — so it goes to every client, and each re-reads the list.
+   */
+  sessionsChanged(): void {
+    const frame: ServerFrame = { type: 'sessions-changed' }
+    for (const conversation of this.conversations.values()) {
+      for (const client of conversation.clients) client.send(frame)
+    }
+  }
+
+  /**
    * Posts a message into a conversation with no turn behind it — how a routine
    * reaches a web chat, and how a live turn's own files reach it too: the answer
    * is already on screen, so the files arrive as their own message. It is written
@@ -392,7 +429,11 @@ export class WebHub {
     const session = await this.runtime.getSession({ gateway: 'web', conversationId })
     await session.appendNotice(text, files)
     const attachments = files.map((file) => this.register(file))
-    this.broadcast(conversationId, {
+    // Said to every screen on the session, not only the conversation it was addressed
+    // to: the file is the session's own message, and a sibling watching it is owed the
+    // same. Kept on the live turn too, so a client that arrives mid-turn still gets it
+    // — the ready it is handed is cut at the turn's start, before this landed.
+    this.emitTurn(session.id, {
       type: 'command-result',
       reply: text,
       markdown: text,
@@ -411,11 +452,14 @@ export class WebHub {
    * conversation's own session. Unlike `deliver` it does not write the transcript
    * again, so the message is not doubled; a reload reads it from the transcript.
    */
-  showNotice(conversationId: string, message: OutgoingMessage): void {
+  async showNotice(conversationId: string, message: OutgoingMessage): Promise<void> {
     const files = message.files ?? []
     const text = message.text ?? ''
     const attachments = files.map((file) => this.register(file))
-    this.broadcast(conversationId, {
+    // The whole session, like `deliver`: a finished job's announcement belongs to the
+    // session it ran on, and a sibling watching that session is owed it too.
+    const session = await this.runtime.getSession({ gateway: 'web', conversationId })
+    this.emitTurn(session.id, {
       type: 'command-result',
       reply: text,
       markdown: text,
@@ -750,20 +794,24 @@ export class WebHub {
     this.turns.run(conversationId, async (inbox, signal) => {
       const id = randomUUID()
       const activeConversation = this.conversations.get(conversationId)
-      // Kept as it is said, frame by frame, for a client that arrives in the middle
-      // of it: by then the `turn-start` below is long gone, and the session on disk
-      // grows only a step at a time.
-      if (activeConversation) {
-        activeConversation.activeTurn = {
-          id,
-          at: Date.now(),
-          frames: [],
-          from: activeConversation.session.messages.length,
-        }
+      // Kept as it is said, frame by frame, for a client that arrives in the middle of
+      // it: by then the `turn-start` below is long gone, and the session on disk grows
+      // only a step at a time. Keyed by the session, so a sibling screen gets it too;
+      // `owner` is the conversation whose queue is running it.
+      let sessionId = activeConversation?.session.id
+      let live: LiveTurn | undefined
+      if (activeConversation && sessionId) {
+        live = { id, at: Date.now(), frames: [], from: activeConversation.session.messages.length, owner: conversationId }
+        this.live.set(sessionId, live)
+        this.sessionsChanged()
       }
-      this.broadcast(conversationId, { type: 'turn-start', id, text: files?.length
+      if (sessionId) this.emitTurn(sessionId, { type: 'turn-start', id, text: files?.length
         ? [text, files.map((file) => `Attached ${file.name}`).join(', ')].filter(Boolean).join('\n')
         : text })
+      // Said again now the live turn is open: the state frame the caller sent when it
+      // queued this turn read `busy` before the queue had registered it, so it still
+      // said false. This is the one that turns the sibling's composer busy.
+      this.sendState(conversationId)
       let status: 'done' | 'stopped' | 'error' = 'done'
       const display = readDisplay()
       let currentImages = images
@@ -780,10 +828,18 @@ export class WebHub {
           let session = await this.runtime.getSession(conversation.scope)
           conversation.session = session
           if (runFrom === undefined) runFrom = session.messages.length
+          // A turn can outlive the session it opened on (`/new`, a resume): the live
+          // turn moves to the session the conversation is bound to now, so the screens
+          // watching that session keep receiving it and the old key is left clean.
+          if (live && session.id !== sessionId) {
+            if (sessionId) this.live.delete(sessionId)
+            sessionId = session.id
+            this.live.set(sessionId, live)
+          }
           // Grounded on the session actually in hand, not the cached copy the turn
           // opened with: this is the index the turn's own user message is written at,
           // and what a late client's ready is cut at.
-          if (activeConversation?.activeTurn?.id === id) activeConversation.activeTurn.from = runFrom
+          if (live) live.from = runFrom
           if (currentFiles?.length) {
             const prepared = await prepareIncoming(currentFiles, { model: session.model })
             currentText = [currentText, currentFiles.map((file) => `Attached ${file.name}`).join('\n'), ...prepared.text].filter(Boolean).join('\n\n') || 'Please inspect the attached media.'
@@ -836,20 +892,15 @@ export class WebHub {
             ask: async (request) => {
               const permissionId = randomUUID()
               const expiresAt = Date.now() + PERMISSION_TIMEOUT_MS
-              // Held for the conversation while it waits: the frame below reaches the
-              // clients that are here, and this is what a client arriving later is told.
-              const asking = this.conversations.get(conversationId)
-              if (asking) asking.permission = { id: permissionId, request, expiresAt }
-              this.broadcast(conversationId, {
-                type: 'permission',
-                id: permissionId,
-                request,
-                expiresAt,
-              })
-              const allowed = await this.pending.wait(permissionId, PERMISSION_TIMEOUT_MS, signal, conversationId)
-              const answered = this.conversations.get(conversationId)
-              if (answered?.permission?.id === permissionId) answered.permission = undefined
-              this.broadcast(conversationId, { type: 'permission-result', id: permissionId, allowed })
+              // Held on the session's live turn while it waits: the frame below reaches
+              // the clients that are here, and this is what a client arriving later is
+              // told. The question is the session's own, so any screen bound to it can
+              // answer — not only the conversation whose queue raised it.
+              if (live) live.permission = { id: permissionId, request, expiresAt }
+              if (sessionId) this.emitTurn(sessionId, { type: 'permission', id: permissionId, request, expiresAt })
+              const allowed = await this.pending.wait(permissionId, PERMISSION_TIMEOUT_MS, signal, sessionId ?? conversationId)
+              if (live?.permission?.id === permissionId) live.permission = undefined
+              if (sessionId) this.emitTurn(sessionId, { type: 'permission-result', id: permissionId, allowed })
               return { allowed }
             },
           })) {
@@ -864,7 +915,7 @@ export class WebHub {
               this.broadcast(conversationId, { type: 'panel', panel: this.panelView(conversation) })
               continue
             }
-            displayEvent(event, id, display, (frame) => this.emitTurn(conversationId, frame))
+            displayEvent(event, id, display, (frame) => { if (sessionId) this.emitTurn(sessionId, frame) })
           }
           currentImages = []
           currentAudio = []
@@ -896,7 +947,10 @@ export class WebHub {
         // Cleared before the `turn-end` goes out: the step that just finished is in
         // the session by now, so a client connecting in this gap is handed the whole
         // turn as history instead of a live row nothing would ever close.
-        if (endedConversation?.activeTurn?.id === id) endedConversation.activeTurn = undefined
+        if (live) {
+          if (sessionId && this.live.get(sessionId) === live) this.live.delete(sessionId)
+          this.sessionsChanged()
+        }
         // The answer's raw copy rides with the turn, so the just-streamed answer has it
         // too — not only a reload, which reads the same rendering back from the transcript.
         // The copy without the output rides beside it, and only where it differs: the two
@@ -906,7 +960,7 @@ export class WebHub {
           : null
         const raw = messages ? rawTurn(messages) : null
         const noOutput = messages ? rawTurn(messages, { output: false }) : null
-        this.broadcast(conversationId, { type: 'turn-end', id, status, ...(raw ? { raw } : {}), ...(noOutput && noOutput !== raw ? { rawNoOutput: noOutput } : {}) })
+        if (sessionId) this.emitTurn(sessionId, { type: 'turn-end', id, status, ...(raw ? { raw } : {}), ...(noOutput && noOutput !== raw ? { rawNoOutput: noOutput } : {}) })
       }
     }, () => this.sendState(conversationId))
     this.sendState(conversationId)
@@ -919,9 +973,11 @@ export class WebHub {
    * vanishing without a reason is what makes it look like nothing happened.
    */
   private reportTurnFailure(conversationId: string, turnId: string, reason: string): void {
-    this.broadcast(conversationId, { type: 'event', turnId, event: { type: 'error', message: reason } })
-    logWarn(`turn failed on web:${conversationId}: ${reason}`)
     const session = this.conversations.get(conversationId)?.session
+    // A turn frame, so it reaches every screen on the session — not only the one whose
+    // queue started it.
+    if (session) this.emitTurn(session.id, { type: 'event', turnId, event: { type: 'error', message: reason } })
+    logWarn(`turn failed on web:${conversationId}: ${reason}`)
     void session?.appendNotice(`⚠ the turn failed: ${reason}`).catch((error: unknown) => {
       logWarn(`could not write down a failed turn: ${errorMessage(error)}`)
     })
@@ -929,9 +985,12 @@ export class WebHub {
 
   private async command(client: WebClient, conversation: Conversation, text: string, messageId?: string): Promise<void> {
     const context = this.commandContext(conversation, conversation.session, new AbortController().signal)
+    // The turn controls act on the session, not the asking conversation: `/stop`,
+    // `/steer` and `/queue` reach the queue the session's turn is running in.
+    const key = this.liveOwner(conversation.session.id) ?? conversation.scope.conversationId
     const result = handleTurnControl(text, {
-      turn: turnOf(this.turns, conversation.scope.conversationId),
-      start: (pending) => this.startTurn(conversation.scope.conversationId, pending),
+      turn: turnOf(this.turns, key),
+      start: (pending) => this.startTurn(key, pending),
     })
     if (result.handled) {
       client.send({ type: 'command-result', reply: result.reply ?? '', ...(messageId ? { messageId } : {}) })
@@ -942,7 +1001,7 @@ export class WebHub {
     // from there it would still say `busy: true` for this very command — a slash
     // command is instantaneous, and the page would be left holding the stop
     // button with nothing running to stop.
-    this.turns.run(conversation.scope.conversationId, async () => {
+    this.turns.run(key, async () => {
       const response = await handleCommand(text, context)
       if (!response.handled) return
       const refreshed = await this.runtime.getSession(conversation.scope)
@@ -972,12 +1031,38 @@ export class WebHub {
     })
   }
 
+  /**
+   * The busy/queued a session is in, sent to every screen bound to it. `busy` is
+   * true while a turn runs anywhere the daemon can see it — the owner's queue, or a
+   * live turn — so a sibling's composer shows the stop and steer controls rather than
+   * a second, idle send. A turn in another process is not seen here; the sessions
+   * list carries that one from the store's lease.
+   */
   private sendState(conversationId: string): void {
-    this.broadcast(conversationId, {
+    const conversation = this.conversations.get(conversationId)
+    if (!conversation) return
+    const sessionId = conversation.session.id
+    const key = this.liveOwner(sessionId) ?? conversationId
+    const frame: ServerFrame = {
       type: 'state',
-      busy: this.turns.busy(conversationId),
-      queued: this.turns.queued(conversationId),
-    })
+      busy: this.turns.busy(key) || this.live.has(sessionId),
+      queued: this.turns.queued(key),
+    }
+    for (const bound of this.conversationsOf(sessionId)) for (const client of bound.clients) client.send(frame)
+  }
+
+  /** Every conversation bound to a session — the screens its live turn speaks to. */
+  private conversationsOf(sessionId: string): Conversation[] {
+    const found: Conversation[] = []
+    for (const conversation of this.conversations.values()) {
+      if (conversation.session.id === sessionId) found.push(conversation)
+    }
+    return found
+  }
+
+  /** The conversation whose queue runs this session's turn, when one is running. */
+  private liveOwner(sessionId: string): string | undefined {
+    return this.live.get(sessionId)?.owner
   }
 
   private broadcast(conversationId: string, frame: ServerFrame): void {
@@ -985,19 +1070,21 @@ export class WebHub {
   }
 
   /**
-   * A frame belonging to the turn running now: sent to everyone watching, and kept
-   * whole for whoever arrives late. Only the turn's own frames go through here — they
-   * are the ones a client that missed the `turn-start` has no other way to see.
+   * A frame belonging to the turn running on a session: sent to every screen watching
+   * it, and kept whole for whoever arrives late. Only the turn's own frames go through
+   * here — they are the ones a client that missed the `turn-start` has no other way to
+   * see.
    *
    * Every frame is kept, the steps already written to the session among them: the
    * ready a late client is handed is cut at the turn's start, so those steps are drawn
    * from these frames and nowhere else. Replaying them alongside a ready that also
    * held them is what split one answer into two rows.
    */
-  private emitTurn(conversationId: string, frame: ServerFrame): void {
-    const conversation = this.conversations.get(conversationId)
-    if (conversation?.activeTurn) conversation.activeTurn.frames.push(frame)
-    this.broadcast(conversationId, frame)
+  private emitTurn(sessionId: string, frame: ServerFrame): void {
+    this.live.get(sessionId)?.frames.push(frame)
+    for (const conversation of this.conversationsOf(sessionId)) {
+      for (const client of conversation.clients) client.send(frame)
+    }
   }
 
   /**

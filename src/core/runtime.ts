@@ -251,7 +251,13 @@ export class AgentRuntime {
   async listSessions(): Promise<SessionSummary[]> {
     const sessions = (await this.store.list())
       .filter((session) => session.scope?.gateway !== ROUTINE_GATEWAY)
-    return withRecaps(sessions, this.recaps)
+    const withHistory = await withRecaps(sessions, this.recaps)
+    // One place says whether a session is running, so every surface reading this
+    // list agrees: the check is the store's own lease, true for a turn anywhere in
+    // the install. Set only when true, so a free session's summary is unchanged.
+    return Promise.all(withHistory.map(async (session) =>
+      (await this.store.busy(session.id)) ? { ...session, running: true } : session,
+    ))
   }
 
   /**

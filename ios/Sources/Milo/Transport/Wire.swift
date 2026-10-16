@@ -333,6 +333,9 @@ enum ServerFrame: Decodable {
     case jobs([JobView])
     case suggestions([Idea])
     case routinesChanged
+    /// A session's turn began or ended somewhere in the install: re-read the list that
+    /// shows it running.
+    case sessionsChanged
     case error(String)
     case unknown
 
@@ -382,6 +385,7 @@ enum ServerFrame: Decodable {
         case "jobs": self = .jobs(try container.decode([JobView].self, forKey: .jobs))
         case "suggestions": self = .suggestions(try container.decode([Idea].self, forKey: .items))
         case "routines-changed": self = .routinesChanged
+        case "sessions-changed": self = .sessionsChanged
         case "error": self = .error(try container.decode(String.self, forKey: .message))
         default: self = .unknown
         }

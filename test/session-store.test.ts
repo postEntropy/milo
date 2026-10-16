@@ -695,3 +695,39 @@ describe('MemorySessionStore fork', () => {
     await expect(store.save(forked!, forked!.version)).resolves.toBeUndefined()
   })
 })
+
+describe('asking whether a session is running', () => {
+  it('the file store reads the turn lock — including one another process holds', async () => {
+    const dir = tempDir()
+    const store = new FileSessionStore({ dir })
+    const created = await store.create()
+    await store.save(created, created.version)
+
+    expect(await store.busy(created.id)).toBe(false)
+    // A second store over the same directory is the CLI beside the daemon: it takes
+    // the lease, and the first store sees it without taking anything itself.
+    const other = new FileSessionStore({ dir })
+    const lease = await other.tryAcquire(created.id)
+    expect(await store.busy(created.id)).toBe(true)
+    expect(await other.busy(created.id)).toBe(true)
+
+    await lease?.release()
+    expect(await store.busy(created.id)).toBe(false)
+  })
+
+  it('the memory store tracks the leases it hands out', async () => {
+    const store = new MemorySessionStore()
+    const created = await store.create()
+
+    expect(await store.busy(created.id)).toBe(false)
+    const lease = await store.tryAcquire(created.id)
+    expect(await store.busy(created.id)).toBe(true)
+    await lease?.release()
+    expect(await store.busy(created.id)).toBe(false)
+  })
+
+  it('reads a session that is gone as free', async () => {
+    expect(await new FileSessionStore({ dir: tempDir() }).busy('calm-otter-9')).toBe(false)
+    expect(await new MemorySessionStore().busy('calm-otter-9')).toBe(false)
+  })
+})

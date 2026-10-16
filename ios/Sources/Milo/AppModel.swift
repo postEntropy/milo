@@ -845,6 +845,10 @@ final class AppModel {
             // The daemon says a routine ran; the list and the reminders are re-read from
             // what it left rather than from the frame, which carries nothing.
             Task { await refreshRoutines() }
+        case .sessionsChanged:
+            // A session started or stopped a turn anywhere in the install: re-read the
+            // list, which carries the running flag, rather than guess it here.
+            Task { await refreshSessions() }
         case .unknown:
             break
         }

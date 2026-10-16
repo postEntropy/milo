@@ -29,6 +29,8 @@ export class MemorySessionStore implements SessionStore {
   private readonly records = new Map<string, SessionRecord>()
   private readonly bindings = new Map<string, string>()
   private readonly leases = new KeyedMutex()
+  /** The ids a turn holds right now, for `busy` — the in-process stand-in for the file lock. */
+  private readonly held = new Set<string>()
   private readonly now: () => number
 
   constructor(options: MemorySessionStoreOptions = {}) {
@@ -65,17 +67,22 @@ export class MemorySessionStore implements SessionStore {
 
   async tryAcquire(id: string): Promise<SessionLease | null> {
     const unlock = this.leases.tryAcquire(id)
-    return unlock ? this.lease(id, unlock) : null
+    if (!unlock) return null
+    this.held.add(id)
+    return this.lease(id, unlock)
   }
 
   async acquire(id: string, options?: { signal?: AbortSignal }): Promise<SessionLease> {
-    return this.lease(id, await waitForLease(this.leases.acquire(id), options?.signal))
+    const unlock = await waitForLease(this.leases.acquire(id), options?.signal)
+    this.held.add(id)
+    return this.lease(id, unlock)
   }
 
   private async lease(id: string, unlock: () => void): Promise<SessionLease> {
     return {
       latest: await this.load(id),
       release: async () => {
+        this.held.delete(id)
         unlock()
       },
     }
@@ -85,6 +92,10 @@ export class MemorySessionStore implements SessionStore {
     return [...this.records.values()]
       .map(toSummary)
       .sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+
+  async busy(id: string): Promise<boolean> {
+    return this.held.has(id)
   }
 
   async remove(id: string): Promise<void> {

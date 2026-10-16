@@ -42,6 +42,11 @@ export interface SessionSummary {
   recap?: string
   /** The address the session was created under; see `SessionRecord.scope`. */
   scope?: MemoryScope
+  /**
+   * Whether a turn holds this session right now — read off the lease, so it is
+   * true for a turn running anywhere, a daemon or a terminal. Absent means no.
+   */
+  running?: boolean
 }
 
 /** The numbers behind `/stats`. */
@@ -112,6 +117,12 @@ export interface SessionStore {
    */
   acquire(id: string, options?: { signal?: AbortSignal }): Promise<SessionLease>
   list(): Promise<SessionSummary[]>
+  /**
+   * Whether a turn holds this session's lease right now — in this process or
+   * another. Read-only: it takes nothing, so asking never starts a wait, and an
+   * id that is gone reads as free.
+   */
+  busy(id: string): Promise<boolean>
   remove(id: string): Promise<void>
   /**
    * Forks an existing session, copying history up to `upToTurn` (1-indexed) into a

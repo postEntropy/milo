@@ -429,6 +429,9 @@ export default function App() {
     }
     if (frame.type === 'error') { setNotice({ text: frame.message, error: true }); return }
     if (frame.type === 'routines-changed') { setRoutinesTick((current) => current + 1); return }
+    // A session started or stopped a turn anywhere in the install: the running dot is
+    // re-read off the daemon rather than guessed at here.
+    if (frame.type === 'sessions-changed') { void refreshSessions(); return }
     if (frame.type === 'panel') {
       // Milo shows something and the panel opens itself — that is the "here, look
       // at this". A resolved `null` is the model taking it down.
@@ -1157,6 +1160,8 @@ function SessionRow({
           </span>
         </button>
       )}
+
+      {session.running && <span className="session-running" role="img" aria-label="Running" />}
 
       <div className="session-row-actions" ref={menuRef}>
         <button

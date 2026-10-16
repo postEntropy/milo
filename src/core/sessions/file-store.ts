@@ -288,6 +288,23 @@ export class FileSessionStore implements SessionStore {
     return summaries.sort((a, b) => b.updatedAt - a.updatedAt)
   }
 
+  /**
+   * Whether a turn holds this session right now. The turn lease is the signal —
+   * the same one a waiting turn watches — so this reads true for a turn in another
+   * process, a terminal among them, which no in-memory map could see. `check`
+   * takes nothing; a lock whose holder died is past `stale` and reads as free,
+   * the way an interrupted turn does.
+   */
+  async busy(id: string): Promise<boolean> {
+    if (!isValidSessionId(id)) return false
+    try {
+      return await lockfile.check(turnTarget(this.fileFor(id)), { realpath: false, stale: LOCK_STALE_MS })
+    } catch (error) {
+      logWarn(`checking whether session ${id} is running failed: ${errorMessage(error)}`)
+      return false
+    }
+  }
+
   async remove(id: string): Promise<void> {
     if (!isValidSessionId(id)) return
     ensurePrivateDir(this.dir)

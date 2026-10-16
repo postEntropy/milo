@@ -57,7 +57,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   // names wins over the one the config holds.
   const web = loaded.config.web
   /** Kept so the scheduler can tell an open Routines screen that a run happened. */
-  let webUi: { routinesChanged(): void; showNotice(conversationId: string, message: OutgoingMessage): void } | undefined
+  let webUi: { routinesChanged(): void; showNotice(conversationId: string, message: OutgoingMessage): Promise<void> } | undefined
   if (!options.noWeb && web.enabled) {
     const { WebGateway } = await import('./web/gateway.js')
     const gateway = new WebGateway({
@@ -96,7 +96,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
       ...(message.files.length > 0 ? { files: message.files } : {}),
     }
     if (job.origin.gateway === 'web') {
-      webUi?.showNotice(job.origin.conversationId, outgoing)
+      await webUi?.showNotice(job.origin.conversationId, outgoing)
       return
     }
     const gateway = gateways.find((candidate) => candidate.id === job.origin.gateway)

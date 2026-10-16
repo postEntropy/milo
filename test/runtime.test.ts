@@ -456,3 +456,24 @@ describe('AgentRuntime close', () => {
     expect(notes.map((note) => note.text)).toContain('Meu editor e o Neovim.')
   })
 })
+
+describe('the sessions list says which one is running', () => {
+  it('marks a session a turn holds, and not one that is free', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const runtime = new AgentRuntime(runtimeOptions(dir))
+    const session = await runtime.getSession(cli)
+    await drain(session.send('hello'))
+
+    expect((await runtime.listSessions()).find((entry) => entry.id === session.id)?.running).toBeUndefined()
+
+    // A lease taken by another store over the same directory — the terminal beside
+    // the daemon — is what the list reads, so it is true for a turn no in-memory map
+    // of the daemon's could see.
+    const other = new FileSessionStore({ dir })
+    const lease = await other.tryAcquire(session.id)
+    expect((await runtime.listSessions()).find((entry) => entry.id === session.id)?.running).toBe(true)
+
+    await lease?.release()
+    expect((await runtime.listSessions()).find((entry) => entry.id === session.id)?.running).toBeUndefined()
+  })
+})

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseClientFrame, PROTOCOL_VERSION } from '../src/gateways/web/protocol.js'
+import { parseClientFrame, PROTOCOL_VERSION, type ServerFrame } from '../src/gateways/web/protocol.js'
 import { displayEvent } from '../src/gateways/web/turn.js'
 
 const output: unknown[] = []
@@ -68,5 +68,12 @@ describe('web protocol', () => {
     expect(output).toHaveLength(0)
     displayEvent({ type: 'text-delta', delta: 'answer' }, 'turn', { tools: 'full', thinking: 'off' }, send as never)
     expect(output).toMatchObject([{ event: { delta: 'answer' } }])
+  })
+
+  it('carries the frame that says a session began or ended a turn', () => {
+    // A type-level fixture: this line is what proves `sessions-changed` is a frame the
+    // server may send, and it is additive, so no version bump rides with it.
+    const frame: ServerFrame = { type: 'sessions-changed' }
+    expect(frame).toEqual({ type: 'sessions-changed' })
   })
 })
