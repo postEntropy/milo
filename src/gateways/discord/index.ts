@@ -287,6 +287,13 @@ export class DiscordGateway implements Gateway {
       sessionLockMessage({ allowlist: this.options.allowlist, userId: message.author.id }) ===
       undefined
 
+    // A command is answered before any turn exists, and one of them — `/compact` —
+    // buys a summary, which is a model call of seconds. The transport's own working
+    // indicator is what says so while it runs: the same one a turn keeps on, and
+    // here there is no turn yet to start it. A message that is not a command is left
+    // alone: the turn it becomes starts that indicator itself.
+    const stopTyping =
+      text.startsWith('/') && !files?.length ? this.typing(message.channel) : () => undefined
     let command: Awaited<ReturnType<typeof handleCommand>>
     try {
       command = files?.length
@@ -304,25 +311,27 @@ export class DiscordGateway implements Gateway {
               signal,
             }),
           )
+      if (command.handled) {
+        // Discord renders Markdown natively, so the richer rendering goes as-is.
+        const components = this.builders
+          ? toDiscordComponents<ActionRowBuilder<ButtonBuilder>>(command.actions, this.builders)
+          : []
+        if (components.length > 0) {
+          await message.reply({
+            content: command.markdown ?? command.reply ?? '',
+            components,
+          })
+        } else {
+          await message.reply(command.markdown ?? command.reply ?? '')
+        }
+        return
+      }
     } catch (error) {
       // A command that throws must not swallow the message it was answering.
       await message.reply(`⚠ ${errorMessage(error)}`).catch(() => undefined)
       return
-    }
-    if (command.handled) {
-      // Discord renders Markdown natively, so the richer rendering goes as-is.
-      const components = this.builders
-        ? toDiscordComponents<ActionRowBuilder<ButtonBuilder>>(command.actions, this.builders)
-        : []
-      if (components.length > 0) {
-        await message.reply({
-          content: command.markdown ?? command.reply ?? '',
-          components,
-        })
-      } else {
-        await message.reply(command.markdown ?? command.reply ?? '')
-      }
-      return
+    } finally {
+      stopTyping()
     }
 
     let postedMessage: Message | null = null

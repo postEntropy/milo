@@ -217,7 +217,12 @@ enum AgentEvent: Decodable {
     /// `draft` while the block is still open. It is drawn in place as it grows.
     case ui(GenUi, draft: Bool)
     case usage(inputTokens: Int, outputTokens: Int)
-    case compacted(ms: Int)
+    /// The oldest turns are being folded into the summary right now: a model call of
+    /// its own, said before it starts so the quiet has a name.
+    case compacting
+    /// The fold is done, and what it came to — the turns, the tokens they were worth,
+    /// whether a summary was written in their place, and how long the call took.
+    case compacted(ms: Int, folded: Int, tokens: Int, summarized: Bool)
     case rebased(added: Int, removed: Int, compacted: Bool)
     case waiting
     case waited(ms: Int)
@@ -230,6 +235,7 @@ enum AgentEvent: Decodable {
     private enum CodingKeys: String, CodingKey {
         case type, delta, id, name, isError, items, message, render, draft, text, finishReason, result
         case inputTokens, outputTokens, ms, added, removed, compacted
+        case folded, tokens, summarized
     }
 
     init(from decoder: Decoder) throws {
@@ -261,7 +267,14 @@ enum AgentEvent: Decodable {
             self = .ui((try? container.decode(GenUi.self, forKey: .render)) ?? .unreadable, draft: read(.draft, false))
         case "usage":
             self = .usage(inputTokens: read(.inputTokens, 0), outputTokens: read(.outputTokens, 0))
-        case "compacted": self = .compacted(ms: read(.ms, 0))
+        case "compacting": self = .compacting
+        case "compacted":
+            self = .compacted(
+                ms: read(.ms, 0),
+                folded: read(.folded, 0),
+                tokens: read(.tokens, 0),
+                summarized: read(.summarized, false)
+            )
         case "rebased":
             self = .rebased(
                 added: read(.added, 0),

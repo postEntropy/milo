@@ -3,7 +3,7 @@ import type { Session } from '../core/session.js'
 import type { MemoryScope } from '../core/memory/index.js'
 import { listProviderModels, listProviders, readDisplay, setDisplay, setPermissionMode, setProvider, setReasoningEffort } from '../core/config/load.js'
 import { describeExport, writeSessionExport, type ExportFormat } from '../core/export.js'
-import { formatStats, formatWhen } from '../core/sessions/index.js'
+import { describeCompaction, formatStats, formatWhen } from '../core/sessions/index.js'
 import type { CompactResult, SessionStats, SessionSummary } from '../core/sessions/index.js'
 import { formatSkillList, type SkillSummary } from '../core/skills/index.js'
 import { jobSummary, type JobInfo } from '../core/jobs/index.js'
@@ -876,19 +876,17 @@ export function handleTurnControl(raw: string, context: TurnControlContext): Com
 }
 
 /**
- * What to say about a compaction, in one place: the CLI and the bots must not
- * disagree about whether "nothing to compact" or "dropped without a summary" is
- * the answer the person gets.
+ * What to say about a compaction, in one place: the CLI, the bots, the web and the
+ * phone must not disagree about whether "nothing to compact" or "dropped without a
+ * summary" is the answer the person gets. The fold itself is worded by
+ * `describeCompaction`, which the automatic pass reports through as well — the same
+ * numbers, whether the fold was asked for or made on its own.
  */
 export function compactReply(result: CompactResult): string {
   // "Nothing to compact" is an answer, not a failure, and it is the common one: a
   // session younger than `keepTurns` turns has nothing worth folding.
   if (result.reason) return `Nothing to compact: ${result.reason}.`
-  const turns = `${result.folded} turn${result.folded === 1 ? '' : 's'}`
-  const took = result.ms >= 1000 ? `${(result.ms / 1000).toFixed(1)}s` : `${result.ms}ms`
-  return result.summarized
-    ? `🗜 Compacted: ${turns} (~${result.tokens} tokens) folded into the summary, in ${took}. /stats for what is left.`
-    : `🗜 Compacted: ${turns} (~${result.tokens} tokens) dropped — the summary call failed, so nothing was written in its place. In ${took}.`
+  return `${describeCompaction(result)} /stats for what is left.`
 }
 
 /** Inline-button payloads: `perm:<id>:allow|deny`. */

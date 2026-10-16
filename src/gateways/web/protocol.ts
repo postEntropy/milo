@@ -43,7 +43,8 @@ export type AgentEvent =
   | { type: 'panel'; request: PanelRequest }
   | { type: 'ui'; render: GenUiRender; draft?: boolean }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
-  | { type: 'compacted'; ms: number }
+  | { type: 'compacting' }
+  | { type: 'compacted'; ms: number; folded: number; tokens: number; summarized: boolean }
   | { type: 'rebased'; added: number; removed: number; compacted: boolean }
   | { type: 'waiting' }
   | { type: 'waited'; ms: number }

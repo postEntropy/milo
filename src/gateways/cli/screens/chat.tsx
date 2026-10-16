@@ -44,7 +44,7 @@ import { buildLines, padToBottom, visibleWindow, type Item, type Line } from '..
 import { useElapsed } from '../use-elapsed.js'
 import { useTerminalSize } from '../use-terminal-size.js'
 
-type Phase = 'idle' | 'thinking' | 'writing' | 'tool' | 'asking' | 'waiting'
+type Phase = 'idle' | 'thinking' | 'writing' | 'tool' | 'asking' | 'waiting' | 'compacting'
 
 const HEADER_ROWS = 0
 /** The composer line and its breathing room. */
@@ -513,7 +513,18 @@ export function ChatScreen({
       }
       case 'compact': {
         const session = await runtime.getSession(scope)
-        push({ kind: 'info', text: compactReply(await session.compact()) })
+        // Asked for by hand, the fold is still a model call — and the band is the
+        // only thing on screen while it runs, since no turn owns it here. `/compact`
+        // is one of the commands a running turn rules out, so nothing else is using
+        // the band, and the clock beside the word starts here rather than at the
+        // last turn's first token.
+        setPhase('compacting')
+        setStartedAt(Date.now())
+        try {
+          push({ kind: 'info', text: compactReply(await session.compact()) })
+        } finally {
+          setPhase('idle')
+        }
         break
       }
       // The three that are about the turn rather than the session, carrying out
@@ -571,14 +582,10 @@ export function ChatScreen({
     const steering: string[] = []
     steeringRef.current = steering
     const startedAtMs = Date.now()
-    // The compaction call happens before the turn's own, so its time is part of
-    // the wait. Naming it is what stops the wait reading as the model being slow.
-    let compactedMs = 0
     // Each wait is its own block: from the question to the model's first visible
     // output, then from the last tool result to the next one. Reasoning deltas do
     // not end it — they *are* the thinking; they are what fills the block.
     let waitingSince = startedAtMs
-    let firstWait = true
     /** Whether anything arrived in the answer channel at all. */
     let answered = false
     /** Reasoning seen this turn, counted even when it is not kept. */
@@ -589,20 +596,16 @@ export function ChatScreen({
       const seconds = (Date.now() - waitingSince) / 1000
       waitingSince = Date.now()
       const thought = reasoningRef.current.trim()
-      const compacting =
-        firstWait && compactedMs > 0 ? ` (${formatSeconds(compactedMs / 1000)} compacting)` : ''
-      firstWait = false
       reasoningRef.current = ''
       setReasoning('')
       // Under a second with nothing to account for there is nothing worth saying
       // — unless the thought is all the turn has said, which is only known at the
-      // end. A summary call is never quiet, however fast the answer after it was.
-      if (seconds < 1 && compacting === '') {
+      // end.
+      if (seconds < 1) {
         if (thought) dropped.push(thought)
         return
       }
-      const header = `✻ Thought for ${formatSeconds(seconds)}${compacting}`
-      push({ kind: 'reasoning', header, text: thought })
+      push({ kind: 'reasoning', header: `✻ Thought for ${formatSeconds(seconds)}`, text: thought })
     }
 
     try {
@@ -675,8 +678,14 @@ export function ChatScreen({
           // wants to see it either way.
           onTodo: (items) => push({ kind: 'todo', items }),
           onUsage: (inputTokens) => setContextTokens(inputTokens),
-          onCompacted: (ms) => {
-            compactedMs = ms
+          // The band says the fold is running; the transcript gets what it came to
+          // once it is over. The clock starts again there, so the fold is counted
+          // in its own line rather than in the model's wait beside it.
+          onCompacting: () => setPhase('compacting'),
+          onCompacted: (fold) => {
+            waitingSince = Date.now()
+            setPhase('thinking')
+            push({ kind: 'info', text: compactReply(fold) })
           },
           // The status line carries the wait while it lasts; the transcript gets
           // it once it is over, with what it actually cost.
@@ -938,13 +947,15 @@ export function ChatScreen({
   const statusLabel =
     phase === 'asking'
       ? 'waiting for confirmation'
-      : phase === 'waiting'
-        ? 'waiting for another Milo on this session…'
-        : phase === 'tool'
-          ? `${toolName}…`
-          : phase === 'writing'
-            ? 'writing…'
-            : 'thinking…'
+      : phase === 'compacting'
+        ? 'folding the oldest turns into the summary…'
+        : phase === 'waiting'
+          ? 'waiting for another Milo on this session…'
+          : phase === 'tool'
+            ? `${toolName}…`
+            : phase === 'writing'
+              ? 'writing…'
+              : 'thinking…'
 
   const statusText = `${statusLabel} ${formatSeconds(elapsed)}${queued > 0 ? ` · ${queued} queued` : ''}`
   const scrolled = window.offset > 0 ? `▲ scrolled (${window.offset})` : ''
@@ -1085,8 +1096,10 @@ interface EventHandlers {
   onTodo: (items: TodoItem[]) => void
   /** What the last request cost in input tokens: the size of the session as sent. */
   onUsage: (inputTokens: number) => void
-  /** How long the compaction's own model call took, in ms. */
-  onCompacted: (ms: number) => void
+  /** The oldest turns are being folded into the summary right now. */
+  onCompacting: () => void
+  /** What that fold came to: the turns, the tokens, the time, and whether it summarized. */
+  onCompacted: (fold: { folded: number; tokens: number; ms: number; summarized: boolean }) => void
   /** Another Milo holds this session; the turn has not started yet. */
   onWaiting: () => void
   /** The wait is over, and how long it was. The turn starts here. */
@@ -1118,8 +1131,11 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
     case 'usage':
       handlers.onUsage(event.inputTokens)
       break
+    case 'compacting':
+      handlers.onCompacting()
+      break
     case 'compacted':
-      handlers.onCompacted(event.ms)
+      handlers.onCompacted(event)
       break
     case 'waiting':
       handlers.onWaiting()

@@ -23,6 +23,27 @@ export function describeRebase(event: {
   return says.join(' and ')
 }
 
+/**
+ * What a fold came to, as one sentence every surface draws: the turns that went,
+ * what they were worth in estimated tokens, and how long the summary call took.
+ *
+ * Whether a summary was written is part of the answer and not a detail: the turns
+ * go either way, because a request that fits beats one the provider rejects — so a
+ * person told only "compacted" has been told something that did not happen.
+ */
+export function describeCompaction(fold: {
+  folded: number
+  tokens: number
+  ms: number
+  summarized: boolean
+}): string {
+  const turns = `${fold.folded} turn${fold.folded === 1 ? '' : 's'}`
+  const took = fold.ms >= 1000 ? formatSeconds(fold.ms / 1000) : `${fold.ms}ms`
+  return fold.summarized
+    ? `🗜 Compacted: ${turns} (~${fold.tokens} tokens) folded into the summary in ${took}.`
+    : `🗜 Compacted: ${turns} (~${fold.tokens} tokens) dropped — the summary call failed, so nothing was written in their place. In ${took}.`
+}
+
 export interface SessionListStyle {
   /** Render for a surface that understands Markdown (Telegram, Discord). */
   markdown?: boolean

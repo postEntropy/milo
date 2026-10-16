@@ -23,6 +23,7 @@ export {
 } from './compact.js'
 export {
   DEFAULT_PAGE_SIZE,
+  describeCompaction,
   describeRebase,
   formatSeconds,
   formatSessionList,

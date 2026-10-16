@@ -18,12 +18,12 @@ import { settingsSectionFromPath } from './settings/sections.js'
 import { Panel } from './panel/Panel.js'
 import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, TranscriptPart } from '@protocol'
 import { drawsToolFailure, toolText } from '../../src/gateways/tool-line.ts'
-import { describeRebase } from '../../src/core/sessions/format.ts'
+import { describeCompaction, describeRebase } from '../../src/core/sessions/format.ts'
 import { Icon } from './ui/Icons.js'
 import { Notice, useAutoDismiss } from './ui/Notice.js'
 import { miloAvatar } from './ui/milo.js'
 
-type SessionSummary = { id: string; title?: string; preview: string; messageCount: number; updatedAt: number; recap?: string }
+type SessionSummary = { id: string; title?: string; preview: string; messageCount: number; updatedAt: number; recap?: string; running?: boolean }
 type PendingPermission = { id: string; request: PermissionRequest; expiresAt: number }
 type SessionGroup = { label: string; sessions: SessionSummary[] }
 /** A past turn the search box found, with the session it belongs to. */
@@ -501,7 +501,10 @@ export default function App() {
         }
         if (event.type === 'waiting') return { ...message, status: 'Waiting for this session to free up…' }
         if (event.type === 'waited') return { ...message, status: `Session freed after ${formatMs(event.ms)}.` }
-        if (event.type === 'compacted') return { ...message, status: `Tidying the context (${formatMs(event.ms)}).` }
+        if (event.type === 'compacting') return { ...message, status: 'Tidying the context…' }
+        // What the fold came to, in the words every other surface uses for it: the
+        // turns, the tokens they were worth, and whether a summary replaced them.
+        if (event.type === 'compacted') return { ...message, status: describeCompaction(event) }
         if (event.type === 'rebased') return { ...message, status: `Session updated by another surface (${describeRebase(event)}).` }
         if (event.type === 'steer') return { ...message, status: 'Correction received by Milo.' }
         if (event.type === 'error') return { ...message, parts: settled(message.parts), status: `Error: ${event.message}` }

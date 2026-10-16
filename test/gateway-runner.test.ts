@@ -131,6 +131,26 @@ describe('runTurn', () => {
     )
   })
 
+  it('names the fold a chat used to leave unmentioned, and what it saved', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'compacting' }
+      yield { type: 'compacted', ms: 2400, folded: 3, tokens: 4200, summarized: true }
+      yield { type: 'text-delta', delta: 'answer' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const harness = makeHarness(stream)
+    await harness.run()
+    // Folding is a model call of its own before the turn's, and on a chat it used to
+    // spend its seconds in silence. The wait is named while it lasts, and what it
+    // came to — the turns and the tokens they were worth — follows it.
+    expect(harness.edits.at(-1)).toBe(
+      '🗜 tidying the context — folding the oldest turns into the summary\n\n' +
+        '🗜 Compacted: 3 turns (~4200 tokens) folded into the summary in 2.4s. /stats for what is left.\n\n' +
+        'answer',
+    )
+  })
+
   it('appends tool activity as lines', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'tool-start', id: '1', name: 'read_file', args: {} }

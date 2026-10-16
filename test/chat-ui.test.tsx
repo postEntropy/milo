@@ -293,21 +293,34 @@ describe('ChatScreen', () => {
     expect(frame).toContain('aqui está')
   })
 
-  it('names the compaction in the wait, so it is not read as the model', async () => {
+  it('names the fold while it runs, and what it saved once it is over', async () => {
+    let release!: () => void
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+
     async function* stream(): AsyncGenerator<AgentEvent> {
-      yield { type: 'compacted', ms: 2400 }
-      await tick(1100)
+      yield { type: 'compacting' }
+      await gate
+      yield { type: 'compacted', ms: 2400, folded: 3, tokens: 4200, summarized: true }
       yield { type: 'text-delta', delta: 'pronto' }
       yield { type: 'done', finishReason: 'stop' }
     }
 
     const { lastFrame, stdin } = renderChat(makeRuntime(stream))
     await submit(stdin, 'oi')
-    await tick(1300)
+    // The band is what says a wait is a wait, and here it says which one: without
+    // it the fold's seconds read as the model being slow.
+    await waitForFrame(lastFrame, 'folding the oldest turns into the summary')
+
+    release()
+    await tick(120)
 
     const frame = lastFrame() ?? ''
-    expect(frame).toContain('✻ Thought for')
-    expect(frame).toContain('2.4s compacting')
+    // Then once, in the transcript, with what the fold came to and what it was worth.
+    expect(frame).toContain('🗜 Compacted: 3 turns (~4200 tokens)')
+    expect(frame).toContain('folded into the summary in 2.4s')
+    expect(frame).toContain('pronto')
   })
 
   it('keeps reasoning the turn ends on, instead of dropping it', async () => {

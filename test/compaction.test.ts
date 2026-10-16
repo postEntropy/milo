@@ -123,6 +123,18 @@ const longSeed = (): Message[] => [
   text('assistant', 'third reply'),
 ]
 
+/**
+ * The ceiling the folding tests name: room above the fixed cost of a request — the system
+ * prompt *and* the tool schemas that go beside it — which is what folding needs to have
+ * anywhere to fold into. Read from the session that counts it rather than pinned to a
+ * number chosen once: what is tested here is folding a transcript, not how big the catalog
+ * happens to be, and a pinned number is wrong the moment a tool gains a sentence.
+ */
+async function foldingBudget(): Promise<number> {
+  const { session } = await compactingSession([], { maxInputTokens: 1_000_000 })
+  return (session.stats().fixedTokens ?? 0) + 1_000
+}
+
 /** A session with a seed and a ceiling nothing reaches: `/compact` on demand. */
 async function manualSession(
   seed: Message[],
@@ -410,11 +422,11 @@ describe('digest', () => {
 
 describe('Session compaction', () => {
   it('summarizes the dropped turns and keeps them out of the transcript', async () => {
-    // The ceiling is named rather than left to the default: folding needs room
-    // above the fixed cost of a request — the system prompt *and* the tool
-    // schemas that go beside it — and this test is about folding a transcript,
-    // not about how big the catalog happens to be.
-    const { provider, session } = await compactingSession(longSeed(), { maxInputTokens: 9000 })
+    // The ceiling is read rather than left to the default, so what is measured is
+    // folding a transcript and not the size of the catalog — see `foldingBudget`.
+    const { provider, session } = await compactingSession(longSeed(), {
+      maxInputTokens: await foldingBudget(),
+    })
 
     expect(provider.systems.some((system) => system.includes('compress a conversation'))).toBe(true)
 
@@ -432,26 +444,41 @@ describe('Session compaction', () => {
   })
 
   it('still fits the request when the summary call fails', async () => {
-    const { provider, session, events } = await compactingSession(longSeed(), { failing: true, maxInputTokens: 9000 })
+    const { provider, session, events } = await compactingSession(longSeed(), {
+      failing: true,
+      maxInputTokens: await foldingBudget(),
+    })
 
     const system = provider.systems.at(-1)!
     expect(system).not.toContain('## Earlier in this conversation')
 
     expect(session.messages[0]!.role).toBe('user')
     expect(session.messages.length).toBeLessThan(longSeed().length)
+    // The turns went anyway — a request that fits beats one the provider rejects —
+    // and the report says so rather than claiming a summary that was never written.
+    expect(events.find((event) => event.type === 'compacted')).toMatchObject({ summarized: false })
     expect(events.at(-1)).toMatchObject({ type: 'done' })
   })
 
-  it('reports what the summary cost, before the turn produces anything', async () => {
-    const { events } = await compactingSession(longSeed(), { maxInputTokens: 9000 })
+  it('says the fold is running, then what it came to, before the turn produces anything', async () => {
+    const { events } = await compactingSession(longSeed(), { maxInputTokens: await foldingBudget() })
 
+    const announcing = events.findIndex((event) => event.type === 'compacting')
     const at = events.findIndex((event) => event.type === 'compacted')
     expect(at).toBeGreaterThanOrEqual(0)
-    // It has to arrive before the turn's own output: a surface only has the
-    // number in time to name the wait if the compaction is reported first.
+    // Both arrive before the turn's own output, and in that order: the summary is a
+    // model call of its own, so a surface names the wait as it starts — otherwise
+    // its seconds are read as the model being slow — and reports the fold once it
+    // is over.
+    expect(announcing).toBeGreaterThanOrEqual(0)
+    expect(announcing).toBeLessThan(at)
     expect(at).toBeLessThan(events.findIndex((event) => event.type === 'done'))
-    expect(events[at]).toMatchObject({ type: 'compacted' })
-    expect((events[at] as { ms: number }).ms).toBeGreaterThanOrEqual(0)
+    // What it came to is what it saved, not only that something happened.
+    const fold = events[at] as { summarized: boolean; ms: number; folded: number; tokens: number }
+    expect(fold.summarized).toBe(true)
+    expect(fold.ms).toBeGreaterThanOrEqual(0)
+    expect(fold.folded).toBeGreaterThan(0)
+    expect(fold.tokens).toBeGreaterThan(0)
   })
 
   it('says nothing when there was nothing to compact', async () => {
@@ -460,6 +487,9 @@ describe('Session compaction', () => {
     const { events } = await compactingSession([])
 
     expect(events.some((event) => event.type === 'compacted')).toBe(false)
+    // And no wait is announced either: a fold that was never bought must not be
+    // named as running.
+    expect(events.some((event) => event.type === 'compacting')).toBe(false)
     expect(events.at(-1)).toMatchObject({ type: 'done' })
   })
 
@@ -547,7 +577,10 @@ describe('Session compaction', () => {
       text('assistant', 'r'),
       text('user', 'last'),
     ]
-    const { session, events } = await compactingSession(seed, { maxInputTokens: 9000, keepTurns: 2 })
+    const { session, events } = await compactingSession(seed, {
+      maxInputTokens: await foldingBudget(),
+      keepTurns: 2,
+    })
 
     expect(events.some((event) => event.type === 'compacted')).toBe(true)
     // Only the last user turn survived ahead of the new question; the floor would

@@ -569,11 +569,12 @@ export class Session {
       jobs: this.options.jobs?.facts(this.id) ?? null,
     }
 
-    // Measured against the request that will actually be sent: the tool list,
-    // the recalled memories and the running summary ride along with every turn,
-    // and leaving them out of the count let the request go over budget.
-    const compaction = await this.compactIfNeeded(prompt, signal)
-    if (compaction) yield { type: 'compacted', ms: compaction.ms }
+    // Measured against the request that will actually be sent: the tool list, the
+    // recalled memories and the running summary ride along with every turn, and
+    // leaving them out of the count let the request go over budget. The fold
+    // reports itself too — it says the wait is a fold before buying the summary,
+    // and what it came to once it has one.
+    yield* this.compactIfNeeded(prompt, signal)
 
     const systemPrompt = buildSystemPrompt({
       ...prompt,
@@ -1079,16 +1080,17 @@ export class Session {
    * make the request smaller than the turn it keeps, and paying for a summary
    * that cannot help is the model call every turn the old rule made.
    *
-   * Reports what the summary cost when it ran, because it is a model call of its
-   * own standing between the question and the answer: without the number, its
-   * time is attributed to the model thinking.
+   * Reports the fold as it happens — that it is running, and then what it cost and
+   * saved — because it is a model call of its own standing between the question and
+   * the answer: without that, the time it adds is attributed to the model thinking
+   * and the turns it took away are not accounted for at all.
    */
-  private async compactIfNeeded(
+  private async *compactIfNeeded(
     prompt: Omit<SystemPromptInput, 'summary'>,
     signal?: AbortSignal,
-  ): Promise<{ ms: number } | null> {
+  ): AsyncGenerator<Extract<AgentEvent, { type: 'compacting' | 'compacted' }>, void> {
     const config = this.options.sessions
-    if (!config?.compaction) return null
+    if (!config?.compaction) return
 
     // The window is a fact about the model, not about this turn: wait for the
     // lookup only if it has not finished already.
@@ -1111,7 +1113,7 @@ export class Session {
     const fixed =
       estimateText(buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts(), mcp: this.mcpFacts(), google: this.options.google ?? null })) +
       estimateTools(prompt.tools)
-    if (estimateTokens(this.messages) + fixed <= ceiling) return null
+    if (estimateTokens(this.messages) + fixed <= ceiling) return
 
     // The floor is a preference, not a promise: when the turns it protects are
     // themselves bigger than the ceiling, the cut recuses past them, and 0 comes
@@ -1124,8 +1126,13 @@ export class Session {
     })
     if (cut <= 0) {
       logDebug('compaction skipped: nothing to fold that would fit')
-      return null
+      return
     }
+
+    // Said before the call, not after: this is the moment the person stops hearing
+    // from Milo, and the wait here is the summary — not the model reading the
+    // question.
+    yield { type: 'compacting' }
 
     const dropped = this.messages.slice(0, cut)
     const startedAt = Date.now()
@@ -1143,7 +1150,8 @@ export class Session {
     }
 
     if (summary) this.summary = summary
-    this.record.droppedTokens = (this.record.droppedTokens ?? 0) + estimateTokens(dropped)
+    const tokens = estimateTokens(dropped)
+    this.record.droppedTokens = (this.record.droppedTokens ?? 0) + tokens
     this.messages.splice(0, cut)
 
     // Measured again, because the summary replaced part of the transcript: if
@@ -1155,6 +1163,12 @@ export class Session {
       estimateTools(prompt.tools)
     if (after > ceiling) logDebug(`compaction left the request over its ceiling (${after} > ${ceiling})`)
 
-    return { ms: Date.now() - startedAt }
+    yield {
+      type: 'compacted',
+      ms: Date.now() - startedAt,
+      folded: countTurns(dropped),
+      tokens,
+      summarized: summary !== null,
+    }
   }
 }

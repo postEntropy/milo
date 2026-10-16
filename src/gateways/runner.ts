@@ -6,6 +6,7 @@ import { errorMessage } from '../util/errors.js'
 import type { ChatSurface } from './surface.js'
 import type { AudioPart, ImagePart } from '../core/providers/types.js'
 import { prepareIncoming, type IncomingFile } from '../core/media.js'
+import { compactReply } from './commands.js'
 import { shellCommand, showsToolCall, toolLabel, toolLine } from './tool-line.js'
 
 export interface RunTurnOptions {
@@ -239,6 +240,15 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
             await flushReasoning()
             await appendLine(formatTodos(event.items), 'prose')
           }
+          break
+        // The fold is a model call of its own before the turn's, and on a chat it
+        // was costing seconds with nothing said about it at all. Named while it
+        // runs, then answered with the numbers once it is done.
+        case 'compacting':
+          await appendLine('🗜 tidying the context — folding the oldest turns into the summary', 'prose')
+          break
+        case 'compacted':
+          await appendLine(compactReply(event), 'prose')
           break
         case 'waiting':
           await appendLine('⏳ another Milo is using this session — waiting for it to finish', 'prose')

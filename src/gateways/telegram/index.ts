@@ -258,6 +258,13 @@ export class TelegramGateway implements Gateway {
     const sessionsAllowed =
       sessionLockMessage({ allowlist: this.options.allowlist, userId }) === undefined
 
+    // A command is answered before any turn exists, and one of them — `/compact` —
+    // buys a summary, which is a model call of seconds. The transport's own working
+    // indicator is what says so while it runs: the same one a turn keeps on, and
+    // here there is no turn yet to start it. A message that is not a command is left
+    // alone: the turn it becomes starts that indicator itself.
+    const stopTyping =
+      text.startsWith('/') && !files?.length ? this.typing(bot, chatId) : () => undefined
     let command: Awaited<ReturnType<typeof handleCommand>>
     try {
       command = files?.length
@@ -273,16 +280,18 @@ export class TelegramGateway implements Gateway {
               signal,
             }),
           )
+      if (command.handled) {
+        await this.reply(bot, chatId, command)
+        return
+      }
     } catch (error) {
       // A command that throws must not swallow the message it was answering.
       for (const part of chunk(`⚠ ${errorMessage(error)}`, MAX_LENGTH)) {
         await ctx.reply(part).catch(() => undefined)
       }
       return
-    }
-    if (command.handled) {
-      await this.reply(bot, chatId, command)
-      return
+    } finally {
+      stopTyping()
     }
 
     const messenger = new TelegramMessenger({

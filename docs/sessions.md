@@ -53,7 +53,9 @@ Once a request passes `sessions.compactAt` **of the model's context window** (es
 per token), the oldest turns are summarized in one model call and replaced by an `## Earlier in this
 conversation` section of the system prompt; the last `sessions.keepTurns` turns are kept verbatim. The
 cut always lands on a user turn, so a tool call is never separated from its result. If the summary call
-fails, the turns are dropped anyway.
+fails, the turns are dropped anyway — and every surface says which happened: the fold is named while it
+runs and reports what it came to, the turns folded and the tokens they were worth, whether it was the
+automatic pass or `/compact` asked for by hand. `/stats` carries the total the session has summarized away.
 
 ```yaml
 sessions:

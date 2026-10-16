@@ -913,8 +913,17 @@ final class AppModel {
             mutatingLast { $0.status = "Waiting for this session to free up…" }
         case .waited(let ms):
             mutatingLast { $0.status = "Session freed after \(AppModel.formatMs(ms))." }
-        case .compacted(let ms):
-            mutatingLast { $0.status = "Tidying the context (\(AppModel.formatMs(ms)))." }
+        case .compacting:
+            mutatingLast { $0.status = "Tidying the context…" }
+        case .compacted(let ms, let folded, let tokens, let summarized):
+            mutatingLast {
+                $0.status = AppModel.describeCompaction(
+                    folded: folded,
+                    tokens: tokens,
+                    ms: ms,
+                    summarized: summarized
+                )
+            }
         case .rebased(let added, let removed, let compacted):
             mutatingLast {
                 $0.status = "Session updated by another surface (\(AppModel.describeRebase(added: added, removed: removed, compacted: compacted)))."
@@ -1013,6 +1022,19 @@ final class AppModel {
     /// A duration as the terminal says it: seconds to one decimal, or milliseconds.
     private static func formatMs(_ ms: Int) -> String {
         ms >= 1000 ? String(format: "%.1f s", Double(ms) / 1000) : "\(ms) ms"
+    }
+
+    /// What a fold came to, in the words the other surfaces use for it. Mirrors
+    /// `describeCompaction` in `src/core/sessions/format.ts`, which the CLI, the bots
+    /// and the browser draw from: the phone cannot import it, so the sentence is kept
+    /// here beside `describeRebase` rather than made up again. The duration is this
+    /// screen's own spelling of a span (`formatMs`), as `waited` already is.
+    private static func describeCompaction(folded: Int, tokens: Int, ms: Int, summarized: Bool) -> String {
+        let turns = "\(folded) turn\(folded == 1 ? "" : "s")"
+        let took = formatMs(ms)
+        return summarized
+            ? "🗜 Compacted: \(turns) (~\(tokens) tokens) folded into the summary in \(took)."
+            : "🗜 Compacted: \(turns) (~\(tokens) tokens) dropped — the summary call failed, so nothing was written in their place. In \(took)."
     }
 
     /// What another holder of this session left in it, in one clause.

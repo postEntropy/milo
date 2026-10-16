@@ -33,11 +33,20 @@ export type AgentEvent =
   | { type: 'ui'; render: GenUiRender; draft?: boolean }
   | { type: 'usage'; inputTokens: number; outputTokens: number }
   /**
-   * The transcript was compacted just before this turn. A session-level event
-   * rather than a loop one: it happens first, it costs a model call of its own,
-   * and without it the wait it adds is read as the model thinking.
+   * The oldest turns are being folded into the summary right now. A model call of
+   * its own stands between the question and the answer and it costs seconds, so
+   * the wait is named before it starts — the same reason `waiting` is said before
+   * the queue rather than after it.
    */
-  | { type: 'compacted'; ms: number }
+  | { type: 'compacting' }
+  /**
+   * The fold is done, and what it came to: how many turns went, what they were
+   * worth in estimated tokens, whether a summary was written in their place, and
+   * how long the call took. A session-level event rather than a loop one: it
+   * happens first, and without the numbers the wait it added reads as the model
+   * thinking.
+   */
+  | { type: 'compacted'; ms: number; folded: number; tokens: number; summarized: boolean }
   /**
    * This session was not as this copy had it: another Milo used it in between —
    * the same conversation reached from a second terminal, or a daemon — and what
