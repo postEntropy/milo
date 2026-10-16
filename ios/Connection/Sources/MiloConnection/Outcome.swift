@@ -39,3 +39,39 @@ public enum OutcomeDecision {
         return .unreachable
     }
 }
+
+/**
+ What pairing learned by opening the real socket with its new token.
+
+ Pairing a code proves only the HTTP route that mints the token; the socket the chat
+ runs on is a different upgrade, and it can fail where the claim succeeded. This is the
+ verdict of opening that socket, so a pair that cannot connect is barred where the
+ person is standing rather than discovered later as a chat that never comes up.
+ */
+public enum PairProbe: Equatable, Sendable {
+    /// A frame came back: the daemon is speaking this app's protocol over a live socket.
+    case online
+    /// The daemon answered and will not take this device. Its own words.
+    case refused(String)
+    /// The upgrade never completed — reached or not, the socket never opened.
+    case noSocket
+
+    /**
+     Composed from what the transport can know, reusing the refusal/outage split
+     `OutcomeDecision` already draws: a daemon that answered is not an outage, and a
+     daemon that never answered is not a refusal either.
+     */
+    public static func decide(
+        everOnline: Bool,
+        refusal: String?,
+        httpStatus: Int?,
+        urlError: URLError.Code?
+    ) -> PairProbe {
+        if let refusal { return .refused(refusal) }
+        if everOnline { return .online }
+        switch OutcomeDecision.decide(httpStatus: httpStatus, urlError: urlError) {
+        case .refused(let reason): return .refused(reason)
+        case .unreachable: return .noSocket
+        }
+    }
+}

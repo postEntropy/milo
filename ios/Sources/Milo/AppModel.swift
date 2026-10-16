@@ -293,10 +293,21 @@ final class AppModel {
                 token: device.token,
                 conversationId: AccountStore.conversationId
             )
-            AccountStore.save(account)
-            pairingHost = ""
-            pairingCode = ""
-            phase = .chat(account)
+            // Pairing a code proves only the HTTP route that mints the token. The socket
+            // the chat runs on is a second upgrade and can fail where the claim went
+            // through, so it is opened here: a pair that cannot connect is barred on this
+            // screen, with the reason, rather than left as a chat that never comes up.
+            switch await Pairing.probe(account) {
+            case .online:
+                AccountStore.save(account)
+                pairingHost = ""
+                pairingCode = ""
+                phase = .chat(account)
+            case .refused(let reason):
+                pairingError = reason
+            case .noSocket:
+                pairingError = "Reached \(account.display) and got a token, but the socket at /ws never opened. A tunnel or proxy in front must forward WebSocket Upgrade, and `milo serve` must be running."
+            }
         } catch {
             pairingError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
