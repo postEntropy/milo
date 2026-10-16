@@ -11,11 +11,23 @@ import SwiftUI
  */
 struct RoutinesView: View {
     let account: Account
+    /// Whether one routine's own page is open on top of the list, told to the shell: the
+    /// drawer's swipe belongs to the list, and a page answers the same drag with the way back.
+    @Binding var pushed: Bool
+    /// Opening the sessions from here. The drawer belongs to the chat, but a screen that is
+    /// not the chat still reaches it — by this control and by the same swipe.
+    let onSessions: () -> Void
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     @State private var path: [Route] = []
+    /// The boxes on a page that scroll sideways on their own — a run's code block, its table.
+    /// A drag that began inside one belongs to the box, not to the way back to the list.
+    @State private var boxes = ScrollBoxes()
 
-    /// Where the sheet can be pushed to: one routine's page, or the field that makes one.
+    /// Where the platform's own back gesture picks up: a drag that starts this close to the
+    /// screen's edge is the system's to answer, so this screen's own one keeps out of it.
+    private static let edge: CGFloat = 24
+
+    /// Where this page can navigate: one routine's page, or the field that makes one.
     private enum Route: Hashable {
         /// A run to open on arrival, when a timeline row named one.
         case detail(routine: String, run: String?)
@@ -27,15 +39,10 @@ struct RoutinesView: View {
             RoutineList(
                 onSelect: { path.append(.detail(routine: $0, run: nil)) },
                 onOpen: { routine, run in path.append(.detail(routine: routine, run: run)) },
-                onCompose: { path.append(.new) }
+                onCompose: { path.append(.new) },
+                onSessions: onSessions
             )
-            .navigationTitle("Routines")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                }
-            }
+            .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Route.self) { route in
                 switch route {
                 case .detail(let routine, let run):
@@ -45,12 +52,34 @@ struct RoutinesView: View {
                 }
             }
         }
+        // A drag across a routine's own page is the way back to the list — the same drag that
+        // opens the sessions from the list itself, answering where the person is standing. A
+        // drag that begins at the screen's edge is the platform's own pop, so the two do not
+        // both answer one gesture.
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 24, coordinateSpace: .global)
+                .onEnded { drag in
+                    let across = drag.translation.width
+                    guard abs(across) > abs(drag.translation.height) * 1.5 else { return }
+                    guard !path.isEmpty, across > 60, drag.startLocation.x > Self.edge else { return }
+                    // Inside a box that scrolls sideways, the drag is the box's to answer.
+                    guard !boxes.frames.contains(where: { $0.contains(drag.startLocation) }) else { return }
+                    path.removeLast()
+                }
+        )
+        .onPreferenceChange(ScrollBoxKey.self) { boxes.frames = $0 }
         // The permission the reminders need, asked once, the first time the screen opens.
         .task { await model.askToRemind() }
-        // A tapped reminder names a routine: open it whether the sheet was already up or
+        // A tapped reminder names a routine: open it whether this page is already up or
         // this is where the launch landed.
         .onChange(of: model.pendingRoutine) { _, _ in openPending() }
-        .onAppear { openPending() }
+        // On the way in, and as the stack moves: the shell keeps the drawer's swipe off a
+        // page, and hands it back the moment the list is what is showing.
+        .onChange(of: path) { _, next in pushed = !next.isEmpty }
+        .onAppear {
+            openPending()
+            pushed = !path.isEmpty
+        }
     }
 
     /// Opens the routine a tapped reminder named, if one is waiting.
@@ -67,6 +96,7 @@ private struct RoutineList: View {
     let onSelect: (String) -> Void
     let onOpen: (String, String) -> Void
     let onCompose: () -> Void
+    let onSessions: () -> Void
 
     @Environment(AppModel.self) private var model
     @State private var feed: [RoutineFeedEntry] = []
@@ -74,100 +104,172 @@ private struct RoutineList: View {
     private var enabled: Int { model.routines.filter(\.enabled).count }
 
     var body: some View {
-        List {
-            if model.remindersAllowed == false {
-                Section {
-                    Label("Reminders are off — allow notifications in Settings.", systemImage: "bell.slash")
+        ScrollView {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.six) {
+                VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                    HStack(spacing: MiloTheme.Space.two) {
+                        Image(systemName: "clock")
+                            .font(.system(size: 13, weight: .semibold))
+                        Text("AUTOMATION")
+                            .font(MiloTheme.Text.meta.weight(.semibold))
+                            .tracking(1.1)
+                    }
+                    .foregroundStyle(MiloTheme.accent)
+
+                    Text("Routines")
+                        .font(.largeTitle.weight(.bold))
+                        .foregroundStyle(MiloTheme.foreground)
+                    Text("Tasks Milo handles on a schedule.")
+                        .font(MiloTheme.Text.body)
+                        .foregroundStyle(MiloTheme.muted)
+
+                    HStack(spacing: MiloTheme.Space.two) {
+                        Label("\(enabled) active", systemImage: "bolt.fill")
+                        Text("·").foregroundStyle(MiloTheme.muted)
+                        Text("\(model.routines.count) total")
+                            .foregroundStyle(MiloTheme.muted)
+                    }
+                    .font(MiloTheme.Text.small.weight(.medium))
+                    .padding(.top, MiloTheme.Space.one)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(MiloTheme.Space.five)
+                .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+
+                if model.notificationsAllowed == false {
+                    Label("Reminders are off. Allow notifications in Settings.", systemImage: "bell.slash")
                         .font(MiloTheme.Text.small)
                         .foregroundStyle(MiloTheme.muted)
+                        .padding(MiloTheme.Space.four)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
                 }
-            }
 
-            if let error = model.routinesError, model.routines.isEmpty {
-                Section {
-                    Text(error)
-                        .font(MiloTheme.Text.small)
-                        .foregroundStyle(MiloTheme.danger)
-                    Button("Try again") { Task { await model.refreshRoutines() } }
-                }
-            } else if model.routines.isEmpty {
-                Section {
-                    if model.routinesLoading {
-                        Text("Reading routines…")
-                            .font(MiloTheme.Text.base)
-                            .foregroundStyle(MiloTheme.muted)
-                    } else {
+                VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                    HStack {
+                        Text("Your routines")
+                            .font(MiloTheme.Text.title)
+                            .foregroundStyle(MiloTheme.foreground)
+                    }
+
+                    if let error = model.routinesError, model.routines.isEmpty {
                         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-                            Image(systemName: "repeat")
+                            Text(error).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.danger)
+                            Button("Try again") { Task { await model.refreshRoutines() } }
+                                .buttonStyle(.glass)
+                        }
+                        .padding(MiloTheme.Space.four)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                    } else if model.routines.isEmpty {
+                        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                            Image(systemName: model.routinesLoading ? "hourglass" : "sparkles")
                                 .font(.system(size: 22, weight: .medium))
-                                .foregroundStyle(MiloTheme.muted)
-                            Text("No routines yet")
-                                .font(MiloTheme.Text.base.weight(.semibold))
+                                .foregroundStyle(MiloTheme.accent)
+                            Text(model.routinesLoading ? "Reading routines…" : "A little time back, every day.")
+                                .font(MiloTheme.Text.body.weight(.semibold))
                                 .foregroundStyle(MiloTheme.foreground)
-                            Text("Describe a task and when to run it. Milo will work out the schedule.")
+                            Text("Describe what Milo should do and when. Your routines will show up here.")
                                 .font(MiloTheme.Text.small)
                                 .foregroundStyle(MiloTheme.muted)
                         }
-                        .padding(.vertical, MiloTheme.Space.two)
-                    }
-                }
-            } else {
-                Section {
-                    ForEach(model.routines) { routine in
-                        RoutineRow(
-                            routine: routine,
-                            onOpen: { onSelect(routine.id) },
-                            onRun: { Task { await model.runRoutine(routine.id) } },
-                            onToggle: { Task { await model.setRoutineEnabled(routine.id, enabled: !routine.enabled) } }
-                        )
-                    }
-                } header: {
-                    Text("\(enabled) active · \(model.routines.count) total")
-                } footer: {
-                    Button {
-                        onCompose()
-                    } label: {
-                        Label("New routine", systemImage: "plus")
-                    }
-                    .disabled(model.busy)
-                }
-            }
-
-            if !feed.isEmpty {
-                Section("Recent outputs") {
-                    ForEach(feed) { entry in
-                        Button {
-                            onOpen(entry.routineId, entry.runId)
-                        } label: {
-                            VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
-                                HStack {
-                                    Text(entry.routine)
-                                        .font(MiloTheme.Text.base.weight(.semibold))
-                                        .foregroundStyle(MiloTheme.foreground)
-                                    Spacer(minLength: MiloTheme.Space.two)
-                                    Text(RelativeTime.when(entry.at))
-                                        .font(MiloTheme.Text.meta)
-                                        .foregroundStyle(MiloTheme.muted)
-                                }
-                                Text(entry.answer.isEmpty ? "No words — the run sent a file." : entry.answer)
-                                    .font(MiloTheme.Text.small)
-                                    .foregroundStyle(MiloTheme.foreground2)
-                                    .lineLimit(2)
+                        .padding(MiloTheme.Space.five)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                    } else {
+                        VStack(spacing: MiloTheme.Space.two) {
+                            ForEach(model.routines) { routine in
+                                RoutineRow(
+                                    routine: routine,
+                                    onOpen: { onSelect(routine.id) },
+                                    onRun: { Task { await model.runRoutine(routine.id) } },
+                                    onToggle: { Task { await model.setRoutineEnabled(routine.id, enabled: !routine.enabled) } }
+                                )
                             }
                         }
-                        .buttonStyle(PressableStyle())
+                    }
+                }
+
+                if !feed.isEmpty {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                        Text("Recent outputs")
+                            .font(MiloTheme.Text.title)
+                            .foregroundStyle(MiloTheme.foreground)
+                        ForEach(feed) { entry in
+                            Button { onOpen(entry.routineId, entry.runId) } label: {
+                                VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                                    HStack {
+                                        Text(entry.routine).font(MiloTheme.Text.base.weight(.semibold))
+                                            .foregroundStyle(MiloTheme.foreground)
+                                        Spacer()
+                                        Text(RelativeTime.when(entry.at)).font(MiloTheme.Text.meta)
+                                            .foregroundStyle(MiloTheme.muted)
+                                    }
+                                    Text(entry.answer.isEmpty ? "No words — the run sent a file." : entry.answer)
+                                        .font(MiloTheme.Text.small)
+                                        .foregroundStyle(MiloTheme.foreground2)
+                                        .lineLimit(3)
+                                    HStack {
+                                        Text("Open run")
+                                            .font(MiloTheme.Text.meta.weight(.medium))
+                                            .foregroundStyle(MiloTheme.accent)
+                                        Spacer()
+                                        Image(systemName: "arrow.up.right")
+                                            .font(MiloTheme.Text.meta.weight(.semibold))
+                                            .foregroundStyle(MiloTheme.muted)
+                                    }
+                                    .padding(.top, MiloTheme.Space.one)
+                                }
+                                .padding(MiloTheme.Space.four)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                            }
+                            .buttonStyle(PressableStyle())
+                        }
                     }
                 }
             }
+            .padding(.horizontal, MiloTheme.margin)
+            .padding(.top, MiloTheme.Space.four)
+            .padding(.bottom, MiloTheme.Space.four)
+            .frame(maxWidth: 620)
+            .frame(maxWidth: .infinity)
         }
-        .scrollContentBackground(.hidden)
         .background(MiloTheme.background)
-        .task { await model.refreshRoutines() }
-        .task { await loadFeed() }
+        // The way back to the sessions, at this screen's own top and in the chat's own
+        // control: the drawer belongs to the chat, but the routines are one press from it
+        // rather than a page with no exit. Drawn in the page's tone, so what scrolls under
+        // it stays under it — the same room the chat's bar keeps, in this screen's material.
+        .safeAreaInset(edge: .top, spacing: 0) {
+            HStack(spacing: 0) {
+                SessionsButton(action: onSessions)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, MiloTheme.margin)
+            .padding(.bottom, MiloTheme.Space.one)
+            .background(MiloTheme.background)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Button(action: onCompose) {
+                Label("New routine", systemImage: "plus")
+                    .font(MiloTheme.Text.base.weight(.semibold))
+                    .foregroundStyle(MiloTheme.accentOn)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 52)
+                    .background(MiloTheme.accent, in: Capsule())
+            }
+            .disabled(model.busy)
+            .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
+            .padding(.horizontal, MiloTheme.margin)
+            .padding(.top, MiloTheme.Space.two)
+            .padding(.bottom, MiloTheme.Space.two)
+        }
         .refreshable {
             await model.refreshRoutines()
             await loadFeed()
         }
+        .task { await model.refreshRoutines() }
+        .task { await loadFeed() }
     }
 
     private func loadFeed() async {
@@ -182,46 +284,58 @@ private struct RoutineRow: View {
     let onToggle: () -> Void
 
     var body: some View {
-        HStack(spacing: MiloTheme.Space.three) {
-            Circle()
-                .fill(routine.enabled ? MiloTheme.success : MiloTheme.muted)
-                .frame(width: 8, height: 8)
-
+        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
             Button(action: onOpen) {
-                VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
-                    Text(routine.label)
-                        .font(MiloTheme.Text.body)
-                        .foregroundStyle(MiloTheme.foreground)
-                        .lineLimit(1)
-                    Text("\(routine.whenLabel) · \(routine.targetLabel)")
+                VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                    HStack(spacing: MiloTheme.Space.two) {
+                        Circle().fill(routine.enabled ? MiloTheme.success : MiloTheme.muted).frame(width: 8, height: 8)
+                        Text(routine.label)
+                            .font(MiloTheme.Text.body.weight(.semibold))
+                            .foregroundStyle(MiloTheme.foreground)
+                            .lineLimit(2)
+                        Spacer(minLength: 0)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(MiloTheme.muted)
+                    }
+                    Text(routine.whenLabel)
+                        .font(MiloTheme.Text.base)
+                        .foregroundStyle(MiloTheme.foreground2)
+                    Text("\(routine.targetLabel) · \(RoutineWording.stateLabel(routine).lowercased()) \(RoutineWording.state(routine))")
                         .font(MiloTheme.Text.small)
-                        .foregroundStyle(MiloTheme.muted)
-                        .lineLimit(1)
+                        .foregroundStyle(routine.failed ? MiloTheme.danger : MiloTheme.muted)
+                        .lineLimit(2)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressableStyle())
 
-            VStack(alignment: .trailing, spacing: MiloTheme.Space.one) {
-                Text(routine.lastRunAt != nil ? "Last run" : routine.enabled ? "Next run" : "Status")
-                    .font(MiloTheme.Text.meta)
-                    .foregroundStyle(MiloTheme.muted)
-                Text(RoutineWording.state(routine))
-                    .font(MiloTheme.Text.small)
-                    .foregroundStyle(routine.failed ? MiloTheme.danger : MiloTheme.foreground2)
+            HStack(spacing: MiloTheme.Space.two) {
+                Button(action: onRun) {
+                    Label("Run now", systemImage: "play.fill")
+                        .font(MiloTheme.Text.small.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 38)
+                        .background(MiloTheme.surfaceRaised, in: Capsule())
+                }
+                .foregroundStyle(MiloTheme.foreground)
+                .buttonStyle(PressableStyle())
+                .glassEffect(.regular.interactive(), in: Capsule())
+                Button(action: onToggle) {
+                    Label(routine.enabled ? "Pause" : "Resume", systemImage: routine.enabled ? "pause.fill" : "play.fill")
+                        .font(MiloTheme.Text.small.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 38)
+                        .background(MiloTheme.surfaceWarm, in: Capsule())
+                }
+                .foregroundStyle(MiloTheme.foreground2)
+                .buttonStyle(PressableStyle())
+                .glassEffect(.regular.interactive(), in: Capsule())
             }
-
-            MiloIconButton(systemName: "play.fill", size: 13, span: 32, action: onRun)
-                .accessibilityLabel("Run \(routine.label) now")
-            MiloIconButton(
-                systemName: routine.enabled ? "pause.fill" : "play",
-                size: 13,
-                span: 32,
-                action: onToggle
-            )
-            .accessibilityLabel(routine.enabled ? "Pause \(routine.label)" : "Resume \(routine.label)")
         }
+        .padding(MiloTheme.Space.four)
+        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
     }
 }
 
@@ -242,91 +356,190 @@ private struct RoutineDetail: View {
     @State private var confirmRemove = false
 
     private static let page = 20
+    /// One height for the controls on this page, so the actions read as one block instead of
+    /// three pills that happen to look alike.
+    private static let control: CGFloat = 46
 
     private var routine: RoutineSummary? { model.routines.first { $0.id == routineId } }
 
     var body: some View {
-        List {
-            if let routine {
-                Section {
-                    fact("Schedule", routine.whenLabel, failed: false)
-                    fact("Deliver to", routine.targetLabel, failed: false)
-                    fact(
-                        routine.lastRunAt != nil ? "Last run" : "Next run",
-                        routine.lastRunAt != nil
-                            ? RoutineWording.lastRun(routine)
-                            : (routine.enabled ? RoutineWording.nextRun(routine) : "Paused"),
-                        failed: routine.failed
-                    )
-                }
+        // Drawn the way the list it came from is drawn: cards on the page's own tone, and
+        // nothing ruled between them. The list this page used to be put a hairline around
+        // every section, and no separator modifier reached it.
+        ScrollView {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.six) {
+                if let routine {
+                    // What the routine is, at a glance: whether it is on, what it is called,
+                    // what it was asked to do, and where its answer goes.
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.five) {
+                        HStack(spacing: MiloTheme.Space.two) {
+                            Circle().fill(routine.finished ? MiloTheme.muted : routine.enabled ? MiloTheme.success : MiloTheme.warning)
+                                .frame(width: 9, height: 9)
+                            Text(routine.finished ? "Finished" : routine.enabled ? "Active" : "Paused")
+                                .font(MiloTheme.Text.small.weight(.semibold))
+                                .foregroundStyle(MiloTheme.foreground2)
+                            Spacer()
+                        }
+                        Text(routine.label)
+                            .font(MiloTheme.Text.title)
+                            .foregroundStyle(MiloTheme.foreground)
+                            .fixedSize(horizontal: false, vertical: true)
+                        if !routine.prompt.isEmpty && routine.name != nil {
+                            Text(routine.prompt)
+                                .font(MiloTheme.Text.base)
+                                .foregroundStyle(MiloTheme.muted)
+                                .lineLimit(3)
+                        }
+                        Label(routine.targetLabel, systemImage: "paperplane")
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.foreground2)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(MiloTheme.Space.five)
+                    .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
 
-                if !routine.allow.isEmpty {
-                    Section {
+                    // When it runs and what it last did: the two facts, side by side.
+                    HStack(spacing: MiloTheme.Space.two) {
+                        factCard("Schedule", routine.whenLabel, icon: "calendar")
+                        factCard(
+                            routine.finished ? "State" : routine.lastRunAt != nil ? "Last run" : "Next run",
+                            routine.finished ? "Finished" : routine.lastRunAt != nil ? RoutineWording.lastRun(routine) : (routine.enabled ? RoutineWording.nextRun(routine) : "Paused"),
+                            icon: "clock", failed: routine.failed
+                        )
+                    }
+
+                    // What it may do with nobody there to ask — the same note the list draws
+                    // for the reminders it cannot send.
+                    if !routine.allow.isEmpty {
                         Label("May use \(routine.allow.joined(separator: ", ")) while unattended", systemImage: "shield")
                             .font(MiloTheme.Text.small)
                             .foregroundStyle(MiloTheme.muted)
+                            .padding(MiloTheme.Space.four)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
                     }
-                }
 
-                Section {
-                    Button {
-                        Task { await runNow(routine) }
+                    // The two halves take the same room whatever their words are — "Run now"
+                    // and "Pause" are not the same length, and hugging their own text left one
+                    // pill wider than the other. The labels ride at the page's own control
+                    // size, not the list rows' small step: at 12pt they were lost inside the
+                    // height a control needs.
+                    HStack(spacing: MiloTheme.Space.two) {
+                        Button {
+                            Task { await runNow(routine) }
+                        } label: {
+                            Label(working ? "Running…" : "Run now", systemImage: "play.fill")
+                                .font(MiloTheme.Text.base.weight(.semibold))
+                                .foregroundStyle(MiloTheme.successOn)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: Self.control)
+                                .contentShape(Capsule())
+                        }
+                        .disabled(working)
+                        .buttonStyle(PressableStyle())
+                        .glassEffect(.regular.tint(MiloTheme.successSoft).interactive(), in: Capsule())
+                        Button {
+                            Task { await model.setRoutineEnabled(routine.id, enabled: !routine.enabled) }
+                        } label: {
+                            Label(routine.enabled ? "Pause" : "Enable", systemImage: routine.enabled ? "pause.fill" : "play.fill")
+                                .font(MiloTheme.Text.base.weight(.semibold))
+                                .foregroundStyle(MiloTheme.foreground)
+                                .frame(maxWidth: .infinity)
+                                .frame(height: Self.control)
+                                .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressableStyle())
+                        .glassEffect(.regular.interactive(), in: Capsule())
+                    }
+                    // Removing, in the tone it means: the same glass every control here is made
+                    // of, tinted with the danger colour the way this app tints a control with
+                    // what it does. Plain glass over the page is only a rim, and a rim around
+                    // something you press is the outline this app does not draw.
+                    Button(role: .destructive) {
+                        confirmRemove = true
                     } label: {
-                        Label(working ? "Running…" : "Run now", systemImage: "play.fill")
+                        Text("Remove routine")
+                            .font(MiloTheme.Text.base.weight(.semibold))
+                            .foregroundStyle(MiloTheme.danger)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: Self.control)
+                            .contentShape(Capsule())
                     }
-                    .disabled(working)
-                    Button(routine.enabled ? "Pause" : "Enable") {
-                        Task { await model.setRoutineEnabled(routine.id, enabled: !routine.enabled) }
-                    }
-                    Button("Remove", role: .destructive) { confirmRemove = true }
-                }
-            } else {
-                Section {
+                    .buttonStyle(PressableStyle())
+                    .glassEffect(.regular.tint(MiloTheme.danger.opacity(0.28)).interactive(), in: Capsule())
+                } else {
                     Text("This routine is gone.")
                         .font(MiloTheme.Text.base)
                         .foregroundStyle(MiloTheme.muted)
+                        .padding(MiloTheme.Space.four)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
                 }
-            }
 
-            if let runsError {
-                Section("Runs") {
-                    Text(runsError)
-                        .font(MiloTheme.Text.small)
-                        .foregroundStyle(MiloTheme.danger)
-                    Button("Try again") { Task { await loadRuns(reset: true) } }
-                }
-            } else if runs.isEmpty {
-                Section("Runs") {
-                    Text("No runs yet. Run it now or wait for its next scheduled time.")
-                        .font(MiloTheme.Text.small)
-                        .foregroundStyle(MiloTheme.muted)
-                }
-            } else {
-                Section("Runs") {
-                    ForEach(Array(runs.enumerated()), id: \.element.id) { index, entry in
-                        Button {
-                            openRun = entry.id
-                        } label: {
-                            HStack {
-                                Text(index == 0 ? "Latest run" : "Run \(total - index)")
-                                    .font(MiloTheme.Text.body)
-                                    .foregroundStyle(MiloTheme.foreground)
-                                Spacer(minLength: MiloTheme.Space.two)
-                                Text(RelativeTime.when(entry.at))
+                // The runs it has made, newest first — and, under them, the one being read,
+                // marked on its own row so the two cannot come apart.
+                VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                    Text(total > 0 ? "Runs · \(total)" : "Runs")
+                        .font(MiloTheme.Text.title)
+                        .foregroundStyle(MiloTheme.foreground)
+
+                    if let runsError {
+                        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                            Text(runsError)
+                                .font(MiloTheme.Text.small)
+                                .foregroundStyle(MiloTheme.danger)
+                            Button("Try again") { Task { await loadRuns(reset: true) } }
+                                .buttonStyle(.glass)
+                        }
+                        .padding(MiloTheme.Space.four)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                    } else if runs.isEmpty {
+                        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                            Label("No runs yet", systemImage: "clock")
+                                .font(MiloTheme.Text.body.weight(.medium))
+                                .foregroundStyle(MiloTheme.foreground)
+                            Text("Your routine’s results will appear here after it runs.")
+                                .font(MiloTheme.Text.small)
+                                .foregroundStyle(MiloTheme.muted)
+                        }
+                        .padding(MiloTheme.Space.four)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                    } else {
+                        VStack(spacing: MiloTheme.Space.two) {
+                            ForEach(Array(runs.enumerated()), id: \.element.id) { index, entry in
+                                Button {
+                                    openRun = entry.id
+                                } label: {
+                                    HStack {
+                                        Text(index == 0 ? "Latest run" : "Run \(total - index)")
+                                            .font(MiloTheme.Text.body)
+                                            .foregroundStyle(MiloTheme.foreground)
+                                        Spacer(minLength: MiloTheme.Space.two)
+                                        Text(RelativeTime.when(entry.at))
+                                            .font(MiloTheme.Text.small)
+                                            .foregroundStyle(MiloTheme.muted)
+                                    }
+                                    .padding(MiloTheme.Space.four)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        entry.id == openRun ? MiloTheme.surfaceRaised : MiloTheme.surface,
+                                        in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg)
+                                    )
+                                }
+                                .buttonStyle(PressableStyle())
+                            }
+                            if runs.count < total {
+                                Button("Show more") { Task { await loadRuns(reset: false) } }
                                     .font(MiloTheme.Text.small)
-                                    .foregroundStyle(MiloTheme.muted)
+                                    .buttonStyle(.glass)
                             }
                         }
-                        .buttonStyle(PressableStyle())
                     }
-                    if runs.count < total {
-                        Button("Show more") { Task { await loadRuns(reset: false) } }
-                            .font(MiloTheme.Text.small)
-                    }
-                }
 
-                if openRun != nil {
-                    Section("Run output") {
+                    if openRun != nil {
                         if let runError {
                             Text(runError)
                                 .font(MiloTheme.Text.small)
@@ -350,11 +563,16 @@ private struct RoutineDetail: View {
                     }
                 }
             }
+            .padding(.horizontal, MiloTheme.margin)
+            .padding(.top, MiloTheme.Space.four)
+            .padding(.bottom, MiloTheme.Space.six)
+            .frame(maxWidth: 620)
+            .frame(maxWidth: .infinity)
         }
-        .scrollContentBackground(.hidden)
         .background(MiloTheme.background)
         .navigationTitle(routine?.label ?? "Routine")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
         .confirmationDialog(
             "Remove the routine “\(routine?.label ?? "")”?",
             isPresented: $confirmRemove,
@@ -370,17 +588,18 @@ private struct RoutineDetail: View {
         .task(id: openRun) { await loadRun() }
     }
 
-    private func fact(_ label: String, _ value: String, failed: Bool) -> some View {
-        HStack {
-            Text(label)
-                .font(MiloTheme.Text.small)
-                .foregroundStyle(MiloTheme.muted)
-            Spacer(minLength: MiloTheme.Space.three)
+    private func factCard(_ label: String, _ value: String, icon: String, failed: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            Label(label, systemImage: icon)
+                .font(MiloTheme.Text.meta.weight(.medium)).foregroundStyle(MiloTheme.muted)
             Text(value)
-                .font(MiloTheme.Text.base)
+                .font(MiloTheme.Text.base.weight(.semibold))
                 .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.foreground)
-                .multilineTextAlignment(.trailing)
+                .lineLimit(2).minimumScaleFactor(0.85)
         }
+        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        .padding(MiloTheme.Space.three)
+        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
     }
 
     private func loadRuns(reset: Bool) async {
@@ -444,6 +663,16 @@ private struct NewRoutine: View {
     /// Where the creation turn starts in the chat's transcript; nil until asked.
     @State private var createdFrom: Int?
 
+    /// The room a row keeps around the card it draws: the page's own margin, and a step
+    /// between one card and the next. The list draws no rules and no rows of its own, so
+    /// what separates the pieces of the form is the same surface the rest of the app uses.
+    private static let row = EdgeInsets(
+        top: MiloTheme.Space.two,
+        leading: MiloTheme.margin,
+        bottom: MiloTheme.Space.two,
+        trailing: MiloTheme.margin
+    )
+
     private enum Destination: String, CaseIterable, Identifiable {
         case chat, telegram, discord, screenOnly
         var id: String { rawValue }
@@ -481,6 +710,10 @@ private struct NewRoutine: View {
                 )
                 .lineLimit(3...6)
                 .font(MiloTheme.Text.body)
+                .padding(MiloTheme.Space.four)
+                .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                .listRowInsets(Self.row)
+                .listRowBackground(Color.clear)
             } header: {
                 Text("What should Milo do, and when?")
             } footer: {
@@ -493,10 +726,19 @@ private struct NewRoutine: View {
                         Text(choice.label).tag(choice)
                     }
                 }
+                .padding(.horizontal, MiloTheme.Space.four)
+                .padding(.vertical, MiloTheme.Space.three)
+                .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                .listRowInsets(Self.row)
+                .listRowBackground(Color.clear)
                 if destination.needsChatId {
                     TextField("a chat or channel id", text: $chatId)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
+                        .padding(MiloTheme.Space.four)
+                        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                        .listRowInsets(Self.row)
+                        .listRowBackground(Color.clear)
                 }
             }
 
@@ -507,6 +749,9 @@ private struct NewRoutine: View {
                     Label(model.busy ? "Milo is on it…" : "Create routine", systemImage: "plus")
                 }
                 .disabled(!canCreate)
+                .buttonStyle(.glass)
+                .listRowInsets(Self.row)
+                .listRowBackground(Color.clear)
             }
 
             if !thread.isEmpty {
@@ -525,15 +770,22 @@ private struct NewRoutine: View {
                         PermissionBar(pending: pending)
                     }
                 }
+                .listRowInsets(Self.row)
+                .listRowBackground(Color.clear)
             }
         }
         .scrollContentBackground(.hidden)
+        .listStyle(.plain)
+        .listRowSeparator(.hidden)
+        .listSectionSeparator(.hidden)
         .background(MiloTheme.background)
         .navigationTitle("New routine")
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.visible, for: .navigationBar)
         .toolbar {
             ToolbarItem(placement: .topBarLeading) {
                 Button { onBack() } label: { Label("Routines", systemImage: "chevron.left") }
+                    .buttonStyle(.glass)
             }
         }
     }
@@ -570,8 +822,18 @@ private struct NewRoutine: View {
 
 /// How a routine reads on a row and on its page, from the daemon's own labels and times.
 private enum RoutineWording {
+    /// What the state cell is labelled: a word is a status, a time is a run.
+    static func stateLabel(_ routine: RoutineSummary) -> String {
+        if routine.finished { return "Status" }
+        if routine.lastRunAt != nil { return "Last run" }
+        return routine.enabled ? "Next run" : "Status"
+    }
+
+    /// How a routine reads as a state: a failure first, then the two words that mean not
+    /// running — finished, which its own ceiling did, and paused, which the person did.
     static func state(_ routine: RoutineSummary) -> String {
         if routine.failed { return "Failed" }
+        if routine.finished { return "Finished" }
         if !routine.enabled { return "Paused" }
         if let last = routine.lastRunAt { return RelativeTime.when(last) }
         if let next = routine.nextRunAt { return RelativeTime.ahead(next) }

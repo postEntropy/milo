@@ -4,6 +4,7 @@ import SwiftUI
 /// the rounded edge and the shadow belong to it; this one is a plain column on
 /// the sidebar's own tone, full-bleed to the screen's edges.
 struct SessionsDrawer: View {
+    let routinesSelected: Bool
     let onClose: () -> Void
     let onNewSession: () -> Void
     let onSettings: () -> Void
@@ -30,13 +31,13 @@ struct SessionsDrawer: View {
 
     private var column: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-            routinesTab
-                .padding(.top, MiloTheme.Space.four)
-
-            Text("Sessions")
+            Text("Milo")
                 .font(.title.weight(.bold))
                 .foregroundStyle(MiloTheme.foreground)
                 .padding(.horizontal, MiloTheme.Space.four)
+                .padding(.top, MiloTheme.Space.four)
+
+            routinesTab
 
             if model.sessions.isEmpty {
                 Text("No sessions yet")
@@ -108,23 +109,27 @@ struct SessionsDrawer: View {
         .padding(.bottom, MiloTheme.Space.four)
     }
 
-    /// The way into the routines, at the sidebar's own top — the browser's own place for it,
-    /// above the sessions rather than among the controls at the foot: routines are something
-    /// you go to, like a page, not something that starts a session. A filled row with its mark
-    /// and its name, in the quiet tone a destination wears until it is pressed.
+    /// The way into the routines, under the drawer's own name: routines are something you go
+    /// to, like a page, not something that starts a session, so they sit above the list
+    /// rather than among the controls at the foot. Drawn as the list's own row — the same box,
+    /// the same tone, the same fill for the one showing — so it answers the finger the way a
+    /// session does; what tells the two apart is the mark and the name, never the box.
     private var routinesTab: some View {
         Button { onRoutines() } label: {
-            HStack(spacing: MiloTheme.Space.three) {
-                Image(systemName: "repeat")
+            HStack(spacing: MiloTheme.Space.two) {
+                Image(systemName: "clock")
                     .font(.system(size: 18, weight: .medium))
                 Text("Routines")
-                    .font(MiloTheme.Text.base)
-                Spacer(minLength: 0)
+                    .font(MiloTheme.Text.body.weight(.medium))
+                    .foregroundStyle(MiloTheme.foreground)
+                Spacer(minLength: MiloTheme.Space.two)
             }
-            .foregroundStyle(MiloTheme.foreground2)
-            .padding(.horizontal, MiloTheme.Space.four)
-            .frame(height: 46)
-            .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+            .padding(.horizontal, MiloTheme.Space.three)
+            .padding(.vertical, MiloTheme.Space.two)
+            .background(
+                routinesSelected ? MiloTheme.surfaceRaised : Color.clear,
+                in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
+            )
             .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
         }
         .buttonStyle(PressableStyle())

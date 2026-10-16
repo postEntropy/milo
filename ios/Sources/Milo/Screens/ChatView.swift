@@ -76,6 +76,11 @@ struct ChatView: View {
     @State private var picker = false
     @State private var settings = false
     @State private var routines = false
+    @State private var routinesSelected = false
+    /// Whether one routine's own page is open on top of the routines list. The drawer's swipe
+    /// belongs to the list: over a page that drag is the page's own way back, and the two
+    /// cannot both answer it.
+    @State private var routinePage = false
     /// The composer's panel, when one is open — raised by the `+` or by a long press on the
     /// send control, drawn over the composer, dismissed by a tap anywhere but itself.
     @State private var menu: ComposerMenu?
@@ -119,22 +124,32 @@ struct ChatView: View {
             // they are open — and until the chat has slid back over them — so
             // nothing of the sidebar can show through the chat at rest.
             SessionsDrawer(
-                onClose: { drawer = false },
+                routinesSelected: routinesSelected,
+                onClose: {
+                    drawer = false
+                    routinesSelected = false
+                    routines = false
+                },
                 onNewSession: {
                     // Inside the tap that asked for it, before the session moves: the
                     // cursor is in the field the press just opened, so the next thing
                     // said is typed rather than looked for. The browser's own new
                     // session takes focus the same way.
                     drawer = false
+                    routinesSelected = false
+                    routines = false
                     composing = true
                     Task { await model.newSession() }
                 },
                 onSettings: {
                     drawer = false
+                    routinesSelected = false
+                    routines = false
                     settings = true
                 },
                 onRoutines: {
                     drawer = false
+                    routinesSelected = true
                     routines = true
                 }
             )
@@ -144,7 +159,17 @@ struct ChatView: View {
                 .allowsHitTesting(drawer)
                 .accessibilityHidden(!drawer)
 
-            chat
+            Group {
+                if routines {
+                    // The sessions are the chat's own drawer, and this screen opens it the
+                    // way the chat does: the same control, the same gesture. Dismissing the
+                    // drawer without choosing a session leaves the person on the routines —
+                    // only a session chosen takes the card back to the chat.
+                    RoutinesView(account: account, pushed: $routinePage, onSessions: openDrawer)
+                } else {
+                    chat
+                }
+            }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // The card is the background: it runs under the status bar and the
                 // home indicator, and carries the rounded edge and the shadow while
@@ -225,7 +250,10 @@ struct ChatView: View {
                     guard abs(across) > abs(drag.translation.height) * 1.5 else { return }
                     // Inside a box that scrolls sideways, the drag is the box's to answer.
                     guard !boxes.frames.contains(where: { $0.contains(drag.startLocation) }) else { return }
-                    if !drawer, across > 60 {
+                    // Over a routine's own page the drag is that page's way back to the list,
+                    // and opening the sessions under it would be a second answer to the one
+                    // gesture — see `RoutinesView`.
+                    if !drawer, across > 60, !(routines && routinePage) {
                         openDrawer()
                     } else if drawer, across < -60 {
                         drawer = false
@@ -256,14 +284,25 @@ struct ChatView: View {
         }
         .sheet(isPresented: $picker) { ModelPickerSheet() }
         .sheet(isPresented: $settings) { SettingsView(account: account) }
-        .sheet(isPresented: $routines) { RoutinesView(account: account) }
-        // A tapped reminder asks for the Routines screen: it is drawn over the chat, so
-        // the routine it named can open without the person finding the drawer first.
+        // A tapped reply notice with the chat already up: the session it named is opened
+        // here, rather than waiting for the next launch to read it — the shape a tapped
+        // reminder takes just below.
+        .onChange(of: model.pendingSession) { _, id in
+            guard id != nil else { return }
+            Task { _ = await model.openPendingSession() }
+        }
+        // A tapped reminder opens the Routines page in the same shell as the chat.
         .onChange(of: model.pendingRoutine) { _, id in
-            if id != nil { routines = true }
+            if id != nil {
+                routinesSelected = true
+                routines = true
+            }
         }
         .onAppear {
-            if model.pendingRoutine != nil { routines = true }
+            if model.pendingRoutine != nil {
+                routinesSelected = true
+                routines = true
+            }
         }
         .sessionRename($renaming)
     }

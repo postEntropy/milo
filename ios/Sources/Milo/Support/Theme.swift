@@ -43,6 +43,11 @@ enum MiloTheme {
     static let accentOn = Color.milo(light: 0xFFFFFF, dark: 0xFFFFFF)
     static let secondary = Color.milo(light: 0x508080, dark: 0x6FA3A3)
     static let success = Color.milo(light: 0x587E20, dark: 0x7FA83F)
+    /// The green a control is filled with, a step lighter than the `success` a status dot is
+    /// read off, and the ink that reads on it — the browser's own pairing for a light fill,
+    /// which is why its second appearance pairs that green with a near-black.
+    static let successSoft = Color.milo(light: 0x7FA83F, dark: 0x8FB457)
+    static let successOn = Color.milo(light: 0x191A18, dark: 0x191A18)
     static let warning = Color.milo(light: 0x8A6209, dark: 0xC0912A)
     static let danger = Color.milo(light: 0xDA392F, dark: 0xE86A5F)
 

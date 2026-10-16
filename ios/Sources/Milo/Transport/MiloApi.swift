@@ -295,6 +295,9 @@ struct RoutineSummary: Decodable, Identifiable, Hashable {
     /// then carries only `nextRunAt`.
     let nextRuns: [Double]
     let enabled: Bool
+    /// Whether its own ceiling stopped it, which is not the person pausing it. Absent
+    /// from an older daemon, which only knows paused.
+    let finished: Bool
     /// The tools it may use unattended, approved when it was made.
     let allow: [String]
     let lastRunAt: Double?
@@ -302,6 +305,7 @@ struct RoutineSummary: Decodable, Identifiable, Hashable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, prompt, whenLabel, targetLabel, nextRunAt, nextRuns, enabled, allow, lastRunAt, lastResult
+        case finished
     }
 
     init(from decoder: Decoder) throws {
@@ -314,6 +318,7 @@ struct RoutineSummary: Decodable, Identifiable, Hashable {
         nextRunAt = try container.decodeIfPresent(Double.self, forKey: .nextRunAt)
         nextRuns = try container.decodeIfPresent([Double].self, forKey: .nextRuns) ?? []
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        finished = try container.decodeIfPresent(Bool.self, forKey: .finished) ?? false
         allow = try container.decodeIfPresent([String].self, forKey: .allow) ?? []
         lastRunAt = try container.decodeIfPresent(Double.self, forKey: .lastRunAt)
         lastResult = try container.decodeIfPresent(String.self, forKey: .lastResult)
