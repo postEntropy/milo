@@ -235,7 +235,10 @@ struct ChatView: View {
         .onPreferenceChange(ScrollBoxKey.self) { boxes.frames = $0 }
         .task {
             composing = true
-            await model.begin(at: account)
+            // A tap on a reply's notice names the session its answer is in, and that is the
+            // session to open — not the fresh one this app otherwise starts on.
+            let opened = await model.openPendingSession()
+            if !opened { await model.begin(at: account) }
             await model.refreshSessions()
         }
         // The strip answers words picked out of the thread on screen. When the session
@@ -537,13 +540,26 @@ struct ChatView: View {
             // outside the visible region — where a lazy stack draws nothing, so the screen
             // comes out blank. Putting the scroll back on it makes the welcome appear every
             // time, and a thread with words in it takes over from there as it grows.
-            .onChange(of: model.sessionId) { _, _ in
+            .onChange(of: model.sessionId) { _, id in
                 // The room is measured off the last message, and the last message is the one
                 // session's; the next thread measures its own before the room means anything.
                 sentTop = 0
                 sent = nil
                 placed = true
-                proxy.scrollTo(Self.threadTop, anchor: .top)
+                // A session opened from a reply's notice lands on its end: the answer is what
+                // the person came to read, and the thread's top is the conversation's first
+                // turn. Every other open still starts where the thread hangs from — an empty
+                // id is the socket forgetting its session before the next one answers, and
+                // there is no thread to land on yet.
+                if model.openedFromNotice, !id.isEmpty {
+                    model.openedFromNotice = false
+                    // Landed one turn of the run loop later: the thread's rows come into
+                    // being with the very change this is answering, and a lazy stack cannot
+                    // be pointed at a row it has not drawn yet.
+                    Task { @MainActor in proxy.scrollTo(Self.threadEnd, anchor: .bottom) }
+                } else {
+                    proxy.scrollTo(Self.threadTop, anchor: .top)
+                }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
                 topbar

@@ -14,6 +14,15 @@
 	</dict>
 	<key>CFBundleDisplayName</key>
 	<string>Milo</string>
+	<!-- The system runs a background task only where its identifier is declared here, and
+	     one of them is what keeps the phone on a running turn after the screen goes: about
+	     half a minute without it. It must name the identifier `Support/ContinuedTurn.swift`
+	     builds at run time, which is this app's own bundle id — `bundleID` in `xtool.yml` —
+	     with a name of its own. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>dev.milo.app.reply</string>
+	</array>
 	<!-- Scanning the QR `milo pair` draws is how a phone is paired without typing
 	     an address or a code. -->
 	<key>NSCameraUsageDescription</key>

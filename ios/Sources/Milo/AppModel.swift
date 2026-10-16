@@ -145,7 +145,14 @@ final class AppModel {
     /// A routine a tapped reminder asked to open; the Routines screen reads it, then
     /// clears it.
     var pendingRoutine: String?
-    private let reminders = RoutineReminders()
+    /// A session a tapped reply notice asked to open; the chat reads it, then clears it.
+    var pendingSession: String?
+    /// Whether the session now opening came from such a tap. Taken back by the chat once it
+    /// has landed there, so a session opened any other way still starts where it always did.
+    var openedFromNotice = false
+    private let notifications = PhoneNotifications.shared
+    /// The system's own hold on a running turn, which is the longer one — see the type.
+    private let continuedTurn = ContinuedTurn.shared
 
     /// The ideas the model drew from what Milo knows, for the welcome screen. Empty
     /// until the daemon draws them; the standing four stand in meanwhile.
@@ -195,8 +202,19 @@ final class AppModel {
         client.onState = { [weak self] state in self?.moved(to: state) }
         client.onFrame = { [weak self] frame in self?.received(frame) }
         client.onSendFailed = { [weak self] in self?.unsent() }
-        // A tapped reminder names the routine it was about, so the app opens on it.
-        reminders.onTap = { [weak self] id in self?.pendingRoutine = id }
+        // A tapped notice names something to open: the routine a reminder was about, or the
+        // session a reply's answer is in. A tap that came to launch the app can arrive
+        // before this model is listening — the notice keeps it, and it is claimed here.
+        notifications.onTap = { [weak self] tapped in self?.opened(tapped) }
+        if let waited = notifications.takePendingTap() { opened(waited) }
+    }
+
+    /// A tapped notice names what to open; this is the one place that reading is made.
+    private func opened(_ tapped: PhoneNotifications.Tapped) {
+        switch tapped {
+        case .routine(let id): pendingRoutine = id
+        case .session(let id): pendingSession = id
+        }
     }
 
     func load() async {
@@ -346,9 +364,12 @@ final class AppModel {
         pending = nil
         note = nil
         phase = .pairing
+        // Nothing is running for this phone any more, so the system's hold on the turn goes
+        // with the install rather than keeping the phone awake for a daemon it has left.
+        continuedTurn.end()
         // The reminders belonged to the install just left; an empty sync takes them off
         // the system without touching anything else the app may hold.
-        Task { await reminders.sync([]) }
+        Task { await notifications.sync([]) }
     }
 
     // MARK: - The turn
@@ -368,6 +389,7 @@ final class AppModel {
             return
         }
         busy = true
+        askToStayOn()
         if !client.send(.send(text: trimmed, intent: intent)) { unsent() }
     }
 
@@ -379,7 +401,19 @@ final class AppModel {
         guard !trimmed.isEmpty else { return }
         messages.append(Message(isUser: true, parts: [.text(trimmed)], attachments: [], streaming: false))
         busy = true
+        askToStayOn()
         if !client.send(.send(text: trimmed, target: target)) { unsent() }
+    }
+
+    /**
+     Asks the system to keep the phone on this turn once the screen goes, which is what the
+     reply notice needs to have anything to say. Asked on the send and only there: the
+     system takes a continued task from the foreground, and only for a person's own action
+     — a send is exactly that.
+     */
+    private func askToStayOn() {
+        guard notifications.replyNoticeOn else { return }
+        continuedTurn.begin()
     }
 
     /// Stops a background job. Pressing the control is the confirmation; the daemon
@@ -446,21 +480,56 @@ final class AppModel {
 
     func newSession() async {
         guard let account else { return }
-        do {
-            try await MiloApi.newSession(account)
-            await reopen(account)
-        } catch {
-            failed(error)
-        }
+        await openFresh(account) { try await MiloApi.newSession($0) }
     }
 
-    func resume(_ id: String) async {
-        guard let account else { return }
+    @discardableResult
+    func resume(_ id: String) async -> Bool {
+        guard let account else { return false }
+        return await openFresh(account) { try await MiloApi.resumeSession($0, id: id) }
+    }
+
+    /**
+     Opens the session a tapped reply notice named, if one is waiting, and answers whether
+     it did. A notice is about one answer in one session, so the app goes to that session
+     rather than starting the fresh one it otherwise opens with — the chat calls this where
+     it would have begun a new session, and again when a tap arrives with the app already
+     up. The answer is also what the person came to read, so the open is marked as one of
+     these and the chat lands on the end of the thread for it.
+     */
+    func openPendingSession() async -> Bool {
+        guard let id = pendingSession else { return false }
+        pendingSession = nil
+        openedFromNotice = true
+        let opened = await resume(id)
+        // Marked only where it is true: a session that could not be opened leaves the chat
+        // where it was, and the next one it opens is that person's own doing.
+        if !opened { openedFromNotice = false }
+        return opened
+    }
+
+    /**
+     Opens a session on a conversation the daemon has not seen. The browser mints a
+     conversation id for each session it opens, and the phone must too: the daemon
+     leaves a scope it is already bound to alone — and will not swap the session of one
+     with a turn running underneath it — so a switch, or a new session, has to be a new
+     scope with the session bound to it. The account is saved only once the daemon has
+     taken it, so a call that fails leaves the phone where it was — and answers whether it
+     opened, which is what tells a caller the phone moved at all.
+     */
+    @discardableResult
+    private func openFresh(_ account: Account, bind: (Account) async throws -> Void) async -> Bool {
+        var next = account
+        next.conversationId = AccountStore.freshConversationId()
         do {
-            try await MiloApi.resumeSession(account, id: id)
-            await reopen(account)
+            try await bind(next)
+            AccountStore.save(next)
+            phase = .chat(next)
+            await reopen(next)
+            return true
         } catch {
             failed(error)
+            return false
         }
     }
 
@@ -574,6 +643,9 @@ final class AppModel {
         turnStarted = nil
         began = false
         busy = false
+        // The turn being left is not what this phone waits on any more: the system is let go
+        // of it rather than held open for an answer this chat no longer draws.
+        continuedTurn.end()
         // The ideas belonged to the session being left; the daemon draws new ones for
         // the one the socket is about to replay.
         ideas = []
@@ -596,21 +668,40 @@ final class AppModel {
         do {
             routines = try await MiloApi.routines(account)
             routinesError = nil
-            await reminders.sync(routines)
+            await notifications.sync(routines)
         } catch {
             routinesError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
-    /// Asks for the permission the reminders need, once, when the screen first opens,
+    /**
+     Whether the phone may raise a notification at all: nil until the person has been
+     asked. Kept here rather than read off the notifier because the screens that draw it
+     — the routines list's own line, the reply notice's footer — watch this model, and a
+     permission that moved behind their back would leave them saying the wrong thing.
+     */
+    private(set) var notificationsAllowed: Bool?
+
+    /// Asks for the permission the reminders need, once, when that screen first opens,
     /// then schedules from the routines already read.
     func askToRemind() async {
-        await reminders.requestAuthorization()
-        await reminders.sync(routines)
+        notificationsAllowed = await notifications.requestAuthorization()
+        await notifications.sync(routines)
     }
 
-    /// Whether reminders may be raised: nil until the person has been asked.
-    var remindersAllowed: Bool? { reminders.authorized }
+    /// The same ask, from the control that turns the reply notice on: a switch that
+    /// promises a banner is where to ask for what one needs, and the answer is taken
+    /// either way so the switch can say when the phone has refused.
+    func askToNotify() async {
+        notificationsAllowed = await notifications.requestAuthorization()
+    }
+
+    /// The system's own reading, without prompting — what opening the settings screen
+    /// reads, so a switch left on from an earlier run is not promising a banner in
+    /// silence.
+    func readNotificationPermission() async {
+        notificationsAllowed = await notifications.authorization()
+    }
 
     /// Fires one now and re-reads the list, so the caller can open the run it made.
     func runRoutine(_ id: String) async -> RoutineRunResult? {
@@ -783,6 +874,64 @@ final class AppModel {
         }
     }
 
+    // MARK: - The phone's own notice
+
+    /**
+     The reply, said on the phone when the person is not looking at the chat. Only where
+     there are words to read: a banner that says Milo replied and carries nothing would not
+     be the thing it names. Nothing is raised while the chat is on screen — the words are
+     already in front of them. It names the session the answer is in, so a tap opens onto
+     that answer rather than the fresh session this app otherwise starts on.
+     */
+    private func announceReply(_ words: String, session: String) async {
+        guard notifications.replyNoticeOn else { return }
+        guard UIApplication.shared.applicationState != .active else { return }
+        await notifications.notifyReply(words, session: session)
+    }
+
+    /**
+     The stretch of time iOS gives an app that has left the screen, held open while a turn
+     is running so its answer can still arrive and be said: without it the app is suspended
+     within seconds of leaving, the socket goes with it, and the notice could never be
+     raised at all. Held for that and nothing else, so it is let go the moment the turn
+     ends or the app is in front again, and the system takes it back itself.
+
+     This is the floor rather than the whole of it: a turn that came from the person's own
+     send carries a continued task, which the system can keep alive for minutes
+     (`ContinuedTurn`), and one of those in hand is what this plain hold would only be a
+     shorter version of.
+     */
+    private var backgroundHold: UIBackgroundTaskIdentifier = .invalid
+
+    /// The app left the screen.
+    func enteredBackground() {
+        guard notifications.replyNoticeOn, busy, !continuedTurn.holds, backgroundHold == .invalid
+        else { return }
+        backgroundHold = UIApplication.shared.beginBackgroundTask(withName: "reply notice") { [weak self] in
+            // Let go right here, and not on a task of its own: the system calls this handler
+            // synchronously on the main thread — it blocks the app's suspension for exactly
+            // this moment — and a hold still open when it returns is one the app is
+            // terminated for.
+            MainActor.assumeIsolated { self?.releaseBackgroundHold() }
+        }
+    }
+
+    /// The app is in front again: whatever the hold was kept for is on the screen now.
+    func becameActive() {
+        releaseBackgroundHold()
+        // The system's own device is the *background*, and a person standing in the app is
+        // exactly when it takes its task back. Letting go here means that happens on the
+        // app's own terms — reported as complete — rather than being surprised by a
+        // cancellation, and the interface it draws goes away with it.
+        continuedTurn.end()
+    }
+
+    private func releaseBackgroundHold() {
+        guard backgroundHold != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(backgroundHold)
+        backgroundHold = .invalid
+    }
+
     // MARK: - Frames
 
     private func received(_ frame: ServerFrame) {
@@ -844,6 +993,9 @@ final class AppModel {
         case .turnEnd(_, let status, let raw, let rawNoOutput):
             busy = false
             answerEnded += 1
+            // The answer's own words, taken as the turn settles: what the phone says when
+            // the chat is not what is on screen.
+            var answered: String?
             if let index = messages.lastIndex(where: { $0.streaming }) {
                 messages[index].streaming = false
                 messages[index].waiting = false
@@ -854,9 +1006,21 @@ final class AppModel {
                 if let raw { messages[index].raw = raw }
                 if let rawNoOutput { messages[index].rawNoOutput = rawNoOutput }
                 if status == "stopped" { messages[index].status = "Stopped · the partial reply was kept." }
+                answered = messages[index].prose
             }
             turnStarted = nil
             if status == "error" { note = Note("That turn ended in an error.") }
+            // Whatever the phone was kept awake for is over. The holds are let go here —
+            // after the notice, where there is one to hand over — because the app is
+            // suspended soon after they end, and a post still in flight when that happens
+            // is a banner nobody ever sees.
+            let said = answered.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            let answeredIn = sessionId
+            Task {
+                if let said, !said.isEmpty { await announceReply(said, session: answeredIn) }
+                releaseBackgroundHold()
+                continuedTurn.end()
+            }
         case .commandResult(let result):
             // The reply as prose, preferring the markdown the daemon rendered beside the
             // plain words — the same choice the browser makes.
@@ -915,6 +1079,9 @@ final class AppModel {
     }
 
     private func apply(_ event: AgentEvent) {
+        // Every event is a step, whether or not it draws anything: what keeps the system's
+        // hold on the turn is that the work is moving, not what moved.
+        continuedTurn.advance()
         switch event {
         case .textDelta(let delta):
             beganSpeaking()
