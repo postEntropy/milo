@@ -84,6 +84,18 @@ enum AccountStore {
         return made
     }
 
+    /**
+     A conversation id for a session opened from here, not yet saved. The browser mints
+     one per session it opens — its `conversationId` is that session's scope, never a
+     fixed address — and the phone does the same: a scope the daemon is already bound
+     to is left alone (and one with a turn running is not swapped underneath), so
+     opening a session on a **new** scope is what makes the switch land. Saved with the
+     account only once the daemon has taken it.
+     */
+    static func freshConversationId() -> String {
+        UUID().uuidString.lowercased()
+    }
+
     static func load() -> Account? {
         let defaults = UserDefaults.standard
         guard let token = Keychain.get(tokenKey),

@@ -252,12 +252,23 @@ final class AppModel {
     /// either way: if the daemon could not start a session, the note says so and
     /// the last bound one is what the socket replays.
     func begin(at account: Account) async {
+        // Opened on a fresh conversation, like every other session this app opens: the
+        // app starts on a new session, and a conversation the daemon is still bound to
+        // — one with a turn that outlived the app running on it — would otherwise
+        // replay that session instead of a new one.
+        var next = account
+        next.conversationId = AccountStore.freshConversationId()
         do {
-            try await MiloApi.newSession(account)
+            try await MiloApi.newSession(next)
+            AccountStore.save(next)
+            phase = .chat(next)
         } catch {
             failed(error)
+            // The socket is opened either way: a daemon that could not start a session
+            // leaves the conversation it does know for the socket to replay.
+            next = account
         }
-        client.connect(to: account)
+        client.connect(to: next)
     }
 
     // MARK: - Pairing
@@ -461,8 +472,14 @@ final class AppModel {
             // the delete removed is worse than not deleting at all — the browser's own
             // order, for the browser's own reason.
             if id == sessionId {
-                try await MiloApi.newSession(account)
-                await reopen(account)
+                // Onto a fresh conversation, so the move lands even while a turn runs
+                // on the session being left.
+                var next = account
+                next.conversationId = AccountStore.freshConversationId()
+                try await MiloApi.newSession(next)
+                AccountStore.save(next)
+                phase = .chat(next)
+                await reopen(next)
             }
             try await MiloApi.deleteSession(account, id: id)
             await refreshSessions()
@@ -532,10 +549,15 @@ final class AppModel {
 
     private func fork(from turn: Int, then prompt: String?) async {
         guard let account, !sessionId.isEmpty else { return }
+        let from = sessionId
         owed = prompt
+        var next = account
+        next.conversationId = AccountStore.freshConversationId()
         do {
-            try await MiloApi.forkSession(account, id: sessionId, upToTurn: turn)
-            await reopen(account)
+            try await MiloApi.forkSession(next, id: from, upToTurn: turn)
+            AccountStore.save(next)
+            phase = .chat(next)
+            await reopen(next)
         } catch {
             owed = nil
             failed(error)
