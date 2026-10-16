@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -53,6 +53,55 @@ describe('milo routines', () => {
 
   afterEach(() => {
     rmSync(path.join(home, 'routines.json'), { force: true })
+  })
+
+  it('caps a routine at a number of runs, and says what the cap does', async () => {
+    const { lines, code } = await run('add', 'ping', '--every', '1m', '--limit', '5', '--gateway', 'none')
+
+    expect(code).toBe(0)
+    expect(lines.join('\n')).toContain('every 1m, 5 runs')
+    expect(lines.join('\n')).toContain('stops itself after 5 runs')
+    expect(readRoutines()[0]!.limit).toBe(5)
+  })
+
+  it('answers a ceiling that is not a count with the ones it takes', async () => {
+    const { errors, code } = await run('add', 'ping', '--every', '1m', '--limit', 'five', '--gateway', 'none')
+
+    expect(code).toBe(1)
+    expect(errors.join('\n')).toContain('whole number of runs')
+  })
+
+  it('reads a routine whose ceiling ran out as finished', async () => {
+    writeFileSync(
+      path.join(home, 'routines.json'),
+      JSON.stringify([
+        {
+          id: 'calm-otter-1',
+          name: 'ping',
+          prompt: 'ping',
+          when: { kind: 'every', minutes: 1 },
+          target: { gateway: 'none' },
+          limit: 2,
+          runs: 2,
+          enabled: false,
+          createdAt: 0,
+        },
+      ]),
+    )
+
+    const { lines } = await run('list')
+
+    expect(lines.join('\n')).toContain('every 1m, 2 runs')
+    expect(lines.join('\n')).toContain('finished')
+  })
+
+  it('says how many runs a routine switched on again has left', async () => {
+    await run('add', 'ping', '--every', '1m', '--limit', '3', '--gateway', 'none')
+
+    const { lines } = await run('enable', readRoutines()[0]!.id)
+
+    expect(lines.join('\n')).toContain('Enabled ')
+    expect(lines.join('\n')).toContain('3 runs left')
   })
 
   it('says there is nothing when there is nothing', async () => {

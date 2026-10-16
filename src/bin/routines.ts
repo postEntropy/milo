@@ -5,22 +5,25 @@ import { DEFAULT_WORKING_DIRECTORY } from '../core/config/paths.js'
 import { loadConfig } from '../core/config/load.js'
 import {
   addRoutine,
+  describeSchedule,
   describeTarget,
-  describeWhen,
   findRoutine,
   formatLocal,
-  nextRunAt,
+  isSpent,
   parseWhen,
   readRoutines,
+  remainingRuns,
   removeRoutine,
   ROUTINE_GATEWAYS,
   runRoutineOnce,
+  runsLeft,
   setEnabled,
   type RoutineGateway,
   type RoutineTarget,
 } from '../core/routines.js'
 import { builtinTools } from '../core/tools/index.js'
 import { errorMessage } from '../util/errors.js'
+import { plural } from '../util/format.js'
 
 export interface RoutineIo {
   out(line: string): void
@@ -52,9 +55,16 @@ const USAGE = [
   '  milo routines add "<prompt>" --at 09:00 --day-of-month 25 --month dec --gateway telegram --to <chat id>',
   '  milo routines add "<prompt>" --every 2h --gateway discord --to <channel id>',
   '  milo routines add "<prompt>" --every 6h --gateway web --to <conversation id>',
+  '  milo routines add "<prompt>" --every 1m --limit 5 --gateway none    at most five runs',
   '  milo routines remove <id>                  delete a routine',
   '  milo routines enable|disable <id>          turn a routine on or off',
   '  milo routines run <id>                     fire it now, printing the answer (no delivery)',
+  '',
+  'A routine repeats until it is paused or removed, unless it is given a ceiling:',
+  '--limit 5 runs it at most five times and then it stops itself, and the list reads',
+  'finished. A run you asked for by hand — `milo routines run`, the screen\'s Run now',
+  '— is not counted against the ceiling, and switching a routine on again after it',
+  'ran out starts the count over.',
   '',
   'A routine fires only while `milo serve` is running, and delivers its answer to',
   'the chat named by --gateway/--to (telegram, discord or web — a web conversation',
@@ -127,11 +137,17 @@ function list(out: RoutineIo['out']): number {
   for (const routine of routines) {
     const name = routine.name ?? routine.prompt
     out(`${routine.enabled ? 'on  ' : 'off '} ${name}  (${routine.id})`)
-    const timing = routine.enabled ? `next ${formatLocal(nextRunAt(routine.when, now))}` : 'paused'
+    const timing = isSpent(routine)
+      ? 'finished'
+      : routine.enabled
+        ? `next ${formatLocal(remainingRuns(routine, now, 1)[0]!)}`
+        : 'paused'
     const last = routine.lastRunAt
       ? `last ${routine.lastResult ?? 'ok'} at ${formatLocal(new Date(routine.lastRunAt))}`
       : 'never run'
-    out(`     ${describeWhen(routine.when)} → ${describeTarget(routine.target)} — ${timing}, ${last}`)
+    out(`     ${describeSchedule(routine)} → ${describeTarget(routine.target)} — ${timing}, ${last}`)
+    const left = runsLeft(routine)
+    if (left !== null && left > 0) out(`     ${plural(left, 'run')} left of ${routine.limit}`)
     if (routine.allow?.length) out(`     may use ${routine.allow.join(', ')} with nobody there`)
   }
   return 0
@@ -147,6 +163,7 @@ interface AddFlags {
   month?: string[]
   gateway?: RoutineGateway | 'none'
   conversationId?: string
+  limit?: number
   allow?: string[]
   yes: boolean
 }
@@ -169,7 +186,15 @@ function parseAdd(argv: string[]): AddFlags {
     else if (token === '--day-of-month') {
       flags.dayOfMonth = value().split(',').map((day) => day.trim()).filter(Boolean)
     } else if (token === '--month') flags.month = value().split(',').map((month) => month.trim()).filter(Boolean)
-    else if (token === '--allow') {
+    else if (token === '--limit') {
+      const raw = value()
+      // A ceiling is a count, so what is not a whole number of runs is answered with
+      // what is — never read as something else.
+      if (!/^\d+$/.test(raw.trim())) {
+        throw new Error(`--limit takes a whole number of runs — 5, or 0 for no ceiling — not "${raw}".`)
+      }
+      flags.limit = Number(raw)
+    } else if (token === '--allow') {
       flags.allow = value().split(',').map((name) => name.trim()).filter(Boolean)
     } else if (token === '--yes' || token === '-y') flags.yes = true
     else if (token === '--gateway') {
@@ -239,15 +264,17 @@ async function add(argv: string[], context: Required<RoutineIo>): Promise<number
     name: flags.name,
     when,
     target,
+    limit: flags.limit && flags.limit > 0 ? flags.limit : undefined,
     allow: flags.allow?.length ? flags.allow : undefined,
     enabled: true,
   })
   context.out(
-    `Created routine "${routine.name ?? routine.prompt}" (${routine.id}): ${describeWhen(routine.when)} → ${describeTarget(routine.target)}`,
+    `Created routine "${routine.name ?? routine.prompt}" (${routine.id}): ${describeSchedule(routine)} → ${describeTarget(routine.target)}`,
   )
+  if (routine.limit !== undefined) context.out(`It stops itself after ${plural(routine.limit, 'run')}.`)
   if (routine.allow?.length) context.out(`Granted: ${routine.allow.join(', ')} (unattended)`)
   context.out(
-    `Next ${formatLocal(nextRunAt(routine.when, new Date()))}. Remove with: milo routines remove ${routine.id}`,
+    `Next ${formatLocal(remainingRuns(routine, new Date(), 1)[0]!)}. Remove with: milo routines remove ${routine.id}`,
   )
   return 0
 }
@@ -277,11 +304,15 @@ async function toggle(
     err(`${enabled ? 'enable' : 'disable'} needs a routine id (see milo routines list).`)
     return 1
   }
-  if (!(await setEnabled(id, enabled))) {
+  const routine = await setEnabled(id, enabled)
+  if (!routine) {
     err(`No routine ${id}.`)
     return 1
   }
-  out(`${enabled ? 'Enabled' : 'Disabled'} ${id}.`)
+  // What a routine switched on again has left is the one thing worth saying here: a
+  // ceiling that had run out started its count over, so the number is not what it was.
+  const left = runsLeft(routine)
+  out(`${enabled ? 'Enabled' : 'Disabled'} ${id}${enabled && left !== null ? ` — ${plural(left, 'run')} left` : ''}.`)
   return 0
 }
 

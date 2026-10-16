@@ -90,6 +90,35 @@ describe('the routine tool', () => {
     expect(result.content).toContain('milo routines remove calm-otter-9')
   })
 
+  it('caps a routine at the runs it was allowed, and says what the cap does', async () => {
+    const { ctx, added } = harness({ origin: { gateway: 'web', conversationId: 'conv-1' } })
+
+    const result = await routineTool.execute({ prompt: 'ping', every: '1m', limit: 5 }, ctx)
+
+    expect(added[0]!.limit).toBe(5)
+    // Said back with the time, so a ceiling nobody meant is caught before it runs.
+    expect(result.content).toContain('every 1m, 5 runs')
+    expect(result.content).toContain('stops itself after 5 runs')
+  })
+
+  it('takes a ceiling off with a zero rather than reading it as a count', async () => {
+    const { ctx, updated } = harness({}, undefined, [briefing({ limit: 5, runs: 4 })])
+
+    const result = await routineTool.execute({ action: 'update', id: 'calm-otter-1', limit: 0 }, ctx)
+
+    expect(result.isError).toBeFalsy()
+    expect(updated[0]!.patch.limit).toBe(0)
+  })
+
+  it('reads a routine that has run out as finished, and says nothing is left', async () => {
+    const { ctx } = harness({}, undefined, [briefing({ limit: 2, runs: 2, enabled: false })])
+
+    const result = await routineTool.execute({ action: 'list' }, ctx)
+
+    expect(result.content).toContain('every 2h, 2 runs')
+    expect(result.content).toContain('finished — it ran all 2 runs')
+  })
+
   it('reads weekday mornings, and aims them at the chat they came from', async () => {
     const { ctx, added } = harness({
       origin: { gateway: 'discord', conversationId: '999' },

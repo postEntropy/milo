@@ -60,17 +60,17 @@ import { INSTALL_SCOPE, memoryStatus } from '../../core/memory/index.js'
 import { provisionEmbedding } from '../../core/memory/provision.js'
 import {
   addRoutine,
+  describeSchedule,
   describeTarget,
-  describeWhen,
   findRoutine,
-  nextRunAt,
+  isSpent,
   parseWhen,
   readRoutines,
+  remainingRuns,
   removeRoutineWithRuns,
   ROUTINE_GATEWAYS,
   runRoutineOnce,
   setEnabled,
-  upcomingRuns,
   type Routine,
   type RoutineGateway,
   type RoutineTarget,
@@ -93,6 +93,7 @@ const FEED_LIMIT = 20
  * How many future fire times a routine carries, for a surface that schedules on them
  * — the phone's own reminders. Small: the schedule's arithmetic stays in `nextRunAt`,
  * and a client takes what it needs rather than this guessing how far ahead it looks.
+ * A routine with a ceiling carries no more than it still has left.
  */
 const UPCOMING_RUNS = 5
 
@@ -978,14 +979,19 @@ export class WebSettings {
 
   private routineView(routine: Routine): Record<string, unknown> {
     const now = new Date()
+    // What is still coming, read once from the one place that knows the ceiling: a
+    // routine that has run out has no next time, and a surface that reminded on one
+    // would be reminding for something that will never happen again.
+    const upcoming = routine.enabled ? remainingRuns(routine, now, UPCOMING_RUNS) : []
     return {
       ...routine,
-      whenLabel: describeWhen(routine.when),
+      whenLabel: describeSchedule(routine),
       targetLabel: describeTarget(routine.target),
-      nextRunAt: routine.enabled ? nextRunAt(routine.when, now).getTime() : null,
-      // When it next fires, and the few after that, so a client that reminds on them
-      // schedules what the schedule itself says rather than its own reading of `when`.
-      nextRuns: routine.enabled ? upcomingRuns(routine.when, now, UPCOMING_RUNS).map((at) => at.getTime()) : [],
+      nextRunAt: upcoming[0]?.getTime() ?? null,
+      nextRuns: upcoming.map((at) => at.getTime()),
+      // Stopped because its own ceiling ran out, which is not the person pausing it:
+      // the surfaces say which one it is, and this is the daemon saying it once.
+      finished: isSpent(routine),
     }
   }
 

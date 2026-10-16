@@ -1,15 +1,18 @@
 import { z } from 'zod'
 import {
+  describeSchedule,
   describeTarget,
-  describeWhen,
   formatLocal,
-  nextRunAt,
+  isSpent,
   parseWhen,
+  remainingRuns,
   ROUTINE_GATEWAYS,
+  runsLeft,
   type Routine,
   type RoutineGateway,
   type RoutineTarget,
 } from '../routines.js'
+import { plural } from '../../util/format.js'
 import type { RoutineStore, Tool, ToolContext, ToolResult } from './types.js'
 
 const schema = z.object({
@@ -75,6 +78,14 @@ const schema = z.object({
     .boolean()
     .optional()
     .describe('For "update": run it (true) or pause it (false). Absent: unchanged.'),
+  limit: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe(
+      'How many times the timer may run it before it stops itself, e.g. "five times" is 5; a ceiling said as a duration ("every minute for five minutes") is the runs the interval fits, which you work out and say back to them. It stops itself after that many runs and reads as finished; switching it on again starts the count over, and a run the person asks for by hand is never counted. 0 removes the ceiling. On "update": what is passed replaces it.',
+    ),
 })
 
 export type RoutineArgs = z.infer<typeof schema>
@@ -85,7 +96,7 @@ const NOT_A_TIME =
 export const routineTool: Tool<RoutineArgs> = {
   name: 'routine',
   description:
-    'Manage routines: a prompt Milo runs on a timer and delivers to a chat — or to no chat at all — with nobody there when it fires. Use it when the person wants something to happen on a schedule ("every two hours", "every weekday at 8", "the 1st of each month") or wants to change, pause or drop one they already have. What the person says comes in natural language; you turn it into a routine. "every two hours" is `every: "2h"`; "every 30 seconds" is `every: "30s"` (seconds and minutes are both fine — the shortest is one second); "every day at 8" is `at: "08:00"`; "every Monday at 9" is `at: "09:00"` with `days: ["mon"]`; "weekdays at 8" is `at: "08:00"` with `days: ["mon-fri"]`; "the 1st of each month at 9" is `at: "09:00"` with `dayOfMonth: ["1"]`; "every 25 December" is `at: "09:00"` with `month: ["dec"]` and `dayOfMonth: ["25"]`; and "every Monday in July" is `at: "09:00"` with `days: ["mon"]` and `month: ["jul"]` — a day of the week and a day of the month are never combined, so pick one. A routine fires at its next time and every time after; it does not run while `milo serve` is down, and a time missed that way is skipped rather than caught up. It delivers to the chat the request came from when that chat can receive messages; from a surface that cannot (the CLI), name `gateway` and `conversationId` — ask the person which chat, do not guess. A routine may also deliver nowhere: `gateway: "none"` (what the web UI calls "Routines screen only") keeps every run on the Routines screen and posts to no chat — reach for it whenever the person does not want the answer in a chat, and say that back to them. Its answer is text, and it can also deliver files with `send_file` — a picture as a picture, anything else as a document. That is the only thing that makes a picture a picture: the file lands on the run\'s own record, which is what the Routines screen draws, so a routine whose output IS an image must `send_file` it even when it delivers nowhere — a path in the answer is text. So "every morning, screenshot the screen and send it" is `shell_command` plus `send_file`, both named in `allow`. A routine runs with nobody to confirm anything: reading needs no permission, but anything that writes, runs a command, sends a file or changes mail has to be named in `allow` — so "every day, bin anything labelled newsletter" needs `gmail_modify` (with `mail_labels` to find it) — and the person is asked to approve those tools before the routine exists. Ask them in the conversation rather than deciding for them, and keep the list to what the prompt actually needs. Always say the name, the time, the destination and the granted tools back, so they can correct it before it ever fires.\n\nTo change or remove a routine, first call this tool with `action: "list"` — it names every routine with its id. Then call again with `action: "update"` or `"remove"` and that `id`. Do not guess an id. On `update`, pass only what changes: a new `at`/`every` (and the `days`, `dayOfMonth` or `month` it keeps — restate the whole schedule, the fields you leave out are not carried over), a new `gateway`+`conversationId` or `"none"`, a new `prompt` or `name`, `enabled` to pause or resume, or a new `allow`. An `update` with nothing to change changes nothing. Say what the routine is now after an update, and confirm which one you removed — by name, not id.',
+    'Manage routines: a prompt Milo runs on a timer and delivers to a chat — or to no chat at all — with nobody there when it fires. Use it when the person wants something to happen on a schedule ("every two hours", "every weekday at 8", "the 1st of each month") or wants to change, pause or drop one they already have. What the person says comes in natural language; you turn it into a routine. "every two hours" is `every: "2h"`; "every 30 seconds" is `every: "30s"` (seconds and minutes are both fine — the shortest is one second); "every day at 8" is `at: "08:00"`; "every Monday at 9" is `at: "09:00"` with `days: ["mon"]`; "weekdays at 8" is `at: "08:00"` with `days: ["mon-fri"]`; "the 1st of each month at 9" is `at: "09:00"` with `dayOfMonth: ["1"]`; "every 25 December" is `at: "09:00"` with `month: ["dec"]` and `dayOfMonth: ["25"]`; and "every Monday in July" is `at: "09:00"` with `days: ["mon"]` and `month: ["jul"]` — a day of the week and a day of the month are never combined, so pick one. A routine fires at its next time and every time after; it does not run while `milo serve` is down, and a time missed that way is skipped rather than caught up. A routine repeats forever unless it is given a ceiling: `limit: 5` runs it at most five times and then it stops itself, and a run the person asks for by hand is not counted against it. "Every minute for five minutes" is `every: "1m"` with `limit: 5` — do that arithmetic and say it back to the person. It delivers to the chat the request came from when that chat can receive messages; from a surface that cannot (the CLI), name `gateway` and `conversationId` — ask the person which chat, do not guess. A routine may also deliver nowhere: `gateway: "none"` (what the web UI calls "Routines screen only") keeps every run on the Routines screen and posts to no chat — reach for it whenever the person does not want the answer in a chat, and say that back to them. Its answer is text, and it can also deliver files with `send_file` — a picture as a picture, anything else as a document. That is the only thing that makes a picture a picture: the file lands on the run\'s own record, which is what the Routines screen draws, so a routine whose output IS an image must `send_file` it even when it delivers nowhere — a path in the answer is text. So "every morning, screenshot the screen and send it" is `shell_command` plus `send_file`, both named in `allow`. A routine runs with nobody to confirm anything: reading needs no permission, but anything that writes, runs a command, sends a file or changes mail has to be named in `allow` — so "every day, bin anything labelled newsletter" needs `gmail_modify` (with `mail_labels` to find it) — and the person is asked to approve those tools before the routine exists. Ask them in the conversation rather than deciding for them, and keep the list to what the prompt actually needs. Always say the name, the time, the destination and the granted tools back, so they can correct it before it ever fires.\n\nTo change or remove a routine, first call this tool with `action: "list"` — it names every routine with its id. Then call again with `action: "update"` or `"remove"` and that `id`. Do not guess an id. On `update`, pass only what changes: a new `at`/`every` (and the `days`, `dayOfMonth` or `month` it keeps — restate the whole schedule, the fields you leave out are not carried over), a new `gateway`+`conversationId` or `"none"`, a new `prompt` or `name`, `enabled` to pause or resume, or a new `allow`. An `update` with nothing to change changes nothing. Say what the routine is now after an update, and confirm which one you removed — by name, not id.',
   schema,
   // Creating a prompt that only reads is the person's own request; but changing an
   // existing routine's prompt, or re-arming it, is a change to a standing instruction
@@ -117,13 +128,19 @@ export const routineTool: Tool<RoutineArgs> = {
 
 /** `calm-otter-7 — "daily briefing" — 08:00, mon–fri → telegram:123 — next …, never run`. */
 function describeRoutine(routine: Routine): string {
-  const next = routine.enabled
-    ? `next ${formatLocal(nextRunAt(routine.when, new Date()))}`
-    : 'paused'
+  const left = runsLeft(routine)
+  const remaining = left === null ? '' : `, ${plural(left, 'run')} left`
+  // A routine that has run out is not paused and has no next time: the ceiling is what
+  // stopped it, and the count is how the person can tell.
+  const state = isSpent(routine)
+    ? `finished — it ran all ${plural(routine.limit!, 'run')}`
+    : routine.enabled
+      ? `next ${formatLocal(remainingRuns(routine, new Date(), 1)[0]!)}${remaining}`
+      : `paused${remaining}`
   const last = routine.lastRunAt
     ? `last ${routine.lastResult ?? 'ok'} at ${formatLocal(new Date(routine.lastRunAt))}`
     : 'never run'
-  return `${routine.id} — "${routine.name ?? routine.prompt}" — ${describeWhen(routine.when)} → ${describeTarget(routine.target)} — ${next}, ${last}`
+  return `${routine.id} — "${routine.name ?? routine.prompt}" — ${describeSchedule(routine)} → ${describeTarget(routine.target)} — ${state}, ${last}`
 }
 
 function handleList(routines: RoutineStore): ToolResult {
@@ -161,13 +178,15 @@ async function handleCreate(args: RoutineArgs, ctx: ToolContext, routines: Routi
       name: args.name,
       when,
       target,
+      limit: args.limit && args.limit > 0 ? args.limit : undefined,
       allow: args.allow?.length ? args.allow : undefined,
       enabled: true,
     })
-    const next = formatLocal(nextRunAt(routine.when, new Date()))
+    const next = formatLocal(remainingRuns(routine, new Date(), 1)[0]!)
     const granted = routine.allow?.length ? `, may use ${routine.allow.join(', ')}` : ''
+    const capped = routine.limit === undefined ? '' : ` It stops itself after ${plural(routine.limit, 'run')}.`
     return {
-      content: `Created routine "${routine.name ?? routine.prompt}" — ${describeWhen(routine.when)}, next ${next}, delivered to ${describeTarget(routine.target)}${granted}. Id ${routine.id}; \`milo routines remove ${routine.id}\` removes it.`,
+      content: `Created routine "${routine.name ?? routine.prompt}" — ${describeSchedule(routine)}, next ${next}, delivered to ${describeTarget(routine.target)}${granted}.${capped} Id ${routine.id}; \`milo routines remove ${routine.id}\` removes it.`,
     }
   } catch (error) {
     return { content: error instanceof Error ? error.message : String(error), isError: true }
@@ -215,6 +234,9 @@ async function handleUpdate(args: RoutineArgs, routines: RoutineStore): Promise<
   if (args.name !== undefined) patch.name = args.name
   if (when !== undefined) patch.when = when
   if (target !== undefined) patch.target = target
+  // `0` is a ceiling taken off, which the store is the one that reads — the same way an
+  // empty `allow` is no grant.
+  if (args.limit !== undefined) patch.limit = args.limit
   if (args.allow !== undefined) patch.allow = args.allow
   if (args.enabled !== undefined) patch.enabled = args.enabled
 

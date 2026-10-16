@@ -20,9 +20,30 @@ export type RoutineSummary = {
   targetLabel: string
   nextRunAt: number | null
   enabled: boolean
+  /** Whether its own ceiling stopped it, which is not the person pausing it. */
+  finished: boolean
   allow?: string[]
   lastRunAt?: number
   lastResult?: 'ok' | 'error'
+}
+
+/** What the row's own state cell is labelled: a word is a status, a time is a run. */
+function stateLabel(routine: RoutineSummary): string {
+  if (routine.finished) return 'Status'
+  return routine.lastRunAt ? 'Last run' : routine.enabled ? 'Next run' : 'Status'
+}
+
+/**
+ * How a routine reads as a state: a failure first, then the two words that mean not
+ * running — finished, which its own ceiling did, and paused, which the person did —
+ * and otherwise the time of its last or next run.
+ */
+function stateWord(routine: RoutineSummary): string {
+  if (routine.lastResult === 'error') return 'Failed'
+  if (routine.finished) return 'Finished'
+  if (!routine.enabled) return 'Paused'
+  if (routine.lastRunAt) return formatWhen(routine.lastRunAt)
+  return routine.nextRunAt ? formatIn(routine.nextRunAt) : 'Enabled'
 }
 
 /** A run of a routine, as the history lists it. */
@@ -235,9 +256,9 @@ function RoutineList({
               <span className="routine-row-meta">{routine.whenLabel}<span className="routine-meta-separator">·</span>{routine.targetLabel}</span>
             </span>
             <span className="routine-row-next">
-              <span className="routine-row-next-label">{routine.lastRunAt ? 'Last run' : routine.enabled ? 'Next run' : 'Status'}</span>
+              <span className="routine-row-next-label">{stateLabel(routine)}</span>
               <span className={`routine-row-state${routine.lastResult === 'error' ? ' failed' : ''}`}>
-                {routine.lastResult === 'error' ? 'Failed' : routine.enabled ? routine.lastRunAt ? formatWhen(routine.lastRunAt) : routine.nextRunAt ? formatIn(routine.nextRunAt) : 'Enabled' : 'Paused'}
+                {stateWord(routine)}
               </span>
             </span>
           </button>
@@ -411,7 +432,7 @@ function RoutineDetail({
       <div className="routine-overview-data">
         <div className="routine-fact"><span className="routine-fact-label">Schedule</span><strong className="routine-fact-value">{routine.whenLabel}</strong></div>
         <div className="routine-fact"><span className="routine-fact-label">Deliver to</span><strong className="routine-fact-value">{routine.targetLabel}</strong></div>
-        <div className="routine-fact"><span className="routine-fact-label">{routine.lastRunAt ? 'Last run' : 'Next run'}</span><strong className={`routine-fact-value${routine.lastResult === 'error' ? ' failed' : ''}`}>{routine.lastRunAt ? `${formatWhen(routine.lastRunAt)}${routine.lastResult === 'error' ? ' · failed' : ''}` : next}</strong></div>
+        <div className="routine-fact"><span className="routine-fact-label">{routine.finished ? 'State' : routine.lastRunAt ? 'Last run' : 'Next run'}</span><strong className={`routine-fact-value${routine.lastResult === 'error' ? ' failed' : ''}`}>{routine.finished ? 'Finished' : routine.lastRunAt ? `${formatWhen(routine.lastRunAt)}${routine.lastResult === 'error' ? ' · failed' : ''}` : next}</strong></div>
       </div>
       <div className="routine-actions">
         <button className="button primary" type="button" disabled={working} onClick={() => void runNow()}><Icon name="play" size={13} /> {working ? 'Running…' : 'Run now'}</button>

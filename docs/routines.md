@@ -11,6 +11,7 @@ milo routines add "look at the repo and tell me what moved" --name "daily briefi
   --at 08:00 --days mon-fri --gateway telegram --to 123456789
 milo routines add "monthly report" --at 09:00 --day-of-month 1 --gateway telegram --to 123456789
 milo routines add "deploy status" --every 6h --gateway discord --to 987654321
+milo routines add "ping" --every 1m --limit 5 --gateway none   # five runs, then it stops itself
 milo routines list
 milo routines disable calm-otter-7
 milo routines run calm-otter-7        # fire it now, printing the answer
@@ -28,6 +29,14 @@ time (`08:00`, `8h`) on the days, dates or months that allow it: days of the wee
 the week is never combined with a day of the month. The time is an exact clock time: for "every so
 often" use the interval. Times are **local**, and day and month names are read in English or
 Portuguese and written back in English.
+
+A routine repeats until it is paused or removed. Give it a **ceiling** and it stops itself
+instead: `--limit 5` — `limit: 5` in chat — runs it at most five times, and then the timer
+switches it off. The list reads `finished`, the runs it made are kept, and switching it on
+again starts the count over (a routine paused mid-count keeps it). A ceiling is a number of
+runs, not a stretch of time: *"every minute for five minutes"* is `--every 1m --limit 5`.
+Runs you ask for by hand — `milo routines run`, the screen's **Run now** — are never counted
+against it.
 
 Three things to know before relying on one:
 

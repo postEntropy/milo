@@ -13,18 +13,22 @@ process.env.MILO_HOME = home
 
 const {
   addRoutine,
+  describeSchedule,
   describeTarget,
   describeWhen,
   findRoutine,
   formatLocal,
+  isSpent,
   MAX_ROUTINES,
   markRun,
   nameFor,
   nextRunAt,
   parseWhen,
   readRoutines,
+  remainingRuns,
   removeRoutine,
   RoutineScheduler,
+  runsLeft,
   setEnabled,
   upcomingRuns,
   updateRoutine,
@@ -215,6 +219,39 @@ describe('describeWhen', () => {
   })
 })
 
+describe('the run ceiling', () => {
+  it('reads a routine with no ceiling as never spent, and as having no count to read', () => {
+    expect(isSpent({})).toBe(false)
+    expect(runsLeft({})).toBeNull()
+  })
+
+  it('is spent once the timer has run it as many times as it was allowed', () => {
+    expect(isSpent({ limit: 5, runs: 4 })).toBe(false)
+    expect(isSpent({ limit: 5 })).toBe(false)
+    expect(runsLeft({ limit: 5, runs: 4 })).toBe(1)
+    expect(isSpent({ limit: 5, runs: 5 })).toBe(true)
+    expect(runsLeft({ limit: 5, runs: 5 })).toBe(0)
+    // A count past the ceiling is still spent, not a negative number of runs left.
+    expect(runsLeft({ limit: 5, runs: 9 })).toBe(0)
+  })
+
+  it('says the ceiling with the time, and nothing when there is none', () => {
+    expect(describeSchedule({ when: every(1), limit: 5 })).toBe('every 1m, 5 runs')
+    expect(describeSchedule({ when: every(1), limit: 1 })).toBe('every 1m, 1 run')
+    expect(describeSchedule({ when: every(1) })).toBe('every 1m')
+  })
+
+  it('carries no more times than the runs it still has', () => {
+    const from = new Date(2026, 8, 25, 8, 0, 0)
+
+    expect(remainingRuns({ when: every(10), limit: 3 }, from, 5)).toHaveLength(3)
+    expect(remainingRuns({ when: every(10), limit: 3, runs: 2 }, from, 5)).toHaveLength(1)
+    expect(remainingRuns({ when: every(10), limit: 3, runs: 3 }, from, 5)).toEqual([])
+    // No ceiling at all is the schedule's own reading, unchanged.
+    expect(remainingRuns({ when: every(10) }, from, 5)).toEqual(upcomingRuns(every(10), from, 5))
+  })
+})
+
 describe('formatLocal', () => {
   it('reads as a local date and time', () => {
     expect(formatLocal(new Date(2026, 8, 26, 8, 5))).toBe('2026-09-26 08:05')
@@ -326,13 +363,99 @@ describe('the store', () => {
     const added = await addRoutine(routine())
 
     expect(await removeRoutine('nobody-here-1')).toBe(false)
-    expect(await setEnabled('nobody-here-1', false)).toBe(false)
+    expect(await setEnabled('nobody-here-1', false)).toBeUndefined()
 
-    expect(await setEnabled(added.id, false)).toBe(true)
+    expect((await setEnabled(added.id, false))?.enabled).toBe(false)
     expect(findRoutine(added.id)?.enabled).toBe(false)
 
     expect(await removeRoutine(added.id)).toBe(true)
     expect(findRoutine(added.id)).toBeUndefined()
+  })
+
+  it('keeps a ceiling, counts the runs, and drops a count that is not one', async () => {
+    await writeRoutines([])
+    const added = await addRoutine(routine({ limit: 3 }))
+    expect(readRoutines()[0]!.limit).toBe(3)
+
+    await markRun(added.id, 'ok', 1_000)
+    expect(readRoutines()[0]).toMatchObject({ runs: 1, enabled: true })
+
+    // A file someone edited by hand reads by the same rule as an empty grant: what is
+    // not a whole number of runs is no count, and no count is not a reason to drop the
+    // routine.
+    writeFileSync(routinesFile(), JSON.stringify([{ ...added, limit: 'three', runs: -1 }]))
+    expect(readRoutines()[0]).toMatchObject({ limit: undefined, runs: undefined })
+  })
+
+  it('stops the routine itself on the run that uses the ceiling up', async () => {
+    await writeRoutines([])
+    const added = await addRoutine(routine({ limit: 2 }))
+
+    await markRun(added.id, 'ok', 1_000)
+    expect(findRoutine(added.id)).toMatchObject({ enabled: true, runs: 1 })
+
+    await markRun(added.id, 'ok', 2_000)
+    expect(findRoutine(added.id)).toMatchObject({ enabled: false, runs: 2 })
+  })
+
+  it('takes a ceiling off with a zero, the way an empty grant is no grant', async () => {
+    await writeRoutines([])
+    const added = await addRoutine(routine({ limit: 5 }))
+    await markRun(added.id, 'ok', 1_000)
+
+    await updateRoutine(added.id, { limit: 0 })
+
+    // The tally goes with the ceiling it counted against: nothing is counting now, so
+    // the next ceiling put on starts at zero rather than part-used.
+    expect(findRoutine(added.id)).toMatchObject({ limit: undefined, runs: undefined })
+  })
+
+  it('starts a ceiling put on a routine that has been repeating for ages at zero', async () => {
+    await writeRoutines([])
+    const added = await addRoutine(routine())
+
+    await markRun(added.id, 'ok', 1_000)
+    await markRun(added.id, 'ok', 2_000)
+    // A routine with no ceiling takes no tally, so there is none to inherit.
+    expect(findRoutine(added.id)!.runs).toBeUndefined()
+
+    await updateRoutine(added.id, { limit: 5 })
+
+    const capped = findRoutine(added.id)!
+    expect(capped.limit).toBe(5)
+    expect(isSpent(capped)).toBe(false)
+  })
+
+  it('starts a spent routine counting over when it is switched on, and leaves a paused one alone', async () => {
+    await writeRoutines([])
+    const spent = await addRoutine(routine({ limit: 1 }))
+    await markRun(spent.id, 'ok', 1_000)
+    expect(findRoutine(spent.id)!.enabled).toBe(false)
+
+    await setEnabled(spent.id, true)
+    expect(findRoutine(spent.id)).toMatchObject({ enabled: true, runs: undefined })
+
+    const paused = await addRoutine(routine({ prompt: 'the other one', limit: 5 }))
+    await markRun(paused.id, 'ok', 1_000)
+    await setEnabled(paused.id, false)
+    await setEnabled(paused.id, true)
+
+    expect(findRoutine(paused.id)).toMatchObject({ enabled: true, runs: 1 })
+  })
+
+  it('starts the count over when a spent routine is given a new ceiling, and keeps it mid-stretch', async () => {
+    await writeRoutines([])
+    const spent = await addRoutine(routine({ limit: 1 }))
+    await markRun(spent.id, 'ok', 1_000)
+
+    await updateRoutine(spent.id, { limit: 4 })
+    expect(findRoutine(spent.id)).toMatchObject({ limit: 4, runs: undefined })
+
+    const going = await addRoutine(routine({ prompt: 'the other one', limit: 5 }))
+    await markRun(going.id, 'ok', 1_000)
+
+    await updateRoutine(going.id, { limit: 9 })
+    expect(findRoutine(going.id)).toMatchObject({ limit: 9, runs: 1 })
   })
 
   it('changes a routine in place, keeping its id and creation time', async () => {
@@ -608,6 +731,27 @@ describe('RoutineScheduler', () => {
     expect(h.delivered).toEqual([{ id: 'calm-otter-1', text: 'briefing\n\nok' }])
     expect(readRoutines()[0]).toMatchObject({ lastResult: 'ok' })
     expect(readRoutines()[0]!.lastRunAt).toBeGreaterThan(0)
+    h.scheduler.stop()
+  })
+
+  it('stops itself once it has run as many times as it was allowed', async () => {
+    await writeRoutines([sample({ when: every(1), limit: 2 })])
+    const h = harness()
+    h.scheduler.start()
+
+    h.advanceClock(60_000)
+    await h.advance(61_000)
+    h.advanceClock(60_000)
+    await h.advance(61_000)
+
+    expect(h.prompts).toEqual(['look at the repo', 'look at the repo'])
+    // The second run was the last it was allowed, so it is off now — not merely never
+    // due again, which would leave it looking switched on everywhere.
+    expect(readRoutines()[0]).toMatchObject({ enabled: false, runs: 2 })
+
+    h.advanceClock(60_000)
+    await h.advance(61_000)
+    expect(h.prompts).toHaveLength(2)
     h.scheduler.stop()
   })
 

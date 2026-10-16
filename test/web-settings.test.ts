@@ -279,6 +279,30 @@ describe('web Settings routines', () => {
     expect(await settings.handle('routines')).toEqual([])
   })
 
+  it('carries the ceiling, and reads a routine that ran out as finished with nothing next', async () => {
+    writeConfig()
+    const settings = new WebSettings(build({}), home)
+    await settings.handle('routine-add', {
+      prompt: 'ping',
+      every: '2h',
+      target: { gateway: 'web', conversationId: CONVERSATION },
+    })
+
+    // What the timer leaves when the last allowed run happens: the count is in the file
+    // and the routine is off — the same file the daemon reads and writes.
+    const file = path.join(home, 'routines.json')
+    const onDisk = JSON.parse(readFileSync(file, 'utf8')) as Array<Record<string, unknown>>
+    writeFileSync(file, JSON.stringify(onDisk.map((entry) => ({ ...entry, limit: 2, runs: 2, enabled: false }))))
+
+    type View = { whenLabel: string; finished: boolean; nextRunAt: number | null; nextRuns: number[] }
+    const listed = await settings.handle('routines') as View[]
+
+    expect(listed[0]!.whenLabel).toBe('every 2h, 2 runs')
+    // Nothing next, so a phone reminding on the projected times is not told to remind
+    // for a routine that will never fire again.
+    expect(listed[0]).toMatchObject({ finished: true, nextRunAt: null, nextRuns: [] })
+  })
+
   it('refuses a destination that is not a surface', async () => {
     writeConfig()
     const settings = new WebSettings(build({}), home)

@@ -58,6 +58,20 @@ export interface Routine {
   when: RoutineWhen
   target: RoutineTarget
   /**
+   * How many times the timer may run it before it stops itself. Absent is no ceiling:
+   * it repeats until it is paused or removed. A run made by hand — "Run now", `milo
+   * routines run` — is the person's own look at it, and is not a run this counts.
+   */
+  limit?: number
+  /**
+   * How many times the timer has run it under its ceiling, which is what `limit` counts.
+   * A count with no ceiling counts nothing, so nothing is kept: a routine that repeats
+   * takes no tally, and the ceiling it is given later starts its own at zero. A ceiling
+   * that has run out is a stretch that is over: switching the routine on again starts the
+   * count over rather than leaving it stopped.
+   */
+  runs?: number
+  /**
    * Tools this routine may use with nobody there to confirm. Approved by the
    * person when it was created — the run itself has no one to ask, so what is not
    * here is refused. Read-only tools are never listed: they never ask anyway.
@@ -238,10 +252,50 @@ export function upcomingRuns(when: RoutineWhen, from: Date, count: number): Date
   return times
 }
 
+/**
+ * Whether a routine has run all it was allowed to. The ceiling is the timer's own
+ * count — a run made by hand is not one of them — so nothing here depends on the
+ * clock.
+ */
+export function isSpent(routine: Pick<Routine, 'limit' | 'runs'>): boolean {
+  return routine.limit !== undefined && (routine.runs ?? 0) >= routine.limit
+}
+
+/** How many runs a routine still has in it, or null when it has no ceiling. */
+export function runsLeft(routine: Pick<Routine, 'limit' | 'runs'>): number | null {
+  if (routine.limit === undefined) return null
+  return Math.max(0, routine.limit - (routine.runs ?? 0))
+}
+
+/**
+ * The next `count` times a routine fires, strictly after `from`, within what its
+ * ceiling still allows — nothing at all once it has run out. The one reading of "what
+ * is still coming", so a surface that shows or schedules it never has to keep its own
+ * account of `limit`.
+ */
+export function remainingRuns(
+  routine: Pick<Routine, 'when' | 'limit' | 'runs'>,
+  from: Date,
+  count: number,
+): Date[] {
+  const left = runsLeft(routine)
+  return upcomingRuns(routine.when, from, left === null ? count : Math.min(count, left))
+}
+
 /** `every 2h`, `08:00, mon-fri`, `09:00, day 25 of December` — the time, said plainly. */
 export function describeWhen(when: RoutineWhen): string {
   if (when.kind === 'every') return `every ${describeMinutes(when.minutes)}`
   return `${when.time}, ${describeDayPart(when)}`
+}
+
+/**
+ * The whole schedule as one phrase — the time, and the ceiling that ends it: `every 1m,
+ * 5 runs`. Composed here rather than at each surface, so the CLI, the tool and the
+ * screens cannot describe the same routine differently.
+ */
+export function describeSchedule(routine: Pick<Routine, 'when' | 'limit'>): string {
+  const when = describeWhen(routine.when)
+  return routine.limit === undefined ? when : `${when}, ${routine.limit} run${routine.limit === 1 ? '' : 's'}`
 }
 
 /** The days, dates or months a wall-clock time fires on, as one phrase. */
@@ -308,7 +362,17 @@ function readRoutinesStrict(): Routine[] {
     allow: Array.isArray(routine.allow)
       ? routine.allow.filter((name) => typeof name === 'string')
       : undefined,
+    // Read the way `allow` is above: a count that is not a whole number of runs is no
+    // count, and none is not a reason to drop the routine — only a schedule or a
+    // destination it cannot use is.
+    limit: countOf(routine.limit),
+    runs: countOf(routine.runs),
   }))
+}
+
+/** A whole number of runs, or nothing — what a count field reads as either way. */
+function countOf(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
 }
 
 /**
@@ -432,10 +496,33 @@ export async function updateRoutine(
     if (patch.name !== undefined) target.name = patch.name.trim() || nameFor(patch.prompt ?? target.prompt)
     if (patch.when !== undefined) target.when = patch.when
     if (patch.target !== undefined) target.target = patch.target
+    // A ceiling of none is no ceiling — `0` takes it off, the way an empty `allow` is no
+    // grant — and one that arrives on a routine which has used its own up starts the
+    // count over, so re-capping a finished routine is not a control that does nothing.
+    if (patch.limit !== undefined) {
+      rearmIfSpent(target)
+      target.limit = patch.limit > 0 ? patch.limit : undefined
+      // A count with no ceiling counts nothing: taking one off drops the tally with it,
+      // so a ceiling put on later starts at zero rather than part-used.
+      if (target.limit === undefined) target.runs = undefined
+    }
     if (patch.allow !== undefined) target.allow = patch.allow.length > 0 ? patch.allow : undefined
-    if (patch.enabled !== undefined) target.enabled = patch.enabled
+    if (patch.enabled !== undefined) {
+      if (patch.enabled) rearmIfSpent(target)
+      target.enabled = patch.enabled
+    }
     return { result: target, next: routines }
   })
+}
+
+/**
+ * A ceiling that has run out is a stretch that is over: switching the routine on again,
+ * or giving it a new ceiling, starts the next one — the count goes back to zero. Keeping
+ * the count would leave a finished routine finished the moment it was switched on, which
+ * is a control that does nothing; a routine paused mid-stretch keeps what it has run.
+ */
+function rearmIfSpent(routine: Routine): void {
+  if (isSpent(routine)) routine.runs = undefined
 }
 
 export async function removeRoutine(id: string): Promise<boolean> {
@@ -465,22 +552,39 @@ export async function removeRoutineWithRuns(runtime: AgentRuntime, id: string): 
   return true
 }
 
-export async function setEnabled(id: string, enabled: boolean): Promise<boolean> {
+/**
+ * Switches a routine on or off and answers with what it now is, or nothing when no
+ * routine has that id. Switching on a routine whose own ceiling stopped it starts the
+ * count over — see `rearmIfSpent` — which the caller is expected to say out loud.
+ */
+export async function setEnabled(id: string, enabled: boolean): Promise<Routine | undefined> {
   return changeRoutines((routines) => {
     const target = routines.find((routine) => routine.id === id)
-    if (!target) return { result: false }
+    if (!target) return { result: undefined }
+    if (enabled) rearmIfSpent(target)
     target.enabled = enabled
-    return { result: true, next: routines }
+    return { result: target, next: routines }
   })
 }
 
-/** Writes down that a routine fired, so a restart does not fire the same minute twice. */
+/**
+ * Writes down that a routine fired, so a restart does not fire the same minute twice, and
+ * counts it against its ceiling: a run is what a ceiling is counted in, and the timer is
+ * what makes one. A run asked for by hand is not counted here — it never reaches this —
+ * and neither is a run of a routine that has no ceiling, because nothing is counting.
+ *
+ * The last run it was allowed is also the one that stops it, in the same breath: `enabled`
+ * is what the surfaces and the phone's reminders read, and a routine the timer will never
+ * fire again must not go on looking switched on even for a tick.
+ */
 export async function markRun(id: string, result: 'ok' | 'error', at: number): Promise<void> {
   await changeRoutines((routines) => {
     const target = routines.find((routine) => routine.id === id)
     if (!target) return { result: undefined }
     target.lastRunAt = at
     target.lastResult = result
+    if (target.limit !== undefined) target.runs = (target.runs ?? 0) + 1
+    if (isSpent(target)) target.enabled = false
     return { result: undefined, next: routines }
   })
 }
@@ -570,6 +674,10 @@ const DEFAULT_MAX_WAIT_MS = 60_000
  * A missed occurrence is not made up. A routine the daemon slept through fires at
  * its next time, once, which is what a person means by "every morning" — not a
  * burst of yesterday's mornings the moment it wakes.
+ *
+ * A routine with a ceiling is switched off once it has run that many times, and being
+ * off is the whole of how it says so: its count is in the file, and every surface tells
+ * a routine that ran out from one the person paused.
  */
 export class RoutineScheduler {
   private timer: ReturnType<typeof setTimeout> | undefined
@@ -624,7 +732,9 @@ export class RoutineScheduler {
     const now = this.now()
     let soonest = this.maxWaitMs
     for (const routine of readRoutines()) {
-      if (!routine.enabled) continue
+      // What has run out is never due again — skipped here rather than only in the tick,
+      // because a past time it can never reach would re-arm this loop every second.
+      if (!routine.enabled || isSpent(routine)) continue
       const due = nextRunAt(routine.when, this.cursor(routine, now))
       soonest = Math.min(soonest, due.getTime() - now.getTime())
     }
@@ -643,7 +753,10 @@ export class RoutineScheduler {
   private async tick(): Promise<void> {
     if (this.stopped) return
     const now = this.now()
-    for (const routine of readRoutines()) {
+    // Anything that has run its last run is turned off before the rest is looked at: its
+    // own ceiling is what takes it off the timer, and `enabled` is what every surface —
+    // and the phone's reminders — reads afterwards.
+    for (const routine of await this.settleSpent()) {
       if (!routine.enabled) continue
       const due = nextRunAt(routine.when, this.cursor(routine, now))
       if (due.getTime() > now.getTime()) continue
@@ -662,6 +775,33 @@ export class RoutineScheduler {
       void work.finally(() => this.pending.delete(work))
     }
     this.arm()
+  }
+
+  /**
+   * The list as this tick reads it, with anything that has run out switched off first. A
+   * run writes its own last one off as it happens (`markRun`), so what is left for here is
+   * the case that had no run: the ceiling was lowered by hand, or the daemon came up on a
+   * file whose routine was already spent. Read without the lock and written only when
+   * there is one — the common tick is a plain read, as it always was — and tolerant, so a
+   * file someone left mid-edit is not a rejection out of a tick nobody awaits.
+   */
+  private async settleSpent(): Promise<Routine[]> {
+    const routines = readRoutines()
+    if (!routines.some((routine) => routine.enabled && isSpent(routine))) return routines
+    try {
+      return await changeRoutines((current) => {
+        let spent = false
+        for (const routine of current) {
+          if (!routine.enabled || !isSpent(routine)) continue
+          routine.enabled = false
+          spent = true
+        }
+        return { result: current, next: spent ? current : undefined }
+      })
+    } catch (error) {
+      this.log(`could not stop the routines that ran out: ${errorMessage(error)}`)
+      return routines
+    }
   }
 
   /**
