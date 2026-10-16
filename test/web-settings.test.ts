@@ -443,7 +443,12 @@ describe('web Settings config', () => {
       },
     })
     expect(readConfig()?.search).toEqual({ provider: 'tavily' })
-    expect(readConfig()?.memory).toEqual({ recallLimit: 12, derive: false, embedding: { provider: 'openrouter' } })
+    expect(readConfig()?.memory).toEqual({
+      recallLimit: 12,
+      derive: false,
+      prune: true,
+      embedding: { provider: 'openrouter' },
+    })
 
     await settings.handle('save-config', {
       config: {
@@ -452,7 +457,7 @@ describe('web Settings config', () => {
       },
     })
     expect(readConfig()?.search).toBeUndefined()
-    expect(readConfig()?.memory).toEqual({ derive: false })
+    expect(readConfig()?.memory).toEqual({ derive: false, prune: true })
   })
 
   it('moves the running model on a save', async () => {

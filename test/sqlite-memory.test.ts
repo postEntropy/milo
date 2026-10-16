@@ -292,3 +292,114 @@ describe('SqliteMemory', () => {
     memory.close()
   })
 })
+
+describe('the admission gate', () => {
+  const scope = { gateway: 'cli', conversationId: 'gate' }
+
+  it('refuses a question the model filed as a fact', async () => {
+    const { memory, dir } = open()
+    await memory.remember(scope, [{ text: 'Isso é HDD mecânico ou SSD?' }])
+    expect(sqliteMemoryStatus(sqliteMemoryFile(dir)).facts).toBe(0)
+  })
+
+  it('refuses the assistant talking about itself', async () => {
+    const { memory, dir } = open()
+    await memory.remember(scope, [{ text: 'Manda aí! Tô pronto.' }])
+    expect(sqliteMemoryStatus(sqliteMemoryFile(dir)).facts).toBe(0)
+  })
+
+  it('refuses the NONE sentinel and a leaked placeholder', async () => {
+    const { memory, dir } = open()
+    await memory.remember(scope, [
+      { text: 'podem acumular 60 arquivosNONE' },
+      { text: 'Minhas capturas ficam em /tmp/milo-shots/pc-N.png' },
+    ])
+    expect(sqliteMemoryStatus(sqliteMemoryFile(dir)).facts).toBe(0)
+  })
+
+  it('keeps the real fact in the same batch as the junk', async () => {
+    const { memory } = open()
+    await memory.remember(scope, [
+      { text: 'Quer que eu leia o email?' },
+      { text: 'Meu kernel é linux-omarchy.' },
+    ])
+
+    expect((await memory.list(scope)).map((note) => note.text)).toEqual([
+      'Meu kernel é linux-omarchy.',
+    ])
+  })
+})
+
+describe('folding a fact repeated at two lengths', () => {
+  const scope = { gateway: 'cli', conversationId: 'fold' }
+
+  it('keeps the richer note when the leaner one arrives second', async () => {
+    const { memory } = open()
+    await memory.remember(scope, [{ text: 'Uso Omarchy no Linux.' }])
+    await memory.remember(scope, [{ text: 'Uso Omarchy.' }])
+
+    const notes = await memory.list(scope)
+    expect(notes).toHaveLength(1)
+    expect(notes[0]!.text).toBe('Uso Omarchy no Linux.')
+  })
+
+  it('upgrades the note when the richer telling arrives second', async () => {
+    const { memory } = open()
+    await memory.remember(scope, [{ text: 'Uso Omarchy.' }])
+    await memory.remember(scope, [{ text: 'Uso Omarchy no Linux.' }])
+
+    const notes = await memory.list(scope)
+    expect(notes).toHaveLength(1)
+    expect(notes[0]!.text).toBe('Uso Omarchy no Linux.')
+  })
+
+  it('never folds a correction: a negation is a different fact', async () => {
+    const { memory } = open()
+    await memory.remember(scope, [{ text: 'a senha gira na segunda' }])
+    await memory.remember(scope, [{ text: 'a senha não gira na segunda' }])
+
+    expect(await memory.list(scope)).toHaveLength(2)
+  })
+})
+
+describe('the sweep', () => {
+  // The install scope on purpose: `unify` would move any other scope's rows into
+  // it the moment the store is opened, and this seeds the database before that.
+  const scope = { gateway: 'local', conversationId: 'install' }
+
+  it('drops the junk already stored and folds the duplicates, counting both', async () => {
+    const dir = tempDir()
+    // Opened first, so the schema exists — then seeded straight into the store,
+    // the way the junk got there: the gate and the fold did not exist when these
+    // rows were written.
+    const memory = new SqliteMemory({ dir })
+    const { DatabaseSync } = loadSqlite()
+    const seed = new DatabaseSync(sqliteMemoryFile(dir))
+    seed.exec(`
+      insert into memories (uid, scope, text, tags, created_at, hash) values
+        ('u1', 'local:install', 'Renato prefere bullet points', '["derived"]', 1, 'h1'),
+        ('u2', 'local:install', 'Renato prefere bullet points mesmo', '["derived"]', 2, 'h2'),
+        ('u3', 'local:install', 'Quer que eu leia o email?', '["derived"]', 3, 'h3'),
+        ('u4', 'local:install', 'Manda aí! Tô pronto.', '["derived"]', 4, 'h4'),
+        ('u5', 'local:install', 'podem acumular 60 arquivosNONE', '["derived"]', 5, 'h5');
+    `)
+    seed.close()
+
+    expect(await memory.prune(scope)).toEqual({ dropped: 3, folded: 1 })
+
+    const notes = await memory.list(scope)
+    expect(notes.map((note) => note.text)).toEqual(['Renato prefere bullet points mesmo'])
+    memory.close()
+  })
+
+  it('leaves a store of real facts untouched, however old', async () => {
+    const { memory } = open()
+    await memory.remember(scope, [
+      { text: 'meu editor é o Neovim' },
+      { text: 'o deploy sai na sexta' },
+    ])
+
+    expect(await memory.prune(scope)).toEqual({ dropped: 0, folded: 0 })
+    expect(await memory.list(scope)).toHaveLength(2)
+  })
+})

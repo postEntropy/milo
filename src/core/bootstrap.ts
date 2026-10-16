@@ -7,7 +7,7 @@ import { fileHistory } from './history.js'
 import { googleState } from './google/state.js'
 import { JobManager } from './jobs/index.js'
 import { createMcpServers } from './mcp/servers.js'
-import { createMemory, embeddingKey, installMemory, TurnIndex } from './memory/index.js'
+import { createMemory, embeddingKey, installMemory, INSTALL_SCOPE, TurnIndex } from './memory/index.js'
 import { engineOnDemand } from './memory/provision.js'
 import {
   addRoutine,
@@ -33,7 +33,7 @@ import {
 } from './tools/index.js'
 import { errorMessage } from '../util/errors.js'
 import { ensurePrivateDir } from '../util/fs.js'
-import { logWarn } from '../util/log.js'
+import { logDebug, logWarn } from '../util/log.js'
 
 export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   const auth = readAuth()
@@ -153,6 +153,35 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     remove: (id) => removeRoutineWithRuns(runtime, id),
   }
 
+  // The facts store, built once: handed to the runtime below and swept on the way
+  // in, beside the sessions. The key is only resolved when it is wanted — a key
+  // Milo never needs is a file it does not have to read.
+  const memory = installMemory(
+    createMemory(loaded.config.memory, memoryDir(), {
+      apiKey:
+        loaded.config.memory.embedding?.provider === 'openrouter'
+          ? embeddingKey(loaded.config, auth)
+          : undefined,
+    }),
+    turns,
+  )
+
+  // The sweep that keeps the store honest: a note that is not a fact, and a note
+  // that is the same fact in another wording, go. Not waited for, like the session
+  // prune above — a first turn does not need it, and nothing is dropped for its age.
+  if (loaded.config.memory.prune) {
+    void memory
+      .prune(INSTALL_SCOPE)
+      .then(({ dropped, folded }) => {
+        if (dropped > 0 || folded > 0) {
+          logDebug(`memory: swept ${dropped} note(s) out and folded ${folded} duplicate(s)`)
+        }
+      })
+      .catch((error) => {
+        logWarn(`could not sweep memory: ${errorMessage(error)}`)
+      })
+  }
+
   runtime = new AgentRuntime({
     provider: traced(createProvider(loaded.provider, loaded.model)),
     // One entry, and the model it is on: `auto` picks its wire from the model
@@ -180,17 +209,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     browser,
     jobs,
     keepSnapshots: loaded.config.browser.keepSnapshots,
-    memory: installMemory(
-      createMemory(loaded.config.memory, memoryDir(), {
-        // Only resolved when it is wanted: a key Milo never needs is a file it
-        // does not have to read.
-        apiKey:
-          loaded.config.memory.embedding?.provider === 'openrouter'
-            ? embeddingKey(loaded.config, auth)
-            : undefined,
-      }),
-      turns,
-    ),
+    memory,
     recallLimit: loaded.config.memory.recallLimit,
     derive: loaded.config.memory.derive,
     store,

@@ -21,9 +21,18 @@ const DERIVE_SYSTEM = `You read one exchange and write down what is worth rememb
 
 Answer with one fact per line — no numbering, no preamble. Each line is a short standalone sentence, in the language of the exchange, written the way the person would say it about themselves.
 
-Keep only what lasts beyond this exchange and is about the person or their setup: a preference, a convention, a decision, a name, a path, or a durable fact about how something works.
+Keep only a durable fact about the person or their setup: a preference, a convention, a decision, a name, a path, or how something of theirs works for good. It has to still be true next month, and it has to be about them.
 
-Leave out: anything already in a file or a repository, anything true only of this one question, anything the assistant said about itself, and anything it merely proposed. A measurement, a version or a number read off this run is not a fact — it changes; keep the durable thing it was about, not the reading of the day. If nothing is worth keeping, answer with exactly NONE.`
+Leave out, always:
+- anything the assistant said, offered, asked or proposed — the fact is about the person, never about you;
+- a question of any kind;
+- a want, a plan or a proposal about the work at hand ("I want…", "let's…", "we could…") — it is not a fact yet;
+- trivia with no lasting use ("I have Steam installed", "I use a terminal");
+- a measurement, a version, a count or any number read off this run — it changes; keep the durable thing it was about, never the reading of the day;
+- anything already in a file, a repository or a document;
+- anything true only of this one question.
+
+When in doubt, leave it out — an empty answer beats noise. If nothing is worth keeping, answer with exactly NONE.`
 
 export interface DeriveOptions {
   provider: Provider

@@ -47,6 +47,13 @@ export const MemorySchema = z.object({
    */
   derive: z.boolean().default(true),
   /**
+   * Whether the store is swept on the way in: the notes that are not facts, and
+   * the duplicates among them, are dropped at startup. On by default — the junk
+   * an extraction leaves behind should not have to be pruned by hand. Nothing is
+   * dropped for its age.
+   */
+  prune: z.boolean().default(true),
+  /**
    * Recall by meaning. Absent means words only — the default, because it needs
    * an engine somewhere and nothing else in Milo does. `milo setup` → Memory
    * offers both ways: a model fetched onto this machine, or a keyed one that

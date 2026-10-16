@@ -457,7 +457,7 @@ describe('the runtime', () => {
       provider: 'test',
       model: 'test-model',
       providers: { test: { baseURL: 'http://127.0.0.1:1/v1', wire: 'openai' } },
-      memory: { derive: false },
+      memory: { derive: false, prune: false },
       sessions: { compactAt: 0.7, maxInputTokens: 12000, keepTurns: 8, compaction: true, maxSessions: 50 },
       history: { windowDays: 365 },
       traces: { enabled: true },

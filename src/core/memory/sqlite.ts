@@ -156,6 +156,7 @@ export class SqliteMemory implements Memory {
   private readonly forgetStmt: StatementSync
   private readonly factTextStmt: StatementSync
   private readonly touchStmt: StatementSync
+  private readonly retextStmt: StatementSync
   private readonly vectorStmt: StatementSync
   private readonly setVectorStmt: StatementSync
   private readonly embedder?: Embedder
@@ -212,6 +213,12 @@ export class SqliteMemory implements Memory {
         limit 200`,
     )
     this.touchStmt = this.db.prepare('update memories set created_at = ? where uid = ? and scope = ?')
+    // The same fact said again at more length: the kept row takes the richer
+    // text, and its vector is dropped so the embed pass rebuilds it for the new
+    // words.
+    this.retextStmt = this.db.prepare(
+      'update memories set text = ?, hash = ?, created_at = ?, vector = null where uid = ? and scope = ?',
+    )
     // Every vector of one layer, for the semantic side of a recall. A full scan
     // is the right shape at this size — measured at 2.5 ms over 5,000 notes of
     // 384 dimensions, against the milliseconds a vector index would add to every
@@ -550,6 +557,80 @@ export class SqliteMemory implements Memory {
     return removed
   }
 
+  /**
+   * Sweeps the store: drops every note the admission gate would refuse today, and
+   * folds the notes that are the same fact told at two lengths — the junk and the
+   * duplicates that accumulated before the gate and the fold existed.
+   *
+   * Nothing is dropped for its age: what goes is what is not a fact, or is a fact
+   * already here in another wording. A real note survives this untouched, however
+   * old.
+   */
+  async prune(scope: MemoryScope): Promise<{ dropped: number; folded: number }> {
+    const key = scopeKey(scope)
+    const upgraded: { uid: string; text: string }[] = []
+    let counts = { dropped: 0, folded: 0 }
+
+    try {
+      counts = this.transaction(() => {
+        const rows = this.db
+          .prepare(
+            `select uid, text, created_at as createdAt
+               from memories
+              where scope = ?
+              order by created_at asc, id asc`,
+          )
+          .all(key) as unknown as { uid: string; text: string; createdAt: number }[]
+
+        // What has survived so far, oldest first, so a duplicate folds into the
+        // note that was already there rather than the other way round.
+        const kept: { uid: string; words: Set<string> }[] = []
+        let dropped = 0
+        let folded = 0
+        for (const row of rows) {
+          const words = contentWords(row.text)
+          if (words.size === 0 || !this.keep(row.text)) {
+            this.forgetStmt.run(row.uid, key)
+            dropped += 1
+            continue
+          }
+
+          const match = kept.find((held) => foldOf(held.words, words) !== 'none')
+          if (!match) {
+            kept.push({ uid: row.uid, words })
+            continue
+          }
+
+          // The duplicate goes before the survivor takes anything from it: an
+          // upgrade writes the arriving row's hash, and the two would collide on
+          // the `(scope, hash)` index while both are still there.
+          this.forgetStmt.run(row.uid, key)
+          if (foldOf(match.words, words) === 'upgrade') {
+            // The richer telling wins; the survivor's text is upgraded to it and
+            // it is re-embedded below.
+            this.retextStmt.run(row.text, hashOf(row.text), row.createdAt, match.uid, key)
+            match.words = words
+            upgraded.push({ uid: match.uid, text: row.text })
+          }
+          folded += 1
+        }
+        return { dropped, folded }
+      })
+    } catch (error) {
+      // A sweep that cannot run is a line in the log, never a turn taken down:
+      // nothing here is on the path of a question. The transaction rolled back,
+      // so nothing was dropped or folded whatever the counters had reached.
+      logWarn(`could not prune memory: ${errorMessage(error)}`)
+      return { dropped: 0, folded: 0 }
+    }
+
+    // After the write, never inside it: an embedding is a request, and holding the
+    // transaction open across one would lock the other process out.
+    if (upgraded.length > 0) await this.embedRows(upgraded)
+    if (this.debug) console.error(`[memory] pruned ${key}: -${counts.dropped}, folded ${counts.folded}`)
+    return counts
+  }
+
   /** For tests and shutdown: nothing else needs the handle. */
   close(): void {
     this.db.close()
@@ -572,21 +653,34 @@ export class SqliteMemory implements Memory {
   ): { uid: string; text: string }[] {
     const written: { uid: string; text: string }[] = []
     for (const item of items) {
+      // The one gate: a line that is not a fact about the person never reaches
+      // the store, whoever handed it over.
+      if (!this.keep(item.text)) continue
+
+      const at = item.createdAt ?? Date.now()
       // A durable fact said again in other words is one fact, not two.
-      const kept = this.sameFact(scope, item.text)
-      if (kept) {
-        // Reinforced: it is the same fact, so recency follows the new telling
-        // and the row that stays is the one already held.
-        this.touchStmt.run(item.createdAt ?? Date.now(), kept, scope)
+      const same = this.sameFact(scope, item.text)
+      if (same) {
+        if (same.upgrade) {
+          // The new telling is the richer one: the note is upgraded to it, and
+          // its vector is dropped so the embed pass rebuilds it for the new text.
+          this.retextStmt.run(item.text, hashOf(item.text), at, same.uid, scope)
+          written.push({ uid: same.uid, text: item.text })
+        } else {
+          // Reinforced: it is the same fact, so recency follows the new telling
+          // and the row that stays is the one already held.
+          this.touchStmt.run(at, same.uid, scope)
+        }
         continue
       }
+
       const uid = randomUUID()
       this.insertStmt.run(
         uid,
         scope,
         item.text,
         JSON.stringify(item.tags ?? []),
-        item.createdAt ?? Date.now(),
+        at,
         hashOf(item.text),
       )
       written.push({ uid, text: item.text })
@@ -595,32 +689,53 @@ export class SqliteMemory implements Memory {
   }
 
   /**
-   * The fact already kept that is the same words as this one, if any.
+   * Whether a line is a fact worth admitting at all.
    *
-   * Two notes are the same note when they are built from the same words —
-   * punctuation, word order and filler aside — and only then. A "mostly the
-   * same" score was tried and dropped: it cannot tell a rewording from a
-   * correction, and one word is what separates "… na segunda" from
-   * "… na terça", or a plain fact from the same fact negated. Nor is this
-   * semantic: it cannot tell that "meu editor" and "o que uso para codar" are
-   * about the same thing.
+   * The single admission gate — extracted facts and the `remember` tool alike
+   * pass through here — so no caller can slip in a line that is not a note about
+   * the person: a question the model answered and then filed, a line of the
+   * assistant's own voice, or a `NONE`/placeholder the extraction leaked. Kept
+   * deliberately narrow: it refuses what is obviously not a fact, never a durable
+   * one that merely reads unusually.
    */
-  private sameFact(scope: string, text: string): string | null {
+  private keep(text: string): boolean {
+    const line = text.trim()
+    if (line.length === 0) return false
+    // A question is the model's, not the person's.
+    if (line.endsWith('?')) return false
+    // The `NONE` sentinel, and a lone `N` a prompt placeholder can leave glued to
+    // a word — both artefacts of the extraction, never something a person said.
+    if (NONE_SENTINEL.test(line)) return false
+    if (PLACEHOLDER.test(line)) return false
+    // The assistant's own voice: an offer, an acknowledgement, a plan of its own.
+    if (ASSISTANT_VOICE.test(line)) return false
+    return true
+  }
+
+  /**
+   * The fact already kept that is the same as this one, if any, and whether this
+   * telling is the richer of the two.
+   *
+   * Two notes are the same when they are built from the same words — punctuation,
+   * order and filler aside — or when one's words are contained in the other's and
+   * the difference is no correction. Containment is what folds a fact repeated at
+   * two lengths ("Uso Omarchy." against "Uso Omarchy no Linux."), which equality
+   * alone left as two notes; the guard is what keeps a correction out of it, where
+   * the word gained or lost is the whole point ("… na segunda" against "… na
+   * terça", a plain fact against the same fact negated).
+   *
+   * Not semantic: it cannot tell that "meu editor" and "o que uso para codar" are
+   * about the same thing, and it does not try — that is meaning, not words.
+   */
+  private sameFact(scope: string, text: string): { uid: string; upgrade: boolean } | null {
     const wanted = contentWords(text)
     if (wanted.size === 0) return null
 
     const rows = this.factTextStmt.all(scope) as unknown as { uid: string; text: string }[]
     for (const row of rows) {
-      const kept = contentWords(row.text)
-      if (kept.size !== wanted.size) continue
-      let same = true
-      for (const word of wanted) {
-        if (!kept.has(word)) {
-          same = false
-          break
-        }
-      }
-      if (same) return row.uid
+      const fold = foldOf(contentWords(row.text), wanted)
+      if (fold === 'upgrade') return { uid: row.uid, upgrade: true }
+      if (fold === 'same' || fold === 'keep-existing') return { uid: row.uid, upgrade: false }
     }
     return null
   }
@@ -749,6 +864,79 @@ export function sqliteMemoryStatus(location: string): MemoryStatus {
   } finally {
     db?.close()
   }
+}
+
+/**
+ * The `NONE` sentinel the extraction answers with when it found nothing. A fact a
+ * person said never carries it, so a line that does is the sentinel leaked mid-answer.
+ */
+const NONE_SENTINEL = /NONE/
+
+/** A lone `N` used as a placeholder in a prompt, left glued to a word (`pc-N.png`). */
+const PLACEHOLDER = /(^|[^A-Za-z0-9])N(?=[^A-Za-z0-9]|$)/
+
+/**
+ * Phrases only the assistant says — an offer, an acknowledgement, a plan of its
+ * own. A wordlist, not true detection: it catches the lines a fact extraction
+ * most often leaks, and nothing more.
+ */
+const ASSISTANT_VOICE =
+  /\b(quer que eu|posso (ler|fazer|buscar|ajudar)|deixa eu|manda a[ií]|t[ôo] pronto|estou pronto|preciso de mais contexto|nada salvo ainda|fico no aguardo|me avise|posso ajudar|é só dizer)\b/i
+
+/**
+ * The words whose presence on one side only is a correction, not a retelling. A
+ * fact that gains or loses a negation, or a number, is not the same fact said
+ * twice — it is a different one, often the opposite.
+ */
+const CORRECTING = new Set(['não', 'nao', 'nunca', 'sem', 'never', 'not', 'nenhum', 'nenhuma'])
+
+/** Whether the words one note has and the other does not make it a correction. */
+function isCorrection(difference: Set<string>): boolean {
+  for (const word of difference) {
+    if (CORRECTING.has(word) || /\d/.test(word)) return true
+  }
+  return false
+}
+
+/** Whether every word of `sub` is in `sup`, with `sub` the smaller of the two. */
+function isSubset(sub: Set<string>, sup: Set<string>): boolean {
+  if (sub.size >= sup.size) return false
+  for (const word of sub) if (!sup.has(word)) return false
+  return true
+}
+
+/** The words in `sup` that `sub` does not have — the difference in a containment. */
+function difference(sub: Set<string>, sup: Set<string>): Set<string> {
+  const extra = new Set<string>()
+  for (const word of sup) if (!sub.has(word)) extra.add(word)
+  return extra
+}
+
+function sameWords(a: Set<string>, b: Set<string>): boolean {
+  if (a.size !== b.size) return false
+  for (const word of a) if (!b.has(word)) return false
+  return true
+}
+
+/**
+ * How a note already kept and a note arriving relate: the same words, one
+ * contained in the other when the difference is no correction, or neither.
+ *
+ * `keep-existing` means the arriving note says nothing the kept one does not
+ * already say; `upgrade` means the arriving one is the richer telling.
+ */
+type Fold = 'same' | 'keep-existing' | 'upgrade' | 'none'
+
+function foldOf(kept: Set<string>, wanted: Set<string>): Fold {
+  if (kept.size === 0 || wanted.size === 0) return 'none'
+  if (kept.size === wanted.size) return sameWords(kept, wanted) ? 'same' : 'none'
+  if (isSubset(wanted, kept)) {
+    return isCorrection(difference(wanted, kept)) ? 'none' : 'keep-existing'
+  }
+  if (isSubset(kept, wanted)) {
+    return isCorrection(difference(kept, wanted)) ? 'none' : 'upgrade'
+  }
+  return 'none'
 }
 
 /** Stored vectors are unit length, so closeness is the plain dot product. */

@@ -41,6 +41,12 @@ export interface Memory {
    * unambiguous; false when nothing was removed.
    */
   forget(scope: MemoryScope, id: string): Promise<boolean>
+  /**
+   * Sweeps one scope: drops the notes the admission gate would refuse today, and
+   * folds the notes that are the same fact in another wording. Nothing is dropped
+   * for its age.
+   */
+  prune(scope: MemoryScope): Promise<{ dropped: number; folded: number }>
 }
 
 /**

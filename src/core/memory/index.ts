@@ -142,6 +142,7 @@ export function installMemory(
     },
     list: (_conversation, opts) => memory.list(scope, opts),
     forget: (_conversation, id) => memory.forget(scope, id),
+    prune: () => memory.prune(scope),
   }
 }
 

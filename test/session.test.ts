@@ -358,6 +358,7 @@ describe('Session', () => {
       },
       list: async () => [],
       forget: async () => false,
+      prune: async () => ({ dropped: 0, folded: 0 }),
     }
     const provider = new CapturingProvider()
 

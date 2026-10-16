@@ -113,4 +113,21 @@ describe('deriveFacts', () => {
     await deriveFacts({ provider, model: 'm', messages: turn })
     expect(system).toMatch(/measurement|version|number/i)
   })
+
+  it('tells the extractor to leave the assistant and its questions out', async () => {
+    let system = ''
+    const provider: Provider = {
+      id: 'capture',
+      async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+        system = req.system ?? ''
+        yield { type: 'text', delta: 'NONE' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+
+    await deriveFacts({ provider, model: 'm', messages: turn })
+    expect(system).toMatch(/assistant/i)
+    expect(system).toMatch(/question/i)
+    expect(system).toMatch(/NONE/)
+  })
 })

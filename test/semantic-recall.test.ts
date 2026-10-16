@@ -164,6 +164,7 @@ describe('recall by meaning', () => {
     const memory = createMemory(
       {
         derive: false,
+        prune: false,
         embedding: {
           provider: 'openrouter',
           model: 'liquid/lfm-2.5-embedding-350m:free',
