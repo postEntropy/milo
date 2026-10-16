@@ -7,6 +7,8 @@ coverage
 .DS_Store
 # Local agent state (taste, plans): not part of the project.
 .commandcode/
+# The editor's own state, the same kind of thing: this machine's, not the project's.
+.idea/
 milo-architectural-review.md
 worklog.md
 ios-pending.md
