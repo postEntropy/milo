@@ -518,12 +518,19 @@ export class WebSettings {
       // nested object the client sent only part of keeps the keys it left out
       // instead of resetting them to the schema's defaults on the way through.
       // Arrays replace — a list is a whole value, not a set to be added to.
+      // A `null` clears an optional key (and nullable fields default back to `null`).
       const isPlain = (value: unknown): value is Record<string, unknown> =>
         Boolean(value) && typeof value === 'object' && !Array.isArray(value)
       const merge = (base: unknown, patch: unknown): unknown => {
         if (!isPlain(patch) || !isPlain(base)) return patch
         const out: Record<string, unknown> = { ...base }
-        for (const [key, value] of Object.entries(patch)) out[key] = merge(out[key], value)
+        for (const [key, value] of Object.entries(patch)) {
+          if (value === null) {
+            delete out[key]
+            continue
+          }
+          out[key] = merge(out[key], value)
+        }
         return out
       }
       const merged = merge(current, patchConfig) as Record<string, unknown>

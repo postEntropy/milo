@@ -432,6 +432,29 @@ describe('web Settings config', () => {
     })
   })
 
+  it('clears an optional key when a patch sends null for it', async () => {
+    writeConfig()
+    const settings = new WebSettings(build({}), home)
+
+    await settings.handle('save-config', {
+      config: {
+        search: { provider: 'tavily' },
+        memory: { recallLimit: 12, derive: false, embedding: { provider: 'openrouter' } },
+      },
+    })
+    expect(readConfig()?.search).toEqual({ provider: 'tavily' })
+    expect(readConfig()?.memory).toEqual({ recallLimit: 12, derive: false, embedding: { provider: 'openrouter' } })
+
+    await settings.handle('save-config', {
+      config: {
+        search: null,
+        memory: { recallLimit: null, embedding: null },
+      },
+    })
+    expect(readConfig()?.search).toBeUndefined()
+    expect(readConfig()?.memory).toEqual({ derive: false })
+  })
+
   it('moves the running model on a save', async () => {
     writeConfig()
     const runtime = build({})
