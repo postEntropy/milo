@@ -802,12 +802,44 @@ final class AppModel {
     private(set) var permissionMode = "ask"
     private(set) var toolDisplay = "full"
     private(set) var showThinking = true
+    private(set) var genui = true
+
+    // Memory
+    private(set) var memoryRecallLimit: Int?
+    private(set) var memoryDerive = true
+    private(set) var memoryEmbedding: SettingsOverview.Embedding?
+    private(set) var memoryStats: MemoryStats?
+    private(set) var memoryNotes: [MemoryNote]?
+
+    // Tools
+    private(set) var searchProvider = "off"
+    private(set) var googleEnabled = false
+    private(set) var googleReport: GoogleReport?
+    private(set) var browserEnabled = false
+    private(set) var browserHeadless = false
+    private(set) var browserChromePath: String?
+    private(set) var browserProfileDir: String?
+    private(set) var browserCdpUrl: String?
+    private(set) var browserKeepSnapshots = 3
+    private(set) var detectedBrowsers: [DetectedBrowser]?
+    private(set) var detectedProfiles: [DetectedProfile]?
+    private(set) var mcpReport: McpReport?
+
+    // Skills
+    private(set) var installedSkills: [InstalledSkill] = []
+    private(set) var popularSkills: [PopularSkill] = []
+    private(set) var popularSkillsLoading = false
+    private(set) var skillChoices: [String]?
+
+    // Long-running setup job (embeddings, browser download, profile copy, MCP check)
+    private(set) var setupJob: SetupJobStatus?
 
     // What the daemon said it accepts. Without it the control offers only what is
     // running — never a set this app made up.
     private(set) var permissionModes: [String] = []
     private(set) var toolLevels: [String] = []
     private(set) var efforts: [String] = []
+    private(set) var searchProviders: [String] = []
 
     /// Reads the whole screen in one call. What the runtime is running wins over
     /// what the file says: a chat command moves the running one first.
@@ -825,9 +857,31 @@ final class AppModel {
             permissionMode = overview.live?.permissionMode ?? overview.config?.permissions?.mode ?? "ask"
             toolDisplay = overview.config?.display?.tools ?? "full"
             showThinking = (overview.config?.display?.thinking ?? "on") == "on"
+            genui = overview.config?.display?.genui ?? true
+
+            memoryRecallLimit = overview.config?.memory?.recallLimit
+            memoryDerive = overview.config?.memory?.derive ?? true
+            memoryEmbedding = overview.config?.memory?.embedding
+            memoryStats = overview.memoryStats
+
+            searchProvider = overview.config?.search?.provider ?? "off"
+            googleEnabled = overview.config?.google?.enabled ?? false
+            googleReport = overview.google
+
+            browserEnabled = overview.config?.browser?.enabled ?? false
+            browserHeadless = overview.config?.browser?.headless ?? false
+            browserChromePath = overview.config?.browser?.chromePath
+            browserProfileDir = overview.config?.browser?.profileDir
+            browserCdpUrl = overview.config?.browser?.cdpUrl
+            browserKeepSnapshots = overview.config?.browser?.keepSnapshots ?? 3
+            mcpReport = overview.mcp
+
+            installedSkills = overview.skills ?? []
+
             permissionModes = overview.options?.permissionModes ?? [permissionMode]
             toolLevels = overview.options?.toolLevels ?? [toolDisplay]
             efforts = overview.options?.efforts ?? [effort]
+            searchProviders = overview.options?.searchProviders ?? [searchProvider]
         } catch {
             settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
@@ -854,6 +908,215 @@ final class AppModel {
         guard await write({ try await MiloApi.saveConfig($0, ["display": ["thinking": thinking]]) })
         else { return }
         showThinking = value
+    }
+
+    func setGenui(_ value: Bool) async {
+        guard await write({ try await MiloApi.saveConfig($0, ["display": ["genui": value]]) })
+        else { return }
+        genui = value
+    }
+
+    func setMemoryRecallLimit(_ value: Int?) async {
+        let payload: Any = value ?? NSNull()
+        guard await write({ try await MiloApi.saveConfig($0, ["memory": ["recallLimit": payload]]) })
+        else { return }
+        memoryRecallLimit = value
+    }
+
+    func setMemoryDerive(_ value: Bool) async {
+        guard await write({ try await MiloApi.saveConfig($0, ["memory": ["derive": value]]) })
+        else { return }
+        memoryDerive = value
+    }
+
+    func setMemoryEmbeddingOpenRouter() async {
+        guard await write({ try await MiloApi.saveConfig($0, ["memory": ["embedding": ["provider": "openrouter"]]]) })
+        else { return }
+        memoryEmbedding = SettingsOverview.Embedding(provider: "openrouter", model: nil, url: nil)
+    }
+
+    func clearMemoryEmbedding() async {
+        guard await write({ try await MiloApi.saveConfig($0, ["memory": ["embedding": NSNull()]]) })
+        else { return }
+        memoryEmbedding = nil
+    }
+
+    func loadMemoryNotes() async {
+        guard let account else { return }
+        do {
+            memoryNotes = try await MiloApi.memoryNotes(account)
+        } catch {
+            settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func forgetMemoryNote(_ id: String) async {
+        guard await write({ try await MiloApi.forgetNote($0, id: id) }) else { return }
+        memoryNotes?.removeAll { $0.id == id }
+        await loadSettings()
+    }
+
+    func setSearchProvider(_ value: String) async {
+        let payload: Any = value == "off" ? NSNull() : ["provider": value]
+        guard await write({ try await MiloApi.saveConfig($0, ["search": payload]) })
+        else { return }
+        searchProvider = value
+    }
+
+    func setGoogleEnabled(_ value: Bool) async {
+        guard await write({ try await MiloApi.saveConfig($0, ["google": ["enabled": value]]) })
+        else { return }
+        googleEnabled = value
+    }
+
+    func setBrowserEnabled(_ value: Bool) async {
+        guard await write({ try await MiloApi.saveConfig($0, ["browser": ["enabled": value]]) })
+        else { return }
+        browserEnabled = value
+    }
+
+    func setBrowserHeadless(_ value: Bool) async {
+        guard await write({ try await MiloApi.saveConfig($0, ["browser": ["headless": value]]) })
+        else { return }
+        browserHeadless = value
+    }
+
+    func setBrowserChromePath(_ value: String?) async {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let next: String? = trimmed.isEmpty ? nil : trimmed
+        let payload: Any = next ?? NSNull()
+        guard await write({ try await MiloApi.saveConfig($0, ["browser": ["chromePath": payload]]) })
+        else { return }
+        browserChromePath = next
+    }
+
+    func setBrowserProfileDir(_ value: String?) async {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let next: String? = trimmed.isEmpty ? nil : trimmed
+        let payload: Any = next ?? NSNull()
+        guard await write({ try await MiloApi.saveConfig($0, ["browser": ["profileDir": payload]]) })
+        else { return }
+        browserProfileDir = next
+    }
+
+    func setBrowserCdpUrl(_ value: String?) async {
+        let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let next: String? = trimmed.isEmpty ? nil : trimmed
+        let payload: Any = next ?? NSNull()
+        guard await write({ try await MiloApi.saveConfig($0, ["browser": ["cdpUrl": payload]]) })
+        else { return }
+        browserCdpUrl = next
+    }
+
+    func setBrowserKeepSnapshots(_ value: Int) async {
+        let clamped = max(0, value)
+        guard await write({ try await MiloApi.saveConfig($0, ["browser": ["keepSnapshots": clamped]]) })
+        else { return }
+        browserKeepSnapshots = clamped
+    }
+
+    func findBrowsers() async {
+        guard let account else { return }
+        settingsError = nil
+        do {
+            detectedBrowsers = try await MiloApi.browsers(account)
+        } catch {
+            settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func findProfiles() async {
+        guard let account else { return }
+        settingsError = nil
+        do {
+            detectedProfiles = try await MiloApi.profiles(account)
+        } catch {
+            settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func reloadMcp() async {
+        guard let account else { return }
+        settingsError = nil
+        do {
+            mcpReport = try await MiloApi.mcpReload(account)
+        } catch {
+            settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func toggleMcpServer(_ name: String, enabled: Bool) async {
+        guard let account else { return }
+        settingsError = nil
+        do {
+            mcpReport = try await MiloApi.mcpToggle(account, name: name, enabled: enabled)
+        } catch {
+            settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func loadPopularSkills() async {
+        guard let account, popularSkills.isEmpty, !popularSkillsLoading else { return }
+        popularSkillsLoading = true
+        defer { popularSkillsLoading = false }
+        if let list = try? await MiloApi.popularSkills(account) {
+            popularSkills = list
+        }
+    }
+
+    func clearSkillChoices() {
+        skillChoices = nil
+    }
+
+    func installSkill(source: String, skill: String? = nil) async -> Bool {
+        guard let account else { return false }
+        let trimmed = source.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        settingsError = nil
+        do {
+            let outcome = try await MiloApi.installSkill(account, source: trimmed, skill: skill)
+            if let choices = outcome.needChoice, !choices.isEmpty {
+                skillChoices = choices
+                return false
+            }
+            skillChoices = nil
+            await loadSettings()
+            return true
+        } catch {
+            settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return false
+        }
+    }
+
+    func removeSkill(_ name: String) async {
+        guard await write({ try await MiloApi.removeSkill($0, name: name) }) else { return }
+        installedSkills.removeAll { $0.name == name }
+        await loadSettings()
+    }
+
+    func dismissSetupJob() {
+        setupJob = nil
+    }
+
+    func runSetupJob(kind: String, extra: [String: String] = [:]) async {
+        guard let account else { return }
+        settingsError = nil
+        do {
+            let jobId = try await MiloApi.startJob(account, kind: kind, extra: extra)
+            while !Task.isCancelled {
+                let status = try await MiloApi.jobStatus(account, id: jobId)
+                setupJob = status
+                if status.status != "running" {
+                    if status.status == "done" {
+                        await loadSettings()
+                    }
+                    break
+                }
+                try? await Task.sleep(for: .milliseconds(450))
+            }
+        } catch {
+            settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 
     /**

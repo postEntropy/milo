@@ -238,22 +238,108 @@ enum MiloApi {
     static func routineFeed(_ account: Account) async throws -> [RoutineFeedEntry] {
         try await call("routine-feed", account: account, as: [RoutineFeedEntry].self)
     }
+
+    // MARK: - Memory, Tools & Skills
+
+    static func memoryNotes(_ account: Account) async throws -> [MemoryNote] {
+        struct Page: Decodable { let notes: [MemoryNote]? }
+        return try await call("memory-notes", account: account, as: Page.self).notes ?? []
+    }
+
+    static func forgetNote(_ account: Account, id: String) async throws {
+        _ = try await call("forget-note", ["id": id], account: account, as: Ack.self)
+    }
+
+    static func mcpReload(_ account: Account) async throws -> McpReport {
+        try await call("mcp-reload", account: account, as: McpReport.self)
+    }
+
+    static func mcpToggle(_ account: Account, name: String, enabled: Bool) async throws -> McpReport {
+        try await call("mcp-toggle", ["name": name, "enabled": enabled], account: account, as: McpReport.self)
+    }
+
+    static func browsers(_ account: Account) async throws -> [DetectedBrowser] {
+        try await call("browsers", account: account, as: [DetectedBrowser].self)
+    }
+
+    static func profiles(_ account: Account) async throws -> [DetectedProfile] {
+        try await call("profiles", account: account, as: [DetectedProfile].self)
+    }
+
+    static func popularSkills(_ account: Account) async throws -> [PopularSkill] {
+        try await call("popular-skills", account: account, as: [PopularSkill].self)
+    }
+
+    static func installSkill(_ account: Account, source: String, skill: String? = nil) async throws -> SkillInstallOutcome {
+        var body: [String: Any] = ["source": source]
+        if let skill { body["skill"] = skill }
+        return try await call("install-skill", body, account: account, as: SkillInstallOutcome.self)
+    }
+
+    static func removeSkill(_ account: Account, name: String) async throws {
+        _ = try await call("remove-skill", ["name": name], account: account, as: Ack.self)
+    }
+
+    static func startJob(_ account: Account, kind: String, extra: [String: String] = [:]) async throws -> String {
+        struct Started: Decodable { let jobId: String }
+        var body: [String: Any] = extra
+        body["kind"] = kind
+        return try await call("job-start", body, account: account, as: Started.self).jobId
+    }
+
+    static func jobStatus(_ account: Account, id: String) async throws -> SetupJobStatus {
+        try await call("job-status", ["id": id], account: account, as: SetupJobStatus.self)
+    }
 }
 
 struct SettingsOverview: Decodable {
     struct Display: Decodable {
         let tools: String?
         let thinking: String?
+        let genui: Bool?
     }
 
     struct Permissions: Decodable {
         let mode: String?
     }
 
+    struct Embedding: Decodable, Equatable {
+        let provider: String?
+        let model: String?
+        let url: String?
+    }
+
+    struct Memory: Decodable {
+        let recallLimit: Int?
+        let derive: Bool?
+        let embedding: Embedding?
+    }
+
+    struct Search: Decodable {
+        let provider: String?
+    }
+
+    struct GoogleConfig: Decodable {
+        let enabled: Bool?
+    }
+
+    struct Browser: Decodable, Equatable {
+        let enabled: Bool?
+        let headless: Bool?
+        let chromePath: String?
+        let profileDir: String?
+        let cdpUrl: String?
+        let keepSnapshots: Int?
+    }
+
     struct Config: Decodable {
         let reasoningEffort: String?
         let display: Display?
         let permissions: Permissions?
+        let memory: Memory?
+        let search: Search?
+        let google: GoogleConfig?
+        let browser: Browser?
     }
 
     /// What the runtime holds now. Set when a chat command or another surface
@@ -266,6 +352,10 @@ struct SettingsOverview: Decodable {
 
     let config: Config?
     let live: Live?
+    let skills: [InstalledSkill]?
+    let memoryStats: MemoryStats?
+    let mcp: McpReport?
+    let google: GoogleReport?
     /**
      The values a settings screen may offer, sent by the daemon so a client draws
      what the server accepts. Absent from an older daemon: the screen then offers
@@ -277,6 +367,167 @@ struct SettingsOverview: Decodable {
         let permissionModes: [String]?
         let toolLevels: [String]?
         let efforts: [String]?
+        let searchProviders: [String]?
+    }
+}
+
+struct MemoryStats: Decodable, Equatable {
+    let facts: Int
+    let bytes: Int
+    let location: String
+}
+
+struct MemoryNote: Decodable, Identifiable, Equatable {
+    let id: String
+    let text: String
+    let createdAt: Double
+}
+
+struct InstalledSkill: Decodable, Identifiable, Equatable {
+    var id: String { name }
+    let name: String
+    let description: String
+    let origin: String?
+}
+
+struct PopularSkill: Decodable, Identifiable, Equatable {
+    var id: String { "\(repo)/\(name)" }
+    let name: String
+    let repo: String
+    let installs: Int?
+    let description: String?
+}
+
+struct SkillInstallOutcome: Decodable {
+    let installed: String?
+    let count: Int?
+    let needChoice: [String]?
+}
+
+struct McpServer: Decodable, Identifiable, Equatable {
+    var id: String { name }
+    let name: String
+    let command: String
+    let enabled: Bool
+    let state: String
+    let tools: Int
+    let readOnly: [String]
+    let listingAt: Double?
+    let era: String?
+    let error: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case name, command, enabled, state, tools, readOnly, listingAt, era, error
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        name = try container.decode(String.self, forKey: .name)
+        command = try container.decodeIfPresent(String.self, forKey: .command) ?? ""
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
+        state = try container.decodeIfPresent(String.self, forKey: .state) ?? "idle"
+        tools = try container.decodeIfPresent(Int.self, forKey: .tools) ?? 0
+        readOnly = try container.decodeIfPresent([String].self, forKey: .readOnly) ?? []
+        listingAt = try container.decodeIfPresent(Double.self, forKey: .listingAt)
+        era = try container.decodeIfPresent(String.self, forKey: .era)
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+    }
+}
+
+struct McpReport: Decodable, Equatable {
+    let file: String
+    let error: String?
+    let servers: [McpServer]
+
+    private enum CodingKeys: String, CodingKey { case file, error, servers }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        file = try container.decodeIfPresent(String.self, forKey: .file) ?? ""
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        servers = try container.decodeIfPresent([McpServer].self, forKey: .servers) ?? []
+    }
+}
+
+struct GoogleTier: Decodable, Identifiable, Equatable {
+    let id: String
+    let label: String
+    let description: String
+}
+
+struct GoogleReport: Decodable, Equatable {
+    let kind: String
+    let email: String?
+    let connectedAt: String?
+    let enabled: Bool?
+    let access: String?
+    let tools: [String]
+    let writeTools: [String]
+    let tiers: [GoogleTier]
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, email, connectedAt, enabled, access, tools, writeTools, tiers
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "off"
+        email = try container.decodeIfPresent(String.self, forKey: .email)
+        connectedAt = try container.decodeIfPresent(String.self, forKey: .connectedAt)
+        enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled)
+        access = try container.decodeIfPresent(String.self, forKey: .access)
+        tools = try container.decodeIfPresent([String].self, forKey: .tools) ?? []
+        writeTools = try container.decodeIfPresent([String].self, forKey: .writeTools) ?? []
+        tiers = try container.decodeIfPresent([GoogleTier].self, forKey: .tiers) ?? []
+    }
+
+    var tier: GoogleTier? {
+        guard let access else { return nil }
+        return tiers.first { $0.id == access }
+    }
+}
+
+struct DetectedBrowser: Decodable, Identifiable, Equatable {
+    var id: String { path }
+    let browserId: String
+    let name: String
+    let path: String
+    let version: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case browserId = "id"
+        case name, path, version
+    }
+}
+
+struct DetectedProfile: Decodable, Identifiable, Equatable {
+    var id: String { profileDir }
+    let browserId: String
+    let browserName: String
+    let profileDir: String
+
+    private enum CodingKeys: String, CodingKey {
+        case browserId = "id"
+        case browserName, profileDir
+    }
+}
+
+struct SetupJobStatus: Decodable, Equatable {
+    let id: String
+    let kind: String
+    let status: String
+    let lines: [String]
+    let error: String?
+
+    private enum CodingKeys: String, CodingKey { case id, kind, status, lines, error }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? ""
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? "running"
+        lines = try container.decodeIfPresent([String].self, forKey: .lines) ?? []
+        error = try container.decodeIfPresent(String.self, forKey: .error)
     }
 }
 
