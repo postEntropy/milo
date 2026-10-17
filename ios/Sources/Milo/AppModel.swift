@@ -1013,7 +1013,7 @@ final class AppModel {
     private(set) var effort = "medium"
     private(set) var permissionMode = "ask"
     private(set) var toolDisplay = "full"
-    private(set) var showThinking = true
+    private(set) var thinking = "expanded"
     private(set) var genui = true
 
     // Memory
@@ -1050,6 +1050,7 @@ final class AppModel {
     // running — never a set this app made up.
     private(set) var permissionModes: [String] = []
     private(set) var toolLevels: [String] = []
+    private(set) var thinkingLevels: [String] = []
     private(set) var efforts: [String] = []
     private(set) var searchProviders: [String] = []
 
@@ -1068,7 +1069,7 @@ final class AppModel {
             effort = overview.live?.effort ?? overview.config?.reasoningEffort ?? "medium"
             permissionMode = overview.live?.permissionMode ?? overview.config?.permissions?.mode ?? "ask"
             toolDisplay = overview.config?.display?.tools ?? "full"
-            showThinking = (overview.config?.display?.thinking ?? "on") == "on"
+            thinking = overview.config?.display?.thinking ?? "expanded"
             genui = overview.config?.display?.genui ?? true
 
             memoryRecallLimit = overview.config?.memory?.recallLimit
@@ -1092,6 +1093,7 @@ final class AppModel {
 
             permissionModes = overview.options?.permissionModes ?? [permissionMode]
             toolLevels = overview.options?.toolLevels ?? [toolDisplay]
+            thinkingLevels = overview.options?.thinkingLevels ?? [thinking]
             efforts = overview.options?.efforts ?? [effort]
             searchProviders = overview.options?.searchProviders ?? [searchProvider]
         } catch {
@@ -1115,11 +1117,10 @@ final class AppModel {
         toolDisplay = value
     }
 
-    func setShowThinking(_ value: Bool) async {
-        let thinking = value ? "on" : "off"
-        guard await write({ try await MiloApi.saveConfig($0, ["display": ["thinking": thinking]]) })
+    func setThinking(_ value: String) async {
+        guard await write({ try await MiloApi.saveConfig($0, ["display": ["thinking": value]]) })
         else { return }
-        showThinking = value
+        thinking = value
     }
 
     func setGenui(_ value: Bool) async {
@@ -1422,7 +1423,9 @@ final class AppModel {
                         parts: $0.parts,
                         attachments: $0.attachments ?? [],
                         streaming: false,
-                        thought: nil,
+                        // The turn's own wait, read back with the words: a session opened
+                        // later says how long it thought, the same line a live one drew.
+                        thought: $0.thoughtMs.map { $0 / 1000 },
                         raw: $0.raw,
                         rawNoOutput: $0.rawNoOutput
                     )
@@ -1496,7 +1499,6 @@ final class AppModel {
             if let index = messages.lastIndex(where: { $0.streaming }) {
                 messages[index].streaming = false
                 messages[index].waiting = false
-                messages[index].thought = turnStarted.map { Date().timeIntervalSince($0) }
                 // A call left marked running never heard back from; the line stops
                 // saying it is underway rather than guessing how it went.
                 messages[index].parts = AppModel.settled(messages[index].parts)
@@ -1580,6 +1582,13 @@ final class AppModel {
         guard !began else { return }
         began = true
         answerBegan += 1
+        // How long the turn waited to say anything, written the moment it does: it is
+        // what the line over its thought reports, and it is the same wait a session read
+        // back carries — the whole turn's own length is a different, longer number.
+        if let waited = turnStarted.map({ Date().timeIntervalSince($0) }),
+           let index = messages.lastIndex(where: { $0.streaming }) {
+            messages[index].thought = waited
+        }
     }
 
     private func apply(_ event: AgentEvent) {

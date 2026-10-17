@@ -1,7 +1,7 @@
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { AgentEvent } from '../src/core/agent/events.js'
 import { SqliteMemory } from '../src/core/memory/sqlite.js'
@@ -564,6 +564,65 @@ describe('a session another writer has moved on from', () => {
       { role: 'user', content: [{ type: 'text', text: 'hello there' }], at: expect.any(Number) },
       { role: 'assistant', content: [{ type: 'text', text: 'SECRET_ASSISTANT_REPLY' }], at: expect.any(Number) },
     ])
+  })
+})
+
+/** A provider that takes its time before saying anything: what a wait is measured from. */
+class SlowProvider implements Provider {
+  readonly id = 'slow'
+  constructor(private readonly waitMs: number) {}
+
+  async *stream(): AsyncGenerator<StreamEvent> {
+    await new Promise((resolve) => setTimeout(resolve, this.waitMs))
+    yield { type: 'text', delta: 'took a while' }
+    yield { type: 'done', finishReason: 'stop' }
+  }
+}
+
+describe('how long a turn took to say anything', () => {
+  it('writes the wait on the turn, so a session read back says it too', async () => {
+    vi.useFakeTimers()
+    try {
+      const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
+      const store = new MemorySessionStore()
+      const record = await store.create()
+      const scope: MemoryScope = { gateway: 'cli', conversationId: 't' }
+      const session = new Session({
+        model: 'test-model',
+        system: 'BASE',
+        registry: createToolRegistry(),
+        memory: new SqliteMemory({ dir }),
+        store,
+        scope,
+        record,
+        cwd: process.cwd(),
+        provider: new SlowProvider(1500),
+        maxSteps: 4,
+      })
+
+      const driving = (async () => {
+        for await (const _event of session.send('demora?')) {
+          // drain
+        }
+      })()
+      await vi.advanceTimersByTimeAsync(1500)
+      await driving
+
+      const messages = (await store.load(record.id))!.messages
+      // The question carries no wait; the turn's own answer carries it, and it is the
+      // number the live surfaces draw — the reload says the same thing.
+      expect(messages[0]?.thoughtMs).toBeUndefined()
+      expect(messages[1]?.thoughtMs).toBe(1500)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('leaves nothing behind when the turn answered at once', async () => {
+    const { store, record } = await run('oi')
+
+    // Under a second there is nothing worth saying, live or on a reload.
+    expect((await store.load(record.id))!.messages[1]?.thoughtMs).toBeUndefined()
   })
 })
 

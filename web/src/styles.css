@@ -456,13 +456,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .reasoning.open .reasoning-collapse { grid-template-rows: 1fr; }
 .reasoning-clip { overflow: hidden; }
 .reasoning-body { padding: var(--space-1) var(--space-7) var(--space-6); color: var(--muted); font-family: var(--font-display); font-size: var(--text-md); font-style: italic; line-height: 1.6; white-space: pre-wrap; }
-.reasoning-note { display: flex; align-items: center; gap: var(--space-4); color: var(--muted); font-size: var(--text-xs); }
-/* The thought line when reasoning is hidden is a control: hovering it offers the
-   way to read what was thought, which is otherwise kept out of the thread. */
-.reasoning-reveal { border: 0; background: transparent; padding: 0; color: var(--muted); font-family: inherit; font-size: var(--text-xs); cursor: pointer; transition: color var(--motion-fast); }
-.reasoning-reveal:hover { color: var(--fg-2); }
-.reasoning-reveal-hint { color: var(--accent); opacity: 0; transition: opacity var(--motion-fast); }
-.reasoning-reveal:hover .reasoning-reveal-hint { opacity: 1; }
 /* The wait for the model's next output, before there is anything of its own to
    show: the glyph the terminal uses, steady, and the glare travelling along the word,
    so the row says it is working without anything blinking and without wearing the

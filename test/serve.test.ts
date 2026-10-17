@@ -57,7 +57,7 @@ const configWith = (
     provider: 'test',
     model: 'test-model',
     providers: { test: { baseURL: 'https://x.test/v1', wire: 'openai' } },
-    display: { tools: 'full', thinking: 'on' },
+    display: { tools: 'full', thinking: 'expanded' },
     gateways,
     permissions: { mode: 'ask', allow: [], deny: [], jevThreshold: 0.35, jevTimeoutMs: 1500 },
     classifier: { backend: 'commandcode' },

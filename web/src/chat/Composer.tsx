@@ -87,7 +87,7 @@ const COMMANDS: Array<{ name: string; hint: string }> = [
   { name: 'mode', hint: 'permission mode: ask | auto | yolo' },
   { name: 'yolo', hint: 'toggle yolo mode' },
   { name: 'tools', hint: 'how much of a tool call to show: full | name | off' },
-  { name: 'thinking', hint: "show the model's reasoning: on | off" },
+  { name: 'thinking', hint: "draw the model's reasoning: expanded | collapsed" },
   { name: 'effort', hint: 'how hard the model thinks: low | medium | high' },
   { name: 'new', hint: 'start a new session' },
   { name: 'sessions', hint: 'the saved sessions' },

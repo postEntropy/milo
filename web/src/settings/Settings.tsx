@@ -12,7 +12,7 @@ import { usePhone } from '../lib/phone.js'
 import { settingsSections } from './sections.js'
 import { MobileModelSheet } from './MobileModelPicker.js'
 import { DisplayPreview } from './DisplayPreview.js'
-import { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from '@protocol'
+import { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS, type ThinkingDisplay } from '@protocol'
 import { GOOGLE_SHORTCUT, GOOGLE_STEPS } from '../../../src/core/google/walkthrough.ts'
 
 type ProviderPreset = { id: string; name: string; baseURL: string; wire: string; keyless?: boolean; models: string[]; keyURL?: string }
@@ -22,7 +22,7 @@ type SettingsConfig = {
   providers: Record<string, { name?: string; baseURL: string; wire?: string; keyless?: boolean; keyEnv?: string; headers?: Record<string, string> }>
   memory: { keepSaid?: number; recallLimit?: number; derive?: boolean; embedding?: { provider: 'ollama' | 'openrouter'; model?: string; url?: string } }
   sessions: { compactAt: number; contextWindow?: number; maxInputTokens: number; keepTurns: number; compaction: boolean; maxSessions: number; generateTitles: boolean; titleModel?: string }
-  display: { tools: 'full' | 'name' | 'off'; thinking: 'on' | 'off'; genui?: boolean }
+  display: { tools: 'full' | 'name' | 'off'; thinking: ThinkingDisplay; genui?: boolean }
   gateways: Record<string, { enabled: boolean; allowlist: string[] }>
   web: { enabled: boolean; host: string; port: number }
   google: { enabled: boolean }
@@ -134,7 +134,7 @@ function describeMcpServer(server: McpServer): string {
 
 /** The display levels as a person reads them; the stored value stays the short form. */
 const TOOL_DETAIL_LABELS: Record<(typeof TOOL_LEVELS)[number], string> = { full: 'Full detail', name: 'Name only', off: 'Hidden' }
-const REASONING_LABELS: Record<(typeof THINKING_LEVELS)[number], string> = { on: 'Shown', off: 'Hidden' }
+const REASONING_LABELS: Record<(typeof THINKING_LEVELS)[number], string> = { expanded: 'Expanded', collapsed: 'Collapsed' }
 
 export function Settings({ section, onSection, conversationId, sessionId, onClose, onSessionChange, theme, onThemeChange, onDirtyChange }: {
   /** The open section; null is the index of them, which a phone shows and a wide screen replaces with the first. */

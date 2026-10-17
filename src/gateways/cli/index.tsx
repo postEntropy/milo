@@ -262,7 +262,7 @@ export function Shell({
       }
     : undefined
 
-  const leftText = `MILO${mode !== 'ask' ? ` · ${PERMISSION_LABELS[mode]}` : ''}${display.tools !== 'full' ? ` · tools ${display.tools}` : ''}${display.thinking === 'off' ? ' · thinking hidden' : ''}`
+  const leftText = `MILO${mode !== 'ask' ? ` · ${PERMISSION_LABELS[mode]}` : ''}${display.tools !== 'full' ? ` · tools ${display.tools}` : ''}${display.thinking === 'collapsed' ? ' · thinking collapsed' : ''}`
   const headerRight = fitHeaderRight(
     loaded
       ? [
@@ -283,7 +283,7 @@ export function Shell({
             <Text bold color={accent}>MILO</Text>
             {mode !== 'ask' && <Text bold color={mode === 'yolo' ? theme.danger : theme.warning}> · {mode}</Text>}
             {display.tools !== 'full' && <Text color={theme.secondary}> · tools {display.tools}</Text>}
-            {display.thinking === 'off' && <Text color={theme.secondary}> · thinking hidden</Text>}
+            {display.thinking === 'collapsed' && <Text color={theme.secondary}> · thinking collapsed</Text>}
           </Box>
           <Text color={theme.secondary}>{headerRight}</Text>
         </Box>

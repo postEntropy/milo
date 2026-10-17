@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
-import type { PermissionRequest, SendTarget, TranscriptMessage } from '@protocol'
+import type { PermissionRequest, SendTarget, ThinkingDisplay, TranscriptMessage } from '@protocol'
 import { api } from '../lib/api.js'
 import type { ConnectionState } from '../lib/connection.js'
 import { formatIn, formatWhen, message } from '../lib/format.js'
@@ -62,7 +62,7 @@ type FeedEntry = { id: string; runId: string; routine: string; at: number; answe
  */
 export interface RoutinesChat {
   messages: ChatMessage[]
-  thinking: boolean
+  thinking: ThinkingDisplay
   busy: boolean
   connection: ConnectionState
   /** Bumped when a turn ends, so the list is re-read from disk. */

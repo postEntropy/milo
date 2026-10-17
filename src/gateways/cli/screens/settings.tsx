@@ -822,7 +822,7 @@ export function SettingsScreen({
     },
     {
       label: 'Thinking display',
-      hint: `${config.display.thinking} (on/off)`,
+      hint: `${config.display.thinking} (expanded → collapsed)`,
       hintColor: theme.accent,
     },
     {
@@ -1352,7 +1352,7 @@ export function SettingsScreen({
             const next = TOOL_LEVELS[(TOOL_LEVELS.indexOf(config.display.tools) + 1) % TOOL_LEVELS.length]!
             patchConfig({ display: { ...config.display, tools: next } })
           } else if (index === 1) {
-            const thinking = config.display.thinking === 'on' ? 'off' : 'on'
+            const thinking = config.display.thinking === 'expanded' ? 'collapsed' : 'expanded'
             patchConfig({ display: { ...config.display, thinking } })
             setNotices([{ text: `Thinking display: ${thinking} — applies to every surface`, tone: 'success' }])
           } else if (index === 2) {

@@ -75,7 +75,11 @@ struct SettingsView: View {
                             Text(SettingsWording.of(value)).tag(value)
                         }
                     }
-                    Toggle("Reasoning shown", isOn: thinking)
+                    Picker("Reasoning", selection: thinking) {
+                        ForEach(model.thinkingLevels, id: \.self) { value in
+                            Text(SettingsWording.of(value)).tag(value)
+                        }
+                    }
                     Toggle("Tool calls folded", isOn: $foldedTools)
                     Toggle("Interactive widgets (GenUI)", isOn: genui)
                 }
@@ -220,10 +224,10 @@ struct SettingsView: View {
         )
     }
 
-    private var thinking: Binding<Bool> {
+    private var thinking: Binding<String> {
         Binding(
-            get: { model.showThinking },
-            set: { value in Task { await model.setShowThinking(value) } }
+            get: { model.thinking },
+            set: { value in Task { await model.setThinking(value) } }
         )
     }
 

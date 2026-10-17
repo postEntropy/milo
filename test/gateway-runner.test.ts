@@ -363,12 +363,12 @@ describe('runTurn', () => {
   it('says why a turn showed nothing when the level hid it all', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       // The answer arrives as reasoning — a provider filling one field with both
-      // channels — and `off` keeps none of it.
+      // channels — and `collapsed` keeps none of it.
       yield { type: 'reasoning-delta', delta: 'Oi! Em que posso ajudar?' }
       yield { type: 'done', finishReason: 'stop' }
     }
 
-    const harness = makeHarness(stream, true, { tools: 'full', thinking: 'off' })
+    const harness = makeHarness(stream, true, { tools: 'full', thinking: 'collapsed' })
     await harness.run()
 
     const last = harness.edits.at(-1) ?? ''
@@ -383,10 +383,10 @@ describe('runTurn', () => {
       yield { type: 'done', finishReason: 'stop' }
     }
 
-    const harness = makeHarness(stream, true, { tools: 'full', thinking: 'off' })
+    const harness = makeHarness(stream, true, { tools: 'full', thinking: 'collapsed' })
     await harness.run()
 
-    // With the level hiding the thinking, a newline would otherwise be the whole
+    // With `collapsed` hiding the thinking, a newline would otherwise be the whole
     // turn and the note would never be written.
     expect(harness.edits.at(-1)).toContain('no answer came back')
   })
@@ -426,13 +426,13 @@ describe('runTurn — display settings', () => {
   }
 
   it('shows only the tool name when asked for names', async () => {
-    const harness = makeHarness(withCommand, true, { tools: 'name', thinking: 'on' })
+    const harness = makeHarness(withCommand, true, { tools: 'name', thinking: 'expanded' })
     await harness.run()
     expect(harness.edits.at(-1)).toBe('> ⚡ **shell_command**\n\npronto')
   })
 
   it('keeps tool activity out entirely when off', async () => {
-    const harness = makeHarness(withCommand, true, { tools: 'off', thinking: 'on' })
+    const harness = makeHarness(withCommand, true, { tools: 'off', thinking: 'expanded' })
     await harness.run()
     expect(harness.edits.at(-1)).toBe('pronto')
   })
@@ -444,7 +444,7 @@ describe('runTurn — display settings', () => {
       yield { type: 'done', finishReason: 'stop' }
     }
 
-    const harness = makeHarness(stream, true, { tools: 'off', thinking: 'on' })
+    const harness = makeHarness(stream, true, { tools: 'off', thinking: 'expanded' })
     await harness.run()
     expect(harness.edits.at(-1)).toBe('> ❌ **shell_command** failed')
   })
@@ -462,14 +462,14 @@ describe('runTurn — display settings', () => {
     expect(harness.edits.at(-1)).toBe('> 💭 Preciso conferir o\n\npronto')
   })
 
-  it('drops the reasoning when thinking is off', async () => {
+  it('drops the reasoning when thinking is collapsed', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       yield { type: 'reasoning-delta', delta: 'algo que não deve aparecer\n' }
       yield { type: 'text-delta', delta: 'pronto' }
       yield { type: 'done', finishReason: 'stop' }
     }
 
-    const harness = makeHarness(stream, true, { tools: 'full', thinking: 'off' })
+    const harness = makeHarness(stream, true, { tools: 'full', thinking: 'collapsed' })
     await harness.run()
     expect(harness.edits.at(-1)).toBe('pronto')
   })

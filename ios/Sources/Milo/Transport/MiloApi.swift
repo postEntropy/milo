@@ -378,6 +378,7 @@ struct SettingsOverview: Decodable {
     struct Options: Decodable {
         let permissionModes: [String]?
         let toolLevels: [String]?
+        let thinkingLevels: [String]?
         let efforts: [String]?
         let searchProviders: [String]?
     }

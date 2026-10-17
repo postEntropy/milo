@@ -38,7 +38,17 @@ struct MessageRow: View {
     /// answer it (quote, ask again, fork) are left off, so a past run is read, not acted on.
     var readOnly = false
     @Environment(AppModel.self) private var model
-    @State private var showReasoning = false
+
+    /// The answer's thinking, when it thought at all. Read off the parts rather than the
+    /// turn's own clock, so a thought read back from a session still has its line and its
+    /// block — the clock is only known for the turn this app watched.
+    private var reasoning: String? {
+        let said = message.parts.compactMap { part -> String? in
+            if case .reasoning(let text) = part { return text }
+            return nil
+        }
+        return said.isEmpty ? nil : said.joined(separator: "\n\n")
+    }
 
     /// The answer's parts as they are drawn: a run of consecutive calls is one chain,
     /// and everything else stands on its own. A turn's work arrives as those runs, so
@@ -101,24 +111,11 @@ struct MessageRow: View {
             .contextMenu { menu }
         } else {
             VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-                if let thought = message.thought {
-                    Button {
-                        withAnimation(.easeInOut(duration: 0.22)) { showReasoning.toggle() }
-                    } label: {
-                        Text("Thought for \(Int(thought.rounded()))s")
-                            .font(MiloTheme.Text.small)
-                            .foregroundStyle(MiloTheme.muted)
-                    }
-                }
-                if showReasoning {
-                    ForEach(Array(message.parts.enumerated()), id: \.offset) { _, part in
-                        if case .reasoning(let text) = part {
-                            Text(text)
-                                .font(MiloTheme.Text.small)
-                                .foregroundStyle(MiloTheme.muted)
-                                .textSelection(.enabled)
-                        }
-                    }
+                // The line is the handle to the thought: it stands when there is one to open,
+                // and not otherwise. A "Thought for Xs" that answers a press with nothing is a
+                // promise the turn cannot keep.
+                if let reasoning {
+                    Reasoning(text: reasoning, seconds: message.thought)
                 }
                 // A `/sessions` answer is its cards: the words the command replied with are
                 // the same list in text, and drawing both would say it twice. The parts and
@@ -506,6 +503,61 @@ struct PartView: View {
         case .tool, .reasoning, .other:
             EmptyView()
         }
+    }
+}
+
+/**
+ What the model thought, under the answer it belongs to: the line saying how long it took,
+ and the reasoning itself. Folded it is one quiet line, open it is the thought, and the
+ press is what decides.
+
+ Unlike a chain of calls, the display in Settings is the rule here rather than a starting
+ point: a change to it reaches every thought on screen, including one opened by hand. And
+ the line stands whenever there is a thought to read — a session read back has no clock to
+ say how long it took, and still gets a line that opens it.
+ */
+struct Reasoning: View {
+    let text: String
+    /// How long the turn took, when this app watched it. Absent for a thought read back.
+    let seconds: Double?
+    @Environment(AppModel.self) private var model
+    /// Nothing until the person touches it; the display answers until then.
+    @State private var toggled: Bool?
+
+    private var open: Bool { toggled ?? (model.thinking == "expanded") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { toggled = !open }
+            } label: {
+                Text(label)
+                    .font(MiloTheme.Text.small)
+                    .foregroundStyle(MiloTheme.muted)
+                    // The whole line answers the press, not only the words on it.
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel(open ? "Hide thinking" : "Show thinking")
+
+            if open {
+                Text(text)
+                    .font(MiloTheme.Text.small)
+                    .foregroundStyle(MiloTheme.muted)
+                    .textSelection(.enabled)
+            }
+        }
+        // The display is the rule, not a starting point: when it changes, this thought —
+        // and every other — follows it, including one the person opened by hand.
+        .onChange(of: model.thinking) { _, _ in toggled = nil }
+    }
+
+    /// How long it thought, when the clock is known and worth saying — the thought's own
+    /// name otherwise, the same rule the browser's own label follows.
+    private var label: String {
+        guard let seconds, seconds >= 1 else { return "Thought" }
+        return "Thought for \(Int(seconds.rounded()))s"
     }
 }
 

@@ -24,7 +24,9 @@ export function protocolRefusal(clientVersion: number): string {
 export const PERMISSION_MODES = ['ask', 'auto', 'yolo'] as const
 export const CLASSIFIER_BACKENDS = ['commandcode', 'openai', 'openrouter', 'ollaya', 'custom'] as const
 export const TOOL_LEVELS = ['full', 'name', 'off'] as const
-export const THINKING_LEVELS = ['on', 'off'] as const
+export const THINKING_LEVELS = ['expanded', 'collapsed'] as const
+/** How a surface draws a thought: open under the question, or folded there. */
+export type ThinkingDisplay = (typeof THINKING_LEVELS)[number]
 export const EFFORT_LEVELS = ['low', 'medium', 'high'] as const
 export const SEARCH_PROVIDERS = ['off', 'tavily', 'exa', 'parallel'] as const
 
@@ -192,7 +194,7 @@ export interface ActiveTurn {
 }
 
 export type ServerFrame =
-  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: 'on' | 'off'; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn }
+  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn }
   | { type: 'turn-start'; id: string; text: string }
   | { type: 'event'; turnId: string; event: AgentEvent }
   | { type: 'permission'; id: string; request: PermissionRequest; expiresAt: number }
@@ -257,6 +259,8 @@ export interface TranscriptMessage {
   attachments?: FrameAttachment[]
   /** When the message was first said, for a surface that shows it. */
   at?: number
+  /** How long the turn took to say anything, for the line over its thought. */
+  thoughtMs?: number
   /**
    * The turn copied whole — the model's words (a `genui` block among them, in its own
    * JSON), its thinking, and every tool call with its arguments and result — for a

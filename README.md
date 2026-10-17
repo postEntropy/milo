@@ -317,7 +317,8 @@ it.
 
 Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/fork`, `/stats`, `/compact`,
 `/export`, `/skills`, `/memory`, `/mode ask|auto|yolo`, `/yolo`, `/tools full|name|off`,
-`/thinking on|off`, `/effort low|medium|high`, `/provider [id]`, `/model [id]`, `/clear`, `/status`.
+`/thinking expanded|collapsed`, `/effort low|medium|high`, `/provider [id]`, `/model [id]`, `/clear`,
+`/status`.
 A mode change from a chat is written to `config.yml` and survives a restart; sessions are written to
 `~/.milo/sessions/` and survive too. The provider and the model are switched with `/provider` and
 `/model`; adding a provider or a key still needs `milo setup`.

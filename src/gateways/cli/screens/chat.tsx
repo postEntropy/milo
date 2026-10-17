@@ -109,7 +109,7 @@ const HELP_TEXT = [
   '/mode ask|auto|yolo — when a tool needs confirming',
   '/yolo — toggle yolo mode',
   '/tools full|name|off — how much of each tool call to show',
-  '/thinking on|off — show or hide the model\'s reasoning in the transcript',
+  '/thinking expanded|collapsed — open the model\'s reasoning under the question or leave it folded',
   '  Display only: the model thinks either way; /effort is what changes that.',
   "/effort low|medium|high — how hard the model thinks",
   "  The other axis, and the one that costs: /effort default goes back to the provider's own.",
@@ -379,21 +379,21 @@ export function ChatScreen({
       }
       case 'thinking': {
         const asked = argument.trim().toLowerCase()
-        // `brief`/`full` and `true`/`false` are older spellings of the same two
-        // states: showing the reasoning, or not.
+        // `on`/`brief`/`full` and `true` are older spellings of an open thought,
+        // `off`/`false` of a folded one.
         const level =
-          asked === 'off' || asked === 'false'
-            ? 'off'
-            : asked === 'on' || asked === 'true' || asked === 'brief' || asked === 'full'
-              ? 'on'
+          asked === 'collapsed' || asked === 'off' || asked === 'false'
+            ? 'collapsed'
+            : asked === 'expanded' || asked === 'on' || asked === 'true' || asked === 'brief' || asked === 'full'
+              ? 'expanded'
               : undefined
         if (!level) {
           push({
             kind: 'info',
             text:
-              `Thinking display: ${display.thinking}. This turns the showing of the reasoning on ` +
-              'or off — the model thinks either way, and /effort is what changes that. ' +
-              'Use /thinking on|off',
+              `Thinking display: ${display.thinking}. This is how the reasoning is drawn — ` +
+              'expanded opens it under the question, collapsed keeps it folded there. The model ' +
+              'thinks either way, and /effort is what changes that. Use /thinking expanded|collapsed',
           })
           break
         }
@@ -401,9 +401,9 @@ export function ChatScreen({
         push({
           kind: 'info',
           text:
-            level === 'off'
-              ? 'Thinking display: off. The model still reasons; this only stops showing it.'
-              : 'Thinking display: on — the reasoning stays under the question.',
+            level === 'collapsed'
+              ? 'Thinking display: collapsed. The model still reasons; the terminal keeps only the line.'
+              : 'Thinking display: expanded — the reasoning stays under the question.',
         })
         break
       }
@@ -633,9 +633,9 @@ export function ChatScreen({
             // Counted whatever the level: a turn that says nothing in the answer
             // channel is worth explaining, and that is all that is left to go on.
             reasoningChars += delta.length
-            // `off` keeps none of it: nothing is going to display it, and the
-            // transcript has no use for it either.
-            if (display.thinking === 'off') return
+            // `collapsed` keeps only the line above: nothing on the terminal is
+            // going to display the text, and it has no way to open it.
+            if (display.thinking === 'collapsed') return
             reasoningRef.current += delta
             setReasoning(reasoningRef.current)
           },
@@ -746,12 +746,12 @@ export function ChatScreen({
     // Nothing came back in the answer channel, and the display hid what did: a turn
     // that shows a user nothing at all has to at least say why, or the provider
     // putting both channels in one field looks like Milo having gone quiet.
-    if (!answered && reasoningChars > 0 && display.thinking === 'off') {
+    if (!answered && reasoningChars > 0 && display.thinking === 'collapsed') {
       push({
         kind: 'info',
         text:
           '⚠ no answer came back: this model sends everything it says as reasoning, and ' +
-          '/thinking off hides it. MILO_DEBUG=1 prints what the wire carried.',
+          '/thinking collapsed hides it. MILO_DEBUG=1 prints what the wire carried.',
       })
     }
 
@@ -983,7 +983,7 @@ export function ChatScreen({
       : [{ text: 'Milo', color: theme.muted }]),
     ...(mode !== 'ask' ? [{ text: PERMISSION_LABELS[mode], color: theme.warning }] : []),
     ...(display.tools !== 'full' ? [{ label: 'tools', text: display.tools, color: theme.warning }] : []),
-    ...(display.thinking === 'off' ? [{ label: 'thinking', text: 'hidden', color: theme.warning }] : []),
+    ...(display.thinking === 'collapsed' ? [{ label: 'thinking', text: 'collapsed', color: theme.warning }] : []),
     ...(sessionId ? [{ label: 'session', text: sessionId, color: theme.muted }] : []),
   ]
   const footerWidth = Math.max(1, columns - 4)

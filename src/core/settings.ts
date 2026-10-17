@@ -6,6 +6,7 @@ import {
   type ClassifierConfig,
   type Config,
   type PermissionsConfig,
+  type ThinkingDisplay,
 } from './config/schema.js'
 import type { ReasoningEffort } from './providers/types.js'
 import { errorMessage } from '../util/errors.js'
@@ -127,7 +128,7 @@ export function setDisplayTools(tools: ToolDisplay): SettingsResult<Config> {
   })
 }
 
-export function setDisplayThinking(thinking: 'on' | 'off'): SettingsResult<Config> {
+export function setDisplayThinking(thinking: ThinkingDisplay): SettingsResult<Config> {
   return mutateConfig((config) => {
     config.display.thinking = thinking
   })

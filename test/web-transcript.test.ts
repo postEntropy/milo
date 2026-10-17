@@ -52,6 +52,23 @@ describe('transcriptOf — a turn keeps the order it happened in', () => {
     ])
   })
 
+  it('carries how long the turn waited, so a reload says what the live turn said', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'look' }] },
+      {
+        role: 'assistant',
+        content: [
+          { type: 'reasoning', text: 'reading first' },
+          { type: 'text', text: 'Fine.' },
+        ],
+        thoughtMs: 3200,
+      },
+    ]
+
+    // The line over the thought: the number the turn itself drew, not a live-only one.
+    expect(of(messages).at(-1)?.thoughtMs).toBe(3200)
+  })
+
   it('leaves no tool line for a tool that draws its own thing', () => {
     const messages: Message[] = [
       {

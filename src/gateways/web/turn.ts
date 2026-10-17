@@ -33,6 +33,7 @@ export function displayEvent(event: AgentEvent, turnId: string, display: Display
     send({ type: 'event', turnId, event: { ...event, result } })
     return
   }
-  if (event.type === 'reasoning-delta' && display.thinking === 'off') return
+  // A thought always rides, whatever the display: `collapsed` draws it folded, and
+  // a folded block is one click from being read, so the text has to be here.
   send({ type: 'event', turnId, event })
 }

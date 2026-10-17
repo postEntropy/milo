@@ -50,7 +50,7 @@ Usage:
   milo --yolo                Shorthand for --mode yolo
   milo --web-port <port>     Port for the web UI (default 7717)
 
-In the chat: /model · /setup · /mode ask|auto|yolo · /yolo · /tools full|name|off · /thinking on|off ·
+In the chat: /model · /setup · /mode ask|auto|yolo · /yolo · /tools full|name|off · /thinking expanded|collapsed ·
 /effort low|medium|high · /new · /sessions · /resume · /stats · /skills · /clear · /help · /exit
 
 Config:  ~/.milo/config.yml

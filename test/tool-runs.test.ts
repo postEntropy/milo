@@ -12,9 +12,9 @@ function keyed(parts: TranscriptPart[]): KeyedPart[] {
   })
 }
 
-/** The turn as the chat draws it, with the thinking shown unless told otherwise. */
-function draw(parts: TranscriptPart[], showReasoning = true): ReturnType<typeof toolRows> {
-  return toolRows(keyed(parts), showReasoning)
+/** The turn as the chat draws it. */
+function draw(parts: TranscriptPart[]): ReturnType<typeof toolRows> {
+  return toolRows(keyed(parts))
 }
 
 const call = (name: string, value: string): TranscriptPart => ({ kind: 'tool', tool: { name, text: `${name} ${value}` } })
@@ -51,20 +51,11 @@ describe('one turn, grouped for drawing', () => {
     expect(callsIn(rows)[0]?.map((tool) => tool.name)).toEqual(['a', 'b', 'c'])
   })
 
-  it('ends the thread at a thought the surface is drawing, because thinking is not a call', () => {
+  it('ends the thread at a thought, because thinking is not a call', () => {
     const rows = draw([call('a', '1'), thought('now the other one'), call('b', '2')])
 
-    // Two calls with a thought between them were not made back to back.
+    // Two calls with a thought between them were not made back to back, folded or not.
     expect(rows.map((row) => row.kind)).toEqual(['part', 'part', 'part'])
-  })
-
-  it('keeps the thread across a thought the surface is hiding', () => {
-    const rows = draw([call('a', '1'), thought('now the other one'), call('b', '2')], false)
-
-    // A hidden thought is not on screen, so nothing of the model's stands between the
-    // two calls: they read as back to back even though one was had in between.
-    expect(rows.map((row) => row.kind)).toEqual(['spine'])
-    expect(callsIn(rows)[0]?.map((tool) => tool.name)).toEqual(['a', 'b'])
   })
 
   it('ends the thread at prose, and starts a new one after it', () => {

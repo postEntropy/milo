@@ -32,6 +32,6 @@ describe('the Display preview', () => {
     const { toolRows } = await import('../web/src/chat/tool-runs.js')
     const keyed = assistantParts('full').map((part, index) => ({ part, key: `part-${index}` }))
 
-    expect(toolRows(keyed, true).filter((row) => row.kind === 'spine')).toEqual([])
+    expect(toolRows(keyed).filter((row) => row.kind === 'spine')).toEqual([])
   })
 })

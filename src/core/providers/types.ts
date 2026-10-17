@@ -95,6 +95,14 @@ export interface Message {
    * wires, which build their blocks from `role` and `content` alone.
    */
   at?: number
+  /**
+   * How long the turn took to say anything, when that is worth saying, set on its
+   * first message. It is what the line over a thought reports — "Thought for 8.2s" —
+   * and it is kept for the same reason `at` is: a session read back from disk says
+   * how long it thought, not only a turn the surface happened to watch. Display
+   * state, like `at`, so the wires ignore it.
+   */
+  thoughtMs?: number
 }
 
 export interface ToolSpec {

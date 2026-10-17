@@ -154,6 +154,9 @@ struct WireMessage: Decodable {
     let parts: [WirePart]
     let attachments: [FrameAttachment]?
     let at: Double?
+    /// How long the turn took to say anything, in ms — what the line over its thought
+    /// reports. Absent on a turn too quick to say, and on one stored before this was kept.
+    let thoughtMs: Double?
     let raw: String?
     /// The same turn with the tool results' own text left out — the path it walked.
     let rawNoOutput: String?

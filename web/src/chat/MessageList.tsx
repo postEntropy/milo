@@ -2,7 +2,7 @@ import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useCopy, type CopyState } from '../lib/clipboard.js'
 import { formatTokens } from '../lib/format.js'
 import { formatWhen, formatSeconds } from '../../../src/core/sessions/format.ts'
-import type { ActionRow, FrameAttachment, SessionCardItem, ToolMark, TranscriptMessage, TranscriptPart } from '@protocol'
+import type { ActionRow, FrameAttachment, SessionCardItem, ThinkingDisplay, ToolMark, TranscriptMessage, TranscriptPart } from '@protocol'
 import { proseOf } from '@protocol'
 import { toolBrand, toolLabel, toolResultPreview } from '../../../src/gateways/tool-line.ts'
 import { toolRows } from './tool-runs.js'
@@ -230,7 +230,7 @@ export function MessageList({
   busy,
 }: {
   messages: ChatMessage[]
-  thinking: boolean
+  thinking: ThinkingDisplay
   onPrompt?(text: string): void
   onAction?(actionId: string, messageId?: string): void
   onFork?(upToTurn: number): void
@@ -295,7 +295,7 @@ export function MessageList({
 
   return <>
     <div className={`thread-inner${messages[0]?.loaded ? ' is-opened' : ''}`} aria-live="polite" aria-relevant="additions text">
-      {messages.filter((m) => hasContent(m, thinking)).map((message) => (
+      {messages.filter((m) => hasContent(m)).map((message) => (
         <MessageRow
           key={message.id}
           message={message}
@@ -373,7 +373,7 @@ function QuoteButton({ onQuote }: { onQuote?(text: string): void }) {
  */
 const MessageRow = memo(function MessageRow({ message, thinking, busy, running, turn, onAction, onFork, onEdit, onRegenerate, onQuote, onSend, regenPrompt, regenUpToTurn }: {
   message: ChatMessage
-  thinking: boolean
+  thinking: ThinkingDisplay
   busy: boolean
   /** The message this turn is still writing; its answer is not ready to act on. */
   running: boolean
@@ -388,10 +388,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
   regenPrompt?: string
   regenUpToTurn?: number
 }) {
-  const [revealed, setRevealed] = useState(false)
   const parts = message.parts
-  const hasReasoning = parts.some((part) => part.kind === 'reasoning')
-  const showReasoning = thinking || revealed
   // A part's place is its identity: parts only ever append, so a running count
   // per kind names each one for as long as the turn streams.
   const seen = new Map<string, number>()
@@ -406,28 +403,19 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
   const prose = proseOf(message)
   return <article className={`message ${message.role}${message.loaded ? ' is-loaded' : ''}`}>
     <div className="message-content">
-      {hasReasoning && !showReasoning && (message.thoughtMs ?? 0) >= 1000 && (
-        <button className="reasoning-note reasoning-reveal" type="button" title="Show thinking" onClick={() => setRevealed(true)}>
-          <Icon name="spark" size={14} /> {thoughtLabel(message.thoughtMs)}
-          <span className="reasoning-reveal-hint">Show thinking</span>
-        </button>
-      )}
-      {!hasReasoning && message.thoughtMs !== undefined && message.thoughtMs >= 1000 && (
-        <div className="reasoning-note"><Icon name="spark" size={14} /> {thoughtLabel(message.thoughtMs)}</div>
-      )}
       {message.cards && message.cards.length > 0 ? (
         <SessionCards
           cards={message.cards}
           onSelect={(id) => onAction?.(`resume:${id}`, message.id)}
         />
       ) : (
-        toolRows(keyed, showReasoning).map((row) => {
+        toolRows(keyed).map((row) => {
           if (row.kind === 'spine') return <ToolRun key={row.key} steps={row.steps} />
           const { part, key } = row
           if (part.kind === 'reasoning') {
-            // A part only ever reaches here when the surface is drawing thinking:
-            // `toolRows` drops the hidden ones before they are grouped.
-            return <Reasoning key={key} text={part.text} thoughtMs={key === firstReasoning ? message.thoughtMs : undefined} animateIn={!thinking} />
+            // Every thought is on screen; the display only decides whether it
+            // arrives open or folded, both one press from the other.
+            return <Reasoning key={key} text={part.text} thoughtMs={key === firstReasoning ? message.thoughtMs : undefined} open={thinking === 'expanded'} />
           }
           if (part.kind === 'text') return <Markdown key={key} text={part.text} />
           if (part.kind === 'tool') return <ToolLine key={key} tool={part.tool} />
@@ -514,29 +502,31 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
 })
 
 /**
- * What the model thought, and how long it took. Open by default: the wait is
- * the thing a person asks about, and a collapsed block answers it with nothing.
+ * What the model thought, and how long it took: a summary line, and the thought
+ * under it, opened or folded as the display asks. The line is the control either
+ * way, so a folded thought is one press from being read.
+ *
+ * The display is the rule, not a starting point: a change to it reaches every
+ * thought on screen, including one the person opened by hand.
  */
-function Reasoning({ text, thoughtMs, animateIn = false }: { text: string; thoughtMs?: number; animateIn?: boolean }) {
-  const [open, setOpen] = useState(!animateIn)
-  useEffect(() => {
-    if (!animateIn) return
-    // Opened a frame after it appears, so the transition has a shut state to
-    // travel from instead of the block simply being there already open.
-    const frame = requestAnimationFrame(() => setOpen(true))
-    return () => cancelAnimationFrame(frame)
-  }, [animateIn])
-  return <div className={`reasoning ${open ? 'open' : ''}`}>
-    <button className="reasoning-summary" type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+function Reasoning({ text, thoughtMs, open }: { text: string; thoughtMs?: number; open: boolean }) {
+  const [expanded, setExpanded] = useState(open)
+  useEffect(() => { setExpanded(open) }, [open])
+  return <div className={`reasoning ${expanded ? 'open' : ''}`}>
+    <button className="reasoning-summary" type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
       <Icon name="spark" size={15} /> {thoughtLabel(thoughtMs)} <Icon className="reasoning-chevron" name="chevron" size={14} />
     </button>
     <div className="reasoning-collapse"><div className="reasoning-clip"><div className="reasoning-body">{text}</div></div></div>
   </div>
 }
 
-/** The terminal's wording, so both surfaces say the same thing about a wait. */
+/**
+ * What the line over a thought says: how long the turn waited before it said
+ * anything, when that is known and worth saying — the thought's own name otherwise.
+ * The terminal's wording for the wait, so both surfaces say the same thing about it.
+ */
 function thoughtLabel(ms?: number): string {
-  return ms !== undefined && ms >= 1000 ? `Thought for ${formatSeconds(ms / 1000)}` : 'Reasoning'
+  return ms !== undefined && ms >= 1000 ? `Thought for ${formatSeconds(ms / 1000)}` : 'Thought'
 }
 
 /**
@@ -802,11 +792,11 @@ function drawingADraft(parts: TranscriptPart[]): boolean {
   return false
 }
 
-function hasContent(message: ChatMessage, thinking: boolean): boolean {
+function hasContent(message: ChatMessage): boolean {
   if (message.parts.some((part) => part.kind === 'text' && part.text.trim())) return true
   if (message.parts.some((part) => part.kind === 'tool' || part.kind === 'todo')) return true
   if (message.parts.some((part) => part.kind === 'ui')) return true
-  if (thinking && message.parts.some((part) => part.kind === 'reasoning')) return true
+  if (message.parts.some((part) => part.kind === 'reasoning')) return true
   if (message.attachments && message.attachments.length > 0) return true
   if (message.cards && message.cards.length > 0) return true
   if (message.actions && message.actions.length > 0) return true

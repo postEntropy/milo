@@ -16,7 +16,7 @@ import { Email } from './email/Email.js'
 import { Settings } from './settings/Settings.js'
 import { settingsSectionFromPath } from './settings/sections.js'
 import { Panel } from './panel/Panel.js'
-import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, TranscriptPart } from '@protocol'
+import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, ThinkingDisplay, TranscriptPart } from '@protocol'
 import { drawsToolFailure, toolText } from '../../src/gateways/tool-line.ts'
 import { describeCompaction, describeRebase, sessionLabel as sharedSessionLabel } from '../../src/core/sessions/format.ts'
 import { Icon } from './ui/Icons.js'
@@ -76,7 +76,7 @@ export default function App() {
   const [turnEnds, setTurnEnds] = useState(0)
   /** Bumped when the server says a routine ran, so the history on screen re-reads. */
   const [routinesTick, setRoutinesTick] = useState(0)
-  const [thinking, setThinking] = useState(true)
+  const [thinking, setThinking] = useState<ThinkingDisplay>('expanded')
   const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium')
   const [identity, setIdentity] = useState({ provider: 'milo', providerName: 'Milo', model: '' })
   const [connection, setConnection] = useState<ConnectionStatus>({ state: 'connecting' })
@@ -398,7 +398,7 @@ export default function App() {
       setQueued(0)
       setConnection({ state: 'online' })
       setSessionId(frame.sessionId)
-      setThinking(frame.thinking === 'on')
+      setThinking(frame.thinking)
       if (frame.effort) setEffort(frame.effort)
       setIdentity({ provider: frame.provider, providerName: frame.providerName, model: frame.model })
       // What the panel was left showing, resolved by the server from the session's

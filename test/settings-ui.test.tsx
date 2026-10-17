@@ -15,7 +15,7 @@ const config = {
   model: 'some-model',
   providers: { commandcode: { baseURL: 'https://api.commandcode.ai/provider/v1' } },
   memory: {},
-  display: { tools: 'full' as const, thinking: 'on' },
+  display: { tools: 'full' as const, thinking: 'expanded' },
   reasoningEffort: 'medium' as const,
   gateways: {},
   web: { enabled: true, host: '127.0.0.1', port: 7717 },
@@ -850,7 +850,7 @@ describe('SettingsScreen', () => {
     expect(app.lastFrame()).toContain('off')
   })
 
-  it('toggles the thinking display and says it applies everywhere', async () => {
+  it('cycles the thinking display and says it applies everywhere', async () => {
     const app = renderSettings()
     for (let index = 0; index < 5; index += 1) await press(app, DOWN)
     await press(app, '\r')
@@ -859,8 +859,8 @@ describe('SettingsScreen', () => {
     await press(app, DOWN)
     await press(app, '\r')
 
-    // on → off
-    await waitUntil(() => readData('config.yml').display?.thinking === 'off')
+    // expanded → collapsed
+    await waitUntil(() => readData('config.yml').display?.thinking === 'collapsed')
     expect(app.lastFrame()).toContain('applies to every surface')
   })
 

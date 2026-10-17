@@ -238,24 +238,27 @@ export type TracesConfig = z.infer<typeof TracesSchema>
 export const DEFAULT_TRACES: TracesConfig = { enabled: true }
 
 /**
- * Whether a surface shows the model's reasoning. `on` keeps the text under the
- * question it belongs to, `off` shows none of it. The model reasons either way —
- * this is display only. Deliberately not a "level": how much thinking happens
- * (and costs) is `reasoningEffort`, a different question from how much of it is
- * shown, and one word for both is how the two get confused.
+ * How a surface draws the model's reasoning: `expanded` opens the thought under
+ * the question it belongs to, `collapsed` keeps it folded there, one click away.
+ * The model reasons either way, and the thought is kept — this is display only.
+ * Deliberately not a "level": how much thinking happens (and costs) is
+ * `reasoningEffort`, a different question from how much of it is shown, and one
+ * word for both is how the two get confused.
  */
-export const ThinkingDisplaySchema = z.enum(['off', 'on'])
+export const ThinkingDisplaySchema = z.enum(['expanded', 'collapsed'])
 export type ThinkingDisplay = z.infer<typeof ThinkingDisplaySchema>
 
 /**
- * The setting has been a boolean and then a three-value level, and a config on
- * disk may still say `true`, `false`, `brief` or `full`. Refusing one would fail
- * the whole file and take every other setting with it, so the old forms are
- * translated: anything that showed the reasoning is `on`.
+ * The setting has been a boolean, a three-value level and an on/off switch, and a
+ * config on disk may still say `true`, `false`, `brief`, `full`, `on` or `off`.
+ * Refusing one would fail the whole file and take every other setting with it, so
+ * the old forms are translated: a setting that showed the reasoning is `expanded`,
+ * and one that hid it is `collapsed` — the reading a value from a surface that had
+ * no way to open a folded thought keeps.
  */
 const ThinkingDisplayValue = z
-  .union([z.boolean(), z.enum(['off', 'on', 'brief', 'full'])])
-  .transform((value): ThinkingDisplay => (value === false || value === 'off' ? 'off' : 'on'))
+  .union([z.boolean(), z.enum(['expanded', 'collapsed', 'on', 'off', 'brief', 'full'])])
+  .transform((value): ThinkingDisplay => (value === false || value === 'off' || value === 'collapsed' ? 'collapsed' : 'expanded'))
 
 export const DisplaySchema = z.object({
   /**
@@ -264,7 +267,7 @@ export const DisplaySchema = z.object({
    * shown — hiding that it went wrong is worse than the noise.
    */
   tools: z.enum(['full', 'name', 'off']).default('full'),
-  thinking: ThinkingDisplayValue.default('on'),
+  thinking: ThinkingDisplayValue.default('expanded'),
   /**
    * Whether an answer may be drawn rather than described: the model is taught the
    * catalog and writes the tree inside the answer, and a surface that can draw one
@@ -275,7 +278,7 @@ export const DisplaySchema = z.object({
 })
 export type DisplayConfig = z.infer<typeof DisplaySchema>
 
-export const DEFAULT_DISPLAY: DisplayConfig = { tools: 'full', thinking: 'on' }
+export const DEFAULT_DISPLAY: DisplayConfig = { tools: 'full', thinking: 'expanded' }
 
 /**
  * The browser Milo drives. Off until it is turned on, like every other optional

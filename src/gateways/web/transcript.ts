@@ -131,6 +131,9 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
           // The turn's start, not the last step: a turn drawn as one message is
           // said to have happened when it began.
           ...(message.at !== undefined ? { at: message.at } : {}),
+          // How long it took to say anything: the line over a thought reports it, and
+          // a session read back has to say it too rather than only a turn watched live.
+          ...(message.thoughtMs !== undefined ? { thoughtMs: message.thoughtMs } : {}),
         }
         transcript.push(currentAssistant)
       } else {

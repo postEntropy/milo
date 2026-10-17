@@ -45,7 +45,7 @@ const config = {
   model: 'some-model',
   providers: { commandcode: { baseURL: 'https://api.commandcode.ai/provider/v1' } },
   memory: {},
-  display: { tools: 'full' as const, thinking: 'on' },
+  display: { tools: 'full' as const, thinking: 'expanded' },
   reasoningEffort: 'medium' as const,
   gateways: {},
   web: { enabled: true, host: '127.0.0.1', port: 7717 },

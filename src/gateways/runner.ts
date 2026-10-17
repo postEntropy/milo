@@ -167,7 +167,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
     reasoning = ''
     // One message, so one line is all the thought can have without crowding out
     // the answer.
-    if (display.thinking === 'off' || !line) return
+    if (display.thinking === 'collapsed' || !line) return
     await appendLine(`💭 ${line}`, 'quote')
   }
 
@@ -193,7 +193,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
       switch (event.type) {
         case 'reasoning-delta':
           reasoningChars += event.delta.length
-          if (display.thinking !== 'off') reasoning += event.delta
+          if (display.thinking !== 'collapsed') reasoning += event.delta
           break
         case 'text-delta':
           // Only text someone can read counts as an answer: a bare newline is not
@@ -287,8 +287,8 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   // content, and the display hid it: a chat that says nothing reads as the bot
   // being broken, when it is the provider putting both channels in one field.
   // The CLI says the same thing, for the same reason.
-  if (!answered && reasoningChars > 0 && display.thinking === 'off') {
-    output += `${output === '' ? '' : '\n\n'}⚠ no answer came back: this model sends everything it says as reasoning, and /thinking off hides it.`
+  if (!answered && reasoningChars > 0 && display.thinking === 'collapsed') {
+    output += `${output === '' ? '' : '\n\n'}⚠ no answer came back: this model sends everything it says as reasoning, and /thinking collapsed hides it.`
   }
   await surface.edit(conversationId, messageId, clamp(output.trim() || '(no response)', maxLength))
 

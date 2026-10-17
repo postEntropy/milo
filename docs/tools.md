@@ -129,19 +129,19 @@ takes effect without restarting `milo serve`.
 ```yaml
 display:
   tools: full
-  thinking: on
+  thinking: expanded
 ```
 
-A config that still says `true`, `false`, `brief` or `full` loads fine: anything that showed the
-reasoning reads as `on`.
+A config that still says `true`, `false`, `brief`, `full`, `on` or `off` loads fine: a value that showed
+the reasoning reads as `expanded`, and one that hid it as `collapsed`.
 
 | Setting | Values | What it does |
 | --- | --- | --- |
 | `tools` | `full` (default) | The tool call with its arguments: `📄 read_file src/app.ts`. `shell_command` is drawn as its fenced block instead. |
 | | `name` | Just which tool ran: `📄 read_file`. |
 | | `off` | No tool lines at all. |
-| `thinking` | `on` (default) | The reasoning is shown under the question it belongs to, and stays in the transcript. |
-| | `off` | No reasoning at all. Display only — the model reasons either way. |
+| `thinking` | `expanded` (default) | The reasoning opens under the question it belongs to, and stays in the transcript. |
+| | `collapsed` | The line (`✻ Thought for 8.2s`) stays with the reasoning folded under it, one click away on the web and the phone. The terminal cannot click, so it keeps only the line. Display only — the model reasons either way. |
 
 A tool that **fails** is reported whichever level is set (`❌ shell_command failed`), and the CLI stops
 naming the tool in its status line when `tools` is `off`.
@@ -156,12 +156,12 @@ tell a model that answers in its thinking from one still thinking. Two rules fol
 
 - A turn that says **nothing in the answer channel** keeps all of its thinking — it is the answer,
   whatever channel it arrived in.
-- `/thinking off` on such a model hides the answer with the thinking, so the turn **says so** instead of
-  going quiet.
+- `/thinking collapsed` on such a model hides the answer with the thinking, so the turn **says so**
+  instead of going quiet.
 
 `MILO_DEBUG=1` prints what each response actually carried (`0 chars of content, 31 chars of reasoning,
 finished tool_calls`). Each level that takes something away is visible in the CLI header
-(`[tools name]`, `[thinking off]`), and the effort sits beside the model name (`effort medium` unless
+(`[tools name]`, `[thinking collapsed]`), and the effort sits beside the model name (`effort medium` unless
 changed). All three are in `/status` and in the **Display** section of `milo setup`.
 
 ## Reasoning effort

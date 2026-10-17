@@ -25,7 +25,7 @@ function writeConfig(genui: boolean): void {
     provider: 'test',
     model: 'test-model',
     providers: { test: { baseURL: 'https://x.test/v1', wire: 'openai' } },
-    display: { tools: 'full', thinking: 'on', genui },
+    display: { tools: 'full', thinking: 'expanded', genui },
     gateways: {},
     permissions: { mode: 'ask', allow: [], deny: [] },
     classifier: { backend: 'commandcode' },

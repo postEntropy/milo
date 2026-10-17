@@ -184,41 +184,44 @@ describe('the classifier', () => {
 })
 
 describe('display settings', () => {
-  it('defaults to showing everything when the file predates them', () => {
-    expect(readDisplay()).toEqual({ tools: 'full', thinking: 'on' })
+  it('defaults to opening the reasoning when the file predates them', () => {
+    expect(readDisplay()).toEqual({ tools: 'full', thinking: 'expanded' })
   })
 
   it('reads the forms the setting used to have, so an old file still loads', () => {
-    // A config written before the current form says `true`, `false`, `brief` or
-    // `full`, and refusing one would fail the whole file and take every other
-    // setting with it.
+    // A config written before the current form says `true`, `false`, `brief`,
+    // `full`, `on` or `off`, and refusing one would fail the whole file and take
+    // every other setting with it.
     writeFileSync(
       configFile,
       stringify({ ...base, display: { tools: 'name', thinking: false } }),
     )
-    expect(readDisplay()).toEqual({ tools: 'name', thinking: 'off' })
+    expect(readDisplay()).toEqual({ tools: 'name', thinking: 'collapsed' })
 
-    for (const before of [true, 'brief', 'full']) {
+    for (const before of [true, 'brief', 'full', 'on']) {
       writeFileSync(configFile, stringify({ ...base, display: { tools: 'full', thinking: before } }))
-      // Every one of them showed the reasoning, which is `on`.
-      expect(readDisplay()).toEqual({ tools: 'full', thinking: 'on' })
+      // Every one of them showed the reasoning, which is `expanded`.
+      expect(readDisplay()).toEqual({ tools: 'full', thinking: 'expanded' })
     }
+
+    writeFileSync(configFile, stringify({ ...base, display: { tools: 'full', thinking: 'off' } }))
+    expect(readDisplay()).toEqual({ tools: 'full', thinking: 'collapsed' })
   })
 
   it('writes one setting and leaves the other alone', () => {
     setDisplay({ tools: 'off' })
-    expect(readDisplay()).toEqual({ tools: 'off', thinking: 'on' })
+    expect(readDisplay()).toEqual({ tools: 'off', thinking: 'expanded' })
 
-    setDisplay({ thinking: 'off' })
-    expect(readDisplay()).toEqual({ tools: 'off', thinking: 'off' })
-    expect(readConfig()?.display).toEqual({ tools: 'off', thinking: 'off' })
+    setDisplay({ thinking: 'collapsed' })
+    expect(readDisplay()).toEqual({ tools: 'off', thinking: 'collapsed' })
+    expect(readConfig()?.display).toEqual({ tools: 'off', thinking: 'collapsed' })
   })
 
   it('falls back to the defaults on an unreadable file rather than throwing', () => {
     writeFileSync(configFile, '{ not json')
 
     expect(() => readDisplay()).not.toThrow()
-    expect(readDisplay()).toEqual({ tools: 'full', thinking: 'on' })
+    expect(readDisplay()).toEqual({ tools: 'full', thinking: 'expanded' })
   })
 
   it('does not throw away a change just because the file is unreadable', () => {
@@ -227,7 +230,7 @@ describe('display settings', () => {
     // The turn in progress must not end because one setting could not be saved.
     expect(() => setDisplay({ tools: 'off' })).not.toThrow()
     expect(() => setPermissionMode('yolo')).not.toThrow()
-    expect(readDisplay()).toEqual({ tools: 'full', thinking: 'on' })
+    expect(readDisplay()).toEqual({ tools: 'full', thinking: 'expanded' })
   })
 })
 

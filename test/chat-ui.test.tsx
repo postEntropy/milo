@@ -108,7 +108,7 @@ function Harness({ runtime, options }: { runtime: AgentRuntime; options: RenderO
       mode={options.mode ?? 'ask'}
       onModeChange={options.onModeChange ?? (() => {})}
       onEffortChange={options.onEffortChange ?? (() => {})}
-      display={options.display ?? { tools: 'full', thinking: 'on' }}
+      display={options.display ?? { tools: 'full', thinking: 'expanded' }}
       onDisplayChange={options.onDisplayChange ?? (() => {})}
       items={items}
       setItems={setItems}
@@ -403,13 +403,13 @@ describe('ChatScreen', () => {
   it('says why a turn showed nothing when the display hid it all', async () => {
     async function* stream(): AsyncGenerator<AgentEvent> {
       // The answer itself arrives as reasoning — a provider putting both of its
-      // channels in one field — with /thinking off there is nothing to show.
+      // channels in one field — with /thinking collapsed there is nothing to show.
       yield { type: 'reasoning-delta', delta: 'Oi! Em que posso ajudar?' }
       yield { type: 'done', finishReason: 'stop' }
     }
 
     const { lastFrame, stdin } = renderChat(makeRuntime(stream), {
-      display: { tools: 'full', thinking: 'off' },
+      display: { tools: 'full', thinking: 'collapsed' },
     })
     await submit(stdin, 'oii')
 
@@ -685,9 +685,9 @@ describe('ChatScreen', () => {
 
     await submit(stdin, '/tools name')
     await submit(stdin, '/tools nonsense')
-    await submit(stdin, '/thinking off')
+    await submit(stdin, '/thinking collapsed')
 
-    expect(patches).toEqual([{ tools: 'name' }, { thinking: 'off' }])
+    expect(patches).toEqual([{ tools: 'name' }, { thinking: 'collapsed' }])
   })
 
   it('hides tool lines and reasoning when the display settings say so', async () => {
@@ -700,7 +700,7 @@ describe('ChatScreen', () => {
     }
 
     const { lastFrame, stdin } = renderChat(makeRuntime(stream), {
-      display: { tools: 'off', thinking: 'off' },
+      display: { tools: 'off', thinking: 'collapsed' },
     })
     await submit(stdin, 'roda isso')
 
@@ -718,7 +718,7 @@ describe('ChatScreen', () => {
     }
 
     const { lastFrame, stdin } = renderChat(makeRuntime(stream), {
-      display: { tools: 'off', thinking: 'on' },
+      display: { tools: 'off', thinking: 'expanded' },
     })
     await submit(stdin, 'roda isso')
 

@@ -38,7 +38,7 @@ const loadedConfig = (
     sessions: DEFAULT_SESSIONS,
     history: { windowDays: 365 },
     traces: { enabled: true },
-    display: { tools: 'full', thinking: 'on' },
+    display: { tools: 'full', thinking: 'expanded' },
     reasoningEffort: 'medium',
     google: { enabled: false },
     gateways: {},

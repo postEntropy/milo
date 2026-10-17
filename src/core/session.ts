@@ -690,6 +690,12 @@ export class Session {
     // request came from" then means that chat.
     const origin = opts?.origin ?? this.scope
 
+    // Where this turn's own first message will land, and how long the turn took to
+    // say anything: reasoning, prose and a call are all an output, and the first of
+    // them is what the line over a thought counts the wait to.
+    const firstNew = this.messages.length
+    let firstOutputMs: number | undefined
+
     let errored = false
 
     try {
@@ -757,6 +763,14 @@ export class Session {
         genui: draws,
         trace: this.runTrace('chat'),
       })) {
+        // Measured once, on the turn's first output of any kind, so a session read
+        // back reports the same wait the surface that watched it drew.
+        if (
+          firstOutputMs === undefined &&
+          (event.type === 'text-delta' || event.type === 'reasoning-delta' || event.type === 'tool-start')
+        ) {
+          firstOutputMs = Date.now() - startedAt
+        }
         if (event.type === 'error') errored = true
         else if (event.type === 'text-delta') answer += event.delta
         else if (event.type === 'reasoning-delta') reasoning += event.delta
@@ -802,6 +816,19 @@ export class Session {
         yield { type: 'error', message: errorMessage(error) }
       }
     } finally {
+      // The wait belongs to the turn's first message, and it is set before the persist
+      // below so a session read back carries the number the live turn drew. Only a wait
+      // worth reporting is written — the same under-a-second rule the surfaces draw by —
+      // so a reload says exactly what the live turn said and nothing more.
+      const first = this.messages[firstNew]
+      if (
+        firstOutputMs !== undefined &&
+        firstOutputMs >= 1000 &&
+        first?.role === 'assistant' &&
+        first.thoughtMs === undefined
+      ) {
+        first.thoughtMs = firstOutputMs
+      }
       try {
         // Runs even when the consumer aborts, so the partial turn is on disk.
         await this.persist()

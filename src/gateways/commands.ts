@@ -106,7 +106,7 @@ const HELP = [
   '/mode ask|auto|yolo — permission mode, saved for every surface',
   '/yolo — toggle yolo mode',
   '/tools full|name|off — how much of each tool call to show',
-  '/thinking on|off — show the model\'s reasoning (display only; /effort is what changes how it thinks)',
+  '/thinking expanded|collapsed — open the model\'s reasoning under the question or leave it folded (display only; /effort is what changes how it thinks)',
   "/effort low|medium|high — how hard the model thinks (the one that costs)",
   '/provider [id] — the provider the install answers with: list them, or switch to one',
   "/model [id] — the model the install answers with: list the current provider's, or switch to one",
@@ -503,30 +503,31 @@ export async function handleCommand(
         return { handled: true, reply: 'Display settings are not available on this surface.' }
       }
       const asked = argument.trim().toLowerCase()
-      const current = context.display?.thinking ?? 'on'
-      // `brief`/`full` are what this command used to take, and `true`/`false`
-      // what the config used to hold: all four mean showing the reasoning or not.
+      const current = context.display?.thinking ?? 'expanded'
+      // `on`/`brief`/`full` and `true` are what this command used to take for an
+      // open thought, `off`/`false` for a folded one: all of them mean the same two.
       const level =
-        asked === 'off' || asked === 'false'
-          ? 'off'
-          : asked === 'on' || asked === 'true' || asked === 'brief' || asked === 'full'
-            ? 'on'
+        asked === 'collapsed' || asked === 'off' || asked === 'false'
+          ? 'collapsed'
+          : asked === 'expanded' || asked === 'on' || asked === 'true' || asked === 'brief' || asked === 'full'
+            ? 'expanded'
             : undefined
       if (!level) {
         return {
           handled: true,
           reply:
-            `Thinking display: ${current}. This turns the showing of the reasoning on or off — ` +
-            `the model thinks either way, and /effort is what changes that. Use /thinking on|off`,
+            `Thinking display: ${current}. This is how the reasoning is drawn — expanded opens it ` +
+            `under the question, collapsed keeps it folded there, a click away — the model thinks ` +
+            `either way, and /effort is what changes that. Use /thinking expanded|collapsed`,
         }
       }
       context.persistDisplay({ thinking: level })
       return {
         handled: true,
         reply:
-          level === 'off'
-            ? "Thinking display: off — none of the model's reasoning is shown. Saved for every surface. The model still thinks."
-            : "Thinking display: on — the reasoning is shown under the question. Saved for every surface.",
+          level === 'collapsed'
+            ? 'Thinking display: collapsed — the reasoning stays folded under the question, and opens on a click. Saved for every surface. The model still thinks.'
+            : 'Thinking display: expanded — the reasoning opens under the question. Saved for every surface.',
       }
     }
 

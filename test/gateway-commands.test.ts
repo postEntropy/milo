@@ -598,13 +598,13 @@ describe('handleCommand', () => {
   it('lists the display commands in help', async () => {
     const reply = (await handleCommand('/help', {})).reply ?? ''
     expect(reply).toContain('/tools full|name|off')
-    expect(reply).toContain('/thinking on|off')
+    expect(reply).toContain('/thinking expanded|collapsed')
   })
 
   it('sets how much of a tool call to show, and writes it down', async () => {
     const saved: Partial<DisplayConfig>[] = []
     const result = await handleCommand('/tools name', {
-      display: { tools: 'full', thinking: 'on' },
+      display: { tools: 'full', thinking: 'expanded' },
       persistDisplay: (patch) => saved.push(patch),
     })
 
@@ -614,7 +614,7 @@ describe('handleCommand', () => {
 
   it('says a failure is still reported when tools are off', async () => {
     const result = await handleCommand('/tools off', {
-      display: { tools: 'full', thinking: 'on' },
+      display: { tools: 'full', thinking: 'expanded' },
       persistDisplay: () => {},
     })
 
@@ -624,7 +624,7 @@ describe('handleCommand', () => {
   it('reports the current level for a bad argument', async () => {
     const saved: Partial<DisplayConfig>[] = []
     const result = await handleCommand('/tools nonsense', {
-      display: { tools: 'name', thinking: 'off' },
+      display: { tools: 'name', thinking: 'collapsed' },
       persistDisplay: (patch) => saved.push(patch),
     })
 
@@ -633,26 +633,26 @@ describe('handleCommand', () => {
     expect(saved).toEqual([])
   })
 
-  it('shows and hides the reasoning, and reports it when asked for nothing', async () => {
+  it('folds and opens the reasoning, and reports it when asked for nothing', async () => {
     const saved: Partial<DisplayConfig>[] = []
     const context = {
-      display: { tools: 'full' as const, thinking: 'on' as const },
+      display: { tools: 'full' as const, thinking: 'expanded' as const },
       persistDisplay: (patch: Partial<DisplayConfig>) => saved.push(patch),
     }
 
-    // No argument reports the state — and says what the command controls: the
-    // showing of the reasoning, not the reasoning itself.
+    // No argument reports the state — and says what the command controls: how the
+    // reasoning is drawn, not the reasoning itself.
     const reply = (await handleCommand('/thinking', context)).reply ?? ''
-    expect(reply).toContain('Thinking display: on')
+    expect(reply).toContain('Thinking display: expanded')
     expect(reply).toContain('the model thinks either way')
     expect(saved).toEqual([])
 
+    await handleCommand('/thinking collapsed', context)
+    await handleCommand('/thinking expanded', context)
+    // `off` is what this command used to take to hide it: it still folds the thought.
     await handleCommand('/thinking off', context)
-    await handleCommand('/thinking on', context)
-    // `brief` and `full` are what this command used to take: both showed it.
-    await handleCommand('/thinking full', context)
 
-    expect(saved).toEqual([{ thinking: 'off' }, { thinking: 'on' }, { thinking: 'on' }])
+    expect(saved).toEqual([{ thinking: 'collapsed' }, { thinking: 'expanded' }, { thinking: 'collapsed' }])
   })
 
   it('takes the reasoning-effort levels, and reports them when asked for nothing', async () => {
@@ -701,13 +701,13 @@ describe('handleCommand', () => {
     const saved: Partial<DisplayConfig>[] = []
     const locked = displayLockMessage({ allowlist: ['1', '2'] })!
     const context = {
-      display: { tools: 'full' as const, thinking: 'on' as const },
+      display: { tools: 'full' as const, thinking: 'expanded' as const },
       persistDisplay: (patch: Partial<DisplayConfig>) => saved.push(patch),
       displayLocked: locked,
     }
 
     expect((await handleCommand('/tools off', context)).reply).toBe(locked)
-    expect((await handleCommand('/thinking off', context)).reply).toBe(locked)
+    expect((await handleCommand('/thinking collapsed', context)).reply).toBe(locked)
     expect(saved).toEqual([])
   })
 
@@ -735,10 +735,10 @@ describe('handleCommand', () => {
   })
 
   it('reports display settings in /status', async () => {
-    const reply = (await handleCommand('/status', { display: { tools: 'off', thinking: 'off' } }))
+    const reply = (await handleCommand('/status', { display: { tools: 'off', thinking: 'collapsed' } }))
       .reply
     expect(reply).toContain('Tools: off')
-    expect(reply).toContain('thinking display: off')
+    expect(reply).toContain('thinking display: collapsed')
     expect(reply).toContain('effort: medium')
   })
 

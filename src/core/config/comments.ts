@@ -46,7 +46,7 @@ export const CONFIG_NOTES: Record<string, string> = {
 
   display: 'How much of a turn the surfaces show. One setting for every surface.',
   'display.tools': 'full, name or off — how much of each tool call is shown.',
-  'display.thinking': "on or off — whether the model's reasoning is shown. Display only.",
+  'display.thinking': "expanded or collapsed — whether the model's reasoning opens under the question or sits folded there, a click away. Display only.",
 
   gateways: 'The chat surfaces. The browser chat is served by `milo serve` and lives under `web`.',
   web: 'The browser chat: whether it is served, and where it listens.',

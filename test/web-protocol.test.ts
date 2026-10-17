@@ -46,8 +46,8 @@ describe('web protocol', () => {
 
   it('sends tool calls as events, not folded into the reply text', () => {
     output.length = 0
-    displayEvent({ type: 'tool-start', id: '1', name: 'read_file', args: { path: 'a.txt' } }, 'turn', { tools: 'full', thinking: 'on' }, send as never)
-    displayEvent({ type: 'tool-start', id: '2', name: 'read_file', args: { path: 'a.txt' } }, 'turn', { tools: 'name', thinking: 'on' }, send as never)
+    displayEvent({ type: 'tool-start', id: '1', name: 'read_file', args: { path: 'a.txt' } }, 'turn', { tools: 'full', thinking: 'expanded' }, send as never)
+    displayEvent({ type: 'tool-start', id: '2', name: 'read_file', args: { path: 'a.txt' } }, 'turn', { tools: 'name', thinking: 'expanded' }, send as never)
     expect(output).toMatchObject([
       { event: { type: 'tool-start', name: 'read_file', args: { path: 'a.txt' } } },
       { event: { type: 'tool-start', name: 'read_file', args: undefined } },
@@ -56,18 +56,17 @@ describe('web protocol', () => {
 
   it('keeps failures visible when tool lines are hidden', () => {
     output.length = 0
-    displayEvent({ type: 'tool-start', id: '1', name: 'write_file', args: { path: 'a.txt' } }, 'turn', { tools: 'off', thinking: 'on' }, send as never)
-    displayEvent({ type: 'tool-end', id: '1', name: 'write_file', result: 'failed', isError: true }, 'turn', { tools: 'off', thinking: 'on' }, send as never)
+    displayEvent({ type: 'tool-start', id: '1', name: 'write_file', args: { path: 'a.txt' } }, 'turn', { tools: 'off', thinking: 'expanded' }, send as never)
+    displayEvent({ type: 'tool-end', id: '1', name: 'write_file', result: 'failed', isError: true }, 'turn', { tools: 'off', thinking: 'expanded' }, send as never)
     expect(output).toHaveLength(1)
     expect(output[0]).toMatchObject({ event: { type: 'tool-end', name: 'write_file', isError: true } })
   })
 
-  it('hides reasoning only when configured off', () => {
+  it('lets a thought ride either way, so a folded one can still be opened', () => {
     output.length = 0
-    displayEvent({ type: 'reasoning-delta', delta: 'secret thought' }, 'turn', { tools: 'full', thinking: 'off' }, send as never)
-    expect(output).toHaveLength(0)
-    displayEvent({ type: 'text-delta', delta: 'answer' }, 'turn', { tools: 'full', thinking: 'off' }, send as never)
-    expect(output).toMatchObject([{ event: { delta: 'answer' } }])
+    displayEvent({ type: 'reasoning-delta', delta: 'secret thought' }, 'turn', { tools: 'full', thinking: 'collapsed' }, send as never)
+    displayEvent({ type: 'text-delta', delta: 'answer' }, 'turn', { tools: 'full', thinking: 'collapsed' }, send as never)
+    expect(output).toMatchObject([{ event: { delta: 'secret thought' } }, { event: { delta: 'answer' } }])
   })
 
   it('carries the frame that says a session began or ended a turn', () => {
