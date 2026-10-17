@@ -38,7 +38,7 @@ const schema = z.object({
     .string()
     .optional()
     .describe(
-      'What to call the routine — two or three words, e.g. "daily briefing" or "deploy status". This is how the person refers to it and how its message is signed in the chat. Absent: the first words of the prompt are used.',
+      'What to call the routine — a short title of two or three words, capitalised, e.g. "Daily briefing" or "Deploy status", never the sentence it was asked as. Name every routine you create rather than leaving this out: the name is how the person refers to it and how its message is signed in the chat. Absent: the first words of the prompt are used.',
     ),
   every: z
     .string()

@@ -196,8 +196,8 @@ describe('milo routines', () => {
       '123',
     )
 
-    expect(readRoutines()[0]!.name).toBe('look at the repo and tell me what moved…')
-    expect(lines.join('\n')).toContain('look at the repo and tell me what moved…')
+    expect(readRoutines()[0]!.name).toBe('Look at the repo and tell me what moved…')
+    expect(lines.join('\n')).toContain('Look at the repo and tell me what moved…')
   })
 
   it('insists on a destination, because a timer has no chat of its own', async () => {

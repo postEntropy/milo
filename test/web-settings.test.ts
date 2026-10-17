@@ -257,7 +257,8 @@ describe('web Settings routines', () => {
       every: '2h',
       target: { gateway: 'web', conversationId: CONVERSATION },
     }) as { routine: { id: string; name: string } }
-    expect(created.routine.name).toContain('look at the repo')
+    // Unnamed at creation, so it takes the prompt's own first words — as a name reads.
+    expect(created.routine.name).toBe('Look at the repo and tell me what moved')
 
     type View = { id: string; whenLabel: string; targetLabel: string; enabled: boolean; nextRunAt: number | null }
     let listed = await settings.handle('routines') as View[]

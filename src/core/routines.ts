@@ -325,11 +325,21 @@ export function describeTarget(target: RoutineTarget): string {
  */
 export function nameFor(prompt: string, max = 42): string {
   const clean = prompt.replace(/\s+/g, ' ').trim().replace(/[.!?;:]+$/, '')
-  if (clean.length <= max) return clean
+  if (clean.length <= max) return capitalised(clean)
   const cut = clean.slice(0, max)
   const space = cut.lastIndexOf(' ')
   // Cut on a word when there is one near the end; a mid-word break reads worse.
-  return `${(space > max * 0.5 ? cut.slice(0, space) : cut).trimEnd()}…`
+  return capitalised(`${(space > max * 0.5 ? cut.slice(0, space) : cut).trimEnd()}…`)
+}
+
+/**
+ * The same words with a capital first letter, so what falls back to the prompt
+ * still reads as a name on the row and in the chat that it signs. Only the first
+ * letter: the rest of the prompt's own capitalisation is the person's.
+ */
+function capitalised(words: string): string {
+  const first = words.slice(0, 1)
+  return first.toUpperCase() + words.slice(1)
 }
 
 /** `2026-09-26 08:00`, local — how a next run reads in a list. */

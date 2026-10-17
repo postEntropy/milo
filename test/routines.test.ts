@@ -491,7 +491,7 @@ describe('the store', () => {
     await writeRoutines([])
     const added = await addRoutine(routine({ name: 'briefing' }))
 
-    expect((await updateRoutine(added.id, { name: '   ' }))?.name).toBe('look at the repo')
+    expect((await updateRoutine(added.id, { name: '   ' }))?.name).toBe('Look at the repo')
   })
 
   it('writes down the run so a restart can tell', async () => {
@@ -543,16 +543,18 @@ describe('the store', () => {
     expect(raw).toContain('"briefing"')
   })
 
-  it('names a routine from its prompt, on a word boundary', async () => {
+  it('names a routine from its prompt, on a word boundary, as a name reads', async () => {
     await writeRoutines([])
     const added = await addRoutine(
       routine({ prompt: 'look at the repo and tell me what moved since yesterday' }),
     )
 
-    expect(added.name).toBe('look at the repo and tell me what moved…')
-    // A short prompt is its own name, without the trailing punctuation.
-    expect(nameFor('check the deploy.')).toBe('check the deploy')
-    expect(nameFor('say hi')).toBe('say hi')
+    expect(added.name).toBe('Look at the repo and tell me what moved…')
+    // A short prompt is its own name, without the trailing punctuation, capitalised —
+    // the first letter only, so the person's own capitalisation inside it is kept.
+    expect(nameFor('check the deploy.')).toBe('Check the deploy')
+    expect(nameFor('say hi')).toBe('Say hi')
+    expect(nameFor('check the NGU Idle autosave')).toBe('Check the NGU Idle autosave')
   })
 
   it('keeps the name it was given rather than deriving one', async () => {
