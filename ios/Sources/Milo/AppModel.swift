@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import SwiftUI
 import UIKit
 
 /**
@@ -209,9 +210,11 @@ final class AppModel {
     /// is running — one hold for the whole outage.
     private static let lineDelay: Duration = .seconds(2)
     private var lineWork: Task<Void, Never>?
-    /// The words a fork owes: sent once the socket is speaking to the copy, the way
-    /// the browser's own regenerate does it.
+    /// The words a fork or an early send on a fresh session owes: sent once the socket is
+    /// speaking to the new session.
     private var owed: String?
+    private var owedIntent: ClientFrame.Intent?
+    private var reopening = false
 
     private var account: Account? {
         if case .chat(let account) = phase { return account }
@@ -253,13 +256,26 @@ final class AppModel {
     private func moved(to state: MiloClient.State) {
         connection = state
         switch state {
-        case .online, .idle:
+        case .online:
+            clearHold()
+            Task { await refreshTaskLists() }
+            Task { await refreshRoutines() }
+        case .idle:
             clearHold()
         case .refused, .unreadable:
             // The daemon spoke, so this is an answer rather than an outage: it is said at
             // once, and `connectionLine` reads its words — a reason it gave, or this app's
             // own account of a frame it could not make out — straight off the state.
             clearHold()
+            if reopening {
+                reopening = false
+                if owed != nil {
+                    owed = nil
+                    owedIntent = nil
+                    busy = false
+                    unsent()
+                }
+            }
         case .connecting, .offline:
             // Already holding: this is the same outage passing through another state,
             // and the line reads whatever the socket is doing when the hold expires.
@@ -294,6 +310,7 @@ final class AppModel {
         // app starts on a new session, and a conversation the daemon is still bound to
         // — one with a turn that outlived the app running on it — would otherwise
         // replay that session instead of a new one.
+        reopening = true
         var next = account
         next.conversationId = AccountStore.freshConversationId()
         do {
@@ -402,6 +419,18 @@ final class AppModel {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         messages.append(Message(isUser: true, parts: [.text(trimmed)], attachments: [], streaming: false))
+        // If a fresh session is still completing its bind or socket handshake, hold the
+        // outgoing message for `.ready` so the bubble stays in place and leaves as soon
+        // as the socket opens.
+        if reopening {
+            owed = trimmed
+            owedIntent = intent
+            if !trimmed.hasPrefix("/") {
+                busy = true
+                askToStayOn()
+            }
+            return
+        }
         // A slash command goes as its own frame, never as a turn the model answers: the
         // daemon runs it out of band and replies with a `command-result`. Sent as a turn
         // it would be handled inside the turn body and leave an empty row beside the
@@ -569,7 +598,19 @@ final class AppModel {
 
     func newSession() async {
         guard let account else { return }
-        await openFresh(account) { try await MiloApi.newSession($0) }
+        // Clear the screen in the same frame the person pressed New session, so the old
+        // thread does not linger while the drawer closes and the keyboard rises.
+        reopening = true
+        owed = nil
+        owedIntent = nil
+        resetSessionState()
+        let opened = await openFresh(account) { try await MiloApi.newSession($0) }
+        if !opened {
+            reopening = false
+            owed = nil
+            owedIntent = nil
+            client.connect(to: account)
+        }
     }
 
     @discardableResult
@@ -709,6 +750,7 @@ final class AppModel {
         guard let account, !sessionId.isEmpty else { return }
         let from = sessionId
         owed = prompt
+        owedIntent = nil
         var next = account
         next.conversationId = AccountStore.freshConversationId()
         do {
@@ -722,9 +764,8 @@ final class AppModel {
         }
     }
 
-    /// After the bound session changes, the socket is reopened so the daemon
-    /// replays the session that is actually bound now.
-    private func reopen(_ account: Account) async {
+    /// Clears the visible state of the session being left before opening the next one.
+    private func resetSessionState() {
         client.disconnect()
         messages = []
         sessionId = ""
@@ -746,6 +787,15 @@ final class AppModel {
         // handshake brings the new session's own. The preference is left alone — it says
         // what this person wants, not what that session was showing.
         panel = nil
+    }
+
+    /// After the bound session changes, the socket is reopened so the daemon
+    /// replays the session that is actually bound now.
+    private func reopen(_ account: Account) async {
+        if !reopening {
+            reopening = true
+            resetSessionState()
+        }
         client.connect(to: account)
     }
 
@@ -1362,17 +1412,21 @@ final class AppModel {
     private func received(_ frame: ServerFrame) {
         switch frame {
         case .ready(let ready):
-            // The whole session, so a reconnect replaces rather than grows it.
-            messages = ready.messages.map {
-                Message(
-                    isUser: $0.role == "user",
-                    parts: $0.parts,
-                    attachments: $0.attachments ?? [],
-                    streaming: false,
-                    thought: nil,
-                    raw: $0.raw,
-                    rawNoOutput: $0.rawNoOutput
-                )
+            let waitingForFirstSend = reopening && owed != nil && ready.messages.isEmpty && !messages.isEmpty
+            reopening = false
+            if !waitingForFirstSend, (!messages.isEmpty || !ready.messages.isEmpty) {
+                // The whole session, so a reconnect replaces rather than grows it.
+                messages = ready.messages.map {
+                    Message(
+                        isUser: $0.role == "user",
+                        parts: $0.parts,
+                        attachments: $0.attachments ?? [],
+                        streaming: false,
+                        thought: nil,
+                        raw: $0.raw,
+                        rawNoOutput: $0.rawNoOutput
+                    )
+                }
             }
             modelName = ready.model
             providerId = ready.provider
@@ -1401,10 +1455,21 @@ final class AppModel {
             if ready.activeTurn != nil {
                 messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil, waiting: true))
             }
-            // The words a fork owes go out now that the socket is speaking to the copy.
+            // The words a fork or an early send owes go out now that the socket is ready.
             if let owed {
+                let intent = owedIntent
                 self.owed = nil
-                send(owed)
+                self.owedIntent = nil
+                if waitingForFirstSend {
+                    if owed.hasPrefix("/") {
+                        if !client.send(.command(text: owed)) { unsent() }
+                    } else {
+                        busy = true
+                        if !client.send(.send(text: owed, intent: intent)) { unsent() }
+                    }
+                } else {
+                    send(owed, intent: intent)
+                }
             }
             // The routines are read at connect, so the reminders are scheduled from what
             // is actually there before the screen is ever opened.
@@ -1413,7 +1478,9 @@ final class AppModel {
             busy = true
             began = false
             turnStarted = Date()
-            messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil, waiting: true))
+            withAnimation(SettlesIn.motion) {
+                messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil, waiting: true))
+            }
         case .event(_, let event):
             apply(event)
         case .permission(let id, let request, let expiresAt):

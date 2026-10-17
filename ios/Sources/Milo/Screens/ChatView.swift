@@ -95,7 +95,10 @@ struct ChatView: View {
     /// floor.
     @State private var room: CGFloat = 1
     /// The thread's own box, what the words in it take before the room is added, and where the
-    /// send's own message sits inside it: what the room is measured from.
+    /// send's own message sits inside it: what the room is measured from. `boxHeight` follows
+    /// the live viewport height even while the keyboard is up so the empty state always rests
+    /// against the composer without flipping the scroll view's alignment anchor on send.
+    @State private var boxHeight: CGFloat = 0
     @State private var threadHeight: CGFloat = 0
     @State private var bare: CGFloat = 0
     @State private var sentTop: CGFloat?
@@ -589,15 +592,19 @@ struct ChatView: View {
     private func send(_ intent: ClientFrame.Intent = .queue) {
         guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         let outgoing = (quote.map(quotedLead) ?? "") + draft
-        draft = ""
-        quote = nil
         if let upToTurn = editing {
+            draft = ""
+            quote = nil
             editing = nil
             Task { await model.regenerate(prompt: outgoing, upToTurn: upToTurn) }
         } else {
             // The arrival the bubble is drawn with is this transaction: a send moves the
             // control that carried it the way the thread moves, so it reads as one motion.
-            withAnimation(SettlesIn.motion) { model.send(outgoing, intent: intent) }
+            withAnimation(SettlesIn.motion) {
+                draft = ""
+                quote = nil
+                model.send(outgoing, intent: intent)
+            }
             // Named here, inside the same update the words went in with: the row is told where
             // it sits as it is laid out, and a name set any later would arrive after the
             // measuring it is there for.
@@ -613,7 +620,17 @@ struct ChatView: View {
     /// clearing the previous turn's measurement so the room waits for this row's own.
     private func armSend(_ id: UUID) {
         guard sent != id else { return }
-        if model.messages.count == 1 { bare = 0 }
+        // The first message in a session is already at the top of the thread; opening extra
+        // room or calling scrollTo while the keyboard drops would only fight the scroll box.
+        if model.messages.count == 1 {
+            bare = 0
+            sent = nil
+            sentTop = nil
+            placed = true
+            if room != 1 { room = 1 }
+            following = true
+            return
+        }
         sent = id
         sentTop = nil
         placed = false
@@ -690,34 +707,53 @@ struct ChatView: View {
                 // would leave the room unmeasured whenever the end of the thread begins
                 // below the fold.
                 VStack(alignment: .leading, spacing: MiloTheme.Space.six) {
-                    LazyVStack(alignment: .leading, spacing: MiloTheme.Space.six) {
-                        // The empty state wears an id of its own, so a session that opens can
-                        // put the scroll back on it — see the reset below.
-                        if model.messages.isEmpty { WelcomeView(claimed: held == true).id(Self.threadTop) }
-                        ForEach(model.messages) { message in
-                            let isSent = message.id == sent
-                            let space = Self.threadSpace
-                            MessageRow(
-                                message: message,
-                                turn: turns[message.id] ?? 1,
-                                regenerate: regeneration(for: message),
-                                onQuote: quoteIt,
-                                onEdit: editMessage
-                            )
-                            // A send is what draws this: the words rise into the thread, and
-                            // everything else that lands in it is simply there — see
-                            // `SettlesIn`.
-                            .transition(SettlesIn())
-                            // Named so a send can put these words at the top of the thread — and,
-                            // for the message the send just put in, told where it sits in the
-                            // thread, which is what the room under the words is measured from.
-                            .id(message.id)
-                            .onGeometryChange(for: CGFloat?.self) { geometry in
-                                isSent ? geometry.frame(in: .named(space)).minY : nil
-                            } action: { _, top in
-                                guard let top else { return }
-                                sentTop = top
-                                sizeRoom(proxy)
+                    // The empty state and the lazy stack share one top-leading origin rather
+                    // than stacking vertically: when the first message is sent inside
+                    // `SettlesIn.motion`, the welcome fades out in place while the first row
+                    // begins at the top of the thread from frame zero instead of sitting below
+                    // the disappearing welcome for 380ms and snapping up at the end.
+                    ZStack(alignment: .topLeading) {
+                        if model.messages.isEmpty {
+                            // The empty state is the thread's only content, but the outer stack
+                            // still leaves its own gap before the one-point end sentinel below it;
+                            // pulling back after the frame has aligned the suggestions to the
+                            // bottom keeps the last line resting above the composer instead of
+                            // sliding behind it.
+                            WelcomeView(claimed: held == true)
+                                .frame(
+                                    minHeight: max(0, boxHeight - MiloTheme.Space.four - 1),
+                                    alignment: .bottom
+                                )
+                                .padding(.bottom, -MiloTheme.Space.six)
+                                .transition(.opacity)
+                                .id(Self.threadTop)
+                        }
+                        LazyVStack(alignment: .leading, spacing: MiloTheme.Space.six) {
+                            ForEach(model.messages) { message in
+                                let isSent = message.id == sent
+                                let space = Self.threadSpace
+                                MessageRow(
+                                    message: message,
+                                    turn: turns[message.id] ?? 1,
+                                    regenerate: regeneration(for: message),
+                                    onQuote: quoteIt,
+                                    onEdit: editMessage
+                                )
+                                // A send is what draws this: the words rise into the thread, and
+                                // everything else that lands in it is simply there — see
+                                // `SettlesIn`.
+                                .transition(SettlesIn())
+                                // Named so a send can put these words at the top of the thread — and,
+                                // for the message the send just put in, told where it sits in the
+                                // thread, which is what the room under the words is measured from.
+                                .id(message.id)
+                                .onGeometryChange(for: CGFloat?.self) { geometry in
+                                    isSent ? geometry.frame(in: .named(space)).minY : nil
+                                } action: { _, top in
+                                    guard let top else { return }
+                                    sentTop = top
+                                    sizeRoom(proxy)
+                                }
                             }
                         }
                     }
@@ -740,12 +776,10 @@ struct ChatView: View {
             // The thread hangs from its own top: a send puts the person's words up there and
             // the reply writes itself downward in the room below. What has grown past the
             // screen is carried along as it is written, while the person is at the end — see
-            // `following`. A screen with no words in it still rests against the composer, the
-            // ways in being the field's companion rather than a banner on an empty page. The
-            // role that places content shorter than the room is named on its own rather than
-            // left to the other anchor to imply.
-            .defaultScrollAnchor(model.messages.isEmpty ? .bottom : .top)
-            .defaultScrollAnchor(model.messages.isEmpty ? .bottom : .top, for: .alignment)
+            // `following`. Keeping the anchor fixed at `.top` avoids flipping the scroll view's
+            // alignment mid-send when the first message arrives.
+            .defaultScrollAnchor(.top)
+            .defaultScrollAnchor(.top, for: .alignment)
             .scrollDismissesKeyboard(.interactively)
             // Frozen the moment the card has claimed the drag: a sideways swipe that pulled the
             // thread along would creep the words under the card as it is carried aside. Gated on
@@ -792,17 +826,15 @@ struct ChatView: View {
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 geometry.containerSize.height
             } action: { _, height in
+                boxHeight = height
                 // While the keyboard is up for typing, the box is temporarily shorter by
                 // the keyboard's height; a send drops the keyboard at once, so keeping the
                 // full height means the room is already sized for the open screen the
                 // message is landing on. If the box grows further as the keyboard finishes
-                // clearing, the room grows with it and re-seats the message at the top.
+                // clearing, the room grows with it without re-triggering the scroll animation
+                // on every frame.
                 guard (!composing && placed) || height > threadHeight else { return }
-                let grew = height > threadHeight
                 threadHeight = height
-                if grew, let sentTop, following, bare < sentTop + height {
-                    placed = false
-                }
                 sizeRoom(proxy)
             }
             // The person's own move, read off the platform's phase rather than guessed at
@@ -831,6 +863,7 @@ struct ChatView: View {
             .onChange(of: model.messages.last?.id) { _, _ in
                 guard let words = model.messages.last, words.isUser else { return }
                 let id = words.id
+                if composing { composing = false }
                 armSend(id)
                 // In a long thread where the person was reading back, the new row lands below
                 // the visible window where a lazy stack will not measure it until the scroll
@@ -846,7 +879,12 @@ struct ChatView: View {
             // outside the visible region — where a lazy stack draws nothing, so the screen
             // comes out blank. Putting the scroll back on it makes the welcome appear every
             // time, and a thread with words in it takes over from there as it grows.
-            .onChange(of: model.sessionId) { _, id in
+            .onChange(of: model.sessionId) { oldId, id in
+                // When the handshake assigns the id to a fresh session the person has already
+                // sent a first message into, leave that message's scroll state intact.
+                if oldId.isEmpty, !model.messages.isEmpty, !model.openedFromNotice {
+                    return
+                }
                 // The room is measured off the last message, and the last message is the one
                 // session's; the next thread measures its own before the room means anything.
                 bare = 0
@@ -1016,6 +1054,7 @@ struct ChatView: View {
                     .accessibilityLabel(model.panelOpen ? "Hide the panel" : "Show the panel")
                 }
             }
+            .frame(minHeight: 46)
             ConnectionPill()
         }
         .padding(.horizontal, MiloTheme.margin)
@@ -1143,12 +1182,6 @@ struct WelcomeView: View {
             .animation(.easeInOut(duration: 0.3), value: model.ideas)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        // The empty state is the thread's only content, but the stack still leaves its
-        // own gap before the one-point end sentinel below it — and with the whole block
-        // anchored to the bottom, that gap comes out as air between the last way in and
-        // the field. Pulled back by exactly it, so the ways in rest against the composer
-        // they feed; a thread with messages keeps its spacing untouched.
-        .padding(.bottom, -MiloTheme.Space.six)
     }
 
     /// One way in: its mark, its words, and what a press does — the prompt said as a
@@ -1188,4 +1221,3 @@ struct WelcomeView: View {
         }
     }
 }
-
