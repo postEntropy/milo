@@ -209,16 +209,6 @@ private struct RoutineList: View {
                                         .font(MiloTheme.Text.small)
                                         .foregroundStyle(MiloTheme.foreground2)
                                         .lineLimit(3)
-                                    HStack {
-                                        Text("Open run")
-                                            .font(MiloTheme.Text.meta.weight(.medium))
-                                            .foregroundStyle(MiloTheme.accent)
-                                        Spacer()
-                                        Image(systemName: "arrow.up.right")
-                                            .font(MiloTheme.Text.meta.weight(.semibold))
-                                            .foregroundStyle(MiloTheme.muted)
-                                    }
-                                    .padding(.top, MiloTheme.Space.one)
                                 }
                                 .padding(MiloTheme.Space.four)
                                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -357,6 +347,9 @@ private struct RoutineDetail: View {
     @State private var runError: String?
     @State private var working = false
     @State private var confirmRemove = false
+    /// Whether the whole of what the routine was asked is open on its card, rather than
+    /// the first lines of it.
+    @State private var promptOpen = false
 
     private static let page = 20
     /// One height for the controls on this page, so the actions read as one block instead of
@@ -387,11 +380,22 @@ private struct RoutineDetail: View {
                             .font(MiloTheme.Text.title)
                             .foregroundStyle(MiloTheme.foreground)
                             .fixedSize(horizontal: false, vertical: true)
+                        // The prompt is what the routine was asked to do, and three lines of it
+                        // are not always the whole of it: the press opens it, the same handle
+                        // the thought and a chain of calls wear.
                         if !routine.prompt.isEmpty && routine.name != nil {
-                            Text(routine.prompt)
-                                .font(MiloTheme.Text.base)
-                                .foregroundStyle(MiloTheme.muted)
-                                .lineLimit(3)
+                            Button {
+                                withAnimation(.easeInOut(duration: 0.22)) { promptOpen.toggle() }
+                            } label: {
+                                Text(routine.prompt)
+                                    .font(MiloTheme.Text.base)
+                                    .foregroundStyle(MiloTheme.muted)
+                                    .lineLimit(promptOpen ? nil : 3)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(PressableStyle())
+                            .accessibilityLabel(promptOpen ? "Show less of the prompt" : "Read the whole prompt")
                         }
                         Label(routine.targetLabel, systemImage: "paperplane")
                             .font(MiloTheme.Text.small)
@@ -480,8 +484,9 @@ private struct RoutineDetail: View {
                         .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
                 }
 
-                // The runs it has made, newest first — and, under them, the one being read,
-                // marked on its own row so the two cannot come apart.
+                // The runs it has made, newest first. Each row is a drawer: the run is read
+                // where its name is, rather than in a place of its own under the list, so
+                // what is open and which run it is cannot come apart.
                 VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
                     Text(total > 0 ? "Runs · \(total)" : "Runs")
                         .font(MiloTheme.Text.title)
@@ -513,55 +518,13 @@ private struct RoutineDetail: View {
                     } else {
                         VStack(spacing: MiloTheme.Space.two) {
                             ForEach(Array(runs.enumerated()), id: \.element.id) { index, entry in
-                                Button {
-                                    openRun = entry.id
-                                } label: {
-                                    HStack {
-                                        Text(index == 0 ? "Latest run" : "Run \(total - index)")
-                                            .font(MiloTheme.Text.body)
-                                            .foregroundStyle(MiloTheme.foreground)
-                                        Spacer(minLength: MiloTheme.Space.two)
-                                        Text(RelativeTime.when(entry.at))
-                                            .font(MiloTheme.Text.small)
-                                            .foregroundStyle(MiloTheme.muted)
-                                    }
-                                    .padding(MiloTheme.Space.four)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(
-                                        entry.id == openRun ? MiloTheme.surfaceRaised : MiloTheme.surface,
-                                        in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg)
-                                    )
-                                }
-                                .buttonStyle(PressableStyle())
+                                runDrawer(entry, index: index)
                             }
                             if runs.count < total {
                                 Button("Show more") { Task { await loadRuns(reset: false) } }
                                     .font(MiloTheme.Text.small)
                                     .buttonStyle(.glass)
                             }
-                        }
-                    }
-
-                    if openRun != nil {
-                        if let runError {
-                            Text(runError)
-                                .font(MiloTheme.Text.small)
-                                .foregroundStyle(MiloTheme.danger)
-                        } else if let run {
-                            ForEach(Array(run.enumerated()), id: \.element.id) { index, message in
-                                MessageRow(
-                                    message: message,
-                                    turn: index + 1,
-                                    regenerate: nil,
-                                    onQuote: { _ in },
-                                    onEdit: { _, _ in },
-                                    readOnly: true
-                                )
-                            }
-                        } else {
-                            Text("Reading run…")
-                                .font(MiloTheme.Text.small)
-                                .foregroundStyle(MiloTheme.muted)
                         }
                     }
                 }
@@ -591,6 +554,77 @@ private struct RoutineDetail: View {
         .task(id: openRun) { await loadRun() }
     }
 
+    /// One run: its own row, and — the drawer open — the run itself under it. One drawer
+    /// stands open at a time and the row that opened it is the one that closes it, so a run
+    /// is read where it is listed rather than in a fixed place of its own further down.
+    @ViewBuilder
+    private func runDrawer(_ entry: RoutineRun, index: Int) -> some View {
+        let open = entry.id == openRun
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.22)) { openRun = open ? nil : entry.id }
+            } label: {
+                HStack(spacing: MiloTheme.Space.two) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(MiloTheme.muted)
+                        .rotationEffect(.degrees(open ? 90 : 0))
+                    Text(index == 0 ? "Latest run" : "Run \(total - index)")
+                        .font(MiloTheme.Text.body)
+                        .foregroundStyle(MiloTheme.foreground)
+                    Spacer(minLength: MiloTheme.Space.two)
+                    Text(RelativeTime.when(entry.at))
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+                .padding(MiloTheme.Space.four)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    open ? MiloTheme.surfaceRaised : MiloTheme.surface,
+                    in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg)
+                )
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableStyle())
+            .accessibilityLabel(open ? "Hide this run" : "Read this run")
+
+            if open {
+                runBody
+                    .padding(MiloTheme.Space.four)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+            }
+        }
+    }
+
+    /// What the open drawer holds: the run's own words as they were said, or why there are
+    /// none to read yet.
+    @ViewBuilder
+    private var runBody: some View {
+        if let runError {
+            Text(runError)
+                .font(MiloTheme.Text.small)
+                .foregroundStyle(MiloTheme.danger)
+        } else if let run {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                ForEach(Array(run.enumerated()), id: \.element.id) { index, message in
+                    MessageRow(
+                        message: message,
+                        turn: index + 1,
+                        regenerate: nil,
+                        onQuote: { _ in },
+                        onEdit: { _, _ in },
+                        readOnly: true
+                    )
+                }
+            }
+        } else {
+            Text("Reading run…")
+                .font(MiloTheme.Text.small)
+                .foregroundStyle(MiloTheme.muted)
+        }
+    }
+
     private func factCard(_ label: String, _ value: String, icon: String, failed: Bool = false) -> some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
             Label(label, systemImage: icon)
@@ -600,7 +634,10 @@ private struct RoutineDetail: View {
                 .foregroundStyle(failed ? MiloTheme.danger : MiloTheme.foreground)
                 .lineLimit(2).minimumScaleFactor(0.85)
         }
-        .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
+        // The inset the two cards keep is the padding and nothing else: the pair takes the
+        // height of the taller one, rather than a height of their own that the words then
+        // float in — which read as a band above and below that the sides did not have.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(MiloTheme.Space.three)
         .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
     }
@@ -633,7 +670,7 @@ private struct RoutineDetail: View {
                     parts: $0.parts,
                     attachments: $0.attachments ?? [],
                     streaming: false,
-                    thought: nil,
+                    thought: $0.thoughtMs.map { $0 / 1000 },
                     raw: $0.raw,
                     rawNoOutput: $0.rawNoOutput
                 )
