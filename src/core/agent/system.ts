@@ -129,6 +129,13 @@ export interface SystemPromptInput {
   /** The background jobs as they stand, for the live-state line; absent when none can run. */
   jobs?: JobFacts | null
   /**
+   * Whether this run is a routine firing on its own, with no conversation around
+   * it. A routine has no background — a job belongs to a conversation someone is
+   * watching — so the shell teaching must say so rather than offer a job it cannot
+   * start.
+   */
+  routine?: boolean
+  /**
    * Whether this turn draws a generated interface. There is no tool to be taught
    * in, so the whole teaching — the rules, the catalog and the example — is a
    * section of the prompt, added only for a run that was told it draws.
@@ -419,7 +426,9 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
       [
         '## Shell',
         '- Know a command is installed before a step depends on it: `command -v` first, and prefer what is always there (`od`, not `xxd`).',
-        '- A command that walks a large tree — `du`, `find` over a whole disk — can outlast the default timeout and be killed with nothing to show. Bound it with `timeout`, raise `timeoutMs`, or run it with `background`.',
+        input.routine
+          ? '- A command that walks a large tree — `du`, `find` over a whole disk — can outlast the default timeout and be killed with nothing to show. Bound it with `timeout` or raise `timeoutMs`: background is not available inside a routine, so the command has to finish within the wait.'
+          : '- A command that walks a large tree — `du`, `find` over a whole disk — can outlast the default timeout and be killed with nothing to show. Bound it with `timeout`, raise `timeoutMs`, or run it with `background`.',
         '- When you check your own work, let each check stand on its own: a `&&` chain stops at the first failure and hides every check after it.',
       ].join('\n'),
     )

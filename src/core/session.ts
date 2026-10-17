@@ -590,6 +590,7 @@ export class Session {
     const prompt = {
       base: system,
       surface,
+      routine: this.scope.gateway === ROUTINE_GATEWAY,
       cwd,
       provider: provider.id,
       model,

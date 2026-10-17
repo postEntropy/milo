@@ -230,6 +230,26 @@ describe('what Milo knows about its own setup', () => {
     expect(build([tool])).not.toContain('## Shell')
   })
 
+  it('does not offer background to a routine, which cannot start one', () => {
+    const shell: ToolSpec = { ...tool, name: 'shell_command' }
+    const live = build([shell])
+    expect(live).toMatch(/or run it with `background`/)
+    // A routine has no conversation to own a job, so the shell teaching tells it
+    // to bound the command rather than reach for one it cannot start.
+    const routine = buildSystemPrompt({
+      base: 'BASE',
+      cwd: '/tmp/x',
+      provider: 'commandcode',
+      model: 'some-model',
+      tools: [shell],
+      memories: [],
+      routine: true,
+    })
+    expect(routine).toContain('## Shell')
+    expect(routine).toMatch(/background is not available inside a routine/)
+    expect(routine).not.toMatch(/or run it with `background`/)
+  })
+
   it('names the tabs on the panel, and where each one is', () => {
     const panel = build([tool, { ...tool, name: 'panel' }], 0, undefined, undefined, {
       tabs: [
