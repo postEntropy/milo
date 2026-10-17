@@ -6,19 +6,22 @@
 
 [![CI](https://github.com/postEntropy/milo/actions/workflows/ci.yml/badge.svg)](https://github.com/postEntropy/milo/actions/workflows/ci.yml)
 
-A multi-surface agent — one transport-agnostic **core** with pluggable **gateways** (CLI, Telegram,
-Discord, web), pluggable **LLM providers**, a pluggable **memory** layer and durable **sessions**.
-Hand-rolled LLM layer (no provider SDKs), built for a fast boot and immediate token streaming.
+A multi-surface agent — one transport-agnostic **core** with pluggable **gateways**, pluggable **LLM
+providers**, a pluggable **memory** layer and durable **sessions**. Milo is built around three surfaces:
+the **terminal**, the **browser** and the **iPhone**; the **Telegram** and **Discord** bots are optional
+and ride the same core. Hand-rolled LLM layer (no provider SDKs), built for a fast boot and immediate
+token streaming.
 
 ```
-GATEWAYS   CLI (Ink)      Telegram (grammY)      Discord (discord.js)      Web (React)
-              └────────────────────┴───────────────────────┴──────────────────┘
+GATEWAYS   CLI (Ink)        Web (React)        iOS (SwiftUI)
+               └─────────────────┴───────────────────┘
+           Telegram (grammY) · Discord (discord.js)   optional bots
 CORE       AgentRuntime → Session → AgentLoop   +  Tools · Memory · Providers · Config · Routines
 PROVIDERS  Command Code Provider API · OpenCode Zen · OpenRouter · OpenAI · Anthropic · Ollama · custom
 ```
 
-The core never knows about Ink, Telegram, Discord or a browser: it hands each gateway a stream of
-normalized `AgentEvent`s, and the gateway translates input in and events out.
+The core never knows about Ink, a browser, a phone, Telegram or Discord: it hands each gateway a stream
+of normalized `AgentEvent`s, and the gateway translates input in and events out.
 
 ## Requirements
 
@@ -108,7 +111,156 @@ Milo does not speak, so those ids are not offered.
 
 ## Gateways
 
-The CLI is always available. The bot gateways run as a daemon:
+The **CLI** is always available. The **web** and the **iPhone** are clients of one daemon: `milo serve`
+runs the HTTP + WebSocket server both talk to, so a phone paired to it (see [iOS](#ios)) draws the same
+sessions, tools and memory as the browser. The **Telegram** and **Discord** bots are optional — off
+unless you turn them on — and are that same core reached one more way.
+
+## Web
+
+A browser chat, on the same core, sessions and memory — and the server the phone talks to as well (see
+[iOS](#ios)). It is served by `milo serve`, so a daemon already keeping the bots up also opens the URL
+it prints:
+
+```
+Milo serving: telegram, web
+Milo web · http://127.0.0.1:7717/?t=<token>
+```
+
+The token in that URL is the whole of the authorization, so loopback is the default and the address is
+not meant to be shared. It is **minted per run unless one is stored**: a token meant to outlive the
+process goes in `auth.json` → `gateways.web` (the `0600` slot the bot tokens use) or arrives as
+`MILO_WEB_TOKEN`, which wins. It is not a field `milo setup` → **Web** edits — that screen is the
+address; the token is set like the other secrets.
+
+```bash
+milo serve                 # the bots and the web UI
+milo serve --no-web        # the bots alone
+milo serve --web-port 8080 # one run on another port
+milo web                   # the web UI alone, no bots, opening the browser
+```
+
+`milo web` starts nothing else and opens the browser at the URL; it takes `--host`, `--port` and
+`--no-open`.
+
+```yaml
+web:
+  enabled: true
+  host: 127.0.0.1
+  port: 7717
+```
+
+Where it binds comes from that section, and a flag wins over it for one run; `enabled: false` is
+`--no-web` written down. **Anything but loopback is reachable from the network**, where the token is
+the only thing in the way. `0.0.0.0` is what you bind, not a name another device can open: the boot
+line lists the machine's own addresses instead. A bind that fails says which address it tried and what
+to change.
+
+The chat is the terminal's turn model: messages stream in, reasoning folds under its question, tool
+lines appear as they run, a confirmation is an Allow/Deny card, `Enter` queues and `Ctrl+Enter` steers,
+and `/` opens the command palette. Export and Clear sit in the top bar; sessions can be searched,
+resumed and deleted. **Task lists** is a view of its own, showing the lists the `task_lists` tool keeps.
+
+The **Panel** sits beside the chat: the `panel` tool shows a file there (a document or HTML you wrote,
+a screenshot, a PDF — any type) or the **live browser** Milo is driving, which is also **interactive** —
+click and type in it, which is where Milo hands over a login, a 2FA code or a payment it must not do
+itself. Milo opens it when it has something to show ("here, look at this"). It holds **one tab per
+thing**, per session: showing a second file does not take away the first, the strip at the top switches
+between them and closes them, and Milo is told what is on the panel — so he can talk about a tab, or
+read the file behind it, without being told where it is. The header's toggle folds the panel away, and
+that is remembered: Milo opens the panel when it shows something, not when a session is opened, so a
+reload brings the tabs back folded unless you keep it open. The browser streams only while its own tab
+is on screen.
+
+**Settings** (the sidebar's last row) is `milo setup` in the browser — provider and model, API keys,
+memory, routines, gateways, tools and the browser, permissions, display, skills and sessions. The long
+setup jobs stream their output into a panel: the Chrome for Testing download, a profile copy, the local
+embedding engine.
+
+One thing to know before pointing a browser at it:
+
+- **The frontend has to be built.** `npm run build:web` compiles `web/` into `web/dist`, which the
+  server serves; after any change under `web/src` the served UI is stale until it is rebuilt.
+
+## iOS
+
+The phone is a native client of the same daemon, not a second backend. It reaches the very web gateway
+the browser does and names its own kind in the handshake — `ios` — which is what tells the two apart,
+and what makes a turn it starts a phone turn (`surfaceOf`, `src/core/session.ts`). So the sessions,
+tools, memory, routines and settings are the install's own, seen from a pocket. The app is SwiftUI on
+iOS 26 (Liquid Glass), lives in `ios/`, and reads the browser's wire
+(`src/gateways/web/protocol.ts`); the two halves it can test without a device — the connection state
+machine and the generated-interface arithmetic — are their own packages (`ios/Connection`,
+`ios/GenUi`).
+
+It is built and installed straight onto the device over the network with **xtool**; there is no
+simulator and no Xcode project to open:
+
+```bash
+cd ios
+xtool dev build   # compile the app here — the check that runs anywhere
+xtool dev run     # build, install and launch it on the phone
+```
+
+`xtool dev build` is the check this machine can run; `xtool dev run` onto the device is the only proof
+of the look, since the drawing is the phone's to settle.
+
+What it draws, the way the browser does: **Chat** streams a turn — reasoning folded under its question,
+one line per tool call with the result folded underneath, an Allow/Deny card and its countdown for a
+confirmation, the queued count, and steer, queue and stop on the send control. A message can be edited
+and said again, and a session's own id copied. **Sessions** is a drawer that reads the list afresh and
+starts a new session; the **model picker** is searched by slug, display name and the daemon's shortened
+label. **Routines** is a page of its own — run one now, pause or remove it, and read its run history as
+the same thread the chat draws — with a **local reminder** set at each routine's next fire times,
+because a closed phone cannot be reached any other way. **Settings** draws the install's own — the
+model, the theme and the GenUI toggle, memory, tools and web search, the skills, the MCP servers, the
+permission mode, the connections, the reply notice, the daemon and Unpair. The **Panel** sits beside
+the chat: the `panel` tool shows a document, a picture, a PDF, an HTML page or the **live browser** Milo
+is driving, and it is interactive — which is where Milo hands over a login, a 2FA code or a payment it
+must not do itself. The phone draws a **generated interface** (the `genui` fence in an answer) too,
+being one of the two surfaces that can (`canDraw`, `src/core/session.ts`).
+
+The phone's own notices: **Notify when Milo replies** raises a local banner carrying the first of the
+answer's words when the chat is not what is on screen, and a tap opens the session the notice names. A
+send asks the system for a **continued task**, which keeps Milo on a slow answer past the screen for
+minutes instead of the ~30 seconds a plain background hold buys; the system draws its own progress for
+it and can end it under pressure. A real push would need an Apple Developer account and an APNs server,
+so an answer that outlives even that is read on return, with no banner.
+
+`milo serve --no-web` closes the phone's door with the browser's: the phone is a client of that server
+and of nothing else. What it still lacks against the browser — session search and clear, the task lists,
+the Email and Google screens, and the settings the browser still has over it — has not been built yet.
+
+### Pairing a phone
+
+A browser you opened yourself holds the token in its URL. A phone is a different client, and is given
+an identity of its own. `milo pair` opens a six-digit code — good for two minutes, used once — and
+prints it **as a QR** (and in words, for a phone that cannot scan) with the addresses the machine
+answers on; the app scans it (`ios/Sources/Milo/Screens/QRScanner.swift`) and redeems it at
+`POST /pair/claim`, and is handed a token of its own, kept **hashed** in `~/.milo/devices.json` (`0600`),
+never in the clear. That token opens the same gate the install's own does, and taking it back closes only
+that device:
+
+```bash
+milo pair                  # print a QR and a code to give the app
+milo devices               # the devices paired with this Milo
+milo devices revoke <id>   # take one back — its token stops working at once
+```
+
+The QR is drawn here rather than by a package: `src/core/qr.ts` is the one symbol the product needs
+(byte mode, level M, versions 1–6), and `test/qr.test.ts` checks it against structure and a
+round-trip. A phone reaches the daemon over the network, so `web.host` has to name an address it can
+use — the machine's tailnet or LAN one, or `0.0.0.0` — and not the loopback default; the QR is only
+drawn when there is such an address. The daemon speaks plain http and ws, so the encryption is the
+tailnet the phone and the machine already share, and `Info.plist` is what lets the app reach it by
+address. `/pair/claim` is the one route that answers without a token; the code is what it spends
+instead, and the tries are capped per address. The open code is written to `~/.milo/pairing.json`, which
+is why the terminal that prints it and the daemon that redeems it can be two processes.
+
+## Telegram & Discord (optional)
+
+The bots are the same core reached from a chat app. `milo setup` → **Gateways** toggles them and stores
+the tokens, or edit `~/.milo/config.yml`:
 
 ```bash
 milo setup                 # Gateways section toggles them and stores the tokens
@@ -194,95 +346,6 @@ awaiting it in the update handler: a turn blocks on the permission prompt, and T
 handles updates one at a time, so awaiting would deadlock. A message sent while a turn is running is
 handed to that turn (taken up at the next step boundary); commands are never steered; and the queue
 owns the abort handle, so a stop ends the message with `🛑 stopped` instead of an `AbortError`.
-
-## Web
-
-The fourth surface is a browser chat, on the same core, sessions and memory. It is served by
-`milo serve`, so a daemon already keeping the bots up also opens the URL it prints:
-
-```
-Milo serving: telegram, web
-Milo web · http://127.0.0.1:7717/?t=<token>
-```
-
-The token in that URL is the whole of the authorization, so loopback is the default and the address is
-not meant to be shared. It is **minted per run unless one is stored**: a token meant to outlive the
-process goes in `auth.json` → `gateways.web` (the `0600` slot the bot tokens use) or arrives as
-`MILO_WEB_TOKEN`, which wins. It is not a field `milo setup` → **Web** edits — that screen is the
-address; the token is set like the other secrets.
-
-```bash
-milo serve                 # the bots and the web UI
-milo serve --no-web        # the bots alone
-milo serve --web-port 8080 # one run on another port
-milo web                   # the web UI alone, no bots, opening the browser
-```
-
-`milo web` starts nothing else and opens the browser at the URL; it takes `--host`, `--port` and
-`--no-open`.
-
-```yaml
-web:
-  enabled: true
-  host: 127.0.0.1
-  port: 7717
-```
-
-Where it binds comes from that section, and a flag wins over it for one run; `enabled: false` is
-`--no-web` written down. **Anything but loopback is reachable from the network**, where the token is
-the only thing in the way. `0.0.0.0` is what you bind, not a name another device can open: the boot
-line lists the machine's own addresses instead. A bind that fails says which address it tried and what
-to change.
-
-The chat is the terminal's turn model: messages stream in, reasoning folds under its question, tool
-lines appear as they run, a confirmation is an Allow/Deny card, `Enter` queues and `Ctrl+Enter` steers,
-and `/` opens the command palette. Export and Clear sit in the top bar; sessions can be searched,
-resumed and deleted. **Task lists** is a view of its own, showing the lists the `task_lists` tool keeps.
-
-The **Panel** sits beside the chat: the `panel` tool shows a file there (a document or HTML you wrote,
-a screenshot, a PDF — any type) or the **live browser** Milo is driving, which is also **interactive** —
-click and type in it, which is where Milo hands over a login, a 2FA code or a payment it must not do
-itself. Milo opens it when it has something to show ("here, look at this"). It holds **one tab per
-thing**, per session: showing a second file does not take away the first, the strip at the top switches
-between them and closes them, and Milo is told what is on the panel — so he can talk about a tab, or
-read the file behind it, without being told where it is. The header's toggle folds the panel away, and
-that is remembered: Milo opens the panel when it shows something, not when a session is opened, so a
-reload brings the tabs back folded unless you keep it open. The browser streams only while its own tab
-is on screen.
-
-**Settings** (the sidebar's last row) is `milo setup` in the browser — provider and model, API keys,
-memory, routines, gateways, tools and the browser, permissions, display, skills and sessions. The long
-setup jobs stream their output into a panel: the Chrome for Testing download, a profile copy, the local
-embedding engine.
-
-One thing to know before pointing a browser at it:
-
-- **The frontend has to be built.** `npm run build:web` compiles `web/` into `web/dist`, which the
-  server serves; after any change under `web/src` the served UI is stale until it is rebuilt.
-
-### Pairing a phone
-
-A browser you opened yourself holds the token in its URL. A phone is a different client, and is given
-an identity of its own. `milo pair` opens a six-digit code — good for two minutes, used once — and
-prints it **as a QR** (and in words, for a phone that cannot scan) with the addresses the machine
-answers on; an app redeems it at `POST /pair/claim` and is handed a token of its own, kept **hashed**
-in `~/.milo/devices.json` (`0600`), never in the clear. That token opens the same gate the install's
-own does, and taking it back closes only that device:
-
-```bash
-milo pair                  # print a QR and a code to give the app
-milo devices               # the devices paired with this Milo
-milo devices revoke <id>   # take one back — its token stops working at once
-```
-
-The QR is drawn here rather than by a package: `src/core/qr.ts` is the one symbol the product needs
-(byte mode, level M, versions 1–6), and `test/qr.test.ts` checks it against structure and a
-round-trip. A phone reaches the daemon over the network, so `web.host` has to name an address it can
-use — the machine's tailnet or LAN one, or `0.0.0.0` — and not the loopback default; the QR is only
-drawn when there is such an address. `/pair/claim` is the one route that answers without a token; the
-code is what it spends instead, and the tries are capped per address. The open code is written to
-`~/.milo/pairing.json`, which is why the terminal that prints it and the daemon that redeems it can be
-two processes.
 
 ## Documentation
 
