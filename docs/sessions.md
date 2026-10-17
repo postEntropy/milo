@@ -31,6 +31,14 @@ remembers. Leaving a session writes a short **recap** in the model's own words, 
 file in `sessions/recaps/<id>.json` and shown by `/sessions`. On Telegram and Discord, `/new`,
 `/sessions` and `/resume` only work on a single-person bot (exactly one id in the allowlist).
 
+With `sessions.generateTitles` (default `true`) a session is also **named** from the turn it opened
+with: one short call, made in the background right after the first reply, so nothing waits on it. A
+session already named — `/new <title>`, a rename, a fork that inherited one — is never renamed over,
+and a routine's own run is never named at all. `sessions.titleModel` picks the model that writes the
+name; left out, the session's own chat model does. Where there is no name, every surface falls back to
+the first message: a terminal, Telegram and Discord draw `calm-otter-7 — <the words it opened with>`,
+the browser and the phone draw the words alone.
+
 The agent has its own view of the same list. It knows which session it is in — the id rides the
 system prompt, so "which session am I in?" is answered without reading the directory — and it carries a
 `sessions` tool: **list** the saved ones with what each was about, or **remove** one by its id. A
@@ -62,6 +70,8 @@ sessions:
   compactAt: 0.7
   keepTurns: 8
   compaction: true
+  generateTitles: true
+  titleModel: some/cheap-model
 ```
 
 The window comes from the OpenRouter catalog (`context_length` per model, no key), cached in

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { humanSize, shortenPath } from '../src/util/format.js'
-import { formatSessionList, quotedLead, summarizeRecap } from '../src/core/sessions/index.js'
+import { formatSessionList, quotedLead, sessionLabel, summarizeRecap } from '../src/core/sessions/index.js'
 
 describe('humanSize', () => {
   it('says a size as a person reads it', () => {
@@ -66,10 +66,73 @@ describe('summarizeRecap', () => {
   })
 })
 
+describe('sessionLabel', () => {
+  it('prefers the name, and falls back to the words it opened with', () => {
+    expect(sessionLabel({ title: 'Folding transcripts', preview: 'how do I fold?' })).toBe('Folding transcripts')
+    expect(sessionLabel({ preview: 'how do I fold?' })).toBe('how do I fold?')
+    expect(sessionLabel({})).toBe('')
+  })
+})
+
 describe('formatSessionList', () => {
   it('formats empty session list', () => {
     expect(formatSessionList([])).toBe('Sessions\n\nNothing saved yet. /new starts one.')
     expect(formatSessionList([], { markdown: true })).toBe('🗂 **Sessions**\n\nNothing saved yet. `/new` starts one.')
+  })
+
+  it('names a session without a name by the words it opened with', () => {
+    // The terminal shows a bare `calm-otter-7` for a session nobody named while the
+    // browser and the phone already draw what it was about — the same session under
+    // two names. The id stays in front either way: it is what `/resume` takes.
+    const list = formatSessionList([{
+      id: 'calm-otter-7',
+      createdAt: 0,
+      updatedAt: 0,
+      messageCount: 1,
+      preview: 'how do I fold a transcript?',
+    }])
+
+    expect(list).toContain('calm-otter-7 — how do I fold a transcript?')
+    // Not said twice: the body only carries what the label does not.
+    expect(list.match(/how do I fold a transcript\?/g)).toHaveLength(1)
+  })
+
+  it('says what a named session was about under its name', () => {
+    const list = formatSessionList([{
+      id: 'calm-otter-7',
+      title: 'Folding transcripts',
+      createdAt: 0,
+      updatedAt: 0,
+      messageCount: 2,
+      preview: 'how do I fold a transcript?',
+    }])
+
+    expect(list).toContain('calm-otter-7 — Folding transcripts')
+    expect(list).toContain('how do I fold a transcript?')
+  })
+
+  it('shows the first bullet of a recap as the body', () => {
+    const list = formatSessionList([{
+      id: 'calm-otter-7',
+      title: 'Folding transcripts',
+      createdAt: 0,
+      updatedAt: 0,
+      messageCount: 2,
+      preview: 'how do I fold a transcript?',
+      recap: '- What the session was about\n- more',
+    }])
+
+    expect(list).toContain('What the session was about')
+    expect(list).not.toContain('more')
+  })
+
+  it('leaves the bare id for a session nothing was said in', () => {
+    const list = formatSessionList([
+      { id: 'empty-otter-1', createdAt: 0, updatedAt: 0, messageCount: 0, preview: '' },
+    ])
+
+    expect(list).toContain('empty-otter-1')
+    expect(list).not.toContain('empty-otter-1 — ')
   })
 
   it('pages sessions in chunks of 5 by default', () => {

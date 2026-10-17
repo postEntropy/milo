@@ -4,6 +4,7 @@ import { errorMessage } from '../../util/errors.js'
 import { logDebug, logWarn } from '../../util/log.js'
 import { fetchedPagePath, hasFetchedPage } from '../fetched.js'
 import { IMAGE_TOKENS } from '../images.js'
+import { previewOf } from './types.js'
 
 /** Rough token estimate. Cheap on purpose: no tokenizer, ~4 chars per token. */
 export function estimateTokens(messages: Message[]): number {
@@ -497,6 +498,111 @@ export async function digest(options: DigestOptions): Promise<string | null> {
     timeoutMs: options.timeoutMs ?? DEFAULT_DIGEST_TIMEOUT_MS,
     purpose: 'recap',
   })
+}
+
+const TITLE_SYSTEM = `You name a conversation, so it can be told apart from the others in a list.
+Answer with a name of at most six words, in the language of the conversation.
+The name alone: no quotes, no full stop at the end, no preamble.`
+
+/**
+ * A name is not waited on by anybody — the reply it is drawn from is already on
+ * screen — so its budget is its own and much shorter than the digest's, which is
+ * handed a whole transcript. What this call gets is two short messages; one still
+ * running after ten seconds is a model that is not going to answer.
+ */
+const TITLE_TIMEOUT_MS = 10_000
+
+/** How much of each side the naming call is shown; the first message can be a pasted file. */
+const TITLE_INPUT_LIMIT = 4000
+const TITLE_ANSWER_LIMIT = 2000
+
+/**
+ * The longest a name may be and still be a name. Refused rather than truncated: a
+ * model that answered with a sentence ignored the instruction, and half a sentence
+ * is not what the six-word rule was for. The listing falls back to the first
+ * message, which is honest about there being no name.
+ */
+const TITLE_MAX_LENGTH = 80
+
+export interface TitleOptions {
+  provider: Provider
+  model: string
+  /** The session's transcript; only the opening turn is read from it. */
+  messages: Message[]
+  signal?: AbortSignal
+  timeoutMs?: number
+}
+
+/**
+ * A name for a session, drawn from the turn it opened with — the first thing the
+ * person said and the first thing Milo answered, and nothing else in the
+ * transcript. Null on any failure, said out loud here: a session left unnamed
+ * without a line in the log is a name that vanished for no stated reason.
+ */
+export async function generateTitle(options: TitleOptions): Promise<string | null> {
+  const prompt = titlePrompt(options.messages)
+  if (!prompt) return null
+
+  const result = await call({
+    provider: options.provider,
+    model: options.model,
+    system: TITLE_SYSTEM,
+    messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
+    reasoningEffort: 'low',
+    timeoutMs: options.timeoutMs ?? TITLE_TIMEOUT_MS,
+    signal: options.signal,
+    purpose: 'title',
+  })
+  if (!result.ok) {
+    logWarn(`could not name the session: ${result.error}`)
+    return null
+  }
+
+  const name = cleanTitle(result.text)
+  if (!name) logWarn(`the session name was not usable: ${result.text.slice(0, TITLE_MAX_LENGTH)}`)
+  return name
+}
+
+/**
+ * The name a model answered with, as a name: on one line, unquoted, no trailing
+ * stop, and short enough to read at a glance. Null when what came back is not one.
+ */
+export function cleanTitle(answer: string): string | null {
+  const cleaned = answer
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^["'`«»“”]+/, '')
+    .replace(/["'`«»“”]+$/, '')
+    .replace(/[.:;,\s]+$/, '')
+    .trim()
+  if (!cleaned || cleaned.length > TITLE_MAX_LENGTH) return null
+  return cleaned
+}
+
+/** The opening turn, as the prompt that asks for its name — empty when nobody spoke. */
+function titlePrompt(messages: Message[]): string {
+  const said = previewOf(messages, TITLE_INPUT_LIMIT)
+  if (!said) return ''
+  const answered = firstAnswer(messages, TITLE_ANSWER_LIMIT)
+  return answered
+    ? `The person said:\n${said}\n\nMilo answered:\n${answered}`
+    : `The person said:\n${said}`
+}
+
+/** The first thing Milo answered, whitespace collapsed and capped. */
+function firstAnswer(messages: Message[], limit: number): string {
+  for (const message of messages) {
+    if (message.role !== 'assistant') continue
+    const text = message.content
+      .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+      .map((part) => part.text)
+      .join(' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+    if (!text) continue
+    return text.length > limit ? text.slice(0, limit) : text
+  }
+  return ''
 }
 
 function promptFor(previous: string | undefined, transcript: string): string {

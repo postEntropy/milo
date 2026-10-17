@@ -498,6 +498,29 @@ describe('web Settings config', () => {
 
     await expect(settings.handle('set-effort', { effort: 'invalid' })).rejects.toThrow('Reasoning effort must be low, medium or high.')
   })
+
+  it('hands a saved session rule to the sessions after it, with no restart', async () => {
+    writeConfig()
+    const runtime = buildModel('Folding transcripts')
+    const settings = new WebSettings(runtime, home)
+    const before = await settings.handle('overview') as { config: { sessions: Record<string, unknown> } }
+
+    await settings.handle('save-config', {
+      config: { sessions: { ...before.config.sessions, titleModel: 'cheap-model' } },
+    })
+
+    expect(readConfig()?.sessions.titleModel).toBe('cheap-model')
+
+    // A session started after the save is named by the rule just written, without
+    // the process being restarted.
+    const session = await runtime.newSession({ gateway: 'web', conversationId: CONVERSATION })
+    for await (const _event of session.send('how do I fold a transcript?')) {
+      // drain
+    }
+    await session.settle()
+
+    expect(session.title).toBe('Folding transcripts')
+  })
 })
 
 describe('web provider switching', () => {

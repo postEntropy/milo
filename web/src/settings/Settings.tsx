@@ -21,7 +21,7 @@ type SettingsConfig = {
   model: string
   providers: Record<string, { name?: string; baseURL: string; wire?: string; keyless?: boolean; keyEnv?: string; headers?: Record<string, string> }>
   memory: { keepSaid?: number; recallLimit?: number; derive?: boolean; embedding?: { provider: 'ollama' | 'openrouter'; model?: string; url?: string } }
-  sessions: { compactAt: number; contextWindow?: number; maxInputTokens: number; keepTurns: number; compaction: boolean; maxSessions: number }
+  sessions: { compactAt: number; contextWindow?: number; maxInputTokens: number; keepTurns: number; compaction: boolean; maxSessions: number; generateTitles: boolean; titleModel?: string }
   display: { tools: 'full' | 'name' | 'off'; thinking: 'on' | 'off'; genui?: boolean }
   gateways: Record<string, { enabled: boolean; allowlist: string[] }>
   web: { enabled: boolean; host: string; port: number }
@@ -761,10 +761,12 @@ export function Settings({ section, onSection, conversationId, sessionId, onClos
             <Field label="Sessions kept"><input type="number" min="1" value={draft.sessions.maxSessions} onChange={(event) => update(['sessions', 'maxSessions'], Number(event.target.value))} /><small>How many sessions stay on disk.</small></Field>
           </div>
           <label className="check-row"><input type="checkbox" checked={draft.sessions.compaction} onChange={(event) => update(['sessions', 'compaction'], event.target.checked)} /> Compact long sessions automatically</label>
+          <label className="check-row"><input type="checkbox" checked={draft.sessions.generateTitles} onChange={(event) => update(['sessions', 'generateTitles'], event.target.checked)} /> Name each session from its first turn</label>
           <Advanced>
             <div className="form-grid">
             <Field label="Fallback budget (tokens)"><input type="number" min="1024" value={draft.sessions.maxInputTokens} onChange={(event) => update(['sessions', 'maxInputTokens'], Number(event.target.value))} /><small>Used only when the model’s window is unknown.</small></Field>
             <Field label="Context window (tokens)"><input type="number" min="1024" value={draft.sessions.contextWindow ?? ''} onChange={(event) => update(['sessions', 'contextWindow'], event.target.value ? Number(event.target.value) : undefined)} /><small>Overrides the catalog, for a model it does not know.</small></Field>
+            <Field label="Model that writes the names"><input value={draft.sessions.titleModel ?? ''} placeholder="Use the main model" onChange={(event) => update(['sessions', 'titleModel'], event.target.value || undefined)} /><small>One short call after the first turn. Left empty, the session’s own chat model is used.</small></Field>
             </div>
           </Advanced>
 

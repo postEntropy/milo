@@ -112,6 +112,37 @@ describe('session retention', () => {
   })
 })
 
+describe('session names', () => {
+  it('names every session from its first turn when the file says nothing', () => {
+    // A file written before this setting existed loads on the default, which names.
+    expect(readConfig()?.sessions.generateTitles).toBe(true)
+    expect(readConfig()?.sessions.titleModel).toBeUndefined()
+  })
+
+  it('reads both keys back, and leaves the rest of the section alone', () => {
+    writeFileSync(configFile, stringify({
+      ...base,
+      sessions: { generateTitles: false, titleModel: 'cheap-model' },
+    }))
+
+    const sessions = readConfig()?.sessions
+    expect(sessions?.generateTitles).toBe(false)
+    expect(sessions?.titleModel).toBe('cheap-model')
+    expect(sessions?.maxSessions).toBe(50)
+  })
+
+  it('stamps the help for the switch, and for the model once one is named', () => {
+    saveConfig(ConfigSchema.parse(base))
+    expect(readFileSync(configFile, 'utf8')).toContain('# Name each session from its first turn')
+
+    // An optional key has no line of its own until there is something to explain.
+    expect(readFileSync(configFile, 'utf8')).not.toContain('# The model that writes those names')
+
+    saveConfig(ConfigSchema.parse({ ...base, sessions: { titleModel: 'cheap-model' } }))
+    expect(readFileSync(configFile, 'utf8')).toContain('# The model that writes those names')
+  })
+})
+
 describe('reasoning effort', () => {
   it('asks for medium when the file says nothing about it', () => {
     // Every request carries an explicit effort now: "let the provider and model

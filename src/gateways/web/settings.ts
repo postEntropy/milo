@@ -545,6 +545,7 @@ export class WebSettings {
       })
       this.runtime.setReasoningEffort(next.reasoningEffort)
       this.runtime.setMediaModels(next.media)
+      this.runtime.setSessions(next.sessions)
       setPermissionMode(next.permissions.mode)
       setDisplay(next.display)
       setReasoningEffort(next.reasoningEffort)

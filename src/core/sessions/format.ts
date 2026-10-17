@@ -71,6 +71,16 @@ export function formatSeconds(seconds: number): string {
   return `${seconds < 10 ? Math.round(seconds * 10) / 10 : Math.round(seconds)}s`
 }
 
+/**
+ * What a session is called on screen: the name it was given, or the words it
+ * opened with. One rule for every surface — the terminal, the chat gateways, the
+ * browser and the phone — because a session drawn as its own id while another
+ * surface shows what it was about is the same session under two names.
+ */
+export function sessionLabel(session: { title?: string; preview?: string }): string {
+  return session.title || session.preview || ''
+}
+
 export function formatSessionList(
   sessions: SessionSummary[],
   style: SessionListStyle = {},
@@ -90,15 +100,21 @@ export function formatSessionList(
   const pageSessions = sessions.slice(offset, offset + pageSize)
 
   const entries = pageSessions.map((session) => {
-    const label = session.title ? `${session.id} — ${session.title}` : session.id
-    const name = markdown ? `**${label}**` : label
+    // The id leads, because it is what `/resume` takes; the name follows. A
+    // session with neither a name nor a message yet is the id alone.
+    const label = sessionLabel(session)
+    const named = label ? `${session.id} — ${label}` : session.id
+    const name = markdown ? `**${named}**` : named
     const meta = `${session.messageCount} msgs · ${formatWhen(session.updatedAt)}`
     const detail = markdown ? meta : `  ${meta}`
     // The recap says what the session was about; the preview is the fallback for
     // one that was never switched away from, so it never got one. In a listing of
     // sessions, only the first bullet of the recap is shown so replies do not
-    // outgrow the chat.
-    const summary = summarizeRecap(session.recap, session.preview)
+    // outgrow the chat. A session with no recap and no name says it in the label
+    // already — the body is left out rather than repeating the same line.
+    const summary = session.recap
+      ? summarizeRecap(session.recap, session.preview)
+      : (session.title ? session.preview : '')
     const body = quote(summary, markdown)
     return [name, detail, body].filter(Boolean).join('\n')
   })

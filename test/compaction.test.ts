@@ -6,16 +6,19 @@ import { SqliteMemory } from '../src/core/memory/sqlite.js'
 import type { ChatRequest, Message, Provider, ReasoningEffort, StreamEvent } from '../src/core/providers/types.js'
 import { Session } from '../src/core/session.js'
 import {
+  cleanTitle,
   contextBudget,
   digest,
   estimateText,
   estimateTokens,
   estimateTools,
+  generateTitle,
   planCut,
   planCutUnderBudget,
   summarize,
 } from '../src/core/sessions/compact.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
+import { DEFAULT_SESSIONS } from '../src/core/config/schema.js'
 import { createToolRegistry, ToolRegistry } from '../src/core/tools/index.js'
 
 const text = (role: 'user' | 'assistant' | 'tool', value: string): Message => ({
@@ -43,6 +46,10 @@ class ScriptedProvider implements Provider {
   readonly systems: string[] = []
   /** The effort each summary call asked for, in order. */
   readonly efforts: (ReasoningEffort | undefined)[] = []
+  /** What the execution log would call each call, in order. */
+  readonly purposes: string[] = []
+  /** The words each call was handed, in order. */
+  readonly prompts: string[] = []
   failing = false
   /** Refuses any request that names an effort, the way a provider without the field would. */
   rejectsEffort = false
@@ -51,6 +58,11 @@ class ScriptedProvider implements Provider {
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     this.systems.push(req.system ?? '')
+    this.purposes.push(req.trace?.purpose ?? '')
+    this.prompts.push(req.messages.map((message) => message.content
+      .filter((part): part is { type: 'text'; text: string } => part.type === 'text')
+      .map((part) => part.text)
+      .join(' ')).join('\n'))
     if (!req.tools) {
       this.efforts.push(req.reasoningEffort)
       if (this.hanging) {
@@ -99,11 +111,12 @@ async function compactingSession(
     record,
     store,
     sessions: {
-      compactAt: 0.7,
+      ...DEFAULT_SESSIONS,
       maxInputTokens: options.maxInputTokens ?? 2400,
       keepTurns: options.keepTurns ?? 1,
-      compaction: true,
-      maxSessions: 50,
+      // Naming a session is a model call of its own, and what this test counts is
+      // the requests a fold makes.
+      generateTitles: false,
       contextWindow: options.contextWindow,
     },
     lookupContextWindow: options.lookup,
@@ -156,11 +169,11 @@ async function manualSession(
     record,
     store,
     sessions: {
-      compactAt: 0.7,
+      ...DEFAULT_SESSIONS,
       maxInputTokens: 100_000,
       keepTurns: overrides.keepTurns ?? 1,
       compaction: overrides.compaction ?? true,
-      maxSessions: 50,
+      generateTitles: false,
     },
   })
   return { provider, session, store, record }
@@ -270,13 +283,7 @@ describe('estimateTools', () => {
 })
 
 describe('contextBudget', () => {
-  const sessions = {
-    compactAt: 0.7,
-    maxInputTokens: 12_000,
-    keepTurns: 8,
-    compaction: true,
-    maxSessions: 50,
-  }
+  const sessions = { ...DEFAULT_SESSIONS, maxInputTokens: 12_000 }
 
   it('takes a share of the window, and the fallback when nothing knows it', () => {
     expect(contextBudget(sessions, 100_000)).toBe(70_000)
@@ -420,6 +427,56 @@ describe('digest', () => {
   })
 })
 
+describe('generateTitle', () => {
+  const opening = [text('user', 'how do I fold a transcript?'), text('assistant', 'with planCut')]
+
+  it('asks for a short name and answers with what came back', async () => {
+    const provider = new ScriptedProvider()
+
+    expect(await generateTitle({ provider, model: 'm', messages: opening })).toBe('OLD_TURNS_SUMMARY')
+    expect(provider.systems.at(-1)).toContain('name a conversation')
+    // Mechanical work nobody waits on, so it asks for the cheapest reasoning —
+    // and the execution log can tell this call from a fold or a recap.
+    expect(provider.efforts).toEqual(['low'])
+    expect(provider.purposes).toEqual(['title'])
+  })
+
+  it('hands the call the opening turn, both sides of it', async () => {
+    const provider = new ScriptedProvider()
+
+    await generateTitle({ provider, model: 'm', messages: opening })
+
+    expect(provider.prompts.at(-1)).toContain('how do I fold a transcript?')
+    expect(provider.prompts.at(-1)).toContain('with planCut')
+  })
+
+  it('returns null when nobody has said anything yet', async () => {
+    const provider = new ScriptedProvider()
+    expect(await generateTitle({ provider, model: 'm', messages: [text('assistant', 'hi')] })).toBeNull()
+    expect(provider.systems).toEqual([])
+  })
+
+  it('returns null rather than throwing when the call fails', async () => {
+    const provider = new ScriptedProvider()
+    provider.failing = true
+    expect(await generateTitle({ provider, model: 'm', messages: opening })).toBeNull()
+  })
+
+  it('reads a name out of the answer', () => {
+    expect(cleanTitle('  "Fix the session list."  ')).toBe('Fix the session list')
+    expect(cleanTitle('`Fold a transcript`')).toBe('Fold a transcript')
+    expect(cleanTitle('one\n\ntwo')).toBe('one two')
+  })
+
+  it('refuses an answer that is not a name', () => {
+    expect(cleanTitle('')).toBeNull()
+    expect(cleanTitle('   ')).toBeNull()
+    expect(cleanTitle('.')).toBeNull()
+    // A sentence is not a name, and half of one is not what the rule was for.
+    expect(cleanTitle('a'.repeat(81))).toBeNull()
+  })
+})
+
 describe('Session compaction', () => {
   it('summarizes the dropped turns and keeps them out of the transcript', async () => {
     // The ceiling is read rather than left to the default, so what is measured is
@@ -540,7 +597,7 @@ describe('Session compaction', () => {
       cwd: process.cwd(),
       record,
       store,
-      sessions: { compactAt: 0.7, maxInputTokens: 40, keepTurns: 1, compaction: false, maxSessions: 50 },
+      sessions: { ...DEFAULT_SESSIONS, maxInputTokens: 40, keepTurns: 1, compaction: false, generateTitles: false },
     })
 
     for await (const _event of session.send('another one')) {

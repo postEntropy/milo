@@ -16,6 +16,7 @@ import type { HistoryEntry } from '../src/core/history.js'
 import { ROUTINE_GATEWAY } from '../src/core/routines.js'
 import { Session, type SendOptions, type SessionOptions } from '../src/core/session.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
+import { DEFAULT_SESSIONS, type SessionsConfig } from '../src/core/config/schema.js'
 import { MemoryRecapStore } from '../src/core/sessions/recap.js'
 import { FileSessionStore } from '../src/core/sessions/file-store.js'
 import { createToolRegistry, sessionsTool } from '../src/core/tools/index.js'
@@ -596,6 +597,153 @@ describe('recapping a session another writer moved on', () => {
     // Not replaced by one describing less, and not paid for: the model call is
     // skipped rather than made and thrown away.
     expect((await recaps.read(record.id))?.text).toBe('newer')
+  })
+})
+
+describe('naming a session from its first turn', () => {
+  /**
+   * Answers the chat turn and the naming call differently, and remembers which was
+   * which. A naming call is the one the execution log tags `title`.
+   */
+  class NamingProvider implements Provider {
+    readonly id = 'naming'
+    readonly calls: { purpose: string; model: string }[] = []
+    private gate: Promise<void> | undefined
+    private open: (() => void) | undefined
+
+    /** Makes the next naming call wait; what this returns lets it answer. */
+    holdNext(): () => void {
+      this.gate = new Promise<void>((resolve) => {
+        this.open = resolve
+      })
+      return () => this.open?.()
+    }
+
+    async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+      const purpose = req.trace?.purpose ?? ''
+      this.calls.push({ purpose, model: req.model })
+      if (purpose === 'title') {
+        const gate = this.gate
+        this.gate = undefined
+        if (gate) await gate
+        yield { type: 'text', delta: 'Folding transcripts' }
+        yield { type: 'done', finishReason: 'stop' }
+        return
+      }
+      yield { type: 'text', delta: 'SECRET_ASSISTANT_REPLY' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+  }
+
+  async function namingSession(options: {
+    sessions?: Partial<SessionsConfig>
+    title?: string
+    gateway?: string
+  } = {}) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-name-'))
+    const provider = new NamingProvider()
+    const store = new MemorySessionStore()
+    const record = await store.create()
+    if (options.title) record.title = options.title
+
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new SqliteMemory({ dir }),
+      store,
+      scope: { gateway: options.gateway ?? 'cli', conversationId: 'naming' },
+      record,
+      cwd: process.cwd(),
+      provider,
+      maxSteps: 4,
+      sessions: { ...DEFAULT_SESSIONS, ...options.sessions },
+    })
+    return { provider, session, record }
+  }
+
+  async function speak(session: Session, input: string): Promise<void> {
+    for await (const _event of session.send(input)) {
+      // drain
+    }
+  }
+
+  const namingCalls = (provider: NamingProvider) =>
+    provider.calls.filter((call) => call.purpose === 'title')
+
+  it('answers the turn without waiting for the name', async () => {
+    const { provider, session } = await namingSession()
+    const release = provider.holdNext()
+
+    await speak(session, 'how do I fold a transcript?')
+
+    // The turn is over and the name is not: the call is out and it held nothing up.
+    expect(session.title).toBeUndefined()
+    release()
+    await session.settle()
+
+    expect(session.title).toBe('Folding transcripts')
+  })
+
+  it('names a session once, and no more', async () => {
+    const { provider, session } = await namingSession()
+
+    await speak(session, 'first')
+    await session.settle()
+    await speak(session, 'second')
+    await session.settle()
+
+    expect(namingCalls(provider)).toHaveLength(1)
+    expect(session.title).toBe('Folding transcripts')
+  })
+
+  it('leaves a name the person gave alone', async () => {
+    const { provider, session } = await namingSession({ title: 'My own name' })
+
+    await speak(session, 'first')
+    await session.settle()
+
+    expect(session.title).toBe('My own name')
+    expect(namingCalls(provider)).toEqual([])
+  })
+
+  it('keeps the name the person set while the call was in flight', async () => {
+    const { provider, session } = await namingSession()
+    const release = provider.holdNext()
+
+    await speak(session, 'first')
+    await session.rename('Renamed mid-flight')
+    release()
+    await session.settle()
+
+    expect(session.title).toBe('Renamed mid-flight')
+  })
+
+  it('never names a routine\'s own run', async () => {
+    const { provider, session } = await namingSession({ gateway: ROUTINE_GATEWAY })
+
+    await speak(session, 'first')
+    await session.settle()
+
+    expect(namingCalls(provider)).toEqual([])
+  })
+
+  it('asks for no name at all when the setting is off', async () => {
+    const { provider, session } = await namingSession({ sessions: { generateTitles: false } })
+
+    await speak(session, 'first')
+    await session.settle()
+
+    expect(namingCalls(provider)).toEqual([])
+  })
+
+  it('names it with the model the setting picks', async () => {
+    const { provider, session } = await namingSession({ sessions: { titleModel: 'cheap-model' } })
+
+    await speak(session, 'first')
+    await session.settle()
+
+    expect(namingCalls(provider).map((call) => call.model)).toEqual(['cheap-model'])
   })
 })
 

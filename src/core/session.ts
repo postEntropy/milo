@@ -34,9 +34,11 @@ import {
   estimateText,
   estimateTokens,
   estimateTools,
+  generateTitle,
   MemoryRecapStore,
   planCut,
   planCutUnderBudget,
+  previewOf,
   rankSessions,
   summarize,
   withRecaps,
@@ -255,8 +257,12 @@ export class Session {
   private ceiling: number | undefined
   /** The lookup in flight: a turn waits on it only if it has not finished. */
   private readonly resolving: Promise<void>
-  /** Turns being read for facts in the background. Nothing waits on them. */
-  private readonly deriving = new Set<Promise<void>>()
+  /**
+   * Model calls this session started and nobody waits on: a finished turn being
+   * read for facts, and the name drawn from the turn it opened with. One set, so
+   * `busy` and `settle` cannot cover one of them and forget the other.
+   */
+  private readonly background = new Set<Promise<void>>()
   /**
    * Files the running turn asked to send to its chat, held until the turn ends.
    * Held rather than sent at once because a delivery takes the session's lease —
@@ -368,11 +374,11 @@ export class Session {
 
   /**
    * Whether this copy still has work in flight: a turn (or its wait for the
-   * lease), or a turn being read for facts. A copy that is busy must stay the
-   * one the runtime hands out, or a second copy would race it.
+   * lease), or a background model call it started. A copy that is busy must stay
+   * the one the runtime hands out, or a second copy would race it.
    */
   get busy(): boolean {
-    return this.sending > 0 || this.deriving.size > 0
+    return this.sending > 0 || this.background.size > 0
   }
 
   /**
@@ -390,6 +396,32 @@ export class Session {
       this.record.version = this.baseVersion + 1
       await this.store.save(this.record, this.baseVersion)
       this.baseVersion = this.record.version
+    } finally {
+      await lease.release()
+    }
+  }
+
+  /**
+   * Gives the session a name nobody asked for, unless it already has one. True
+   * when it wrote.
+   *
+   * The check sits here, immediately before the write, rather than at the caller:
+   * a name is drawn in the background, so the person can name the session — or
+   * another process can — in the second the model takes, and a name they chose is
+   * never the one to lose. Under the lease for the reason `rename` gives.
+   */
+  async nameIfUnnamed(title: string): Promise<boolean> {
+    const trimmed = title.trim()
+    if (!trimmed) return false
+    const lease = await this.store.acquire(this.id)
+    try {
+      if (lease.latest) this.adoptLatest(lease.latest)
+      if (this.record.title) return false
+      this.record.title = trimmed
+      this.record.version = this.baseVersion + 1
+      await this.store.save(this.record, this.baseVersion)
+      this.baseVersion = this.record.version
+      return true
     } finally {
       await lease.release()
     }
@@ -508,7 +540,7 @@ export class Session {
     // needs a chat that can receive a file: a routine's named target, or the live
     // surface the turn is talking through. The terminal is the one surface with
     // nowhere to put one, so the tool stays out of its list. `panel` needs a
-    // surface that can draw one, which is the web app alone, so it is withheld
+    // surface that can draw one — the browser and the phone — so it is withheld
     // from every other catalog the same way. (A subagent filters `task` out of its
     // own list too.)
     const surface = surfaceOf(this.scope.gateway, opts?.client)
@@ -790,13 +822,56 @@ export class Session {
     // said is in the history log either way — this only adds the tidier version of
     // it, and nothing is lost if it never lands.
     if (!errored && this.options.derive && answer.trim()) {
-      const work = this.extract(input, answer)
-      this.deriving.add(work)
-      void work.finally(() => {
-        this.deriving.delete(work)
-        this.notifyIfIdle()
-      })
+      this.inBackground(this.extract(input, answer))
     }
+
+    // Naming the session is the same kind of call: drawn from the turn it opened
+    // with, and nobody waits for it. Only the first turn, only a session nobody
+    // named, and never a routine's own run — those belong to the routine and are
+    // kept out of `/sessions`, so a name for one is a name nobody reads.
+    if (this.shouldBeNamed(errored)) {
+      this.inBackground(this.nameFromOpeningTurn())
+    }
+  }
+
+  /** Whether this finished turn is the one that names the session. */
+  private shouldBeNamed(errored: boolean): boolean {
+    if (errored) return false
+    if (this.options.sessions?.generateTitles !== true) return false
+    if (this.record.title) return false
+    if (this.scope.gateway === ROUTINE_GATEWAY) return false
+    // One turn, and it was a question — not an instruction the gateway handled.
+    if (countTurns(this.messages) !== 1) return false
+    return !previewOf(this.messages).startsWith('/')
+  }
+
+  /**
+   * Asks the model for a name, out of the turn the session opened with, and writes
+   * it only into a session that still has none. Nothing here is the turn's problem:
+   * a call that fails or answers with something that is not a name leaves the
+   * session unnamed, and every surface falls back to the first message.
+   */
+  private async nameFromOpeningTurn(): Promise<void> {
+    try {
+      const model = this.options.sessions?.titleModel ?? this.options.model
+      const title = await generateTitle({
+        provider: this.options.providerFor?.(model) ?? this.options.provider,
+        model,
+        messages: this.messages,
+      })
+      if (title) await this.nameIfUnnamed(title)
+    } catch (error) {
+      logWarn(`could not name session ${this.id}: ${errorMessage(error)}`)
+    }
+  }
+
+  /** Starts background work, and stops counting it as in flight when it ends. */
+  private inBackground(work: Promise<void>): void {
+    this.background.add(work)
+    void work.finally(() => {
+      this.background.delete(work)
+      this.notifyIfIdle()
+    })
   }
 
   /**
@@ -825,9 +900,9 @@ export class Session {
     }
   }
 
-  /** Waits for the fact extractions still in flight. No turn ever waits on one. */
+  /** Waits for the background model calls still in flight. No turn ever waits on one. */
   async settle(): Promise<void> {
-    while (this.deriving.size > 0) await Promise.all([...this.deriving])
+    while (this.background.size > 0) await Promise.all([...this.background])
   }
 
   /**

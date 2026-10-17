@@ -18,7 +18,7 @@ import { settingsSectionFromPath } from './settings/sections.js'
 import { Panel } from './panel/Panel.js'
 import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, TranscriptPart } from '@protocol'
 import { drawsToolFailure, toolText } from '../../src/gateways/tool-line.ts'
-import { describeCompaction, describeRebase } from '../../src/core/sessions/format.ts'
+import { describeCompaction, describeRebase, sessionLabel as sharedSessionLabel } from '../../src/core/sessions/format.ts'
 import { Icon } from './ui/Icons.js'
 import { Notice, useAutoDismiss } from './ui/Notice.js'
 import { miloAvatar } from './ui/milo.js'
@@ -1268,7 +1268,7 @@ function settled(parts: TranscriptPart[]): TranscriptPart[] {
 
 /** What a session is called on screen: its message, never the generated id. */
 function sessionLabel(session: SessionSummary): string {
-  return session.title || session.preview || session.recap || 'New session'
+  return sharedSessionLabel(session) || session.recap || 'New session'
 }
 
 function sessionMeta(session: SessionSummary): string {

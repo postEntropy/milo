@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { z } from 'zod'
 import type { LoadedConfig } from '../src/core/config/load.js'
 import type { ClassifierConfig } from '../src/core/config/schema.js'
+import { DEFAULT_SESSIONS } from '../src/core/config/schema.js'
 import type { Tool } from '../src/core/tools/types.js'
 
 // Point the app at a throwaway home *before* the config modules load.
@@ -34,7 +35,7 @@ const loadedConfig = (
     model: 'test-model',
     providers: { test: { baseURL, wire: 'openai' } },
     memory: { derive: false, prune: false },
-    sessions: { compactAt: 0.7, maxInputTokens: 12000, keepTurns: 8, compaction: true, maxSessions: 50 },
+    sessions: DEFAULT_SESSIONS,
     history: { windowDays: 365 },
     traces: { enabled: true },
     display: { tools: 'full', thinking: 'on' },

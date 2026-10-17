@@ -7,6 +7,7 @@ export { rankSessions, withRecaps } from './recall.js'
 export { pruneSessions } from './retention.js'
 export { generateNickname } from './nickname.js'
 export {
+  cleanTitle,
   contextBudget,
   digest,
   dropOldAudio,
@@ -16,11 +17,13 @@ export {
   estimateText,
   estimateTokens,
   estimateTools,
+  generateTitle,
   planCut,
   planCutUnderBudget,
   sliceMessagesUpToTurn,
   summarize,
 } from './compact.js'
+export type { TitleOptions } from './compact.js'
 export {
   DEFAULT_PAGE_SIZE,
   describeCompaction,
@@ -30,5 +33,6 @@ export {
   formatStats,
   formatWhen,
   quotedLead,
+  sessionLabel,
   summarizeRecap,
 } from './format.js'

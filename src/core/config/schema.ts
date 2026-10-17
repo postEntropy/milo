@@ -182,6 +182,15 @@ export const SessionsSchema = z.object({
    * prune costs disk and nothing else.
    */
   maxSessions: z.number().int().nonnegative().default(50),
+  /**
+   * Name each session from its own first turn, in one short model call after that
+   * turn lands. On by default: `calm-otter-7` with nothing else beside it is a
+   * session nobody finds again. Nothing waits on the call — the reply is already
+   * on screen — and a session the person named is never renamed over.
+   */
+  generateTitles: z.boolean().default(true),
+  /** The model that writes those names. Absent, the session's own chat model is used. */
+  titleModel: z.string().optional(),
 })
 export type SessionsConfig = z.infer<typeof SessionsSchema>
 
@@ -191,6 +200,7 @@ export const DEFAULT_SESSIONS: SessionsConfig = {
   keepTurns: 8,
   compaction: true,
   maxSessions: 50,
+  generateTitles: true,
 }
 
 /**

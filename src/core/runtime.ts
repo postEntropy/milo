@@ -435,6 +435,16 @@ export class AgentRuntime {
   }
 
   /**
+   * Moves the sessions settings the sessions after this one start on. The config
+   * is read when a session is adopted, so replacing it here is what saving the
+   * file does: the next conversation is kept, folded and named by the new rules,
+   * and one already open keeps the ones it was built with.
+   */
+  setSessions(sessions: SessionsConfig): void {
+    this.options.sessions = sessions
+  }
+
+  /**
    * Switches the model for this install: the open sessions and the ones after.
    * The provider is built again where the runtime knows how — a model can
    * resolve to another wire — and the sessions already open, which hold the

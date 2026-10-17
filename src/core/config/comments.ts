@@ -32,7 +32,11 @@ export const CONFIG_NOTES: Record<string, string> = {
   'sessions.keepTurns': 'Turns kept verbatim when compacting; older ones are summarized.',
   'sessions.maxSessions': 'How many sessions stay on disk. 0 keeps every one.',
   'sessions.compaction': 'Whether a long conversation is folded at all.',
+  'sessions.generateTitles':
+    'Name each session from its first turn. One short model call, in the background.',
   'sessions.contextWindow': 'The window in tokens, for a model the public catalog gets wrong or misses.',
+  'sessions.titleModel':
+    'The model that writes those names. Absent, the session’s own chat model is used.',
 
   history: 'The log: one JSONL per day, and how far back recall reads it.',
   'history.windowDays': 'How far back recall reaches. 0 keeps every day.',

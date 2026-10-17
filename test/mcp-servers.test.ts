@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { LoadedConfig } from '../src/core/config/load.js'
+import { DEFAULT_SESSIONS } from '../src/core/config/schema.js'
 import type { ToolContext } from '../src/core/tools/types.js'
 
 // Point the install somewhere throwaway *before* the path module is loaded.
@@ -458,7 +459,7 @@ describe('the runtime', () => {
       model: 'test-model',
       providers: { test: { baseURL: 'http://127.0.0.1:1/v1', wire: 'openai' } },
       memory: { derive: false, prune: false },
-      sessions: { compactAt: 0.7, maxInputTokens: 12000, keepTurns: 8, compaction: true, maxSessions: 50 },
+      sessions: DEFAULT_SESSIONS,
       history: { windowDays: 365 },
       traces: { enabled: true },
       display: { tools: 'full', thinking: 'on' },
