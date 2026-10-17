@@ -5,10 +5,12 @@ import SwiftUI
 /// the sidebar's own tone, full-bleed to the screen's edges.
 struct SessionsDrawer: View {
     let routinesSelected: Bool
+    let tasksSelected: Bool
     let onClose: () -> Void
     let onNewSession: () -> Void
     let onSettings: () -> Void
     let onRoutines: () -> Void
+    let onTasks: () -> Void
     @Environment(AppModel.self) private var model
     /// The session being renamed, by id: the row's own press names one, and the alert
     /// the modifier presents does the rest.
@@ -37,7 +39,10 @@ struct SessionsDrawer: View {
                 .padding(.horizontal, MiloTheme.Space.four)
                 .padding(.top, MiloTheme.Space.four)
 
-            routinesTab
+            VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                pageTab("Routines", symbol: "clock", selected: routinesSelected, action: onRoutines)
+                pageTab("Task lists", symbol: "checklist", selected: tasksSelected, action: onTasks)
+            }
 
             if model.sessions.isEmpty {
                 Text("No sessions yet")
@@ -109,17 +114,17 @@ struct SessionsDrawer: View {
         .padding(.bottom, MiloTheme.Space.four)
     }
 
-    /// The way into the routines, under the drawer's own name: routines are something you go
-    /// to, like a page, not something that starts a session, so they sit above the list
-    /// rather than among the controls at the foot. Drawn as the list's own row — the same box,
-    /// the same tone, the same fill for the one showing — so it answers the finger the way a
-    /// session does; what tells the two apart is the mark and the name, never the box.
-    private var routinesTab: some View {
-        Button { onRoutines() } label: {
+    /// A workspace page under the drawer's own name: routines and task lists are places you
+    /// go to, not controls that start a session, so they sit above the list rather than
+    /// among the controls at the foot. Drawn as the list's own row — the same box, the same
+    /// tone, the same fill for the one showing — so it answers the finger the way a session
+    /// does; what tells the two apart is the mark and the name, never the box.
+    private func pageTab(_ title: String, symbol: String, selected: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
             HStack(spacing: MiloTheme.Space.two) {
-                Image(systemName: "clock")
+                Image(systemName: symbol)
                     .font(.system(size: 18, weight: .medium))
-                Text("Routines")
+                Text(title)
                     .font(MiloTheme.Text.body.weight(.medium))
                     .foregroundStyle(MiloTheme.foreground)
                 Spacer(minLength: MiloTheme.Space.two)
@@ -127,14 +132,14 @@ struct SessionsDrawer: View {
             .padding(.horizontal, MiloTheme.Space.three)
             .padding(.vertical, MiloTheme.Space.two)
             .background(
-                routinesSelected ? MiloTheme.surfaceRaised : Color.clear,
+                selected ? MiloTheme.surfaceRaised : Color.clear,
                 in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
             )
             .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
         }
         .buttonStyle(PressableStyle())
         .padding(.horizontal, MiloTheme.Space.three)
-        .accessibilityLabel("Routines")
+        .accessibilityLabel(title)
     }
 
     /// The list the way the browser buckets it: how recent, newest group first, with the

@@ -77,6 +77,7 @@ struct RootView: View {
                 // The routines too: what the daemon ran while the phone slept is on the
                 // list, and the reminders are re-scheduled from it for the next stretch.
                 Task { await model.refreshRoutines() }
+                Task { await model.refreshTaskLists() }
             case .background:
                 // Leaving the screen is the one moment the app can ask the system to stay
                 // awake a little longer — which is what the reply notice needs to have

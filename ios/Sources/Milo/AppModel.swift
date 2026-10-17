@@ -139,6 +139,13 @@ final class AppModel {
     /// A routine a tapped reminder asked to open; the Routines screen reads it, then
     /// clears it.
     var pendingRoutine: String?
+
+    // The task lists shared across sessions.
+    private(set) var taskLists: [TaskList] = []
+    private(set) var taskListsLoading = false
+    private(set) var taskListsSaving = false
+    /// Why the task lists could not be read, or why an action on one was refused.
+    private(set) var taskListsError: String?
     /// A session a tapped reply notice asked to open; the chat reads it, then clears it.
     var pendingSession: String?
     /// Whether the session now opening came from such a tap. Taken back by the chat once it
@@ -374,6 +381,8 @@ final class AppModel {
         ideas = []
         jobs = []
         routines = []
+        taskLists = []
+        taskListsError = nil
         panel = nil
         pending = nil
         note = nil
@@ -836,6 +845,75 @@ final class AppModel {
     func routineFeed() async throws -> [RoutineFeedEntry] {
         guard let account else { throw ApiError.badAddress }
         return try await MiloApi.routineFeed(account)
+    }
+
+    // MARK: - Task lists
+
+    func refreshTaskLists() async {
+        guard let account else { return }
+        taskListsLoading = true
+        defer { taskListsLoading = false }
+        do {
+            taskLists = try await MiloApi.taskLists(account)
+            taskListsError = nil
+        } catch is URLError {
+            // The socket's own glass pill already speaks for a connection that is down or
+            // reconnecting; saying it a second time in the list would draw two different
+            // notices for one outage.
+            connectionSaid = true
+            taskListsError = nil
+        } catch {
+            taskListsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    @discardableResult
+    func createTaskList(name: String) async -> Bool {
+        await actOnTaskLists(["action": "create", "name": name])
+    }
+
+    @discardableResult
+    func renameTaskList(name: String, newName: String) async -> Bool {
+        await actOnTaskLists(["action": "rename", "name": name, "newName": newName])
+    }
+
+    @discardableResult
+    func deleteTaskList(name: String) async -> Bool {
+        await actOnTaskLists(["action": "delete", "name": name])
+    }
+
+    @discardableResult
+    func addTaskItem(listName: String, item: String) async -> Bool {
+        await actOnTaskLists(["action": "add", "name": listName, "item": item])
+    }
+
+    @discardableResult
+    func completeTaskItem(listName: String, itemId: String) async -> Bool {
+        await actOnTaskLists(["action": "complete", "name": listName, "itemId": itemId])
+    }
+
+    @discardableResult
+    func removeTaskItem(listName: String, itemId: String) async -> Bool {
+        await actOnTaskLists(["action": "remove", "name": listName, "itemId": itemId])
+    }
+
+    /// One action, the whole set back: the daemon's store is the one that decides.
+    private func actOnTaskLists(_ body: [String: String]) async -> Bool {
+        guard let account else { return false }
+        taskListsSaving = true
+        taskListsError = nil
+        defer { taskListsSaving = false }
+        do {
+            let outcome = try await MiloApi.taskListAction(account, body)
+            taskLists = outcome.lists
+            return true
+        } catch is URLError {
+            connectionSaid = true
+            return false
+        } catch {
+            taskListsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return false
+        }
     }
 
     // MARK: - Models

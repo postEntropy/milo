@@ -239,6 +239,18 @@ enum MiloApi {
         try await call("routine-feed", account: account, as: [RoutineFeedEntry].self)
     }
 
+    // MARK: - Task lists
+
+    /// Every task list the install holds, shared across all sessions.
+    static func taskLists(_ account: Account) async throws -> [TaskList] {
+        try await call("task-lists", account: account, as: [TaskList].self)
+    }
+
+    /// One action on the task lists; the daemon answers with the whole set back.
+    static func taskListAction(_ account: Account, _ body: [String: String]) async throws -> TaskListActionOutcome {
+        try await call("task-list-action", body, account: account, as: TaskListActionOutcome.self)
+    }
+
     // MARK: - Memory, Tools & Skills
 
     static func memoryNotes(_ account: Account) async throws -> [MemoryNote] {
@@ -656,3 +668,62 @@ struct RoutineFeedEntry: Decodable, Identifiable, Hashable {
         answer = try container.decodeIfPresent(String.self, forKey: .answer) ?? ""
     }
 }
+
+/// One task inside a persistent list.
+struct TaskListItem: Decodable, Identifiable, Hashable {
+    let id: String
+    let content: String
+    let completed: Bool
+    let createdAt: Double
+
+    private enum CodingKeys: String, CodingKey {
+        case id, content, completed, createdAt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        content = try container.decodeIfPresent(String.self, forKey: .content) ?? ""
+        completed = try container.decodeIfPresent(Bool.self, forKey: .completed) ?? false
+        createdAt = try container.decodeIfPresent(Double.self, forKey: .createdAt) ?? 0
+    }
+}
+
+/// A persistent named task list shared across all sessions.
+struct TaskList: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let createdAt: Double
+    let items: [TaskListItem]
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, createdAt, items
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        createdAt = try container.decodeIfPresent(Double.self, forKey: .createdAt) ?? 0
+        items = try container.decodeIfPresent([TaskListItem].self, forKey: .items) ?? []
+    }
+
+    var openCount: Int { items.filter { !$0.completed }.count }
+    var completedCount: Int { items.filter(\.completed).count }
+    var lastActivity: Double { items.reduce(createdAt) { max($0, $1.createdAt) } }
+}
+
+/// What a task list action answers: the sentence it produced, and the updated lists.
+struct TaskListActionOutcome: Decodable {
+    let result: String
+    let lists: [TaskList]
+
+    private enum CodingKeys: String, CodingKey { case result, lists }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        result = try container.decodeIfPresent(String.self, forKey: .result) ?? ""
+        lists = try container.decodeIfPresent([TaskList].self, forKey: .lists) ?? []
+    }
+}
+

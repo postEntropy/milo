@@ -47,6 +47,86 @@ struct SessionsButton: View {
 }
 
 /**
+ How the socket's state is worn on a screen's own line: the mark and the tone, read off the
+ state so the words and what they are drawn in cannot come apart. A wait — reaching for the
+ daemon, reconnecting to it — is the warning a transient thing wears and keeps the app's
+ sweeping indicator; a state the daemon itself gave, a refusal or a frame this app cannot
+ read, is the danger that needs the person's hand and is drawn settled.
+ */
+extension MiloClient.State {
+    var tone: Color {
+        switch self {
+        case .refused, .unreadable: return MiloTheme.danger
+        case .connecting, .offline: return MiloTheme.warning
+        case .online, .idle: return MiloTheme.muted
+        }
+    }
+
+    /// One mark for the whole wait: the socket still being worked at. It does not change as
+    /// the outage passes between connecting and offline, so the pill cannot flicker a mark
+    /// while the thumb is only watching it retry.
+    var symbol: String {
+        switch self {
+        case .refused, .unreadable: return "exclamationmark.triangle.fill"
+        default: return "arrow.triangle.2.circlepath"
+        }
+    }
+
+    /// Whether the socket is still working at it — what decides between the app's own sweep
+    /// and a line that is simply there to read.
+    var waiting: Bool {
+        switch self {
+        case .connecting, .offline: return true
+        default: return false
+        }
+    }
+}
+
+/**
+ What a screen says about the socket, worn the way every control here is made — the
+ platform's own glass, tinted with the tone of the state — so the line reads as part of the
+ surface rather than a bare sentence dropped over the page. A wait keeps the app's own sweep
+ travelling its words, which is what says the app is still trying; an answer the daemon gave
+ is drawn settled, because it is a thing to read rather than a thing to wait on. Held between
+ the bar's own margins and hugging its words: a two-word line is a small pill, and a long
+ refusal grows and wraps it.
+ */
+struct ConnectionPill: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        if let state = model.connectionLine {
+            let tone = model.connection.tone
+            let content = HStack(spacing: MiloTheme.Space.two) {
+                Image(systemName: model.connection.symbol)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(tone)
+                if model.connection.waiting {
+                    Glare(text: state, font: MiloTheme.Text.small, tone: tone)
+                } else {
+                    Text(state)
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(tone)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.horizontal, MiloTheme.Space.three)
+            .padding(.vertical, MiloTheme.Space.two)
+            .glassEffect(.regular.tint(tone.opacity(0.28)), in: Capsule())
+
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                content
+                Spacer(minLength: 0)
+            }
+            .accessibilityElement(children: .combine)
+            .transition(.opacity)
+        }
+    }
+}
+
+/**
  Renaming, wherever it is asked for: one alert, one starting point, one call. Presented
  with the id of the session to rename, nil for none, so a surface only has to name one.
  */

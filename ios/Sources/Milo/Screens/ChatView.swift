@@ -16,65 +16,6 @@ final class ScrollBoxes {
     var frames: [CGRect] = []
 }
 
-/// The frames, in the window's own space, of every box in the thread that scrolls sideways
-/// on its own — a code block, a table. A drag that begins inside one belongs to the box,
-/// not to the sessions drawer.
-struct ScrollBoxKey: PreferenceKey {
-    static var defaultValue: [CGRect] { [] }
-    static func reduce(value: inout [CGRect], nextValue: () -> [CGRect]) {
-        value.append(contentsOf: nextValue())
-    }
-}
-
-/// Where those frames are kept: a plain reference, so a scroll that moves the boxes writes
-/// them without re-rendering the screen, which reads them only when a drag has ended.
-final class ScrollBoxes {
-    var frames: [CGRect] = []
-}
-
-/// The panel a composer control has raised: what belongs to the message being written, or
-/// what a running turn answers to. One at a time, and never in place of the composer.
-enum ComposerMenu: Equatable {
-    case actions
-    case running
-}
-
-/**
- How the socket's state is worn on the chat's own line: the mark and the tone, read off the
- state so the words and what they are drawn in cannot come apart. A wait — reaching for the
- daemon, reconnecting to it — is the warning a transient thing wears and keeps the app's
- sweeping indicator; a state the daemon itself gave, a refusal or a frame this app cannot
- read, is the danger that needs the person's hand and is drawn settled.
- */
-private extension MiloClient.State {
-    var tone: Color {
-        switch self {
-        case .refused, .unreadable: return MiloTheme.danger
-        case .connecting, .offline: return MiloTheme.warning
-        case .online, .idle: return MiloTheme.muted
-        }
-    }
-
-    /// One mark for the whole wait: the socket still being worked at. It does not change as
-    /// the outage passes between connecting and offline, so the pill cannot flicker a mark
-    /// while the thumb is only watching it retry.
-    var symbol: String {
-        switch self {
-        case .refused, .unreadable: return "exclamationmark.triangle.fill"
-        default: return "arrow.triangle.2.circlepath"
-        }
-    }
-
-    /// Whether the socket is still working at it — what decides between the app's own sweep
-    /// and a line that is simply there to read.
-    var waiting: Bool {
-        switch self {
-        case .connecting, .offline: return true
-        default: return false
-        }
-    }
-}
-
 /// The session on screen: a floating top bar, the thread, and a floating
 /// composer pinned above the keyboard. No rules between the regions — each is
 /// carried by its own surface and spacing.
@@ -93,10 +34,13 @@ struct ChatView: View {
     @State private var settings = false
     @State private var routines = false
     @State private var routinesSelected = false
-    /// Whether one routine's own page is open on top of the routines list. The drawer's swipe
-    /// belongs to the list: over a page that drag is the page's own way back, and the two
+    @State private var tasks = false
+    @State private var tasksSelected = false
+    /// Whether one routine's or task list's own page is open on top of its index. The drawer's
+    /// swipe belongs to the list: over a page that drag is the page's own way back, and the two
     /// cannot both answer it.
     @State private var routinePage = false
+    @State private var taskPage = false
     /// The composer's panel, when one is open — raised by the `+` or by a long press on the
     /// send control, drawn over the composer, dismissed by a tap anywhere but itself.
     @State private var menu: ComposerMenu?
@@ -173,10 +117,13 @@ struct ChatView: View {
             // nothing of the sidebar can show through the chat at rest.
             SessionsDrawer(
                 routinesSelected: routinesSelected,
+                tasksSelected: tasksSelected,
                 onClose: {
                     drawer = false
                     routinesSelected = false
                     routines = false
+                    tasksSelected = false
+                    tasks = false
                 },
                 onNewSession: {
                     // Inside the tap that asked for it, before the session moves: the
@@ -186,6 +133,8 @@ struct ChatView: View {
                     drawer = false
                     routinesSelected = false
                     routines = false
+                    tasksSelected = false
+                    tasks = false
                     composing = true
                     Task { await model.newSession() }
                 },
@@ -193,12 +142,23 @@ struct ChatView: View {
                     drawer = false
                     routinesSelected = false
                     routines = false
+                    tasksSelected = false
+                    tasks = false
                     settings = true
                 },
                 onRoutines: {
                     drawer = false
+                    tasksSelected = false
+                    tasks = false
                     routinesSelected = true
                     routines = true
+                },
+                onTasks: {
+                    drawer = false
+                    routinesSelected = false
+                    routines = false
+                    tasksSelected = true
+                    tasks = true
                 }
             )
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
@@ -222,17 +182,7 @@ struct ChatView: View {
                 .transition(.move(edge: .trailing))
             }
 
-            Group {
-                if routines {
-                    // The sessions are the chat's own drawer, and this screen opens it the
-                    // way the chat does: the same control, the same gesture. Dismissing the
-                    // drawer without choosing a session leaves the person on the routines —
-                    // only a session chosen takes the card back to the chat.
-                    RoutinesView(account: account, pushed: $routinePage, onSessions: openDrawer)
-                } else {
-                    chat
-                }
-            }
+            cardContent
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // The card is the background: it runs under the status bar and the
                 // home indicator, and carries the rounded edge and the shadow while
@@ -429,17 +379,36 @@ struct ChatView: View {
         // A tapped reminder opens the Routines page in the same shell as the chat.
         .onChange(of: model.pendingRoutine) { _, id in
             if id != nil {
+                tasksSelected = false
+                tasks = false
                 routinesSelected = true
                 routines = true
             }
         }
         .onAppear {
             if model.pendingRoutine != nil {
+                tasksSelected = false
+                tasks = false
                 routinesSelected = true
                 routines = true
             }
         }
         .sessionRename($renaming)
+    }
+
+    @ViewBuilder
+    private var cardContent: some View {
+        if routines {
+            // The sessions are the chat's own drawer, and this screen opens it the
+            // way the chat does: the same control, the same gesture. Dismissing the
+            // drawer without choosing a session leaves the person on the routines —
+            // only a session chosen takes the card back to the chat.
+            RoutinesView(account: account, pushed: $routinePage, onSessions: openDrawer)
+        } else if tasks {
+            TaskListsView(pushed: $taskPage, onSessions: openDrawer)
+        } else {
+            chat
+        }
     }
 
     /// The panel's tabs and the one in front, when the daemon has any and the sessions are not
@@ -539,12 +508,13 @@ struct ChatView: View {
     /// Whether a sideways drag belongs to the card rather than to the thread: toward an edge
     /// that has something to show — the sessions on the right, the panel on the left — and from
     /// outside any box that scrolls sideways of its own. A lid already up is the one the drag
-    /// answers, whichever way the hand goes; from rest, a rightward drag over a routine's own
-    /// page is that page's way back to the list (`RoutinesView`), so the sessions stay out of it.
+    /// answers, whichever way the hand goes; from rest, a rightward drag over a routine's or
+    /// task list's own page is that page's way back to its list (`RoutinesView`, `TaskListsView`),
+    /// so the sessions stay out of it.
     private func claims(_ across: CGFloat, from start: CGPoint) -> Bool {
         guard !boxes.frames.contains(where: { $0.contains(start) }) else { return false }
         if drawer || panelShown { return true }
-        return across > 0 ? !(routines && routinePage) : hasPanel
+        return across > 0 ? !((routines && routinePage) || (tasks && taskPage)) : hasPanel
     }
 
     /// Where a drag that has just been let go leaves the card: past halfway, or flicked there,
@@ -1046,52 +1016,13 @@ struct ChatView: View {
                     .accessibilityLabel(model.panelOpen ? "Hide the panel" : "Show the panel")
                 }
             }
-            if let state = model.connectionLine {
-                connectionPill(state)
-                    .transition(.opacity)
-            }
+            ConnectionPill()
         }
         .padding(.horizontal, MiloTheme.margin)
         .padding(.bottom, MiloTheme.Space.two)
         // The line comes and goes as a fade rather than a jump, the way the notice over the
         // thread does: the two are the same kind of thing, a state said once and then gone.
         .animation(.smooth(duration: 0.22), value: model.connectionLine)
-    }
-
-    /// What the chat says about the socket, worn the way every control here is made — the
-    /// platform's own glass, tinted with the tone of the state — so the line reads as part
-    /// of the surface rather than a bare sentence dropped over the thread. A wait keeps the
-    /// app's own sweep travelling its words, which is what says the app is still trying; an
-    /// answer the daemon gave is drawn settled, because it is a thing to read rather than a
-    /// thing to wait on. Held between the bar's own margins and hugging its words: a
-    /// two-word line is a small pill, and a long refusal grows and wraps it.
-    private func connectionPill(_ state: String) -> some View {
-        let tone = model.connection.tone
-        let content = HStack(spacing: MiloTheme.Space.two) {
-            Image(systemName: model.connection.symbol)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(tone)
-            if model.connection.waiting {
-                Glare(text: state, font: MiloTheme.Text.small, tone: tone)
-            } else {
-                Text(state)
-                    .font(MiloTheme.Text.small)
-                    .foregroundStyle(tone)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(.horizontal, MiloTheme.Space.three)
-        .padding(.vertical, MiloTheme.Space.two)
-        .glassEffect(.regular.tint(tone.opacity(0.28)), in: Capsule())
-        // The two spacers are what let the pill be only as wide as its own words — the shape
-        // the notice over the thread is given — and hold it centred under the bar.
-        return HStack(spacing: 0) {
-            Spacer(minLength: 0)
-            content
-            Spacer(minLength: 0)
-        }
-        .accessibilityElement(children: .combine)
     }
 
     /// The mark a glass control in the top bar wears: one size, so the row's buttons

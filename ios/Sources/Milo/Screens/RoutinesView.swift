@@ -241,13 +241,16 @@ private struct RoutineList: View {
         // rather than a page with no exit. Drawn in the page's tone, so what scrolls under
         // it stays under it — the same room the chat's bar keeps, in this screen's material.
         .safeAreaInset(edge: .top, spacing: 0) {
-            HStack(spacing: 0) {
-                SessionsButton(action: onSessions)
-                Spacer(minLength: 0)
+            VStack(spacing: MiloTheme.Space.one) {
+                HStack(spacing: 0) {
+                    SessionsButton(action: onSessions)
+                    Spacer(minLength: 0)
+                }
+                ConnectionPill()
             }
             .padding(.horizontal, MiloTheme.margin)
-            .padding(.bottom, MiloTheme.Space.one)
-            .background(MiloTheme.background)
+            .padding(.bottom, MiloTheme.Space.two)
+            .animation(.smooth(duration: 0.22), value: model.connectionLine)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             Button(action: onCompose) {
