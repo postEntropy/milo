@@ -38,6 +38,14 @@ enum ClientFrame {
      place rather than opening a second one.
      */
     case action(actionId: String, messageId: String? = nil)
+    /**
+     A press on a panel tab: bring it to the front, or close it, named by its key. A key
+     rather than a position, so a press cannot race the list shifting under it.
+     */
+    case panelActivate(key: String)
+    case panelClose(key: String)
+    /// Pointer or keyboard the person sent into the live browser.
+    case panelInput(PanelInput)
 
     /// A flat object per frame, so the encoder is `JSONSerialization` and there is
     /// no second spelling of the wire to keep in step with the server's.
@@ -67,6 +75,12 @@ enum ClientFrame {
         case .action(let actionId, let messageId):
             guard let messageId else { return ["type": "action", "actionId": actionId] }
             return ["type": "action", "actionId": actionId, "messageId": messageId]
+        case .panelActivate(let key):
+            return ["type": "panel-activate", "key": key]
+        case .panelClose(let key):
+            return ["type": "panel-close", "key": key]
+        case .panelInput(let input):
+            return ["type": "panel-input", "input": input.json]
         }
     }
 }
@@ -204,6 +218,70 @@ struct CommandResult: Decodable {
     let attachments: [FrameAttachment]?
 }
 
+// MARK: - The panel beside the chat
+
+/// What a panel tab is showing, as the daemon decides it. A kind this build has never
+/// heard of is kept as `other` and drawn the way an unrenderable file is: served to the
+/// person by its bytes rather than taking the frame down with it.
+enum PanelKind: String, Decodable {
+    case document, page, image, pdf, file, browser, other
+
+    init(from decoder: Decoder) throws {
+        let name = try decoder.singleValueContainer().decode(String.self)
+        self = PanelKind(rawValue: name) ?? .other
+    }
+}
+
+/// One tab: what it holds, plus the stable name a press refers to it by. The bytes never
+/// ride the socket — `artifact` is a descriptor, and the file behind it is fetched from
+/// `/panel/<id>` by the id it carries.
+struct PanelTab: Decodable, Identifiable, Hashable {
+    let key: String
+    let kind: PanelKind
+    /// What the tab calls it, when the daemon named it.
+    let title: String?
+    /// The file behind `document`, `page`, `image`, `pdf` or `file`.
+    let artifact: FrameAttachment?
+    /// The page the live browser is on, when it knows.
+    let url: String?
+
+    var id: String { key }
+}
+
+/// What the panel is showing: its tabs, in the order they opened, and the one in front.
+/// Null on the wire means nothing is open, which is the panel being down.
+struct PanelView: Decodable, Hashable {
+    let tabs: [PanelTab]
+    let active: Int
+}
+
+/// A pointer or a key sent into the live browser. Coordinates are normalized to the
+/// viewport (0..1) so the page does not have to be told its pixel size, and a key
+/// carries CDP's modifier bitmask (Alt 1, Ctrl 2, Meta 4, Shift 8) so a shortcut is
+/// not mistaken for a plain character.
+enum PanelInput {
+    case click(x: Double, y: Double)
+    case move(x: Double, y: Double)
+    case scroll(x: Double, y: Double, deltaY: Double)
+    case key(String, modifiers: Int)
+    case type(String)
+
+    var json: [String: Any] {
+        switch self {
+        case .click(let x, let y):
+            return ["kind": "click", "x": x, "y": y]
+        case .move(let x, let y):
+            return ["kind": "move", "x": x, "y": y]
+        case .scroll(let x, let y, let deltaY):
+            return ["kind": "scroll", "x": x, "y": y, "deltaY": deltaY]
+        case .key(let key, let modifiers):
+            return ["kind": "key", "key": key, "modifiers": modifiers]
+        case .type(let text):
+            return ["kind": "type", "text": text]
+        }
+    }
+}
+
 /// The pieces of a streaming turn the chat actually draws. Every kind is read
 /// tolerantly — a shape this build does not know is `other` and draws nothing,
 /// rather than taking the frame down with it.
@@ -317,6 +395,9 @@ struct Ready: Decodable {
     /// The background jobs still running when this screen opened, so the strip is drawn
     /// without waiting for the next change broadcast.
     let jobs: [JobView]?
+    /// The panel this conversation was left showing, so a screen that opens onto one has
+    /// its tabs without waiting for the next time the model shows something.
+    let panel: PanelView?
 }
 
 // MARK: - What the server sends
@@ -336,12 +417,14 @@ enum ServerFrame: Decodable {
     /// A session's turn began or ended somewhere in the install: re-read the list that
     /// shows it running.
     case sessionsChanged
+    /// The panel beside the chat changed; null takes it down.
+    case panel(PanelView?)
     case error(String)
     case unknown
 
     private enum CodingKeys: String, CodingKey {
         case type, id, text, turnId, event, request, expiresAt, allowed, status, raw, rawNoOutput
-        case busy, queued, jobs, items, message
+        case busy, queued, jobs, items, message, panel
     }
 
     init(from decoder: Decoder) throws {
@@ -386,6 +469,9 @@ enum ServerFrame: Decodable {
         case "suggestions": self = .suggestions(try container.decode([Idea].self, forKey: .items))
         case "routines-changed": self = .routinesChanged
         case "sessions-changed": self = .sessionsChanged
+        // Absent and null are the same thing here: nothing is open, which is the panel
+        // being down rather than a frame that failed to read.
+        case "panel": self = .panel(try container.decodeIfPresent(PanelView.self, forKey: .panel))
         case "error": self = .error(try container.decode(String.self, forKey: .message))
         default: self = .unknown
         }

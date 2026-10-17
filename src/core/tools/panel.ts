@@ -24,12 +24,12 @@ const schema = z.object({
 export type PanelArgs = z.infer<typeof schema>
 
 /**
- * The panel beside the web chat: the surface the model shows things on.
+ * The panel beside the chat: the surface the model shows things on.
  *
  * It holds no effect of its own — nothing but the view a surface draws — so it
  * never asks, and its result carries the request for the web gateway to resolve
- * rather than only text. Only the web app has a panel, so the session keeps this
- * tool out of every other surface's catalog, the same way it withholds
+ * rather than only text. The browser and the phone both have a panel, so the session
+ * keeps this tool out of every other surface's catalog, the same way it withholds
  * `send_file` from the terminal.
  */
 export const panelTool: Tool<PanelArgs> = {

@@ -72,6 +72,16 @@ function canDraw(surface: SurfaceKind | undefined): boolean {
 }
 
 /**
+ * Whether a surface can draw a panel beside its chat. The same two surfaces as
+ * `canDraw` today, but a rule of its own: a panel is a place for tabs, and a
+ * surface that can draw a widget is not thereby one that has somewhere to put
+ * a file.
+ */
+function canPanel(surface: SurfaceKind | undefined): boolean {
+  return surface === 'web' || surface === 'ios'
+}
+
+/**
  * Whether a surface can receive a file the turn sends. The terminal is the one
  * that cannot: it has nowhere to put a file, so `send_file` stays out of its
  * catalog rather than being offered to fail on.
@@ -567,7 +577,7 @@ export class Session {
           }
         : undefined
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
-      .filter((tool) => tool.name !== 'panel' || surface === 'web')
+      .filter((tool) => tool.name !== 'panel' || canPanel(surface))
       .filter((tool) => tool.name !== 'sessions' || sessionAdmin !== undefined)
     // An instruction-only turn has nothing of the person's to recall against.
     const recalled = opts?.notice

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -329,6 +329,44 @@ describe('the panel strip frames', () => {
     expect(parseClientFrame({ type: 'panel-activate' })).toBeNull()
     expect(parseClientFrame({ type: 'panel-activate', key: '' })).toBeNull()
     expect(parseClientFrame({ type: 'panel-close', key: 3 })).toBeNull()
+  })
+})
+
+describe('the live browser stream', () => {
+  /** A browser that only hands back the place Chrome's own frames arrive on. */
+  function streaming() {
+    let push: ((frame: Buffer) => void) | undefined
+    const browser = {
+      startScreencast: async (onFrame: (frame: Buffer) => void) => {
+        push = onFrame
+      },
+      stopScreencast: () => undefined,
+    }
+    return { browser, frame: (bytes: string) => push?.(Buffer.from(bytes)) }
+  }
+
+  it('repeats the last frame, so a page that is still is not a stream that died', async () => {
+    // Only the beat is on the clock: everything else in this test awaits promises.
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const { browser, frame } = streaming()
+    const hub = new WebHub(build(new PanelProvider([]), browser), home)
+    const sent: string[] = []
+    const off = await hub.watchBrowser((bytes) => sent.push(bytes.toString()))
+
+    frame('one')
+    expect(sent).toEqual(['one'])
+
+    // A still page sends nothing of its own. Without the repeat, both surfaces that
+    // draw this stream would take four quiet seconds for a dead one and retry.
+    vi.advanceTimersByTime(4_000)
+    expect(sent).toEqual(['one', 'one', 'one'])
+
+    // Nobody watching: not even a repeat. This is also what keeps a process alive
+    // from being held by a live view nobody is looking at.
+    off()
+    vi.advanceTimersByTime(4_000)
+    expect(sent).toEqual(['one', 'one', 'one'])
+    vi.useRealTimers()
   })
 })
 

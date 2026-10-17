@@ -86,12 +86,6 @@ final class AppModel {
         return String(modelName[modelName.index(after: slash)...])
     }
 
-    /// The name of the session on screen, when the list knows it — the `ready`
-    /// frame carries no title, so it comes from the sessions themselves.
-    var title: String? {
-        let named = sessions.first { $0.id == sessionId }?.title?.trimmingCharacters(in: .whitespaces) ?? ""
-        return named.isEmpty ? nil : named
-    }
     /// Counters, not flags: a haptic fires on an edge, so what it watches is the
     /// moment the answer begins and the moment it lands. `busy` cannot be the
     /// trigger — it goes up on the send — and neither can `turn-start`, which the
@@ -163,6 +157,25 @@ final class AppModel {
     var suggestions: [Suggestion] {
         buildSuggestions(sessions: sessions, ideas: ideas, currentId: sessionId)
     }
+
+    // The panel beside the chat.
+    /**
+     What the daemon says is on the panel: its tabs, in the order they opened, and the one
+     in front. Held here rather than in the view, so the frame that opens a tab and the
+     screen that draws it cannot disagree about what is up — and so switching sessions
+     drops it in the one place every switch goes through.
+     */
+    private(set) var panel: PanelView?
+    /**
+     Whether the panel is showing. The phone's own preference, kept the way the appearance
+     and the folded tools are, and the reason is the browser's: a panel the model revealed
+     is not the person's own choice about what their screen looks like. What the handshake
+     brings back is the tabs; whether they are covered comes from here.
+     */
+    var panelOpen = UserDefaults.standard.object(forKey: AppModel.panelOpenKey) as? Bool ?? false {
+        didSet { UserDefaults.standard.set(panelOpen, forKey: Self.panelOpenKey) }
+    }
+    private static let panelOpenKey = "panel-open"
 
     // The model picker.
     private(set) var providers: [ProviderInfo] = []
@@ -361,6 +374,7 @@ final class AppModel {
         ideas = []
         jobs = []
         routines = []
+        panel = nil
         pending = nil
         note = nil
         phase = .pairing
@@ -452,6 +466,72 @@ final class AppModel {
               let encodedToken = account.token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
         else { return nil }
         return account.url("/attachment/\(encodedId)?t=\(encodedToken)")
+    }
+
+    // MARK: - The panel
+
+    /// Where a panel artifact's bytes are fetched: the same inline request the browser makes,
+    /// with the token in the query — a `WKWebView`, a `PDFView` and an image loader all send
+    /// no header of ours.
+    func panelURL(_ id: String) -> URL? {
+        guard let account,
+              let encodedId = id.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed),
+              let encodedToken = account.token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+        else { return nil }
+        return account.url("/panel/\(encodedId)?t=\(encodedToken)")
+    }
+
+    /// The live browser's own stream: one request that never ends, the daemon writing a JPEG
+    /// per frame and stopping when the last watcher lets go of it.
+    var browserFramesURL: URL? {
+        guard let account,
+              let encodedToken = account.token.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed)
+        else { return nil }
+        return account.url("/browser/frames?t=\(encodedToken)")
+    }
+
+    /// How much of a document is read before it stops. The browser's own ceiling, so a file
+    /// far too big to read is cut off in the same place on both surfaces rather than each
+    /// choosing a size of its own.
+    private static let documentCap = 512 * 1024
+
+    /// A document's words, for the tab that draws them. Over HTTP rather than the wire: the
+    /// bytes never ride the socket, and the file is read as it is now — which is what lets
+    /// an edit on the machine show the next time the tab is drawn, without reopening it.
+    func panelText(_ id: String) async throws -> (text: String, truncated: Bool) {
+        let data = try await panelData(id)
+        let truncated = data.count > Self.documentCap
+        return (String(decoding: data.prefix(Self.documentCap), as: UTF8.self), truncated)
+    }
+
+    /// A panel artifact's bytes. One request for every kind that is fetched rather than
+    /// streamed, so the address, the token and what a refusal says cannot drift apart.
+    func panelData(_ id: String) async throws -> Data {
+        guard let url = panelURL(id) else { throw ApiError.badAddress }
+        let (data, response) = try await URLSession.shared.data(from: url)
+        guard (response as? HTTPURLResponse).map({ (200..<300).contains($0.statusCode) }) ?? false else {
+            throw ApiError.refused("That file could not be read from the daemon.")
+        }
+        return data
+    }
+
+    /// Brings a panel tab to the front. It travels to the daemon, which redraws the panel and
+    /// sends it back: two screens watching one chat cannot then disagree about which tab is in
+    /// front — the browser's own round trip.
+    func activatePanelTab(_ key: String) {
+        client.send(.panelActivate(key: key))
+    }
+
+    /// Closes a tab by key. Closing the last one takes the panel down, which is the daemon's
+    /// answer to draw rather than a guess made here.
+    func closePanelTab(_ key: String) {
+        client.send(.panelClose(key: key))
+    }
+
+    /// A pointer or a key the person sent into the live browser. Their own act, so nothing is
+    /// confirmed; where it failed, the daemon says.
+    func sendPanelInput(_ input: PanelInput) {
+        if !client.send(.panelInput(input)) { unsent() }
     }
 
     func stop() {
@@ -653,6 +733,10 @@ final class AppModel {
         // the new one's own — so the strip never stands showing the strip of the chat
         // that was left.
         jobs = []
+        // And the panel: its tabs are the ones the session being left had open, and the
+        // handshake brings the new session's own. The preference is left alone — it says
+        // what this person wants, not what that session was showing.
+        panel = nil
         client.connect(to: account)
     }
 
@@ -1225,6 +1309,11 @@ final class AppModel {
             // The jobs running when this screen opened: the strip is drawn from the
             // handshake rather than waiting for the next change to reach it.
             jobs = ready.jobs ?? []
+            // The panel this conversation was left showing, if it was: the handshake hands
+            // the tabs back, and whether they are covered comes from the preference. A
+            // reload therefore brings a panel back the way it was left, never opening one
+            // nobody asked for — the browser's own rule, for the browser's own reason.
+            panel = ready.panel
             turnStarted = nil
             began = false
             // A turn still being written when this screen opened: its `turn-start`
@@ -1327,6 +1416,13 @@ final class AppModel {
             // A session started or stopped a turn anywhere in the install: re-read the
             // list, which carries the running flag, rather than guess it here.
             Task { await refreshSessions() }
+        case .panel(let view):
+            // The model showed something, so it comes to the front the way it does in the
+            // browser: what the surface beside the chat is for is being looked at. A null
+            // frame is the panel being taken down, and it leaves the preference alone — the
+            // daemon ended the tabs, not the person's own choice about their screen.
+            panel = view
+            if view != nil { panelOpen = true }
         case .unknown:
             break
         }

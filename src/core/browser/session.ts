@@ -219,7 +219,7 @@ export class BrowserSession {
   }
 
   async close(): Promise<void> {
-    this.screencast = null
+    this.stopScreencast()
     this.connection?.close()
     this.connection = null
     this.stopChrome?.()
@@ -361,7 +361,10 @@ export class BrowserSession {
    *
    * One screencast per session: the first watcher starts it and every frame is
    * acknowledged, which is what keeps Chrome sending the next one. A frame the
-   * surface dropped must not stall the stream, so the ack is not waited on.
+   * surface dropped must not stall the stream, so the ack is not waited on. Chrome
+   * only sends a frame when the page changes, so a stream a surface can watch is
+   * made upstream of this, by repeating the last frame — see `BROWSER_BEAT_MS` in
+   * the web hub, which is the one place frames reach a surface from.
    */
   async startScreencast(onFrame: (frame: Buffer) => void): Promise<void> {
     await this.start()

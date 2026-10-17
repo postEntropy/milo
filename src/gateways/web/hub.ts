@@ -46,6 +46,20 @@ const IDEAS_NOTES_LIMIT = 200
 /** How many recent sessions are named as grounding. */
 const IDEAS_SESSIONS = 5
 
+/**
+ * How often the live browser's last frame is sent again while a surface watches.
+ *
+ * `Page.screencastFrame` is event-driven: Chrome sends a frame when the page's
+ * surface changes, and nothing at all while it is still — which is the ordinary
+ * case, a page nobody is touching. Both surfaces that draw the live view read that
+ * silence as a dead stream, and they are right to: from outside, a still page and a
+ * stalled browser look exactly alike. So the frame a watcher already has is sent
+ * again on this beat, and a stream that really has stopped is the only quiet one
+ * left. Half of the four seconds both surfaces wait, which leaves them a whole beat
+ * of slack.
+ */
+const BROWSER_BEAT_MS = 2_000
+
 export interface WebClient {
   send(frame: ServerFrame): void
 }
@@ -143,6 +157,12 @@ export class WebHub {
    * at is not streaming.
    */
   private readonly browserWatchers = new Set<(frame: Buffer) => void>()
+
+  /** The last frame the live browser sent, repeated on the beat below. */
+  private lastBrowserFrame: Buffer | null = null
+
+  /** The beat doing that repeating. One for every watcher together, not one each. */
+  private browserBeat: NodeJS.Timeout | null = null
 
   /** Stops following the browser's URL once subscribed; see `watchBrowserUrl`. */
   private browserUrlWatch: (() => void) | null = null
@@ -649,18 +669,51 @@ export class WebHub {
   async watchBrowser(onFrame: (frame: Buffer) => void): Promise<() => void> {
     const browser = this.runtime.browser
     if (!browser) throw new Error('the browser is not enabled — turn it on in Settings → Tools')
-    if (this.browserWatchers.size === 0) await browser.startScreencast((frame) => this.fanBrowser(frame))
+    if (this.browserWatchers.size === 0) {
+      await browser.startScreencast((frame) => this.fanBrowser(frame))
+      this.startBrowserBeat()
+    }
     this.browserWatchers.add(onFrame)
     let stopped = false
     return () => {
       if (stopped) return
       stopped = true
       this.browserWatchers.delete(onFrame)
-      if (this.browserWatchers.size === 0) browser.stopScreencast()
+      if (this.browserWatchers.size === 0) {
+        browser.stopScreencast()
+        this.stopBrowserBeat()
+      }
     }
   }
 
+  /**
+   * The last frame, again and again: see `BROWSER_BEAT_MS` for why a screencast is
+   * not a stream without this. Started with the first watcher and stopped with the
+   * last, so nothing is sent — not even a repeat — to nobody.
+   */
+  private startBrowserBeat(): void {
+    this.lastBrowserFrame = null
+    this.browserBeat = setInterval(() => {
+      // A watcher that left without the off switch being called — a socket cut
+      // mid-frame — must not leave this running.
+      if (this.browserWatchers.size === 0) {
+        this.stopBrowserBeat()
+        return
+      }
+      if (this.lastBrowserFrame) this.fanBrowser(this.lastBrowserFrame)
+    }, BROWSER_BEAT_MS)
+    // A live view is not a reason for the process to stay up.
+    this.browserBeat.unref()
+  }
+
+  private stopBrowserBeat(): void {
+    if (this.browserBeat) clearInterval(this.browserBeat)
+    this.browserBeat = null
+    this.lastBrowserFrame = null
+  }
+
   private fanBrowser(frame: Buffer): void {
+    this.lastBrowserFrame = frame
     for (const watcher of this.browserWatchers) {
       try {
         watcher(frame)
@@ -906,10 +959,10 @@ export class WebHub {
           })) {
             if (event.type === 'error') status = 'error'
             if (event.type === 'aborted') status = 'stopped'
-            // The panel is display state of the web surface, not something the
-            // other surfaces draw: it is resolved to a view here and sent as its
-            // own frame, never as a raw `event`. A `close` request leaves no tabs,
-            // which is the model taking the panel down.
+            // The panel is display state of the surface that draws one — the browser
+            // and the phone — not something the other surfaces draw: it is resolved
+            // to a view here and sent as its own frame, never as a raw `event`. A
+            // `close` request leaves no tabs, which is the model taking the panel down.
             if (event.type === 'panel') {
               this.showPanel(conversation, event.request)
               this.broadcast(conversationId, { type: 'panel', panel: this.panelView(conversation) })

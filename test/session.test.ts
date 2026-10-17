@@ -1190,3 +1190,49 @@ describe('what a turn may do with the install\'s sessions', () => {
     expect(seen?.sessionAdmin).toBeUndefined()
   })
 })
+
+describe('the tools a surface is offered', () => {
+  class QuietProvider implements Provider {
+    readonly id = 'quiet'
+    calls: string[][] = []
+    async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+      this.calls.push((req.tools ?? []).map((tool) => tool.name))
+      yield { type: 'text', delta: 'ok' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+  }
+
+  /** The catalog a turn on this gateway holds, as the provider saw it. */
+  async function catalog(gateway: string, send: SendOptions = {}): Promise<string[]> {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-surface-'))
+    const store = new MemorySessionStore()
+    const record = await store.create()
+    const provider = new QuietProvider()
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new SqliteMemory({ dir }),
+      store,
+      scope: { gateway, conversationId: 'surface' },
+      record,
+      cwd: process.cwd(),
+      provider,
+      maxSteps: 1,
+    })
+    for await (const _event of session.send('go', send)) {
+      // drain
+    }
+    return provider.calls[0] ?? []
+  }
+
+  it('offers the panel to the browser and the phone, and to nothing else', async () => {
+    expect(await catalog('web')).toContain('panel')
+    // The phone reaches the same gateway the browser does, so the client it named in
+    // the handshake is the only thing that says which of the two surfaces it is.
+    expect(await catalog('web', { client: 'ios' })).toContain('panel')
+    expect(await catalog('cli')).not.toContain('panel')
+    expect(await catalog('telegram')).not.toContain('panel')
+    expect(await catalog('discord')).not.toContain('panel')
+  })
+})
