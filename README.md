@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="assets/milo.jpeg" alt="Milo" width="190">
+  <img src="assets/milo-mark.png" alt="Milo" width="190">
 </div>
 
 # Milo

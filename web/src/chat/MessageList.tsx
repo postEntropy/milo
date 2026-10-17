@@ -13,7 +13,6 @@ import { Markdown } from './Markdown.js'
 import { GenUi } from './genui/GenUi.js'
 import { Icon, type IconName } from '../ui/Icons.js'
 import { WaitLine } from '../ui/WaitLine.js'
-import { miloAvatar } from '../ui/milo.js'
 import { defaultSuggestions, type Suggestion } from './suggestions.js'
 
 export interface ChatMessage extends TranscriptMessage {
@@ -249,7 +248,6 @@ export function MessageList({
 }) {
   if (messages.length === 0) return (
     <section className="empty-state" aria-labelledby="welcome-title">
-      <img className="empty-brand" src={miloAvatar} alt="" />
       <h1 id="welcome-title">How can I help today?</h1>
       {/* Remounted when the ideas take over from the standing four, so the cards
           fade in rather than the set jumping in place. */}
