@@ -803,11 +803,16 @@ export class WebSettings {
     })))
   }
 
-  /** The words a run produced, flattened and cut for a one-line gist. */
+  /**
+   * The words a run answered with, flattened and cut for a one-line gist. What the
+   * run was asked is not one of them: the prompt is its routine's own, said on the
+   * routine's page, so a gist that led with it would say the ask and not the answer.
+   */
   private async runText(runId: string): Promise<string> {
     const record = await this.runtime.loadSession(runId)
     if (!record) return ''
     return record.messages
+      .filter((message) => message.role === 'assistant')
       .flatMap((message) => message.content)
       .flatMap((part) => (part.type === 'text' ? [part.text] : []))
       .join(' ')
@@ -889,6 +894,11 @@ export class WebSettings {
    * One run as the page draws a conversation. Read-only: it binds nothing and
    * takes no lease, so opening a past run does not take the conversation over
    * from whoever is in it.
+   *
+   * A run opens on the routine's own prompt, and the page a run is read on says
+   * that prompt above it already — so the run is drawn from the prompt onwards:
+   * what it answered, not the ask said a second time. Only the opening message
+   * goes; a later word in a run would be something that happened in it.
    */
   private async runTranscript(body: Record<string, unknown>): Promise<unknown> {
     const record = await this.runtime.loadSession(sessionId(body.id))
@@ -898,7 +908,9 @@ export class WebSettings {
     const register = this.files?.register ?? ((file: { name: string }) => {
       throw new Error(`Serving ${file.name} needs the web server's file registry.`)
     })
-    return transcriptOf(record.messages, register, readDisplay().tools)
+    const [opening, ...answered] = record.messages
+    const messages = opening?.role === 'user' ? answered : record.messages
+    return transcriptOf(messages, register, readDisplay().tools)
   }
 
   private async browsers(): Promise<unknown> {

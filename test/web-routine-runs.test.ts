@@ -95,8 +95,26 @@ describe('web Settings reads a routine’s runs', () => {
     expect(past.runs).toEqual([])
 
     const transcript = await settings.handle('run-transcript', { id: runId }) as TranscriptMessage[]
-    expect(transcript[0]).toMatchObject({ role: 'user', parts: [{ kind: 'text', text: 'look at the repo' }] })
+    // A run opens on the routine's own prompt, and the routine's page says that
+    // prompt above the run — so the run draws the answer, not the ask again.
+    expect(transcript.map((entry) => entry.role)).toEqual(['assistant'])
     expect(transcript.at(-1)).toMatchObject({ role: 'assistant', parts: [{ kind: 'text', text: 'nothing moved' }] })
+  })
+
+  it('gists each recent output by what the run answered, never by its prompt', async () => {
+    writeConfig()
+    const settings = new WebSettings(build(), home, registry())
+    const created = await settings.handle('routine-add', {
+      prompt: 'look at the repo',
+      every: '6h',
+      target: { gateway: 'web', conversationId: CONVERSATION },
+    }) as { routine: { id: string } }
+    await settings.handle('routine-run', { id: created.routine.id })
+
+    const feed = await settings.handle('routine-feed') as { answer: string }[]
+    // The prompt is the routine's own and its page says it, so the front page's gist
+    // is the answer — opening on the ask would hand the person their own words back.
+    expect(feed.map((entry) => entry.answer)).toEqual(['nothing moved'])
   })
 
   it('draws the file a run sent, through the server’s own registry', async () => {
