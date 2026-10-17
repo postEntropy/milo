@@ -96,21 +96,18 @@ struct PressableStyle: ButtonStyle {
     }
 }
 
-/// A full-width filled control — the shape an action takes on a plain screen.
+/// A full-width control on a plain screen — the platform's own glass, like every control here.
 struct MiloWideButton: View {
     let title: String
     var systemImage: String?
+    /// Wearing the accent as its tint: the screen's primary action rather than one that only
+    /// goes somewhere.
     var primary = false
-    /// Liquid Glass instead of a filled surface: the platform's own material, wearing
-    /// the accent as its tint when the control is the screen's primary action.
-    var glass = false
     var busy = false
     let action: () -> Void
 
     private var shape: Capsule { Capsule() }
 
-    /// What a glass control wears: the accent as its tint when it is the screen's primary
-    /// action, the plain glass of a control that only goes somewhere otherwise.
     private var material: Glass {
         (primary ? Glass.regular.tint(MiloTheme.accent) : .regular).interactive()
     }
@@ -126,10 +123,7 @@ struct MiloWideButton: View {
             .foregroundStyle(primary ? MiloTheme.accentOn : MiloTheme.foreground)
             .frame(maxWidth: .infinity)
             .frame(height: 50)
-            .background {
-                if !glass { shape.fill(primary ? MiloTheme.accent : MiloTheme.surface) }
-            }
-            .glassEffect(glass ? material : .identity, in: shape)
+            .glassEffect(material, in: shape)
         }
         .buttonStyle(PressableStyle())
         .disabled(busy)
