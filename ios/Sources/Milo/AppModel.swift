@@ -21,6 +21,11 @@ final class AppModel {
         let isUser: Bool
         var parts: [WirePart]
         var attachments: [FrameAttachment]
+        /// The files the person picked themselves, still in hand: drawn from their own bytes
+        /// while the daemon is given them, and left on the bubble after — what was attached
+        /// is what the message is, whether or not the upload landed. A received file, and a
+        /// reload of this one, come through `attachments` instead.
+        var drafts: [AttachmentDraft] = []
         var streaming: Bool
         /// How long the turn thought, said once when it is over.
         var thought: Double?
@@ -211,9 +216,11 @@ final class AppModel {
     private static let lineDelay: Duration = .seconds(2)
     private var lineWork: Task<Void, Never>?
     /// The words a fork or an early send on a fresh session owes: sent once the socket is
-    /// speaking to the new session.
+    /// speaking to the new session, together with the names of whatever files it carried —
+    /// the bytes are already with the daemon, so the ids are what is left to hand over.
     private var owed: String?
     private var owedIntent: ClientFrame.Intent?
+    private var owedUploads: [String] = []
     private var reopening = false
 
     private var account: Account? {
@@ -272,6 +279,7 @@ final class AppModel {
                 if owed != nil {
                     owed = nil
                     owedIntent = nil
+                    owedUploads = []
                     busy = false
                     unsent()
                 }
@@ -415,17 +423,61 @@ final class AppModel {
     // MARK: - The turn
 
     /// Sends as its own turn, or — with `intent` — steers the turn already running.
-    func send(_ text: String, intent: ClientFrame.Intent? = nil) {
+    ///
+    /// A file the person attached goes to the daemon first, and the name it answers with is
+    /// what the turn carries: the bytes ride over HTTP and only the id goes over the socket,
+    /// the same two-step the browser makes. The bubble is drawn with the file at once, so
+    /// the picture is the feedback while the upload is in flight rather than a wait with
+    /// nothing on it. A file the daemon never got stays on the bubble and the note says so —
+    /// what was attached is what the message is, even when it did not land.
+    func send(_ text: String, intent: ClientFrame.Intent? = nil, drafts: [AttachmentDraft] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        messages.append(Message(isUser: true, parts: [.text(trimmed)], attachments: [], streaming: false))
-        // If a fresh session is still completing its bind or socket handshake, hold the
-        // outgoing message for `.ready` so the bubble stays in place and leaves as soon
-        // as the socket opens.
+        guard !trimmed.isEmpty || !drafts.isEmpty else { return }
+        // The chat exists only inside a bound install, so this is the account the upload
+        // goes to rather than a second source for one.
+        guard let account else { return }
+        messages.append(
+            Message(
+                isUser: true,
+                parts: trimmed.isEmpty ? [] : [.text(trimmed)],
+                attachments: [],
+                drafts: drafts,
+                streaming: false
+            )
+        )
+        guard !drafts.isEmpty else {
+            deliver(trimmed, intent: intent, uploadIds: [])
+            return
+        }
+        busy = true
+        askToStayOn()
+        Task {
+            do {
+                var ids: [String] = []
+                for draft in drafts {
+                    ids.append(
+                        try await MiloApi.upload(draft.data, name: draft.name, mimeType: draft.mimeType, account: account)
+                    )
+                }
+                deliver(trimmed, intent: intent, uploadIds: ids)
+            } catch {
+                busy = false
+                failed(error)
+            }
+        }
+    }
+
+    /**
+     Hands the message to the socket once whatever it carried has a name. Held while a fresh
+     session is still completing its bind or socket handshake, so the bubble stays in place
+     and the words leave as soon as the socket opens.
+     */
+    private func deliver(_ text: String, intent: ClientFrame.Intent?, uploadIds: [String]) {
         if reopening {
-            owed = trimmed
+            owed = text
             owedIntent = intent
-            if !trimmed.hasPrefix("/") {
+            owedUploads = uploadIds
+            if !text.hasPrefix("/") || !uploadIds.isEmpty {
                 busy = true
                 askToStayOn()
             }
@@ -435,14 +487,16 @@ final class AppModel {
         // daemon runs it out of band and replies with a `command-result`. Sent as a turn
         // it would be handled inside the turn body and leave an empty row beside the
         // answer. No `busy` either — a command finishes at once, the daemon's own `state`
-        // frame says whether anything is running. The browser's own rule.
-        if trimmed.hasPrefix("/") {
-            if !client.send(.command(text: trimmed)) { unsent() }
+        // frame says whether anything is running. The browser's own rule. A message with a
+        // file is never a command: a file has no way into one, so it goes as the turn it was
+        // typed into — the same rule the browser keeps.
+        if text.hasPrefix("/") && uploadIds.isEmpty {
+            if !client.send(.command(text: text)) { unsent() }
             return
         }
         busy = true
         askToStayOn()
-        if !client.send(.send(text: trimmed, intent: intent)) { unsent() }
+        if !client.send(.send(text: text, intent: intent, uploadIds: uploadIds)) { unsent() }
     }
 
     /// Sends a turn whose destination is pinned on it — how the Routines screen makes
@@ -603,12 +657,14 @@ final class AppModel {
         reopening = true
         owed = nil
         owedIntent = nil
+        owedUploads = []
         resetSessionState()
         let opened = await openFresh(account) { try await MiloApi.newSession($0) }
         if !opened {
             reopening = false
             owed = nil
             owedIntent = nil
+            owedUploads = []
             client.connect(to: account)
         }
     }
@@ -721,6 +777,13 @@ final class AppModel {
         note = nil
     }
 
+    /// A line the app has to say, raised from a screen: a file the daemon could not take is
+    /// refused where it was chosen, rather than left to fail later where the person is not
+    /// looking. A failure, like nearly every line the note carries.
+    func showNote(_ text: String) {
+        note = Note(text)
+    }
+
     func rename(_ id: String, to name: String) async {
         guard let account else { return }
         do {
@@ -751,6 +814,7 @@ final class AppModel {
         let from = sessionId
         owed = prompt
         owedIntent = nil
+        owedUploads = []
         var next = account
         next.conversationId = AccountStore.freshConversationId()
         do {
@@ -760,6 +824,7 @@ final class AppModel {
             await reopen(next)
         } catch {
             owed = nil
+            owedUploads = []
             failed(error)
         }
     }
@@ -1458,17 +1523,24 @@ final class AppModel {
             if ready.activeTurn != nil {
                 messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil, waiting: true))
             }
-            // The words a fork or an early send owes go out now that the socket is ready.
+            // The words a fork or an early send owes go out now that the socket is ready,
+            // with the names of whatever files it carried.
             if let owed {
                 let intent = owedIntent
+                let uploads = owedUploads
                 self.owed = nil
                 self.owedIntent = nil
-                if waitingForFirstSend {
-                    if owed.hasPrefix("/") {
+                self.owedUploads = []
+                // The bubble is already on screen when this screen holds the thread, and
+                // also when the files waited here with the ids they had already earned — a
+                // file cannot be picked a second time, so the words go out on the bubble
+                // rather than being sent again as a copy.
+                if waitingForFirstSend || !uploads.isEmpty {
+                    if owed.hasPrefix("/") && uploads.isEmpty {
                         if !client.send(.command(text: owed)) { unsent() }
                     } else {
                         busy = true
-                        if !client.send(.send(text: owed, intent: intent)) { unsent() }
+                        if !client.send(.send(text: owed, intent: intent, uploadIds: uploads)) { unsent() }
                     }
                 } else {
                     send(owed, intent: intent)

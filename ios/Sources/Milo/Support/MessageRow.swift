@@ -100,6 +100,11 @@ struct MessageRow: View {
                     }
                     // Guarded like the assistant side: an empty `Attachments` is still a
                     // child, and the stack's spacing would show up as a chin under the text.
+                    // The files still in hand are drawn first, then whatever the daemon
+                    // delivered — a message carries one or the other.
+                    if !message.drafts.isEmpty {
+                        DraftAttachments(items: message.drafts)
+                    }
                     if !message.attachments.isEmpty {
                         Attachments(items: message.attachments)
                     }
@@ -457,7 +462,7 @@ struct Attachments: View {
                                 Image(systemName: "doc")
                                 Text(item.name).lineLimit(1)
                                 Spacer(minLength: MiloTheme.Space.two)
-                                Text(bytes(item.size))
+                                Text(Self.bytes(item.size))
                                     .font(MiloTheme.Text.small)
                                     .foregroundStyle(MiloTheme.muted)
                             }
@@ -472,7 +477,9 @@ struct Attachments: View {
         }
     }
 
-    private func bytes(_ count: Int) -> String {
+    /// A file's size, read the same way for the file the daemon delivered into the chat and
+    /// the one still in hand: the same fact on screen gets one reading of it.
+    static func bytes(_ count: Int) -> String {
         if count < 1024 { return "\(count) B" }
         if count < 1024 * 1024 { return "\(Int((Double(count) / 1024).rounded())) KB" }
         return String(format: "%.1f MB", Double(count) / (1024 * 1024))

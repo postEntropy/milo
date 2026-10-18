@@ -1,4 +1,6 @@
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The frames, in the window's own space, of every box in the thread that scrolls sideways
 /// on its own — a code block, a table. A drag that begins inside one belongs to the box,
@@ -26,6 +28,9 @@ struct ChatView: View {
     /// The words picked out of an answer, held until the reply is sent — the phone's half
     /// of the strip the browser keeps above its field.
     @State private var quote: String?
+    /// The files picked for the message being written, held until it is sent — the phone's
+    /// half of the field the browser attaches through.
+    @State private var drafts: [AttachmentDraft] = []
     /// A message being edited: the turn just before it, which the session is forked at so
     /// the edited words replace it rather than stacking a second copy on top.
     @State private var editing: Int?
@@ -44,6 +49,10 @@ struct ChatView: View {
     /// The composer's panel, when one is open — raised by the `+` or by a long press on the
     /// send control, drawn over the composer, dismissed by a tap anywhere but itself.
     @State private var menu: ComposerMenu?
+    /// The pickers the panel's attach lines raise: the platform's own chooser for each, over
+    /// this screen, which is where the files come from.
+    @State private var attachPhoto = false
+    @State private var attachFile = false
     /// How tall the composer came out, so the panel opens above it instead of through it.
     /// Read off the composer itself: it grows with the draft and with every strip above the
     /// field, so no constant would place the panel right.
@@ -397,6 +406,27 @@ struct ChatView: View {
             }
         }
         .sessionRename($renaming)
+        // Where the files come from: the platform's own chooser for each, over this screen.
+        // The photo sheet answers with the pictures rather than with bytes, so they are read
+        // once it has put itself away; the Files picker answers with the files themselves.
+        .sheet(isPresented: $attachPhoto) {
+            PhotoPicker { providers in
+                attachPhoto = false
+                Task { await readPhotos(providers) }
+            }
+        }
+        .fileImporter(
+            isPresented: $attachFile,
+            allowedContentTypes: Self.fileTypes,
+            allowsMultipleSelection: true
+        ) { result in
+            switch result {
+            case .success(let urls):
+                addFiles(urls)
+            case .failure(let error):
+                model.showNote((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
+            }
+        }
     }
 
     @ViewBuilder
@@ -590,9 +620,13 @@ struct ChatView: View {
     /// changed, so the words go again with the session forked there rather than a second copy
     /// piling on top.
     private func send(_ intent: ClientFrame.Intent = .queue) {
-        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !drafts.isEmpty else { return }
         let outgoing = (quote.map(quotedLead) ?? "") + draft
-        if let upToTurn = editing {
+        let attached = drafts
+        // An edit is a redo from the turn before the message it changed, and a redo has
+        // nowhere to put a file: with one attached the words go as a turn of their own —
+        // the rule the browser's own composer keeps.
+        if let upToTurn = editing, attached.isEmpty {
             draft = ""
             quote = nil
             editing = nil
@@ -603,7 +637,9 @@ struct ChatView: View {
             withAnimation(SettlesIn.motion) {
                 draft = ""
                 quote = nil
-                model.send(outgoing, intent: intent)
+                editing = nil
+                drafts = []
+                model.send(outgoing, intent: intent, drafts: attached)
             }
             // Named here, inside the same update the words went in with: the row is told where
             // it sits as it is laid out, and a name set any later would arrive after the
@@ -614,6 +650,72 @@ struct ChatView: View {
         // reply is about to write itself, and the person's own words have gone up to the top
         // of the thread to open it.
         composing = false
+    }
+
+    /// What the Files picker offers: exactly the types the browser's own attach field
+    /// accepts — pictures, sound, PDFs and text, plus the three Office formats the daemon
+    /// knows how to read the words out of.
+    private static let fileTypes: [UTType] = [.image, .audio, .pdf, .text]
+        + ["docx", "xlsx", "pptx"].compactMap { UTType(filenameExtension: $0) }
+
+    /// The pictures the chooser handed back, read into what the composer holds. Each is taken
+    /// under the image type it actually carries, so the file keeps the bytes it has rather
+    /// than being re-encoded — the picker was asked for the same. One that cannot be read says
+    /// so rather than leaving a chip that carries nothing.
+    private func readPhotos(_ providers: [NSItemProvider]) async {
+        var picked: [AttachmentDraft] = []
+        for (index, provider) in providers.enumerated() {
+            guard let identifier = provider.registeredTypeIdentifiers
+                .first(where: { UTType($0)?.conforms(to: .image) == true }),
+                let type = UTType(identifier) else {
+                model.showNote("A picture could not be read.")
+                continue
+            }
+            let data = await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
+                provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
+                    continuation.resume(returning: data)
+                }
+            }
+            guard let data else {
+                model.showNote("A picture could not be read.")
+                continue
+            }
+            // The chooser names no picture, and several picked at once would otherwise be a
+            // row of chips saying the same thing.
+            let name = "photo-\(index + 1)" + (type.preferredFilenameExtension.map { ".\($0)" } ?? ".jpg")
+            picked.append(AttachmentDraft(name: name, mimeType: type.preferredMIMEType ?? "image/jpeg", data: data))
+        }
+        attach(picked)
+    }
+
+    /// The files the Files picker handed back. Reading one out of the sandbox the picker
+    /// keeps it in takes the access it grants, given back the moment the bytes are in hand.
+    private func addFiles(_ urls: [URL]) {
+        var picked: [AttachmentDraft] = []
+        for url in urls {
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            do {
+                let data = try Data(contentsOf: url)
+                let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
+                picked.append(AttachmentDraft(name: url.lastPathComponent, mimeType: mime, data: data))
+            } catch {
+                model.showNote("\(url.lastPathComponent) could not be read.")
+            }
+        }
+        attach(picked)
+    }
+
+    /// Adds the picked files to the message being written. One the daemon would refuse is
+    /// refused here, where it was chosen, rather than left to fail as a large upload later.
+    private func attach(_ picked: [AttachmentDraft]) {
+        for draft in picked {
+            guard draft.size <= AttachmentDraft.maxBytes else {
+                model.showNote("\(draft.name) is larger than 50 MB.")
+                continue
+            }
+            drafts.append(draft)
+        }
     }
 
     /// Marks the message a send just put in as the one the room and the scroll answer to,
@@ -647,6 +749,19 @@ struct ChatView: View {
         let rows: [MenuRow]
         switch which {
         case .actions:
+            // The files, and how hard the model thinks: what belongs to the message is what
+            // is being written. Each line carries the mark of what it does, the way every
+            // other line of a panel does.
+            let attach = [
+                MenuRow(title: "Photo", symbol: "photo") {
+                    closeMenu()
+                    attachPhoto = true
+                },
+                MenuRow(title: "File", symbol: "doc") {
+                    closeMenu()
+                    attachFile = true
+                },
+            ]
             let modelRow = MenuRow(
                 title: "Model",
                 subtitle: model.modelLabel.isEmpty ? nil : model.modelLabel,
@@ -659,9 +774,9 @@ struct ChatView: View {
             // the levels live inside it as a submenu, so the root panel names what is being
             // chosen and a press unfolds the levels in place.
             if model.efforts.isEmpty {
-                rows = [modelRow]
+                rows = attach + [modelRow]
             } else {
-                rows = [
+                rows = attach + [
                     modelRow,
                     MenuRow(
                         title: "Reasoning effort",
@@ -1131,6 +1246,7 @@ struct ChatView: View {
             Composer(
                 draft: $draft,
                 quote: $quote,
+                drafts: $drafts,
                 editing: $editing,
                 focused: $composing,
                 menu: $menu,

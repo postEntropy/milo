@@ -27,7 +27,10 @@ enum ClientFrame {
     enum Control: String { case stop, allow, deny }
 
     case hello(conversationId: String)
-    case send(text: String, intent: Intent? = nil, target: SendTarget? = nil)
+    /// The files the message carries: the daemon's names for bytes this app has already
+    /// posted to `/upload`, which is how a file reaches a turn — the bytes never ride the
+    /// socket. Empty for every message with nothing attached.
+    case send(text: String, intent: Intent? = nil, target: SendTarget? = nil, uploadIds: [String] = [])
     case control(Control, id: String? = nil)
     case command(text: String)
     /// Stop a background job. Pressing the control is the confirmation.
@@ -58,12 +61,13 @@ enum ClientFrame {
             // same web gateway, and that is what lets it hold the turn for a phone —
             // shorter answers, spoken to a small screen.
             return ["type": "hello", "version": miloProtocolVersion, "conversationId": conversationId, "genui": true, "client": "ios"]
-        case .send(let text, let intent, let target):
+        case .send(let text, let intent, let target, let uploadIds):
             var frame: [String: Any] = ["type": "send", "text": text]
             if let intent { frame["intent"] = intent.rawValue }
             if let target {
                 frame["target"] = ["gateway": target.gateway.rawValue, "conversationId": target.conversationId]
             }
+            if !uploadIds.isEmpty { frame["uploadIds"] = uploadIds }
             return frame
         case .control(let action, let id):
             guard let id else { return ["type": "control", "action": action.rawValue] }

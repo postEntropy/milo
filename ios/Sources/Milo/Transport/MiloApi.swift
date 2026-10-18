@@ -113,6 +113,54 @@ enum MiloApi {
         }
     }
 
+    /**
+     One file's bytes, posted to the upload route and named. The same two-step the browser
+     makes: the bytes go over HTTP and the id that comes back travels on the socket, on the
+     `send` frame. It cannot go through `call`, which always sends a JSON body — here the
+     file *is* the body — and the name rides percent-encoded in the header the daemon reads.
+     */
+    static func upload(_ data: Data, name: String, mimeType: String, account: Account) async throws -> String {
+        guard let url = account.url("/upload") else { throw ApiError.badAddress }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("Bearer \(account.token)", forHTTPHeaderField: "authorization")
+        request.setValue(mimeType.isEmpty ? "application/octet-stream" : mimeType, forHTTPHeaderField: "content-type")
+        // Only what a URL may carry bare: the daemon runs this back through
+        // `decodeURIComponent`, and a set that left `&`, `=` or `+` through would hand it
+        // something other than the name.
+        request.setValue(
+            name.addingPercentEncoding(withAllowedCharacters: Self.unreserved),
+            forHTTPHeaderField: "x-file-name"
+        )
+        request.httpBody = data
+        // A file is not a settings read: the wait here is the file itself, and a picture
+        // over a tailnet takes longer than any call this type makes.
+        request.timeoutInterval = 120
+
+        let body: Data
+        let response: URLResponse
+        do {
+            (body, response) = try await URLSession.shared.data(for: request)
+        } catch {
+            throw ApiError.refused("Could not reach the daemon at \(account.display).")
+        }
+        guard let http = response as? HTTPURLResponse else { throw ApiError.badAnswer }
+        guard http.statusCode == 200 else {
+            let message = (try? JSONDecoder().decode([String: String].self, from: body))?["error"]
+            throw ApiError.refused(message ?? "The daemon answered \(http.statusCode).")
+        }
+        guard let ack = try? JSONDecoder().decode(UploadAck.self, from: body) else { throw ApiError.badAnswer }
+        return ack.uploadId
+    }
+
+    /// What the upload route answers with: the daemon's own name for the file it took.
+    struct UploadAck: Decodable { let uploadId: String }
+
+    /// RFC 3986's unreserved set — the characters a header can carry bare.
+    private static let unreserved = CharacterSet(
+        charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~"
+    )
+
     /// The body an action answers nothing for.
     struct Ack: Decodable {}
 
@@ -727,4 +775,3 @@ struct TaskListActionOutcome: Decodable {
         lists = try container.decodeIfPresent([TaskList].self, forKey: .lists) ?? []
     }
 }
-

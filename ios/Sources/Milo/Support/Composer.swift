@@ -13,6 +13,9 @@ struct Composer: View {
     @Binding var draft: String
     /// The words picked out of an answer, held until the reply is sent.
     @Binding var quote: String?
+    /// The files picked and not yet sent, held until the reply is sent with them. They are
+    /// picked from the panel this composer's own control raises, and drawn above the field.
+    @Binding var drafts: [AttachmentDraft]
     /// The turn an edit forks at, when the draft is an edit rather than a new message.
     @Binding var editing: Int?
     @FocusState.Binding var focused: Bool
@@ -50,6 +53,14 @@ struct Composer: View {
             if let quote {
                 quoteStrip(quote)
                     .padding(.horizontal, MiloTheme.margin)
+            }
+
+            // The files, above the field they will be sent with: the same place the
+            // quotation takes, so both read as part of the message being written.
+            if !drafts.isEmpty {
+                DraftStrip(drafts: drafts) { draft in
+                    drafts.removeAll { $0.id == draft.id }
+                }
             }
 
             // Centred against the field: the send control is shorter than a line of text,
@@ -153,7 +164,7 @@ struct Composer: View {
     }
 
     private var canSend: Bool {
-        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !drafts.isEmpty || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// While a turn runs the field's own text decides this control. Empty, it stops: a tap
