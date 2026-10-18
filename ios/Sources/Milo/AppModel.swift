@@ -1113,6 +1113,20 @@ final class AppModel {
         return try await MiloApi.browseFolders(account, path: path)
     }
 
+    /// A project's folder as a tree, for the Work screen. Throws, so the page that asked
+    /// says the reason inside itself rather than drawing an empty folder.
+    func projectTree(_ id: String) async throws -> WorkTree {
+        guard let account else { throw ApiError.badAddress }
+        return try await MiloApi.projectTree(account, id: id)
+    }
+
+    /// One page of a project's file. `offset` continues a longer file; where the page
+    /// stopped and how much is left are the daemon's own numbers.
+    func projectFile(_ id: String, path: String, offset: Int? = nil) async throws -> WorkFilePage {
+        guard let account else { throw ApiError.badAddress }
+        return try await MiloApi.projectFile(account, id: id, path: path, offset: offset)
+    }
+
     /**
      Opens a work session in a project: `newSession`'s move, with the folder the session
      works in. The daemon binds this conversation to that project, so the chat that comes

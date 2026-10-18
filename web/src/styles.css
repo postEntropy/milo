@@ -1544,6 +1544,44 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .work-card { padding-inline: var(--space-6); }
 }
 
+/* The tree of a project's folder: what is in there, and one file of it read. A row is a
+   place to press, so it is filled on hover and never outlined; the nesting of the markup
+   is the nesting of the folder, so the indent is this one step. */
+.work-files { margin-top: var(--space-10); }
+.work-files-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-6); margin-bottom: var(--space-5); }
+.work-files-title { color: var(--fg); font-size: var(--text-lg); font-weight: 600; }
+.work-files-count { color: var(--muted); font: var(--text-2xs) var(--font-mono); white-space: nowrap; }
+.work-files-note { margin-top: var(--space-5); color: var(--muted); font-size: var(--text-xs); }
+.work-tree { display: flex; flex-direction: column; gap: var(--space-1); border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-4); }
+.work-tree-branch, .work-tree-children { display: flex; flex-direction: column; gap: var(--space-1); }
+/* One step in, per level: the children's own edges, not a number the markup carries. */
+.work-tree-children { padding-inline-start: var(--space-6); }
+.work-tree-row { display: flex; align-items: center; gap: var(--space-4); width: 100%; min-height: var(--control-md); border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0 var(--space-5); color: var(--fg-2); text-align: start; transition: background var(--motion-fast); }
+.work-tree-row:hover { background: var(--surface-warm); }
+.work-tree-row.folder { font-weight: 550; }
+.work-tree-twist { display: inline-flex; width: 13px; flex: none; justify-content: center; color: var(--muted); transition: transform var(--motion-fast) var(--ease-standard); }
+/* The chevron turns as the thing it names opens — the same act in the tree and in the
+   changes, so it is said once, against the control that carries the opened state. */
+[aria-expanded='true'] > .work-tree-twist { transform: rotate(90deg); }
+.work-tree-mark { flex: none; color: var(--muted); }
+.work-tree-row.open { background: var(--accent-wash); color: var(--fg); }
+.work-tree-row.folder .work-tree-mark { color: var(--secondary); }
+.work-tree-name { overflow: hidden; min-width: 0; flex: 1; font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
+.work-tree-count, .work-tree-size { flex: none; color: var(--muted); font: var(--text-2xs) var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.work-file { margin-bottom: var(--space-6); overflow: hidden; border-radius: var(--radius-lg); background: var(--surface); }
+.work-file-head { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-5) var(--space-5) var(--space-5) var(--space-7); }
+.work-file-name { overflow: hidden; min-width: 0; flex: 1; color: var(--fg); font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.work-file-meta { flex: none; color: var(--muted); font-size: var(--text-2xs); white-space: nowrap; }
+.work-file-error, .work-file-foot { padding: 0 var(--space-7) var(--space-6); }
+.work-file-error { color: var(--danger); font-size: var(--text-sm); }
+.work-file-code { margin: 0; max-height: 52vh; overflow: auto; padding: 0 var(--space-7) var(--space-6); color: var(--fg-2); font: var(--text-xs)/1.7 var(--font-mono); tab-size: 4; }
+.work-file-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-5); }
+.work-file-where { color: var(--muted); font-size: var(--text-xs); }
+@media (max-width: 620px) {
+  .work-files { margin-top: var(--space-9); }
+  .work-file-code { max-height: 40vh; }
+}
+
 /* The folder picker: the folders of the machine Milo runs on, walked a level at a time.
    It is drawn over the screen rather than in a platform file dialog, because the dialog
    would offer the *browser's* folders and the work happens in the daemon's. */

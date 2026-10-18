@@ -378,6 +378,12 @@ private struct ProjectDetail: View {
                         }
                     }
 
+                    // A folder that is gone has no diff and no tree to read, and the bar
+                    // already says why.
+                    if project.error == nil {
+                        ProjectFiles(projectId: projectId)
+                    }
+
                     if model.projectsSaving {
                         Text("Saving…")
                             .font(MiloTheme.Text.small)
@@ -543,10 +549,253 @@ private struct SessionRow: View {
                     .font(MiloTheme.Text.meta.monospacedDigit())
                     .foregroundStyle(MiloTheme.muted)
             }
-            .padding(MiloTheme.Space.four)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
-            .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+// MARK: - The folder of a project
+
+/**
+ The tree of a project's folder, and one file of it read.
+
+ Read-only: the person edits in their own editor and the agent through its own tools, so
+ this draws what is there and opens a file as text. The tree is the daemon's own walk —
+ the same one the agent's tools use — so what is drawn here and what a search finds
+ cannot disagree about what is in the folder.
+ */
+private struct ProjectFiles: View {
+    let projectId: String
+
+    @Environment(AppModel.self) private var model
+    @State private var tree: WorkTree?
+    @State private var error: String?
+    /// The file being read, by the row it was opened from.
+    @State private var open: WorkNode?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            HStack(spacing: MiloTheme.Space.two) {
+                Text("Files")
+                    .font(MiloTheme.Text.title)
+                    .foregroundStyle(MiloTheme.foreground)
+                Spacer(minLength: MiloTheme.Space.two)
+                if let tree {
+                    Text("\(tree.files) \(tree.files == 1 ? "file" : "files")")
+                        .font(MiloTheme.Text.meta.monospacedDigit())
+                        .foregroundStyle(MiloTheme.muted)
+                }
+            }
+
+            if let error {
+                MiloErrorPill(text: error)
+            }
+
+            if let open {
+                WorkFileReader(projectId: projectId, node: open, onClose: { self.open = nil })
+            }
+
+            if let tree {
+                if tree.nodes.isEmpty {
+                    Text("This folder has no files in it.")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                } else {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                        ForEach(tree.nodes) { node in
+                            WorkNodeRow(
+                                projectId: projectId,
+                                node: node,
+                                openRel: open?.rel,
+                                onOpen: { self.open = $0 }
+                            )
+                        }
+                    }
+                    .padding(MiloTheme.Space.three)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                }
+
+                // One line for the whole tree, said once: what was cut, and what could not be read.
+                if tree.truncated {
+                    Text("Only the first \(tree.files) files are shown — the folder holds more than fits here.")
+                        .font(MiloTheme.Text.meta)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+                if !tree.warnings.isEmpty {
+                    Text(tree.warnings.joined(separator: " · "))
+                        .font(MiloTheme.Text.meta)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+            } else if error == nil {
+                HStack(spacing: MiloTheme.Space.two) {
+                    ProgressView().controlSize(.small)
+                    Text("Reading this folder…")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+            }
+        }
+        .task { await read() }
+    }
+
+    private func read() async {
+        do {
+            tree = try await model.projectTree(projectId)
+            error = nil
+        } catch {
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+}
+
+/// One entry of the tree: a folder that opens onto what is inside it, or a file to read.
+/// Folders start folded, so a big repository is drawn as its top level until asked.
+private struct WorkNodeRow: View {
+    let projectId: String
+    let node: WorkNode
+    /// The file being read, so the row it was opened from stays marked.
+    let openRel: String?
+    let onOpen: (WorkNode) -> Void
+
+    var body: some View {
+        if node.isFolder {
+            DisclosureGroup {
+                ForEach(node.children) { child in
+                    WorkNodeRow(projectId: projectId, node: child, openRel: openRel, onOpen: onOpen)
+                }
+            } label: {
+                HStack(spacing: MiloTheme.Space.two) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundStyle(MiloTheme.secondary)
+                    Text(node.name)
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.foreground)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: MiloTheme.Space.two)
+                    Text("\(node.children.count)")
+                        .font(MiloTheme.Text.meta.monospacedDigit())
+                        .foregroundStyle(MiloTheme.muted)
+                }
+                .padding(.vertical, MiloTheme.Space.two)
+            }
+            .tint(MiloTheme.muted)
+        } else {
+            Button {
+                onOpen(node)
+            } label: {
+                HStack(spacing: MiloTheme.Space.two) {
+                    Image(systemName: "doc.text")
+                        .font(.system(size: 13))
+                        .foregroundStyle(MiloTheme.muted)
+                    Text(node.name)
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(openRel == node.rel ? MiloTheme.accent : MiloTheme.foreground)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: MiloTheme.Space.two)
+                    Text(ByteCountFormatter.string(fromByteCount: Int64(node.size ?? 0), countStyle: .file))
+                        .font(MiloTheme.Text.meta.monospacedDigit())
+                        .foregroundStyle(MiloTheme.muted)
+                }
+                .padding(.vertical, MiloTheme.Space.two)
+                .padding(.horizontal, MiloTheme.Space.two)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressableStyle())
+        }
+    }
+}
+
+/**
+ One file, read from the daemon a page at a time. The page is the core's own cut — the same
+ one the agent's reader takes — so the lines here are the lines it was handed, and a long
+ file continues at the offset the page named rather than at a guess.
+ */
+private struct WorkFileReader: View {
+    let projectId: String
+    let node: WorkNode
+    let onClose: () -> Void
+
+    @Environment(AppModel.self) private var model
+    @State private var pages: [WorkFilePage] = []
+    @State private var error: String?
+    @State private var busy = false
+
+    private var first: WorkFilePage? { pages.first }
+    private var last: WorkFilePage? { pages.last }
+    /// How many lines the pages hold, which is where the range drawn ends.
+    private var shown: Int {
+        pages.reduce(0) { count, page in
+            count + (page.text.isEmpty ? 0 : page.text.split(separator: "\n", omittingEmptySubsequences: false).count)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            HStack(spacing: MiloTheme.Space.two) {
+                Text(node.rel)
+                    .font(MiloTheme.Text.meta.monospaced())
+                    .foregroundStyle(MiloTheme.foreground)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer(minLength: MiloTheme.Space.two)
+                if let first, first.total > 0 {
+                    Text("\(first.total) lines")
+                        .font(MiloTheme.Text.meta.monospacedDigit())
+                        .foregroundStyle(MiloTheme.muted)
+                }
+                MiloIconButton(systemName: "xmark", size: 14, span: 30) { onClose() }
+            }
+
+            if let error {
+                Text(error)
+                    .font(MiloTheme.Text.small)
+                    .foregroundStyle(MiloTheme.danger)
+            } else if let first {
+                if first.total == 0 {
+                    Text("This file is empty.")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                } else {
+                    // The same block the chat draws code with: monospaced, scrolling
+                    // sideways, and marked so the drawer's drag stands down inside it.
+                    CodeBlock(code: pages.map(\.text).joined(separator: "\n"))
+
+                    HStack(spacing: MiloTheme.Space.two) {
+                        Text("Showing lines \(first.from)–\(first.from + shown - 1) of \(first.total)")
+                            .font(MiloTheme.Text.meta)
+                            .foregroundStyle(MiloTheme.muted)
+                        Spacer(minLength: MiloTheme.Space.two)
+                        if let last, let next = last.next {
+                            MiloWideButton(
+                                title: busy ? "Reading…" : "Load more",
+                                systemImage: "arrow.down",
+                                busy: busy
+                            ) { Task { await read(offset: next) } }
+                            .frame(maxWidth: 160)
+                        }
+                    }
+                }
+            } else {
+                HStack(spacing: MiloTheme.Space.two) {
+                    ProgressView().controlSize(.small)
+                    Text("Reading the file…")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+            }
+        }
+        .task { await read() }
+    }
+
+    private func read(offset: Int? = nil) async {
+        busy = true
+        defer { busy = false }
+        do {
+            let page = try await model.projectFile(projectId, path: node.rel, offset: offset)
+            pages = offset == nil ? [page] : pages + [page]
+            error = nil
+        } catch {
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
         .buttonStyle(PressableStyle())
     }

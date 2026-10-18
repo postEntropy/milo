@@ -326,6 +326,18 @@ enum MiloApi {
         return try await call("browse-folders", body, account: account, as: FolderListing.self)
     }
 
+    /// A project's folder as a tree: every file under it, cut and all.
+    static func projectTree(_ account: Account, id: String) async throws -> WorkTree {
+        try await call("project-tree", ["id": id], account: account, as: WorkTree.self)
+    }
+
+    /// One page of a project's file, cut where the agent's own reader cuts it.
+    static func projectFile(_ account: Account, id: String, path: String, offset: Int? = nil) async throws -> WorkFilePage {
+        var body: [String: Any] = ["id": id, "path": path]
+        if let offset { body["offset"] = offset }
+        return try await call("project-file", body, account: account, as: WorkFilePage.self)
+    }
+
     // MARK: - Memory, Tools & Skills
 
     static func memoryNotes(_ account: Account) async throws -> [MemoryNote] {
@@ -871,3 +883,82 @@ struct FolderListing: Decodable {
     }
 }
 
+/// One entry of a project's folder, as the daemon nests it.
+struct WorkNode: Decodable, Identifiable, Hashable {
+    let kind: String
+    let name: String
+    /// Path relative to the project's folder — what opening it asks for.
+    let rel: String
+    let size: Double?
+    let children: [WorkNode]
+
+    var id: String { rel }
+    var isFolder: Bool { kind == "folder" }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, name, rel, size, children
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "file"
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        rel = try container.decodeIfPresent(String.self, forKey: .rel) ?? ""
+        size = try container.decodeIfPresent(Double.self, forKey: .size)
+        children = try container.decodeIfPresent([WorkNode].self, forKey: .children) ?? []
+    }
+}
+
+/// A project's folder as the daemon walked it, cut and all.
+struct WorkTree: Decodable {
+    let nodes: [WorkNode]
+    /// How many files the tree holds — what was walked, not what is on disk.
+    let files: Int
+    /// True when the walk hit its ceiling: what is drawn is the first part of the tree.
+    let truncated: Bool
+    /// Folders the walk could not read, in its own words.
+    let warnings: [String]
+
+    private enum CodingKeys: String, CodingKey {
+        case nodes, files, truncated, warnings
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        nodes = try container.decodeIfPresent([WorkNode].self, forKey: .nodes) ?? []
+        files = try container.decodeIfPresent(Int.self, forKey: .files) ?? 0
+        truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+        warnings = try container.decodeIfPresent([String].self, forKey: .warnings) ?? []
+    }
+}
+
+/// One page of a project's file, cut where the agent's own reader cuts it.
+struct WorkFilePage: Decodable {
+    /// The path that was asked for, as it was asked for.
+    let rel: String
+    let name: String
+    let size: Double
+    /// The page's lines, numbered from `from`. Empty for an empty file.
+    let text: String
+    /// The 1-based line this page starts at.
+    let from: Int
+    /// How many lines the whole file has.
+    let total: Int
+    /// The 1-based line the next page starts at; absent on the last page.
+    let next: Int?
+
+    private enum CodingKeys: String, CodingKey {
+        case rel, name, size, text, from, total, next
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        rel = try container.decodeIfPresent(String.self, forKey: .rel) ?? ""
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        size = try container.decodeIfPresent(Double.self, forKey: .size) ?? 0
+        text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+        from = try container.decodeIfPresent(Int.self, forKey: .from) ?? 1
+        total = try container.decodeIfPresent(Int.self, forKey: .total) ?? 0
+        next = try container.decodeIfPresent(Int.self, forKey: .next)
+    }
+}

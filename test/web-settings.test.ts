@@ -1167,4 +1167,40 @@ describe('the Work screen’s projects', () => {
       'Use add, update or remove.',
     )
   })
+
+  it('walks the project’s folder as a tree, and reads one file of it a page at a time', async () => {
+    const settings = new WebSettings(build(), home)
+    const where = folder('tree')
+    mkdirSync(path.join(where, 'src'))
+    writeFileSync(path.join(where, 'readme.md'), 'one\ntwo\n')
+    writeFileSync(path.join(where, 'src', 'a.ts'), 'export const a = 1\n')
+    const id = await addProject(settings, where, 'Tree')
+
+    const tree = (await settings.handle('project-tree', { id })) as {
+      nodes: Array<{ kind: string; rel: string }>
+      files: number
+      truncated: boolean
+    }
+    expect(tree.files).toBe(2)
+    expect(tree.truncated).toBe(false)
+    expect(tree.nodes.map((node) => `${node.kind}:${node.rel}`)).toEqual(['folder:src', 'file:readme.md'])
+
+    const page = (await settings.handle('project-file', { id, path: 'readme.md' })) as { text: string; total: number; next?: number }
+    expect(page.text).toBe('1\tone\n2\ttwo')
+    expect(page.total).toBe(2)
+    expect(page.next).toBeUndefined()
+  })
+
+  it('refuses a file outside the project, one it cannot read, and a tree of no project', async () => {
+    const settings = new WebSettings(build(), home)
+    const id = await addProject(settings, folder('tree-refusals'), 'Tree')
+
+    await expect(settings.handle('project-file', { id, path: '../elsewhere.txt' })).rejects.toThrow(
+      'is not inside Tree.',
+    )
+    await expect(settings.handle('project-file', { id, path: 'nope.txt' })).rejects.toThrow('could not read nope.txt')
+    await expect(settings.handle('project-file', { id })).rejects.toThrow('A file is required.')
+    await expect(settings.handle('project-tree', { id: 'calm-otter-9' })).rejects.toThrow('not in the list any more')
+  })
+
 })

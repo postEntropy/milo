@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
-import { formatWhen, message } from '../lib/format.js'
+import { formatBytes, formatWhen, message } from '../lib/format.js'
 import { sessionLabel } from '../../../src/core/sessions/format.ts'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { PageHeader } from '../ui/PageHeader.js'
 import { SkeletonList } from '../ui/Skeleton.js'
+import { WaitLine } from '../ui/WaitLine.js'
 
 /** A folder a session may work in, as the daemon reports it. */
 type Project = { id: string; name: string; path: string; createdAt: number; error?: string }
@@ -27,6 +28,35 @@ type WorkSession = {
   updatedAt: number
   project?: string
   running?: boolean
+}
+/** One entry of a project's folder, as the daemon nests it. */
+type WorkNode = {
+  kind: 'folder' | 'file'
+  name: string
+  /** Path relative to the project's folder — what opening it asks for. */
+  rel: string
+  size?: number
+  mtimeMs?: number
+  children?: WorkNode[]
+}
+/** A project's folder as the daemon walked it, cut and all. */
+type WorkTree = {
+  nodes: WorkNode[]
+  files: number
+  /** The walk hit its ceiling: what is drawn is the first part of the tree. */
+  truncated: boolean
+  /** Folders the walk could not read, in its own words. */
+  warnings: string[]
+}
+/** One page of a project's file, cut where the agent's own reader cuts it. */
+type FilePage = {
+  rel: string
+  name: string
+  size: number
+  text: string
+  from: number
+  total: number
+  next?: number
 }
 
 /**
@@ -104,6 +134,7 @@ export function Work({ tick, sessions, onOpenSession, onStartSession }: {
       key={selected.id}
       project={selected}
       sessions={sessions.filter((session) => session.project === selected.id)}
+      tick={tick}
       notice={notice}
       saving={saving}
       onDismiss={() => setNotice(null)}
@@ -317,6 +348,7 @@ function FolderPicker({ onChoose, onClose }: { onChoose(path: string): void; onC
 function ProjectPage({
   project,
   sessions,
+  tick,
   notice,
   saving,
   onDismiss,
@@ -328,6 +360,8 @@ function ProjectPage({
   project: Project
   /** This project's sessions, newest first — the caller's list, filtered. */
   sessions: WorkSession[]
+  /** Bumped when a turn ends: a session at work has changed the folder this draws. */
+  tick: number
   notice: Notice | null
   saving: boolean
   onDismiss(): void
@@ -338,6 +372,31 @@ function ProjectPage({
 }) {
   const [renaming, setRenaming] = useState(false)
   const [rename, setRename] = useState(project.name)
+  const [tree, setTree] = useState<WorkTree | null>(null)
+  const [treeError, setTreeError] = useState<string | null>(null)
+  /** The file being read, by its project-relative path. */
+  const [open, setOpen] = useState<WorkNode | null>(null)
+
+  /** Bumped per read, so a slower earlier walk cannot overwrite a newer one. */
+  const treeSeq = useRef(0)
+  const readTree = useCallback(async (): Promise<void> => {
+    const mine = ++treeSeq.current
+    try {
+      const next = await api<WorkTree>('project-tree', { id: project.id })
+      if (mine !== treeSeq.current) return
+      setTree(next)
+      setTreeError(null)
+    } catch (error) {
+      if (mine !== treeSeq.current) return
+      setTreeError(message(error))
+    }
+  }, [project.id])
+
+  useEffect(() => { void readTree() }, [readTree])
+  // A turn that ran in this project may have written in its folder; the tree is re-read
+  // rather than drawn from what this screen remembered.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: tick is a change signal only
+  useEffect(() => { void readTree() }, [tick, readTree])
 
   function saveRename(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
@@ -387,5 +446,124 @@ function ProjectPage({
           <span className="work-session-meta">{session.messageCount} msgs · {formatWhen(session.updatedAt)}</span>
         </button>)}
       </div>}
+
+    {/* A folder that is gone has no tree to walk, and the reason is already on the bar. */}
+    {project.error === undefined && <section className="work-files">
+      <header className="work-files-head">
+        <h2 className="work-files-title">Files</h2>
+        {tree && <span className="work-files-count">{tree.files} {tree.files === 1 ? 'file' : 'files'}</span>}
+      </header>
+
+      {open && <FileView
+        project={project.id}
+        node={open}
+        onClose={() => setOpen(null)}
+      />}
+
+      {treeError
+        ? <div className="panel-state"><p>Could not read this folder: {treeError}</p><button className="button" type="button" onClick={() => void readTree()}>Try again</button></div>
+        : tree === null
+          ? <SkeletonList rows={4} label="Reading this folder…" />
+          : tree.nodes.length === 0
+            ? <p className="list-empty">This folder has no files in it.</p>
+            : <div className="work-tree">
+              {tree.nodes.map((node) => <TreeNode key={node.rel} node={node} openRel={open?.rel ?? null} onOpen={setOpen} />)}
+            </div>}
+
+      {/* One line for the whole tree, said once: what was cut, and what could not be read. */}
+      {tree?.truncated && <p className="work-files-note">Only the first {tree.files} files are shown — the folder holds more than fits here.</p>}
+      {tree && tree.warnings.length > 0 && <p className="work-files-note">{tree.warnings.join(' · ')}</p>}
+    </section>}
   </Shell>
+}
+/**
+ * The tree of a project's folder, drawn a level at a time: a folder opens onto what is
+ * inside it, a file is what the reader opens. Nested by the daemon, so this draws the
+ * shape the core handed over rather than nesting paths of its own — and the nesting of
+ * the markup is the nesting of the tree, so the indent is the one the sheet gives it.
+ */
+function TreeNode({ node, openRel, onOpen }: {
+  node: WorkNode
+  /** The file being read, so the row it was opened from stays marked. */
+  openRel: string | null
+  onOpen(node: WorkNode): void
+}) {
+  const [folded, setFolded] = useState(true)
+
+  if (node.kind === 'folder') {
+    const children = node.children ?? []
+    return <div className="work-tree-branch">
+      <button className="work-tree-row folder" type="button" aria-expanded={!folded} onClick={() => setFolded((current) => !current)}>
+        <Icon className="work-tree-twist" name="chevron" size={13} />
+        <Icon className="work-tree-mark" name="folder" size={15} />
+        <span className="work-tree-name">{node.name}</span>
+        <span className="work-tree-count">{children.length}</span>
+      </button>
+      {!folded && <div className="work-tree-children">
+        {children.map((child) => <TreeNode key={child.rel} node={child} openRel={openRel} onOpen={onOpen} />)}
+      </div>}
+    </div>
+  }
+
+  return <button className={`work-tree-row file ${openRel === node.rel ? 'open' : ''}`} type="button" aria-current={openRel === node.rel ? 'true' : undefined} onClick={() => onOpen(node)}>
+    <span className="work-tree-twist" />
+    <Icon className="work-tree-mark" name="file" size={15} />
+    <span className="work-tree-name">{node.name}</span>
+    <span className="work-tree-size">{formatBytes(node.size ?? 0)}</span>
+  </button>
+}
+
+/**
+ * One file, read from the daemon a page at a time. The page is the core's own cut — the
+ * same one the agent's reader takes — so the lines here are the lines it was handed, and
+ * a long file continues with the offset the page named rather than a guess.
+ */
+function FileView({ project, node, onClose }: { project: string; node: WorkNode; onClose(): void }) {
+  const [pages, setPages] = useState<FilePage[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const seq = useRef(0)
+
+  const read = useCallback(async (offset?: number): Promise<void> => {
+    const mine = ++seq.current
+    setBusy(true)
+    try {
+      const next = await api<FilePage>('project-file', { id: project, path: node.rel, ...(offset !== undefined ? { offset } : {}) })
+      if (mine !== seq.current) return
+      setPages((current) => (offset === undefined ? [next] : [...current, next]))
+      setError(null)
+    } catch (failure) {
+      if (mine !== seq.current) return
+      setError(message(failure))
+    } finally {
+      if (mine === seq.current) setBusy(false)
+    }
+  }, [project, node.rel])
+
+  useEffect(() => { setPages([]); setError(null); void read() }, [read])
+
+  const first = pages[0]
+  const last = pages[pages.length - 1]
+  const shown = pages.reduce((count, page) => count + (page.text === '' ? 0 : page.text.split('\n').length), 0)
+
+  return <section className="work-file">
+    <header className="work-file-head">
+      <span className="work-file-name">{node.rel}</span>
+      <span className="work-file-meta">{first === undefined ? '' : first.total === 0 ? 'Empty' : `${first.total} lines · ${formatBytes(first.size)}`}</span>
+      <button className="icon-button" type="button" aria-label="Close the file" onClick={onClose}><Icon name="x" size={16} /></button>
+    </header>
+    {error
+      ? <p className="work-file-error">{error}</p>
+      : first === undefined
+        ? <WaitLine label="Reading the file…" />
+        : first.total === 0
+          ? <p className="list-empty">This file is empty.</p>
+          : <>
+            <pre className="work-file-code">{pages.map((page) => page.text).join('\n')}</pre>
+            <div className="work-file-foot">
+              <span className="work-file-where">Showing lines {first.from}–{first.from + shown - 1} of {first.total}</span>
+              {last?.next !== undefined && <button className="button" type="button" disabled={busy} onClick={() => void read(last.next)}>Load more</button>}
+            </div>
+          </>}
+  </section>
 }

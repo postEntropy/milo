@@ -92,6 +92,7 @@ import {
   updateProject,
 } from '../../core/projects.js'
 import { browseFolders } from '../../core/browse.js'
+import { workFile, workTree } from '../../core/work.js'
 import { JobRegistry } from './jobs.js'
 import { transcriptOf, type RegisterFile } from './transcript.js'
 
@@ -166,6 +167,8 @@ export class WebSettings {
       case 'projects': return projectViews()
       case 'project-action': return this.projectAction(body)
       case 'browse-folders': return browseFolders(optionalText(body.path), { cwd: this.cwd })
+      case 'project-tree': return this.projectTree(body)
+      case 'project-file': return this.projectFile(body)
       case 'routine-feed': return this.routineFeed()
       case 'routine-add': return this.addRoutine(body)
       case 'routine-remove': return this.removeRoutine(body)
@@ -745,6 +748,31 @@ export class WebSettings {
       return { result: `Updated ${outcome.project.name}.`, projects: projectViews() }
     }
     throw new Error(`Invalid project action: "${String(action)}". Use add, update or remove.`)
+  }
+
+  /**
+   * A project's folder as a tree, for the Work screen. The id is checked here and the
+   * reading happens in the core, so the same tree is what the phone and the browser
+   * draw — including what was cut and what could not be read, which ride back with it.
+   */
+  private async projectTree(body: Record<string, unknown>): Promise<unknown> {
+    const outcome = await workTree(projectId(body.id))
+    if (!outcome.ok) throw new Error(outcome.error)
+    return outcome
+  }
+
+  /**
+   * One file of a project, read as a page of text. `offset` continues a longer file;
+   * everything else about the page — how many lines, where it stopped — is the core's,
+   * so the person reading a file reads the same page the agent would be handed.
+   */
+  private async projectFile(body: Record<string, unknown>): Promise<unknown> {
+    const offset = typeof body.offset === 'number' && body.offset > 0 ? Math.floor(body.offset) : undefined
+    const outcome = await workFile(projectId(body.id), requireText(body.path, 'file'), {
+      ...(offset !== undefined ? { offset } : {}),
+    })
+    if (!outcome.ok) throw new Error(outcome.error)
+    return outcome
   }
 
   private async resumeSession(body: Record<string, unknown>): Promise<unknown> {
