@@ -34,8 +34,10 @@ struct Composer: View {
     ///
     /// The second has no thread behind it yet, so none of the open session's own state belongs
     /// to it — not the queued count, not the job strip, not the control a running turn answers
-    /// to, and not the `+`: a session not yet begun has nothing for a file to belong to. The
-    /// model stays, because it is what the message about to be sent will run on.
+    /// to. The `+` stays: what it holds is a file on the message **being written**, and that
+    /// message is what starts the session — so the first thing said to a project can carry a
+    /// file, read the same way the chat reads one. The model stays too, because it is what the
+    /// message about to be sent will run on.
     enum Role { case session, start }
 
     var role: Role = .session
@@ -98,7 +100,7 @@ struct Composer: View {
                     // Centred against the field: the send control is shorter than a line of
                     // text, so bottom-aligning it left the air above it and read as a bump.
                     HStack(alignment: .center, spacing: MiloTheme.Space.one) {
-                        if role == .session { actionsButton }
+                        actionsButton
                         field
                         sendControl
                     }
@@ -138,6 +140,9 @@ struct Composer: View {
     /// It raises the panel rather than opening a menu of the platform's: a platform menu
     /// takes the shape of the control it came from as it opens, and a control inside the
     /// composer then reads as the composer becoming the menu.
+    ///
+    /// Drawn in either role: what the panel holds is the message being written, not the
+    /// session it will be said into.
     private var actionsButton: some View {
         Button {
             menu = menu == .actions ? nil : .actions
@@ -182,7 +187,7 @@ struct Composer: View {
     /// A work session's second line: the files, the chosen model, and the way to send.
     private var workRow: some View {
         HStack(spacing: MiloTheme.Space.one) {
-            if role == .session { actionsButton }
+            actionsButton
             modelPill
             Spacer(minLength: MiloTheme.Space.two)
             sendControl

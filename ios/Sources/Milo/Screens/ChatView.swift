@@ -1,6 +1,4 @@
-import PhotosUI
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// The frames, in the window's own space, of every box in the thread that scrolls sideways
 /// on its own — a code block, a table. A drag that begins inside one belongs to the box,
@@ -60,8 +58,7 @@ struct ChatView: View {
     @State private var menu: ComposerMenu?
     /// The pickers the panel's attach lines raise: the platform's own chooser for each, over
     /// this screen, which is where the files come from.
-    @State private var attachPhoto = false
-    @State private var attachFile = false
+    @State private var attach: AttachKind?
     /// How tall the composer came out, so the panel opens above it instead of through it.
     /// Read off the composer itself: it grows with the draft and with every strip above the
     /// field, so no constant would place the panel right.
@@ -452,26 +449,10 @@ struct ChatView: View {
             }
         }
         .sessionRename($renaming)
-        // Where the files come from: the platform's own chooser for each, over this screen.
-        // The photo sheet answers with the pictures rather than with bytes, so they are read
-        // once it has put itself away; the Files picker answers with the files themselves.
-        .sheet(isPresented: $attachPhoto) {
-            PhotoPicker { providers in
-                attachPhoto = false
-                Task { await readPhotos(providers) }
-            }
-        }
-        .fileImporter(
-            isPresented: $attachFile,
-            allowedContentTypes: Self.fileTypes,
-            allowsMultipleSelection: true
-        ) { result in
-            switch result {
-            case .success(let urls):
-                addFiles(urls)
-            case .failure(let error):
-                model.showNote((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)
-            }
+        // Where the files come from: the platform's own chooser for each, over this screen —
+        // the same pair a project's own page raises, from `ComposerAttach`.
+        .attachmentPickers(drafts: $drafts, asked: $attach) { message in
+            model.showNote(message)
         }
     }
 
@@ -763,72 +744,6 @@ struct ChatView: View {
         composing = false
     }
 
-    /// What the Files picker offers: exactly the types the browser's own attach field
-    /// accepts — pictures, sound, PDFs and text, plus the three Office formats the daemon
-    /// knows how to read the words out of.
-    private static let fileTypes: [UTType] = [.image, .audio, .pdf, .text]
-        + ["docx", "xlsx", "pptx"].compactMap { UTType(filenameExtension: $0) }
-
-    /// The pictures the chooser handed back, read into what the composer holds. Each is taken
-    /// under the image type it actually carries, so the file keeps the bytes it has rather
-    /// than being re-encoded — the picker was asked for the same. One that cannot be read says
-    /// so rather than leaving a chip that carries nothing.
-    private func readPhotos(_ providers: [NSItemProvider]) async {
-        var picked: [AttachmentDraft] = []
-        for (index, provider) in providers.enumerated() {
-            guard let identifier = provider.registeredTypeIdentifiers
-                .first(where: { UTType($0)?.conforms(to: .image) == true }),
-                let type = UTType(identifier) else {
-                model.showNote("A picture could not be read.")
-                continue
-            }
-            let data = await withCheckedContinuation { (continuation: CheckedContinuation<Data?, Never>) in
-                provider.loadDataRepresentation(forTypeIdentifier: identifier) { data, _ in
-                    continuation.resume(returning: data)
-                }
-            }
-            guard let data else {
-                model.showNote("A picture could not be read.")
-                continue
-            }
-            // The chooser names no picture, and several picked at once would otherwise be a
-            // row of chips saying the same thing.
-            let name = "photo-\(index + 1)" + (type.preferredFilenameExtension.map { ".\($0)" } ?? ".jpg")
-            picked.append(AttachmentDraft(name: name, mimeType: type.preferredMIMEType ?? "image/jpeg", data: data))
-        }
-        attach(picked)
-    }
-
-    /// The files the Files picker handed back. Reading one out of the sandbox the picker
-    /// keeps it in takes the access it grants, given back the moment the bytes are in hand.
-    private func addFiles(_ urls: [URL]) {
-        var picked: [AttachmentDraft] = []
-        for url in urls {
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            do {
-                let data = try Data(contentsOf: url)
-                let mime = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "application/octet-stream"
-                picked.append(AttachmentDraft(name: url.lastPathComponent, mimeType: mime, data: data))
-            } catch {
-                model.showNote("\(url.lastPathComponent) could not be read.")
-            }
-        }
-        attach(picked)
-    }
-
-    /// Adds the picked files to the message being written. One the daemon would refuse is
-    /// refused here, where it was chosen, rather than left to fail as a large upload later.
-    private func attach(_ picked: [AttachmentDraft]) {
-        for draft in picked {
-            guard draft.size <= AttachmentDraft.maxBytes else {
-                model.showNote("\(draft.name) is larger than 50 MB.")
-                continue
-            }
-            drafts.append(draft)
-        }
-    }
-
     /// Marks the message a send just put in as the one the room and the scroll answer to,
     /// clearing the previous turn's measurement so the room waits for this row's own.
     private func armSend(_ id: UUID) {
@@ -860,59 +775,21 @@ struct ChatView: View {
         let rows: [MenuRow]
         switch which {
         case .actions:
-            // The files, and how hard the model thinks: what belongs to the message is what
-            // is being written. Each line carries the mark of what it does, the way every
-            // other line of a panel does.
-            //
-            // The model is not here: it has its own line under the field, where it is read
-            // without opening anything, and one choice is reached one way.
-            let attach = [
-                MenuRow(title: "Photo", symbol: "photo") {
+            // What belongs to the message being written: the files, and how hard the model
+            // thinks — one set of rows, from `ComposerAttach`, so the panel a project's own
+            // page raises is this one.
+            let modelRow: (() -> Void)? = model.sessionProject == nil ? {
+                closeMenu()
+                self.picker = true
+            } : nil
+            rows = composerActionRows(
+                model: model,
+                modelRow: modelRow,
+                ask: { ask in
                     closeMenu()
-                    attachPhoto = true
-                },
-                MenuRow(title: "File", symbol: "doc") {
-                    closeMenu()
-                    attachFile = true
-                },
-            ]
-            // The model is a line of this panel in an ordinary chat, and a line of the
-            // composer itself in a work session. One choice, reached where that surface put
-            // it, never two ways to the same thing.
-            let modelRow = model.sessionProject != nil ? [] : [
-                MenuRow(
-                    title: "Model",
-                    subtitle: model.modelLabel.isEmpty ? nil : model.modelLabel,
-                    symbol: "cpu"
-                ) {
-                    closeMenu()
-                    picker = true
-                },
-            ]
-            // The bulb is the browser's own mark for this control, off its reasoning pill;
-            // the levels live inside it as a submenu, so the root panel names what is being
-            // chosen and a press unfolds the levels in place.
-            if model.efforts.isEmpty {
-                rows = attach + modelRow
-            } else {
-                rows = attach + modelRow + [
-                    MenuRow(
-                        title: "Reasoning effort",
-                        symbol: "lightbulb",
-                        children: model.efforts.map { value in
-                            MenuRow(
-                                title: SettingsWording.of(value),
-                                chosen: value == model.effort
-                            ) {
-                                // The panel stays open: choosing how hard to think is not
-                                // leaving, and the tick has to be seen moving onto what was
-                                // chosen.
-                                Task { await model.setEffort(value) }
-                            }
-                        }
-                    ),
-                ]
-            }
+                    self.attach = ask
+                }
+            )
         case .running:
             rows = [
                 MenuRow(title: "Steer the running turn", symbol: "arrow.turn.down.right") {
