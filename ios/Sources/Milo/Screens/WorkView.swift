@@ -253,48 +253,52 @@ private struct ProjectRow: View {
     let onRename: () -> Void
     let onRemove: () -> Void
 
+    /// A tap opens it, a hold lifts its menu — and, as in the drawer, the row is not a `Button`:
+    /// a `ButtonStyle` takes the press for its own animation, and the platform's long press
+    /// then never reaches the row, so nothing is ever raised.
     var body: some View {
-        Button(action: onOpen) {
-            HStack(spacing: MiloTheme.Space.three) {
-                VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
-                    Text(project.name)
-                        .font(MiloTheme.Text.body.weight(.semibold))
-                        .foregroundStyle(MiloTheme.foreground)
+        HStack(spacing: MiloTheme.Space.three) {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                Text(project.name)
+                    .font(MiloTheme.Text.body.weight(.semibold))
+                    .foregroundStyle(MiloTheme.foreground)
+                    .lineLimit(1)
+                // Only a folder that is gone is said: where it is is the store's business,
+                // and a path under every name was a second line saying nothing the person
+                // asked for. A gone one is said rather than left as a project that looks
+                // workable — a session started in it would not work there.
+                if let error = project.error {
+                    Text(error)
+                        .font(MiloTheme.Text.meta)
+                        .foregroundStyle(MiloTheme.danger)
                         .lineLimit(1)
-                    // Only a folder that is gone is said: where it is is the store's business,
-                    // and a path under every name was a second line saying nothing the person
-                    // asked for. A gone one is said rather than left as a project that looks
-                    // workable — a session started in it would not work there.
-                    if let error = project.error {
-                        Text(error)
-                            .font(MiloTheme.Text.meta)
-                            .foregroundStyle(MiloTheme.danger)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
+                        .truncationMode(.middle)
                 }
-                Spacer(minLength: MiloTheme.Space.two)
-                HStack(spacing: MiloTheme.Space.one) {
-                    if running {
-                        Circle().fill(MiloTheme.accent).frame(width: 6, height: 6)
-                    }
-                    Text("\(sessions)")
-                        .font(MiloTheme.Text.base.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(sessions > 0 ? MiloTheme.accent : MiloTheme.muted)
-                    Text(sessions == 1 ? "session" : "sessions")
-                        .font(MiloTheme.Text.small)
-                        .foregroundStyle(MiloTheme.muted)
+            }
+            Spacer(minLength: MiloTheme.Space.two)
+            HStack(spacing: MiloTheme.Space.one) {
+                if running {
+                    Circle().fill(MiloTheme.accent).frame(width: 6, height: 6)
                 }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+                Text("\(sessions)")
+                    .font(MiloTheme.Text.base.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(sessions > 0 ? MiloTheme.accent : MiloTheme.muted)
+                Text(sessions == 1 ? "session" : "sessions")
+                    .font(MiloTheme.Text.small)
                     .foregroundStyle(MiloTheme.muted)
             }
-            .padding(MiloTheme.Space.four)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
-            .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(MiloTheme.muted)
         }
-        .buttonStyle(PressableStyle())
+        .padding(MiloTheme.Space.four)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .onTapGesture(perform: onOpen)
+        // A row that opens a project reads as a control, the way the button it used to be did:
+        // a tap is not the only way to answer one.
+        .accessibilityAddTraits(.isButton)
         .contextMenu {
             menuItem("Rename", "pencil", action: onRename)
             Button(role: .destructive, action: onRemove) {

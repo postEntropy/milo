@@ -249,38 +249,42 @@ private struct TaskListRow: View {
         return "\(count) · last added \(RelativeTime.when(list.lastActivity))"
     }
 
+    /// A tap opens it, a hold lifts its menu — and, as in the drawer, the row is not a `Button`:
+    /// a `ButtonStyle` takes the press for its own animation, and the platform's long press
+    /// then never reaches the row, so nothing is ever raised.
     var body: some View {
-        Button(action: onOpen) {
-            HStack(spacing: MiloTheme.Space.three) {
-                VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
-                    Text(list.name)
-                        .font(MiloTheme.Text.body.weight(.semibold))
-                        .foregroundStyle(MiloTheme.foreground)
-                        .lineLimit(1)
-                    Text(meta)
-                        .font(MiloTheme.Text.small)
-                        .foregroundStyle(MiloTheme.muted)
-                        .lineLimit(1)
-                }
-                Spacer(minLength: MiloTheme.Space.two)
-                HStack(spacing: MiloTheme.Space.one) {
-                    Text("\(list.openCount)")
-                        .font(MiloTheme.Text.base.weight(.semibold).monospacedDigit())
-                        .foregroundStyle(list.openCount > 0 ? MiloTheme.accent : MiloTheme.muted)
-                    Text("open")
-                        .font(MiloTheme.Text.small)
-                        .foregroundStyle(MiloTheme.muted)
-                }
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
+        HStack(spacing: MiloTheme.Space.three) {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                Text(list.name)
+                    .font(MiloTheme.Text.body.weight(.semibold))
+                    .foregroundStyle(MiloTheme.foreground)
+                    .lineLimit(1)
+                Text(meta)
+                    .font(MiloTheme.Text.small)
+                    .foregroundStyle(MiloTheme.muted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: MiloTheme.Space.two)
+            HStack(spacing: MiloTheme.Space.one) {
+                Text("\(list.openCount)")
+                    .font(MiloTheme.Text.base.weight(.semibold).monospacedDigit())
+                    .foregroundStyle(list.openCount > 0 ? MiloTheme.accent : MiloTheme.muted)
+                Text("open")
+                    .font(MiloTheme.Text.small)
                     .foregroundStyle(MiloTheme.muted)
             }
-            .padding(MiloTheme.Space.four)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
-            .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+            Image(systemName: "chevron.right")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(MiloTheme.muted)
         }
-        .buttonStyle(PressableStyle())
+        .padding(MiloTheme.Space.four)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .onTapGesture(perform: onOpen)
+        // A row that opens a list reads as a control, the way the button it used to be did:
+        // a tap is not the only way to answer one.
+        .accessibilityAddTraits(.isButton)
         .contextMenu {
             menuItem("Rename", "pencil", action: onRename)
             Button(role: .destructive, action: onDelete) {
