@@ -21,7 +21,10 @@ struct DetailSheet<Content: View>: View {
         ScrollView {
             content
                 .padding(.horizontal, MiloTheme.margin)
-                .padding(.top, MiloTheme.Space.four)
+                // Room enough for the grabber the platform draws at the sheet's own top: a
+                // detail that starts right under it reads as crowding the line that says this
+                // is a drawer rather than a page.
+                .padding(.top, MiloTheme.Space.six)
                 .padding(.bottom, MiloTheme.Space.six)
                 // The reading column the pages are drawn in, so a diff or a run reads at the
                 // width everything else in this app reads at.
@@ -33,5 +36,9 @@ struct DetailSheet<Content: View>: View {
         // — the pull to the top is there for a long file or a run with plenty to say.
         .presentationDetents([.fraction(0.9), .large])
         .presentationDragIndicator(.visible)
+        // The page's own tone, opaque rather than the platform's own sheet surface: a diff
+        // read through the page behind it is a diff read through a haze, and this is a drawer
+        // something is read in.
+        .presentationBackground(MiloTheme.background)
     }
 }
