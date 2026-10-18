@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import type { Classifier } from '../src/core/classifier/index.js'
 import type { McpServers } from '../src/core/mcp/servers.js'
 import { stringify } from 'yaml'
+import { execFileSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -1203,4 +1204,70 @@ describe('the Work screen’s projects', () => {
     await expect(settings.handle('project-tree', { id: 'calm-otter-9' })).rejects.toThrow('not in the list any more')
   })
 
+  it('reads the changes from git, and says when the folder is not a repository', async () => {
+    const settings = new WebSettings(build(), home)
+
+    const plainId = await addProject(settings, folder('diff-plain'), 'Plain')
+    expect(await settings.handle('project-diff', { id: plainId })).toEqual({
+      ok: true,
+      source: 'none',
+      reason: 'Plain is not a git repository.',
+    })
+
+    const repo = folder('diff-repo')
+    const git = (...args: string[]): string =>
+      execFileSync('git', args, {
+        cwd: repo,
+        encoding: 'utf8',
+        env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_SYSTEM: '/dev/null' },
+      })
+    writeFileSync(path.join(repo, 'a.txt'), 'first\n')
+    git('init', '-q')
+    git('config', 'user.email', 'test@example.com')
+    git('config', 'user.name', 'Milo Test')
+    git('config', 'commit.gpgsign', 'false')
+    git('add', 'a.txt')
+    git('commit', '-q', '-m', 'first commit')
+    writeFileSync(path.join(repo, 'a.txt'), 'second\n')
+    const id = await addProject(settings, repo, 'Repo')
+
+    const diff = (await settings.handle('project-diff', { id })) as {
+      source: string
+      files: Array<{ path: string; status: string; additions: number; hunks: unknown[] }>
+    }
+    expect(diff.source).toBe('git')
+    expect(diff.files).toEqual([
+      expect.objectContaining({ path: 'a.txt', status: 'modified', additions: 1 }),
+    ])
+    expect(diff.files[0]?.hunks).toHaveLength(1)
+  })
+
+  it('refuses a diff of a project that is not in the list', async () => {
+    const settings = new WebSettings(build(), home)
+    await expect(settings.handle('project-diff', { id: 'calm-otter-9' })).rejects.toThrow('not in the list any more')
+  })
+
+  it('starts a repository from the screen, and answers with the changes it made readable', async () => {
+    const settings = new WebSettings(build(), home)
+    const plain = folder('init-plain')
+    writeFileSync(path.join(plain, 'a.txt'), 'hello\n')
+    const id = await addProject(settings, plain, 'Plain')
+
+    const tracked = (await settings.handle('project-track', { id })) as {
+      source: string
+      files: Array<{ path: string }>
+      committed: boolean
+    }
+    // Everything in the folder is now the recorded state, so there is nothing to read yet
+    // — which is what makes the section stop drawing the whole folder as one change.
+    expect(tracked.source).toBe('git')
+    expect(tracked.committed).toBe(true)
+    expect(tracked.files).toEqual([])
+
+    writeFileSync(path.join(plain, 'a.txt'), 'changed\n')
+    const after = (await settings.handle('project-diff', { id })) as { files: Array<{ path: string; status: string }> }
+    expect(after.files).toEqual([expect.objectContaining({ path: 'a.txt', status: 'modified' })])
+
+    await expect(settings.handle('project-track', { id })).rejects.toThrow('already has its first state recorded')
+  })
 })

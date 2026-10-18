@@ -58,6 +58,33 @@ type FilePage = {
   total: number
   next?: number
 }
+/** One line of a hunk, with the line it is on in either file. */
+type DiffLine = { kind: 'add' | 'remove' | 'context'; text: string; old?: number; new?: number }
+/** One hunk of a changed file. */
+type DiffHunk = { header: string; lines: DiffLine[] }
+/** One changed file, as git sees it. */
+type DiffFile = {
+  path: string
+  from?: string
+  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked'
+  additions: number
+  deletions: number
+  hunks: DiffHunk[]
+  note?: string
+}
+/** What a project has changed: read from git, or nothing to read at all. */
+type WorkDiff =
+  | { ok: true; source: 'git'; files: DiffFile[]; truncated: boolean; committed: boolean }
+  | { ok: true; source: 'none'; reason: string }
+
+/** A changed file's state, in the screen's own words. */
+const DIFF_STATUS: Record<DiffFile['status'], string> = {
+  added: 'Added',
+  modified: 'Modified',
+  deleted: 'Deleted',
+  renamed: 'Renamed',
+  untracked: 'Untracked',
+}
 
 /**
  * Work: the folders a session may work in, and the sessions that ran in one.
@@ -376,6 +403,12 @@ function ProjectPage({
   const [treeError, setTreeError] = useState<string | null>(null)
   /** The file being read, by its project-relative path. */
   const [open, setOpen] = useState<WorkNode | null>(null)
+  const [diff, setDiff] = useState<WorkDiff | null>(null)
+  const [diffError, setDiffError] = useState<string | null>(null)
+  /** The changed file whose hunks are drawn, by its own path. */
+  const [openDiff, setOpenDiff] = useState<string | null>(null)
+  /** Recording the folder as it is now, which is what makes the changes readable at all. */
+  const [tracking, setTracking] = useState(false)
 
   /** Bumped per read, so a slower earlier walk cannot overwrite a newer one. */
   const treeSeq = useRef(0)
@@ -392,11 +425,45 @@ function ProjectPage({
     }
   }, [project.id])
 
-  useEffect(() => { void readTree() }, [readTree])
-  // A turn that ran in this project may have written in its folder; the tree is re-read
-  // rather than drawn from what this screen remembered.
+  const diffSeq = useRef(0)
+  const readDiff = useCallback(async (): Promise<void> => {
+    const mine = ++diffSeq.current
+    try {
+      const next = await api<WorkDiff>('project-diff', { id: project.id })
+      if (mine !== diffSeq.current) return
+      setDiff(next)
+      setDiffError(null)
+    } catch (error) {
+      if (mine !== diffSeq.current) return
+      setDiffError(message(error))
+    }
+  }, [project.id])
+
+  useEffect(() => { void readTree(); void readDiff() }, [readTree, readDiff])
+  // A turn that ran in this project may have written in its folder; both the tree and
+  // the changes are re-read rather than drawn from what this screen remembered.
   // biome-ignore lint/correctness/useExhaustiveDependencies: tick is a change signal only
-  useEffect(() => { void readTree() }, [tick, readTree])
+  useEffect(() => { void readTree(); void readDiff() }, [tick, readTree, readDiff])
+
+  /**
+   * Recording what the folder holds now as its first state: their folder, their
+   * repository, so nothing asks. What it answered is the changes themselves — empty,
+   * because there is now something to compare against — and the section draws that
+   * instead of asking for the read again.
+   */
+  const track = useCallback(async (): Promise<void> => {
+    setTracking(true)
+    try {
+      const next = await api<WorkDiff>('project-track', { id: project.id })
+      setDiff(next)
+      setDiffError(null)
+      setTreeError(null)
+    } catch (error) {
+      setDiffError(message(error))
+    } finally {
+      setTracking(false)
+    }
+  }, [project.id])
 
   function saveRename(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
@@ -447,6 +514,49 @@ function ProjectPage({
         </button>)}
       </div>}
 
+    {/* A folder that is gone has no diff to read, and the reason is already on the bar. */}
+    {project.error === undefined && <section className="work-changes">
+      <header className="work-files-head">
+        <h2 className="work-files-title">Changes</h2>
+        {diff?.source === 'git' && diff.files.length > 0 && <span className="work-files-count">{diff.files.length} {diff.files.length === 1 ? 'file' : 'files'}</span>}
+      </header>
+
+      {diffError
+        ? <div className="panel-state"><p>Could not read the changes: {diffError}</p><button className="button" type="button" onClick={() => void readDiff()}>Try again</button></div>
+        : diff === null
+          ? <SkeletonList rows={2} label="Reading the changes…" />
+          : diff.source === 'none' || !diff.committed
+            ? <div className="work-changes-none">
+              {/* What this is, then what pressing the control below would do: the words read
+                  first, and the one thing to press sits under them. A repository with
+                  nothing committed has no state to compare against — every file in it
+                  would read as new — so that is said instead of the whole folder. */}
+              <p className="list-empty">
+                {diff.source === 'none'
+                  ? `${diff.reason} Milo reads a folder’s changes through git, so there is nothing here to compare this one to.`
+                  : 'Nothing is recorded in this repository yet, so every file in it counts as new.'}
+              </p>
+              <span className="work-changes-note">Git keeps the history locally, in a <code>.git</code> folder inside the project. Nothing is sent anywhere.</span>
+              {/* Their folder, their repository: pressing this is the person's own act, and
+                  it is the only thing that makes this section say anything at all. */}
+              <button className="button" type="button" disabled={tracking} onClick={() => void track()}>
+                <Icon name="branch" size={14} /> {tracking ? 'Recording…' : diff.source === 'none' ? 'Start a repository' : 'Record the first state'}
+              </button>
+            </div>
+            : diff.files.length === 0
+              ? <p className="list-empty">No changes</p>
+              : <div className="work-diff-list">
+                {diff.files.map((file) => <DiffFileRow
+                  key={file.path}
+                  file={file}
+                  open={openDiff === file.path}
+                  onToggle={() => setOpenDiff((current) => (current === file.path ? null : file.path))}
+                />)}
+              </div>}
+
+      {diff?.source === 'git' && diff.committed && diff.truncated && <p className="work-files-note">Only the first {diff.files.length} changed files are shown — there are more than fit here.</p>}
+    </section>}
+
     {/* A folder that is gone has no tree to walk, and the reason is already on the bar. */}
     {project.error === undefined && <section className="work-files">
       <header className="work-files-head">
@@ -476,6 +586,41 @@ function ProjectPage({
     </section>}
   </Shell>
 }
+
+/**
+ * A changed file: what happened to it, how much moved, and — opened — the hunks
+ * themselves. The marking of a line is the diff's own: added lines green, removed red,
+ * and both numbers in the gutter, so a line can be found in the file it is from.
+ */
+function DiffFileRow({ file, open, onToggle }: { file: DiffFile; open: boolean; onToggle(): void }) {
+  const moved = file.from === undefined ? '' : ` (was ${file.from})`
+  return <div className="work-diff-file">
+    <button className="work-diff-row" type="button" aria-expanded={open} onClick={onToggle}>
+      <Icon className="work-tree-twist" name="chevron" size={13} />
+      <span className="work-diff-path" title={file.path}>{file.path}{moved}</span>
+      <span className="work-diff-status">{DIFF_STATUS[file.status]}</span>
+      {/* The counts are only worth drawing when something moved: a rename or a
+          permission change has no lines of its own, and a bare `+0 −0` says nothing. */}
+      {(file.additions > 0 || file.deletions > 0) && <span className="work-diff-count">
+        {file.additions > 0 && <span className="plus">+{file.additions}</span>}
+        {file.deletions > 0 && <span className="minus">−{file.deletions}</span>}
+      </span>}
+    </button>
+    {open && <div className="work-diff-hunks">
+      {file.hunks.map((hunk) => <div className="work-diff-hunk" key={`${hunk.header}:${hunk.lines.length}`}>
+        <div className="work-diff-hunk-head">@@ {hunk.header} @@</div>
+        {hunk.lines.map((line) => <div className={`work-diff-line ${line.kind}`} key={`${line.kind}:${line.old ?? ''}:${line.new ?? ''}`}>
+          <span className="work-diff-num">{line.old ?? ''}</span>
+          <span className="work-diff-num">{line.new ?? ''}</span>
+          <span className="work-diff-mark">{line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : ' '}</span>
+          <span className="work-diff-text">{line.text === '' ? ' ' : line.text}</span>
+        </div>)}
+      </div>)}
+      {file.note && <p className="work-diff-note">{file.note}</p>}
+    </div>}
+  </div>
+}
+
 /**
  * The tree of a project's folder, drawn a level at a time: a folder opens onto what is
  * inside it, a file is what the reader opens. Nested by the daemon, so this draws the

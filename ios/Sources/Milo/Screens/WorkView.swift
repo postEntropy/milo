@@ -381,6 +381,7 @@ private struct ProjectDetail: View {
                     // A folder that is gone has no diff and no tree to read, and the bar
                     // already says why.
                     if project.error == nil {
+                        ProjectChanges(projectId: projectId)
                         ProjectFiles(projectId: projectId)
                     }
 
@@ -535,20 +536,253 @@ private struct SessionRow: View {
     let onOpen: () -> Void
 
     var body: some View {
-        Button(action: onOpen) {
-            HStack(spacing: MiloTheme.Space.three) {
-                if session.running == true {
-                    Circle().fill(MiloTheme.accent).frame(width: 6, height: 6)
+
+// MARK: - What the project's folder has changed
+
+/**
+ The changes in a project's folder, read from its own repository.
+
+ A folder that is not one is answered with that, in a sentence: nothing in Milo records
+ what a session wrote, so an empty list here would read as "nothing changed" — which is
+ not the same thing as "there is nothing to compare this to". The hunks come from the
+ core already parsed, so this draws the shape instead of reading git's own text.
+ */
+private struct ProjectChanges: View {
+    let projectId: String
+
+    @Environment(AppModel.self) private var model
+    @State private var diff: WorkDiff?
+    @State private var error: String?
+    /// Recording the folder as it is now, while it is being recorded.
+    @State private var tracking = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            HStack(spacing: MiloTheme.Space.two) {
+                Text("Changes")
+                    .font(MiloTheme.Text.title)
+                    .foregroundStyle(MiloTheme.foreground)
+                Spacer(minLength: MiloTheme.Space.two)
+                if let diff, diff.isGit, !diff.files.isEmpty {
+                    Text("\(diff.files.count) \(diff.files.count == 1 ? "file" : "files")")
+                        .font(MiloTheme.Text.meta.monospacedDigit())
+                        .foregroundStyle(MiloTheme.muted)
                 }
-                Text(session.label)
-                    .font(MiloTheme.Text.base)
+            }
+
+            if let error {
+                MiloErrorPill(text: error)
+            }
+
+            if let diff {
+                if !diff.isGit || !diff.committed {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                        // What this is, then what pressing the control below would do: the
+                        // words read first, and the one thing to press sits under them. A
+                        // repository with nothing committed has no state to compare against —
+                        // every file in it would read as new — so that is said instead of the
+                        // whole folder.
+                        Text(diff.isGit
+                            ? "Nothing is recorded in this repository yet, so every file in it counts as new."
+                            : "\(diff.reason ?? "") Milo reads a folder’s changes through git, so there is nothing here to compare this one to.")
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                        Text("Git keeps the history locally, in a .git folder inside the project. Nothing is sent anywhere.")
+                            .font(MiloTheme.Text.meta)
+                            .foregroundStyle(MiloTheme.muted)
+                        // Their folder, their repository: pressing this is the person's own act,
+                        // and it is the only thing that makes this section say anything at all.
+                        // A capsule the size of what it says — the composer's own glass, not the
+                        // wide control a screen's bottom bar is made of.
+                        Button {
+                            Task { await track() }
+                        } label: {
+                            HStack(spacing: MiloTheme.Space.two) {
+                                if tracking {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Image(systemName: "arrow.triangle.branch")
+                                        .font(.system(size: 13, weight: .medium))
+                                }
+                                Text(tracking ? "Recording…" : diff.isGit ? "Record the first state" : "Start a repository")
+                                    .font(MiloTheme.Text.small)
+                            }
+                            .foregroundStyle(MiloTheme.foreground2)
+                            .padding(.horizontal, MiloTheme.Space.four)
+                            .padding(.vertical, MiloTheme.Space.two + 1)
+                            .contentShape(Capsule())
+                        }
+                        .buttonStyle(PressableStyle())
+                        .disabled(tracking)
+                        .glassEffect(.regular.interactive(), in: Capsule())
+                        .accessibilityLabel(diff.isGit
+                            ? "Record what is in this folder now as its first state"
+                            : "Start a git repository in this folder")
+                        .padding(.top, MiloTheme.Space.one)
+                    }
+                } else if diff.files.isEmpty {
+                    Text("No changes")
+                        .font(MiloTheme.Text.body)
+                        .foregroundStyle(MiloTheme.muted)
+                } else {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                        ForEach(diff.files) { file in
+                            DiffFileRow(file: file)
+                        }
+                    }
+                }
+
+                if diff.isGit, diff.truncated {
+                    Text("Only the first \(diff.files.count) changed files are shown — there are more than fit here.")
+                        .font(MiloTheme.Text.meta)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+            } else if error == nil {
+                HStack(spacing: MiloTheme.Space.two) {
+                    ProgressView().controlSize(.small)
+                    Text("Reading the changes…")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+            }
+        }
+        .task { await read() }
+    }
+
+    private func read() async {
+        do {
+            diff = try await model.projectDiff(projectId)
+            error = nil
+        } catch {
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Recording the folder as its first state, and drawing the changes it made readable —
+    /// empty, because there is now something to compare against — rather than asking the
+    /// daemon for them again.
+    private func track() async {
+        tracking = true
+        defer { tracking = false }
+        do {
+            diff = try await model.startTracking(projectId)
+            error = nil
+        } catch {
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+}
+
+/**
+ One changed file: what happened to it, how much moved, and — opened — the hunks. The
+ marking is the diff's own: an added line green, a removed one red, both numbers in the
+ gutter so a line can be found in the file it is from.
+ */
+private struct DiffFileRow: View {
+    let file: WorkDiffFile
+
+    @State private var open = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $open) {
+            if file.hunks.isEmpty {
+                if let note = file.note {
+                    Text(note)
+                        .font(MiloTheme.Text.meta)
+                        .foregroundStyle(MiloTheme.muted)
+                        .padding(.vertical, MiloTheme.Space.two)
+                }
+            } else {
+                // The same box a code block is drawn in: monospaced, scrolling sideways
+                // rather than wrapping — a wrapped line of a diff stops being that line —
+                // and marked so the drawer's drag stands down inside it.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(file.hunks) { hunk in
+                            Text("@@ \(hunk.header) @@")
+                                .font(MiloTheme.Text.meta.monospaced())
+                                .foregroundStyle(MiloTheme.muted)
+                                .padding(.top, MiloTheme.Space.three)
+                                .padding(.bottom, MiloTheme.Space.one)
+                            ForEach(hunk.lines) { line in
+                                DiffLineRow(line: line)
+                            }
+                        }
+                    }
+                    .padding(MiloTheme.Space.three)
+                }
+                .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                .marksScrollBox()
+                .padding(.top, MiloTheme.Space.two)
+
+                if let note = file.note {
+                    Text(note)
+                        .font(MiloTheme.Text.meta)
+                        .foregroundStyle(MiloTheme.muted)
+                        .padding(.top, MiloTheme.Space.two)
+                }
+            }
+        } label: {
+            HStack(spacing: MiloTheme.Space.two) {
+                Text(file.path)
+                    .font(MiloTheme.Text.meta.monospaced())
                     .foregroundStyle(MiloTheme.foreground)
                     .lineLimit(1)
+                    .truncationMode(.middle)
+                if let from = file.from {
+                    Text("was \(from)")
+                        .font(MiloTheme.Text.meta)
+                        .foregroundStyle(MiloTheme.muted)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
                 Spacer(minLength: MiloTheme.Space.two)
-                Text(RelativeTime.when(session.updatedAt))
-                    .font(MiloTheme.Text.meta.monospacedDigit())
+                Text(file.statusWord)
+                    .font(MiloTheme.Text.meta)
                     .foregroundStyle(MiloTheme.muted)
+                // The counts are only drawn when something moved: a rename or a
+                // permission change has no lines of its own, and `+0 −0` says nothing.
+                if file.additions > 0 || file.deletions > 0 {
+                    HStack(spacing: MiloTheme.Space.one) {
+                        if file.additions > 0 {
+                            Text("+\(file.additions)").foregroundStyle(MiloTheme.success)
+                        }
+                        if file.deletions > 0 {
+                            Text("−\(file.deletions)").foregroundStyle(MiloTheme.danger)
+                        }
+                    }
+                    .font(MiloTheme.Text.meta.monospacedDigit())
+                }
             }
+
+/// One line of a hunk: its two line numbers, the diff's own marker, and the text.
+private struct DiffLineRow: View {
+    let line: WorkDiffLine
+
+    var body: some View {
+        HStack(spacing: MiloTheme.Space.two) {
+            Text(line.old.map(String.init) ?? "")
+                .frame(width: 34, alignment: .trailing)
+            Text(line.new.map(String.init) ?? "")
+                .frame(width: 34, alignment: .trailing)
+            Text(line.mark)
+                .foregroundStyle(line.isAdd ? MiloTheme.success : line.isRemove ? MiloTheme.danger : MiloTheme.muted)
+            Text(line.text.isEmpty ? " " : line.text)
+                .foregroundStyle(MiloTheme.foreground2)
+            Spacer(minLength: 0)
+        }
+        .font(MiloTheme.Text.meta.monospaced())
+        .padding(.horizontal, MiloTheme.Space.two)
+        .background(background)
+    }
+
+    private var background: Color {
+        if line.isAdd { return MiloTheme.success.opacity(0.14) }
+        if line.isRemove { return MiloTheme.danger.opacity(0.12) }
+        return .clear
+    }
+}
+
 // MARK: - The folder of a project
 
 /**

@@ -16,11 +16,21 @@ const MAX_BUFFER = 10 * 1024 * 1024
  * command. Paging and colour are turned off because the output is read as text,
  * and the terminal prompt is closed so an operation that would want credentials
  * fails instead of hanging with nobody to answer.
+ *
+ * Exported because reading git is one behaviour: the Work screen reads a working
+ * tree through this too, so the flags, the timeout and what an absent `git` says
+ * cannot differ between the agent's reader and the screen's.
+ *
+ * `raw` is for output that is *data* rather than reading: `status --porcelain -z`
+ * begins with the two status letters, one of which is a space, so trimming the
+ * body would eat the first entry's index status and shift its path a character.
+ * A raw read also leaves stderr out, since a warning is not part of the protocol.
  */
-function runGit(
+export function runGit(
   cwd: string,
   args: string[],
-  signal: AbortSignal,
+  signal?: AbortSignal,
+  options: { raw?: boolean } = {},
 ): Promise<{ code: number; body: string } | { failed: string }> {
   return new Promise((resolve) => {
     execFile(
@@ -43,7 +53,9 @@ function runGit(
           resolve({ failed: 'the git command was stopped.' })
           return
         }
-        const combined = `${stdout}${stderr ? `${stdout ? '\n' : ''}${stderr}` : ''}`.trim()
+        const combined = options.raw
+          ? stdout
+          : `${stdout}${stderr ? `${stdout ? '\n' : ''}${stderr}` : ''}`.trim()
         const code = nodeError && typeof nodeError.code === 'number' ? nodeError.code : 0
         resolve({ code, body: combined })
       },

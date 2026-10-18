@@ -338,6 +338,17 @@ enum MiloApi {
         return try await call("project-file", body, account: account, as: WorkFilePage.self)
     }
 
+    /// What a project's folder has changed, read from its own repository.
+    static func projectDiff(_ account: Account, id: String) async throws -> WorkDiff {
+        try await call("project-diff", ["id": id], account: account, as: WorkDiff.self)
+    }
+
+    /// Records what a project's folder holds now as its first state, and answers with what
+    /// the changes read from then on — empty, because there is now something to compare to.
+    static func projectTrack(_ account: Account, id: String) async throws -> WorkDiff {
+        try await call("project-track", ["id": id], account: account, as: WorkDiff.self)
+    }
+
     // MARK: - Memory, Tools & Skills
 
     static func memoryNotes(_ account: Account) async throws -> [MemoryNote] {
@@ -962,3 +973,123 @@ struct WorkFilePage: Decodable {
         next = try container.decodeIfPresent(Int.self, forKey: .next)
     }
 }
+
+/// One line of a hunk, with the line it is on in either file.
+struct WorkDiffLine: Decodable, Identifiable, Hashable {
+    let kind: String
+    /// The line's own text, without the diff's leading marker.
+    let text: String
+    /// The line's number before the change, when the line is in that file.
+    let old: Int?
+    /// The line's number after the change, when the line is in that file.
+    let new: Int?
+
+    /// The three fields together are what a line is: no two of them in one hunk share it.
+    var id: String { "\(kind):\(old ?? 0):\(new ?? 0)" }
+    var isAdd: Bool { kind == "add" }
+    var isRemove: Bool { kind == "remove" }
+    /// The marker the diff itself draws in the margin.
+    var mark: String { isAdd ? "+" : isRemove ? "−" : " " }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, text, old, new
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "context"
+        text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+        old = try container.decodeIfPresent(Int.self, forKey: .old)
+        new = try container.decodeIfPresent(Int.self, forKey: .new)
+    }
+}
+
+/// One hunk: where it starts in either file, and what changed there.
+struct WorkDiffHunk: Decodable, Identifiable, Hashable {
+    /// The header's own numbers, as git wrote them: `-12,7 +12,9`.
+    let header: String
+    let lines: [WorkDiffLine]
+
+    var id: String { header }
+
+    private enum CodingKeys: String, CodingKey {
+        case header, lines
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        header = try container.decodeIfPresent(String.self, forKey: .header) ?? ""
+        lines = try container.decodeIfPresent([WorkDiffLine].self, forKey: .lines) ?? []
+    }
+}
+
+/// One changed file, as the Work screen draws it.
+struct WorkDiffFile: Decodable, Identifiable, Hashable {
+    /// Path relative to the project's folder — the new one when it was renamed.
+    let path: String
+    /// Where it came from, when it was renamed or moved.
+    let from: String?
+    let status: String
+    let additions: Int
+    let deletions: Int
+    let hunks: [WorkDiffHunk]
+    /// Why there is nothing to draw — a binary file, only its mode changed, or git does
+    /// not track it yet. The core's own sentence, so both surfaces say the same thing.
+    let note: String?
+
+    var id: String { path }
+    /// The state in the screen's own words, rather than git's two letters.
+    var statusWord: String {
+        switch status {
+        case "added": return "Added"
+        case "deleted": return "Deleted"
+        case "renamed": return "Renamed"
+        case "untracked": return "Untracked"
+        default: return "Modified"
+        }
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case path, from, status, additions, deletions, hunks, note
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
+        from = try container.decodeIfPresent(String.self, forKey: .from)
+        status = try container.decodeIfPresent(String.self, forKey: .status) ?? "modified"
+        additions = try container.decodeIfPresent(Int.self, forKey: .additions) ?? 0
+        deletions = try container.decodeIfPresent(Int.self, forKey: .deletions) ?? 0
+        hunks = try container.decodeIfPresent([WorkDiffHunk].self, forKey: .hunks) ?? []
+        note = try container.decodeIfPresent(String.self, forKey: .note)
+    }
+}
+
+/// What a project's folder has changed: read from git, or nothing to read at all.
+struct WorkDiff: Decodable {
+    let source: String
+    let files: [WorkDiffFile]
+    let truncated: Bool
+    /// Whether the repository has a commit to compare against. A repository that has just
+    /// been started has none — everything in it counts as new — so the screen offers to
+    /// record the first state instead of drawing the whole folder as one change.
+    let committed: Bool
+    /// Why there is nothing to read, when the folder is not a repository.
+    let reason: String?
+
+    var isGit: Bool { source == "git" }
+
+    private enum CodingKeys: String, CodingKey {
+        case source, files, truncated, committed, reason
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        source = try container.decodeIfPresent(String.self, forKey: .source) ?? "none"
+        files = try container.decodeIfPresent([WorkDiffFile].self, forKey: .files) ?? []
+        truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+        committed = try container.decodeIfPresent(Bool.self, forKey: .committed) ?? false
+        reason = try container.decodeIfPresent(String.self, forKey: .reason)
+    }
+}
+

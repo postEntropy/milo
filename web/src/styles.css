@@ -1544,6 +1544,41 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .work-card { padding-inline: var(--space-6); }
 }
 
+/* The changes a project's folder holds, read from its own repository: one row per
+   file, opened onto the hunks themselves. The diff's own marking — green for what
+   arrived, red for what left — is the one place colour is the data. */
+.work-changes { margin-top: var(--space-10); }
+.work-diff-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.work-diff-file { overflow: hidden; border-radius: var(--radius-lg); background: var(--surface); }
+.work-diff-row { display: flex; align-items: center; gap: var(--space-4); width: 100%; min-height: var(--control-lg); border: 0; background: transparent; padding: var(--space-4) var(--space-6); color: inherit; text-align: start; transition: background var(--motion-fast); }
+.work-diff-row:hover { background: var(--surface-warm); }
+.work-diff-path { overflow: hidden; min-width: 0; flex: 1; color: var(--fg); font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.work-diff-status { flex: none; color: var(--muted); font-size: var(--text-2xs); }
+.work-diff-count { display: flex; flex: none; gap: var(--space-3); font: var(--text-2xs) var(--font-mono); font-variant-numeric: tabular-nums; }
+.work-diff-count .plus { color: var(--success); }
+.work-diff-count .minus { color: var(--danger); }
+.work-diff-hunks { padding: 0 var(--space-6) var(--space-6); }
+.work-diff-hunk { margin-top: var(--space-5); overflow: hidden; border-radius: var(--radius-md); background: var(--surface-warm); }
+.work-diff-hunk-head { padding: var(--space-4) var(--space-6); color: var(--muted); font: var(--text-2xs) var(--font-mono); }
+.work-diff-line { display: grid; grid-template-columns: 3.5ch 3.5ch 1.5ch minmax(0, 1fr); gap: var(--space-4); padding: 0 var(--space-6); color: var(--fg-2); font: var(--text-xs)/1.6 var(--font-mono); }
+.work-diff-line.add { background: color-mix(in oklab, var(--success) 14%, transparent); }
+.work-diff-line.remove { background: color-mix(in oklab, var(--danger) 12%, transparent); }
+.work-diff-num { color: var(--muted); text-align: end; }
+.work-diff-mark { color: var(--muted); }
+.work-diff-line.add .work-diff-mark { color: var(--success); }
+.work-diff-line.remove .work-diff-mark { color: var(--danger); }
+.work-diff-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.work-diff-note { margin-top: var(--space-5); color: var(--muted); font-size: var(--text-xs); }
+/* A folder that is not a repository: the reason, the one way to have a history, and what
+   that does — said here rather than left for the person to wonder about. */
+.work-changes-none { display: flex; flex-direction: column; gap: var(--space-5); }
+.work-changes-none .list-empty { padding: 0; text-align: start; }
+.work-changes-none .button { align-self: flex-start; }
+.work-changes-note { color: var(--muted); font-size: var(--text-xs); }
+@media (max-width: 620px) {
+  .work-changes { margin-top: var(--space-9); }
+}
+
 /* The tree of a project's folder: what is in there, and one file of it read. A row is a
    place to press, so it is filled on hover and never outlined; the nesting of the markup
    is the nesting of the folder, so the indent is this one step. */

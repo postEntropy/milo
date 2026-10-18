@@ -1127,6 +1127,21 @@ final class AppModel {
         return try await MiloApi.projectFile(account, id: id, path: path, offset: offset)
     }
 
+    /// What a project's folder has changed, read from its own repository. Throws, so
+    /// the page that asked says the reason inside itself.
+    func projectDiff(_ id: String) async throws -> WorkDiff {
+        guard let account else { throw ApiError.badAddress }
+        return try await MiloApi.projectDiff(account, id: id)
+    }
+
+    /// Recording what a project's folder holds now as its first state — the person's own
+    /// act on their own folder, so nothing asks. Throws, and the page says the reason
+    /// inside itself.
+    func startTracking(_ id: String) async throws -> WorkDiff {
+        guard let account else { throw ApiError.badAddress }
+        return try await MiloApi.projectTrack(account, id: id)
+    }
+
     /**
      Opens a work session in a project: `newSession`'s move, with the folder the session
      works in. The daemon binds this conversation to that project, so the chat that comes

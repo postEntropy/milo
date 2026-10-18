@@ -93,6 +93,7 @@ import {
 } from '../../core/projects.js'
 import { browseFolders } from '../../core/browse.js'
 import { workFile, workTree } from '../../core/work.js'
+import { startTracking, workDiff } from '../../core/work-diff.js'
 import { JobRegistry } from './jobs.js'
 import { transcriptOf, type RegisterFile } from './transcript.js'
 
@@ -169,6 +170,8 @@ export class WebSettings {
       case 'browse-folders': return browseFolders(optionalText(body.path), { cwd: this.cwd })
       case 'project-tree': return this.projectTree(body)
       case 'project-file': return this.projectFile(body)
+      case 'project-diff': return this.projectDiff(body)
+      case 'project-track': return this.projectTrack(body)
       case 'routine-feed': return this.routineFeed()
       case 'routine-add': return this.addRoutine(body)
       case 'routine-remove': return this.removeRoutine(body)
@@ -773,6 +776,33 @@ export class WebSettings {
     })
     if (!outcome.ok) throw new Error(outcome.error)
     return outcome
+  }
+
+  /**
+   * What a project's folder has changed, read from its own repository. A folder that
+   * is not one is answered with that — the screen says so instead of drawing an empty
+   * list that would read as "nothing changed" — so an `ok` outcome carries whether
+   * there was anything to read at all.
+   */
+  private async projectDiff(body: Record<string, unknown>): Promise<unknown> {
+    const outcome = await workDiff(projectId(body.id))
+    if (!outcome.ok) throw new Error(outcome.error)
+    return outcome
+  }
+
+  /**
+   * Recording what a project's folder holds now as its first state — the button under
+   * "nothing is recorded here yet". It is their folder and their repository: nothing
+   * asks, and what was done is said. The answer carries the changes it made readable,
+   * so the screen draws them instead of asking again.
+   */
+  private async projectTrack(body: Record<string, unknown>): Promise<unknown> {
+    const id = projectId(body.id)
+    const outcome = await startTracking(id)
+    if (!outcome.ok) throw new Error(outcome.error)
+    const diff = await workDiff(id)
+    if (!diff.ok) throw new Error(diff.error)
+    return diff
   }
 
   private async resumeSession(body: Record<string, unknown>): Promise<unknown> {
