@@ -8,17 +8,15 @@ import SwiftUI
  */
 struct TaskListsView: View {
     /// Whether one list's own page is open on top of the index, told to the shell: the
-    /// drawer's swipe belongs to the index, and a page answers the same drag with the way back.
+    /// drawer's swipe belongs to the index, and over a page it keeps out of the way — the way
+    /// back from one is the platform's own, the edge swipe it answers and the control the stack
+    /// draws.
     @Binding var pushed: Bool
     /// Opening the sessions from here. The drawer belongs to the chat, and this screen
     /// reaches it through the same control and the same swipe.
     let onSessions: () -> Void
     @Environment(AppModel.self) private var model
     @State private var path: [String] = []
-
-    /// Where the platform's own back gesture picks up: a drag that starts this close to the
-    /// screen's edge is the system's to answer, so this screen's own one keeps out of it.
-    private static let edge: CGFloat = 24
 
     var body: some View {
         NavigationStack(path: $path) {
@@ -34,17 +32,9 @@ struct TaskListsView: View {
                 )
             }
         }
-        // A drag across a list's own page is the way back to the index — the same drag that
-        // opens the sessions from the index itself, answering where the person is standing.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 24, coordinateSpace: .global)
-                .onEnded { drag in
-                    let across = drag.translation.width
-                    guard abs(across) > abs(drag.translation.height) * 1.5 else { return }
-                    guard !path.isEmpty, across > 60, drag.startLocation.x > Self.edge else { return }
-                    path.removeLast()
-                }
-        )
+        // No drag of this screen's own over the stack: the way back from a page is the platform's
+        // own — the edge swipe the stack already answers, and the control it draws in the bar —
+        // rather than a second gesture that only mimics them from the middle of the screen.
         .onChange(of: path) { _, next in pushed = !next.isEmpty }
         // A chat turn may have changed a list through Milo; re-read its persisted state.
         .onChange(of: model.answerEnded) { _, _ in

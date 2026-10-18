@@ -10,7 +10,9 @@ import SwiftUI
  */
 struct WorkView: View {
     /// Whether one project's own page is open on top of the index, told to the shell: the
-    /// drawer's swipe belongs to the index, and a page answers the same drag with the way back.
+    /// drawer's swipe belongs to the index, and over a page it keeps out of the way — the way
+    /// back from one is the platform's own, the edge swipe it answers and the control the stack
+    /// draws beside the project's name.
     @Binding var pushed: Bool
     /// The project the shell asked for — set when the drag out of a session in one comes this
     /// way, so the page opens on the project rather than on the list. Cleared as it opens.
@@ -23,10 +25,6 @@ struct WorkView: View {
     let onChat: (Bool) -> Void
     @Environment(AppModel.self) private var model
     @State private var path: [String] = []
-
-    /// Where the platform's own back gesture picks up: a drag that starts this close to the
-    /// screen's edge is the system's to answer, so this screen's own one keeps out of it.
-    private static let edge: CGFloat = 24
 
     /// The project the shell named, opened on top of the index — as if it had been chosen
     /// there. Only while the index is what is showing: a page already open is the person's
@@ -48,23 +46,15 @@ struct WorkView: View {
             .navigationDestination(for: String.self) { projectId in
                 ProjectDetail(
                     projectId: projectId,
-                    onBack: { if !path.isEmpty { path.removeLast() } },
                     onRemoved: { path.removeAll { $0 == projectId } },
                     onChat: onChat
                 )
             }
         }
-        // A drag across a project's own page is the way back to the index — the same drag that
-        // opens the sessions from the index itself, answering where the person is standing.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 24, coordinateSpace: .global)
-                .onEnded { drag in
-                    let across = drag.translation.width
-                    guard abs(across) > abs(drag.translation.height) * 1.5 else { return }
-                    guard !path.isEmpty, across > 60, drag.startLocation.x > Self.edge else { return }
-                    path.removeLast()
-                }
-        )
+        // No drag of this screen's own over the stack: the way back from a page is the platform's
+        // own — the edge swipe the stack already answers, and the control it draws beside the
+        // project's name — rather than a second gesture that only mimics them from the middle of
+        // the screen.
         .onChange(of: path) { _, next in pushed = !next.isEmpty }
         // A chat turn may have started a session in a project through Milo; re-read the list
         // it changed rather than what this screen remembered.
@@ -319,8 +309,6 @@ private struct ProjectRow: View {
 
 private struct ProjectDetail: View {
     let projectId: String
-    /// The way back to the index this page sits on.
-    let onBack: () -> Void
     let onRemoved: () -> Void
     /// The way back to the chat, told whether the cursor belongs in the composer.
     let onChat: (Bool) -> Void
@@ -414,29 +402,14 @@ private struct ProjectDetail: View {
             .frame(maxWidth: .infinity)
         }
         .background(MiloTheme.background)
-        // The bar the stack already draws, given its three places: the way back, the project
-        // named with its folder, and the project's own actions. The connection line is not here
-        // — it belongs to the bars of the roots, as it does over a routine's own page.
+        // The bar the stack already draws, carrying what it does not draw itself: the project
+        // named with its folder, and the project's own actions. The way back is the stack's own —
+        // the control it puts at the leading place, and the swipe from the screen's edge that goes
+        // with it — as a routine's own page keeps it. The connection line is not here: it belongs
+        // to the bars of the roots, as it does over a routine's own page.
         .toolbar(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
-        // This page's own control takes the leading place, so the platform's own back button —
-        // one wearing the previous page's title — is not standing beside it.
-        .navigationBarBackButtonHidden(true)
         .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button {
-                    onBack()
-                } label: {
-                    // The mark alone: the page names itself in the middle of this same bar, so a
-                    // word here would be a second name for where the chevron already goes. And its
-                    // tone is the foreground's rather than the accent's, which is the pointer's.
-                    Image(systemName: "chevron.left")
-                }
-                // No style of its own: a place in a toolbar is already drawn in the platform's
-                // glass, and asking for the glass as well drew a second capsule inside the first.
-                .tint(MiloTheme.foreground)
-                .accessibilityLabel("Back to your projects")
-            }
             ToolbarItem(placement: .principal) {
                 // The project, named where a title goes: with the folder's mark and at the
                 // platform's own title weight, and said before anything has been written into it

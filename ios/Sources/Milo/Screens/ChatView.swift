@@ -45,8 +45,8 @@ struct ChatView: View {
     /// session named one. Cleared by that page as it opens it.
     @State private var workProject: String?
     /// Whether one routine's, task list's or project's own page is open on top of its index. The
-    /// drawer's swipe belongs to the list: over a page that drag is the page's own way back, and
-    /// the two cannot both answer it.
+    /// drawer's swipe belongs to the list: over a page the card stays put, because a page's way
+    /// back is the platform's own edge swipe, and the two cannot both answer one drag.
     @State private var routinePage = false
     @State private var taskPage = false
     @State private var workPage = false
@@ -588,9 +588,9 @@ struct ChatView: View {
     /// Whether a sideways drag belongs to the card rather than to the thread: toward an edge
     /// that has something to show — the sessions on the right, the panel on the left — and from
     /// outside any box that scrolls sideways of its own. A lid already up is the one the drag
-    /// answers, whichever way the hand goes; from rest, a rightward drag over a routine's,
-    /// task list's or project's own page is that page's way back to its list (`RoutinesView`,
-    /// `TaskListsView`, `WorkView`), so the sessions stay out of it.
+    /// answers, whichever way the hand goes; from rest, a routine's, task list's or project's
+    /// own page keeps the sessions out of it — a page is left to the platform's own edge swipe
+    /// for the way back, and a drag in the middle of one answers nothing.
     private func claims(_ across: CGFloat, from start: CGPoint) -> Bool {
         guard !boxes.frames.contains(where: { $0.contains(start) }) else { return false }
         if drawer || panelShown { return true }

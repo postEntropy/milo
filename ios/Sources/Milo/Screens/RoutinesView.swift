@@ -12,20 +12,15 @@ import SwiftUI
 struct RoutinesView: View {
     let account: Account
     /// Whether one routine's own page is open on top of the list, told to the shell: the
-    /// drawer's swipe belongs to the list, and a page answers the same drag with the way back.
+    /// drawer's swipe belongs to the list, and over a page it keeps out of the way — the way
+    /// back from one is the platform's own, the edge swipe it answers and the control the stack
+    /// draws.
     @Binding var pushed: Bool
     /// Opening the sessions from here. The drawer belongs to the chat, but a screen that is
     /// not the chat still reaches it — by this control and by the same swipe.
     let onSessions: () -> Void
     @Environment(AppModel.self) private var model
     @State private var path: [Route] = []
-    /// The boxes on a page that scroll sideways on their own — a run's code block, its table.
-    /// A drag that began inside one belongs to the box, not to the way back to the list.
-    @State private var boxes = ScrollBoxes()
-
-    /// Where the platform's own back gesture picks up: a drag that starts this close to the
-    /// screen's edge is the system's to answer, so this screen's own one keeps out of it.
-    private static let edge: CGFloat = 24
 
     /// Where this page can navigate: one routine's page, or the field that makes one.
     private enum Route: Hashable {
@@ -52,22 +47,9 @@ struct RoutinesView: View {
                 }
             }
         }
-        // A drag across a routine's own page is the way back to the list — the same drag that
-        // opens the sessions from the list itself, answering where the person is standing. A
-        // drag that begins at the screen's edge is the platform's own pop, so the two do not
-        // both answer one gesture.
-        .simultaneousGesture(
-            DragGesture(minimumDistance: 24, coordinateSpace: .global)
-                .onEnded { drag in
-                    let across = drag.translation.width
-                    guard abs(across) > abs(drag.translation.height) * 1.5 else { return }
-                    guard !path.isEmpty, across > 60, drag.startLocation.x > Self.edge else { return }
-                    // Inside a box that scrolls sideways, the drag is the box's to answer.
-                    guard !boxes.frames.contains(where: { $0.contains(drag.startLocation) }) else { return }
-                    path.removeLast()
-                }
-        )
-        .onPreferenceChange(ScrollBoxKey.self) { boxes.frames = $0 }
+        // No drag of this screen's own over the stack: the way back from a page is the platform's
+        // own — the edge swipe the stack already answers, and the control it draws in the bar —
+        // rather than a second gesture that only mimics them from the middle of the screen.
         // The permission the reminders need, asked once, the first time the screen opens.
         .task { await model.askToRemind() }
         // A tapped reminder names a routine: open it whether this page is already up or
