@@ -51,7 +51,17 @@ export interface PermissionPolicy {
   readonly mode: PermissionMode
   setMode(mode: PermissionMode): void
   update(options: PermissionPolicyUpdate): void
-  decide(tool: Tool<unknown>, args: unknown): PermissionDecision | Promise<PermissionDecision>
+  /**
+   * The answer for one call. `cwd` is the directory the call is being made from,
+   * when the caller knows it: the same words mean a different thing under a
+   * project's root than under the install's home, and one policy serves every
+   * session in the process.
+   */
+  decide(
+    tool: Tool<unknown>,
+    args: unknown,
+    options?: { cwd?: string },
+  ): PermissionDecision | Promise<PermissionDecision>
 }
 
 export interface PermissionPolicyOptions {
@@ -62,7 +72,8 @@ export interface PermissionPolicyOptions {
   reviewer?: DangerReviewer | null
   /** Allow when P(dangerous) is below this. */
   threshold?: number
-  /** Resolves a relative write target before it is judged. */
+  /** Resolves a relative write target before it is judged. A caller that knows
+   *  where the call is being made from passes it to `decide` instead. */
   cwd?: string
 }
 
@@ -104,7 +115,11 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     if (typeof options.threshold === 'number') this.threshold = options.threshold
   }
 
-  decide(tool: Tool<unknown>, args: unknown): PermissionDecision | Promise<PermissionDecision> {
+  decide(
+    tool: Tool<unknown>,
+    args: unknown,
+    options?: { cwd?: string },
+  ): PermissionDecision | Promise<PermissionDecision> {
     if (this.mode === 'yolo') return 'allow'
     if (this.deny.has(tool.name)) return 'deny'
     if (tool.readOnly || tool.internal || tool.delegates) return 'allow'
@@ -115,8 +130,9 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     if (this.allow.has(tool.name)) return 'allow'
     if (this.mode === 'ask') return 'ask'
 
-    // The acts the rules bar outright, whatever the mode.
-    if (barredByRules(args, this.cwd)) return 'deny'
+    // The acts the rules bar outright, whatever the mode — judged from where the
+    // call is being made, which the caller knows and this object does not.
+    if (barredByRules(args, options?.cwd ?? this.cwd)) return 'deny'
 
     if (!this.reviewer) return 'ask'
     const state = reviewText(args)
@@ -180,11 +196,15 @@ export function withGrants(
     },
     setMode: (mode) => policy.setMode(mode),
     update: (options) => policy.update(options),
-    decide: async (tool, args) => {
-      const decision = await policy.decide(tool, args)
+    decide: async (tool, args, options) => {
+      // The answer is judged from where the call is being made, which the caller
+      // knows and this object — the install's, shared by every session in the
+      // process — does not. The grant path below already has that directory: it
+      // was handed the turn's own when it was built.
+      const decision = await policy.decide(tool, args, options)
       if (decision === 'deny') return 'deny'
       if (!granted.includes(tool.name)) return decision
-      return barredByRules(args, cwd) ? 'deny' : 'allow'
+      return barredByRules(args, options?.cwd ?? cwd) ? 'deny' : 'allow'
     },
   }
 }
