@@ -1,6 +1,7 @@
 import type { GenUiRender } from '../../core/genui.js'
 import type { Idea } from '../../core/ideas.js'
 import type { PanelRequest } from '../../core/panel.js'
+import type { ProjectView } from '../../core/projects.js'
 import type { TodoItem } from '../../core/todos.js'
 import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
 
@@ -194,7 +195,7 @@ export interface ActiveTurn {
 }
 
 export type ServerFrame =
-  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn }
+  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn; project?: ProjectView }
   | { type: 'turn-start'; id: string; text: string }
   | { type: 'event'; turnId: string; event: AgentEvent }
   | { type: 'permission'; id: string; request: PermissionRequest; expiresAt: number }

@@ -21,6 +21,13 @@ export interface SessionRecord {
    */
   scope?: MemoryScope
   /**
+   * The project this session works in, by id. Kept as the id and not the folder,
+   * so a project renamed or moved does not have to be rewritten into every
+   * session that ever ran in it — and a session whose project is gone says so
+   * rather than quietly working somewhere else.
+   */
+  project?: string
+  /**
    * Revision of the record, bumped by the store on every accepted save. A write
    * names the revision it is based on, so a save built from a copy another
    * process has since moved on from is refused instead of erasing its turns.
@@ -42,6 +49,8 @@ export interface SessionSummary {
   recap?: string
   /** The address the session was created under; see `SessionRecord.scope`. */
   scope?: MemoryScope
+  /** The project it works in, by id; see `SessionRecord.project`. */
+  project?: string
   /**
    * Whether a turn holds this session right now — read off the lease, so it is
    * true for a turn running anywhere, a daemon or a terminal. Absent means no.
@@ -100,8 +109,13 @@ export interface CompactResult {
  * address (`scopeKey`) to the session currently bound to it.
  */
 export interface SessionStore {
-  /** Mints an empty record, recording the address it was created under. */
-  create(scope?: MemoryScope): Promise<SessionRecord>
+  /**
+   * Mints an empty record, recording the address it was created under and the
+   * project it will work in. Both are written here rather than by whoever saves
+   * first: a session that has not been spoken in yet is in no file, so what the
+   * store mints is the only place they can live.
+   */
+  create(scope?: MemoryScope, project?: string): Promise<SessionRecord>
   load(id: string): Promise<SessionRecord | null>
   /**
    * Writes the record only if the stored one is still at `expectedVersion`,
@@ -254,5 +268,6 @@ export function toSummary(record: SessionRecord): SessionSummary {
     messageCount: countMessages(record.messages),
     preview: previewOf(record.messages),
     scope: record.scope,
+    project: record.project,
   }
 }

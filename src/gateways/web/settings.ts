@@ -83,6 +83,15 @@ import type { AgentRuntime } from '../../core/runtime.js'
 import { writeSessionExport } from '../../core/export.js'
 import { readTaskLists } from '../../core/task-lists.js'
 import { taskListsTool } from '../../core/tools/task-lists.js'
+import {
+  addProject,
+  findProject,
+  projectViews,
+  readProjects,
+  removeProject,
+  updateProject,
+} from '../../core/projects.js'
+import { browseFolders } from '../../core/browse.js'
 import { JobRegistry } from './jobs.js'
 import { transcriptOf, type RegisterFile } from './transcript.js'
 
@@ -154,6 +163,9 @@ export class WebSettings {
       case 'routines': return this.listRoutines()
       case 'task-lists': return readTaskLists()
       case 'task-list-action': return this.taskListAction(body)
+      case 'projects': return projectViews()
+      case 'project-action': return this.projectAction(body)
+      case 'browse-folders': return browseFolders(optionalText(body.path), { cwd: this.cwd })
       case 'routine-feed': return this.routineFeed()
       case 'routine-add': return this.addRoutine(body)
       case 'routine-remove': return this.removeRoutine(body)
@@ -684,8 +696,55 @@ export class WebSettings {
   private async newSession(body: Record<string, unknown>): Promise<unknown> {
     const conversationId = validConversationId(body.conversationId)
     const scope = { gateway: 'web', conversationId }
-    const session = await this.runtime.newSession(scope, typeof body.title === 'string' ? body.title : undefined)
+    // A work session is started in a project. The id is checked here rather than
+    // written blind: a session pointed at a project that is not in the list would
+    // start and then work somewhere else, saying nothing about why.
+    const project = optionalText(body.project)
+    if (project && !findProject(project)) {
+      const known = readProjects().map((entry) => `${entry.id} — ${entry.name}`).join(', ')
+      throw new Error(`No project ${project}. ${known ? `Known: ${known}` : 'None yet — add one first.'}`)
+    }
+    const session = await this.runtime.newSession(
+      scope,
+      typeof body.title === 'string' ? body.title : undefined,
+      project ? { project } : undefined,
+    )
     return { id: session.id }
+  }
+
+  /**
+   * Adding, changing and dropping a project from the Work screen. Every argument
+   * is validated here, and a refusal comes back as the reason the store gave —
+   * which names the folder or the project it is about. Like the task lists, the
+   * answer is the sentence plus the whole list back, so the screen draws what the
+   * store decided instead of guessing at what a change made.
+   */
+  private async projectAction(body: Record<string, unknown>): Promise<unknown> {
+    const action = body.action
+    if (action === 'add') {
+      const outcome = await addProject({ path: requireText(body.path, 'folder'), name: optionalText(body.name) })
+      if (!outcome.ok) throw new Error(outcome.error)
+      return { result: `Added ${outcome.project.name} at ${outcome.project.path}.`, projects: projectViews() }
+    }
+    const id = projectId(body.id)
+    if (action === 'remove') {
+      if (!(await removeProject(id))) throw new Error(`No project ${id}.`)
+      return { result: `Removed ${id}. Its sessions stay, without a project.`, projects: projectViews() }
+    }
+    if (action === 'update') {
+      const name = body.name === undefined ? undefined : (optionalText(body.name) ?? '')
+      const path = body.path === undefined ? undefined : requireText(body.path, 'folder')
+      if (name === undefined && path === undefined) {
+        throw new Error('An update needs a name, a folder, or both.')
+      }
+      const outcome = await updateProject(id, {
+        ...(name !== undefined ? { name } : {}),
+        ...(path !== undefined ? { path } : {}),
+      })
+      if (!outcome.ok) throw new Error(outcome.error)
+      return { result: `Updated ${outcome.project.name}.`, projects: projectViews() }
+    }
+    throw new Error(`Invalid project action: "${String(action)}". Use add, update or remove.`)
   }
 
   private async resumeSession(body: Record<string, unknown>): Promise<unknown> {
@@ -1052,6 +1111,19 @@ function sessionId(value: unknown): string {
 
 function optionalText(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined
+}
+
+/** Text a call cannot do without: absent reads as the reason, not as an empty value. */
+function requireText(value: unknown, what: string): string {
+  const text = optionalText(value)
+  if (!text) throw new Error(`A ${what} is required.`)
+  return text
+}
+
+/** A project id as the page sends it: the nickname shape, and nothing else. */
+function projectId(value: unknown): string {
+  if (typeof value !== 'string' || !SESSION_ID.test(value)) throw new Error('Invalid project id.')
+  return value
 }
 
 function stringList(value: unknown): string[] | undefined {

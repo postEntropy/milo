@@ -3,6 +3,8 @@ import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { proseOf, type ServerFrame } from '../src/gateways/web/protocol.js'
+import type { ProjectLookup } from '../src/core/projects.js'
+
 
 const home = mkdtempSync(path.join(os.tmpdir(), 'milo-web-resume-'))
 process.env.MILO_HOME = home
@@ -11,6 +13,7 @@ const { WebHub } = await import('../src/gateways/web/hub.js')
 const { WebSettings } = await import('../src/gateways/web/settings.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { findPreset } = await import('../src/core/config/presets.js')
+const { placeProject } = await import('../src/core/projects.js')
 
 const PAST_CONVERSATION = '11111111-2222-3333-4444-555555555555'
 const NEXT_CONVERSATION = '99999999-8888-7777-6666-555555555555'
@@ -20,7 +23,7 @@ afterEach(() => {
   mkdirSync(home, { recursive: true })
 })
 
-function build(providerId = 'test'): InstanceType<typeof AgentRuntime> {
+function build(providerId = 'test', project?: ProjectLookup): InstanceType<typeof AgentRuntime> {
   return new AgentRuntime({
     provider: { id: providerId, stream: async function* () {} },
     // The fallback bootstrap wires: a preset's own name, else the raw id.
@@ -35,6 +38,7 @@ function build(providerId = 'test'): InstanceType<typeof AgentRuntime> {
       forget: async () => false,
     } as never,
     cwd: home,
+    ...(project ? { project } : {}),
   })
 }
 
@@ -80,3 +84,56 @@ describe('the web handshake', () => {
 function readyOf(frames: ServerFrame[]): Extract<ServerFrame, { type: 'ready' }> | undefined {
   return frames.find((frame): frame is Extract<ServerFrame, { type: 'ready' }> => frame.type === 'ready')
 }
+
+describe('what the ready frame says about the session', () => {
+  const where = path.join(home, 'milo')
+
+  /** A project in the install's own list, the way the Work screen puts one there. */
+  const withProject = async (settings: InstanceType<typeof WebSettings>): Promise<{ id: string; name: string; path: string }> => {
+    mkdirSync(where, { recursive: true })
+    const added = (await settings.handle('project-action', { action: 'add', path: where, name: 'Milo' })) as {
+      projects: Array<{ id: string; name: string; path: string }>
+    }
+    return added.projects[0]!
+  }
+
+  it('names the project, on a session that has not said anything yet', async () => {
+    const runtime = build('test', placeProject)
+    const settings = new WebSettings(runtime, home)
+    const project = await withProject(settings)
+    // The Work screen's own move: a session started in a project. The socket opens the
+    // conversation right after, and the project is said there — before a word is written.
+    await settings.handle('new-session', { conversationId: PAST_CONVERSATION, project: project.id })
+
+    const frames: ServerFrame[] = []
+    await new WebHub(runtime).connect({ send: (frame) => frames.push(frame) }, PAST_CONVERSATION)
+
+    expect(readyOf(frames)?.messages).toEqual([])
+    expect(readyOf(frames)?.project).toEqual(project)
+  })
+
+  it('keeps the name, and says why when the folder cannot be worked in', async () => {
+    const runtime = build('test', placeProject)
+    const settings = new WebSettings(runtime, home)
+    const project = await withProject(settings)
+    rmSync(where, { recursive: true })
+    await settings.handle('new-session', { conversationId: PAST_CONVERSATION, project: project.id })
+
+    const frames: ServerFrame[] = []
+    await new WebHub(runtime).connect({ send: (frame) => frames.push(frame) }, PAST_CONVERSATION)
+
+    const said = readyOf(frames)?.project
+    expect(said?.name).toBe('Milo')
+    expect(said?.error).toContain('is gone')
+  })
+
+  it('says nothing about a project on an ordinary chat', async () => {
+    const runtime = build()
+    await runtime.newSession({ gateway: 'web', conversationId: PAST_CONVERSATION })
+
+    const frames: ServerFrame[] = []
+    await new WebHub(runtime).connect({ send: (frame) => frames.push(frame) }, PAST_CONVERSATION)
+
+    expect(readyOf(frames)).not.toHaveProperty('project')
+  })
+})

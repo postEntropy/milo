@@ -35,6 +35,7 @@ Usage:
   milo history               What the history log costs (status | trim)
   milo log                   What the execution log holds (status | tail | follow | trim)
   milo routines              The prompts Milo runs on a timer (list | add | remove | enable | run)
+  milo projects              The folders a session may work in (list | add | rename | move | remove)
   milo google                Connect a Google account, read-only (connect | status | forget)
   milo pair                  Let a phone in: prints a one-time code and the address to give
   milo devices               The devices paired with this Milo (list | revoke)
@@ -180,6 +181,11 @@ async function main(): Promise<void> {
     case 'routines': {
       const { runRoutines } = await import('./routines.js')
       process.exitCode = await runRoutines(process.argv.slice(2))
+      return
+    }
+    case 'projects': {
+      const { runProjects } = await import('./projects.js')
+      process.exitCode = await runProjects(process.argv.slice(2))
       return
     }
     case 'mcp': {

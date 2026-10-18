@@ -74,6 +74,12 @@ export const routinesFile = (): string => path.join(MILO_HOME, 'routines.json')
 /** Named task lists shared by every session in this Milo install. */
 export const taskListsFile = (): string => path.join(MILO_HOME, 'task-lists.json')
 /**
+ * The folders the work happens in, one entry each. An install list like the
+ * routines: a session points at a project, and what is kept here is only where
+ * that project is and what it is called.
+ */
+export const projectsFile = (): string => path.join(MILO_HOME, 'projects.json')
+/**
  * The mail labels Milo sorts the inbox with. Its own file, not Gmail's: the labels
  * are a Milo view over the mail, reachable at the read-only grant and never written
  * back to the account.

@@ -1071,3 +1071,100 @@ describe('web Settings mail', () => {
     expect(called).toBe(0)
   })
 })
+
+describe('the Work screen’s projects', () => {
+  const folder = (name: string): string => {
+    const dir = path.join(home, name)
+    mkdirSync(dir, { recursive: true })
+    return dir
+  }
+  const addProject = async (settings: InstanceType<typeof WebSettings>, where: string, name: string): Promise<string> => {
+    const added = (await settings.handle('project-action', { action: 'add', path: where, name })) as {
+      projects: Array<{ id: string; name: string }>
+    }
+    return added.projects.find((project) => project.name === name)!.id
+  }
+
+  it('lists the projects, and says which folder is gone', async () => {
+    const settings = new WebSettings(build(), home)
+    const where = folder('milo')
+    await addProject(settings, where, 'Milo')
+
+    const listed = (await settings.handle('projects')) as Array<{ name: string; path: string }>
+    expect(listed).toEqual([expect.objectContaining({ name: 'Milo', path: where })])
+
+    rmSync(where, { recursive: true })
+    const after = (await settings.handle('projects')) as Array<{ error?: string }>
+    expect(after[0]?.error).toContain('is gone')
+  })
+
+  it('adds, renames and drops one, and answers a refusal with the reason', async () => {
+    const settings = new WebSettings(build(), home)
+    const where = folder('milo')
+    const id = await addProject(settings, where, 'Milo')
+
+    const renamed = (await settings.handle('project-action', { action: 'update', id, name: 'Milo Work' })) as {
+      result: string
+      projects: Array<{ id: string; name: string }>
+    }
+    expect(renamed.result).toBe('Updated Milo Work.')
+    expect(renamed.projects.find((project) => project.id === id)?.name).toBe('Milo Work')
+
+    const missing = path.join(home, 'nowhere')
+    await expect(settings.handle('project-action', { action: 'add', path: missing })).rejects.toThrow(
+      `there is no folder at ${missing}`,
+    )
+
+    const removed = (await settings.handle('project-action', { action: 'remove', id })) as { result: string }
+    expect(removed.result).toContain('Its sessions stay')
+    expect(await settings.handle('projects')).toEqual([])
+  })
+
+  it('starts a work session in the project it was told to', async () => {
+    const settings = new WebSettings(build(), home)
+    const id = await addProject(settings, folder('milo'), 'Milo')
+
+    const created = (await settings.handle('new-session', {
+      conversationId: CONVERSATION,
+      project: id,
+    })) as { id: string }
+
+    const sessions = (await settings.handle('sessions')) as Array<{ id: string; project?: string }>
+    expect(sessions.find((session) => session.id === created.id)?.project).toBe(id)
+  })
+
+  it('answers an unknown project with the ones it knows', async () => {
+    const settings = new WebSettings(build(), home)
+    const id = await addProject(settings, folder('milo'), 'Milo')
+
+    await expect(
+      settings.handle('new-session', { conversationId: CONVERSATION, project: 'calm-otter-9' }),
+    ).rejects.toThrow(`Known: ${id} — Milo`)
+  })
+
+  it('lists the folders of the machine the daemon runs on, and nothing that is a file', async () => {
+    const settings = new WebSettings(build(), home)
+    mkdirSync(path.join(home, 'code'))
+    writeFileSync(path.join(home, 'notes.txt'), 'x')
+
+    const listing = (await settings.handle('browse-folders', { path: home })) as {
+      path: string
+      folders: Array<{ name: string; path: string }>
+    }
+    expect(listing.path).toBe(home)
+    expect(listing.folders.map((entry) => entry.name)).toContain('code')
+    expect(listing.folders.map((entry) => entry.name)).not.toContain('notes.txt')
+
+    const missing = path.join(home, 'nowhere')
+    await expect(settings.handle('browse-folders', { path: missing })).rejects.toThrow(
+      `could not read ${missing}`,
+    )
+  })
+
+  it('refuses an action it does not know, naming the ones it does', async () => {
+    const settings = new WebSettings(build(), home)
+    await expect(settings.handle('project-action', { action: 'frobnicate', id: 'calm-otter-1' })).rejects.toThrow(
+      'Use add, update or remove.',
+    )
+  })
+})

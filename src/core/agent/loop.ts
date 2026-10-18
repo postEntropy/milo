@@ -26,6 +26,12 @@ import { GenUiFence, type GenUiFencePart } from '../genui-fence.js'
 export interface ToolPermission {
   policy: PermissionPolicy
   ask?: PermissionAsker
+  /**
+   * The directory the calls of this turn are made from, when the turn knows it: a
+   * session working in a project is judged against that project's root, not
+   * against the install's own folder. Absent means the policy's own default.
+   */
+  cwd?: string
 }
 
 /**
@@ -507,7 +513,11 @@ async function checkPermission(
   const tool = registry.get(name)
   if (!tool) return null
 
-  const decision = await permission.policy.decide(tool, args)
+  const decision = await permission.policy.decide(
+    tool,
+    args,
+    permission.cwd ? { cwd: permission.cwd } : undefined,
+  )
   if (decision === 'allow') return null
   if (decision === 'deny') return `Tool "${name}" is denied by the permission policy.`
 

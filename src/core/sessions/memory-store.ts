@@ -37,7 +37,7 @@ export class MemorySessionStore implements SessionStore {
     this.now = options.now ?? Date.now
   }
 
-  async create(scope?: MemoryScope): Promise<SessionRecord> {
+  async create(scope?: MemoryScope, project?: string): Promise<SessionRecord> {
     const id = generateNickname((candidate) => this.records.has(candidate))
     const timestamp = this.now()
     const record: SessionRecord = {
@@ -47,6 +47,7 @@ export class MemorySessionStore implements SessionStore {
       messages: [],
       version: INITIAL_SESSION_VERSION,
       ...(scope ? { scope } : {}),
+      ...(project ? { project } : {}),
     }
     this.records.set(id, record)
     return structuredClone(record)
@@ -132,6 +133,9 @@ export class MemorySessionStore implements SessionStore {
       summary: whole ? source.summary : undefined,
       droppedTokens: whole ? source.droppedTokens : undefined,
       ...(options?.scope ? { scope: options.scope } : {}),
+      // A fork is the same work carried on in another session, so it stays in the
+      // project its source was working in.
+      ...(source.project ? { project: source.project } : {}),
     }
     this.records.set(id, record)
     return structuredClone(record)

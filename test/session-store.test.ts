@@ -49,6 +49,17 @@ describe('FileSessionStore', () => {
     expect(list[0]!.preview).toContain('hello')
   })
 
+  it('keeps the project a session works in, through a save and a fork', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    await store.save({ ...record('calm-otter-1'), project: 'gentle-heron-2' }, INITIAL_SESSION_VERSION)
+
+    expect((await store.load('calm-otter-1'))?.project).toBe('gentle-heron-2')
+    expect((await store.list())[0]!.project).toBe('gentle-heron-2')
+    // A fork is the same work carried on in another session, so it stays in the
+    // project its source was working in.
+    expect((await store.fork('calm-otter-1'))?.project).toBe('gentle-heron-2')
+  })
+
   it('counts the conversation, not the tool results behind it', async () => {
     const store = new FileSessionStore({ dir: tempDir() })
     const created = await store.create()

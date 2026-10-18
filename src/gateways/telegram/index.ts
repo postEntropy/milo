@@ -37,6 +37,7 @@ import {
   toTelegramKeyboard,
   type ActionContext,
 } from '../actions.js'
+import { projectNames } from '../../core/projects.js'
 import { toolDisplayName } from '../tool-line.js'
 
 export interface TelegramGatewayOptions {
@@ -90,7 +91,9 @@ export class TelegramGateway implements Gateway {
 
     const actionRouter = new ActionRouter()
     actionRouter.on('sessions', async (payload, context) => {
-      const outcome = buildSessionsList(await this.options.runtime.listSessions(), payload)
+      const outcome = buildSessionsList(await this.options.runtime.listSessions(), payload, undefined, {
+        projectNames: projectNames(),
+      })
       if (!outcome.ok) {
         await context.edit({ text: outcome.error, markdown: outcome.error, actions: [] })
         return

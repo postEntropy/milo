@@ -7,6 +7,7 @@ import type { Session } from '../../core/session.js'
 import { INSTALL_SCOPE, type MemoryScope } from '../../core/memory/index.js'
 import { isImage, mimeFor, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
 import type { PanelRequest } from '../../core/panel.js'
+import { placedProject } from '../../core/projects.js'
 import { readDisplay } from '../../core/config/load.js'
 import { buildCommandContext, handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
@@ -203,10 +204,16 @@ export class WebHub {
     // so the id it is drawn under rides with the ready and the events it has already
     // said are replayed under it, in order, before anything new arrives.
     const running = this.live.get(conversation.session.id)
+    // The folder this session works in, when it works in one: said here so a surface names it
+    // without reading the project list itself — and said on a session with nothing in it yet,
+    // which is the session that is about to work there.
+    const placement = conversation.session.project
+    const project = placement ? placedProject(placement) : undefined
     client.send({
       type: 'ready',
       version: 1,
       sessionId: conversation.session.id,
+      ...(project ? { project } : {}),
       // A late client is handed the history up to and including the running turn's own
       // user message. Everything after it is that turn's output, which the frames below
       // replay — so the answer is drawn once, as one row, and not as the steps already

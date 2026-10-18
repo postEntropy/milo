@@ -18,6 +18,7 @@ import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.
 import { MEMORY_ID_CHARS, shortId, type MemoryItem } from '../core/memory/index.js'
 import type { TurnQueue } from './turns.js'
 import { buildSessionsList, type ActionRow, type SessionCardItem } from './actions.js'
+import { projectNames } from '../core/projects.js'
 import { normalize } from './access.js'
 import { errorMessage } from '../util/errors.js'
 
@@ -596,7 +597,11 @@ export async function handleCommand(
       if (!context.listSessions) {
         return { handled: true, reply: 'Session switching is not available on this surface.' }
       }
-      const outcome = buildSessionsList(await context.listSessions(), argument)
+      const outcome = buildSessionsList(await context.listSessions(), argument, undefined, {
+        // The install's projects, read once per listing, so each session says
+        // which project it is working in — on every surface that draws this list.
+        projectNames: projectNames(),
+      })
       if (!outcome.ok) return { handled: true, reply: outcome.error }
       return { handled: true, ...outcome.result }
     }

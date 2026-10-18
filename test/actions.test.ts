@@ -142,6 +142,22 @@ describe('buildSessionsList', () => {
       error: 'Invalid page: "-2". Use /sessions 1..3',
     })
   })
+
+  it('names the project a session is working in, when the caller read the projects', () => {
+    const working = [{ ...dummySessions[0]!, project: 'calm-otter-1' }]
+    const outcome = buildSessionsList(working, 1, 5, {
+      projectNames: new Map([['calm-otter-1', 'Milo']]),
+    })
+    if (!outcome.ok) throw new Error(`expected a page, got: ${outcome.error}`)
+    expect(outcome.result.reply).toContain('Milo · 2 msgs')
+  })
+
+  it('leaves the project out rather than showing the id it is kept by', () => {
+    const working = [{ ...dummySessions[0]!, project: 'calm-otter-1' }]
+    const outcome = buildSessionsList(working, 1, 5)
+    if (!outcome.ok) throw new Error(`expected a page, got: ${outcome.error}`)
+    expect(outcome.result.reply).not.toContain('calm-otter-1')
+  })
 })
 
 describe('toTelegramKeyboard', () => {

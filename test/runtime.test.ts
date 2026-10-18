@@ -11,8 +11,11 @@ import { createToolRegistry } from '../src/core/tools/index.js'
 class StubProvider implements Provider {
   readonly id = 'stub'
   calls = 0
-  async *stream(_req: ChatRequest): AsyncGenerator<StreamEvent> {
+  /** What the last request carried, for a test that reads the prompt a turn built. */
+  lastSystem = ''
+  async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     this.calls += 1
+    this.lastSystem = req.system ?? ''
     yield { type: 'text', delta: 'ok' }
     yield { type: 'done', finishReason: 'stop' }
   }
@@ -113,6 +116,17 @@ describe('AgentRuntime sessions', () => {
     // then opens it — the web, whose socket connects on the id it just minted —
     // has to land in the session it asked for.
     expect((await runtime.sessionFor(cli)).id).toBe(first.id)
+  })
+
+  it('hands back the session it was just asked to start, not a second one', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    const runtime = new AgentRuntime(runtimeOptions(dir))
+
+    const started = await runtime.newSession(cli, 'work', { project: 'calm-otter-1' })
+    // Starting a session and then opening the scope is one move in two steps, and the
+    // second must not undo the first: a fresh session here would leave the one the screen
+    // asked for silent, working nowhere, while the screen talks to another.
+    expect((await runtime.sessionFor(cli)).id).toBe(started.id)
   })
 
   it('returns null for an unknown session id', async () => {
@@ -475,5 +489,57 @@ describe('the sessions list says which one is running', () => {
 
     await lease?.release()
     expect((await runtime.listSessions()).find((entry) => entry.id === session.id)?.running).toBeUndefined()
+  })
+})
+
+describe('a session that works in a project', () => {
+  const where = mkdtempSync(path.join(tmpdir(), 'milo-project-'))
+  const placed = (id: string): { ok: true; project: { id: string; name: string; path: string; createdAt: number } } => ({
+    ok: true,
+    project: { id, name: 'Milo', path: where, createdAt: 1 },
+  })
+
+  it('runs the turn in the project folder, and names it in the prompt', async () => {
+    const provider = new StubProvider()
+    const runtime = new AgentRuntime({
+      ...runtimeOptions(mkdtempSync(path.join(tmpdir(), 'milo-rt-'))),
+      provider,
+      project: placed,
+    })
+
+    const session = await runtime.newSession(cli, 'work', { project: 'calm-otter-1' })
+    await drain(session.send('hi'))
+
+    expect(provider.lastSystem).toContain(`- Project: Milo (${where})`)
+    expect((await runtime.listSessions())[0]?.project).toBe('calm-otter-1')
+  })
+
+  it('says the project is gone rather than working somewhere else in silence', async () => {
+    const provider = new StubProvider()
+    const runtime = new AgentRuntime({
+      ...runtimeOptions(mkdtempSync(path.join(tmpdir(), 'milo-rt-'))),
+      provider,
+      project: (id) => ({ ok: false, id, error: 'the folder of Milo is gone (/gone)' }),
+    })
+
+    const session = await runtime.newSession(cli, 'work', { project: 'calm-otter-1' })
+    await drain(session.send('hi'))
+
+    expect(provider.lastSystem).toContain('the folder of Milo is gone (/gone)')
+  })
+
+  it('leaves a session with no project on the install folder it always had', async () => {
+    const provider = new StubProvider()
+    const runtime = new AgentRuntime({
+      ...runtimeOptions(mkdtempSync(path.join(tmpdir(), 'milo-rt-'))),
+      provider,
+      project: placed,
+    })
+
+    const session = await runtime.getSession(cli)
+    await drain(session.send('hi'))
+
+    expect(provider.lastSystem).not.toContain('Project:')
+    expect(provider.lastSystem).toContain(`Today:`)
   })
 })

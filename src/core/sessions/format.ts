@@ -51,6 +51,12 @@ export interface SessionListStyle {
   page?: number
   /** Number of sessions per page. Defaults to 5. */
   pageSize?: number
+  /**
+   * How a session's project is named, when the surface drawing the list knows the
+   * projects. Absent — a surface that was not handed them — leaves the project
+   * out rather than showing the id it is kept by.
+   */
+  projectName?: (id: string) => string | undefined
 }
 
 export function formatWhen(timestamp: number): string {
@@ -105,7 +111,13 @@ export function formatSessionList(
     const label = sessionLabel(session)
     const named = label ? `${session.id} — ${label}` : session.id
     const name = markdown ? `**${named}**` : named
-    const meta = `${session.messageCount} msgs · ${formatWhen(session.updatedAt)}`
+    // A session working in a project says which one, before the size and the
+    // time: it is the context the other two are read in, and the same list is
+    // drawn by every surface.
+    const project = session.project ? style.projectName?.(session.project) : undefined
+    const meta = [project, `${session.messageCount} msgs`, formatWhen(session.updatedAt)]
+      .filter(Boolean)
+      .join(' · ')
     const detail = markdown ? meta : `  ${meta}`
     // The recap says what the session was about; the preview is the fallback for
     // one that was never switched away from, so it never got one. In a listing of

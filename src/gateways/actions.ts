@@ -106,6 +106,16 @@ export type SessionsListOutcome =
   | { ok: false; error: string }
 
 /**
+ * What the caller of `buildSessionsList` may add to the listing. Optional, because
+ * a surface that was not handed the install's projects still lists sessions — it
+ * just does not say which project each one is in.
+ */
+export interface SessionsListOptions {
+  /** The install's projects by id, to name the one each session is working in. */
+  projectNames?: ReadonlyMap<string, string>
+}
+
+/**
  * The one builder for `/sessions`, shared by the CLI and every chat gateway: it
  * validates the page argument and derives the plain reply, the Markdown one, the
  * pagination row and the rich cards in a single place, so no surface invents its own.
@@ -114,6 +124,7 @@ export function buildSessionsList(
   sessions: SessionSummary[],
   pageArg?: string | number,
   pageSize = DEFAULT_PAGE_SIZE,
+  options?: SessionsListOptions,
 ): SessionsListOutcome {
   const totalPages = Math.max(1, Math.ceil(sessions.length / pageSize))
   let page = 1
@@ -140,12 +151,20 @@ export function buildSessionsList(
 
   const paginationRow = paginationActions('sessions', currentPage, totalPages)
   const actions: ActionRow[] = paginationRow ? [paginationRow] : []
+  const naming = options?.projectNames
+    ? (id: string): string | undefined => options.projectNames!.get(id)
+    : undefined
 
   return {
     ok: true,
     result: {
-      reply: formatSessionList(sessions, { page: currentPage, pageSize }),
-      markdown: formatSessionList(sessions, { markdown: true, page: currentPage, pageSize }),
+      reply: formatSessionList(sessions, { page: currentPage, pageSize, projectName: naming }),
+      markdown: formatSessionList(sessions, {
+        markdown: true,
+        page: currentPage,
+        pageSize,
+        projectName: naming,
+      }),
       actions: actions.length > 0 ? actions : undefined,
       cards,
       pagination: {

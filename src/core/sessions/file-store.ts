@@ -104,7 +104,7 @@ export class FileSessionStore implements SessionStore {
    * has handed out and the ones already on disk, so a second process cannot take
    * a nickname this one is holding.
    */
-  async create(scope?: MemoryScope): Promise<SessionRecord> {
+  async create(scope?: MemoryScope, project?: string): Promise<SessionRecord> {
     return this.run(() => {
       const timestamp = this.now()
       const id = generateNickname(
@@ -119,6 +119,7 @@ export class FileSessionStore implements SessionStore {
         // Written here, not by whoever saves first, so the record says where it
         // came from even if the process dies before the first turn lands.
         ...(scope ? { scope } : {}),
+        ...(project ? { project } : {}),
       } satisfies SessionRecord
       this.pending.set(id, record)
       return structuredClone(record)
@@ -355,6 +356,9 @@ export class FileSessionStore implements SessionStore {
         // The fork is a session of its own, in the scope it was forked into —
         // not the one its source happened to live in.
         ...(options?.scope ? { scope: options.scope } : {}),
+        // A fork is the same work carried on in another session, so it stays in
+        // the project its source was working in.
+        ...(source.project ? { project: source.project } : {}),
       }
       // Nothing to write yet, so it lives in memory like a minted session does.
       if (record.messages.length === 0) {
@@ -517,5 +521,6 @@ function parseRecord(value: unknown): SessionRecord | null {
     // Records written before the scope was kept read as having none; they are
     // still readable, just unattributable.
     scope: isScope(raw.scope) ? raw.scope : undefined,
+    project: typeof raw.project === 'string' && raw.project.length > 0 ? raw.project : undefined,
   }
 }

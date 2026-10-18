@@ -1,4 +1,5 @@
 import { DEFAULT_WORKING_DIRECTORY, scratchDir } from '../config/paths.js'
+import type { ProjectPlacement } from '../projects.js'
 import { shortId, type MemoryItem } from '../memory/index.js'
 import type { ToolSpec } from '../providers/types.js'
 import type { SkillSummary } from '../skills/index.js'
@@ -110,6 +111,12 @@ export interface SystemPromptInput {
   cwd: string
   provider: string
   model: string
+  /**
+   * The project this session works in, when it has one: where it is, or why the
+   * one on its record could not be found. Absent on a session with no project,
+   * which is most of them.
+   */
+  project?: ProjectPlacement
   /** The session this turn is running in (`calm-otter-7`), so the model can name it. */
   sessionId?: string
   tools: ToolSpec[]
@@ -404,11 +411,22 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   environment.push(`- Today: ${localDate(input.now ?? new Date())}`)
   environment.push(`- Model: ${input.provider}/${input.model}`)
   if (input.sessionId) environment.push(`- You are in session \`${input.sessionId}\``)
-  environment.push(
-    input.cwd === DEFAULT_WORKING_DIRECTORY
-      ? '- No project is selected; you can work across this machine.'
-      : '- A project is selected; use it as the default context for project work.',
-  )
+  // Where the work is. A session pointed at a project says which one, by name —
+  // the model is told what it is working on, not only where — and one whose
+  // project has gone says so rather than leaving the folder unexplained.
+  if (input.project) {
+    environment.push(
+      input.project.ok
+        ? `- Project: ${input.project.project.name} (${input.project.project.path})`
+        : `- This session's project is gone: ${input.project.error}. Working from ${input.cwd} instead.`,
+    )
+  } else {
+    environment.push(
+      input.cwd === DEFAULT_WORKING_DIRECTORY
+        ? '- No project is selected; you can work across this machine.'
+        : '- A project is selected; use it as the default context for project work.',
+    )
+  }
   environment.push(
     `- Scratch space for your own intermediate files — a script, temp data, anything you need while working but the person did not ask for: ${scratchDir()}. Never put there what the person asked you to produce; that goes into the project, or is sent to them.`,
   )

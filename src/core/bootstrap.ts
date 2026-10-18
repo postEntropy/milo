@@ -17,6 +17,7 @@ import {
 } from './routines.js'
 import { createProvider } from './providers/create.js'
 import type { Provider } from './providers/types.js'
+import { placeProject } from './projects.js'
 import { fileTraces, TracedProvider, type TraceWriter } from './traces.js'
 import { lookupContextWindow } from './providers/context.js'
 import { AgentRuntime } from './runtime.js'
@@ -226,6 +227,9 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     lookupContextWindow,
     reasoningEffort: loaded.config.reasoningEffort,
     cwd,
+    // Where a session's project is, read from the install's own list — the same
+    // one `milo projects` and the Work screen write to.
+    project: placeProject,
     maxSteps: loaded.config.maxSteps,
     maxTokens: loaded.config.maxTokens,
     permissionPolicy: new DefaultPermissionPolicy({

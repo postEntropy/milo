@@ -21,6 +21,7 @@ import { runAgent, type RunTrace } from './agent/loop.js'
 import type { TraceWriter } from './traces.js'
 import { runSubagent } from './agent/subagent.js'
 import { buildSystemPrompt, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
+import type { ProjectPlacement } from './projects.js'
 import type { ClientKind } from './client.js'
 import {
   contextBudget,
@@ -100,6 +101,11 @@ export interface SessionOptions {
   registry: ToolRegistry
   memory: Memory
   cwd: string
+  /**
+   * The project this session works in: where it is, or why the one on its record
+   * cannot be found. Absent on a session with no project.
+   */
+  project?: ProjectPlacement
   /**
    * Reads the skills to index in the system prompt, once per prompt; the bodies
    * load on demand. A getter rather than a list, so a skill installed while Milo
@@ -392,6 +398,15 @@ export class Session {
   }
 
   /**
+   * The project this session works in, when it works in one: where it is, or why the folder
+   * on its record cannot be used. The placement the turn was given, carried out to a surface
+   * that names it — not a second look at the record, so a bar and the turn never disagree.
+   */
+  get project(): ProjectPlacement | undefined {
+    return this.options.project
+  }
+
+  /**
    * Renames the session and writes it down. Under the lease, for the reason
    * `clear` gives: a rename sent from a copy the file has already moved past would
    * be refused at best, and would write back a transcript that dropped the turns
@@ -592,6 +607,9 @@ export class Session {
       surface,
       routine: this.scope.gateway === ROUTINE_GATEWAY,
       cwd,
+      // Which project this session is working in, when it has one: the turn is
+      // told what it is working on, not only where the folder is.
+      project: this.options.project,
       provider: provider.id,
       model,
       // The session this turn is in, so a question about it is answerable without
@@ -647,7 +665,7 @@ export class Session {
     const abort = signal ?? new AbortController().signal
     const effort = this.options.reasoningEffort?.() ?? DEFAULT_REASONING_EFFORT
     const permission = permissionPolicy
-      ? { policy: withGrants(permissionPolicy, this.options.grantedTools ?? [], cwd), ask: opts?.ask }
+      ? { policy: withGrants(permissionPolicy, this.options.grantedTools ?? [], cwd), ask: opts?.ask, cwd }
       : undefined
     // Read through `this.scope` at call time: a gateway can rebind the session
     // to another conversation while it is running.

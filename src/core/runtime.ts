@@ -13,6 +13,7 @@ import type { Skill, SkillLibrary } from './skills/index.js'
 import type { PermissionPolicy } from './tools/index.js'
 import type { RoutineStore, ToolRegistry } from './tools/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
+import type { ProjectLookup } from './projects.js'
 import { Session } from './session.js'
 import {
   contextBudget,
@@ -51,6 +52,13 @@ export interface RuntimeOptions {
   registry: ToolRegistry
   memory: Memory
   cwd: string
+  /**
+   * How a session's project is found: the folder it works in, or why it cannot be
+   * worked in. Injected the way the stores are, so a runtime in a test needs no
+   * projects file on disk, and a session with no project — most of them — never
+   * calls it.
+   */
+  project?: ProjectLookup
   /** The skills directory, read live, so the index in every prompt stays current. */
   skills?: SkillLibrary
   maxSteps?: number
@@ -125,6 +133,11 @@ export interface NewSessionOptions {
   grantedTools?: string[]
   /** The chat its turns may send files to — a routine's own target. */
   deliverTo?: { gateway: string; conversationId: string }
+  /**
+   * The project this session works in, by id. Absent is the install's own
+   * directory — what every session before this one used.
+   */
+  project?: string
 }
 
 /**
@@ -521,9 +534,15 @@ export class AgentRuntime {
     options?: NewSessionOptions,
   ): Promise<Session> {
     await this.detach(scope)
-    const record = await this.store.create(scope)
+    const record = await this.store.create(scope, options?.project)
     if (title?.trim()) record.title = title.trim()
     await this.store.setBinding(scopeKey(scope), record.id)
+    // This run has opened the scope. A surface that starts a session and then opens it —
+    // the web and the phone both ask for one over HTTP and then connect the socket on the
+    // conversation they minted — has to land in the session it just asked for, or the one
+    // it started, project and all, is left unwritten and the screen speaks to another. The
+    // same reason `resumeSession` marks the scope it takes.
+    this.opened.add(scopeKey(scope))
     // Not written out here: a session takes its file on its first turn, so a run
     // that opens a conversation and never speaks in it leaves nothing behind.
     return this.adopt(record, scope, options)
@@ -556,6 +575,14 @@ export class AgentRuntime {
       cached.scope = scope
       return this.touch(record.id, cached)
     }
+    // Where this session works: its project's folder when it has one that is
+    // there, and the install's own directory otherwise. Resolved here because
+    // this is where a session's directory is decided — every tool, the subagent
+    // and the prompt read it from the session afterwards. A project whose folder
+    // has gone is carried as the reason, so the turn says so rather than working
+    // somewhere else in silence.
+    const placement =
+      this.options.project && record.project ? this.options.project(record.project) : undefined
     const session = new Session({
       scope,
       provider: this.options.provider,
@@ -565,7 +592,8 @@ export class AgentRuntime {
       system: this.options.system,
       registry: this.options.registry,
       memory: this.options.memory,
-      cwd: this.options.cwd,
+      cwd: placement?.ok ? placement.project.path : this.options.cwd,
+      project: placement,
       // A getter, not the list: the system prompt is built per turn, and a skill
       // installed since the last one belongs in it.
       skills: this.options.skills ? () => this.options.skills!.list() : undefined,
