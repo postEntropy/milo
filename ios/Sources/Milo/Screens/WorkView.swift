@@ -785,14 +785,15 @@ private struct DiffSummary: View {
     let place: Place
 
     /// The file's name: a row carries it at the step the list's rows are drawn at, and the
-    /// drawer, which has nothing above it, at the size of a title.
+    /// drawer, which has nothing above it, a step above that — enough to read as the name of
+    /// what the drawer holds, without shouting over the code inside it.
     private var name: Font {
-        place == .title ? MiloTheme.Text.body.weight(.semibold).monospaced() : MiloTheme.Text.small.monospaced()
+        place == .title ? MiloTheme.Text.base.weight(.semibold).monospaced() : MiloTheme.Text.small.monospaced()
     }
 
     /// Where it came from and how much moved, a step under the name wherever it is drawn.
     private var detail: Font {
-        place == .title ? MiloTheme.Text.base : MiloTheme.Text.meta
+        place == .title ? MiloTheme.Text.small : MiloTheme.Text.meta
     }
 
     var body: some View {
@@ -801,7 +802,10 @@ private struct DiffSummary: View {
                 .font(name)
                 .foregroundStyle(MiloTheme.foreground)
                 .lineLimit(1)
-                .truncationMode(.middle)
+                // A path too long to fit gives way at its head, never at the file's own name:
+                // the last segment is the one that says which file this is, and half a
+                // directory still says where it sits.
+                .truncationMode(.head)
             if let from = file.from {
                 Text("was \(from)")
                     .font(detail)
@@ -1088,11 +1092,13 @@ private struct WorkFileReader: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
             HStack(spacing: MiloTheme.Space.two) {
+                // The same rule the diff's own line keeps: the file's name is the last thing
+                // this gives up, so a long path is cut at its head.
                 Text(node.rel)
                     .font(MiloTheme.Text.meta.monospaced())
                     .foregroundStyle(MiloTheme.foreground)
                     .lineLimit(1)
-                    .truncationMode(.middle)
+                    .truncationMode(.head)
                 Spacer(minLength: MiloTheme.Space.two)
                 if let first, first.total > 0 {
                     Text("\(first.total) lines")
@@ -1230,11 +1236,13 @@ private struct FolderPicker: View {
                             .foregroundStyle(MiloTheme.muted)
                     }
                 } header: {
+                    // A folder's own path is read the way a file's is: the last segment — the
+                    // folder being looked at — is the part that cannot be given up.
                     Text(listing?.path ?? " ")
                         .font(MiloTheme.Text.meta.monospaced())
                         .textCase(nil)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                        .truncationMode(.head)
                 } footer: {
                     Text("These are the folders of the machine Milo runs on, not this phone's.")
                 }

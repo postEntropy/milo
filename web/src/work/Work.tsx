@@ -578,6 +578,19 @@ function ProjectPage({
 }
 
 /**
+ * A path, cut from its directory when it does not fit: half a directory still says which file
+ * this is, half a name does not. The name itself never gives way — the same rule the phone
+ * keeps, where a long path is truncated at its head.
+ */
+function Path({ value }: { value: string }) {
+  const cut = value.lastIndexOf('/')
+  return <>
+    {cut !== -1 && <span className="path-dir">{value.slice(0, cut + 1)}</span>}
+    <span className="path-name">{value.slice(cut + 1)}</span>
+  </>
+}
+
+/**
  * A changed file: how much moved, and — opened — the hunks themselves. The marking of a
  * line is the diff's own: added lines green, removed red, and both numbers in the gutter,
  * so a line can be found in the file it is from. What git called the change is not drawn
@@ -589,7 +602,7 @@ function DiffFileRow({ file, open, onToggle }: { file: DiffFile; open: boolean; 
   return <div className="work-diff-file">
     <button className="work-diff-row" type="button" aria-expanded={open} onClick={onToggle}>
       <Icon className="work-tree-twist" name="chevron" size={13} />
-      <span className="work-diff-path" title={file.path}>{file.path}{moved}</span>
+      <span className="work-diff-path" title={file.path}><Path value={file.path} />{moved}</span>
       {/* The counts are only worth drawing when something moved: a rename or a
           permission change has no lines of its own, and a bare `+0 −0` says nothing. */}
       {(file.additions > 0 || file.deletions > 0) && <span className="work-diff-count">
@@ -684,7 +697,7 @@ function FileView({ project, node, onClose }: { project: string; node: WorkNode;
 
   return <section className="work-file">
     <header className="work-file-head">
-      <span className="work-file-name">{node.rel}</span>
+      <span className="work-file-name"><Path value={node.rel} /></span>
       <span className="work-file-meta">{first === undefined ? '' : first.total === 0 ? 'Empty' : `${first.total} lines · ${formatBytes(first.size)}`}</span>
       <button className="icon-button" type="button" aria-label="Close the file" onClick={onClose}><Icon name="x" size={16} /></button>
     </header>

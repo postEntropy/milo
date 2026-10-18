@@ -1552,7 +1552,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .work-diff-file { overflow: hidden; border-radius: var(--radius-lg); background: var(--surface); }
 .work-diff-row { display: flex; align-items: center; gap: var(--space-4); width: 100%; min-height: var(--control-lg); border: 0; background: transparent; padding: var(--space-4) var(--space-6); color: inherit; text-align: start; transition: background var(--motion-fast); }
 .work-diff-row:hover { background: var(--surface-warm); }
-.work-diff-path { overflow: hidden; min-width: 0; flex: 1; color: var(--fg); font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.work-diff-path { display: flex; align-items: center; overflow: hidden; min-width: 0; flex: 1; color: var(--fg); font: var(--text-xs) var(--font-mono); white-space: nowrap; }
+/* A path gives way from its directory, never from the file's own name: the last segment is
+   what says which file this is, and half a directory still says where it sits. Worn by the
+   diff's own line and by the header of a file that is open. */
+.path-dir { overflow: hidden; min-width: 0; text-overflow: ellipsis; }
+.path-name { flex: none; }
 .work-diff-count { display: flex; flex: none; gap: var(--space-3); font: var(--text-2xs) var(--font-mono); font-variant-numeric: tabular-nums; }
 .work-diff-count .plus { color: var(--success); }
 .work-diff-count .minus { color: var(--danger); }
@@ -1604,7 +1609,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .work-tree-count, .work-tree-size { flex: none; color: var(--muted); font: var(--text-2xs) var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .work-file { margin-bottom: var(--space-6); overflow: hidden; border-radius: var(--radius-lg); background: var(--surface); }
 .work-file-head { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-5) var(--space-5) var(--space-5) var(--space-7); }
-.work-file-name { overflow: hidden; min-width: 0; flex: 1; color: var(--fg); font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.work-file-name { display: flex; align-items: center; overflow: hidden; min-width: 0; flex: 1; color: var(--fg); font: var(--text-xs) var(--font-mono); white-space: nowrap; }
 .work-file-meta { flex: none; color: var(--muted); font-size: var(--text-2xs); white-space: nowrap; }
 .work-file-error, .work-file-foot { padding: 0 var(--space-7) var(--space-6); }
 .work-file-error { color: var(--danger); font-size: var(--text-sm); }
