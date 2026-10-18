@@ -202,7 +202,9 @@ export class WebSettings {
       case 'email-label-create': return this.emailLabelCreate(body)
       case 'email-label-delete': return this.emailLabelDelete(body)
       case 'email-label-assign': return this.emailLabelAssign(body)
-      default: throw new Error('Unknown Settings action.')
+      // The action that arrived is named: a screen calling a route this daemon does not
+      // have — because it is running an older build — has to say which one it was.
+      default: throw new Error(`Unknown Settings action: "${action}".`)
     }
   }
 
