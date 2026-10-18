@@ -1,6 +1,7 @@
 import { closeParagraph } from '../../util/format.js'
 import type { Message, Provider, ReasoningEffort } from '../providers/types.js'
 import type { SkillSummary } from '../skills/index.js'
+import type { ProjectInstructions } from './instructions.js'
 import type { RunTrace } from './loop.js'
 import type { ToolContext, ToolRegistry, ToolResult } from '../tools/index.js'
 import type { BrowserFacts } from '../browser/index.js'
@@ -15,6 +16,12 @@ export interface SubagentRun {
   registry: ToolRegistry
   cwd: string
   skills?: SkillSummary[]
+  /**
+   * The rules of the parent turn's project, already resolved: a subagent works in the
+   * same folder, so it keeps the same conventions the parent does. Absent when the
+   * turn has no project, or the project carries no instructions.
+   */
+  instructions?: ProjectInstructions
   /**
    * The live state the setup section carries. A subagent is handed the parent's
    * whole catalog, so the browser, the external servers and the Google grant are
@@ -62,6 +69,7 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     model: options.model,
     tools,
     skills: options.skills,
+    instructions: options.instructions,
     browser: options.browser ?? null,
     mcp: options.mcp ?? null,
     google: options.google ?? null,

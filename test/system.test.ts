@@ -61,6 +61,49 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('## Environment')
   })
 
+  it('follows the instructions of the folder it works in', () => {
+    const prompt = buildSystemPrompt({
+      base: 'BASE',
+      cwd: '/a',
+      provider: 'p',
+      model: 'm',
+      tools: [],
+      memories: [],
+      instructions: { kind: 'present', text: 'Run the suite before you call it done.' },
+    })
+
+    expect(prompt).toContain("## This project's instructions")
+    expect(prompt).toContain('Run the suite before you call it done.')
+    // Instructions to follow, not data to weigh: the line keeps the base policy and
+    // the person above whatever the folder wrote.
+    expect(prompt).toContain('outrank your habits')
+  })
+
+  it('says when the project instructions could not be carried, with the reason', () => {
+    const prompt = buildSystemPrompt({
+      base: 'BASE',
+      cwd: '/a',
+      provider: 'p',
+      model: 'm',
+      tools: [],
+      memories: [],
+      instructions: { kind: 'unreadable', error: 'it is 40.0 KB, over the 16.0 KB carried' },
+    })
+
+    expect(prompt).toContain("## This project's instructions")
+    expect(prompt).toContain('could not be included: it is 40.0 KB')
+    // Never left to guess what the rules said.
+    expect(prompt).toContain('Do not guess what it says.')
+  })
+
+  it('adds nothing about project instructions when there are none', () => {
+    const base = { base: 'BASE', cwd: '/a', provider: 'p', model: 'm', tools: [], memories: [] }
+    expect(buildSystemPrompt(base)).not.toContain("This project's instructions")
+    expect(buildSystemPrompt({ ...base, instructions: { kind: 'absent' } })).not.toContain(
+      "This project's instructions",
+    )
+  })
+
   it('names the session it is running in, when it has one', () => {
     const base = { base: 'BASE', cwd: '/a', provider: 'p', model: 'm', tools: [], memories: [] }
     expect(buildSystemPrompt({ ...base, sessionId: 'calm-otter-7' })).toContain(

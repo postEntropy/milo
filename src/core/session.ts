@@ -22,6 +22,7 @@ import type { TraceWriter } from './traces.js'
 import { runSubagent } from './agent/subagent.js'
 import { buildSystemPrompt, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import type { ProjectPlacement } from './projects.js'
+import type { ProjectInstructions } from './agent/instructions.js'
 import type { ClientKind } from './client.js'
 import {
   contextBudget,
@@ -106,6 +107,12 @@ export interface SessionOptions {
    * cannot be found. Absent on a session with no project.
    */
   project?: ProjectPlacement
+  /**
+   * The rules of the session's project folder, read once per prompt like the skills:
+   * its own `AGENTS.md`, or why there is none to carry. A getter rather than the
+   * text, so an edit to that file lands on the next turn without a restart.
+   */
+  instructions?: () => ProjectInstructions
   /**
    * Reads the skills to index in the system prompt, once per prompt; the bodies
    * load on demand. A getter rather than a list, so a skill installed while Milo
@@ -610,6 +617,9 @@ export class Session {
       // Which project this session is working in, when it has one: the turn is
       // told what it is working on, not only where the folder is.
       project: this.options.project,
+      // The project's own rules, read per turn: the folder a session works in says
+      // how it is to be worked in, and an edit to that file lands on the next turn.
+      instructions: this.options.instructions?.(),
       provider: provider.id,
       model,
       // The session this turn is in, so a question about it is answerable without
@@ -751,6 +761,9 @@ export class Session {
               registry,
               cwd,
               skills: this.options.skills?.(),
+              // The same rules the parent's prompt carries: a delegated task works in
+              // the same folder, and must follow the same conventions it keeps.
+              instructions: this.options.instructions?.(),
               // The same live state the parent's prompt carries, so a delegated
               // task can answer about the browser, the servers and Google too.
               browser: this.browserFacts(),

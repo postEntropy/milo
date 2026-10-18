@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -7,6 +7,7 @@ import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/t
 import { AgentRuntime, type RuntimeOptions } from '../src/core/runtime.js'
 import { FileSessionStore } from '../src/core/sessions/file-store.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
+import { readProjectInstructions } from '../src/core/agent/instructions.js'
 
 class StubProvider implements Provider {
   readonly id = 'stub'
@@ -541,5 +542,23 @@ describe('a session that works in a project', () => {
 
     expect(provider.lastSystem).not.toContain('Project:')
     expect(provider.lastSystem).toContain(`Today:`)
+  })
+
+  it("carries the rules of the folder it works in into the prompt", async () => {
+    const provider = new StubProvider()
+    const folder = mkdtempSync(path.join(tmpdir(), 'milo-rules-'))
+    writeFileSync(path.join(folder, 'AGENTS.md'), 'Run `npm test` before you call it done.\n')
+    const runtime = new AgentRuntime({
+      ...runtimeOptions(mkdtempSync(path.join(tmpdir(), 'milo-rt-'))),
+      provider,
+      project: (id) => ({ ok: true, project: { id, name: 'Milo', path: folder, createdAt: 1 } }),
+      instructions: readProjectInstructions,
+    })
+
+    const session = await runtime.newSession(cli, 'work', { project: 'calm-otter-1' })
+    await drain(session.send('hi'))
+
+    expect(provider.lastSystem).toContain("## This project's instructions")
+    expect(provider.lastSystem).toContain('Run `npm test` before you call it done.')
   })
 })

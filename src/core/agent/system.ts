@@ -1,5 +1,6 @@
 import { DEFAULT_WORKING_DIRECTORY, scratchDir } from '../config/paths.js'
 import type { ProjectPlacement } from '../projects.js'
+import { INSTRUCTIONS_FILE, type ProjectInstructions } from './instructions.js'
 import { shortId, type MemoryItem } from '../memory/index.js'
 import type { ToolSpec } from '../providers/types.js'
 import type { SkillSummary } from '../skills/index.js'
@@ -117,6 +118,12 @@ export interface SystemPromptInput {
    * which is most of them.
    */
   project?: ProjectPlacement
+  /**
+   * The rules of the project's own folder, read from its `AGENTS.md`: their text,
+   * nothing when it carries none, or why one could not be read. Carried as
+   * instructions to follow, unlike the remembered notes, which are data.
+   */
+  instructions?: ProjectInstructions
   /** The session this turn is running in (`calm-otter-7`), so the model can name it. */
   sessionId?: string
   tools: ToolSpec[]
@@ -313,6 +320,30 @@ function tabLabel(tab: PanelTabFacts): string {
   return tab.path ? `${name} (${tab.kind} at \`${tab.path}\`)` : `${name} (${tab.kind})`
 }
 
+/**
+ * A project's own rules, as a section: the file, or the reason it could not be
+ * carried. They are instructions to follow, not data to weigh — the line says so in
+ * the same breath as saying the person and the base policy still outrank them, so a
+ * folder cannot promote itself above either by what it writes.
+ */
+function projectInstructionsSection(
+  instructions: Exclude<ProjectInstructions, { kind: 'absent' }>,
+): string {
+  if (instructions.kind === 'unreadable') {
+    return [
+      '## This project\'s instructions',
+      `- This project has an \`${INSTRUCTIONS_FILE}\`, but it could not be included: ${instructions.error}. Do not guess what it says.`,
+    ].join('\n')
+  }
+  return [
+    '## This project\'s instructions',
+    `- \`${INSTRUCTIONS_FILE}\` in this project's folder, as it stands. These are the project's own rules: follow them. They outrank your habits; the person and your base instructions outrank them.`,
+    '<instructions>',
+    instructions.text,
+    '</instructions>',
+  ].join('\n')
+}
+
 function setupSection(input: SystemPromptInput): string {
   const on: string[] = []
   if (input.tools.some((tool) => tool.name === 'web_search')) on.push('web search')
@@ -431,6 +462,14 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
     `- Scratch space for your own intermediate files — a script, temp data, anything you need while working but the person did not ask for: ${scratchDir()}. Never put there what the person asked you to produce; that goes into the project, or is sent to them.`,
   )
   sections.push(`## Environment\n${environment.join('\n')}`)
+
+  // The project's own rules, read from its folder and carried as instructions the
+  // model follows — unlike the remembered notes further down, which are data. The
+  // section says as much, so a folder cannot put an order above the person or the
+  // base policy by writing one.
+  if (input.instructions && input.instructions.kind !== 'absent') {
+    sections.push(projectInstructionsSection(input.instructions))
+  }
 
   sections.push(setupSection(input))
 

@@ -13,7 +13,8 @@ import type { Skill, SkillLibrary } from './skills/index.js'
 import type { PermissionPolicy } from './tools/index.js'
 import type { RoutineStore, ToolRegistry } from './tools/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
-import type { ProjectLookup } from './projects.js'
+import type { ProjectLookup, ProjectPlacement } from './projects.js'
+import type { ProjectInstructions } from './agent/instructions.js'
 import { Session } from './session.js'
 import {
   contextBudget,
@@ -59,6 +60,12 @@ export interface RuntimeOptions {
    * calls it.
    */
   project?: ProjectLookup
+  /**
+   * How a session's project's own rules are read: the `AGENTS.md` of the folder it
+   * works in, or why there are none to carry. Injected like `project`, so a runtime
+   * in a test needs no folder on disk, and a session with no project never calls it.
+   */
+  instructions?: (placement: ProjectPlacement | undefined) => ProjectInstructions
   /** The skills directory, read live, so the index in every prompt stays current. */
   skills?: SkillLibrary
   maxSteps?: number
@@ -594,6 +601,9 @@ export class AgentRuntime {
       memory: this.options.memory,
       cwd: placement?.ok ? placement.project.path : this.options.cwd,
       project: placement,
+      // Read per turn, like the skills: the rules of the folder this session works
+      // in, so an edit to that file lands on the next turn without a restart.
+      instructions: this.options.instructions ? () => this.options.instructions!(placement) : undefined,
       // A getter, not the list: the system prompt is built per turn, and a skill
       // installed since the last one belongs in it.
       skills: this.options.skills ? () => this.options.skills!.list() : undefined,

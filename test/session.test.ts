@@ -405,6 +405,27 @@ describe('Session', () => {
     expect(provider.lastEffort).toBe('high')
   })
 
+  it("reads the project's instructions per turn, so an edit lands on the next one", async () => {
+    const provider = new CapturingProvider()
+    let text = 'First rule.'
+    const { session } = await sessionWith(provider, {
+      instructions: () => ({ kind: 'present', text }),
+    })
+
+    for await (const _event of session.send('hello')) {
+      // drain
+    }
+    expect(provider.lastSystem).toContain('First rule.')
+
+    // An edit to the file is what the next turn reads: the session is not restarted.
+    text = 'Second rule.'
+    for await (const _event of session.send('again')) {
+      // drain
+    }
+    expect(provider.lastSystem).toContain('Second rule.')
+    expect(provider.lastSystem).not.toContain('First rule.')
+  })
+
   it('tells the model which browser it has, and whether it is up', async () => {
     // The model asked, out loud, and went looking through `ps` and `ss` instead:
     // the answer belongs in the prompt, where it costs a line.
