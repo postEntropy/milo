@@ -66,7 +66,6 @@ type DiffHunk = { header: string; lines: DiffLine[] }
 type DiffFile = {
   path: string
   from?: string
-  status: 'added' | 'modified' | 'deleted' | 'renamed' | 'untracked'
   additions: number
   deletions: number
   hunks: DiffHunk[]
@@ -76,15 +75,6 @@ type DiffFile = {
 type WorkDiff =
   | { ok: true; source: 'git'; files: DiffFile[]; truncated: boolean; committed: boolean }
   | { ok: true; source: 'none'; reason: string }
-
-/** A changed file's state, in the screen's own words. */
-const DIFF_STATUS: Record<DiffFile['status'], string> = {
-  added: 'Added',
-  modified: 'Modified',
-  deleted: 'Deleted',
-  renamed: 'Renamed',
-  untracked: 'Untracked',
-}
 
 /**
  * Work: the folders a session may work in, and the sessions that ran in one.
@@ -588,9 +578,11 @@ function ProjectPage({
 }
 
 /**
- * A changed file: what happened to it, how much moved, and — opened — the hunks
- * themselves. The marking of a line is the diff's own: added lines green, removed red,
- * and both numbers in the gutter, so a line can be found in the file it is from.
+ * A changed file: how much moved, and — opened — the hunks themselves. The marking of a
+ * line is the diff's own: added lines green, removed red, and both numbers in the gutter,
+ * so a line can be found in the file it is from. What git called the change is not drawn
+ * beside the name: the path names the file, a rename says where it came from, and the
+ * counts say how much moved.
  */
 function DiffFileRow({ file, open, onToggle }: { file: DiffFile; open: boolean; onToggle(): void }) {
   const moved = file.from === undefined ? '' : ` (was ${file.from})`
@@ -598,7 +590,6 @@ function DiffFileRow({ file, open, onToggle }: { file: DiffFile; open: boolean; 
     <button className="work-diff-row" type="button" aria-expanded={open} onClick={onToggle}>
       <Icon className="work-tree-twist" name="chevron" size={13} />
       <span className="work-diff-path" title={file.path}>{file.path}{moved}</span>
-      <span className="work-diff-status">{DIFF_STATUS[file.status]}</span>
       {/* The counts are only worth drawing when something moved: a rename or a
           permission change has no lines of its own, and a bare `+0 −0` says nothing. */}
       {(file.additions > 0 || file.deletions > 0) && <span className="work-diff-count">

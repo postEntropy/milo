@@ -1553,7 +1553,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .work-diff-row { display: flex; align-items: center; gap: var(--space-4); width: 100%; min-height: var(--control-lg); border: 0; background: transparent; padding: var(--space-4) var(--space-6); color: inherit; text-align: start; transition: background var(--motion-fast); }
 .work-diff-row:hover { background: var(--surface-warm); }
 .work-diff-path { overflow: hidden; min-width: 0; flex: 1; color: var(--fg); font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.work-diff-status { flex: none; color: var(--muted); font-size: var(--text-2xs); }
 .work-diff-count { display: flex; flex: none; gap: var(--space-3); font: var(--text-2xs) var(--font-mono); font-variant-numeric: tabular-nums; }
 .work-diff-count .plus { color: var(--success); }
 .work-diff-count .minus { color: var(--danger); }

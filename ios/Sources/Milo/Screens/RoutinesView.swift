@@ -324,9 +324,8 @@ private struct RoutineDetail: View {
     @State private var runs: [RoutineRun] = []
     @State private var total = 0
     @State private var runsError: String?
-    @State private var openRun: String?
-    @State private var run: [AppModel.Message]?
-    @State private var runError: String?
+    /// The run being read, risen from the bottom of the screen — nil while none is.
+    @State private var reading: ReadingRun?
     @State private var working = false
     @State private var confirmRemove = false
     /// Whether the whole of what the routine was asked is open on its card, rather than
@@ -466,9 +465,10 @@ private struct RoutineDetail: View {
                         .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
                 }
 
-                // The runs it has made, newest first. Each row is a drawer: the run is read
-                // where its name is, rather than in a place of its own under the list, so
-                // what is open and which run it is cannot come apart.
+                // The runs it has made, newest first. A tap reads one in the drawer — the
+                // same container a changed file's hunks rise in (`DetailSheet`) — rather than
+                // opening it under its own row: a run is a whole thread of words, and the
+                // page it is listed on is no place for one.
                 VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
                     Text(total > 0 ? "Runs · \(total)" : "Runs")
                         .font(MiloTheme.Text.title)
@@ -500,7 +500,10 @@ private struct RoutineDetail: View {
                     } else {
                         VStack(spacing: MiloTheme.Space.two) {
                             ForEach(Array(runs.enumerated()), id: \.element.id) { index, entry in
-                                runDrawer(entry, index: index)
+                                let name = runName(index: index)
+                                RunRow(name: name, at: entry.at) {
+                                    reading = ReadingRun(run: entry, name: name)
+                                }
                             }
                             if runs.count < total {
                                 Button("Show more") { Task { await loadRuns(reset: false) } }
@@ -533,77 +536,10 @@ private struct RoutineDetail: View {
             }
         }
         .task { await loadRuns(reset: true) }
-        .task(id: openRun) { await loadRun() }
-    }
-
-    /// One run: its own row, and — the drawer open — the run itself under it. One drawer
-    /// stands open at a time and the row that opened it is the one that closes it, so a run
-    /// is read where it is listed rather than in a fixed place of its own further down.
-    @ViewBuilder
-    private func runDrawer(_ entry: RoutineRun, index: Int) -> some View {
-        let open = entry.id == openRun
-        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.22)) { openRun = open ? nil : entry.id }
-            } label: {
-                HStack(spacing: MiloTheme.Space.two) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(MiloTheme.muted)
-                        .rotationEffect(.degrees(open ? 90 : 0))
-                    Text(index == 0 ? "Latest run" : "Run \(total - index)")
-                        .font(MiloTheme.Text.body)
-                        .foregroundStyle(MiloTheme.foreground)
-                    Spacer(minLength: MiloTheme.Space.two)
-                    Text(RelativeTime.when(entry.at))
-                        .font(MiloTheme.Text.small)
-                        .foregroundStyle(MiloTheme.muted)
-                }
-                .padding(MiloTheme.Space.four)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    open ? MiloTheme.surfaceRaised : MiloTheme.surface,
-                    in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg)
-                )
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(PressableStyle())
-            .accessibilityLabel(open ? "Hide this run" : "Read this run")
-
-            if open {
-                runBody
-                    .padding(MiloTheme.Space.four)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
-            }
-        }
-    }
-
-    /// What the open drawer holds: the run's own words as they were said, or why there are
-    /// none to read yet.
-    @ViewBuilder
-    private var runBody: some View {
-        if let runError {
-            Text(runError)
-                .font(MiloTheme.Text.small)
-                .foregroundStyle(MiloTheme.danger)
-        } else if let run {
-            VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-                ForEach(Array(run.enumerated()), id: \.element.id) { index, message in
-                    MessageRow(
-                        message: message,
-                        turn: index + 1,
-                        regenerate: nil,
-                        onQuote: { _ in },
-                        onEdit: { _, _ in },
-                        readOnly: true
-                    )
-                }
-            }
-        } else {
-            Text("Reading run…")
-                .font(MiloTheme.Text.small)
-                .foregroundStyle(MiloTheme.muted)
+        // The run itself, risen from the bottom of the screen: the same container a changed
+        // file's hunks use (see `DetailSheet`).
+        .sheet(item: $reading) { open in
+            RunDetail(run: open.run, name: open.name)
         }
     }
 
@@ -630,23 +566,143 @@ private struct RoutineDetail: View {
             let page = try await model.routineRuns(routineId, offset: reset ? 0 : runs.count, limit: Self.page)
             runs = reset ? page.runs : runs + page.runs
             total = page.total
-            if reset, openRun == nil { openRun = initialRun ?? page.runs.first?.id }
+            // A run named from outside — a tapped reminder, a row on the front page — is what
+            // this page was opened for, so it opens with it. Arriving any other way opens
+            // nothing: the latest run is listed, and reading it is the person's own tap.
+            if reset { read(initialRun) }
         } catch {
             runsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 
-    private func loadRun() async {
-        guard let openRun else {
-            run = nil
-            runError = nil
-            return
+    /// What a run is called where it is listed and where it is read: the newest is the latest
+    /// run, and every other is counted from the routine's first.
+    private func runName(index: Int) -> String {
+        index == 0 ? "Latest run" : "Run \(total - index)"
+    }
+
+    /// Opens the drawer on one of the runs the list is showing, by id: the run a tapped
+    /// reminder named, or the one just fired. A run the list has not caught up with opens
+    /// nothing — there is no row for it to have been read from.
+    private func read(_ id: String?) {
+        guard let id, let index = runs.firstIndex(where: { $0.id == id }) else { return }
+        reading = ReadingRun(run: runs[index], name: runName(index: index))
+    }
+
+    /// Fires it now and reads the run it made — one way to see what a run said.
+    private func runNow(_ routine: RoutineSummary) async {
+        working = true
+        defer { working = false }
+        guard let result = await model.runRoutine(routine.id) else { return }
+        await loadRuns(reset: true)
+        read(result.runId)
+    }
+}
+
+// MARK: - One run
+
+/// One run as the drawer reads it: the run itself, and what the row it came from called it,
+/// so the two cannot disagree about which run is open.
+private struct ReadingRun: Identifiable {
+    let run: RoutineRun
+    /// The words its row carries — "Latest run", or the run's number.
+    let name: String
+
+    var id: String { run.id }
+}
+
+/// One run as the list draws it: which run it is and when it happened. A tap reads it in the
+/// drawer, where a whole thread of words has the room to itself — and the row, being the
+/// control, wears no glyph of its own.
+private struct RunRow: View {
+    let name: String
+    let at: Double
+    let onOpen: () -> Void
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: MiloTheme.Space.two) {
+                Text(name)
+                    .font(MiloTheme.Text.body)
+                    .foregroundStyle(MiloTheme.foreground)
+                Spacer(minLength: MiloTheme.Space.two)
+                Text(RelativeTime.when(at))
+                    .font(MiloTheme.Text.small)
+                    .foregroundStyle(MiloTheme.muted)
+            }
+            .padding(MiloTheme.Space.four)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+            .contentShape(Rectangle())
         }
-        run = nil
-        runError = nil
+        .buttonStyle(PressableStyle())
+    }
+}
+
+/**
+ One run, risen from the bottom of the screen: which run it is and when, then what it said,
+ drawn as the chat draws a thread.
+
+ The words are not in the page's own list — that holds the runs' summaries — so they are read
+ from the daemon as the drawer opens, and the drawer says it is reading them rather than
+ standing there empty.
+ */
+private struct RunDetail: View {
+    let run: RoutineRun
+    /// What the drawer calls it, in the words the row it came from carried.
+    let name: String
+
+    @Environment(AppModel.self) private var model
+    @State private var thread: [AppModel.Message]?
+    @State private var error: String?
+
+    var body: some View {
+        DetailSheet {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.four) {
+                HStack(spacing: MiloTheme.Space.two) {
+                    Text(name)
+                        .font(MiloTheme.Text.body.weight(.semibold))
+                        .foregroundStyle(MiloTheme.foreground)
+                    Spacer(minLength: MiloTheme.Space.two)
+                    Text(RelativeTime.when(run.at))
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+
+                if let error {
+                    Text(error)
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.danger)
+                } else if let thread {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                        ForEach(Array(thread.enumerated()), id: \.element.id) { index, message in
+                            MessageRow(
+                                message: message,
+                                turn: index + 1,
+                                regenerate: nil,
+                                onQuote: { _ in },
+                                onEdit: { _, _ in },
+                                readOnly: true
+                            )
+                        }
+                    }
+                } else {
+                    HStack(spacing: MiloTheme.Space.two) {
+                        ProgressView().controlSize(.small)
+                        Text("Reading this run…")
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                    }
+                }
+            }
+        }
+        .task { await read() }
+    }
+
+    private func read() async {
         do {
-            let transcript = try await model.routineTranscript(openRun)
-            run = transcript.map {
+            let transcript = try await model.routineTranscript(run.id)
+            thread = transcript.map {
                 AppModel.Message(
                     isUser: $0.role == "user",
                     parts: $0.parts,
@@ -657,18 +713,10 @@ private struct RoutineDetail: View {
                     rawNoOutput: $0.rawNoOutput
                 )
             }
+            error = nil
         } catch {
-            runError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
-    }
-
-    /// Fires it now and opens the run it made — one way to see what a run said.
-    private func runNow(_ routine: RoutineSummary) async {
-        working = true
-        defer { working = false }
-        guard let result = await model.runRoutine(routine.id) else { return }
-        openRun = result.runId
-        await loadRuns(reset: true)
     }
 }
 

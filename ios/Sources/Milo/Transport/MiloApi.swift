@@ -1057,7 +1057,6 @@ struct WorkDiffFile: Decodable, Identifiable, Hashable {
     let path: String
     /// Where it came from, when it was renamed or moved.
     let from: String?
-    let status: String
     let additions: Int
     let deletions: Int
     let hunks: [WorkDiffHunk]
@@ -1066,26 +1065,15 @@ struct WorkDiffFile: Decodable, Identifiable, Hashable {
     let note: String?
 
     var id: String { path }
-    /// The state in the screen's own words, rather than git's two letters.
-    var statusWord: String {
-        switch status {
-        case "added": return "Added"
-        case "deleted": return "Deleted"
-        case "renamed": return "Renamed"
-        case "untracked": return "Untracked"
-        default: return "Modified"
-        }
-    }
 
     private enum CodingKeys: String, CodingKey {
-        case path, from, status, additions, deletions, hunks, note
+        case path, from, additions, deletions, hunks, note
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
         from = try container.decodeIfPresent(String.self, forKey: .from)
-        status = try container.decodeIfPresent(String.self, forKey: .status) ?? "modified"
         additions = try container.decodeIfPresent(Int.self, forKey: .additions) ?? 0
         deletions = try container.decodeIfPresent(Int.self, forKey: .deletions) ?? 0
         hunks = try container.decodeIfPresent([WorkDiffHunk].self, forKey: .hunks) ?? []

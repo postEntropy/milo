@@ -626,6 +626,8 @@ private struct ProjectChanges: View {
     @State private var error: String?
     /// Recording the folder as it is now, while it is being recorded.
     @State private var tracking = false
+    /// The changed file whose hunks are open, risen from the bottom of the screen.
+    @State private var reading: WorkDiffFile?
 
     var body: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
@@ -696,9 +698,9 @@ private struct ProjectChanges: View {
                         .font(MiloTheme.Text.body)
                         .foregroundStyle(MiloTheme.muted)
                 } else {
-                    VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
                         ForEach(diff.files) { file in
-                            DiffFileRow(file: file)
+                            DiffFileRow(file: file, onOpen: { reading = file })
                         }
                     }
                 }
@@ -718,6 +720,9 @@ private struct ProjectChanges: View {
             }
         }
         .task { await read() }
+        // The file's own hunks, risen from the bottom: a diff is read on its own, and a long
+        // one would otherwise stretch the project's page it changed in.
+        .sheet(item: $reading) { file in DiffDetail(file: file) }
     }
 
     private func read() async {
@@ -745,89 +750,130 @@ private struct ProjectChanges: View {
 }
 
 /**
- One changed file: what happened to it, how much moved, and — opened — the hunks. The
- marking is the diff's own: an added line green, a removed one red, both numbers in the
- gutter so a line can be found in the file it is from.
+ One changed file as the list draws it: what it is called, where it came from, and how much
+ moved. A tap rises its hunks from the bottom of the screen rather than opening them under
+ the row — a diff is read on its own, and a long one spread under the row would stretch the
+ page it changed in.
  */
 private struct DiffFileRow: View {
     let file: WorkDiffFile
-
-    @State private var open = false
+    let onOpen: () -> Void
 
     var body: some View {
-        DisclosureGroup(isExpanded: $open) {
-            if file.hunks.isEmpty {
-                if let note = file.note {
-                    Text(note)
-                        .font(MiloTheme.Text.meta)
-                        .foregroundStyle(MiloTheme.muted)
-                        .padding(.vertical, MiloTheme.Space.two)
-                }
-            } else {
-                // The same box a code block is drawn in: monospaced, scrolling sideways
-                // rather than wrapping — a wrapped line of a diff stops being that line —
-                // and marked so the drawer's drag stands down inside it.
-                ScrollView(.horizontal, showsIndicators: false) {
-                    VStack(alignment: .leading, spacing: 0) {
-                        ForEach(file.hunks) { hunk in
-                            Text("@@ \(hunk.header) @@")
-                                .font(MiloTheme.Text.meta.monospaced())
-                                .foregroundStyle(MiloTheme.muted)
-                                .padding(.top, MiloTheme.Space.three)
-                                .padding(.bottom, MiloTheme.Space.one)
-                            ForEach(hunk.lines) { line in
-                                DiffLineRow(line: line)
-                            }
-                        }
-                    }
-                    .padding(MiloTheme.Space.three)
-                }
-                .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
-                .marksScrollBox()
-                .padding(.top, MiloTheme.Space.two)
+        Button(action: onOpen) {
+            DiffSummary(file: file, place: .row)
+                .padding(.vertical, MiloTheme.Space.two)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressableStyle())
+    }
+}
 
-                if let note = file.note {
-                    Text(note)
-                        .font(MiloTheme.Text.meta)
-                        .foregroundStyle(MiloTheme.muted)
-                        .padding(.top, MiloTheme.Space.two)
-                }
-            }
-        } label: {
-            HStack(spacing: MiloTheme.Space.two) {
-                Text(file.path)
-                    .font(MiloTheme.Text.meta.monospaced())
-                    .foregroundStyle(MiloTheme.foreground)
+/// A changed file's own line: what it is called, where it came from, and how much moved.
+/// Drawn in the list and again at the top of its own drawer, from one place, so the two
+/// cannot come to say different things about the same file — each at the step its own place
+/// reads a line at.
+private struct DiffSummary: View {
+    /// Where the line stands: one row among the list's, or the name of what a drawer holds.
+    enum Place {
+        case row
+        case title
+    }
+
+    let file: WorkDiffFile
+    let place: Place
+
+    /// The file's name: a row carries it at the step the list's rows are drawn at, and the
+    /// drawer, which has nothing above it, at the size of a title.
+    private var name: Font {
+        place == .title ? MiloTheme.Text.body.weight(.semibold).monospaced() : MiloTheme.Text.small.monospaced()
+    }
+
+    /// Where it came from and how much moved, a step under the name wherever it is drawn.
+    private var detail: Font {
+        place == .title ? MiloTheme.Text.base : MiloTheme.Text.meta
+    }
+
+    var body: some View {
+        HStack(spacing: MiloTheme.Space.two) {
+            Text(file.path)
+                .font(name)
+                .foregroundStyle(MiloTheme.foreground)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            if let from = file.from {
+                Text("was \(from)")
+                    .font(detail)
+                    .foregroundStyle(MiloTheme.muted)
                     .lineLimit(1)
                     .truncationMode(.middle)
-                if let from = file.from {
-                    Text("was \(from)")
+            }
+            Spacer(minLength: MiloTheme.Space.two)
+            // The counts are only drawn when something moved: a rename or a
+            // permission change has no lines of its own, and `+0 −0` says nothing.
+            if file.additions > 0 || file.deletions > 0 {
+                HStack(spacing: MiloTheme.Space.one) {
+                    if file.additions > 0 {
+                        Text("+\(file.additions)").foregroundStyle(MiloTheme.success)
+                    }
+                    if file.deletions > 0 {
+                        Text("−\(file.deletions)").foregroundStyle(MiloTheme.danger)
+                    }
+                }
+                .font(detail.monospacedDigit())
+            }
+        }
+    }
+}
+
+/**
+ One changed file's hunks, risen from the bottom of the screen.
+
+ The marking is the diff's own: an added line green, a removed one red, both numbers in the
+ gutter so a line can be found in the file it is from. What git called the change is not
+ drawn beside the name: the path names the file, a rename says where it came from, and the
+ counts say how much moved.
+ */
+private struct DiffDetail: View {
+    let file: WorkDiffFile
+
+    var body: some View {
+        DetailSheet {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.four) {
+                DiffSummary(file: file, place: .title)
+
+                // The same box a code block is drawn in: monospaced, scrolling sideways
+                // rather than wrapping — a wrapped line of a diff stops being that line. Not
+                // marked as a scroll box: nothing drags behind a sheet.
+                if !file.hunks.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 0) {
+                            ForEach(file.hunks) { hunk in
+                                Text("@@ \(hunk.header) @@")
+                                    .font(MiloTheme.Text.meta.monospaced())
+                                    .foregroundStyle(MiloTheme.muted)
+                                    .padding(.top, MiloTheme.Space.three)
+                                    .padding(.bottom, MiloTheme.Space.one)
+                                ForEach(hunk.lines) { line in
+                                    DiffLineRow(line: line)
+                                }
+                            }
+                        }
+                        .padding(MiloTheme.Space.three)
+                    }
+                    .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                }
+
+                // Why there is nothing above to draw, where there is something to say: a
+                // binary file, only its mode changed, or a file git does not track yet.
+                if let note = file.note {
+                    Text(note)
                         .font(MiloTheme.Text.meta)
                         .foregroundStyle(MiloTheme.muted)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                Spacer(minLength: MiloTheme.Space.two)
-                Text(file.statusWord)
-                    .font(MiloTheme.Text.meta)
-                    .foregroundStyle(MiloTheme.muted)
-                // The counts are only drawn when something moved: a rename or a
-                // permission change has no lines of its own, and `+0 −0` says nothing.
-                if file.additions > 0 || file.deletions > 0 {
-                    HStack(spacing: MiloTheme.Space.one) {
-                        if file.additions > 0 {
-                            Text("+\(file.additions)").foregroundStyle(MiloTheme.success)
-                        }
-                        if file.deletions > 0 {
-                            Text("−\(file.deletions)").foregroundStyle(MiloTheme.danger)
-                        }
-                    }
-                    .font(MiloTheme.Text.meta.monospacedDigit())
                 }
             }
-            .padding(.vertical, MiloTheme.Space.two)
         }
-        .tint(MiloTheme.muted)
     }
 }
 
@@ -847,7 +893,7 @@ private struct DiffLineRow: View {
                 .foregroundStyle(MiloTheme.foreground2)
             Spacer(minLength: 0)
         }
-        .font(MiloTheme.Text.meta.monospaced())
+        .font(MiloTheme.Text.small.monospaced())
         .padding(.horizontal, MiloTheme.Space.two)
         .background(background)
     }
