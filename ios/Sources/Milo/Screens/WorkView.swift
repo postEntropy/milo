@@ -461,9 +461,11 @@ private struct ProjectDetail: View {
                     focused: $composing,
                     menu: $menu,
                     send: { intent in start(saying: intent) },
-                    // The same composer a work session carries, told which of the two it is.
+                    // The same composer a work session carries, told which of the two it is
+                    // and which folder the words will start a session in.
                     work: true,
                     role: .start,
+                    project: project?.name,
                     onModel: {
                         composing = false
                         picker = true

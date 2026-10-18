@@ -41,6 +41,10 @@ struct Composer: View {
     enum Role { case session, start }
 
     var role: Role = .session
+    /// The project a session started here will work in, named in the field's own empty state
+    /// — the one thing this field does that the chat's does not. Nil on a composer spoken
+    /// into a session that already exists: that session's own bar says where it works.
+    var project: String? = nil
     /// Raising the model picker. The model is the composer's own line, so choosing one is the
     /// composer's own action — the screen owns the sheet, as it owns the `+` panel.
     let onModel: () -> Void
@@ -124,10 +128,21 @@ struct Composer: View {
     private static let mark: CGFloat = 20
     private static let markLead: CGFloat = (40 - mark) / 2
 
+    /// What the field says while it is empty.
+    ///
+    /// A project's own page is where a session is begun, and which folder it will work in is
+    /// the one thing that page has not said — the bar names the page, not what writing here
+    /// does. The question is gone the moment something is typed, which is why it belongs to
+    /// the empty state and not to a line of its own.
+    private var prompt: String {
+        guard let project, !project.isEmpty else { return "Ask Milo anything" }
+        return "Work in \(project)"
+    }
+
     /// The field itself, the same one in either arrangement: the two composers are one
     /// composer placed two ways, so what is typed is typed in one field.
     private var field: some View {
-        TextField("Ask Milo anything", text: $draft, axis: .vertical)
+        TextField(prompt, text: $draft, axis: .vertical)
             .lineLimit(1...8)
             .focused($focused)
             .font(.body)
