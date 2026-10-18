@@ -222,6 +222,58 @@ describe('a turn in a web conversation', () => {
   })
 })
 
+describe('a file a client sends with a message', () => {
+  it('runs the staged bytes into the turn the send frame names them on', async () => {
+    const runtime = build()
+    const hub = new WebHub(runtime)
+    const frames: ServerFrame[] = []
+    const client = { send: (frame: ServerFrame) => frames.push(frame) }
+
+    // The two halves the phone keeps apart: the bytes go up over HTTP and are staged
+    // under an id, and only the id travels on the `send` frame. Nothing else in the
+    // protocol can carry a file, so this is the whole of how an attach arrives.
+    const uploadId = hub.stageUpload({
+      name: 'notes.txt',
+      mimeType: 'text/plain',
+      data: Buffer.from('the milk is off'),
+    })
+
+    await hub.connect(client, CONVERSATION)
+    frames.length = 0 // the handshake; only what follows is the message
+    hub.handle(client, { type: 'send', text: 'what does this say?', uploadIds: [uploadId] }, CONVERSATION)
+    expect(await waitFor(() => frames.some((frame) => frame.type === 'turn-end'))).toBe(true)
+
+    // What the model was handed: the person's words and the file's on the *same*
+    // user message. A staged file that reached the turn as nothing would still end
+    // the turn, so the reading is of the message and not of the frame.
+    const session = await runtime.getSession({ gateway: 'web', conversationId: CONVERSATION })
+    const said = session.messages
+      .filter((message) => message.role === 'user')
+      .flatMap((message) => message.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])))
+      .join('\n')
+    expect(said).toContain('what does this say?')
+    expect(said).toContain('Attached notes.txt')
+    expect(said).toContain('the milk is off')
+  })
+
+  it('refuses an id it never staged rather than running a turn with nothing attached', async () => {
+    const runtime = build()
+    const hub = new WebHub(runtime)
+    const frames: ServerFrame[] = []
+    const client = { send: (frame: ServerFrame) => frames.push(frame) }
+
+    await hub.connect(client, CONVERSATION)
+    frames.length = 0
+    hub.handle(client, { type: 'send', text: 'look at this', uploadIds: ['never-staged'] }, CONVERSATION)
+    expect(await waitFor(() => frames.some((frame) => frame.type === 'error'))).toBe(true)
+
+    // The refusal is said where the message was sent — and no turn ran, so the
+    // person is not left with an answer about a file the daemon never had.
+    const session = await runtime.getSession({ gateway: 'web', conversationId: CONVERSATION })
+    expect(session.messages).toEqual([])
+  })
+})
+
 const tick = (ms = 10): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function waitFor(condition: () => boolean): Promise<boolean> {
