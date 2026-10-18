@@ -12,6 +12,7 @@ import { buildSuggestions } from './chat/suggestions.js'
 import { Permissions } from './chat/Permissions.js'
 import { Routines } from './routines/Routines.js'
 import { TaskLists } from './tasks/TaskLists.js'
+import { Work } from './work/Work.js'
 import { Email } from './email/Email.js'
 import { Settings } from './settings/Settings.js'
 import { settingsSectionFromPath } from './settings/sections.js'
@@ -23,16 +24,19 @@ import { Icon } from './ui/Icons.js'
 import { Notice, useAutoDismiss } from './ui/Notice.js'
 import { miloAvatar } from './ui/milo.js'
 
-type SessionSummary = { id: string; title?: string; preview: string; messageCount: number; updatedAt: number; recap?: string; running?: boolean }
+type SessionSummary = { id: string; title?: string; preview: string; messageCount: number; updatedAt: number; recap?: string; running?: boolean; project?: string }
 type PendingPermission = { id: string; request: PermissionRequest; expiresAt: number }
 type SessionGroup = { label: string; sessions: SessionSummary[] }
+/** A project as the wire carries it: what it is called, where it is, and why it cannot be
+ *  worked in when it cannot. */
+type Project = { id: string; name: string; path: string; error?: string }
 /** A past turn the search box found, with the session it belongs to. */
 type HistoryHit = { session: string; at: string; kind: string; text: string }
 
-type View = 'chat' | 'settings' | 'routines' | 'tasks' | 'email'
+type View = 'chat' | 'settings' | 'routines' | 'tasks' | 'work' | 'email'
 
 /** The address each screen lives at, so a link can be shared and Back works. */
-const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', tasks: '/tasks', email: '/email', settings: '/settings' }
+const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', tasks: '/tasks', work: '/work', email: '/email', settings: '/settings' }
 
 /** Which screen a path names; anything that is not one of them is the chat. */
 function viewFromPath(pathname: string): View {
@@ -62,6 +66,8 @@ export default function App() {
   const [sessionId, setSessionId] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [sessions, setSessions] = useState<SessionSummary[]>([])
+  /** The project this session works in, as the server resolved it for this connection. */
+  const [project, setProject] = useState<Project | null>(null)
   /** Ideas the model drew for the empty home; null until they arrive. */
   const [ideas, setIdeas] = useState<{ title: string; prompt: string }[] | null>(null)
   /** The budget the request is measured against, for the meter; null until read. */
@@ -346,6 +352,7 @@ export default function App() {
       socket.close()
       setMessages([])
       setPanel(null)
+      setProject(null)
       setSessionId(res.id)
       setConversationId(nextConversationId)
       setView('chat')
@@ -404,6 +411,7 @@ export default function App() {
       // What the panel was left showing, resolved by the server from the session's
       // own history, so a reload comes back to the same view.
       setPanel(frame.panel ?? null)
+      setProject(frame.project ?? null)
       setJobs(frame.jobs ?? [])
       // A session opens at its end, where the conversation is — the whole thread
       // is here at once, so there is no "scrolled there" to respect.
@@ -584,6 +592,7 @@ export default function App() {
       socket.close()
       setMessages([])
       setPanel(null)
+      setProject(null)
       setSessionId(session.id)
       setView('chat')
       setSidebarOpen(false)
@@ -592,6 +601,33 @@ export default function App() {
     } catch (error) {
       // Reported here, and said as a failure to the caller: a delete that moves
       // off the current session first must not go on when that move did not happen.
+      fail(error)
+      return false
+    }
+  }, [socket, fail, setView])
+
+  /**
+   * Start a work session in a project and open it — `newChat`'s move, with the
+   * folder the session works in. The daemon binds the conversation to that
+   * project, so the chat that opens is the ordinary one, working there.
+   */
+  const startWorkSession = useCallback(async (project: string): Promise<boolean> => {
+    editingTurn.current = null
+    const nextConversationId = randomUUID()
+    composerRef.current?.focus()
+    setComposerFocus((current) => current + 1)
+    try {
+      const session = await api<{ id: string }>('new-session', { conversationId: nextConversationId, project })
+      socket.close()
+      setMessages([])
+      setPanel(null)
+      setProject(null)
+      setSessionId(session.id)
+      setView('chat')
+      setSidebarOpen(false)
+      setConversationId(nextConversationId)
+      return true
+    } catch (error) {
       fail(error)
       return false
     }
@@ -791,6 +827,7 @@ export default function App() {
       socket.close()
       setMessages([])
       setPanel(null)
+      setProject(null)
       setSessionId(id)
       setConversationId(nextConversationId)
       setView('chat')
@@ -813,6 +850,7 @@ export default function App() {
       socket.close()
       setMessages([])
       setPanel(null)
+      setProject(null)
       setSessionId(res.id)
       setConversationId(nextConversationId)
       setView('chat')
@@ -1008,6 +1046,7 @@ export default function App() {
         <div className="sidebar-pad">
           <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={18} /><span>Routines</span></button>
           <button className={`sidebar-tab ${view === 'tasks' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'tasks' ? 'chat' : 'tasks'); setSidebarOpen(false) }}><Icon name="list-check" size={18} /><span>Task lists</span></button>
+          <button className={`sidebar-tab ${view === 'work' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'work' ? 'chat' : 'work'); setSidebarOpen(false) }}><Icon name="folder" size={18} /><span>Work</span></button>
           <button className={`sidebar-tab ${view === 'email' ? 'active' : ''}`} type="button" onClick={() => { setEmailRoute(null); setView(view === 'email' ? 'chat' : 'email'); setSidebarOpen(false) }}><Icon name="mail" size={18} /><span>Email</span>{mailUnread !== null && mailUnread.count > 0 && <span className="sidebar-badge">{mailUnread.more ? `${mailUnread.count}+` : mailUnread.count}</span>}</button>
         </div>
         <div className="session-region">
@@ -1048,7 +1087,16 @@ export default function App() {
             and the bar saying it again was a second naming. The chat has no such heading,
             so the name of the session it is showing lives here — and, on a phone, this is
             the only place that names it. */}
-        <div className="topbar-title">{view === 'chat' && <h1>{currentSession ? sessionLabel(currentSession) : 'New session'}</h1>}</div>
+        <div className="topbar-title">{view === 'chat' && <>
+          {/* The project over the name: a session in one is work in a place, and which place
+              is the first thing to know about it — said even before the first word, and with
+              the folder's own mark, because it is a folder on the machine Milo runs on. A
+              project whose folder has gone says so rather than reading as workable. */}
+          {project && <p className={project.error ? 'gone' : undefined} title={project.error}>
+            <Icon name="folder" size={12} /> {project.name}
+          </p>}
+          <h1>{currentSession ? sessionLabel(currentSession) : 'New session'}</h1>
+        </>}</div>
         <div className="topbar-actions">
           {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelVisible(!panelOpen)}><Icon name="panel-right" size={18} /></button>}
           {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>}
@@ -1061,6 +1109,8 @@ export default function App() {
         ? <Routines conversationId={conversationId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
+        : view === 'work'
+        ? <Work tick={turnEnds} sessions={sessions} onOpenSession={(id) => void openSession(id)} onStartSession={startWorkSession} />
         : view === 'chat'
         ? <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>{thread}</div>
