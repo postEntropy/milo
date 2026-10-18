@@ -34,6 +34,13 @@
   --label-sky: #2E6FA8;
   --label-plum: #8A4E86;
   --label-rose: #B44A63;
+  /* The roles `src/core/highlight.ts` reads out of code, painted. A comment is the page's own
+     quiet text; the three hues are ones this palette already carries, and deliberately not the
+     accent (a pointer) nor success/danger — those two are the diff's own wash, green and red. */
+  --code-comment: var(--muted);
+  --code-keyword: #8A4E86;
+  --code-string: #2E6FA8;
+  --code-number: #A9740F;
   --knob: #FFFEFA;
   /* What a list holds while it is being read: a bar one step off the card it is drawn
      on, and the light that travels along it. A pair of its own because the step is the
@@ -139,6 +146,11 @@
   --label-sky: #7FB2E8;
   --label-plum: #C79AD0;
   --label-rose: #E88FA6;
+  /* The code roles' hues, restated for the dark page — the comment is not: it is the muted
+     text, which this block has just moved. */
+  --code-keyword: #C79AD0;
+  --code-string: #7FB2E8;
+  --code-number: #D6A23A;
   --knob: #EFEEE9;
   --skeleton: #34352F;
   --skeleton-sheen: #41423B;
@@ -438,6 +450,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-prose code { border: 1px solid var(--border-soft); border-radius: var(--radius-xs); background: var(--surface-warm); padding: 1px var(--space-3); font-size: .86em; }
 .message-prose pre { overflow: auto; margin: var(--space-6) 0; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--surface-warm); padding: var(--space-6) var(--space-7); font-size: var(--text-sm); line-height: 1.6; }
 .message-prose pre code { border: 0; background: none; padding: 0; }
+/* Syntax colouring, from the roles `src/core/highlight.ts` reads out of a block: one class per
+   role, worn wherever code is drawn — a fenced block in a reply, a project's file, the lines of
+   a diff. `plain` is the colour code already had. */
+.code-comment { color: var(--code-comment); }
+.code-keyword { color: var(--code-keyword); }
+.code-string { color: var(--code-string); }
+.code-number { color: var(--code-number); }
+.code-plain { color: var(--fg-2); }
 .message-prose blockquote { margin: var(--space-6) 0; border-inline-start: 2px solid var(--secondary); padding-inline-start: var(--space-7); color: var(--muted); }
 .message-prose ul, .message-prose ol { padding-inline-start: var(--space-9); }
 .message-prose li + li { margin-top: var(--space-2); }

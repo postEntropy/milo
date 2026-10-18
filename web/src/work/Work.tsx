@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
 import { formatBytes, formatWhen, message } from '../lib/format.js'
+import { languageOf } from '../../../src/core/highlight.ts'
 import { sessionLabel } from '../../../src/core/sessions/format.ts'
+import { Code } from '../ui/Code.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
@@ -599,6 +601,9 @@ function Path({ value }: { value: string }) {
  */
 function DiffFileRow({ file, open, onToggle }: { file: DiffFile; open: boolean; onToggle(): void }) {
   const moved = file.from === undefined ? '' : ` (was ${file.from})`
+  // Which language the lines are read as: a diff carries no tag, so the file's own name is
+  // the only hint — the same one the phone reads.
+  const language = languageOf(file.path)
   return <div className="work-diff-file">
     <button className="work-diff-row" type="button" aria-expanded={open} onClick={onToggle}>
       <Icon className="work-tree-twist" name="chevron" size={13} />
@@ -617,7 +622,7 @@ function DiffFileRow({ file, open, onToggle }: { file: DiffFile; open: boolean; 
           <span className="work-diff-num">{line.old ?? ''}</span>
           <span className="work-diff-num">{line.new ?? ''}</span>
           <span className="work-diff-mark">{line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : ' '}</span>
-          <span className="work-diff-text">{line.text === '' ? ' ' : line.text}</span>
+          <span className="work-diff-text">{line.text === '' ? ' ' : <Code code={line.text} language={language} />}</span>
         </div>)}
       </div>)}
       {file.note && <p className="work-diff-note">{file.note}</p>}
@@ -708,7 +713,7 @@ function FileView({ project, node, onClose }: { project: string; node: WorkNode;
         : first.total === 0
           ? <p className="list-empty">This file is empty.</p>
           : <>
-            <pre className="work-file-code">{pages.map((page) => page.text).join('\n')}</pre>
+            <pre className="work-file-code"><Code code={pages.map((page) => page.text).join('\n')} language={node.rel} /></pre>
             <div className="work-file-foot">
               <span className="work-file-where">Showing lines {first.from}–{first.from + shown - 1} of {first.total}</span>
               {last?.next !== undefined && <button className="button" type="button" disabled={busy} onClick={() => void read(last.next)}>Load more</button>}

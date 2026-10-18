@@ -1,8 +1,26 @@
 import DOMPurify from 'dompurify'
-import { marked } from 'marked'
+import { marked, type Tokens } from 'marked'
 import { memo, useMemo } from 'react'
+import { codeHtml } from '../ui/Code.js'
 
 marked.setOptions({ breaks: true, gfm: true })
+
+/**
+ * A fenced block is coloured as it is parsed, out of the runs the core lexer reads from it —
+ * the phone colours the same fence with that lexer's Swift port. The fence's tag names the
+ * language and is not drawn or kept: on this surface it was only ever the highlighter's own
+ * input, and by the time the block is drawn the reading has happened.
+ */
+marked.use({
+  renderer: {
+    code({ text, lang }: Tokens.Code): string {
+      // A fence with nothing in it is dropped below rather than drawn as an empty box, and it
+      // is handed over in the same shape so that rule keeps holding.
+      if (text.trim() === '') return '<pre><code></code></pre>\n'
+      return `<pre><code>${codeHtml(text, lang?.trim().split(/\s+/)[0])}</code></pre>\n`
+    },
+  },
+})
 
 /**
  * The answer as it renders in the browser. Parsed from Markdown and sanitized

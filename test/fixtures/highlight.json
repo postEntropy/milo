@@ -1,0 +1,504 @@
+{
+  "languageOf": [
+    {
+      "name": "src/core/highlight.ts",
+      "language": "ts"
+    },
+    {
+      "name": "test/fixtures/highlight.json",
+      "language": "json"
+    },
+    {
+      "name": "web/src/styles.css",
+      "language": "css"
+    },
+    {
+      "name": "ios/Sources/Milo/Screens/WorkView.swift",
+      "language": "swift"
+    },
+    {
+      "name": "scripts/bench-genui.ts",
+      "language": "ts"
+    },
+    {
+      "name": "Dockerfile",
+      "language": "shell"
+    },
+    {
+      "name": "Makefile",
+      "language": "shell"
+    },
+    {
+      "name": "package.json",
+      "language": "json"
+    },
+    {
+      "name": "README",
+      "language": "plain"
+    },
+    {
+      "name": "notes.md",
+      "language": "plain"
+    },
+    {
+      "name": "a/b/c.py",
+      "language": "python"
+    },
+    {
+      "name": "ts",
+      "language": "ts"
+    },
+    {
+      "name": "typescript",
+      "language": "ts"
+    },
+    {
+      "name": "bash",
+      "language": "shell"
+    },
+    {
+      "name": "console",
+      "language": "shell"
+    },
+    {
+      "name": "rust",
+      "language": "plain"
+    },
+    {
+      "name": ".svelte",
+      "language": "plain"
+    },
+    {
+      "name": "",
+      "language": "ts"
+    }
+  ],
+  "highlight": [
+    {
+      "name": "ts: a const, a string and a trailing comment",
+      "language": "ts",
+      "code": "const total = 42 // counted",
+      "runs": [
+        {
+          "role": "keyword",
+          "text": "const"
+        },
+        {
+          "role": "plain",
+          "text": " total = "
+        },
+        {
+          "role": "number",
+          "text": "42"
+        },
+        {
+          "role": "plain",
+          "text": " "
+        },
+        {
+          "role": "comment",
+          "text": "// counted"
+        }
+      ]
+    },
+    {
+      "name": "ts: an untagged fence takes the C-like rules",
+      "language": null,
+      "code": "let n = 0\nif (n) n += 1",
+      "runs": [
+        {
+          "role": "keyword",
+          "text": "let"
+        },
+        {
+          "role": "plain",
+          "text": " n = "
+        },
+        {
+          "role": "number",
+          "text": "0"
+        },
+        {
+          "role": "plain",
+          "text": "\n"
+        },
+        {
+          "role": "keyword",
+          "text": "if"
+        },
+        {
+          "role": "plain",
+          "text": " (n) n += "
+        },
+        {
+          "role": "number",
+          "text": "1"
+        }
+      ]
+    },
+    {
+      "name": "ts: a block comment, closed",
+      "language": "ts",
+      "code": "/* one */ const a = 1",
+      "runs": [
+        {
+          "role": "comment",
+          "text": "/* one */"
+        },
+        {
+          "role": "plain",
+          "text": " "
+        },
+        {
+          "role": "keyword",
+          "text": "const"
+        },
+        {
+          "role": "plain",
+          "text": " a = "
+        },
+        {
+          "role": "number",
+          "text": "1"
+        }
+      ]
+    },
+    {
+      "name": "ts: a block comment left open",
+      "language": "ts",
+      "code": "const a = 1\n/* still writing",
+      "runs": [
+        {
+          "role": "keyword",
+          "text": "const"
+        },
+        {
+          "role": "plain",
+          "text": " a = "
+        },
+        {
+          "role": "number",
+          "text": "1"
+        },
+        {
+          "role": "plain",
+          "text": "\n"
+        },
+        {
+          "role": "comment",
+          "text": "/* still writing"
+        }
+      ]
+    },
+    {
+      "name": "ts: an apostrophe is not a string",
+      "language": "ts",
+      "code": "const s = don't",
+      "runs": [
+        {
+          "role": "keyword",
+          "text": "const"
+        },
+        {
+          "role": "plain",
+          "text": " s = don't"
+        }
+      ]
+    },
+    {
+      "name": "ts: a quote left open stands for itself",
+      "language": "ts",
+      "code": "const a = \"open\nconst b = 2",
+      "runs": [
+        {
+          "role": "keyword",
+          "text": "const"
+        },
+        {
+          "role": "plain",
+          "text": " a = \"open\n"
+        },
+        {
+          "role": "keyword",
+          "text": "const"
+        },
+        {
+          "role": "plain",
+          "text": " b = "
+        },
+        {
+          "role": "number",
+          "text": "2"
+        }
+      ]
+    },
+    {
+      "name": "ts: a template spans its lines",
+      "language": "ts",
+      "code": "const t = `a\n${b}\nc`",
+      "runs": [
+        {
+          "role": "keyword",
+          "text": "const"
+        },
+        {
+          "role": "plain",
+          "text": " t = "
+        },
+        {
+          "role": "string",
+          "text": "`a\n${b}\nc`"
+        }
+      ]
+    },
+    {
+      "name": "ts: a number with separators and a dot",
+      "language": "ts",
+      "code": "const big = 1_000_000.5",
+      "runs": [
+        {
+          "role": "keyword",
+          "text": "const"
+        },
+        {
+          "role": "plain",
+          "text": " big = "
+        },
+        {
+          "role": "number",
+          "text": "1_000_000.5"
+        }
+      ]
+    },
+    {
+      "name": "swift: a let, a hex number and a comment",
+      "language": "swift",
+      "code": "let mask = 0xFF // low byte",
+      "runs": [
+        {
+          "role": "keyword",
+          "text": "let"
+        },
+        {
+          "role": "plain",
+          "text": " mask = "
+        },
+        {
+          "role": "number",
+          "text": "0xFF"
+        },
+        {
+          "role": "plain",
+          "text": " "
+        },
+        {
+          "role": "comment",
+          "text": "// low byte"
+        }
+      ]
+    },
+    {
+      "name": "shell: a shebang and a hash comment",
+      "language": "sh",
+      "code": "#!/bin/sh\nrm -rf \"$dir\"  # careful",
+      "runs": [
+        {
+          "role": "comment",
+          "text": "#!/bin/sh"
+        },
+        {
+          "role": "plain",
+          "text": "\nrm -rf "
+        },
+        {
+          "role": "string",
+          "text": "\"$dir\""
+        },
+        {
+          "role": "plain",
+          "text": "  "
+        },
+        {
+          "role": "comment",
+          "text": "# careful"
+        }
+      ]
+    },
+    {
+      "name": "python: a docstring and a def",
+      "language": "python",
+      "code": "def run(n):\n    \"\"\"Say it.\"\"\"\n    return n",
+      "runs": [
+        {
+          "role": "keyword",
+          "text": "def"
+        },
+        {
+          "role": "plain",
+          "text": " run(n):\n    "
+        },
+        {
+          "role": "string",
+          "text": "\"\"\"Say it.\"\"\""
+        },
+        {
+          "role": "plain",
+          "text": "\n    "
+        },
+        {
+          "role": "keyword",
+          "text": "return"
+        },
+        {
+          "role": "plain",
+          "text": " n"
+        }
+      ]
+    },
+    {
+      "name": "python: a hash comment mentioning a keyword",
+      "language": "python",
+      "code": "# for each one\nfor i in x: pass",
+      "runs": [
+        {
+          "role": "comment",
+          "text": "# for each one"
+        },
+        {
+          "role": "plain",
+          "text": "\n"
+        },
+        {
+          "role": "keyword",
+          "text": "for"
+        },
+        {
+          "role": "plain",
+          "text": " i "
+        },
+        {
+          "role": "keyword",
+          "text": "in"
+        },
+        {
+          "role": "plain",
+          "text": " x: "
+        },
+        {
+          "role": "keyword",
+          "text": "pass"
+        }
+      ]
+    },
+    {
+      "name": "json: no comments, literals are words",
+      "language": "json",
+      "code": "{ \"on\": true, \"n\": 1.5 }",
+      "runs": [
+        {
+          "role": "plain",
+          "text": "{ "
+        },
+        {
+          "role": "string",
+          "text": "\"on\""
+        },
+        {
+          "role": "plain",
+          "text": ": "
+        },
+        {
+          "role": "keyword",
+          "text": "true"
+        },
+        {
+          "role": "plain",
+          "text": ", "
+        },
+        {
+          "role": "string",
+          "text": "\"n\""
+        },
+        {
+          "role": "plain",
+          "text": ": "
+        },
+        {
+          "role": "number",
+          "text": "1.5"
+        },
+        {
+          "role": "plain",
+          "text": " }"
+        }
+      ]
+    },
+    {
+      "name": "yaml: a hash comment and a number",
+      "language": "yaml",
+      "code": "port: 7717  # the socket",
+      "runs": [
+        {
+          "role": "plain",
+          "text": "port: "
+        },
+        {
+          "role": "number",
+          "text": "7717"
+        },
+        {
+          "role": "plain",
+          "text": "  "
+        },
+        {
+          "role": "comment",
+          "text": "# the socket"
+        }
+      ]
+    },
+    {
+      "name": "a language we do not know: strings and numbers only",
+      "language": "rust",
+      "code": "fn main() { let n = 1; let s = \"x\"; }",
+      "runs": [
+        {
+          "role": "plain",
+          "text": "fn main() { let n = "
+        },
+        {
+          "role": "number",
+          "text": "1"
+        },
+        {
+          "role": "plain",
+          "text": "; let s = "
+        },
+        {
+          "role": "string",
+          "text": "\"x\""
+        },
+        {
+          "role": "plain",
+          "text": "; }"
+        }
+      ]
+    },
+    {
+      "name": "empty",
+      "language": "ts",
+      "code": "",
+      "runs": []
+    },
+    {
+      "name": "no code at all, just punctuation",
+      "language": "ts",
+      "code": "  , ;  ",
+      "runs": [
+        {
+          "role": "plain",
+          "text": "  , ;  "
+        }
+      ]
+    }
+  ]
+}

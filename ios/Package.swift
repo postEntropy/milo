@@ -25,6 +25,9 @@ let package = Package(
         // The widget arithmetic, apart from the app for the same reason and held to
         // the browser's own cases — see `GenUi/Package.swift`.
         .package(path: "GenUi"),
+        // The colouring of code, the core's own lexer in Swift and held to the same cases —
+        // see `Highlight/Package.swift`.
+        .package(path: "Highlight"),
     ],
     targets: [
         .target(
@@ -32,6 +35,7 @@ let package = Package(
             dependencies: [
                 .product(name: "MiloConnection", package: "Connection"),
                 .product(name: "MiloGenUi", package: "GenUi"),
+                .product(name: "MiloHighlight", package: "Highlight"),
             ]
         ),
     ]

@@ -4,6 +4,7 @@ import { attachmentUrl, browserFramesUrl, panelUrl } from '../lib/api.js'
 import { boundaryOf, frameParser } from './frames.js'
 import { panelInputFor, typedInput } from './keys.js'
 import { Markdown } from '../chat/Markdown.js'
+import { Code } from '../ui/Code.js'
 import { Icon, type IconName } from '../ui/Icons.js'
 
 /** The glyph each kind wears, on its tab and in the header. */
@@ -116,7 +117,7 @@ function DocumentBody({ id, name, nonce }: { id: string; name: string; nonce: nu
   if (text === null) return <p className="panel-state">Reading…</p>
   const drawn = name.toLowerCase().endsWith('.md') || name.toLowerCase().endsWith('.markdown')
     ? <div className="panel-doc"><Markdown text={text} /></div>
-    : <pre className="panel-code">{text}</pre>
+    : <pre className="panel-code"><Code code={text} language={name} /></pre>
   return <>
     {drawn}
     {cut && <p className="panel-doc-cut">The file is larger than this panel draws — only the first {Math.round(DOC_MAX_BYTES / 1024)} KB is shown.</p>}

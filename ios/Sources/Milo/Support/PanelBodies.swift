@@ -45,7 +45,7 @@ struct PanelDocument: View {
                         if markdown {
                             Prose(text: read.text)
                         } else {
-                            Text(read.text)
+                            Text(coloured(read.text, language: name))
                                 .font(MiloTheme.Text.mono)
                                 .foregroundStyle(MiloTheme.foreground)
                                 .textSelection(.enabled)
@@ -73,12 +73,16 @@ struct PanelDocument: View {
             .fixedSize(horizontal: false, vertical: true)
     }
 
+    /// The file's own name, as the daemon named it — what says whether this is prose and which
+    /// language the code is coloured as.
+    private var name: String { tab.artifact?.name ?? "" }
+
     /// Whether the file is drawn as prose. The name decides it, the way the browser's own
     /// panel decides it — the same two extensions, so one file does not read as markdown on
     /// one surface and as monospace on the other.
     private var markdown: Bool {
-        let name = (tab.artifact?.name ?? "").lowercased()
-        return name.hasSuffix(".md") || name.hasSuffix(".markdown")
+        let lowered = name.lowercased()
+        return lowered.hasSuffix(".md") || lowered.hasSuffix(".markdown")
     }
 
     private func load() async {

@@ -860,7 +860,7 @@ private struct DiffDetail: View {
                                     .padding(.top, MiloTheme.Space.three)
                                     .padding(.bottom, MiloTheme.Space.one)
                                 ForEach(hunk.lines) { line in
-                                    DiffLineRow(line: line)
+                                    DiffLineRow(line: line, language: file.path)
                                 }
                             }
                         }
@@ -881,9 +881,13 @@ private struct DiffDetail: View {
     }
 }
 
-/// One line of a hunk: its two line numbers, the diff's own marker, and the text.
+/// One line of a hunk: its two line numbers, the diff's own marker, and the text — coloured
+/// out of the roles the shared lexer reads, which is the one thing a diff's line and a reply's
+/// block say alike.
 private struct DiffLineRow: View {
     let line: WorkDiffLine
+    /// What the line is read as: the changed file's own name, since a diff carries no tag.
+    let language: String?
 
     var body: some View {
         HStack(spacing: MiloTheme.Space.two) {
@@ -893,8 +897,9 @@ private struct DiffLineRow: View {
                 .frame(width: 34, alignment: .trailing)
             Text(line.mark)
                 .foregroundStyle(line.isAdd ? MiloTheme.success : line.isRemove ? MiloTheme.danger : MiloTheme.muted)
-            Text(line.text.isEmpty ? " " : line.text)
-                .foregroundStyle(MiloTheme.foreground2)
+            // An empty line is one space, so the row is the height its gutter numbers are and
+            // the two of them still line up down the hunk.
+            Text(line.text.isEmpty ? AttributedString(" ") : coloured(line.text, language: language))
             Spacer(minLength: 0)
         }
         .font(MiloTheme.Text.small.monospaced())
@@ -1119,8 +1124,9 @@ private struct WorkFileReader: View {
                         .foregroundStyle(MiloTheme.muted)
                 } else {
                     // The same block the chat draws code with: monospaced, scrolling
-                    // sideways, and marked so the drawer's drag stands down inside it.
-                    CodeBlock(code: pages.map(\.text).joined(separator: "\n"))
+                    // sideways, and marked so the drawer's drag stands down inside it. The
+                    // file's own name is what colours it — the same hint the browser reads.
+                    CodeBlock(language: node.rel, code: pages.map(\.text).joined(separator: "\n"))
 
                     HStack(spacing: MiloTheme.Space.two) {
                         Text("Showing lines \(first.from)–\(first.from + shown - 1) of \(first.total)")

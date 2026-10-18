@@ -44,8 +44,8 @@ struct Prose: View {
                 face: level <= 2 ? titleFace : headlineFace,
                 tone: color
             )
-        case .code(let code):
-            CodeBlock(code: code)
+        case .code(let language, let code):
+            CodeBlock(language: language, code: code)
         case .list(let items):
             VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
                 ForEach(Array(marked(items).enumerated()), id: \.offset) { _, item in
@@ -215,7 +215,9 @@ struct Prose: View {
     private enum Block {
         case paragraph(String)
         case heading(level: Int, text: String)
-        case code(String)
+        /// A fenced block: what the fence's tag named, and the code itself. The tag is read for
+        /// the colouring and never drawn — the browser draws no label either.
+        case code(language: String?, text: String)
         case list([ListItem])
         case quote(String)
         case table(columns: [String], rows: [[String]])
@@ -241,6 +243,9 @@ struct Prose: View {
         var paragraph: [String] = []
         var code: [String] = []
         var fenced = false
+        /// What the fence that opened named, for the colouring to read. Read from the line and
+        /// never drawn: the browser draws no label either.
+        var language: String?
 
         func endParagraph() {
             let joined = paragraph.joined(separator: "\n")
@@ -255,11 +260,15 @@ struct Prose: View {
             // A fence opens or closes a block of code; nothing inside it is read.
             if line.hasPrefix("```") {
                 if fenced {
-                    blocks.append(.code(code.joined(separator: "\n")))
+                    blocks.append(.code(language: language, text: code.joined(separator: "\n")))
                     code = []
+                    language = nil
                     fenced = false
                 } else {
                     endParagraph()
+                    // The fence's first word, the way the browser reads it off marked's own tag:
+                    // ```ts and ```ts title=x are both TypeScript, and ``` alone names nothing.
+                    language = line.dropFirst(3).split(whereSeparator: \.isWhitespace).first.map(String.init)
                     fenced = true
                 }
                 index += 1
@@ -356,7 +365,9 @@ struct Prose: View {
 
         // An unterminated fence is what a code block looks like while it streams, so it
         // is drawn as code rather than left as prose with a stray fence in it.
-        if fenced || !code.isEmpty { blocks.append(.code(code.joined(separator: "\n"))) }
+        if fenced || !code.isEmpty {
+            blocks.append(.code(language: language, text: code.joined(separator: "\n")))
+        }
         endParagraph()
         return blocks
     }
@@ -532,20 +543,23 @@ extension View {
 }
 
 /// A fenced block: monospaced on its own surface, scrolling sideways rather than
-/// wrapping, because a wrapped line of code stops being the line that was written.
-/// No language label — the browser does not draw one, and the two surfaces say the
-/// same things about the same data.
+/// wrapping, because a wrapped line of code stops being the line that was written —
+/// and coloured, out of the roles the shared lexer reads (`Support/CodeText.swift`).
+/// No language label is drawn and the tag is never shown: the browser draws none
+/// either, and the two surfaces say the same things about the same data.
 ///
 /// The browser draws no copy control here, because a pointer can drag a selection across
 /// its box. On a phone the box is what the finger drags to scroll, so copying is a control
 /// of its own — in the corner of the box, on the platform's glass, over the code.
 struct CodeBlock: View {
+    /// What the fence's tag named, for the colouring to read.
+    let language: String?
     let code: String
     @State private var copied = false
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            Text(code)
+            Text(coloured(code, language: language))
                 .font(MiloTheme.Text.mono)
                 .foregroundStyle(MiloTheme.foreground)
                 .textSelection(.enabled)

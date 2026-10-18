@@ -51,6 +51,14 @@ enum MiloTheme {
     static let warning = Color.milo(light: 0x8A6209, dark: 0xC0912A)
     static let danger = Color.milo(light: 0xDA392F, dark: 0xE86A5F)
 
+    // The roles code is coloured by (`src/core/highlight.ts`, ported in `ios/Highlight`). A
+    // comment is the page's own quiet text and plain code is what code already was; the three
+    // hues are deliberately none of the tones above — the accent is a pointer, and green and
+    // red are the diff's own wash, where a coloured line sits.
+    static let codeKeyword = Color.milo(light: 0x8A4E86, dark: 0xC79AD0)
+    static let codeString = Color.milo(light: 0x2E6FA8, dark: 0x7FB2E8)
+    static let codeNumber = Color.milo(light: 0xA9740F, dark: 0xD6A23A)
+
     enum Radius {
         static let xs: CGFloat = 8
         static let sm: CGFloat = 10
