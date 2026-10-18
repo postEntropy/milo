@@ -78,7 +78,7 @@ import {
 import { listInstalled, removeSkill, installSkill } from '../../core/skills/install.js'
 import { fetchPopular } from '../../core/skills/catalog.js'
 import { resolveSource } from '../../core/skills/sources.js'
-import { readSession, searchHistory } from '../../core/history.js'
+import { peekSession, readSession, searchHistory } from '../../core/history.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import { writeSessionExport } from '../../core/export.js'
 import { readTaskLists } from '../../core/task-lists.js'
@@ -153,6 +153,7 @@ export class WebSettings {
       case 'session-delete': return this.deleteSession(body)
       case 'session-rename': return this.renameSession(body)
       case 'transcript': return this.transcript(body)
+      case 'session-peek': return this.sessionPeek(body)
       case 'export': return this.export(body)
       case 'skills': return this.skills()
       case 'popular-skills': return fetchPopular(20)
@@ -856,6 +857,15 @@ export class WebSettings {
 
   private transcript(body: Record<string, unknown>): unknown {
     return readSession(sessionId(body.id))
+  }
+
+  /**
+   * Where a session left off — the last few things said, for the card a long press lifts
+   * on the phone. A read and nothing else: a peek at a session is not a visit to it, so
+   * this never opens, moves or renames one.
+   */
+  private sessionPeek(body: Record<string, unknown>): unknown {
+    return peekSession(sessionId(body.id))
   }
 
   private async export(body: Record<string, unknown>): Promise<unknown> {

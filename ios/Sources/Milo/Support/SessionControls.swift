@@ -24,6 +24,157 @@ func sessionActions(
 }
 
 /**
+ Holding a session, wherever a list draws one: the press keeps the row, the row lifts into
+ a card, and the actions are laid under it. One declaration, so the drawer and a project's
+ own page offer the same four under the same press — and the card that rises is the same
+ card.
+
+ Two things this has to live with, both of them the platform's:
+
+ - The card is drawn once, as it is lifted. So the session's last words cannot be read
+   when the finger lands: they are read before it, as the row comes up (and again when the
+   session moves) — a short, local read against the list the row is already in.
+ - The long press has to reach the platform, which is why what this is attached to is not
+   a `Button`: a `ButtonStyle` takes the press for its own animation, and the card is then
+   never raised at all.
+ */
+extension View {
+    func sessionMenu(_ session: SessionSummary, renaming: Binding<String?>) -> some View {
+        modifier(SessionMenu(session: session, renaming: renaming))
+    }
+}
+
+private struct SessionMenu: ViewModifier {
+    let session: SessionSummary
+    @Binding var renaming: String?
+
+    /// Where the session left off. Nil until the read lands; the reason when it could not
+    /// be made.
+    @State private var peek: [PeekLine]?
+    @State private var peekError: String?
+
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        content
+            // Read as the row comes up, and read again whenever the session moves.
+            .task(id: session.updatedAt) { await read() }
+            .contextMenu {
+                sessionActions(
+                    onRename: { renaming = session.id },
+                    onExport: { Task { await model.export(session.id) } },
+                    onCopy: { model.copyId(session.id) },
+                    onDelete: { Task { await model.delete(session.id) } }
+                )
+            } preview: {
+                SessionPeek(session: session, lines: peek, error: peekError)
+            }
+    }
+
+    /// Where the session left off. A read that fails is kept as the reason: a card that
+    /// went quiet about it would read as a session with nothing in it. A session nobody has
+    /// said anything in is answered without asking the daemon at all.
+    private func read() async {
+        guard session.messageCount > 0 else {
+            peek = []
+            peekError = nil
+            return
+        }
+        do {
+            peek = try await model.peek(session.id)
+            peekError = nil
+        } catch {
+            peek = []
+            peekError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+}
+
+/**
+ A session, held: what rises under the finger while its actions rest below it. The row it
+ was lifted from is drawn in whatever surface that row sits on — clear in the drawer, a
+ filled card on a project's page — so the lifted one is drawn here as a card of its own,
+ and the peek is a card on both surfaces rather than floating words on one of them.
+
+ It carries the session itself, not just its name: the last few things said, drawn the way
+ the chat draws the two sides — the person on their own fill, Milo in prose — so a peek
+ answers what a peek is asked, which is where this conversation left off.
+ */
+struct SessionPeek: View {
+    let session: SessionSummary
+    /// Where the session left off, oldest first. Nil until the read lands.
+    let lines: [PeekLine]?
+    /// Why there is nothing to draw, when the read could not be made.
+    let error: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                HStack(spacing: MiloTheme.Space.two) {
+                    if session.running == true {
+                        Circle().fill(MiloTheme.accent).frame(width: 7, height: 7)
+                    }
+                    Text(session.label)
+                        .font(MiloTheme.Text.body.weight(.medium))
+                        .foregroundStyle(MiloTheme.foreground)
+                        .lineLimit(1)
+                }
+                Text("\(session.messageCount) \(session.messageCount == 1 ? "message" : "messages") · \(RelativeTime.when(session.updatedAt))")
+                    .font(MiloTheme.Text.small.monospacedDigit())
+                    .foregroundStyle(MiloTheme.muted)
+            }
+
+            if let error {
+                Text(error)
+                    .font(MiloTheme.Text.small)
+                    .foregroundStyle(MiloTheme.danger)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if let lines {
+                if lines.isEmpty {
+                    Text("Nothing has been said in this one yet.")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                } else {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                        ForEach(Array(lines.enumerated()), id: \.offset) { _, line in
+                            said(line)
+                        }
+                    }
+                }
+            }
+        }
+        .padding(MiloTheme.Space.four)
+        .frame(width: Self.width, alignment: .leading)
+        .background(MiloTheme.surfaceRaised, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+    }
+
+    /// One thing said: the person's own words wear the fill their message wears in the
+    /// chat, on the side of the card the chat puts them on, and Milo's are prose. The words
+    /// arrive already cut to what a card holds; three lines each is what is left of that
+    /// cut on a card this size.
+    private func said(_ line: PeekLine) -> some View {
+        Text(line.text)
+            .font(MiloTheme.Text.base)
+            .foregroundStyle(line.fromPerson ? MiloTheme.accentOn : MiloTheme.foreground)
+            .lineLimit(3)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, line.fromPerson ? MiloTheme.Space.three : 0)
+            .padding(.vertical, line.fromPerson ? MiloTheme.Space.two : 0)
+            .background(
+                line.fromPerson ? MiloTheme.accent : .clear,
+                in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg)
+            )
+            .frame(maxWidth: .infinity, alignment: line.fromPerson ? .trailing : .leading)
+    }
+
+    /// One width rather than the row's: the drawer's column and a project's page are two
+    /// different widths, and a card that changed size with the screen it was opened on
+    /// would be two cards. This is the width the drawer's own rows come to.
+    private static let width: CGFloat = 276
+}
+
+/**
  The way back to the sessions, wherever there is one: the drawer belongs to the chat, but
  every screen the card can show reaches it through this same control, so the mark, the
  material and the words cannot drift between them.

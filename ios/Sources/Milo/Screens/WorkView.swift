@@ -329,6 +329,9 @@ private struct ProjectDetail: View {
     @State private var renaming = false
     @State private var renameDraft = ""
     @State private var confirmRemove = false
+    /// The session being renamed from its own row here, by id. This page keeps a name for
+    /// the project too, so the two are told apart by what they are.
+    @State private var renamingSession: String?
     /// What is being said to this project, before there is a session to say it in.
     @State private var draft = ""
     @State private var menu: ComposerMenu?
@@ -361,18 +364,18 @@ private struct ProjectDetail: View {
                     }
 
                     VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-                        Text(sessions.isEmpty ? "No sessions yet" : "Sessions here")
+                        Text("Sessions")
                             .font(MiloTheme.Text.title)
                             .foregroundStyle(MiloTheme.foreground)
 
                         if sessions.isEmpty {
-                            Text("No sessions have worked here yet. Say something below and one starts here.")
+                            Text("No sessions yet. Say something below to start one.")
                                 .font(MiloTheme.Text.small)
                                 .foregroundStyle(MiloTheme.muted)
                         } else {
                             VStack(spacing: MiloTheme.Space.two) {
                                 ForEach(sessions) { session in
-                                    SessionRow(session: session, onOpen: { open(session.id) })
+                                    SessionRow(session: session, renaming: $renamingSession, onOpen: { open(session.id) })
                                 }
                             }
                         }
@@ -494,6 +497,7 @@ private struct ProjectDetail: View {
             }
             Button("Cancel", role: .cancel) {}
         }
+        .sessionRename($renamingSession)
         .confirmationDialog(
             "Remove “\(project?.name ?? "")” from the list? Its sessions stay.",
             isPresented: $confirmRemove,
@@ -531,11 +535,41 @@ private struct ProjectDetail: View {
 }
 
 /// One session of a project: what it is about, when it last moved, and whether it is running.
+/// A tap opens it, a hold lifts it into its card — and, as in the drawer, this is not a
+/// `Button`: a `ButtonStyle` takes the press for its own animation and the platform's long
+/// press never reaches the row.
 private struct SessionRow: View {
     let session: SessionSummary
+    /// The session being renamed, named by the row's own press: the alert is presented once,
+    /// up on the page, and this only says which one.
+    @Binding var renaming: String?
     let onOpen: () -> Void
 
     var body: some View {
+        HStack(spacing: MiloTheme.Space.three) {
+            if session.running == true {
+                Circle().fill(MiloTheme.accent).frame(width: 6, height: 6)
+            }
+            Text(session.label)
+                .font(MiloTheme.Text.base)
+                .foregroundStyle(MiloTheme.foreground)
+                .lineLimit(1)
+            Spacer(minLength: MiloTheme.Space.two)
+            Text(RelativeTime.when(session.updatedAt))
+                .font(MiloTheme.Text.meta.monospacedDigit())
+                .foregroundStyle(MiloTheme.muted)
+        }
+        .padding(MiloTheme.Space.four)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .onTapGesture(perform: onOpen)
+        // A row that opens a session reads as a control, the way the button it used to be
+        // did: a tap is not the only way to answer one.
+        .accessibilityAddTraits(.isButton)
+        .sessionMenu(session, renaming: $renaming)
+    }
+}
 
 // MARK: - What the project's folder has changed
 
@@ -754,6 +788,11 @@ private struct DiffFileRow: View {
                     .font(MiloTheme.Text.meta.monospacedDigit())
                 }
             }
+            .padding(.vertical, MiloTheme.Space.two)
+        }
+        .tint(MiloTheme.muted)
+    }
+}
 
 /// One line of a hunk: its two line numbers, the diff's own marker, and the text.
 private struct DiffLineRow: View {
@@ -1031,7 +1070,6 @@ private struct WorkFileReader: View {
         } catch {
             self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
-        .buttonStyle(PressableStyle())
     }
 }
 

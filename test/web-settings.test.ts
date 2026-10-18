@@ -32,6 +32,7 @@ const { createMcpServers } = await import('../src/core/mcp/servers.js')
 const { mcpFile } = await import('../src/core/config/paths.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { saveAuth, readConfig } = await import('../src/core/config/load.js')
+const { fileHistory } = await import('../src/core/history.js')
 
 const CONVERSATION = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 
@@ -353,6 +354,28 @@ describe('web Settings sessions', () => {
       .toEqual({ removed: true })
     expect((await settings.handle('sessions') as Array<{ id: string }>).some((item) => item.id === session.id)).toBe(false)
     await expect(settings.handle('session-delete', { id: session.id })).rejects.toThrow('not found')
+  })
+
+  it('reads where a session left off, for the card a long press lifts', async () => {
+    writeConfig()
+    const settings = new WebSettings(build({}), home)
+    const id = 'peek-otter-7'
+    fileHistory.append([
+      { at: '2026-10-18T20:00:00.000Z', session: id, scope: 'web:peek', kind: 'user', text: 'the first thing' },
+      { at: '2026-10-18T20:01:00.000Z', session: id, scope: 'web:peek', kind: 'assistant', text: 'the first answer' },
+      { at: '2026-10-18T20:02:00.000Z', session: id, scope: 'web:peek', kind: 'user', text: 'the last thing' },
+    ])
+
+    expect(await settings.handle('session-peek', { id })).toEqual([
+      { who: 'you', text: 'the first thing' },
+      { who: 'milo', text: 'the first answer' },
+      { who: 'you', text: 'the last thing' },
+    ])
+
+    // A read and nothing else: a session the log never heard of is an empty card rather
+    // than a failure, and an id that is not one is refused as such.
+    expect(await settings.handle('session-peek', { id: 'peek-goose-9' })).toEqual([])
+    await expect(settings.handle('session-peek', {})).rejects.toThrow('Invalid session id')
   })
 
   it('renames a saved session', async () => {

@@ -505,7 +505,7 @@ function ProjectPage({
       <span className="work-start-note">Opens a chat that works in {project.path}.</span>
     </div>
     {sessions.length === 0
-      ? <p className="list-empty">No sessions have worked here yet. Start one above, or ask Milo for something that needs this folder.</p>
+      ? <p className="list-empty">No sessions yet. Start one above, or ask Milo for something that needs this folder.</p>
       : <div className="work-sessions">
         {sessions.map((session) => <button className="work-session" key={session.id} type="button" onClick={() => onOpenSession(session.id)}>
           {session.running && <span className="session-running" />}

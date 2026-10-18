@@ -59,6 +59,25 @@ struct SessionSummary: Decodable, Identifiable, Hashable {
     }
 }
 
+/// One thing said in a session, as the card a long press lifts reads it: which side said it,
+/// and the words, already cut by the daemon to what a card holds.
+struct PeekLine: Decodable {
+    /// Which side said it. Read leniently: a side this build does not know is drawn the way
+    /// Milo's own words are, which is the plainer of the two.
+    let who: String
+    let text: String
+
+    var fromPerson: Bool { who == "you" }
+
+    private enum CodingKeys: String, CodingKey { case who, text }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        who = try container.decodeIfPresent(String.self, forKey: .who) ?? ""
+        text = try container.decodeIfPresent(String.self, forKey: .text) ?? ""
+    }
+}
+
 struct ProviderInfo: Decodable, Identifiable, Hashable {
     let id: String
     let name: String
@@ -221,6 +240,15 @@ enum MiloApi {
 
     static func deleteSession(_ account: Account, id: String) async throws {
         _ = try await call("session-delete", ["id": id], account: account, as: Ack.self)
+    }
+
+    /**
+     Where a session left off: the last few things said, oldest first. Read without
+     opening it — the card a long press lifts is a look at a session, not a visit, so this
+     never moves the chat.
+     */
+    static func sessionPeek(_ account: Account, id: String) async throws -> [PeekLine] {
+        try await call("session-peek", ["id": id], account: account, as: [PeekLine].self)
     }
 
     /**

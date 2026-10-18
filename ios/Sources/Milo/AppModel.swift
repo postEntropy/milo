@@ -691,6 +691,17 @@ final class AppModel {
     }
 
     /**
+     Where a session left off, for the card a long press lifts. A read: it does not open
+     the session, move the chat or touch the daemon's own state, so looking at a session
+     is not a visit to it. Throws, and the card says the reason rather than nothing — a
+     card that went quiet would read as a session with nothing in it.
+     */
+    func peek(_ id: String) async throws -> [PeekLine] {
+        guard let account else { throw ApiError.badAddress }
+        return try await MiloApi.sessionPeek(account, id: id)
+    }
+
+    /**
      Opens the session a tapped reply notice named, if one is waiting, and answers whether
      it did. A notice is about one answer in one session, so the app goes to that session
      rather than starting the fresh one it otherwise opens with — the chat calls this where

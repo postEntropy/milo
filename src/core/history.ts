@@ -103,6 +103,47 @@ export function readSession(id: string, options: { dir?: string } = {}): History
   return entries
 }
 
+/** One thing said, as a peek reads it: which side said it, and the words. */
+export interface PeekLine {
+  /** The side that said it — the person, or Milo. */
+  who: 'you' | 'milo'
+  /** The words as they were logged, cut to what a card holds. */
+  text: string
+}
+
+/**
+ * How many lines a peek shows, and how long one may be. Three is what a card holds under
+ * its own heading, and the cut is the one the history search already makes of a line it
+ * draws for a screen.
+ */
+const PEEK_LINES = 3
+const PEEK_CHARS = 240
+
+/**
+ * Where a session left off: the last few things said, oldest first.
+ *
+ * Read from the newest end of the log, and no further than the lines it returns, so a
+ * conversation spanning months costs a peek no more than the peek shows. A call is left
+ * out — a peek shows what the two sides said to each other, and a tool call is neither —
+ * and so is a line with no words in it.
+ */
+export function peekSession(id: string, options: { dir?: string } = {}): PeekLine[] {
+  const dir = options.dir ?? historyDir()
+  const lines: PeekLine[] = []
+  for (const file of historyFiles(dir, Number.POSITIVE_INFINITY)) {
+    for (const entry of readEntries(file)) {
+      if (entry.session !== id) continue
+      const who = entry.kind === 'user' ? 'you' : entry.kind === 'assistant' ? 'milo' : undefined
+      if (who === undefined) continue
+      const text = (entry.text ?? '').trim()
+      if (text === '') continue
+      lines.push({ who, text: text.length > PEEK_CHARS ? `${text.slice(0, PEEK_CHARS - 1)}…` : text })
+      if (lines.length >= PEEK_LINES) return lines.reverse()
+    }
+  }
+  return lines.reverse()
+}
+
 /** Every day-file on disk, oldest first, as `YYYY-MM-DD`. Nothing when there is none. */
 export function historyDays(dir: string = historyDir()): string[] {
   try {

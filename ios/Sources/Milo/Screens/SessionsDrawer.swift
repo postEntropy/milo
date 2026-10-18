@@ -167,46 +167,42 @@ struct SessionsDrawer: View {
             .filter { !$0.sessions.isEmpty }
     }
 
+    /// A session: a tap opens it, a hold lifts it into its card. Not a `Button` — a
+    /// `ButtonStyle` takes the press for its own animation, and the platform's long press
+    /// then never reaches the row, so nothing is ever raised.
     private func row(_ session: SessionSummary) -> some View {
         let current = session.id == model.sessionId
-        return Button {
+        return HStack(spacing: MiloTheme.Space.two) {
+            Text(session.label)
+                .font(MiloTheme.Text.body)
+                .foregroundStyle(MiloTheme.foreground)
+                .lineLimit(1)
+            Spacer(minLength: MiloTheme.Space.two)
+            // A session running now, said with the accent the way the accent already
+            // points: one dot at the row's own edge, no words.
+            if session.running == true {
+                Circle()
+                    .fill(MiloTheme.accent)
+                    .frame(width: 7, height: 7)
+                    .accessibilityLabel("Running")
+            }
+        }
+        .padding(.horizontal, MiloTheme.Space.three)
+        .padding(.vertical, MiloTheme.Space.two)
+        .background(
+            current ? MiloTheme.surfaceRaised : .clear,
+            in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
+        )
+        .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+        .onTapGesture {
             Task {
                 await model.resume(session.id)
                 onClose()
             }
-        } label: {
-            HStack(spacing: MiloTheme.Space.two) {
-                Text(session.label)
-                    .font(MiloTheme.Text.body)
-                    .foregroundStyle(MiloTheme.foreground)
-                    .lineLimit(1)
-                Spacer(minLength: MiloTheme.Space.two)
-                // A session running now, said with the accent the way the accent already
-                // points: one dot at the row's own edge, no words.
-                if session.running == true {
-                    Circle()
-                        .fill(MiloTheme.accent)
-                        .frame(width: 7, height: 7)
-                        .accessibilityLabel("Running")
-                }
-            }
-            .padding(.horizontal, MiloTheme.Space.three)
-            .padding(.vertical, MiloTheme.Space.two)
-            .background(
-                current ? MiloTheme.surfaceRaised : .clear,
-                in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
-            )
-            .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
         }
-        .buttonStyle(PressableStyle())
-
-        .contextMenu {
-            sessionActions(
-                onRename: { renaming = session.id },
-                onExport: { Task { await model.export(session.id) } },
-                onCopy: { model.copyId(session.id) },
-                onDelete: { Task { await model.delete(session.id) } }
-            )
-        }
+        // A row that opens a session reads as a control, the way the button it used to be
+        // did: a tap is not the only way to answer one.
+        .accessibilityAddTraits(.isButton)
+        .sessionMenu(session, renaming: $renaming)
     }
 }

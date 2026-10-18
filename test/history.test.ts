@@ -8,7 +8,7 @@ import type { HistoryEntry } from '../src/core/history.js'
 const home = mkdtempSync(path.join(tmpdir(), 'milo-history-'))
 process.env.MILO_HOME = home
 
-const { fileHistory, searchHistory, historyDays, historyStatus, trimHistory } = await import(
+const { fileHistory, searchHistory, historyDays, historyStatus, trimHistory, peekSession } = await import(
   '../src/core/history.js'
 )
 // Imported after the home is pointed at a throwaway directory: a static import
@@ -125,6 +125,45 @@ describe('searchHistory', () => {
   it('finds nothing, quietly, when there is no log yet', () => {
     expect(searchHistory('anything', { dir: path.join(home, 'nowhere') })).toEqual([])
     expect(searchHistory('  ')).toEqual([])
+  })
+})
+
+describe('peekSession', () => {
+  it('reads the last few things said, oldest first, and leaves the calls out', () => {
+    fileHistory.append([
+      entry({ session: 'peek-otter-1', at: '2026-09-22T20:00:00.000Z', text: 'the first thing' }),
+      entry({ session: 'peek-otter-1', at: '2026-09-22T20:01:00.000Z', kind: 'assistant', text: 'a first answer' }),
+      entry({
+        session: 'peek-otter-1',
+        at: '2026-09-22T20:02:00.000Z',
+        kind: 'tool',
+        text: undefined,
+        tool: { name: 'read_file', args: { path: 'a.txt' }, result: 'the contents' },
+      }),
+      entry({ session: 'peek-otter-1', at: '2026-09-22T20:03:00.000Z', text: 'the last thing' }),
+      entry({ session: 'peek-otter-1', at: '2026-09-22T20:04:00.000Z', kind: 'assistant', text: '   ' }),
+      entry({ session: 'peek-otter-1', at: '2026-09-22T20:05:00.000Z', kind: 'assistant', text: 'the last answer' }),
+    ])
+
+    // Three lines: the oldest of them drops off, the call is not one of them, and an
+    // answer with no words in it is not one either.
+    expect(peekSession('peek-otter-1')).toEqual([
+      { who: 'milo', text: 'a first answer' },
+      { who: 'you', text: 'the last thing' },
+      { who: 'milo', text: 'the last answer' },
+    ])
+  })
+
+  it('cuts a line to what a card holds', () => {
+    fileHistory.append([entry({ session: 'peek-shrew-1', kind: 'assistant', text: 'x'.repeat(400) })])
+
+    const [line] = peekSession('peek-shrew-1')
+    expect(line?.text).toHaveLength(240)
+    expect(line?.text.endsWith('…')).toBe(true)
+  })
+
+  it('answers nothing for a session nobody spoke in', () => {
+    expect(peekSession('peek-goose-9')).toEqual([])
   })
 })
 
