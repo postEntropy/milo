@@ -907,9 +907,12 @@ private struct DiffLineRow: View {
         .background(background)
     }
 
+    /// A wash, not a fill: which way the line went is read at a glance, and the code on top of
+    /// it is still what is being read — so the colour is strong enough to name the line and no
+    /// stronger. The browser mixes the same two into the same tone.
     private var background: Color {
-        if line.isAdd { return MiloTheme.success.opacity(0.14) }
-        if line.isRemove { return MiloTheme.danger.opacity(0.12) }
+        if line.isAdd { return MiloTheme.success.opacity(0.20) }
+        if line.isRemove { return MiloTheme.danger.opacity(0.17) }
         return .clear
     }
 }

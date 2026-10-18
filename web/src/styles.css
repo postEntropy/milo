@@ -1585,8 +1585,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .work-diff-hunk { margin-top: var(--space-5); overflow: hidden; border-radius: var(--radius-md); background: var(--surface-warm); }
 .work-diff-hunk-head { padding: var(--space-4) var(--space-6); color: var(--muted); font: var(--text-2xs) var(--font-mono); }
 .work-diff-line { display: grid; grid-template-columns: 3.5ch 3.5ch 1.5ch minmax(0, 1fr); gap: var(--space-4); padding: 0 var(--space-6); color: var(--fg-2); font: var(--text-xs)/1.6 var(--font-mono); }
-.work-diff-line.add { background: color-mix(in oklab, var(--success) 14%, transparent); }
-.work-diff-line.remove { background: color-mix(in oklab, var(--danger) 12%, transparent); }
+.work-diff-line.add { background: color-mix(in oklab, var(--success) 20%, transparent); }
+.work-diff-line.remove { background: color-mix(in oklab, var(--danger) 17%, transparent); }
 .work-diff-num { color: var(--muted); text-align: end; }
 .work-diff-mark { color: var(--muted); }
 .work-diff-line.add .work-diff-mark { color: var(--success); }
