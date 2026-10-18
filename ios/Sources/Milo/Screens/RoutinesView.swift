@@ -48,7 +48,7 @@ struct RoutinesView: View {
                 case .detail(let routine, let run):
                     RoutineDetail(routineId: routine, initialRun: run)
                 case .new:
-                    NewRoutine(account: account, onBack: { path.removeLast() })
+                    NewRoutine(account: account)
                 }
             }
         }
@@ -694,7 +694,6 @@ private struct RoutineDetail: View {
 
 private struct NewRoutine: View {
     let account: Account
-    let onBack: () -> Void
 
     @Environment(AppModel.self) private var model
     @State private var ask = ""
@@ -819,15 +818,12 @@ private struct NewRoutine: View {
         .listRowSeparator(.hidden)
         .listSectionSeparator(.hidden)
         .background(MiloTheme.background)
+        // The way back is the stack's own, as it is on a routine's page: one control, drawn
+        // where this platform draws it, rather than a second one beside it in the accent's
+        // colour — the pointer's, and this is not the one thing to press.
         .navigationTitle("New routine")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
-        .toolbar {
-            ToolbarItem(placement: .topBarLeading) {
-                Button { onBack() } label: { Label("Routines", systemImage: "chevron.left") }
-                    .buttonStyle(.glass)
-            }
-        }
     }
 
     private func create() {

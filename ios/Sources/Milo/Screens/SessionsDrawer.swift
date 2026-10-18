@@ -6,11 +6,13 @@ import SwiftUI
 struct SessionsDrawer: View {
     let routinesSelected: Bool
     let tasksSelected: Bool
+    let workSelected: Bool
     let onClose: () -> Void
     let onNewSession: () -> Void
     let onSettings: () -> Void
     let onRoutines: () -> Void
     let onTasks: () -> Void
+    let onWork: () -> Void
     @Environment(AppModel.self) private var model
     /// The session being renamed, by id: the row's own press names one, and the alert
     /// the modifier presents does the rest.
@@ -42,6 +44,7 @@ struct SessionsDrawer: View {
             VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
                 pageTab("Routines", symbol: "clock", selected: routinesSelected, action: onRoutines)
                 pageTab("Task lists", symbol: "checklist", selected: tasksSelected, action: onTasks)
+                pageTab("Work", symbol: "folder", selected: workSelected, action: onWork)
             }
 
             if model.sessions.isEmpty {

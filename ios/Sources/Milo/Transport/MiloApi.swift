@@ -26,9 +26,12 @@ struct SessionSummary: Decodable, Identifiable, Hashable {
     /// Whether a turn holds this session right now — anywhere in the install, the
     /// daemon or a terminal. A row draws its running mark from this.
     let running: Bool?
+    /// The project this session works in, by id. Absent on a session working in the
+    /// install's own folder — a screen names the project from the list of them.
+    let project: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, createdAt, updatedAt, messageCount, preview, recap, running
+        case id, title, createdAt, updatedAt, messageCount, preview, recap, running, project
     }
 
     /// Read leniently, and only `id` as the one thing it cannot do without: a row
@@ -40,6 +43,7 @@ struct SessionSummary: Decodable, Identifiable, Hashable {
         title = try container.decodeIfPresent(String.self, forKey: .title)
         recap = try container.decodeIfPresent(String.self, forKey: .recap)
         running = try container.decodeIfPresent(Bool.self, forKey: .running)
+        project = try container.decodeIfPresent(String.self, forKey: .project)
         preview = try container.decodeIfPresent(String.self, forKey: .preview) ?? ""
         messageCount = try container.decodeIfPresent(Int.self, forKey: .messageCount) ?? 0
         createdAt = try container.decodeIfPresent(Double.self, forKey: .createdAt) ?? 0
@@ -176,9 +180,13 @@ enum MiloApi {
         try await call("models", ["provider": provider], account: account, as: [ModelInfo].self)
     }
 
-    static func newSession(_ account: Account, title: String? = nil) async throws {
+    static func newSession(_ account: Account, title: String? = nil, project: String? = nil) async throws {
         var body: [String: Any] = ["conversationId": account.conversationId]
         if let title { body["title"] = title }
+        // The folder this session works in. The daemon refuses an id it does not know,
+        // which is what keeps a work session from starting in the install's own folder
+        // while saying nothing about why.
+        if let project { body["project"] = project }
         _ = try await call("new-session", body, account: account, as: Ack.self)
     }
 
@@ -297,6 +305,25 @@ enum MiloApi {
     /// One action on the task lists; the daemon answers with the whole set back.
     static func taskListAction(_ account: Account, _ body: [String: String]) async throws -> TaskListActionOutcome {
         try await call("task-list-action", body, account: account, as: TaskListActionOutcome.self)
+    }
+
+    // MARK: - Projects
+
+    /// The folders a session may work in, each already told whether its folder is there.
+    static func projects(_ account: Account) async throws -> [Project] {
+        try await call("projects", account: account, as: [Project].self)
+    }
+
+    /// One action on the projects; the daemon answers with the whole list back.
+    static func projectAction(_ account: Account, _ body: [String: String]) async throws -> ProjectActionOutcome {
+        try await call("project-action", body, account: account, as: ProjectActionOutcome.self)
+    }
+
+    /// One level of the daemon's own folders, for the picker a project is chosen with.
+    static func browseFolders(_ account: Account, path: String?) async throws -> FolderListing {
+        var body: [String: Any] = [:]
+        if let path { body["path"] = path }
+        return try await call("browse-folders", body, account: account, as: FolderListing.self)
     }
 
     // MARK: - Memory, Tools & Skills
@@ -775,3 +802,72 @@ struct TaskListActionOutcome: Decodable {
         lists = try container.decodeIfPresent([TaskList].self, forKey: .lists) ?? []
     }
 }
+
+/// A folder a session may work in, as the daemon draws it.
+struct Project: Decodable, Identifiable, Hashable {
+    let id: String
+    let name: String
+    let path: String
+    /// Why the folder cannot be worked in right now, when it cannot. The daemon says it
+    /// rather than this screen inferring it from a path that stopped existing.
+    let error: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, path, error
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+    }
+}
+
+/// What a project action answers: the sentence it produced, and the updated list.
+struct ProjectActionOutcome: Decodable {
+    let result: String
+    let projects: [Project]
+
+    private enum CodingKeys: String, CodingKey { case result, projects }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        result = try container.decodeIfPresent(String.self, forKey: .result) ?? ""
+        projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
+    }
+}
+
+/// One folder inside the one being listed.
+struct FolderEntry: Decodable, Identifiable, Hashable {
+    let name: String
+    let path: String
+
+    var id: String { path }
+}
+
+/// A folder of the machine Milo runs on, as the picker draws it.
+struct FolderListing: Decodable {
+    let path: String
+    let name: String
+    /// Where "up" goes; absent at the filesystem root, so the control is not offered there.
+    let parent: String?
+    let folders: [FolderEntry]
+    /// True when the list was cut at its ceiling, so the screen says it rather than pretending.
+    let truncated: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case path, name, parent, folders, truncated
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
+        name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        parent = try container.decodeIfPresent(String.self, forKey: .parent)
+        folders = try container.decodeIfPresent([FolderEntry].self, forKey: .folders) ?? []
+        truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+    }
+}
+

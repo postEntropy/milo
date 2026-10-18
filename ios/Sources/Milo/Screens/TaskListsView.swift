@@ -107,7 +107,7 @@ private struct TaskListIndex: View {
                 .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
 
                 if let error = model.taskListsError {
-                    TaskErrorPill(text: error)
+                    MiloErrorPill(text: error)
                 }
 
                 VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
@@ -372,7 +372,7 @@ private struct TaskListDetail: View {
                     }
 
                     if let error = model.taskListsError {
-                        TaskErrorPill(text: error)
+                        MiloErrorPill(text: error)
                     }
 
                     if list.items.isEmpty {
@@ -595,27 +595,3 @@ private struct TaskRow: View {
     }
 }
 
-private struct TaskErrorPill: View {
-    let text: String
-
-    var body: some View {
-        HStack(spacing: 0) {
-            Spacer(minLength: 0)
-            HStack(spacing: MiloTheme.Space.two) {
-                Image(systemName: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(MiloTheme.danger)
-                Text(text)
-                    .font(MiloTheme.Text.small)
-                    .foregroundStyle(MiloTheme.danger)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            .padding(.horizontal, MiloTheme.Space.three)
-            .padding(.vertical, MiloTheme.Space.two)
-            .glassEffect(.regular.tint(MiloTheme.danger.opacity(0.28)), in: Capsule())
-            Spacer(minLength: 0)
-        }
-        .accessibilityElement(children: .combine)
-    }
-}

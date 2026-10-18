@@ -152,6 +152,18 @@ final class AppModel {
     private(set) var taskListsSaving = false
     /// Why the task lists could not be read, or why an action on one was refused.
     private(set) var taskListsError: String?
+
+    /// The project the open session works in, as the handshake resolved it — nil on an
+    /// ordinary chat, which is what tells the two composers apart.
+    private(set) var sessionProject: Project?
+
+    // The folders a session can work in, and the sessions that ran in one.
+    private(set) var projects: [Project] = []
+    private(set) var projectsLoading = false
+    private(set) var projectsSaving = false
+    /// Why the projects could not be read, or why an action on one was refused — the
+    /// Work screen draws this; a change that went through is drawn by the list itself.
+    private(set) var projectsError: String?
     /// A session a tapped reply notice asked to open; the chat reads it, then clears it.
     var pendingSession: String?
     /// Whether the session now opening came from such a tap. Taken back by the chat once it
@@ -266,6 +278,7 @@ final class AppModel {
         case .online:
             clearHold()
             Task { await refreshTaskLists() }
+            Task { await refreshProjects() }
             Task { await refreshRoutines() }
         case .idle:
             clearHold()
@@ -408,6 +421,8 @@ final class AppModel {
         routines = []
         taskLists = []
         taskListsError = nil
+        projects = []
+        projectsError = nil
         panel = nil
         pending = nil
         note = nil
@@ -852,6 +867,10 @@ final class AppModel {
         // handshake brings the new session's own. The preference is left alone — it says
         // what this person wants, not what that session was showing.
         panel = nil
+        // And the project: it belongs to the session being left, and the handshake that
+        // follows says the one being opened's. A bar naming the old folder over a new chat
+        // would be naming work that is not happening.
+        sessionProject = nil
     }
 
     /// After the bound session changes, the socket is reopened so the daemon
@@ -1029,6 +1048,93 @@ final class AppModel {
             taskListsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
             return false
         }
+    }
+
+    // MARK: - Projects
+
+    func refreshProjects() async {
+        guard let account else { return }
+        projectsLoading = true
+        defer { projectsLoading = false }
+        do {
+            projects = try await MiloApi.projects(account)
+            projectsError = nil
+        } catch is URLError {
+            // The socket's own glass pill already speaks for a connection that is down or
+            // reconnecting; saying it again in the list would draw two notices for one outage.
+            connectionSaid = true
+            projectsError = nil
+        } catch {
+            projectsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Creating one, renaming one, and dropping one all answer the daemon's own
+    /// sentence, so the screen shows what the store said instead of a wording of its own.
+    @discardableResult
+    func createProject(folder: String) async -> String? {
+        await actOnProjects(["action": "add", "path": folder])
+    }
+
+    @discardableResult
+    func renameProject(id: String, name: String) async -> String? {
+        await actOnProjects(["action": "update", "id": id, "name": name])
+    }
+
+    @discardableResult
+    func removeProject(id: String) async -> String? {
+        await actOnProjects(["action": "remove", "id": id])
+    }
+
+    /// One action, the whole list back: the daemon's store is the one that decides. What
+    /// it answered is returned, and a refusal is left in `projectsError`.
+    private func actOnProjects(_ body: [String: String]) async -> String? {
+        guard let account else { return nil }
+        projectsSaving = true
+        projectsError = nil
+        defer { projectsSaving = false }
+        do {
+            let outcome = try await MiloApi.projectAction(account, body)
+            projects = outcome.projects
+            return outcome.result
+        } catch is URLError {
+            connectionSaid = true
+            return nil
+        } catch {
+            projectsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            return nil
+        }
+    }
+
+    /// One level of the daemon's own folders, for the picker a project is chosen with.
+    /// Throws, so the sheet that asked says the reason inside itself.
+    func browseFolders(_ path: String?) async throws -> FolderListing {
+        guard let account else { throw ApiError.badAddress }
+        return try await MiloApi.browseFolders(account, path: path)
+    }
+
+    /**
+     Opens a work session in a project: `newSession`'s move, with the folder the session
+     works in. The daemon binds this conversation to that project, so the chat that comes
+     back to is the ordinary one, working there.
+     */
+    @discardableResult
+    func startWorkSession(project: String) async -> Bool {
+        guard let account else { return false }
+        reopening = true
+        owed = nil
+        owedIntent = nil
+        owedUploads = []
+        resetSessionState()
+        let opened = await openFresh(account) { try await MiloApi.newSession($0, project: project) }
+        if !opened {
+            reopening = false
+            owed = nil
+            owedIntent = nil
+            owedUploads = []
+            client.connect(to: account)
+        }
+        return opened
     }
 
     // MARK: - Models
@@ -1480,6 +1586,7 @@ final class AppModel {
         case .ready(let ready):
             let waitingForFirstSend = reopening && owed != nil && ready.messages.isEmpty && !messages.isEmpty
             reopening = false
+            sessionProject = ready.project
             if !waitingForFirstSend, (!messages.isEmpty || !ready.messages.isEmpty) {
                 // The whole session, so a reconnect replaces rather than grows it.
                 messages = ready.messages.map {

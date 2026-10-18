@@ -405,6 +405,10 @@ struct Ready: Decodable {
     /// The panel this conversation was left showing, so a screen that opens onto one has
     /// its tabs without waiting for the next time the model shows something.
     let panel: PanelView?
+    /// The project this session works in, when it works in one — with the reason it cannot
+    /// be worked in, when the folder has gone. Set on a session that has said nothing yet
+    /// too: which folder the work happens in is a fact of the session, not of its words.
+    let project: Project?
 }
 
 // MARK: - What the server sends
