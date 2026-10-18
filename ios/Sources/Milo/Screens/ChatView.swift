@@ -168,20 +168,21 @@ struct ChatView: View {
                 tasksSelected: tasksSelected,
                 workSelected: workSelected,
                 onClose: {
-                    drawer = false
                     routinesSelected = false
                     routines = false
                     tasksSelected = false
                     tasks = false
                     workSelected = false
                     work = false
+                    Task { @MainActor in
+                        drawer = false
+                    }
                 },
                 onNewSession: {
                     // Inside the tap that asked for it, before the session moves: the
                     // cursor is in the field the press just opened, so the next thing
                     // said is typed rather than looked for. The browser's own new
                     // session takes focus the same way.
-                    drawer = false
                     routinesSelected = false
                     routines = false
                     tasksSelected = false
@@ -189,7 +190,10 @@ struct ChatView: View {
                     workSelected = false
                     work = false
                     composing = true
-                    Task { await model.newSession() }
+                    Task { @MainActor in
+                        drawer = false
+                        await model.newSession()
+                    }
                 },
                 onSettings: {
                     drawer = false
@@ -473,7 +477,6 @@ struct ChatView: View {
 
     @ViewBuilder
     private var cardContent: some View {
-        Group {
         if routines {
             // The sessions are the chat's own drawer, and this screen opens it the
             // way the chat does: the same control, the same gesture. Dismissing the
@@ -488,7 +491,6 @@ struct ChatView: View {
             WorkView(pushed: $workPage, opening: $workProject, onSessions: openDrawer, onChat: leaveWork)
         } else {
             chat
-        }
         }
     }
 
@@ -568,6 +570,7 @@ struct ChatView: View {
     /// the list underneath comes back exactly as the card covers it — with a little spring in
     /// it, which is what says a surface has been brought over the chat rather than through it.
     private static let lidMove = Animation.spring(duration: drawerDuration, bounce: 0.16)
+
     /// Which turn each message belongs to: the person's own line opens one, so a
     /// message's place is how many of them came before it. What a fork cuts at.
     private var turns: [UUID: Int] {
@@ -651,19 +654,22 @@ struct ChatView: View {
     /// Which of the three pages the drawer opens.
     private enum Page { case routines, tasks, work }
 
-    /// Coming out of the drawer onto a page: the card returns to the chat's place while the page
-    /// slides into it, on one spring — so a screen chosen from the list arrives rather than
-    /// appearing where the chat was. Leaving the sessions for a chat is the same move in reverse.
+    /// Coming out of the drawer onto a page: the page takes its place on the card first while
+    /// `drawer` is still up (`rest` unchanged, so no animation transaction runs on the swap),
+    /// and the next turn closes `drawer` so `.animation(Self.lidMove, value: rest)` slides the
+    /// already-swapped card across the screen — the exact two-step sequence a session row runs.
     private func openPage(_ page: Page) {
         closeMenu()
         model.panelOpen = false
-        drawer = false
         routinesSelected = page == .routines
         routines = page == .routines
         tasksSelected = page == .tasks
         tasks = page == .tasks
         workSelected = page == .work
         work = page == .work
+        Task { @MainActor in
+            drawer = false
+        }
     }
 
     /// Opening the sessions is leaving the thread: the keys go down with it rather
