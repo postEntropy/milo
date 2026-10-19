@@ -57,8 +57,12 @@ On the first run an onboarding wizard asks for a provider, API key and model, an
 ## Configuration
 
 - `~/.milo/config.yml` — provider, model, `maxTokens`, reasoning effort, memory, sessions, traces,
-  display, permissions, browser, the web UI and enabled gateways. YAML so it can carry comments; every
-  surface rewrites it, and a line you add survives any write that does not touch the key above it.
+  display, permissions, browser, the web UI, enabled gateways and the verification gate. YAML so it can
+  carry comments; every surface rewrites it, and a line you add survives any write that does not touch
+  the key above it.
+- `~/.milo/rules.yml` — permission rules for shell commands, hand-edited
+  (see [Rules file](docs/tools.md#rules-file)). A project may add `<project>/.milo/rules.yml`; its rules
+  are read first.
 - `~/.milo/auth.json` — API keys, bot tokens and the Google grant (`0600`).
 - `~/.milo/input-history.json` — what was typed at the CLI's prompt, for `↑`/`↓`.
 - `~/.milo/task-lists.json` — the named task lists, shared by every session (see [Task lists](docs/sessions.md#task-lists)).
@@ -115,6 +119,27 @@ The **CLI** is always available. The **web** and the **iPhone** are clients of o
 runs the HTTP + WebSocket server both talk to, so a phone paired to it (see [iOS](#ios)) draws the same
 sessions, tools and memory as the browser. The **Telegram** and **Discord** bots are optional — off
 unless you turn them on — and are that same core reached one more way.
+
+A session can be pointed at a registered project, so its tools and its prompt work in that
+folder: `milo --project <id|name|folder>` opens the chat there, and `--cwd <folder>` does the
+same for a folder that is not in the list.
+
+### One turn, no conversation
+
+`milo run` is the terminal's headless turn: the prompt in, the answer out, and an exit code
+that says whether it finished. It is what a script or a cron job calls.
+
+```bash
+milo run "what changed in this repo today?"
+milo run --project milo "run the tests and say what failed"
+milo run --json --allow shell_command "npm test"   # one JSON event per line
+echo "summarize the open TODOs" | milo run
+```
+
+With nobody to ask, a tool that needs confirmation fails rather than waiting. A headless run
+is given what it may do with `--mode auto|yolo` and `--allow tool,…`; `--session <id>` and
+`--continue` reach a session that already exists. With `verification.enabled`, a turn that
+wrote runs the project's own checks, and the exit code is 1 when they fail.
 
 ## Web
 

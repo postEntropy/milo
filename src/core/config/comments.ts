@@ -16,6 +16,14 @@ export const CONFIG_NOTES: Record<string, string> = {
   provider: 'Which provider this install talks to: a key of `providers` below.',
   model: 'The model the surfaces open on. `/model` changes it and writes it here.',
   providers: 'One entry per provider: base URL, wire format, and any extra headers.',
+  models:
+    'Per-model facts that outrank the catalogs: context, maxOutput, vision, audio, reasoning and compactionAt, keyed by model id.',
+  sandbox:
+    'How shell_command is contained: off, or workspace (bwrap: project writable, machine read-only, no network).',
+  verification: "The project's own checks, run after a turn that changed files.",
+  'verification.enabled':
+    'true runs the discovered test/typecheck/lint commands at the end of a writing turn. Off by default.',
+  'verification.timeoutMs': 'How long one check may run before it is killed. Default 120000.',
   maxTokens:
     'Output ceiling per request. Left out, each wire uses its own default — 4096 on the Anthropic one.',
   reasoningEffort: 'How hard the model thinks: low, medium or high. Every request carries it.',
@@ -63,7 +71,7 @@ export const CONFIG_NOTES: Record<string, string> = {
 
   permissions: 'What may run without asking.',
   'permissions.mode': 'ask, auto or yolo. One value for every surface.',
-  'permissions.allow': 'Tools never asked about. Beats the rules, so it is a blanket yes.',
+  'permissions.allow': 'Tools never asked about. Beats a config rule, except a rule that denies.',
   'permissions.deny': 'Tools refused outright. Outranked only by yolo.',
   'permissions.jevTimeoutMs': 'Superseded by classifier.timeoutMs; kept so an older file still loads.',
 

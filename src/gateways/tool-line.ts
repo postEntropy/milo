@@ -40,6 +40,8 @@ const TOOLS: Record<string, { icon: string; brand?: ToolBrand }> = {
   git_commit: { icon: '📌' },
   write_file: { icon: '📝' },
   edit_file: { icon: '✏️' },
+  apply_patch: { icon: '🧩' },
+  format: { icon: '📐' },
   remember: { icon: '🧠' },
   recall: { icon: '🗂' },
   sessions: { icon: '🗃' },

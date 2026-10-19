@@ -70,7 +70,7 @@ struct MessageRow: View {
                 } else {
                     out.append(.calls([call]))
                 }
-            case .text, .todo, .ui:
+            case .text, .todo, .ui, .verification:
                 out.append(.one(part))
             }
         }
@@ -501,6 +501,8 @@ struct PartView: View {
             Prose(text: text, isStreaming: isStreaming, onQuote: isStreaming ? nil : onQuote)
         case .todo(let items):
             TodoRow(items: items)
+        case .verification(let text, let ok):
+            VerificationRow(text: text, ok: ok)
         case .ui(let widget, _):
             // A widget's button speaks the same way the composer does, so the message
             // it builds lands in the conversation as an ordinary turn.
@@ -754,6 +756,23 @@ struct ToolRow: View {
         case "failed": return MiloTheme.danger
         default: return MiloTheme.muted
         }
+    }
+}
+
+/// The project's checks, after a turn that wrote. One filled block, the verdict's
+/// colour on the words — the same block the browser draws.
+struct VerificationRow: View {
+    let text: String
+    let ok: Bool
+
+    var body: some View {
+        Text(text)
+            .font(MiloTheme.Text.small)
+            .foregroundStyle(ok ? MiloTheme.muted : MiloTheme.danger)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(MiloTheme.Space.four)
+            .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
     }
 }
 

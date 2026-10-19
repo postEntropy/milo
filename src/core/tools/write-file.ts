@@ -4,7 +4,7 @@ import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
 import { writeFileAtomic } from '../../util/fs.js'
 import type { Tool } from './types.js'
-import { displayPath, resolveToolPath } from './walk.js'
+import { displayPath, resolveWritePath } from './walk.js'
 
 const schema = z.object({
   path: z.string().describe('File to write, relative to the working directory (or absolute).'),
@@ -20,7 +20,9 @@ export const writeFileTool: Tool<WriteFileArgs> = {
   schema,
   readOnly: false,
   async execute(args, ctx) {
-    const target = resolveToolPath(ctx.cwd, args.path)
+    const resolved = resolveWritePath(ctx.cwd, args.path, ctx.confineTo)
+    if (!resolved.ok) return { content: resolved.error, isError: true }
+    const target = resolved.path
 
     try {
       const existing = await stat(target).catch(() => null)

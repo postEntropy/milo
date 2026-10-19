@@ -14,7 +14,7 @@ import type {
   TraceTag,
 } from '../providers/types.js'
 import type { TraceWriter } from '../traces.js'
-import type { ToolContext, ToolImage, ToolRegistry, ToolResult } from '../tools/index.js'
+import type { ToolContext, ToolEffect, ToolImage, ToolRegistry, ToolResult } from '../tools/index.js'
 import {
   actsOnSomething,
   summarizeToolCall,
@@ -103,7 +103,8 @@ export interface RunAgentOptions {
    * Said when the step is over, not when it starts: the change is on disk by then, which
    * is the moment there is something to read.
    */
-  onSideEffect?: () => void
+  /** Called with the call that may have changed something, not for reads. */
+  onSideEffect?: (effect: ToolEffect) => void
   /**
    * Whether this run draws an interface. The model writes the tree in a fenced
    * block inside its own answer, and the loop lifts it out of the stream below.
@@ -381,7 +382,9 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         // has usually written some of what it was doing, and a screen left showing the
         // folder as it was before is worse than one re-read for nothing.
         const ran = registry.get(call.name)
-        if (ran && actsOnSomething(ran, call.args)) options.onSideEffect?.()
+        if (ran && actsOnSomething(ran, call.args) && !result.blocked) {
+          options.onSideEffect?.({ tool: call.name, args: call.args })
+        }
         options.trace?.traces.record({
           at: new Date().toISOString(),
           event: 'tool.call',
@@ -493,7 +496,9 @@ async function executeCall(
   context: ToolContext,
 ): Promise<ToolResult> {
   const blocked = await checkPermission(permission, registry, call.name, call.args)
-  return blocked ? { content: blocked, isError: true } : registry.execute(call.name, call.args, context)
+  return blocked
+    ? { content: blocked, isError: true, blocked: true }
+    : registry.execute(call.name, call.args, context)
 }
 
 /**

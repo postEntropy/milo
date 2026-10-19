@@ -1,24 +1,22 @@
 #!/usr/bin/env node
 import process from 'node:process'
+import { statSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { createElement } from 'react'
 import { render } from 'ink'
-import {
-  configExists,
-  loadConfig,
-  readAuth,
-  resolveApiKey,
-  type LoadedConfig,
-} from '../core/config/load.js'
+import { configExists, loadConfig, type LoadedConfig } from '../core/config/load.js'
 import { errorMessage } from '../util/errors.js'
 import { enterMouseTracking, enterTui, exitTui } from '../gateways/cli/ansi.js'
 import { mouseStdin } from '../gateways/cli/mouse.js'
 import { Shell } from '../gateways/cli/index.js'
 import type { PermissionMode } from '../core/tools/permission.js'
 import { DEFAULT_WORKING_DIRECTORY } from '../core/config/paths.js'
+import { resolveProjectRef } from '../core/projects.js'
+import { resolveToolPath } from '../core/tools/walk.js'
 
 import { parseArgs, type Args } from './args.js'
 import { resolveCommand, resolveInitialMode, validateArgs } from './dispatch.js'
+import { applyOverrides } from './overrides.js'
 
 const { version: VERSION } = createRequire(import.meta.url)('../../package.json') as {
   version: string
@@ -43,8 +41,12 @@ Usage:
   milo serve                 Run the enabled bot gateways and the web UI
   milo web                   Run only the web UI (opens the browser)
   milo serve --no-web        Run the bot gateways without the web UI
+  milo run "prompt"          One turn, no UI: the answer on stdout, JSON with --json
+  milo run --project <ref> "prompt"   Run in a registered project's folder
   milo --continue            Continue the last session in this terminal
   milo --resume <id>         Open a specific session (see /sessions)
+  milo --project <ref>       Work in a registered project, by id, name or folder
+  milo --cwd <folder>        Work in a folder as it is
   milo --model <id>          Override the model for this session
   milo --provider <id>       Use another configured provider
   milo --mode <mode>         Permission mode: ask | auto | yolo
@@ -59,27 +61,12 @@ Sessions: ~/.milo/sessions/
 Keys:    ~/.milo/auth.json (or env: COMMANDCODE_API_KEY, OPENROUTER_API_KEY, OPENAI_API_KEY, …)`)
 }
 
-function applyOverrides(loaded: LoadedConfig, args: Args): void {
-  if (args.provider) {
-    const entry = loaded.config.providers[args.provider]
-    if (!entry) throw new Error(`Provider "${args.provider}" is not configured.`)
-    loaded.provider = {
-      id: args.provider,
-      name: entry.name,
-      baseURL: entry.baseURL,
-      wire: entry.wire,
-      headers: entry.headers,
-      apiKey: resolveApiKey(args.provider, entry, readAuth()),
-    }
-  }
-  if (args.model) loaded.model = args.model
-}
-
 async function runTui(
   startScreen: 'chat' | 'model' | 'settings',
   standalone: boolean,
   args: Args,
   initialMode?: PermissionMode,
+  project?: string,
 ): Promise<void> {
   let loaded: LoadedConfig | null = null
   if (configExists()) {
@@ -96,10 +83,11 @@ async function runTui(
     const app = render(
       createElement(Shell, {
         initial: loaded,
-        cwd: DEFAULT_WORKING_DIRECTORY,
+        cwd: args.cwd ? resolveToolPath(process.cwd(), args.cwd) : DEFAULT_WORKING_DIRECTORY,
         startScreen: screen,
         standalone,
         initialMode,
+        project,
         resumeId: args.resume,
         continueSession: args.continueSession,
       }),
@@ -148,8 +136,36 @@ async function main(): Promise<void> {
     return
   }
   const initialMode = resolveInitialMode(args)
+  const command = resolveCommand(args.command)
 
-  switch (resolveCommand(args.command)) {
+  // `milo run` resolves its own project after loading the config; the terminal
+  // surfaces need only the id, and a bad reference is said here rather than after
+  // the TUI has taken the screen.
+  let project: string | undefined
+  if (args.project && command !== 'run') {
+    const found = resolveProjectRef(args.project)
+    if (!found) {
+      console.error(`No project "${args.project}" is registered. See \`milo projects list\`.`)
+      process.exitCode = 1
+      return
+    }
+    project = found.id
+  }
+  if (args.cwd && command !== 'run') {
+    const folder = resolveToolPath(process.cwd(), args.cwd)
+    if (!statSync(folder, { throwIfNoEntry: false })?.isDirectory()) {
+      console.error(`--cwd "${args.cwd}" is not a folder.`)
+      process.exitCode = 1
+      return
+    }
+  }
+
+  switch (command) {
+    case 'run': {
+      const { runCommand } = await import('./run.js')
+      process.exitCode = await runCommand(process.argv.slice(2))
+      return
+    }
     case 'serve': {
       const { runServe } = await import('../gateways/serve.js')
       await runServe({ noWeb: args.noWeb, webPort: args.webPort })
@@ -212,7 +228,7 @@ async function main(): Promise<void> {
       await runTui('settings', true, args, initialMode)
       return
     case 'chat':
-      await runTui('chat', false, args, initialMode)
+      await runTui('chat', false, args, initialMode, project)
       return
     default:
       console.error(`Unknown command: ${args.command}\n`)

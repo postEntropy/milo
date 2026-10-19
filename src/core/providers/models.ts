@@ -5,11 +5,18 @@ export interface ModelInfo {
   name?: string
   /** How much the model holds, when the catalog says: tokens, not bytes. */
   context?: number
+  /** The output ceiling the catalog declares, in tokens. */
+  maxOutput?: number
   /** Whether the catalog explicitly says that image input is supported. */
   vision?: boolean
+  /** Whether the catalog says the model has a reasoning mode. */
+  reasoning?: boolean
   /** Non-text input types explicitly listed by the provider catalog. */
   inputModalities?: InputModality[]
 }
+
+/** The names a catalog gives the size of a model's reply, most common first. */
+const MAX_OUTPUT_KEYS = ['max_completion_tokens', 'max_output_tokens', 'max_tokens']
 
 export type InputModality = 'image' | 'audio' | 'file'
 
@@ -76,6 +83,10 @@ export function normalizeModels(json: unknown): ModelInfo[] {
       ? record.architecture as Record<string, unknown>
       : {}
     const context = firstNumber(CONTEXT_KEYS.map((key) => record[key]).concat(CONTEXT_KEYS.map((key) => nested[key])))
+    const maxOutput = firstNumber(
+      MAX_OUTPUT_KEYS.map((key) => record[key]).concat(MAX_OUTPUT_KEYS.map((key) => nested[key])),
+    )
+    const reasoning = firstBoolean(record.supports_reasoning, record.reasoning, nested.supports_reasoning)
     const inputModalities = arrayOfStrings(architecture.input_modalities ?? record.input_modalities)
     const knownModalities = inputModalities?.filter((item): item is InputModality => ['image', 'audio', 'file'].includes(item))
     const inferredModalities = inputModalities === undefined ? knownInputModalities(id) : undefined
@@ -86,7 +97,9 @@ export function normalizeModels(json: unknown): ModelInfo[] {
       id,
       name: name && name !== id ? name : undefined,
       ...(context ? { context } : {}),
+      ...(maxOutput ? { maxOutput } : {}),
       ...(vision !== undefined ? { vision } : {}),
+      ...(reasoning !== undefined ? { reasoning } : {}),
       ...(knownModalities !== undefined ? { inputModalities: knownModalities } : inferredModalities ? { inputModalities: inferredModalities } : {}),
     })
   }

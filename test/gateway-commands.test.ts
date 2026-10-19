@@ -945,8 +945,25 @@ describe('sessionLockMessage', () => {
 
 describe('permission callback payloads', () => {
   it('round-trips', () => {
-    expect(decodePermission(encodePermission('abc', true))).toEqual({ id: 'abc', allowed: true })
-    expect(decodePermission(encodePermission('abc', false))).toEqual({ id: 'abc', allowed: false })
+    expect(decodePermission(encodePermission('abc', true))).toEqual({
+      id: 'abc',
+      allowed: true,
+      remember: false,
+    })
+    expect(decodePermission(encodePermission('abc', false))).toEqual({
+      id: 'abc',
+      allowed: false,
+      remember: false,
+    })
+  })
+
+  it('round-trips an always answer', () => {
+    expect(decodePermission(encodePermission('abc', true, true))).toEqual({
+      id: 'abc',
+      allowed: true,
+      remember: true,
+    })
+    expect(decodePermission('perm:abc:always')).toEqual({ id: 'abc', allowed: true, remember: true })
   })
 
   it('rejects malformed data', () => {
@@ -960,20 +977,20 @@ describe('PendingDecisions', () => {
   it('resolves a waiting decision', async () => {
     const pending = new PendingDecisions()
     const waiting = pending.wait('id1', 1000)
-    expect(pending.resolve('id1', true)).toBe(true)
-    expect(await waiting).toBe(true)
+    expect(pending.resolve('id1', { allowed: true })).toBe(true)
+    expect(await waiting).toEqual({ allowed: true })
     expect(pending.size).toBe(0)
   })
 
   it('returns false for unknown ids', () => {
     const pending = new PendingDecisions()
-    expect(pending.resolve('nope', true)).toBe(false)
+    expect(pending.resolve('nope', { allowed: true })).toBe(false)
   })
 
   it('resolves false on expiry', async () => {
     const pending = new PendingDecisions()
     const waiting = pending.wait('id2', 20)
-    expect(await waiting).toBe(false)
+    expect(await waiting).toEqual({ allowed: false })
     expect(pending.size).toBe(0)
   })
 
@@ -986,9 +1003,9 @@ describe('PendingDecisions', () => {
 
     // Denied rather than left standing: waiting out the five minutes would keep
     // the turn parked with a ✅ still able to allow the tool afterwards.
-    expect(await waiting).toBe(false)
+    expect(await waiting).toEqual({ allowed: false })
     expect(pending.size).toBe(0)
-    expect(pending.resolve('id3', true)).toBe(false)
+    expect(pending.resolve('id3', { allowed: true })).toBe(false)
   })
 
   it('takes the answer that came before the stop', async () => {
@@ -996,10 +1013,10 @@ describe('PendingDecisions', () => {
     const controller = new AbortController()
     const waiting = pending.wait('id4', 60_000, controller.signal)
 
-    expect(pending.resolve('id4', true)).toBe(true)
+    expect(pending.resolve('id4', { allowed: true })).toBe(true)
     controller.abort()
 
-    expect(await waiting).toBe(true)
+    expect(await waiting).toEqual({ allowed: true })
   })
 
   it('denies at once for a turn stopped before it asked', async () => {
@@ -1007,7 +1024,7 @@ describe('PendingDecisions', () => {
     const controller = new AbortController()
     controller.abort()
 
-    expect(await pending.wait('id5', 60_000, controller.signal)).toBe(false)
+    expect(await pending.wait('id5', 60_000, controller.signal)).toEqual({ allowed: false })
     expect(pending.size).toBe(0)
   })
 
@@ -1016,19 +1033,19 @@ describe('PendingDecisions', () => {
     const waiting = pending.wait('id6', 60_000, undefined, 'session-a')
 
     // A different session holding the id cannot answer for it.
-    expect(pending.resolve('id6', true, 'session-b')).toBe(false)
+    expect(pending.resolve('id6', { allowed: true }, 'session-b')).toBe(false)
     expect(pending.size).toBe(1)
 
-    expect(pending.resolve('id6', true, 'session-a')).toBe(true)
-    expect(await waiting).toBe(true)
+    expect(pending.resolve('id6', { allowed: true }, 'session-a')).toBe(true)
+    expect(await waiting).toEqual({ allowed: true })
   })
 
   it('leaves a permission with no owner answerable by anyone', async () => {
     const pending = new PendingDecisions()
     const waiting = pending.wait('id7', 60_000)
 
-    expect(pending.resolve('id7', true)).toBe(true)
-    expect(await waiting).toBe(true)
+    expect(pending.resolve('id7', { allowed: true })).toBe(true)
+    expect(await waiting).toEqual({ allowed: true })
   })
 })
 

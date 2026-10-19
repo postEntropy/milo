@@ -80,16 +80,54 @@ classifier:
 side effect is on Milo's own state (`remember`, `todo`). On a surface that cannot ask, an `ask` decision **fails
 closed**.
 
-The deterministic rules cover two shapes, and only in `auto`: a catastrophic shell command (`rm -rf /`,
-`mkfs`, a `curl … | sh`), and anything writing into a path that is never a legitimate target — a system
+The deterministic rules cover two shapes: a catastrophic shell command (`rm -rf /`, `mkfs`, a
+`curl … | sh`), and anything writing into a path that is never a legitimate target — a system
 directory (`/etc`, `/usr`, `/bin`, `/boot`, …) or a credential store (`~/.ssh`, `~/.aws`, `~/.gnupg`,
-`~/.netrc`). Both are refused outright. The second follows the *path*, not the tool, and reads the
-command as text (redirections and the commands that take a path to write), which makes it a backstop,
-not a sandbox. Everything else with side effects goes to the reviewer.
+`~/.netrc`). In `auto` both are refused outright, and a rule that allows a command is still held to
+them. The second follows the *path*, not the tool, and reads the command as text (redirections and
+the commands that take a path to write), which makes it a backstop, not a sandbox.
+
+A shell line is read as the commands it runs: quotes, `;`, `&&`, `||`, `|` and newlines are split, and
+`sudo`/`env`/`command`/`nice`/`nohup`/`time` are peeled off. A hidden `rm` after a `;` is therefore
+the `rm` the rules see. What the parser cannot read — `$(…)`, backticks, heredocs, process
+substitution, `sh -c`, `eval`, `xargs`, `find -exec` — is never allowed by a rule; it asks.
 
 A confirmation shows what it is asking about: the target *and* the content (`- old` / `+ new` for an
-edit), and the directory a command will run in when the call sets one. An `allow` entry is checked
-before the rules, so `allow: ["shell_command"]` turns the backstop off for that tool.
+edit), and the directory a command will run in when the call sets one.
+
+### Rules file
+
+Two hand-edited files, read on every decision:
+
+```yaml
+# ~/.milo/rules.yml, and <project>/.milo/rules.yml
+rules:
+  - match: "npm test*"
+    action: allow
+  - match: "git push --force*"
+    action: deny
+  - not_match: "rm -rf /*"
+    action: ask
+```
+
+- `match` is a command glob (`*`, `?`); absent means every command. `not_match` narrows it.
+- The project's rules are read first, then the install's; the first match wins.
+- `deny` always denies, and outranks the config's blanket `allow`.
+- `allow` works in `ask` and `auto`, but never bypasses the destructive-command and protected-path
+  rules; a command the parser cannot read never matches an `allow`.
+- An unreadable file is logged and treated as having no `allow` entries. It never fails a turn.
+
+The order is: `deny` list → read-only/internal → rule `deny` → config `allow` → rule `allow` →
+rule `ask` → `ask` mode → the destructive rules in `auto` → the reviewer.
+
+### Always
+
+The confirmation's **Always** (CLI `a`, web and phone button, bot button) allows the same act for the
+rest of the session without asking again. It is kept in memory on the session — a restart asks again —
+and it never widens a `deny` or the destructive rules. What it covers: a shell command's program and
+subcommand (`npm test`, `git status`; a chain gets no key at all), a write's directory, and an
+unrecognised tool by name. `Always` is per session across the terminal, web, phone, Telegram and
+Discord; it is not written to `rules.yml`.
 
 Switch at runtime with `/mode ask|auto|yolo` or `/yolo`, from the terminal or a bot. The mode is
 **saved** and is one value for every surface; `milo --mode`/`--yolo` are per-session overrides that

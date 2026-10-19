@@ -694,7 +694,7 @@ export function Settings({ section, onSection, conversationId, sessionId, onClos
         <Section title="Permissions" description="The policy applies to tools that can cause effects." active={current === 'permissions'}>
           <div className="form-grid">
             <Field label="Mode"><Select label="Mode" value={draft.permissions.mode} choices={PERMISSION_MODES.map((value) => ({ value, label: PERMISSION_LABELS[value] }))} onChange={(next) => update(['permissions', 'mode'], next)} /><small>Ask confirms every tool that can cause an effect. Auto lets a reviewing model allow the safe ones. YOLO runs everything without asking.</small></Field>
-            <Field label="Always-allowed tools"><input value={draft.permissions.allow.join(', ')} onChange={(event) => update(['permissions', 'allow'], splitNames(event.target.value))} /><small>Tool names never asked about. Beats the rules, so it is a blanket yes.</small></Field>
+            <Field label="Always-allowed tools"><input value={draft.permissions.allow.join(', ')} onChange={(event) => update(['permissions', 'allow'], splitNames(event.target.value))} /><small>Tool names never asked about. Beats a config rule, except a rule that denies.</small></Field>
             <Field label="Blocked tools"><input value={draft.permissions.deny.join(', ')} onChange={(event) => update(['permissions', 'deny'], splitNames(event.target.value))} /><small>Tool names refused outright. Outranked only by YOLO.</small></Field>
           </div>
           <Advanced>

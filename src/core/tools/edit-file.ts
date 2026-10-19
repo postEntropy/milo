@@ -3,7 +3,7 @@ import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
 import { writeFileAtomic } from '../../util/fs.js'
 import type { Tool } from './types.js'
-import { displayPath, resolveToolPath } from './walk.js'
+import { displayPath, resolveWritePath } from './walk.js'
 
 const schema = z.object({
   path: z.string().describe('File to edit, relative to the working directory (or absolute).'),
@@ -26,7 +26,9 @@ export const editFileTool: Tool<EditFileArgs> = {
   schema,
   readOnly: false,
   async execute(args, ctx) {
-    const target = resolveToolPath(ctx.cwd, args.path)
+    const resolved = resolveWritePath(ctx.cwd, args.path, ctx.confineTo)
+    if (!resolved.ok) return { content: resolved.error, isError: true }
+    const target = resolved.path
     const shown = displayPath(ctx.cwd, target)
 
     if (args.old_string === '') {

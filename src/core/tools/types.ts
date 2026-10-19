@@ -71,9 +71,27 @@ export interface RoutineStore {
  */
 export type SendFileFn = (input: { path: string; caption?: string }) => Promise<OutgoingFile>
 
+/** A tool call that may have changed something, as the turn's watchers hear it. */
+export interface ToolEffect {
+  tool: string
+  args: unknown
+}
+
 export interface ToolContext {
   cwd: string
   signal: AbortSignal
+  /**
+   * The folder a write may not leave, when the turn works in a project. Absent
+   * everywhere else, where the install is the subject and there is no boundary to
+   * draw. Reads are never confined.
+   */
+  confineTo?: string
+  /**
+   * How the shell is contained, when the config asks for it. `workspace` runs the
+   * command inside `bwrap`: the workspace writable, the rest of the machine read
+   * only, and no network.
+   */
+  sandbox?: 'off' | 'workspace'
   /** Absent on a context with no memory behind it, so `remember` fails cleanly. */
   remember?: RememberFn
   /** The same store the `remember` write goes to, for the `memories` tool. */
@@ -135,6 +153,12 @@ export interface ToolImage {
 export interface ToolResult {
   content: string
   isError?: boolean
+  /**
+   * The call never ran: the permission gate refused it. Internal to the loop —
+   * it is what keeps a refused write out of the verification gate's "the turn
+   * wrote" mark and out of the tool's own side effects.
+   */
+  blocked?: boolean
   images?: ToolImage[]
   /**
    * A plan the turn is keeping, when the tool is one that sets one. Not written

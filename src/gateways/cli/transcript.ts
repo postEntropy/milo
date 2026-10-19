@@ -51,6 +51,11 @@ export type Item =
    * step is the one thing in the accent colour — the eye's anchor in the block.
    */
   | { kind: 'todo'; items: TodoItem[] }
+  /**
+   * What the project's own checks answered after a turn that wrote. `text` is
+   * the core's wording, the same block every surface draws.
+   */
+  | { kind: 'verification'; ok: boolean; text: string }
 
 export function wrapText(text: string, width: number): string[] {
   const limit = Math.max(1, width)
@@ -168,6 +173,17 @@ export function buildLines(items: Item[], width: number): Line[] {
           const color =
             todo.status === 'completed' ? theme.success : todo.status === 'in_progress' ? theme.accent : theme.muted
           for (const text of wrapText(`${todoMark(todo.status)} ${todo.content}`, width)) push(text, { color })
+        }
+        break
+      }
+      case 'verification': {
+        // The first line is the verdict and wears the colour; the detail under it
+        // is the failing command's own output, muted so it does not read as a
+        // second verdict.
+        for (const [index, line] of item.text.split('\n').entries()) {
+          for (const text of wrapText(line, width)) {
+            push(text, { color: index === 0 ? (item.ok ? theme.success : theme.danger) : theme.muted })
+          }
         }
         break
       }

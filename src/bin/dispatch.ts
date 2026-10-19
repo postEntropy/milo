@@ -17,6 +17,7 @@ export type Command =
   | 'web'
   | 'pair'
   | 'devices'
+  | 'run'
 
 /** What the command line asks for, or the message to say instead of running. */
 export function validateArgs(args: Args): string | null {
@@ -28,6 +29,12 @@ export function validateArgs(args: Args): string | null {
   }
   if (args.webPort !== undefined && (!Number.isInteger(args.webPort) || args.webPort < 0 || args.webPort > 65535)) {
     return `Invalid --web-port "${args.webPort}". Expected a port between 0 and 65535.`
+  }
+  if (args.project && args.cwd) {
+    return 'Use one of --project or --cwd, not both: a project is a folder with a name, and --cwd is a folder as it is.'
+  }
+  if (args.session && !isValidSessionId(args.session)) {
+    return `Invalid session id "${args.session}". Expected something like calm-otter-7.`
   }
   return null
 }
@@ -53,6 +60,7 @@ export function resolveCommand(command: string): Command | null {
     case 'web':
     case 'pair':
     case 'devices':
+    case 'run':
     case 'chat':
       return command
     default:

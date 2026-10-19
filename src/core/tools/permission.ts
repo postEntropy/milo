@@ -6,7 +6,12 @@ import {
   scanCommandTargets,
   scanWriteTarget,
 } from './rules.js'
+import path from 'node:path'
+import { patchTargets } from './apply-patch.js'
+import { matchingRule, type RuleBook } from './rule-file.js'
+import { effectiveSegment, parseShell } from './shell-parse.js'
 import type { Tool } from './types.js'
+import { resolveToolPath } from './walk.js'
 
 export type PermissionDecision = 'allow' | 'ask' | 'deny'
 export type PermissionMode = 'ask' | 'auto' | 'yolo'
@@ -30,6 +35,11 @@ export interface PermissionRequest {
 
 export interface PermissionResult {
   allowed: boolean
+  /**
+   * "Always" — the answer also stands for the next call with the same approval
+   * key, for the rest of this session. Absent on an ordinary allow.
+   */
+  remember?: boolean
 }
 
 /** Provided by the surface (CLI, Telegram, …) to ask the user inline. */
@@ -92,6 +102,11 @@ export interface PermissionPolicyOptions {
   /** Resolves a relative write target before it is judged. A caller that knows
    *  where the call is being made from passes it to `decide` instead. */
   cwd?: string
+  /**
+   * The rules that apply from a directory. Injected so a policy in a test does
+   * not read the machine's `~/.milo/rules.yml`; the runtime wires `loadRules`.
+   */
+  rules?: (cwd: string) => RuleBook
 }
 
 export const DEFAULT_JEV_THRESHOLD = 0.35
@@ -109,6 +124,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   private deny: Set<string>
   private readonly reviewer: DangerReviewer | null
   private readonly cwd: string
+  private readonly rules: (cwd: string) => RuleBook
   private threshold: number
 
   constructor(options: PermissionPolicyOptions = {}) {
@@ -118,6 +134,9 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     this.reviewer = options.reviewer ?? null
     this.threshold = options.threshold ?? DEFAULT_JEV_THRESHOLD
     this.cwd = options.cwd ?? process.cwd()
+    // No rule file unless a runtime wired one: a policy built in a test must not
+    // read the person's own rules and change what the test is proving.
+    this.rules = options.rules ?? (() => ({ kind: 'absent' }))
   }
 
   setMode(mode: PermissionMode): void {
@@ -137,15 +156,32 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     args: unknown,
     options?: { cwd?: string },
   ): PermissionDecision | Promise<PermissionDecision> {
+    const cwd = options?.cwd ?? this.cwd
     if (this.mode === 'yolo') return 'allow'
+    // A denied tool is denied whatever a rule says.
     if (this.deny.has(tool.name)) return 'deny'
     if (!actsOnSomething(tool, args)) return 'allow'
+
+    // The rule file, when the turn is a shell command. A `deny` here outranks a
+    // blanket `allow` below; that is the point of writing one down.
+    const command = extractCommandText(args)
+    const rule = command ? matchingRule(this.rules(cwd), command) : undefined
+    if (rule?.action === 'deny') return 'deny'
+
+    // The config's blanket yes, as it has always been. A rule that only asks
+    // does not undo it.
     if (this.allow.has(tool.name)) return 'allow'
+
+    // A rule that allows is still held to the acts no rule may allow: a
+    // destructive command or a protected path.
+    if (rule?.action === 'allow') return barredByRules(args, cwd) ? 'deny' : 'allow'
+    if (rule?.action === 'ask') return 'ask'
+
     if (this.mode === 'ask') return 'ask'
 
     // The acts the rules bar outright, whatever the mode — judged from where the
     // call is being made, which the caller knows and this object does not.
-    if (barredByRules(args, options?.cwd ?? this.cwd)) return 'deny'
+    if (barredByRules(args, cwd)) return 'deny'
 
     if (!this.reviewer) return 'ask'
     const state = reviewText(args)
@@ -180,6 +216,85 @@ export function barredByRules(args: unknown, cwd: string): boolean {
   const typed = extractTypedText(args)
   if (typed && scanCommand(typed)) return true
   return scanWriteTarget(args, cwd) !== null
+}
+
+/**
+ * What an "Always" answer covers.
+ *
+ * The key is deliberately coarse where a coarse key is safe and refuses where it
+ * is not: a shell command is its program and its subcommand (`npm test`, `git
+ * status`), a chain gets no key at all (allowing `cd app && …` would allow any
+ * command after it), and a write is its directory. An unrecognised tool is its
+ * name alone — the whole tool, which is what the person saw the prompt about.
+ */
+export function approvalKey(tool: string, args: unknown, cwd: string): string | null {
+  const record = args && typeof args === 'object' ? (args as Record<string, unknown>) : {}
+
+  if (tool === 'shell_command') {
+    const command = typeof record.command === 'string' ? record.command : ''
+    const parsed = parseShell(command)
+    // A chain is not one act: `cd app && rm -rf build` and `cd app && npm test`
+    // share a first command and not a decision.
+    if (!parsed.ok || parsed.segments.length !== 1) return null
+    const segment = effectiveSegment(parsed.segments[0]!)
+    if (!segment.program) return null
+    const subcommand = segment.args.find((arg) => !arg.startsWith('-'))
+    return `shell:${[segment.program, subcommand].filter(Boolean).join(' ')}`
+  }
+
+  if (tool === 'write_file' || tool === 'edit_file') {
+    if (typeof record.path !== 'string' || !record.path.trim()) return null
+    return `dir:${path.dirname(resolveToolPath(cwd, record.path))}`
+  }
+
+  if (tool === 'format') {
+    // The formatter's subject exactly: a folder and a file in it are different
+    // questions, and approving one should not approve the other.
+    const subject = typeof record.path === 'string' && record.path.trim()
+      ? resolveToolPath(cwd, record.path)
+      : cwd
+    return `format:${subject}`
+  }
+
+  if (tool === 'apply_patch') {
+    if (typeof record.patch !== 'string') return null
+    const dirs = [
+      ...new Set(patchTargets(record.patch).map((target) => path.dirname(resolveToolPath(cwd, target)))),
+    ].sort()
+    return dirs.length > 0 ? `dirs:${dirs.join(',')}` : null
+  }
+
+  return `tool:${tool}`
+}
+
+/**
+ * The policy with a session's "Always" answers layered on. Only a decision that
+ * was going to ask can be answered from the cache; a deny stays a deny, and an
+ * allow that came from the rules or the config is not made more permissive.
+ *
+ * A cached yes is still held to the deterministic rules: the person approving
+ * `npm test` once did not approve a destructive command that happens to share a
+ * key, and `barredByRules` is the backstop that says so.
+ */
+export function withApprovals(
+  policy: PermissionPolicy,
+  approved: Set<string>,
+  cwd: string,
+): PermissionPolicy {
+  return {
+    get mode(): PermissionMode {
+      return policy.mode
+    },
+    setMode: (mode) => policy.setMode(mode),
+    update: (options) => policy.update(options),
+    decide: async (tool, args, options) => {
+      const decision = await policy.decide(tool, args, options)
+      if (decision !== 'ask') return decision
+      const key = approvalKey(tool.name, args, options?.cwd ?? cwd)
+      if (!key || !approved.has(key)) return decision
+      return barredByRules(args, options?.cwd ?? cwd) ? 'deny' : 'allow'
+    },
+  }
 }
 
 /**
@@ -280,7 +395,20 @@ export function summarizeToolCall(args: unknown, tool?: string): string {
             : ''
       return `${record.message.trim()}${staging}`
     }
+    // The formatter: where it runs, and whether it writes — checking a file and
+    // reformatting it are different questions to approve.
+    if (tool === 'format') {
+      const where = typeof record.path === 'string' && record.path.trim() ? record.path : 'the changed files'
+      return `${record.check === true ? 'Check formatting of' : 'Format'} ${where}`
+    }
     if (typeof record.path === 'string') return writePreview(record) ?? record.path
+    // A patch across files: every file it touches, then the patch itself — the
+    // paths are what the decision is about, and the body is what goes in them.
+    if (typeof record.patch === 'string') {
+      const files = patchTargets(record.patch)
+      const named = files.length > 0 ? `Files: ${files.join(', ')}\n` : ''
+      return `Apply a patch\n${named}${preview(record.patch)}`
+    }
     // Acting on one mail message: what is done, and to which one — a prompt that
     // does not say what it will touch is not a decision.
     if (typeof record.op === 'string' && typeof record.id === 'string') {

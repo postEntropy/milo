@@ -389,10 +389,55 @@ export type JobsConfig = z.infer<typeof JobsSchema>
 
 export const DEFAULT_JOBS: JobsConfig = { max: 8 }
 
+/**
+ * How `shell_command` is contained. `workspace` runs every command in `bwrap`:
+ * the project's folder writable, the rest of the machine read only, and the
+ * network off. Linux only, and off by default — a switch measured before it
+ * becomes the way everyone runs.
+ */
+export const SandboxSchema = z.enum(['off', 'workspace'])
+export type SandboxMode = z.infer<typeof SandboxSchema>
+
+/**
+ * The checks a turn that wrote runs before it is over: the project's own test,
+ * typecheck and lint commands, discovered rather than asked for. Off unless it
+ * is turned on — a command run after every writing turn is a real change in how
+ * a conversation behaves, and this one is the person's to make.
+ */
+export const VerificationSchema = z.object({
+  enabled: z.boolean().default(false),
+  /** How long one check may run before it is killed. */
+  timeoutMs: z.number().int().positive().default(120_000),
+})
+export type VerificationConfig = z.infer<typeof VerificationSchema>
+export const DEFAULT_VERIFICATION: VerificationConfig = { enabled: false, timeoutMs: 120_000 }
+
+/**
+ * What the person knows about one model that no catalog said: how much it holds,
+ * how much it answers with, what it reads, whether it thinks, and where it folds.
+ * Every field optional — a config that overrides one thing leaves the rest to the
+ * catalogs.
+ */
+export const ModelProfileSchema = z.object({
+  context: z.number().int().positive().optional(),
+  maxOutput: z.number().int().positive().optional(),
+  vision: z.boolean().optional(),
+  audio: z.boolean().optional(),
+  reasoning: z.boolean().optional(),
+  /** The share of the window at which this model folds; `sessions.compactAt` otherwise. */
+  compactionAt: z.number().gt(0).max(0.95).optional(),
+})
+export type ModelProfileConfig = z.infer<typeof ModelProfileSchema>
+
 export const ConfigSchema = z.object({
   provider: z.string(),
   model: z.string(),
   providers: z.record(z.string(), ProviderEntrySchema),
+  /**
+   * Per-model facts, keyed by model id. They outrank the provider's catalog and the
+   * public one — the last word on a model, written by the person who runs it.
+   */
+  models: z.record(z.string(), ModelProfileSchema).default({}),
   memory: MemorySchema.default(DEFAULT_MEMORY),
   sessions: SessionsSchema.default(DEFAULT_SESSIONS),
   history: HistorySchema.default(DEFAULT_HISTORY),
@@ -405,6 +450,10 @@ export const ConfigSchema = z.object({
   browser: BrowserSchema.default(DEFAULT_BROWSER),
   google: GoogleSchema.default(DEFAULT_GOOGLE),
   jobs: JobsSchema.default(DEFAULT_JOBS),
+  /** How `shell_command` is contained. `workspace` uses `bwrap`; off by default. */
+  sandbox: SandboxSchema.default('off'),
+  /** The project's own checks after a turn that wrote. Off by default. */
+  verification: VerificationSchema.default(DEFAULT_VERIFICATION),
   media: MediaModelsSchema.optional(),
   search: SearchSchema.optional(),
   systemPrompt: z.string().optional(),

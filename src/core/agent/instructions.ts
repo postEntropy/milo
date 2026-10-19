@@ -1,7 +1,8 @@
-import { readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, statSync } from 'node:fs'
 import path from 'node:path'
 import { errorMessage } from '../../util/errors.js'
 import { humanSize } from '../../util/format.js'
+import { MILO_HOME } from '../config/paths.js'
 import type { ProjectPlacement } from '../projects.js'
 
 /**
@@ -24,6 +25,12 @@ import type { ProjectPlacement } from '../projects.js'
 export const INSTRUCTIONS_FILE = 'AGENTS.md'
 
 /**
+ * The same rules under the name another agent reads. Tried only when there is no
+ * `AGENTS.md`: a folder that carries both has already said which one Milo follows.
+ */
+export const FALLBACK_INSTRUCTIONS_FILE = 'CLAUDE.md'
+
+/**
  * How much of the file rides along. It is a section of the system prompt, so it is
  * paid for on every request a session with a project makes. A file larger than this
  * is not half-read — half a set of rules is worse than none — it is left out and the
@@ -31,36 +38,32 @@ export const INSTRUCTIONS_FILE = 'AGENTS.md'
  */
 const MAX_INSTRUCTIONS_BYTES = 16 * 1024
 
-/** A project's instructions, or why there are none to carry. */
+/** A set of rules, or why there are none to carry. */
 export type ProjectInstructions =
-  | { kind: 'present'; text: string }
+  | { kind: 'present'; file: string; text: string }
   /** No project, no folder, or no file: nothing to say, and nothing wrong. */
   | { kind: 'absent' }
   /** There is a file and it could not be carried. The reason is for the prompt. */
-  | { kind: 'unreadable'; error: string }
+  | { kind: 'unreadable'; file: string; error: string }
 
 /**
- * Reads the instructions of the session's project. Sync, because it is called while
- * the prompt for the turn is built — the same place, and the same shape, as the
- * skills list.
+ * Reads one instructions file. The common reader behind both the project's rules
+ * and Milo's own: the same size bound, the same three outcomes and the same refusal
+ * of a file that cannot say anything useful.
  */
-export function readProjectInstructions(placement: ProjectPlacement | undefined): ProjectInstructions {
-  // No project, or one whose folder is gone: there is nothing to read, and the
-  // environment line already says the session is working somewhere else.
-  if (!placement?.ok) return { kind: 'absent' }
-
-  const file = path.join(placement.project.path, INSTRUCTIONS_FILE)
+export function readInstructionsFile(file: string): ProjectInstructions {
+  const name = path.basename(file)
 
   let size: number
   try {
     const stats = statSync(file)
     // Something with the file's name that is not a file — a folder, say — is not
     // "no instructions": the person meant to write some, and it should be said.
-    if (!stats.isFile()) return { kind: 'unreadable', error: `${INSTRUCTIONS_FILE} is not a file` }
+    if (!stats.isFile()) return { kind: 'unreadable', file: name, error: `${name} is not a file` }
     size = stats.size
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { kind: 'absent' }
-    return { kind: 'unreadable', error: errorMessage(error) }
+    return { kind: 'unreadable', file: name, error: errorMessage(error) }
   }
 
   // Measured before the read, so a huge file is never pulled into memory to be
@@ -68,6 +71,7 @@ export function readProjectInstructions(placement: ProjectPlacement | undefined)
   if (size > MAX_INSTRUCTIONS_BYTES) {
     return {
       kind: 'unreadable',
+      file: name,
       error: `it is ${humanSize(size)}, over the ${humanSize(MAX_INSTRUCTIONS_BYTES)} carried`,
     }
   }
@@ -76,17 +80,51 @@ export function readProjectInstructions(placement: ProjectPlacement | undefined)
   try {
     raw = readFileSync(file, 'utf8')
   } catch (error) {
-    return { kind: 'unreadable', error: errorMessage(error) }
+    return { kind: 'unreadable', file: name, error: errorMessage(error) }
   }
   // A binary read as UTF-8 is garbage with no complaint; a NUL is the one byte text
   // does not hold — the same rule `work.ts` keeps for a file the person opens.
-  if (raw.includes('\u0000')) return { kind: 'unreadable', error: 'it is not a text file' }
+  if (raw.includes('\u0000')) return { kind: 'unreadable', file: name, error: 'it is not a text file' }
 
   const text = raw.trim()
   // An empty file says nothing, and a heading over nothing teaches the model to
   // look for rules that are not there.
   if (text === '') return { kind: 'absent' }
-  return { kind: 'present', text }
+  return { kind: 'present', file: name, text }
+}
+
+/**
+ * Reads the instructions of the session's project. Sync, because it is called while
+ * the prompt for the turn is built — the same place, and the same shape, as the
+ * skills list.
+ *
+ * `AGENTS.md` is the file Milo reads; `CLAUDE.md` is the same convention under
+ * another agent's name, and is read only when there is no `AGENTS.md`. An
+ * `AGENTS.md` that exists but could not be read does not fall through: the person
+ * put it there, and silently following a different file would hide the problem.
+ */
+export function readProjectInstructions(placement: ProjectPlacement | undefined): ProjectInstructions {
+  // No project, or one whose folder is gone: there is nothing to read, and the
+  // environment line already says the session is working somewhere else.
+  if (!placement?.ok) return { kind: 'absent' }
+
+  const root = placement.project.path
+  const ownFile = path.join(root, INSTRUCTIONS_FILE)
+  const own = readInstructionsFile(ownFile)
+  if (own.kind !== 'absent') return own
+  // An empty `AGENTS.md` is this folder saying it has no rules; it is not an
+  // invitation to follow another agent's file instead.
+  if (existsSync(ownFile)) return own
+  return readInstructionsFile(path.join(root, FALLBACK_INSTRUCTIONS_FILE))
+}
+
+/**
+ * The rules of this install itself: the `AGENTS.md` in Milo's own directory,
+ * carried above every project's. Read per turn like the project's, so an edit
+ * lands on the next one.
+ */
+export function readOwnInstructions(dir: string = MILO_HOME): ProjectInstructions {
+  return readInstructionsFile(path.join(dir, INSTRUCTIONS_FILE))
 }
 
 /**
@@ -95,14 +133,16 @@ export function readProjectInstructions(placement: ProjectPlacement | undefined)
  * that the rules are there, it does not read them out.
  */
 export type ProjectRules =
-  | { kind: 'present' }
+  | { kind: 'present'; file: string }
   | { kind: 'absent' }
-  | { kind: 'unreadable'; error: string }
+  | { kind: 'unreadable'; file: string; error: string }
 
 /** The status of a read, with the file's text dropped. */
 export function rulesOf(instructions: ProjectInstructions): ProjectRules {
-  if (instructions.kind === 'present') return { kind: 'present' }
-  if (instructions.kind === 'unreadable') return { kind: 'unreadable', error: instructions.error }
+  if (instructions.kind === 'present') return { kind: 'present', file: instructions.file }
+  if (instructions.kind === 'unreadable') {
+    return { kind: 'unreadable', file: instructions.file, error: instructions.error }
+  }
   return { kind: 'absent' }
 }
 

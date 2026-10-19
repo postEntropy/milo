@@ -19,6 +19,9 @@ enum ToolIcons {
         "fetch_url": "link",
         "write_file": "doc.badge.plus",
         "edit_file": "pencil",
+        // One change across several files, and the project's own formatter.
+        "apply_patch": "square.and.pencil",
+        "format": "wand.and.stars",
         "remember": "cylinder",
         "recall": "clock.arrow.circlepath",
         "search_history": "clock.arrow.circlepath",

@@ -20,6 +20,10 @@ const TOOL_ICONS: Record<string, IconName> = {
   fetch_url: 'link',
   write_file: 'file-plus',
   edit_file: 'edit',
+  // One change across several files, and the project's own formatter: a stack of
+  // pages for the first, a code mark for the second.
+  apply_patch: 'files',
+  format: 'code',
   remember: 'database',
   recall: 'history',
   search_history: 'history',

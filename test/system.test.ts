@@ -69,7 +69,7 @@ describe('buildSystemPrompt', () => {
       model: 'm',
       tools: [],
       memories: [],
-      instructions: { kind: 'present', text: 'Run the suite before you call it done.' },
+      instructions: { kind: 'present', file: 'AGENTS.md', text: 'Run the suite before you call it done.' },
     })
 
     expect(prompt).toContain("## This project's instructions")
@@ -87,7 +87,11 @@ describe('buildSystemPrompt', () => {
       model: 'm',
       tools: [],
       memories: [],
-      instructions: { kind: 'unreadable', error: 'it is 40.0 KB, over the 16.0 KB carried' },
+      instructions: {
+        kind: 'unreadable',
+        file: 'AGENTS.md',
+        error: 'it is 40.0 KB, over the 16.0 KB carried',
+      },
     })
 
     expect(prompt).toContain("## This project's instructions")
@@ -314,13 +318,64 @@ describe('buildSystemPrompt', () => {
         ok: true,
         project: { id: 'calm-otter-7', name: 'milo', path: '/home/me/milo', createdAt: 0 },
       },
-      instructions: { kind: 'present', text: 'Use tabs.' },
+      instructions: { kind: 'present', file: 'AGENTS.md', text: 'Use tabs.' },
     })
 
     const code = prompt.indexOf('## Working in this project')
     const rules = prompt.indexOf("## This project's instructions")
     expect(code).toBeGreaterThan(-1)
     expect(rules).toBeGreaterThan(code)
+  })
+
+  it("carries this install's own rules above the project's", () => {
+    const prompt = buildSystemPrompt({
+      base: 'BASE',
+      cwd: '/home/me/milo',
+      provider: 'p',
+      model: 'm',
+      tools: [],
+      memories: [],
+      ownInstructions: { kind: 'present', file: 'AGENTS.md', text: 'Answer in English.' },
+      instructions: { kind: 'present', file: 'AGENTS.md', text: 'Use tabs.' },
+    })
+
+    expect(prompt).toContain('## Your own instructions')
+    expect(prompt).toContain('Answer in English.')
+    expect(prompt.indexOf('## Your own instructions')).toBeLessThan(
+      prompt.indexOf("## This project's instructions"),
+    )
+  })
+
+  it("says when the install's own rules could not be carried, with the reason", () => {
+    const prompt = buildSystemPrompt({
+      base: 'BASE',
+      cwd: '/a',
+      provider: 'p',
+      model: 'm',
+      tools: [],
+      memories: [],
+      ownInstructions: { kind: 'unreadable', file: 'AGENTS.md', error: 'the disk refused it' },
+    })
+
+    expect(prompt).toContain('## Your own instructions')
+    expect(prompt).toContain('could not be included: the disk refused it')
+    expect(prompt).toContain('Do not guess what it says.')
+  })
+
+  it('says the shell is sandboxed only when it is', () => {
+    const shell: ToolSpec = { name: 'shell_command', description: 'Run a command', parameters: {} }
+    const base = { base: 'BASE', cwd: '/a', provider: 'p', model: 'm', tools: [shell], memories: [] }
+
+    expect(buildSystemPrompt(base)).not.toContain('The shell is sandboxed')
+    expect(buildSystemPrompt({ ...base, sandbox: 'workspace' })).toContain('The shell is sandboxed')
+  })
+
+  it("adds nothing about the install's own rules when there are none", () => {
+    const base = { base: 'BASE', cwd: '/a', provider: 'p', model: 'm', tools: [], memories: [] }
+    expect(buildSystemPrompt(base)).not.toContain('## Your own instructions')
+    expect(buildSystemPrompt({ ...base, ownInstructions: { kind: 'absent' } })).not.toContain(
+      '## Your own instructions',
+    )
   })
 })
 

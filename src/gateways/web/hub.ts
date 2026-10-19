@@ -315,12 +315,19 @@ export class WebHub {
         this.emitTurn(conversation.session.id, { type: 'plan', plan: false })
         this.startTurn(conversationId, PLAN_APPROVAL)
       } else if (frame.id) {
-        const allowed = frame.action === 'allow'
+        const allowed = frame.action !== 'deny'
+        const remember = frame.action === 'always'
         // The permission belongs to the session it was raised in: a client of another
         // session cannot answer it, even holding the id — and a client of a sibling
         // conversation can, because the question is the session's own.
-        if (this.pending.resolve(frame.id, allowed, conversation.session.id)) {
-          client.send({ type: 'permission-result', id: frame.id, allowed })
+        if (
+          this.pending.resolve(
+            frame.id,
+            { allowed, ...(remember ? { remember: true } : {}) },
+            conversation.session.id,
+          )
+        ) {
+          client.send({ type: 'permission-result', id: frame.id, allowed, ...(remember ? { remember: true } : {}) })
         } else {
           client.send({ type: 'error', message: 'That permission is no longer waiting.' })
         }
@@ -1029,10 +1036,17 @@ export class WebHub {
               // answer — not only the conversation whose queue raised it.
               if (live) live.permission = { id: permissionId, request, expiresAt }
               if (sessionId) this.emitTurn(sessionId, { type: 'permission', id: permissionId, request, expiresAt })
-              const allowed = await this.pending.wait(permissionId, PERMISSION_TIMEOUT_MS, signal, sessionId ?? conversationId)
+              const result = await this.pending.wait(permissionId, PERMISSION_TIMEOUT_MS, signal, sessionId ?? conversationId)
               if (live?.permission?.id === permissionId) live.permission = undefined
-              if (sessionId) this.emitTurn(sessionId, { type: 'permission-result', id: permissionId, allowed })
-              return { allowed }
+              if (sessionId) {
+                this.emitTurn(sessionId, {
+                  type: 'permission-result',
+                  id: permissionId,
+                  allowed: result.allowed,
+                  ...(result.remember ? { remember: true } : {}),
+                })
+              }
+              return result
             },
           })) {
             if (event.type === 'error') status = 'error'

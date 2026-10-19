@@ -69,7 +69,7 @@ export interface RoutinesChat {
   turnEnds: number
   pendingPermission: { id: string; request: PermissionRequest; expiresAt: number } | null
   send(text: string, target?: SendTarget): void
-  decide(allowed: boolean): void
+  decide(action: 'allow' | 'always' | 'deny'): void
 }
 
 const GATEWAYS = [
@@ -539,7 +539,7 @@ function NewRoutine({ conversationId, chat, onBack }: { conversationId: string; 
       <div className="routine-thread-heading"><h3>Routine setup</h3><p className="routine-thread-subtitle">Milo’s questions and confirmation appear here.</p></div>
       <MessageList messages={thread} thinking={chat.thinking} />
       {chat.pendingPermission && <article className="message assistant">
-        <Permissions request={chat.pendingPermission.request} expiresAt={chat.pendingPermission.expiresAt} onDecision={(allowed) => chat.decide(allowed)} />
+        <Permissions request={chat.pendingPermission.request} expiresAt={chat.pendingPermission.expiresAt} onDecision={(action) => chat.decide(action)} />
       </article>}
     </div>}
   </Shell>

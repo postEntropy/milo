@@ -9,6 +9,12 @@ export const DEFAULT_WORKING_DIRECTORY = os.homedir()
 export const configFile = (): string => path.join(MILO_HOME, 'config.yml')
 export const authFile = (): string => path.join(MILO_HOME, 'auth.json')
 /**
+ * The install-wide permission rules, hand-edited: `allow`, `deny` or `ask` for
+ * the commands a shell line runs. A project may add its own under
+ * `<project>/.milo/rules.yml`, and the project's rules are read first.
+ */
+export const rulesFile = (): string => path.join(MILO_HOME, 'rules.yml')
+/**
  * The phones and other machines that have paired with this Milo, each with the
  * hash of the token it was handed. Its own file rather than a corner of
  * `auth.json`: it is written by the running daemon, and taking a device back must

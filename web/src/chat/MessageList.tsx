@@ -147,6 +147,19 @@ const TODO_STATUS_LABEL: Record<TodoStatus, string> = {
 }
 
 /**
+ * The project's checks, after a turn that wrote. One filled block, no border:
+ * the verdict is the first line's colour, and the failing command's own output
+ * sits under it in the same block.
+ */
+function Verification({ ok, text }: { ok: boolean; text: string }) {
+  return (
+    <div className={`verification-card ${ok ? 'ok' : 'failed'}`}>
+      <pre className="verification-text">{text}</pre>
+    </div>
+  )
+}
+
+/**
  * The plan the model is keeping, drawn whole each time it changes: a card that
  * names itself and how far it has got, the current step in the accent so the
  * eye lands on it, a finished one struck through rather than removed.
@@ -420,6 +433,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
           if (part.kind === 'text') return <Markdown key={key} text={part.text} />
           if (part.kind === 'tool') return <ToolLine key={key} tool={part.tool} />
           if (part.kind === 'ui') return <GenUi key={key} render={part.render} onSend={onSend} />
+          if (part.kind === 'verification') return <Verification key={key} ok={part.ok} text={part.text} />
           return <TodoList key={key} items={part.items} />
         })
       )}

@@ -13,16 +13,18 @@ import type { SkillSummary } from './skills/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
 import { describeOutgoing, type OutgoingFile } from './outgoing.js'
 import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
-import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, SessionAdmin, ToolRegistry } from './tools/index.js'
+import type { ModelProfile } from './providers/profile.js'
+import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, SessionAdmin, ToolEffect, ToolRegistry } from './tools/index.js'
 import type { JobManager } from './jobs/index.js'
-import { isPlanTool, withGrants, withPlan } from './tools/index.js'
+import { approvalKey, isPlanTool, withApprovals, withGrants, withPlan } from './tools/index.js'
 import { taskDescription } from './tools/task.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent, type RunTrace } from './agent/loop.js'
 import type { TraceWriter } from './traces.js'
 import { runSubagent } from './agent/subagent.js'
 import { buildSystemPrompt, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
-import type { ProjectPlacement } from './projects.js'
+import type { Project, ProjectPlacement } from './projects.js'
+import { verificationText, type VerificationResult } from './verification.js'
 import type { ProjectInstructions } from './agent/instructions.js'
 import type { ClientKind } from './client.js'
 import {
@@ -55,6 +57,20 @@ import {
 } from './sessions/index.js'
 
 const SURFACES: SurfaceKind[] = ['cli', 'telegram', 'discord', 'web', 'ios']
+
+/**
+ * What counts as "the turn wrote something" for the verification gate. A shell
+ * command is here whether it wrote or not: the command is the act, and the tool
+ * cannot say what it left behind.
+ */
+const VERIFICATION_WRITES = new Set([
+  'write_file',
+  'edit_file',
+  'apply_patch',
+  'format',
+  'shell_command',
+  'git_commit',
+])
 
 function asSurface(gateway: string): SurfaceKind | undefined {
   return (SURFACES as string[]).includes(gateway) ? (gateway as SurfaceKind) : undefined
@@ -115,6 +131,23 @@ export interface SessionOptions {
    */
   instructions?: () => ProjectInstructions
   /**
+   * The rules of this install itself, read once per prompt like the skills. Above
+   * the project's own and absent when `~/.milo/AGENTS.md` does not exist.
+   */
+  ownInstructions?: () => ProjectInstructions
+  /**
+   * How the shell is contained: `workspace` puts every command in `bwrap` with the
+   * project's folder writable and the rest of the machine read only. Off unless
+   * the config asks for it.
+   */
+  sandbox?: 'off' | 'workspace'
+  /**
+   * The project's own checks, run after a turn that wrote. Absent when the
+   * verification gate is off, which is the default — a command run after every
+   * writing turn is a change in how a conversation behaves.
+   */
+  verify?: (project: Project) => Promise<VerificationResult>
+  /**
    * Reads the skills to index in the system prompt, once per prompt; the bodies
    * load on demand. A getter rather than a list, so a skill installed while Milo
    * is running is indexed on the next turn.
@@ -168,10 +201,11 @@ export interface SessionOptions {
    */
   grantedTools?: string[]
   /**
-   * Where a model's context window comes from. Swapped in tests, so a test never
-   * has to reach the network to know how big a model is.
+   * What is known about a model: its window, output ceiling and whether it
+   * reasons. Swapped in tests, so a test never has to reach the network to know
+   * how big a model is.
    */
-  lookupContextWindow?: (model: string) => Promise<number | undefined>
+  modelProfile?: (model: string) => Promise<ModelProfile | undefined>
   /**
    * How hard the model should think, read per turn. A function rather than a
    * value so a surface can change it without the session being rebuilt.
@@ -284,6 +318,14 @@ export class Session {
   private readonly recaps: RecapStore
   private readonly options: SessionOptions
   private summary: string | undefined
+  /**
+   * The "Always" answers given in this conversation, by approval key. Kept in
+   * memory on purpose: a restart is a new conversation, and a standing yes from
+   * an earlier run is not one the person can still see.
+   */
+  private readonly approved = new Set<string>()
+  /** Whether the turn in flight has changed something; reset when it starts. */
+  private wroteThisTurn = false
   /** The revision this session's copy of the transcript was built from. */
   private baseVersion: number
   /**
@@ -405,8 +447,12 @@ export class Session {
     if (!config?.compaction) return undefined
     // Nothing is asked for unless a caller wired a lookup in: a session that
     // reached the network on its own would make every test a network test.
-    const window = config.contextWindow ?? (await this.options.lookupContextWindow?.(this.options.model))
-    return contextBudget(config, window)
+    const profile = config.contextWindow ? undefined : await this.options.modelProfile?.(this.options.model)
+    const window = config.contextWindow ?? profile?.context
+    // A model that folds at its own share overrides the install's one, without
+    // losing the rest of the session rules.
+    const rules = profile?.compactionAt ? { ...config, compactAt: profile.compactionAt } : config
+    return contextBudget(rules, window)
   }
 
   /**
@@ -586,12 +632,15 @@ export class Session {
       memory,
       cwd,
       maxSteps,
-      maxTokens,
       temperature,
       permissionPolicy,
     } = this.options
     const startedAt = Date.now()
     const model = opts?.model ?? (opts?.images?.length ? this.options.mediaModels?.vision : undefined) ?? this.options.model
+    // What is known about the model this turn runs on: its own output ceiling and
+    // whether it has a reasoning mode. Absent fields keep the config's rule.
+    const profile = await this.options.modelProfile?.(model)
+    const maxTokens = profile?.maxOutput ?? this.options.maxTokens
     const provider = opts?.model || (opts?.images?.length && this.options.mediaModels?.vision)
       ? this.options.providerFor?.(model) ?? this.options.provider
       : this.options.provider
@@ -675,11 +724,17 @@ export class Session {
       // The project's own rules, read per turn: the folder a session works in says
       // how it is to be worked in, and an edit to that file lands on the next turn.
       instructions: this.options.instructions?.(),
+      // The install's own rules, above the folder's: read per turn for the same
+      // reason, so a rule written into `~/.milo/AGENTS.md` lands on the next one.
+      ownInstructions: this.options.ownInstructions?.(),
       provider: provider.id,
       model,
       // The shape of this turn, not a fact of the session: a planning turn is told
       // to propose, and the catalog it was handed has nothing to write with.
       plan,
+      // The shell's box, so the turn knows a network command will fail and a
+      // write outside the folder is refused before it tries one.
+      sandbox: this.options.sandbox,
       // The session this turn is in, so a question about it is answerable without
       // going to read the sessions directory.
       sessionId: this.id,
@@ -731,7 +786,11 @@ export class Session {
     // The turn's one signal, one permission decision and one effort, shared by
     // the turn and by any subagent it delegates to.
     const abort = signal ?? new AbortController().signal
-    const effort = this.options.reasoningEffort?.() ?? DEFAULT_REASONING_EFFORT
+    // A model that declared it has no reasoning mode is not sent an effort: the
+    // field is a guess about a mode it does not have, and some wires refuse it.
+    const effort = profile?.reasoning === false
+      ? undefined
+      : this.options.reasoningEffort?.() ?? DEFAULT_REASONING_EFFORT
     // A plan is a promise with a gate behind it: the catalog hides the writes, and
     // the policy refuses one that reaches the gate anyway — a subagent's own call,
     // a tool from a source that filtered nothing. The grant is layered first so a
@@ -739,9 +798,29 @@ export class Session {
     const granted = permissionPolicy
       ? withGrants(permissionPolicy, this.options.grantedTools ?? [], cwd)
       : undefined
-    const permission = granted
-      ? { policy: plan ? withPlan(granted) : granted, ask: opts?.ask, cwd }
+    const shaped = granted ? (plan ? withPlan(granted) : granted) : undefined
+    // What this conversation already said "Always" to, and what it says during
+    // this turn: the answer is added after the surface replies, so the next call
+    // with the same key does not ask again.
+    const policy = shaped ? withApprovals(shaped, this.approved, cwd) : undefined
+    const asker = opts?.ask
+    const ask: PermissionAsker | undefined = asker
+      ? async (request) => {
+          const result = await asker(request)
+          if (result.allowed && result.remember) {
+            const key = approvalKey(request.tool, request.args, cwd)
+            if (key) this.approved.add(key)
+          }
+          return result
+        }
       : undefined
+    const permission = policy ? { policy, ask, cwd } : undefined
+    // One watcher for both jobs: the surface that re-reads the folder, and the
+    // mark that says this turn wrote, which is what the gate acts on.
+    const sideEffect = (effect: ToolEffect): void => {
+      if (VERIFICATION_WRITES.has(effect.tool)) this.wroteThisTurn = true
+      this.options.onSideEffect?.()
+    }
     // Read through `this.scope` at call time: a gateway can rebind the session
     // to another conversation while it is running.
     const remember = (items: MemoryInput[]) => memory.remember(this.scope, items)
@@ -771,6 +850,8 @@ export class Session {
     // live surface it is talking through, or a routine's named target. A delivery
     // must not be rerouted, so the destination is fixed before the turn runs.
     this.outgoing = []
+    // The gate is about this turn, not the last one.
+    this.wroteThisTurn = false
     const sendFile: SendFileFn | undefined = canSendFiles
       ? async (input) => {
           const file = describeOutgoing(input.path, input.caption)
@@ -807,6 +888,10 @@ export class Session {
         context: {
           cwd,
           signal: abort,
+          // A project's folder is the boundary for writes: the session was pointed
+          // at it, so changing something outside it is not this turn's business.
+          confineTo: this.options.project?.ok ? this.options.project.project.path : undefined,
+          sandbox: this.options.sandbox,
           remember,
           memories,
           recall,
@@ -829,6 +914,11 @@ export class Session {
               // The same rules the parent's prompt carries: a delegated task works in
               // the same folder, and must follow the same conventions it keeps.
               instructions: this.options.instructions?.(),
+              ownInstructions: this.options.ownInstructions?.(),
+              // The same boundary and the same box: a delegated write lands in the
+              // same folder, and its commands are contained the same way.
+              confineTo: this.options.project?.ok ? this.options.project.project.path : undefined,
+              sandbox: this.options.sandbox,
               // The same project, so a delegated task carries the same code brief.
               project: this.options.project,
               // The same live state the parent's prompt carries, so a delegated
@@ -843,7 +933,7 @@ export class Session {
               permission,
               // A delegated write lands in the same folder this session works in, so it is
               // announced the same way: the subtask is not a second, silent writer.
-              onSideEffect: this.options.onSideEffect,
+              onSideEffect: sideEffect,
               maxSteps,
               maxTokens,
               temperature,
@@ -861,7 +951,7 @@ export class Session {
         // A step that may have written in the folder, said to the session's owner while
         // the turn is still running: this is what keeps a page drawing that folder from
         // showing what was there before the turn began.
-        onSideEffect: this.options.onSideEffect,
+        onSideEffect: sideEffect,
         // Read at call time, so `/effort` takes effect on the next turn instead
         // of needing the runtime rebuilt. Never absent: a session built without
         // one still asks for Milo's default.
@@ -907,6 +997,49 @@ export class Session {
           running = null
         }
         yield event
+      }
+
+      // The gate: a turn that changed files ends with what the project's own
+      // checks answered, not only with what the model said it ran. It is off
+      // unless the install turned it on, and it never feeds the failure back —
+      // v1 reports, so the answer already on screen is not rewritten under it.
+      if (
+        !errored &&
+        !abort.aborted &&
+        this.wroteThisTurn &&
+        this.options.project?.ok &&
+        this.options.verify
+      ) {
+        const project = this.options.project.project
+        const startedVerification = Date.now()
+        let result: VerificationResult
+        try {
+          result = await this.options.verify(project)
+        } catch (error) {
+          result = { kind: 'unreadable', error: errorMessage(error) }
+        }
+        this.options.traces?.record({
+          at: new Date().toISOString(),
+          event: 'verification',
+          ok: result.kind === 'checks' ? result.ok : result.kind === 'none',
+          ms: Date.now() - startedVerification,
+          purpose: 'verification',
+          surface: this.scope.gateway,
+          session: this.id,
+          project: project.id,
+          ...(result.kind === 'checks'
+            ? {
+                checks: result.checks.length,
+                failed: result.checks.filter((check) => !check.ok).map((check) => check.name),
+              }
+            : { checks: 0 }),
+        })
+        yield {
+          type: 'verification',
+          result,
+          text: verificationText(result),
+          ok: result.kind === 'checks' ? result.ok : result.kind === 'none',
+        }
       }
     } catch (error) {
       // A stop is not a failure: reporting `AbortError` to the user turns their

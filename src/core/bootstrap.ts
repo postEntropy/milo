@@ -18,9 +18,10 @@ import {
 import { createProvider } from './providers/create.js'
 import type { Provider } from './providers/types.js'
 import { placeProject } from './projects.js'
-import { readProjectInstructions } from './agent/instructions.js'
+import { readOwnInstructions, readProjectInstructions } from './agent/instructions.js'
 import { fileTraces, TracedProvider, type TraceWriter } from './traces.js'
-import { lookupContextWindow } from './providers/context.js'
+import { lookupModelProfile } from './providers/profile.js'
+import { listModels } from './providers/models.js'
 import { AgentRuntime } from './runtime.js'
 import { FileRecapStore, FileSessionStore, pruneSessions } from './sessions/index.js'
 import { createSearchProvider } from './search/index.js'
@@ -28,6 +29,8 @@ import { ensureSkillsDir, SkillLibrary } from './skills/index.js'
 import { createClassifier, dangerousReviewer, type Classifier } from './classifier/index.js'
 import { OLLAYA_DEFAULT_MODEL, OLLAYA_URL, OPENAI_DECISIONS_MODEL, OPENAI_DECISIONS_URL, OPENROUTER_DECISIONS_MODEL, OPENROUTER_URL, type Auth } from './config/schema.js'
 import { resolveToolPath } from './tools/walk.js'
+import { loadRules } from './tools/rule-file.js'
+import { verifyProject } from './verification.js'
 import {
   DefaultPermissionPolicy,
   createToolRegistry,
@@ -223,9 +226,21 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     routine: routines,
     skills,
     sessions: loaded.config.sessions,
-    // Where the compaction ceiling comes from: a model's window is not in the
-    // config and not in the request, so it is looked up once and cached.
-    lookupContextWindow,
+    // Where a model's shape comes from: its window, output ceiling and reasoning
+    // mode are in no request, so they are read from the config and the catalogs
+    // once per model and cached.
+    modelProfile: (model: string) =>
+      lookupModelProfile(model, {
+        override: loaded.config.models[model],
+        fetchProvider: () =>
+          listModels({
+            baseURL: loaded.provider.baseURL,
+            apiKey: loaded.provider.apiKey,
+            wire: loaded.provider.wire,
+            headers: loaded.provider.headers,
+            signal: AbortSignal.timeout(4_000),
+          }),
+      }),
     reasoningEffort: loaded.config.reasoningEffort,
     cwd,
     // Where a session's project is, read from the install's own list — the same
@@ -234,6 +249,18 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     // The rules of the folder a session works in, read from it: the project's own
     // `AGENTS.md`, which the prompt carries as instructions for the turn.
     instructions: readProjectInstructions,
+    // This install's own rules, read from `~/.milo/AGENTS.md` on every turn and
+    // carried above every project's.
+    ownInstructions: readOwnInstructions,
+    // The shell's box, when the config asks for one. Off is the default and the
+    // meaning of an install that never chose.
+    sandbox: loaded.config.sandbox,
+    // The verification gate, when the config asks for one. Off by default: it
+    // runs the project's own commands after every writing turn, which is a
+    // change the person makes on purpose.
+    verify: loaded.config.verification.enabled
+      ? (project) => verifyProject(project, { timeoutMs: loaded.config.verification.timeoutMs })
+      : undefined,
     maxSteps: loaded.config.maxSteps,
     maxTokens: loaded.config.maxTokens,
     permissionPolicy: new DefaultPermissionPolicy({
@@ -243,6 +270,9 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
       threshold: permissions.jevThreshold,
       reviewer: classifier ? dangerousReviewer(classifier) : null,
       cwd,
+      // The person's own rules, read from the install and from the project the
+      // call is being made in.
+      rules: loadRules,
     }),
     classifier,
   })

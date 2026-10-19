@@ -6,7 +6,9 @@ import type { Classifier } from '../classifier/index.js'
 import type { JobManager } from '../jobs/index.js'
 import type { GoogleAccount } from '../config/schema.js'
 import type { McpServers } from '../mcp/servers.js'
+import { applyPatchTool } from './apply-patch.js'
 import { editFileTool } from './edit-file.js'
+import { formatTool } from './format.js'
 import { createGmailTools } from './gmail.js'
 import { createDriveTools } from './drive.js'
 import { createMailLabelTools } from './mail-labels.js'
@@ -48,6 +50,8 @@ export { fetchUrlTool } from './fetch-url.js'
 export { gitTool, gitCommitTool } from './git.js'
 export { writeFileTool } from './write-file.js'
 export { editFileTool } from './edit-file.js'
+export { applyPatchTool, parsePatch, patchTargets } from './apply-patch.js'
+export { formatTool, detectFormatter, formatCommand } from './format.js'
 export { rememberTool } from './remember.js'
 export { memoriesTool } from './memories.js'
 export { recallTool } from './recall.js'
@@ -75,6 +79,8 @@ export const builtinTools = [
   gitCommitTool,
   writeFileTool,
   editFileTool,
+  applyPatchTool,
+  formatTool,
   rememberTool,
   memoriesTool,
   recallTool,

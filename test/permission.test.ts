@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { DefaultPermissionPolicy, summarizeToolCall, withGrants, withPlan } from '../src/core/tools/permission.js'
+import { approvalKey, DefaultPermissionPolicy, summarizeToolCall, withApprovals, withGrants, withPlan } from '../src/core/tools/permission.js'
 import type { DangerReviewer } from '../src/core/tools/permission.js'
+import type { RuleBook } from '../src/core/tools/rule-file.js'
 import type { Tool } from '../src/core/tools/types.js'
 
 const readTool: Tool = {
@@ -405,5 +406,118 @@ describe('withGrants — a routine running with nobody to ask', () => {
     // must not become *more* restrictive than no grant.
     expect(withGrants(policy, ['shell_command'], cwd)).toBe(policy)
     expect(await policy.decide(writeTool, { command: 'rm -rf /' })).toBe('allow')
+  })
+})
+
+describe('permission rules', () => {
+  const rules = (book: RuleBook) => () => book
+
+  it('allows a command a rule allows', async () => {
+    const policy = new DefaultPermissionPolicy({
+      rules: rules({ kind: 'rules', rules: [{ match: 'npm test*', action: 'allow' }] }),
+    })
+    expect(await policy.decide(writeTool, { command: 'npm test' })).toBe('allow')
+  })
+
+  it('lets a deny rule beat the config blanket allow', async () => {
+    const policy = new DefaultPermissionPolicy({
+      allow: ['shell_command'],
+      rules: rules({ kind: 'rules', rules: [{ match: 'git push --force*', action: 'deny' }] }),
+    })
+    expect(await policy.decide(writeTool, { command: 'git push --force origin main' })).toBe('deny')
+  })
+
+  it('does not let an allow rule bypass the acts no rule may allow', async () => {
+    const policy = new DefaultPermissionPolicy({
+      rules: rules({ kind: 'rules', rules: [{ match: '*', action: 'allow' }] }),
+    })
+    expect(await policy.decide(writeTool, { command: 'rm -rf /' })).toBe('deny')
+  })
+
+  it('keeps a blanket allow over a rule that only asks', async () => {
+    const policy = new DefaultPermissionPolicy({
+      allow: ['shell_command'],
+      rules: rules({ kind: 'rules', rules: [{ match: 'npm test*', action: 'ask' }] }),
+    })
+    expect(await policy.decide(writeTool, { command: 'npm test' })).toBe('allow')
+  })
+
+  it('follows a rule in auto mode without reaching the reviewer', async () => {
+    let reviewed = 0
+    const policy = new DefaultPermissionPolicy({
+      mode: 'auto',
+      reviewer: { review: async () => { reviewed += 1; return 1 } },
+      rules: rules({
+        kind: 'rules',
+        rules: [
+          { match: 'git status*', action: 'allow' },
+          { match: 'git push*', action: 'deny' },
+          { match: 'npm publish*', action: 'ask' },
+        ],
+      }),
+    })
+
+    expect(await policy.decide(writeTool, { command: 'git status' })).toBe('allow')
+    expect(await policy.decide(writeTool, { command: 'git push' })).toBe('deny')
+    expect(await policy.decide(writeTool, { command: 'npm publish' })).toBe('ask')
+    expect(reviewed).toBe(0)
+  })
+
+  it('does not let a rule allow a command it cannot read', async () => {
+    const policy = new DefaultPermissionPolicy({
+      rules: rules({ kind: 'rules', rules: [{ match: '*', action: 'allow' }] }),
+    })
+    expect(await policy.decide(writeTool, { command: 'echo $(date)' })).toBe('ask')
+  })
+})
+
+describe('an always answer', () => {
+  const writeFile: Tool<{ path: string; content: string }> = {
+    name: 'write_file',
+    description: '',
+    schema: z.object({ path: z.string(), content: z.string() }),
+    async execute() {
+      return { content: '' }
+    },
+  }
+
+  it('keys a shell command by its program and subcommand', () => {
+    expect(approvalKey('shell_command', { command: 'npm test -- --watch' }, '/p')).toBe('shell:npm test')
+    expect(approvalKey('shell_command', { command: 'sudo -u root git status' }, '/p')).toBe('shell:git status')
+    expect(approvalKey('shell_command', { command: 'echo $(date)' }, '/p')).toBeNull()
+  })
+
+  it('gives a chain no key at all', () => {
+    expect(approvalKey('shell_command', { command: 'cd app && npm test' }, '/p')).toBeNull()
+  })
+
+  it('keys a write by its directory, and a patch by all of them', () => {
+    expect(approvalKey('write_file', { path: '/p/src/a.ts' }, '/p')).toBe('dir:/p/src')
+    expect(
+      approvalKey(
+        'apply_patch',
+        { patch: '*** Begin Patch\n*** Update File: a.ts\n@@\n-x\n+y\n*** Add File: b.ts\n+z\n*** End Patch' },
+        '/p',
+      ),
+    ).toBe('dirs:/p')
+  })
+
+  it('answers a cached yes, and keeps barred acts denied', async () => {
+    const approved = new Set<string>([approvalKey('write_file', { path: '/p/src/a.ts' }, '/p')!])
+    const policy = withApprovals(new DefaultPermissionPolicy(), approved, '/p')
+
+    expect(await policy.decide(writeFile, { path: '/p/src/b.ts', content: 'x' })).toBe('allow')
+    expect(await policy.decide(writeFile, { path: '/p/other/b.ts', content: 'x' })).toBe('ask')
+
+    // The same key, but the act itself is one no approval may allow.
+    const dangerous = new Set<string>([approvalKey('write_file', { path: '/etc/hosts' }, '/p')!])
+    const guarded = withApprovals(new DefaultPermissionPolicy(), dangerous, '/p')
+    expect(await guarded.decide(writeFile, { path: '/etc/hosts', content: 'x' })).toBe('deny')
+  })
+
+  it('never overrides a deny', async () => {
+    const approved = new Set<string>(['dir:/p/src'])
+    const policy = withApprovals(new DefaultPermissionPolicy({ deny: ['write_file'] }), approved, '/p')
+    expect(await policy.decide(writeFile, { path: '/p/src/a.ts', content: 'x' })).toBe('deny')
   })
 })

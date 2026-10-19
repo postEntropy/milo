@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Bot, Context } from 'grammy'
 import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
-import type { PermissionRequest } from '../../core/tools/permission.js'
+import type { PermissionRequest, PermissionResult } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import { isTelegramPhoto, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
@@ -151,9 +151,14 @@ export class TelegramGateway implements Gateway {
         await ctx.answerCallbackQuery().catch(() => undefined)
         return
       }
-      const known = this.pending.resolve(parsed.id, parsed.allowed)
+      const known = this.pending.resolve(parsed.id, {
+        allowed: parsed.allowed,
+        ...(parsed.remember ? { remember: true } : {}),
+      })
       await ctx
-        .answerCallbackQuery({ text: known ? (parsed.allowed ? 'Allowed' : 'Denied') : 'Expired' })
+        .answerCallbackQuery({
+          text: known ? (parsed.allowed ? (parsed.remember ? 'Always allowed' : 'Allowed') : 'Denied') : 'Expired',
+        })
         .catch(() => undefined)
       if (known) {
         await ctx
@@ -405,7 +410,7 @@ export class TelegramGateway implements Gateway {
     chatId: string,
     request: PermissionRequest,
     signal?: AbortSignal,
-  ): Promise<boolean> {
+  ): Promise<PermissionResult> {
     const id = randomUUID()
     let promptId: number | undefined
     try {
@@ -414,6 +419,7 @@ export class TelegramGateway implements Gateway {
           inline_keyboard: [
             [
               { text: '✅ Allow', callback_data: encodePermission(id, true) },
+              { text: '♾️ Always', callback_data: encodePermission(id, true, true) },
               { text: '🚫 Deny', callback_data: encodePermission(id, false) },
             ],
           ],
@@ -421,10 +427,10 @@ export class TelegramGateway implements Gateway {
       })
       promptId = prompt.message_id
     } catch {
-      return false
+      return { allowed: false }
     }
 
-    const allowed = await this.pending.wait(id, ASK_TIMEOUT_MS, signal)
+    const result = await this.pending.wait(id, ASK_TIMEOUT_MS, signal)
     if (signal?.aborted && promptId !== undefined) {
       // The id is spent, so a tap answers "Expired" — but the buttons should not
       // be left there inviting a tap that a stopped turn must not honour.
@@ -432,7 +438,7 @@ export class TelegramGateway implements Gateway {
         .editMessageReplyMarkup(chatId, promptId, { reply_markup: { inline_keyboard: [] } })
         .catch(() => undefined)
     }
-    return allowed
+    return result
   }
 
   async stop(): Promise<void> {

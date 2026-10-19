@@ -488,6 +488,7 @@ struct PermissionBar: View {
                 // pair is solid, and that is the browser's house: its surfaces are tokens, and
                 // this app's are the platform's material.
                 MiloWideButton(title: "Deny") { model.answerPermission(allowed: false) }
+                MiloWideButton(title: "Always") { model.answerPermission(allowed: true, remember: true) }
                 MiloWideButton(title: "Allow", primary: true) { model.answerPermission(allowed: true) }
             }
             // The daemon lets a prompt expire; the countdown says how long it holds.

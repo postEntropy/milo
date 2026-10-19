@@ -8,7 +8,7 @@ import {
   type Project,
 } from '../core/projects.js'
 import { resolveToolPath } from '../core/tools/walk.js'
-import { INSTRUCTIONS_FILE, readProjectInstructions, rulesOf } from '../core/agent/instructions.js'
+import { readProjectInstructions, rulesOf } from '../core/agent/instructions.js'
 import { errorMessage } from '../util/errors.js'
 
 export interface ProjectIo {
@@ -88,8 +88,8 @@ function list(out: ProjectIo['out']): number {
     // that is worth knowing before one is started. A folder with none says nothing —
     // silence is the ordinary case, not a warning.
     const rules = rulesOf(readProjectInstructions(placement))
-    if (rules.kind === 'present') out(`     rules: ${INSTRUCTIONS_FILE}`)
-    else if (rules.kind === 'unreadable') out(`     rules: ${INSTRUCTIONS_FILE} — ${rules.error}`)
+    if (rules.kind === 'present') out(`     rules: ${rules.file}`)
+    else if (rules.kind === 'unreadable') out(`     rules: ${rules.file} — ${rules.error}`)
   }
   return 0
 }

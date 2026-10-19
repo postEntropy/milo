@@ -6,7 +6,8 @@ import { Icon } from '../ui/Icons.js'
 export function Permissions({ request, expiresAt, onDecision }: {
   request: PermissionRequest
   expiresAt: number
-  onDecision(allowed: boolean): void
+  /** `always` covers the same act for the rest of this session. */
+  onDecision(action: 'allow' | 'always' | 'deny'): void
 }) {
   const tool = toolDisplayName(request.tool)
   const [remaining, setRemaining] = useState(Math.max(0, Math.ceil((expiresAt - Date.now()) / 1000)))
@@ -21,8 +22,9 @@ export function Permissions({ request, expiresAt, onDecision }: {
     </div>
     <pre className="approval-command">{request.summary}</pre>
     <div className="approval-actions">
-      <button className="allow-button" type="button" onClick={() => onDecision(true)}><Icon name="check" size={15} /> Allow</button>
-      <button className="deny-button" type="button" onClick={() => onDecision(false)}>Deny</button>
+      <button className="allow-button" type="button" onClick={() => onDecision('allow')}><Icon name="check" size={15} /> Allow</button>
+      <button className="always-button" type="button" title="Allow this act without asking again in this session" onClick={() => onDecision('always')}>Always allow</button>
+      <button className="deny-button" type="button" onClick={() => onDecision('deny')}>Deny</button>
       <span className="approval-time"><Icon name="clock" size={14} /> {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, '0')}</span>
     </div>
   </section>

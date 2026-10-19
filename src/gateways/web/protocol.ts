@@ -3,6 +3,7 @@ import type { Idea } from '../../core/ideas.js'
 import type { PanelRequest } from '../../core/panel.js'
 import type { ProjectView } from '../../core/projects.js'
 import type { TodoItem } from '../../core/todos.js'
+import type { VerificationResult } from '../../core/verification.js'
 import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
 
 // 9: a `ui` event carries `draft` while the block is still being written, so the
@@ -59,6 +60,8 @@ export type AgentEvent =
   | { type: 'waiting' }
   | { type: 'waited'; ms: number }
   | { type: 'steer'; text: string }
+  /** The project's own checks after a turn that wrote. Display state only. */
+  | { type: 'verification'; result: VerificationResult; text: string; ok: boolean }
   | { type: 'done'; finishReason: string }
   | { type: 'aborted' }
   | { type: 'error'; message: string }
@@ -98,7 +101,13 @@ export interface SessionCardItem {
 export type ClientFrame =
   | { type: 'hello'; version: number; conversationId: string; genui?: boolean; client?: ClientKind }
   | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[] }
-  | { type: 'control'; action: 'stop' | 'allow' | 'deny' | 'plan' | 'approve-plan'; id?: string; plan?: boolean }
+  | {
+      type: 'control'
+      /** `always`: allow, and for this session do not ask again about the same act. */
+      action: 'stop' | 'allow' | 'always' | 'deny' | 'plan' | 'approve-plan'
+      id?: string
+      plan?: boolean
+    }
   /** Stop a background job. Pressing the control is the confirmation. */
   | { type: 'job-kill'; id: string }
   | { type: 'command'; text: string }
@@ -208,7 +217,7 @@ export type ServerFrame =
   | { type: 'turn-start'; id: string; text: string }
   | { type: 'event'; turnId: string; event: AgentEvent }
   | { type: 'permission'; id: string; request: PermissionRequest; expiresAt: number }
-  | { type: 'permission-result'; id: string; allowed: boolean }
+  | { type: 'permission-result'; id: string; allowed: boolean; remember?: boolean }
   | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error'; raw?: string; rawNoOutput?: string }
   | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; attachments?: FrameAttachment[]; actions?: ActionRow[]; messageId?: string; cards?: SessionCardItem[] }
   | { type: 'state'; busy: boolean; queued: number }
@@ -270,6 +279,8 @@ export type TranscriptPart =
   | { kind: 'reasoning'; text: string }
   | { kind: 'tool'; tool: ToolMark }
   | { kind: 'todo'; items: TodoItem[] }
+  /** What the project's checks answered after the turn. */
+  | { kind: 'verification'; ok: boolean; text: string }
   /** `draft` is only ever set on the wire: a stored session is read back as it ended. */
   | { kind: 'ui'; render: GenUiRender; draft?: boolean }
 

@@ -9,11 +9,13 @@ import type { TraceWriter } from './traces.js'
 import type { Memory, MemoryScope } from './memory/index.js'
 import { scopeKey } from './memory/index.js'
 import { DEFAULT_REASONING_EFFORT, type Provider, type ReasoningEffort } from './providers/types.js'
+import type { ModelProfile } from './providers/profile.js'
 import type { Skill, SkillLibrary } from './skills/index.js'
 import type { PermissionPolicy } from './tools/index.js'
 import type { RoutineStore, ToolRegistry } from './tools/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
-import type { ProjectLookup, ProjectPlacement } from './projects.js'
+import type { Project, ProjectLookup, ProjectPlacement } from './projects.js'
+import type { VerificationResult } from './verification.js'
 import type { ProjectInstructions } from './agent/instructions.js'
 import { Session } from './session.js'
 import {
@@ -66,6 +68,18 @@ export interface RuntimeOptions {
    * in a test needs no folder on disk, and a session with no project never calls it.
    */
   instructions?: (placement: ProjectPlacement | undefined) => ProjectInstructions
+  /**
+   * The rules of this install itself (`~/.milo/AGENTS.md`), read live like the
+   * project's so an edit lands on the next turn. Above every project's.
+   */
+  ownInstructions?: () => ProjectInstructions
+  /** How the shell is contained; from `sandbox` in the config. */
+  sandbox?: 'off' | 'workspace'
+  /**
+   * The project's own checks after a turn that wrote. Absent when the gate is
+   * off, which is the default.
+   */
+  verify?: (project: Project) => Promise<VerificationResult>
   /** The skills directory, read live, so the index in every prompt stays current. */
   skills?: SkillLibrary
   maxSteps?: number
@@ -97,8 +111,11 @@ export interface RuntimeOptions {
    * cleanly.
    */
   routine?: RoutineStore
-  /** Where a model's context window comes from, for the compaction ceiling. */
-  lookupContextWindow?: (model: string) => Promise<number | undefined>
+  /**
+   * What is known about a model — its window, output ceiling and reasoning mode —
+   * for the compaction ceiling and the request's own limits.
+   */
+  modelProfile?: (model: string) => Promise<ModelProfile | undefined>
   /** How hard the model should think; `medium` unless the config was changed. */
   reasoningEffort?: ReasoningEffort
   /**
@@ -214,11 +231,11 @@ export class AgentRuntime {
    * Nothing is lost by it: the session left behind stays on disk, is still
    * listed by `/sessions` and is still `/resume`-able.
    */
-  async sessionFor(scope: MemoryScope): Promise<Session> {
+  async sessionFor(scope: MemoryScope, options?: NewSessionOptions): Promise<Session> {
     const key = scopeKey(scope)
     if (this.opened.has(key)) return this.getSession(scope)
     this.opened.add(key)
-    return this.newSession(scope)
+    return this.newSession(scope, undefined, options)
   }
 
   /**
@@ -473,8 +490,10 @@ export class AgentRuntime {
    */
   async contextBudget(): Promise<number | undefined> {
     const config = this.options.sessions
-    const window = config?.contextWindow ?? (await this.options.lookupContextWindow?.(this.options.model))
-    return contextBudget(config, window)
+    const profile = config?.contextWindow ? undefined : await this.options.modelProfile?.(this.options.model)
+    const window = config?.contextWindow ?? profile?.context
+    const rules = config && profile?.compactionAt ? { ...config, compactAt: profile.compactionAt } : config
+    return contextBudget(rules, window)
   }
 
   /**
@@ -642,6 +661,14 @@ export class AgentRuntime {
       // Read per turn, like the skills: the rules of the folder this session works
       // in, so an edit to that file lands on the next turn without a restart.
       instructions: this.options.instructions ? () => this.options.instructions!(placement) : undefined,
+      // The install's own rules, independent of the project: the same getter on
+      // every session, reading the file again each turn.
+      ownInstructions: this.options.ownInstructions,
+      // The shell's box, fixed for the life of the process: a config change needs
+      // a restart, like the browser's own settings.
+      sandbox: this.options.sandbox,
+      // The gate's own function, when the install turned it on.
+      verify: this.options.verify,
       // A getter, not the list: the system prompt is built per turn, and a skill
       // installed since the last one belongs in it.
       skills: this.options.skills ? () => this.options.skills!.list() : undefined,
@@ -665,7 +692,7 @@ export class AgentRuntime {
       // implementation per behaviour. `listSessions` already hides routine runs,
       // and `removeSession` takes the recap and the cache entry with the record.
       sessionAdmin: { list: () => this.listSessions(), remove: (id) => this.removeSession(id) },
-      lookupContextWindow: this.options.lookupContextWindow,
+      modelProfile: this.options.modelProfile,
       keepSnapshots: this.options.keepSnapshots,
       // A getter, so the prompt says what the browser is now rather than what it
       // was when the runtime was built.

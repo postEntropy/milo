@@ -134,6 +134,39 @@ export function resolveToolPath(cwd: string, target: string | undefined): string
   return path.isAbsolute(value) ? value : path.resolve(cwd, value)
 }
 
+/** Where a write may go, or why it may not. */
+export type WritePath = { ok: true; path: string } | { ok: false; error: string }
+
+/**
+ * The path a write would land on, refused when it leaves the folder the turn is
+ * confined to. Reads are deliberately not confined: looking at a system file or a
+ * neighbouring project is useful, and changing one is what needs the boundary.
+ *
+ * The check is on the resolved path, so `../` and an absolute path are held to
+ * the same rule as a plain relative one.
+ */
+export function resolveWritePath(
+  cwd: string,
+  target: string | undefined,
+  confineTo?: string,
+): WritePath {
+  const resolved = resolveToolPath(cwd, target)
+  if (!confineTo) return { ok: true, path: resolved }
+  if (isInsideFolder(resolved, confineTo)) return { ok: true, path: resolved }
+  return {
+    ok: false,
+    error: `"${target ?? resolved}" is outside the project's folder (${confineTo}). Writing outside it is not allowed.`,
+  }
+}
+
+function isInsideFolder(target: string, folder: string): boolean {
+  const from = path.resolve(folder)
+  const to = path.resolve(target)
+  if (to === from) return true
+  const rel = path.relative(from, to)
+  return rel !== '' && !rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel)
+}
+
 /** How a path is shown back to the model: relative when that is shorter. */
 export function displayPath(cwd: string, target: string): string {
   const rel = toPosix(path.relative(cwd, target))

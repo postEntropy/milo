@@ -4,7 +4,7 @@ import type { SkillSummary } from '../skills/index.js'
 import type { ProjectPlacement } from '../projects.js'
 import type { ProjectInstructions } from './instructions.js'
 import type { RunTrace } from './loop.js'
-import type { ToolContext, ToolRegistry, ToolResult } from '../tools/index.js'
+import type { ToolContext, ToolEffect, ToolRegistry, ToolResult } from '../tools/index.js'
 import type { BrowserFacts } from '../browser/index.js'
 import type { GoogleState } from '../google/state.js'
 import type { McpFacts } from '../mcp/servers.js'
@@ -24,6 +24,15 @@ export interface SubagentRun {
    * turn has no project, or the project carries no instructions.
    */
   instructions?: ProjectInstructions
+  /**
+   * The rules of the install, already resolved: a delegated task runs under the
+   * same `~/.milo/AGENTS.md` the parent does.
+   */
+  ownInstructions?: ProjectInstructions
+  /** The folder a delegated write may not leave; the parent's project. */
+  confineTo?: string
+  /** How the delegated shell is contained, when the parent's is. */
+  sandbox?: 'off' | 'workspace'
   /**
    * The project the parent turn works in, already resolved. A delegated task
    * works in the same folder, so it carries the same project — and the code
@@ -52,7 +61,7 @@ export interface SubagentRun {
    * the same folder a watching surface re-reads: without this, a delegated write would
    * leave the screen showing what was there before it.
    */
-  onSideEffect?: () => void
+  onSideEffect?: (effect: ToolEffect) => void
   /** The parent turn's policy and prompt, so the subagent's actions ask the same way. */
   permission?: ToolPermission
   maxSteps?: number
@@ -93,12 +102,14 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     tools,
     skills: options.skills,
     instructions: options.instructions,
+    ownInstructions: options.ownInstructions,
     project: options.project,
     browser: options.browser ?? null,
     mcp: options.mcp ?? null,
     google: options.google ?? null,
     memories: [],
     plan: options.plan,
+    sandbox: options.sandbox,
   })
   const messages: Message[] = [
     { role: 'user', content: [{ type: 'text', text: options.input.prompt }] },
@@ -106,6 +117,8 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
   const context: ToolContext = {
     cwd: options.cwd,
     signal: options.signal,
+    confineTo: options.confineTo,
+    sandbox: options.sandbox,
     remember: options.context.remember,
     memories: options.context.memories,
     recall: options.context.recall,

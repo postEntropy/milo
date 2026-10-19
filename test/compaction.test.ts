@@ -119,7 +119,10 @@ async function compactingSession(
       generateTitles: false,
       contextWindow: options.contextWindow,
     },
-    lookupContextWindow: options.lookup,
+    modelProfile: async (model) => {
+      const context = await options.lookup?.(model)
+      return context === undefined ? undefined : { id: model, context }
+    },
   })
 
   const events = []

@@ -24,7 +24,7 @@ struct SendTarget: Equatable {
 
 enum ClientFrame {
     enum Intent: String { case steer, queue }
-    enum Control: String { case stop, allow, deny }
+    enum Control: String { case stop, allow, always, deny }
 
     case hello(conversationId: String)
     /// The files the message carries: the daemon's names for bytes this app has already
@@ -136,6 +136,9 @@ enum WirePart: Decodable {
     case reasoning(String)
     case tool(ToolMark)
     case todo([TodoItem])
+    /// The project's checks after a turn that wrote: the core's own words, and
+    /// whether they passed.
+    case verification(text: String, ok: Bool)
     /// The widget the turn drew beside its words. It used to decode as `other` and
     /// vanish without a word, which is the one thing a drawn thing may not do.
     /// `draft` is a widget still being written, drawn in place as it grows — a stored
@@ -143,7 +146,7 @@ enum WirePart: Decodable {
     case ui(GenUi, draft: Bool)
     case other
 
-    private enum CodingKeys: String, CodingKey { case kind, text, tool, items, render, draft }
+    private enum CodingKeys: String, CodingKey { case kind, text, tool, items, render, draft, ok }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
@@ -152,6 +155,11 @@ enum WirePart: Decodable {
         case "reasoning": self = .reasoning(try container.decode(String.self, forKey: .text))
         case "tool": self = .tool(try container.decode(ToolMark.self, forKey: .tool))
         case "todo": self = .todo(try container.decode([TodoItem].self, forKey: .items))
+        case "verification":
+            self = .verification(
+                text: (try? container.decodeIfPresent(String.self, forKey: .text)) ?? "",
+                ok: (try? container.decodeIfPresent(Bool.self, forKey: .ok)) ?? false
+            )
         case "ui":
             self = .ui(
                 (try? container.decode(GenUi.self, forKey: .render)) ?? .unreadable,
@@ -307,6 +315,9 @@ enum AgentEvent: Decodable {
     case toolStart(id: String, name: String, text: String?)
     case toolEnd(id: String, name: String, isError: Bool, result: String?)
     case todo([TodoItem])
+    /// The project's checks after a turn that wrote. The words are the core's, so
+    /// the phone says what the browser and the terminal say.
+    case verification(text: String, ok: Bool)
     /// A widget as the model writes it: the same tree at longer and longer prefixes,
     /// `draft` while the block is still open. It is drawn in place as it grows.
     case ui(GenUi, draft: Bool)
@@ -327,7 +338,7 @@ enum AgentEvent: Decodable {
     case other
 
     private enum CodingKeys: String, CodingKey {
-        case type, delta, id, name, isError, items, message, render, draft, text, finishReason, result
+        case type, delta, id, name, isError, items, message, render, draft, text, finishReason, result, ok
         case inputTokens, outputTokens, ms, added, removed, compacted
         case folded, tokens, summarized
     }
@@ -357,6 +368,7 @@ enum AgentEvent: Decodable {
                 result: readText(.result)
             )
         case "todo": self = .todo(read(.items, []))
+        case "verification": self = .verification(text: readText(.text) ?? "", ok: read(.ok, false))
         case "ui":
             self = .ui((try? container.decode(GenUi.self, forKey: .render)) ?? .unreadable, draft: read(.draft, false))
         case "usage":

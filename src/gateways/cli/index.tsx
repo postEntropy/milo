@@ -33,6 +33,8 @@ export interface ShellProps {
   startScreen?: 'chat' | 'model' | 'settings'
   standalone?: boolean
   initialMode?: PermissionMode
+  /** `milo --project <ref>`: start the session in a registered project's folder. */
+  project?: string
   /** `milo --resume <id>`: open this session instead of starting a new one. */
   resumeId?: string
   /**
@@ -48,6 +50,7 @@ export function Shell({
   startScreen = 'chat',
   standalone = false,
   initialMode,
+  project,
   resumeId,
   continueSession = false,
 }: ShellProps) {
@@ -110,14 +113,14 @@ export function Shell({
       // and `/sessions` still lists it. `--continue` is the way back to it.
       const session = continueSession
         ? await runtime.getSession(CLI_SCOPE)
-        : await runtime.sessionFor(CLI_SCOPE)
+        : await runtime.sessionFor(CLI_SCOPE, project ? { project } : undefined)
       if (!cancelled) setSessionId(session.id)
     }
     void resolve()
     return () => {
       cancelled = true
     }
-  }, [runtime, resumeId, continueSession])
+  }, [runtime, resumeId, continueSession, project])
 
   // Push live settings edits into the existing policy.
   useEffect(() => {

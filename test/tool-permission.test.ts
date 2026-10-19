@@ -70,6 +70,8 @@ describe('tool permission gating', () => {
       git_commit: false,
       write_file: false,
       edit_file: false,
+      apply_patch: false,
+      format: false,
       memories: false,
       remember: false,
       recall: true,

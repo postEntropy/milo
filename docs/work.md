@@ -37,10 +37,12 @@ the ordinary ones, with the folder they run in changed.
   tab reads.
 - No second store. Projects and sessions are the install's, and the same session list feeds
   every surface.
-- No per-project model, instructions or permission configuration beyond `AGENTS.md`.
-- A surface of the web app and the phone only. Telegram and Discord are not Work and will
-  not be: their session list names a session's project and that is the whole of it. The
-  CLI manages projects with `milo projects`.
+- No per-project model, instructions or permission configuration beyond `AGENTS.md` — or
+  `CLAUDE.md` when the folder carries that name instead.
+- A surface of the web app and the phone. Telegram and Discord are not Work and will not
+  be: their session list names a session's project and that is the whole of it. The CLI
+  manages projects with `milo projects`, and works in one with `milo --project <ref>` or
+  `milo run --project <ref>` — the same session and the same folder, without the tab.
 
 ## Behaviour
 
@@ -62,12 +64,10 @@ the ordinary ones, with the folder they run in changed.
 
 ## Deliberately later
 
-- Starting a session already in a project from the terminal (`milo`, `milo chat`). The tab
-  is the only place that does it today.
+- Rules per subfolder. `AGENTS.md` (or `CLAUDE.md`) is read at the project's root; a rule
+  that follows a monorepo's packages needs the path the turn is touching first.
 - MCP per project — an external tool server stays the install's.
-- A global `~/.milo/AGENTS.md`, a `CLAUDE.md` fallback, and per-subfolder rules.
 - An editor in the tab.
-- The web redesign that follows the phone's white/black tone.
 
 ## Code map
 

@@ -62,7 +62,7 @@ async function harness(options: { onEdit?: (value: string) => void } = {}) {
       edits.push(value)
       options.onEdit?.(value)
     },
-    ask: async () => true,
+    ask: async () => ({ allowed: true }),
     files: async () => undefined,
     typing: () => () => undefined,
   }

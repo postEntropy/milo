@@ -6,7 +6,7 @@ import { tracesFile } from './config/paths.js'
 import type { ChatRequest, FinishReason, Provider, StreamEvent } from './providers/types.js'
 
 /** The kinds of execution the log records. A closed vocabulary, so a reader can trust the name. */
-export type TraceEventName = 'model.request' | 'classifier.request' | 'tool.call' | 'turn'
+export type TraceEventName = 'model.request' | 'classifier.request' | 'tool.call' | 'turn' | 'verification'
 
 /**
  * One line of the execution log.

@@ -1,6 +1,6 @@
 import { DEFAULT_WORKING_DIRECTORY, scratchDir } from '../config/paths.js'
 import type { ProjectPlacement } from '../projects.js'
-import { INSTRUCTIONS_FILE, type ProjectInstructions } from './instructions.js'
+import type { ProjectInstructions } from './instructions.js'
 import { modelFamily, type ModelFamily } from './model-family.js'
 import { shortId, type MemoryItem } from '../memory/index.js'
 import type { ToolSpec } from '../providers/types.js'
@@ -131,7 +131,9 @@ const PROJECT_CODE_SECTION = [
   '- Read before you write: the file, its neighbours, and the commands the project already uses. Change the smallest thing that solves the task and match the style around it.',
   '- Do not invent a command, a file, an API or a directory. If you did not see it in the folder, it is not there.',
   '- Do not add structure the task does not need: no speculative abstraction, no dead code. Do not reformat or undo work you did not do, and keep unrelated lines out of the change.',
+  '- When one change spans several files, prefer `apply_patch`: it applies as one reviewed patch, and refuses the whole thing rather than half of it.',
   "- A change is not finished until you have checked it: run the project's own tests, typecheck or lint when they exist, and say what you ran and what it answered. When no check exists, say that plainly rather than claiming it works.",
+  '- When the project has a formatter, run it over what you changed (`format`) before calling the work done. Do not reformat files the task did not touch.',
 ].join('\n')
 
 /**
@@ -179,6 +181,12 @@ export interface SystemPromptInput {
    * instructions to follow, unlike the remembered notes, which are data.
    */
   instructions?: ProjectInstructions
+  /**
+   * The rules of this Milo install itself, from `~/.milo/AGENTS.md`. Carried above
+   * the project's own, so a folder can refine the install's conventions but not
+   * silently replace them.
+   */
+  ownInstructions?: ProjectInstructions
   /** The session this turn is running in (`calm-otter-7`), so the model can name it. */
   sessionId?: string
   tools: ToolSpec[]
@@ -216,6 +224,8 @@ export interface SystemPromptInput {
    * turn, so the model proposes instead of trying to write.
    */
   plan?: boolean
+  /** How the shell is contained, when the config asked for `bwrap`. */
+  sandbox?: 'off' | 'workspace'
   now?: Date
 }
 
@@ -393,12 +403,35 @@ function projectInstructionsSection(
   if (instructions.kind === 'unreadable') {
     return [
       '## This project\'s instructions',
-      `- This project has an \`${INSTRUCTIONS_FILE}\`, but it could not be included: ${instructions.error}. Do not guess what it says.`,
+      `- This project has an \`${instructions.file}\`, but it could not be included: ${instructions.error}. Do not guess what it says.`,
     ].join('\n')
   }
   return [
     '## This project\'s instructions',
-    `- \`${INSTRUCTIONS_FILE}\` in this project's folder, as it stands. These are the project's own rules: follow them. They outrank your habits; the person and your base instructions outrank them.`,
+    `- \`${instructions.file}\` in this project's folder, as it stands. These are the project's own rules: follow them. They outrank your habits; the person and your base instructions outrank them.`,
+    '<instructions>',
+    instructions.text,
+    '</instructions>',
+  ].join('\n')
+}
+
+/**
+ * This install's own rules, above the project's. The same shape as the project
+ * section, and the same sentence about who outranks whom: a file in Milo's own
+ * directory is still a file, not a promotion over the person.
+ */
+function ownInstructionsSection(
+  instructions: Exclude<ProjectInstructions, { kind: 'absent' }>,
+): string {
+  if (instructions.kind === 'unreadable') {
+    return [
+      '## Your own instructions',
+      `- This install has an \`${instructions.file}\` in Milo's own directory, but it could not be included: ${instructions.error}. Do not guess what it says.`,
+    ].join('\n')
+  }
+  return [
+    '## Your own instructions',
+    `- \`${instructions.file}\` in Milo's own directory (\`~/.milo\`), as it stands. These are this install's rules: follow them in every session. They outrank your habits; the person and your base instructions outrank them, and the project's own rules refine them for that folder.`,
     '<instructions>',
     instructions.text,
     '</instructions>',
@@ -534,10 +567,13 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   )
   sections.push(`## Environment\n${environment.join('\n')}`)
 
-  // The project's own rules, read from its folder and carried as instructions the
-  // model follows — unlike the remembered notes further down, which are data. The
-  // section says as much, so a folder cannot put an order above the person or the
-  // base policy by writing one.
+  // The install's own rules come first, then the folder's: the project refines
+  // them, and both are instructions the model follows — unlike the remembered
+  // notes further down, which are data. Each section says as much, so neither a
+  // folder nor `~/.milo` can put an order above the person or the base policy.
+  if (input.ownInstructions && input.ownInstructions.kind !== 'absent') {
+    sections.push(ownInstructionsSection(input.ownInstructions))
+  }
   if (input.instructions && input.instructions.kind !== 'absent') {
     sections.push(projectInstructionsSection(input.instructions))
   }
@@ -558,6 +594,11 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
           ? '- A command that walks a large tree — `du`, `find` over a whole disk — can outlast the default timeout and be killed with nothing to show. Bound it with `timeout` or raise `timeoutMs`: background is not available inside a routine, so the command has to finish within the wait.'
           : '- A command that walks a large tree — `du`, `find` over a whole disk — can outlast the default timeout and be killed with nothing to show. Bound it with `timeout`, raise `timeoutMs`, or run it with `background`.',
         '- When you check your own work, let each check stand on its own: a `&&` chain stops at the first failure and hides every check after it.',
+        ...(input.sandbox === 'workspace'
+          ? [
+              '- The shell is sandboxed: the project folder is writable, the rest of the machine is read-only, and the network is off. A background job cannot be sandboxed, so it is refused.',
+            ]
+          : []),
       ].join('\n'),
     )
   }

@@ -656,11 +656,11 @@ private struct ProjectRulesSection: View {
                 MiloErrorPill(text: error)
             } else if let rules {
                 if rules.carriesRules {
-                    Text("This folder’s rules are in AGENTS.md. A session started here follows them.")
+                    Text("This folder’s rules are in \(rules.file ?? "AGENTS.md"). A session started here follows them.")
                         .font(MiloTheme.Text.small)
                         .foregroundStyle(MiloTheme.muted)
                 } else if rules.isUnreadable {
-                    Text("This folder has an AGENTS.md that could not be read: \(rules.error ?? "")")
+                    Text("This folder has an \(rules.file ?? "AGENTS.md") that could not be read: \(rules.error ?? "")")
                         .font(MiloTheme.Text.small)
                         .foregroundStyle(MiloTheme.muted)
                 } else {

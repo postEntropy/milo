@@ -186,9 +186,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
       audio,
       ...(mediaModel ? { model: mediaModel } : {}),
       ...(options.sessionsAllowed === false ? { sessionsAllowed: false } : {}),
-      ask: async (request) => ({
-        allowed: await surface.ask(conversationId, messageId, request),
-      }),
+      ask: (request) => surface.ask(conversationId, messageId, request),
     })) {
       switch (event.type) {
         case 'reasoning-delta':
@@ -240,6 +238,12 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
             await flushReasoning()
             await appendLine(formatTodos(event.items), 'prose')
           }
+          break
+        // The project's checks, after a turn that wrote. The words are the
+        // core's, so a bot says what the terminal and the browser say.
+        case 'verification':
+          await flushReasoning()
+          await appendLine(event.text, 'prose')
           break
         // The fold is a model call of its own before the turn's, and on a chat it
         // was costing seconds with nothing said about it at all. Named while it

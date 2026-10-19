@@ -58,11 +58,11 @@
   --focus-outline: color-mix(in oklab, var(--fg) 25%, transparent);
   /* Corner rounding: one scale for the whole interface. A value is picked by the role a
      thing plays — never per component. `--radius-pill` and `50%` are shapes, not levels. */
-  --radius-xs: 4px;     /* marks read inline with text: inline code, id/size badges */
-  --radius-sm: 6px;    /* small icon buttons, menu options, tiny inner fields, chips */
-  --radius-md: 8px;    /* single-line rows, list/nav items, inputs, standard buttons */
-  --radius-lg: 10px;    /* cards, panels, popovers, code/blocks, notices, iframes */
-  --radius-xl: 12px;    /* the big surfaces: composer, user bubble, suggestions, approval */
+  --radius-xs: 6px;     /* marks read inline with text: inline code, id/size badges */
+  --radius-sm: 8px;    /* small icon buttons, menu options, tiny inner fields, chips */
+  --radius-md: 12px;    /* single-line rows, list/nav items, inputs, standard buttons */
+  --radius-lg: 16px;    /* cards, panels, popovers, code/blocks, notices, iframes */
+  --radius-xl: 20px;    /* the big surfaces: composer, user bubble, suggestions, approval */
   --radius-pill: 999px; /* pills, chips, switches, round buttons */
   /* Type: one ladder for the whole interface, picked by the role a thing plays. The ten
      sizes between 10 and 14px doing one job each are why text read uneven everywhere. */
@@ -834,10 +834,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .approval .approval-title p { margin-top: var(--space-1); color: var(--muted); font-size: var(--text-sm); line-height: 1.5; }
 .approval-command { overflow: auto; max-height: 180px; margin: var(--space-7) 0 0; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--surface-warm); padding: var(--space-6) var(--space-6); color: var(--fg); font: var(--text-xs)/1.55 var(--font-mono); white-space: pre-wrap; word-break: break-word; }
 .approval-actions { display: flex; align-items: center; gap: var(--space-5); margin-top: var(--space-7); flex-wrap: wrap; }
-.allow-button, .deny-button { display: inline-flex; min-height: var(--control-md); align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--surface-warm); padding: var(--space-4) var(--space-6); font-size: var(--text-sm); font-weight: 500; transition: background var(--motion-fast); }
+.allow-button, .always-button, .deny-button { display: inline-flex; min-height: var(--control-md); align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--surface-warm); padding: var(--space-4) var(--space-6); font-size: var(--text-sm); font-weight: 500; transition: background var(--motion-fast); }
 .allow-button { background: var(--accent); color: var(--accent-on); }
 .allow-button:hover { background: var(--accent-hover); }
-.deny-button:hover { background: var(--border-soft); }
+.always-button:hover, .deny-button:hover { background: var(--border-soft); }
 .approval-time { display: flex; align-items: center; gap: var(--space-3); margin-inline-start: auto; color: var(--muted); font: var(--text-xs) var(--font-mono); }
 
 .settings-workspace { display: flex; flex: 1; min-height: 0; flex-direction: column; overflow: auto; }
@@ -1423,6 +1423,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .todo-text { min-width: 0; }
 .todo-mark { flex: none; margin-top: var(--space-1); color: var(--muted); stroke-width: 2.2; }
 .todo-item.todo-in_progress { color: var(--fg); font-weight: 500; }
+/* The verification gate: one filled block, never an outlined one. The verdict's
+   colour is the edit; the detail is the failing command's own output. */
+.verification-card { border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-5) var(--space-6); color: var(--muted); font-size: var(--text-sm); }
+.verification-card.failed { color: var(--danger); }
+.verification-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
 .todo-item.todo-in_progress .todo-mark { color: var(--accent); }
 .todo-item.todo-completed { color: var(--muted); }
 .todo-item.todo-completed .todo-mark { color: var(--success); }

@@ -535,6 +535,9 @@ export default function App() {
         if (event.type === 'todo') return event.items.length > 0
           ? { ...message, parts: [...message.parts, { kind: 'todo', items: event.items }] }
           : message
+        if (event.type === 'verification') {
+          return { ...message, parts: [...message.parts, { kind: 'verification', ok: event.ok, text: event.text }] }
+        }
         if (event.type === 'ui') {
           // A widget arrives as the model writes it: each draft takes the place of the
           // one before it, and the closed block takes the place of the last draft.
@@ -853,9 +856,9 @@ export default function App() {
   }
 
   /** The answer to a permission prompt, wherever on screen it is drawn. */
-  function decide(allowed: boolean): void {
+  function decide(action: 'allow' | 'always' | 'deny'): void {
     if (!pendingPermission) return
-    socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })
+    socket.send({ type: 'control', action, id: pendingPermission.id })
   }
 
   const openSession = useCallback(async (id: string): Promise<void> => {
@@ -1087,7 +1090,7 @@ export default function App() {
   /** The main chat's thread: prose, tools, the plan and anything the model drew. */
   const thread = <>
     <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} />
-    {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(allowed) => socket.send({ type: 'control', action: allowed ? 'allow' : 'deny', id: pendingPermission.id })} /></article>}
+    {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(action) => socket.send({ type: 'control', action, id: pendingPermission.id })} /></article>}
   </>
 
   return <div className={`app-shell ${sidebarOpen ? 'drawer-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'chat' && panelOpen && panel && panel.tabs.length > 0 ? 'panel-open' : ''}`}>

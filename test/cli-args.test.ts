@@ -11,6 +11,8 @@ describe('parseArgs', () => {
       yolo: false,
       continueSession: false,
       noWeb: false,
+      json: false,
+      allow: [],
     })
   })
 
@@ -67,6 +69,35 @@ describe('parseArgs', () => {
     expect(parseArgs(['--model']).model).toBeUndefined()
     expect(parseArgs(['--mode']).mode).toBeUndefined()
   })
+
+  it('takes the bare words after run as the prompt', () => {
+    const args = parseArgs(['run', '--project', 'milo', 'fix the tests'])
+    expect(args.command).toBe('run')
+    expect(args.project).toBe('milo')
+    expect(args.prompt).toBe('fix the tests')
+  })
+
+  it('reads the run flags', () => {
+    const args = parseArgs([
+      'run',
+      '--json',
+      '--session',
+      'calm-otter-7',
+      '--allow',
+      'shell_command,write_file',
+      '--allow',
+      'edit_file',
+      'go',
+    ])
+    expect(args.json).toBe(true)
+    expect(args.session).toBe('calm-otter-7')
+    expect(args.allow).toEqual(['shell_command', 'write_file', 'edit_file'])
+    expect(args.prompt).toBe('go')
+  })
+
+  it('reads a working folder', () => {
+    expect(parseArgs(['--cwd', '/tmp/x']).cwd).toBe('/tmp/x')
+  })
 })
 
 describe('validateArgs', () => {
@@ -75,5 +106,17 @@ describe('validateArgs', () => {
     expect(validateArgs(parseArgs(['serve', '--web-port', 'nonsense']))).toContain('Invalid --web-port')
     expect(validateArgs(parseArgs(['serve', '--web-port', '8080']))).toBeNull()
     expect(validateArgs(parseArgs(['serve']))).toBeNull()
+  })
+
+  it('refuses both a project and a folder at once', () => {
+    expect(validateArgs(parseArgs(['--project', 'milo', '--cwd', '/tmp']))).toContain(
+      'Use one of --project or --cwd',
+    )
+    expect(validateArgs(parseArgs(['--project', 'milo']))).toBeNull()
+  })
+
+  it('checks the session a run names', () => {
+    expect(validateArgs(parseArgs(['run', '--session', 'nope']))).toContain('Invalid session id')
+    expect(validateArgs(parseArgs(['run', '--session', 'calm-otter-7']))).toBeNull()
   })
 })

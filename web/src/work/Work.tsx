@@ -80,6 +80,8 @@ type WorkDiff =
 /** Whether a project's folder carries rules of its own, and the words that ask for them. */
 type ProjectRules = {
   kind: 'present' | 'absent' | 'unreadable'
+  /** Which file carries the rules: `AGENTS.md`, or `CLAUDE.md` when it is the fallback. */
+  file?: string
   /** Why the file could not be read, when it could not. */
   error?: string
   /** What a session is told to write or improve the file — one wording, every surface. */
@@ -544,9 +546,9 @@ function ProjectPage({
         : rules === null
           ? <SkeletonList rows={1} label="Reading this folder’s rules…" />
           : rules.kind === 'present'
-            ? <p className="list-empty">This folder’s rules are in <code>AGENTS.md</code>. A session started here follows them.</p>
+            ? <p className="list-empty">This folder’s rules are in <code>{rules.file ?? 'AGENTS.md'}</code>. A session started here follows them.</p>
             : rules.kind === 'unreadable'
-              ? <p className="list-empty">This folder has an <code>AGENTS.md</code> that could not be read: {rules.error}</p>
+              ? <p className="list-empty">This folder has an <code>{rules.file ?? 'AGENTS.md'}</code> that could not be read: {rules.error}</p>
               : <div className="work-changes-none">
                 {/* What a project's own rules are, said once — and the one control that
                     makes them: a session told to read the folder and write the file, which

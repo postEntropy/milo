@@ -1,5 +1,5 @@
 import type { OutgoingFile } from '../core/outgoing.js'
-import type { PermissionRequest } from '../core/tools/permission.js'
+import type { PermissionRequest, PermissionResult } from '../core/tools/permission.js'
 
 /**
  * What a turn needs from a chat transport. Every gateway (Telegram, Discord,
@@ -11,8 +11,8 @@ export interface ChatSurface {
   post(conversationId: string, text: string): Promise<string>
   /** Replace the message text (called as the answer streams). */
   edit(conversationId: string, messageId: string, text: string): Promise<void>
-  /** Ask for permission inline; must resolve false on expiry. */
-  ask(conversationId: string, messageId: string, request: PermissionRequest): Promise<boolean>
+  /** Ask for permission inline; must resolve a denial on expiry. */
+  ask(conversationId: string, messageId: string, request: PermissionRequest): Promise<PermissionResult>
   /**
    * Post the files the turn asked to send, as their own messages. Called once the
    * turn is over, so the files follow the answer rather than interrupting it.

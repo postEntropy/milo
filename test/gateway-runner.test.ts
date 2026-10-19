@@ -3,13 +3,13 @@ import type { AgentEvent } from '../src/core/agent/events.js'
 import type { DisplayConfig } from '../src/core/config/schema.js'
 import type { OutgoingFile } from '../src/core/outgoing.js'
 import type { Session, SendOptions } from '../src/core/session.js'
-import type { PermissionRequest } from '../src/core/tools/permission.js'
+import type { PermissionRequest, PermissionResult } from '../src/core/tools/permission.js'
 import { runTurn } from '../src/gateways/runner.js'
 import type { ChatSurface } from '../src/gateways/surface.js'
 
 type StreamFn = (options?: SendOptions) => AsyncGenerator<AgentEvent>
 
-function makeHarness(stream: StreamFn, askAnswer = true, display?: DisplayConfig, outgoing: OutgoingFile[] = []) {
+function makeHarness(stream: StreamFn, askAnswer: PermissionResult = { allowed: true }, display?: DisplayConfig, outgoing: OutgoingFile[] = []) {
   const edits: string[] = []
   const asks: PermissionRequest[] = []
   /** The files the turn asked to send, as the surface was handed them. */
@@ -315,7 +315,7 @@ describe('runTurn', () => {
       yield { type: 'done', finishReason: 'stop' }
     }
 
-    const harness = makeHarness(stream, false)
+    const harness = makeHarness(stream, { allowed: false })
     await harness.run()
 
     expect(harness.asks).toHaveLength(1)
@@ -368,7 +368,7 @@ describe('runTurn', () => {
       yield { type: 'done', finishReason: 'stop' }
     }
 
-    const harness = makeHarness(stream, true, { tools: 'full', thinking: 'collapsed' })
+    const harness = makeHarness(stream, { allowed: true }, { tools: 'full', thinking: 'collapsed' })
     await harness.run()
 
     const last = harness.edits.at(-1) ?? ''
@@ -383,7 +383,7 @@ describe('runTurn', () => {
       yield { type: 'done', finishReason: 'stop' }
     }
 
-    const harness = makeHarness(stream, true, { tools: 'full', thinking: 'collapsed' })
+    const harness = makeHarness(stream, { allowed: true }, { tools: 'full', thinking: 'collapsed' })
     await harness.run()
 
     // With `collapsed` hiding the thinking, a newline would otherwise be the whole
@@ -407,7 +407,7 @@ describe('runTurn', () => {
     }
 
     const shot: OutgoingFile = { path: '/tmp/shot.png', name: 'shot.png', mimeType: 'image/png' }
-    const harness = makeHarness(stream, true, undefined, [shot])
+    const harness = makeHarness(stream, { allowed: true }, undefined, [shot])
     await harness.run()
 
     // The answer is already in the chat, so the file follows it as its own
@@ -426,13 +426,13 @@ describe('runTurn — display settings', () => {
   }
 
   it('shows only the tool name when asked for names', async () => {
-    const harness = makeHarness(withCommand, true, { tools: 'name', thinking: 'expanded' })
+    const harness = makeHarness(withCommand, { allowed: true }, { tools: 'name', thinking: 'expanded' })
     await harness.run()
     expect(harness.edits.at(-1)).toBe('> ⚡ **shell_command**\n\npronto')
   })
 
   it('keeps tool activity out entirely when off', async () => {
-    const harness = makeHarness(withCommand, true, { tools: 'off', thinking: 'expanded' })
+    const harness = makeHarness(withCommand, { allowed: true }, { tools: 'off', thinking: 'expanded' })
     await harness.run()
     expect(harness.edits.at(-1)).toBe('pronto')
   })
@@ -444,7 +444,7 @@ describe('runTurn — display settings', () => {
       yield { type: 'done', finishReason: 'stop' }
     }
 
-    const harness = makeHarness(stream, true, { tools: 'off', thinking: 'expanded' })
+    const harness = makeHarness(stream, { allowed: true }, { tools: 'off', thinking: 'expanded' })
     await harness.run()
     expect(harness.edits.at(-1)).toBe('> ❌ **shell_command** failed')
   })
@@ -469,7 +469,7 @@ describe('runTurn — display settings', () => {
       yield { type: 'done', finishReason: 'stop' }
     }
 
-    const harness = makeHarness(stream, true, { tools: 'full', thinking: 'collapsed' })
+    const harness = makeHarness(stream, { allowed: true }, { tools: 'full', thinking: 'collapsed' })
     await harness.run()
     expect(harness.edits.at(-1)).toBe('pronto')
   })

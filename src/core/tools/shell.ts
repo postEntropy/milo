@@ -1,4 +1,4 @@
-import { exec } from 'node:child_process'
+import { exec, execFile } from 'node:child_process'
 import path from 'node:path'
 import { z } from 'zod'
 import type { Tool, ToolResult } from './types.js'
@@ -35,6 +35,27 @@ const MAX_BUFFER = 10 * 1024 * 1024
 /** The scope tag a routine's own run carries; a background job does not belong there. */
 const ROUTINE_GATEWAY = 'routine'
 
+/**
+ * The `bwrap` arguments that put one command in a box: the machine read-only, the
+ * workspace writable over it, no network, and the process dying with Milo rather
+ * than outliving it.
+ *
+ * A pure function so what the sandbox promises can be read and tested without
+ * running a command — the arguments are the policy.
+ */
+export function sandboxArgs(command: string, cwd: string, workspace: string): string[] {
+  return [
+    '--ro-bind', '/', '/',
+    '--bind', workspace, workspace,
+    '--dev', '/dev',
+    '--proc', '/proc',
+    '--unshare-net',
+    '--die-with-parent',
+    '--chdir', cwd,
+    '--', '/bin/sh', '-c', command,
+  ]
+}
+
 export const shellTool: Tool<ShellArgs> = {
   name: 'shell_command',
   description:
@@ -46,6 +67,18 @@ export const shellTool: Tool<ShellArgs> = {
     const cwd = args.cwd ? path.resolve(ctx.cwd, args.cwd) : ctx.cwd
 
     const canBackground = Boolean(ctx.jobs) && ctx.origin?.gateway !== ROUTINE_GATEWAY
+    const sandboxed = ctx.sandbox === 'workspace'
+    // A job is started by the manager from a command string, so there is no place
+    // to put the box around it. Saying so is better than starting something the
+    // person believed was contained.
+    if (args.background && canBackground && sandboxed) {
+      return {
+        content:
+          'The shell sandbox is on (sandbox: workspace), and a background job would run outside it. ' +
+          'Run the command in the foreground, or turn the sandbox off.',
+        isError: true,
+      }
+    }
     if (args.background && canBackground) {
       const started = ctx.jobs!.start({
         command: args.command,
@@ -70,26 +103,54 @@ export const shellTool: Tool<ShellArgs> = {
       : ''
 
     const timeout = Math.min(args.timeoutMs ?? DEFAULT_TIMEOUT, MAX_TIMEOUT)
+    const done = (
+      resolve: (result: ToolResult) => void,
+      error: (Error & { code?: string | number | null; killed?: boolean }) | null,
+      stdout: string,
+      stderr: string,
+    ) => {
+      const combined = `${stdout}${stderr ? `${stdout ? '\n' : ''}${stderr}` : ''}`.trim()
+      const body = clipMiddle(combined || '(no output)', MAX_OUTPUT)
+
+      if (sandboxed && error && (error as NodeJS.ErrnoException).code === 'ENOENT') {
+        resolve({
+          content:
+            'The shell sandbox is on (sandbox: workspace), but bwrap is not installed. ' +
+            'Install bubblewrap, or set `sandbox: off` in the config.',
+          isError: true,
+        })
+        return
+      }
+      if (error?.killed) {
+        resolve({ content: `${note}Command timed out after ${timeout}ms.\n${body}`, isError: true })
+        return
+      }
+      if (error && typeof error.code !== 'number') {
+        resolve({ content: `${note}Failed to run command: ${error.message}`, isError: true })
+        return
+      }
+
+      const exitCode = error && typeof error.code === 'number' ? error.code : 0
+      resolve({ content: `${note}exit ${exitCode}\n${body}` })
+    }
+
     return new Promise<ToolResult>((resolve) => {
+      if (sandboxed) {
+        // The workspace is the project's folder; a turn with no project works in
+        // its own cwd, so that is the only thing it may write to.
+        const workspace = ctx.confineTo ?? cwd
+        execFile(
+          'bwrap',
+          sandboxArgs(args.command, cwd, workspace),
+          { cwd, timeout, maxBuffer: MAX_BUFFER, signal: ctx.signal },
+          (error, stdout, stderr) => done(resolve, error, stdout, stderr),
+        )
+        return
+      }
       exec(
         args.command,
         { cwd, timeout, maxBuffer: MAX_BUFFER, signal: ctx.signal },
-        (error, stdout, stderr) => {
-          const combined = `${stdout}${stderr ? `${stdout ? '\n' : ''}${stderr}` : ''}`.trim()
-          const body = clipMiddle(combined || '(no output)', MAX_OUTPUT)
-
-          if (error?.killed) {
-            resolve({ content: `${note}Command timed out after ${timeout}ms.\n${body}`, isError: true })
-            return
-          }
-          if (error && typeof error.code !== 'number') {
-            resolve({ content: `${note}Failed to run command: ${error.message}`, isError: true })
-            return
-          }
-
-          const exitCode = error && typeof error.code === 'number' ? error.code : 0
-          resolve({ content: `${note}exit ${exitCode}\n${body}` })
-        },
+        (error, stdout, stderr) => done(resolve, error, stdout, stderr),
       )
     })
   },

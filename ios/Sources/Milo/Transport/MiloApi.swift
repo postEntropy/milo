@@ -1125,6 +1125,8 @@ struct WorkDiff: Decodable {
 struct ProjectRules: Decodable {
     /// `present`, `absent` or `unreadable`.
     let kind: String
+    /// Which file carries the rules: `AGENTS.md`, or `CLAUDE.md` when it is the fallback.
+    let file: String?
     /// Why the file could not be read, when it could not.
     let error: String?
     /// What a session is told to write or improve the file. The same words on every surface.
@@ -1134,12 +1136,13 @@ struct ProjectRules: Decodable {
     var isUnreadable: Bool { kind == "unreadable" }
 
     private enum CodingKeys: String, CodingKey {
-        case kind, error, prompt
+        case kind, file, error, prompt
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "absent"
+        file = try container.decodeIfPresent(String.self, forKey: .file)
         error = try container.decodeIfPresent(String.self, forKey: .error)
         prompt = try container.decodeIfPresent(String.self, forKey: .prompt) ?? ""
     }

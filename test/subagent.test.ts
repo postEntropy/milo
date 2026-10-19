@@ -134,17 +134,17 @@ describe('runSubagent', () => {
         { type: 'done', finishReason: 'stop' },
       ],
     ])
-    let changed = 0
+    const effects: { tool: string; args: unknown }[] = []
 
     await run({
       provider,
       registry: new ToolRegistry([fakeRead, fakeWrite]),
-      onSideEffect: () => { changed += 1 },
+      onSideEffect: (effect) => { effects.push(effect) },
     })
 
     // A subtask works in the folder the parent turn works in, so its write is the same news
     // as the parent's: a delegated step must not be the one that leaves a screen behind.
-    expect(changed).toBe(1)
+    expect(effects).toEqual([{ tool: 'fake_write', args: { path: 'a.txt' } }])
   })
 
   it('does not offer `task` to the subagent — delegation is one level deep', async () => {

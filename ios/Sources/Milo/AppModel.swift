@@ -673,10 +673,10 @@ final class AppModel {
         if !client.send(.approvePlan) { unsent() }
     }
 
-    func answerPermission(allowed: Bool) {
+    func answerPermission(allowed: Bool, remember: Bool = false) {
         guard let pending else { return }
         self.pending = nil
-        client.send(.control(allowed ? .allow : .deny, id: pending.id))
+        client.send(.control(remember ? .always : (allowed ? .allow : .deny), id: pending.id))
     }
 
     // MARK: - Sessions
@@ -1916,6 +1916,9 @@ final class AppModel {
                 }
                 if let index { parts[index] = .todo(items) } else { parts.append(.todo(items)) }
             }
+        case .verification(let text, let ok):
+            beganSpeaking()
+            mutatingLast { $0.parts.append(.verification(text: text, ok: ok)) }
         case .ui(let widget, let draft):
             beganSpeaking()
             // A widget arrives many times over as the model writes it: each draft takes

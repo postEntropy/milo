@@ -416,7 +416,7 @@ describe('Session', () => {
     const provider = new CapturingProvider()
     let text = 'First rule.'
     const { session } = await sessionWith(provider, {
-      instructions: () => ({ kind: 'present', text }),
+      instructions: () => ({ kind: 'present', file: 'AGENTS.md', text }),
     })
 
     for await (const _event of session.send('hello')) {
@@ -431,6 +431,32 @@ describe('Session', () => {
     }
     expect(provider.lastSystem).toContain('Second rule.')
     expect(provider.lastSystem).not.toContain('First rule.')
+  })
+
+  it("sends the output ceiling the model declares, over the configured one", async () => {
+    const provider = new CapturingProvider()
+    const { session } = await sessionWith(provider, {
+      maxTokens: 4096,
+      modelProfile: async (id) => ({ id, maxOutput: 8192 }),
+    })
+
+    for await (const _event of session.send('hello')) {
+      // drain
+    }
+    expect(provider.lastMaxTokens).toBe(8192)
+  })
+
+  it('leaves the effort out for a model with no reasoning mode', async () => {
+    const provider = new CapturingProvider()
+    const { session } = await sessionWith(provider, {
+      reasoningEffort: () => 'high',
+      modelProfile: async (id) => ({ id, reasoning: false }),
+    })
+
+    for await (const _event of session.send('hello')) {
+      // drain
+    }
+    expect(provider.lastEffort).toBeUndefined()
   })
 
   it('lets a project turn delegate on its own, and keeps the ask outside one', async () => {
@@ -1428,5 +1454,169 @@ describe('the tools a surface is offered', () => {
     expect(await catalog('cli')).not.toContain('panel')
     expect(await catalog('telegram')).not.toContain('panel')
     expect(await catalog('discord')).not.toContain('panel')
+  })
+})
+
+describe('an always answer', () => {
+  /** Two turns, each writing one file in the same directory. */
+  class TwoWrites implements Provider {
+    readonly id = 'two-writes'
+    calls = 0
+
+    async *stream(): AsyncGenerator<StreamEvent> {
+      const call = this.calls++
+      if (call === 0 || call === 2) {
+        yield {
+          type: 'tool-call',
+          id: `c${call}`,
+          name: 'write_file',
+          args: { path: call === 0 ? 'a.txt' : 'b.txt', content: 'ok\n' },
+        }
+        yield { type: 'done', finishReason: 'tool_calls' }
+        return
+      }
+      yield { type: 'text', delta: 'ok' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+  }
+
+  async function writes(answers: Array<{ allowed: boolean; remember?: boolean }>) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-always-'))
+    const store = new MemorySessionStore()
+    const record = await store.create()
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new SqliteMemory({ dir }),
+      store,
+      scope: { gateway: 'cli', conversationId: 'always' },
+      record,
+      cwd: dir,
+      provider: new TwoWrites(),
+      maxSteps: 4,
+      permissionPolicy: new DefaultPermissionPolicy(),
+    })
+    let asked = 0
+    for (const answer of answers) {
+      for await (const _event of session.send('write', {
+        ask: async () => {
+          asked += 1
+          return answer
+        },
+      })) {
+        // drain
+      }
+    }
+    return { dir, asked }
+  }
+
+  it('does not ask again for the same directory in the session', async () => {
+    const { dir, asked } = await writes([
+      { allowed: true, remember: true },
+      { allowed: false },
+    ])
+
+    expect(asked).toBe(1)
+    expect(existsSync(path.join(dir, 'a.txt'))).toBe(true)
+    expect(existsSync(path.join(dir, 'b.txt'))).toBe(true)
+  })
+
+  it('asks again when the answer was an ordinary allow', async () => {
+    const { asked } = await writes([{ allowed: true }, { allowed: false }])
+    expect(asked).toBe(2)
+  })
+})
+
+describe('the verification gate', () => {
+  /** One write, then an answer; or only an answer, when `write` is false. */
+  class GateProvider implements Provider {
+    readonly id = 'gate'
+    calls = 0
+
+    constructor(private readonly write: boolean) {}
+
+    async *stream(): AsyncGenerator<StreamEvent> {
+      if (this.calls++ === 0) {
+        if (this.write) {
+          yield { type: 'tool-call', id: 'c1', name: 'write_file', args: { path: 'a.txt', content: 'x\n' } }
+          yield { type: 'done', finishReason: 'tool_calls' }
+          return
+        }
+        yield { type: 'done', finishReason: 'stop' }
+        return
+      }
+      yield { type: 'text', delta: 'done' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+  }
+
+  async function runGate(options: { project?: boolean; write?: boolean; plan?: boolean } = {}) {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-gate-'))
+    const project = { id: 'p1', name: 'Demo', path: dir, createdAt: 0 }
+    const store = new MemorySessionStore()
+    const record = await store.create()
+    const verified: string[] = []
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new SqliteMemory({ dir }),
+      store,
+      scope: { gateway: 'cli', conversationId: 'gate' },
+      record,
+      cwd: dir,
+      provider: new GateProvider(options.write ?? true),
+      maxSteps: 4,
+      permissionPolicy: new DefaultPermissionPolicy({ mode: 'yolo' }),
+      ...(options.project ? { project: { ok: true as const, project } } : {}),
+      verify: async (target) => {
+        verified.push(target.id)
+        return {
+          kind: 'checks',
+          ok: true,
+          checks: [
+            { name: 'test', command: 'npm test', ok: true, exitCode: 0, timedOut: false, ms: 1, output: '' },
+          ],
+        }
+      },
+    })
+    session.setPlan(options.plan ?? false)
+
+    const events: AgentEvent[] = []
+    for await (const event of session.send('go')) events.push(event)
+    return { events, verified }
+  }
+
+  it('runs the checks after a turn that wrote, and says what they answered', async () => {
+    const { events, verified } = await runGate({ project: true })
+
+    expect(verified).toEqual(['p1'])
+    const gate = events.find(
+      (event): event is Extract<AgentEvent, { type: 'verification' }> => event.type === 'verification',
+    )
+    expect(gate?.ok).toBe(true)
+    expect(gate?.text).toContain('Checks passed — test.')
+  })
+
+  it('does not run them after a turn that only read', async () => {
+    const { events, verified } = await runGate({ project: true, write: false })
+
+    expect(verified).toEqual([])
+    expect(events.some((event) => event.type === 'verification')).toBe(false)
+  })
+
+  it('does not run them outside a project', async () => {
+    const { events, verified } = await runGate({})
+
+    expect(verified).toEqual([])
+    expect(events.some((event) => event.type === 'verification')).toBe(false)
+  })
+
+  it('does not run them for a write plan mode refused', async () => {
+    const { events, verified } = await runGate({ project: true, plan: true })
+
+    expect(verified).toEqual([])
+    expect(events.some((event) => event.type === 'verification')).toBe(false)
   })
 })

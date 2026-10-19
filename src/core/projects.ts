@@ -18,6 +18,11 @@ import { resolveToolPath } from './tools/walk.js'
  * everything else a person might want to pin on a project is a decision to make
  * when something actually needs it.
  */
+export interface ProjectCheck {
+  name: string
+  command: string
+}
+
 export interface Project {
   /** `calm-otter-7`, the shape a session and a routine are known by too. */
   id: string
@@ -26,6 +31,12 @@ export interface Project {
   /** The folder, absolute — so two entries cannot name the same one by accident. */
   path: string
   createdAt: number
+  /**
+   * The checks this project runs after a turn that wrote, when the verification
+   * gate is on. Absent means "discover them from the folder"; present is the
+   * person's own list, and the only thing run.
+   */
+  checks?: ProjectCheck[]
 }
 
 /** What it takes to register one, before the store gives it an id and a timestamp. */
@@ -152,6 +163,21 @@ export async function writeProjects(projects: Project[]): Promise<void> {
 
 export function findProject(id: string): Project | undefined {
   return readProjects().find((project) => project.id === id)
+}
+
+/**
+ * A project named from a command line: its id, its name, or the folder it points
+ * at. A reference is one of those, and the folder is resolved from where the
+ * command was run, so `--project .` means the project whose folder is here.
+ */
+export function resolveProjectRef(ref: string, base: string = process.cwd()): Project | undefined {
+  const trimmed = ref.trim()
+  if (!trimmed) return undefined
+  const projects = readProjects()
+  const named = projects.find((project) => project.id === trimmed || project.name === trimmed)
+  if (named) return named
+  const folder = resolveToolPath(base, trimmed)
+  return projects.find((project) => project.path === folder)
 }
 
 /**

@@ -248,12 +248,12 @@ export function ChatScreen({
     })
   }, [])
 
-  const resolvePermission = (allowed: boolean) => {
+  const resolvePermission = (allowed: boolean, remember = false) => {
     const resolve = permissionResolverRef.current
     permissionResolverRef.current = null
     setPermission(null)
     setPhase('thinking')
-    resolve?.({ allowed })
+    resolve?.({ allowed, ...(remember ? { remember } : {}) })
   }
 
   // The width the transcript wraps to: the screen less the two columns each line
@@ -296,6 +296,7 @@ export function ChatScreen({
       // A tool is waiting on y/n, and the composer is not on screen.
       if (isCtrlC(inputChar, key)) resolvePermission(false)
       else if (inputChar === 'y' || inputChar === 'Y') resolvePermission(true)
+      else if (inputChar === 'a' || inputChar === 'A') resolvePermission(true, true)
       else if (inputChar === 'n' || inputChar === 'N' || key.escape) resolvePermission(false)
       return
     }
@@ -677,6 +678,8 @@ export function ChatScreen({
           // whatever the tool level is set to — the person watching a long turn
           // wants to see it either way.
           onTodo: (items) => push({ kind: 'todo', items }),
+          // The gate's report arrives after the answer, as its own block.
+          onVerification: (ok, text) => push({ kind: 'verification', ok, text }),
           onUsage: (inputTokens) => setContextTokens(inputTokens),
           // The band says the fold is running; the transcript gets what it came to
           // once it is over. The clock starts again there, so the fold is counted
@@ -1043,7 +1046,7 @@ export function ChatScreen({
         <Box flexDirection="column" paddingX={2}>
           <Text color={theme.warning}>⚠ Milo wants to run {toolDisplayName(permission.tool)}:</Text>
           <Text color={theme.warning}>  {permission.summary}</Text>
-          <Text color={theme.muted}>[y] allow · [n] deny</Text>
+          <Text color={theme.muted}>[y] allow · [a] always · [n] deny</Text>
         </Box>
       ) : (
         <Box
@@ -1094,6 +1097,8 @@ interface EventHandlers {
   onToolEnd: (name: string, isError: boolean) => void
   /** The plan the model is keeping, in full, each time it changes. */
   onTodo: (items: TodoItem[]) => void
+  /** The project's checks, after a turn that wrote. */
+  onVerification: (ok: boolean, text: string) => void
   /** What the last request cost in input tokens: the size of the session as sent. */
   onUsage: (inputTokens: number) => void
   /** The oldest turns are being folded into the summary right now. */
@@ -1127,6 +1132,9 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
       break
     case 'todo':
       handlers.onTodo(event.items)
+      break
+    case 'verification':
+      handlers.onVerification(event.ok, event.text)
       break
     case 'usage':
       handlers.onUsage(event.inputTokens)

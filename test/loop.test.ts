@@ -152,7 +152,7 @@ describe('runAgent', () => {
       ],
     ])
     const registry = new ToolRegistry([peek, write])
-    let changed = 0
+    const effects: { tool: string; args: unknown }[] = []
 
     for await (const _event of runAgent({
       provider,
@@ -161,14 +161,14 @@ describe('runAgent', () => {
       registry,
       messages: [{ role: 'user', content: [{ type: 'text', text: 'read a, write b' }] }],
       context: { cwd: process.cwd(), signal: new AbortController().signal },
-      onSideEffect: () => { changed += 1 },
+      onSideEffect: (effect) => { effects.push(effect) },
     })) {
       // drain
     }
 
     // Two steps ran and one of them is news: a surface watching a folder has nothing new to
     // read after a peek, and would pay for a tree and a diff to find that out.
-    expect(changed).toBe(1)
+    expect(effects).toEqual([{ tool: 'fake_write', args: { path: 'b.txt' } }])
   })
 
   it('keeps what was already shown when the provider dies mid-answer', async () => {

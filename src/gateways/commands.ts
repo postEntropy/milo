@@ -891,16 +891,16 @@ export function compactReply(result: CompactResult): string {
   return `${describeCompaction(result)} /stats for what is left.`
 }
 
-/** Inline-button payloads: `perm:<id>:allow|deny`. */
-export function encodePermission(id: string, allowed: boolean): string {
-  return `perm:${id}:${allowed ? 'allow' : 'deny'}`
+/** Inline-button payloads: `perm:<id>:allow|deny|always`. */
+export function encodePermission(id: string, allowed: boolean, remember = false): string {
+  return `perm:${id}:${allowed ? (remember ? 'always' : 'allow') : 'deny'}`
 }
 
-export function decodePermission(data: string): { id: string; allowed: boolean } | null {
+export function decodePermission(data: string): { id: string; allowed: boolean; remember: boolean } | null {
   const parts = data.split(':')
   if (parts.length !== 3 || parts[0] !== 'perm') return null
   const id = parts[1]
   const action = parts[2]
-  if (!id || (action !== 'allow' && action !== 'deny')) return null
-  return { id, allowed: action === 'allow' }
+  if (!id || (action !== 'allow' && action !== 'deny' && action !== 'always')) return null
+  return { id, allowed: action !== 'deny', remember: action === 'always' }
 }

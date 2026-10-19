@@ -1,7 +1,7 @@
 import type { ActionRowBuilder, ButtonBuilder, Client, Message } from 'discord.js'
 import type { MemoryScope } from '../../core/memory/index.js'
 import type { AgentRuntime } from '../../core/runtime.js'
-import type { PermissionRequest } from '../../core/tools/permission.js'
+import type { PermissionRequest, PermissionResult } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import type { OutgoingFile, OutgoingMessage } from '../../core/outgoing.js'
@@ -68,7 +68,7 @@ type ChannelAsk = (
   target: Message,
   request: PermissionRequest,
   signal?: AbortSignal,
-) => Promise<boolean>
+) => Promise<PermissionResult>
 
 /**
  * Discord's typing indicator lasts about ten seconds, so it is refreshed just
@@ -119,9 +119,10 @@ export class DiscordGateway implements Gateway {
       target: Message,
       request: PermissionRequest,
       signal?: AbortSignal,
-    ): Promise<boolean> => {
+    ): Promise<PermissionResult> => {
       const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId('perm:allow').setLabel('Allow').setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId('perm:always').setLabel('Always').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('perm:deny').setLabel('Deny').setStyle(ButtonStyle.Danger),
       )
 
@@ -149,18 +150,19 @@ export class DiscordGateway implements Gateway {
           await prompt
             .edit({ content: '🛑 Stopped before this was answered — denied.', components: [] })
             .catch(() => undefined)
-          return false
+          return { allowed: false }
         }
 
-        const allowed = interaction.customId === 'perm:allow'
+        const allowed = interaction.customId !== 'perm:deny'
+        const remember = interaction.customId === 'perm:always'
         await interaction.update({
-          content: allowed ? '✅ Allowed' : '🚫 Denied',
+          content: allowed ? (remember ? '✅ Always allowed' : '✅ Allowed') : '🚫 Denied',
           components: [],
         })
-        return allowed
+        return { allowed, ...(remember ? { remember: true } : {}) }
       } catch {
         // Timed out — fail closed.
-        return false
+        return { allowed: false }
       }
     }
 

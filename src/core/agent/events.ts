@@ -1,6 +1,7 @@
 import type { GenUiRender } from '../genui.js'
 import type { PanelRequest } from '../panel.js'
 import type { TodoItem } from '../todos.js'
+import type { VerificationResult } from '../verification.js'
 
 export type AgentEvent =
   | { type: 'text-delta'; delta: string }
@@ -74,6 +75,12 @@ export type AgentEvent =
    * step boundary. The turn carries on with it — a correction, not a new turn.
    */
   | { type: 'steer'; text: string }
+  /**
+   * What the project's own checks answered after a turn that wrote. Display
+   * state, like the plan: the model is not told, and it is not part of the
+   * transcript sent back on the next request.
+   */
+  | { type: 'verification'; result: VerificationResult; text: string; ok: boolean }
   | { type: 'done'; finishReason: string }
   /** The turn was stopped (Ctrl+C, shutdown) — not a failure. */
   | { type: 'aborted' }

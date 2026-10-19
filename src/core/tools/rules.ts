@@ -1,5 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { patchTargets } from './apply-patch.js'
+import { effectiveSegment, parseShell } from './shell-parse.js'
 import { resolveToolPath } from './walk.js'
 
 export interface RuleHit {
@@ -95,6 +97,24 @@ const DESTRUCTIVE_TARGETS = new Set([
 ])
 
 export function scanCommand(command: string): RuleHit | null {
+  // The whole line first: a rule like `curl … | sh` spans two segments, and
+  // reading each half alone would lose it.
+  const direct = scanCommandText(command)
+  if (direct) return direct
+
+  const parsed = parseShell(command)
+  if (!parsed.ok) return null
+
+  // Then each command on its own, with `sudo`/`env` peeled off: the second `rm`
+  // after a `;` is a command, not an argument of the first.
+  for (const segment of parsed.segments) {
+    const hit = scanCommandText(effectiveSegment(segment).text)
+    if (hit) return hit
+  }
+  return null
+}
+
+function scanCommandText(command: string): RuleHit | null {
   const normalized = command.replace(/\s+/g, ' ').trim()
 
   for (const rule of RULES) {
@@ -164,7 +184,27 @@ const HARMLESS_DEVICES = new Set([
   '/dev/tty',
 ])
 
+/**
+ * The patch a call carries, when it carries one. A patch writes several files at
+ * once, so it is read as a whole rather than through the single-path shape.
+ */
+export function extractPatchText(args: unknown): string | null {
+  if (!args || typeof args !== 'object') return null
+  const record = args as Record<string, unknown>
+  return typeof record.patch === 'string' && record.patch.trim() ? record.patch : null
+}
+
 export function scanWriteTarget(args: unknown, cwd: string): RuleHit | null {
+  // Every file the patch names is held to the same rule: a patch is not a way to
+  // reach a protected path that a single write would have been refused.
+  const patch = extractPatchText(args)
+  if (patch) {
+    for (const target of patchTargets(patch)) {
+      const hit = protectedPath(resolveToolPath(cwd, target))
+      if (hit) return hit
+    }
+    return null
+  }
   const target = extractWriteTarget(args)
   if (!target) return null
   return protectedPath(resolveToolPath(cwd, target))
@@ -181,6 +221,20 @@ export function scanWriteTarget(args: unknown, cwd: string): RuleHit | null {
  * (`grep … /etc/hosts` is not a write), which is why only these are looked at.
  */
 export function scanCommandTargets(command: string, cwd: string): RuleHit | null {
+  const direct = scanTargets(command, cwd)
+  if (direct) return direct
+
+  const parsed = parseShell(command)
+  if (!parsed.ok) return null
+
+  for (const segment of parsed.segments) {
+    const hit = scanTargets(effectiveSegment(segment).text, cwd)
+    if (hit) return hit
+  }
+  return null
+}
+
+function scanTargets(command: string, cwd: string): RuleHit | null {
   for (const target of commandWriteTargets(command)) {
     const hit = protectedPath(resolveToolPath(cwd, target))
     if (hit) return hit
@@ -273,7 +327,14 @@ export function reviewText(args: unknown): string | null {
       args && typeof args === 'object' && typeof (args as Record<string, unknown>).cwd === 'string'
         ? ((args as Record<string, unknown>).cwd as string).trim()
         : ''
-    return cwd ? `Command to run (in ${cwd}):\n${command}` : `Command to run:\n${command}`
+    const reviewed = reviewedCommand(command)
+    return cwd ? `Command to run (in ${cwd}):\n${reviewed}` : `Command to run:\n${reviewed}`
+  }
+
+  const patch = extractPatchText(args)
+  if (patch) {
+    const files = patchTargets(patch)
+    return `Apply a patch${files.length > 0 ? ` to:\n${files.join('\n')}` : ''}\n\n${preview(patch)}`
   }
 
   const target = extractWriteTarget(args)
@@ -288,6 +349,18 @@ export function reviewText(args: unknown): string | null {
     `Replacing:\n${preview(String(record.old_string))}`,
     `With:\n${preview(String(record.new_string))}`,
   ].join('\n')
+}
+
+/**
+ * The command as the reviewer should see it: the line, then each command it
+ * runs. A reviewer judging only the line sees `cd /tmp && rm -rf .` as one
+ * sentence; the segments are what it actually does.
+ */
+function reviewedCommand(command: string): string {
+  const parsed = parseShell(command)
+  if (!parsed.ok || parsed.segments.length <= 1) return command
+  const segments = parsed.segments.map((segment) => effectiveSegment(segment).text)
+  return `${command}\nSegments:\n${segments.map((segment) => `  ${segment}`).join('\n')}`
 }
 
 function preview(text: string): string {
