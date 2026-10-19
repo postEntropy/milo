@@ -1,24 +1,24 @@
 :root {
   color-scheme: light;
-  --bg: #F5F3ED;
-  --surface: #FFFEFA;
-  --surface-warm: #EDE9DF;
+  --bg: #FFFFFF;
+  --surface: #F5F5F7;
+  --surface-warm: #F2F2F4;
   /* One step above the plain surface: the controls that should stand off a warm
      panel, e.g. the sidebar's own action row. */
   --surface-raised: #FFFFFF;
-  --fg: #272724;
-  --fg-2: #3B3934;
-  --muted: #675E5E;
+  --fg: #1C1C1E;
+  --fg-2: #3A3A3C;
+  --muted: #5A5A61;
   /* What the wait line's word is dimmed to, so the light that travels along it has
      something to travel against. Built from `--muted`, so the dark theme's own muted
      carries it there without a second value. */
   --wait-dim: color-mix(in oklab, var(--muted) 62%, transparent);
-  --border: #DED8CB;
-  --border-soft: #E7E1D5;
+  --border: #D8D8DC;
+  --border-soft: #E5E5EA;
   --accent: #C4541C;
   --accent-on: #FFFFFF;
   --accent-hover: #A64514;
-  --accent-wash: #F6E8DF;
+  --accent-wash: #F7ECE5;
   --secondary: #508080;
   --secondary-hover: #3F6868;
   --success: #587E20;
@@ -41,28 +41,28 @@
   --code-keyword: #8A4E86;
   --code-string: #2E6FA8;
   --code-number: #A9740F;
-  --knob: #FFFEFA;
+  --knob: #FFFFFF;
   /* What a list holds while it is being read: a bar one step off the card it is drawn
      on, and the light that travels along it. A pair of its own because the step is the
      other way round in the dark theme — there the bar is lighter than the card. */
-  --skeleton: #EAE4D8;
-  --skeleton-sheen: #F6F3EA;
-  --shadow: 0 4px 16px rgb(39 39 36 / 7%);
-  --shadow-sm: 0 1px 2px rgb(39 39 36 / 7%);
-  --shadow-menu: 0 12px 30px rgb(39 39 36 / 15%), 0 2px 6px rgb(39 39 36 / 7%);
-  --shadow-seam: -3px 0 12px rgb(39 39 36 / 12%);
-  --focus-ring: 0 0 0 3px rgb(196 84 28 / 26%);
+  --skeleton: #EAEAEF;
+  --skeleton-sheen: #F5F5F7;
+  --shadow: 0 2px 8px rgb(0 0 0 / 4%);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 4%);
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 10%), 0 2px 6px rgb(0 0 0 / 5%);
+  --shadow-seam: -1px 0 0 var(--border);
+  --focus-ring: 0 0 0 3px rgb(0 0 0 / 12%);
   /* The ring a control wears when it holds focus. Neutral, not the accent: the accent is
      a pointer (the cursor, the selected row), and an accent ring on every focused button
      made focus read as selection. Resolves against the theme's own `--fg`. */
   --focus-outline: color-mix(in oklab, var(--fg) 25%, transparent);
   /* Corner rounding: one scale for the whole interface. A value is picked by the role a
      thing plays — never per component. `--radius-pill` and `50%` are shapes, not levels. */
-  --radius-xs: 8px;     /* marks read inline with text: inline code, id/size badges */
-  --radius-sm: 10px;    /* small icon buttons, menu options, tiny inner fields, chips */
-  --radius-md: 14px;    /* single-line rows, list/nav items, inputs, standard buttons */
-  --radius-lg: 18px;    /* cards, panels, popovers, code/blocks, notices, iframes */
-  --radius-xl: 22px;    /* the big surfaces: composer, user bubble, suggestions, approval */
+  --radius-xs: 4px;     /* marks read inline with text: inline code, id/size badges */
+  --radius-sm: 6px;    /* small icon buttons, menu options, tiny inner fields, chips */
+  --radius-md: 8px;    /* single-line rows, list/nav items, inputs, standard buttons */
+  --radius-lg: 10px;    /* cards, panels, popovers, code/blocks, notices, iframes */
+  --radius-xl: 12px;    /* the big surfaces: composer, user bubble, suggestions, approval */
   --radius-pill: 999px; /* pills, chips, switches, round buttons */
   /* Type: one ladder for the whole interface, picked by the role a thing plays. The ten
      sizes between 10 and 14px doing one job each are why text read uneven everywhere. */
@@ -91,7 +91,6 @@
   --control-md: 36px;
   --control-lg: 44px;
   --font-body: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-display: 'Source Serif 4', Georgia, serif;
   --font-mono: ui-monospace, 'SFMono-Regular', 'JetBrains Mono', Menlo, monospace;
   --motion-fast: 150ms;
   --motion-base: 220ms;
@@ -120,19 +119,19 @@
   /* A card lifts off the page with its shadow in the light theme; on a dark page the
      shadow is invisible, so the whole lift is carried by the fill and the four steps
      are wider than the light theme's — 1.2:1 where the light one sits at 1.1:1. */
-  --bg: #191A18;
-  --surface: #292A27;
-  --surface-warm: #232422;
-  --surface-raised: #32332E;
-  --fg: #EFEEE9;
-  --fg-2: #D9D6CE;
-  --muted: #A8A29A;
-  --border: #3F403A;
-  --border-soft: #3A3B34;
-  --accent: #ED8754;
-  --accent-on: #191A18;
-  --accent-hover: #F29A6B;
-  --accent-wash: #4A3323;
+  --bg: #0F0F10;
+  --surface: #1C1C1E;
+  --surface-warm: #161617;
+  --surface-raised: #2C2C2E;
+  --fg: #F2F2F3;
+  --fg-2: #D1D1D6;
+  --muted: #8E8E93;
+  --border: #38383A;
+  --border-soft: #2C2C2E;
+  --accent: #D9703A;
+  --accent-on: #FFFFFF;
+  --accent-hover: #E07D49;
+  --accent-wash: #3A2A20;
   --secondary: #80B5B3;
   --secondary-hover: #9AC9C7;
   --success: #8FB457;
@@ -151,14 +150,14 @@
   --code-keyword: #C79AD0;
   --code-string: #7FB2E8;
   --code-number: #D6A23A;
-  --knob: #EFEEE9;
-  --skeleton: #34352F;
-  --skeleton-sheen: #41423B;
-  --shadow: 0 4px 18px rgb(0 0 0 / 45%);
-  --shadow-sm: 0 1px 2px rgb(0 0 0 / 38%);
-  --shadow-menu: 0 12px 30px rgb(0 0 0 / 55%), 0 2px 6px rgb(0 0 0 / 30%);
-  --shadow-seam: -3px 0 12px rgb(0 0 0 / 42%);
-  --focus-ring: 0 0 0 3px rgb(237 135 84 / 34%);
+  --knob: #F2F2F3;
+  --skeleton: #252528;
+  --skeleton-sheen: #323236;
+  --shadow: 0 2px 8px rgb(0 0 0 / 25%);
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / 20%);
+  --shadow-menu: 0 8px 24px rgb(0 0 0 / 40%), 0 2px 6px rgb(0 0 0 / 25%);
+  --shadow-seam: -1px 0 0 var(--border);
+  --focus-ring: 0 0 0 3px rgb(255 255 255 / 14%);
   /* The control focus ring, re-declared for the dark theme the way `--focus-ring` is;
      the value is the same because it is built from `--fg`, which is not. */
   --focus-outline: color-mix(in oklab, var(--fg) 25%, transparent);
@@ -252,7 +251,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-item:hover, .session-item.menu-open { background: var(--surface); }
 /* The one you are in, lifted off the warm sidebar rather than merely tinted into it:
    white and a hairline shadow say which session the chat belongs to. */
-.session-item.active { background: var(--surface-raised); box-shadow: var(--shadow-sm); }
+.session-item.active { background: var(--surface-raised); }
 .session-row { display: flex; align-items: center; gap: var(--space-5); flex: 1; min-width: 0; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-4) var(--space-3) var(--space-4) var(--space-5); color: var(--fg-2); text-align: start; }
 .session-item.active .session-row { color: var(--fg); font-weight: 500; }
 /* The row's focus is the row's, not the button's: the ring wraps the whole card — the
@@ -413,7 +412,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .messages { flex: 1; min-height: 0; overflow: auto; padding: var(--space-8) 28px var(--space-6); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .thread-inner { width: min(940px, 100%); margin: 0 auto; padding: var(--space-3) 0 var(--space-8); }
 .empty-state { display: flex; min-height: min(70vh, 720px); flex-direction: column; align-items: center; justify-content: center; padding: 42px var(--space-8) 56px; text-align: center; }
-.empty-state h1 { max-width: 16ch; margin: 0; font-family: var(--font-display); font-size: var(--text-display); font-weight: 400; letter-spacing: -.02em; line-height: 1.14; }
+.empty-state h1 { max-width: 16ch; margin: 0; font-family: var(--font-body); font-size: var(--text-display); font-weight: 600; letter-spacing: -.03em; line-height: 1.14; }
 /* A card wraps its own text rather than widening the row: a title or a detail
    that is one unbroken word — a path, a URL, a session's auto-title — would
    otherwise set the card's minimum width and push it past the screen on a phone.
@@ -476,7 +475,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .reasoning-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--motion-base) var(--ease-standard); }
 .reasoning.open .reasoning-collapse { grid-template-rows: 1fr; }
 .reasoning-clip { overflow: hidden; }
-.reasoning-body { padding: var(--space-1) var(--space-7) var(--space-6); color: var(--muted); font-family: var(--font-display); font-size: var(--text-md); font-style: italic; line-height: 1.6; white-space: pre-wrap; }
+.reasoning-body { padding: var(--space-1) var(--space-7) var(--space-6); color: var(--muted); font-family: var(--font-body); font-size: var(--text-md); line-height: 1.6; white-space: pre-wrap; }
 /* The wait for the model's next output, before there is anything of its own to
    show: the glyph the terminal uses, steady, and the glare travelling along the word,
    so the row says it is working without anything blinking and without wearing the
@@ -1024,7 +1023,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .button:hover { background: var(--border-soft); }
 .button:active { transform: translateY(1px); }
 .button:disabled { transform: none; }
-.button.primary { background: var(--accent); color: var(--accent-on); box-shadow: 0 2px 10px color-mix(in oklab, var(--accent) 24%, transparent); }
+.button.primary { background: var(--accent); color: var(--accent-on); }
 .button.primary:hover { background: var(--accent-hover); }
 .button.danger { background: color-mix(in oklab, var(--danger) 11%, var(--surface)); color: var(--danger); }
 .button.danger:hover { background: color-mix(in oklab, var(--danger) 18%, var(--surface)); }
@@ -1865,7 +1864,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* The generated interface: the catalog the model draws from, in the app's own
    tokens. Controls are filled, never outlined. */
 .genui { display: flex; flex-direction: column; gap: var(--space-6); margin: var(--space-1) 0 var(--space-5); }
-.genui-title { font-family: var(--font-display); font-weight: 500; letter-spacing: -.01em; line-height: 1.2; }
+.genui-title { font-family: var(--font-body); font-weight: 600; letter-spacing: -.01em; line-height: 1.2; }
 .genui-size-sm { font-size: var(--text-md); }
 .genui-size-md { font-size: var(--text-lg); }
 .genui-size-lg { font-size: var(--text-xl); }
