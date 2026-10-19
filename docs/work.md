@@ -34,8 +34,9 @@ the ordinary ones, with the folder they run in changed.
 - No second store. Projects and sessions are the install's, and the same session list feeds
   every surface.
 - No per-project model, instructions or permission configuration beyond `AGENTS.md`.
-- Not drawn on Telegram or Discord; their session list names a session's project and that
-  is the whole of it. The CLI manages projects with `milo projects`.
+- A surface of the web app and the phone only. Telegram and Discord are not Work and will
+  not be: their session list names a session's project and that is the whole of it. The
+  CLI manages projects with `milo projects`.
 
 ## Behaviour
 
@@ -57,6 +58,8 @@ the ordinary ones, with the folder they run in changed.
 
 ## Deliberately later
 
+- Starting a session already in a project from the terminal (`milo`, `milo chat`). The tab
+  is the only place that does it today.
 - MCP per project — an external tool server stays the install's.
 - A global `~/.milo/AGENTS.md`, a `CLAUDE.md` fallback, and per-subfolder rules.
 - An editor in the tab.
