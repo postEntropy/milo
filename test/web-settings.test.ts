@@ -341,6 +341,24 @@ describe('web Settings routines', () => {
 })
 
 describe('web Settings sessions', () => {
+  it('starts a work session in plan mode when the project page asks for it', async () => {
+    writeConfig()
+    const runtime = build({})
+    const settings = new WebSettings(runtime, home)
+    const scope = { gateway: 'web', conversationId: CONVERSATION }
+
+    const planned = await settings.handle('new-session', { conversationId: CONVERSATION, plan: true }) as { id: string }
+    const planning = await runtime.getSession(scope)
+    expect(planning.id).toBe(planned.id)
+    expect(planning.planMode).toBe(true)
+
+    // The ordinary start is Build: nothing turns plan mode on by accident.
+    const plain = await settings.handle('new-session', { conversationId: CONVERSATION }) as { id: string }
+    const building = await runtime.getSession(scope)
+    expect(building.id).toBe(plain.id)
+    expect(building.planMode).toBe(false)
+  })
+
   it('deletes a saved session but refuses the one being looked at', async () => {
     writeConfig()
     const runtime = build({})

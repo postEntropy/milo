@@ -336,6 +336,9 @@ private struct ProjectDetail: View {
     /// rather than covering what is being written — the chat's own arrangement.
     @State private var composerHeight: CGFloat = 0
     @State private var picker = false
+    /// Whether the session started from this page's first words should be planning.
+    /// The session does not exist yet, so the choice is held here until it does.
+    @State private var planStart = false
     @FocusState private var composing: Bool
 
     private var project: Project? {
@@ -468,10 +471,7 @@ private struct ProjectDetail: View {
                     work: true,
                     role: .start,
                     project: project?.name,
-                    onModel: {
-                        composing = false
-                        picker = true
-                    }
+                    startPlan: $planStart
                 )
                 // How tall the composer came out, so the `+`'s panel stands over the field
                 // rather than through it — the chat's own arrangement.
@@ -535,12 +535,16 @@ private struct ProjectDetail: View {
         }
     }
 
-    /// What the `+`'s panel holds here: the files, and how hard the model thinks. The model
-    /// itself has its own line under the field — one choice, reached one way.
+    /// What the `+`'s panel holds here: the files, the model, and how hard it thinks — one
+    /// set of rows on every composer, so the model is reached the same way everywhere.
     private var panelRows: [MenuRow] {
         composerActionRows(
             model: model,
-            modelRow: nil,
+            modelRow: {
+                menu = nil
+                composing = false
+                picker = true
+            },
             ask: { ask in
                 menu = nil
                 attach = ask
@@ -567,15 +571,22 @@ private struct ProjectDetail: View {
         // The field is given up before the session moves: the chat that opens draws the message
         // this one sent, and two fields holding the same words is one too many.
         composing = false
-        begin(with: words, drafts: files, intent: intent)
+        begin(with: words, drafts: files, intent: intent, plan: planStart)
     }
 
     /// Opens the session and says these words into it. The composer's own path, given the words
     /// rather than reading the field — the control that asks for the folder's rules says words the
     /// person did not type, and they begin the work the same way.
-    private func begin(with words: String, drafts files: [AttachmentDraft], intent: ClientFrame.Intent) {
+    private func begin(
+        with words: String,
+        drafts files: [AttachmentDraft],
+        intent: ClientFrame.Intent,
+        plan: Bool = false,
+    ) {
         Task {
-            guard await model.startWorkSession(project: projectId) else { return }
+            guard await model.startWorkSession(project: projectId, plan: plan) else { return }
+            // The session now owns the mode; a page opened again starts on Build.
+            planStart = false
             model.send(words, intent: intent, drafts: files)
             onChat(false)
         }

@@ -32,6 +32,14 @@ interface Props {
    */
   context?: { used: number; budget: number }
   effort: 'low' | 'medium' | 'high'
+  /** Whether this session is proposing rather than working. */
+  plan: boolean
+  /** Whether the plan turn has answered, so there is something to approve. */
+  planReady: boolean
+  /** Whether this chat works in a project, which is where a plan makes sense. */
+  canPlan: boolean
+  onPlanChange(plan: boolean): void
+  onApprovePlan(): void
   /** Bumped when something asks for the cursor, so the field takes the next keystroke. */
   focusSignal: number
   onSend(text: string, intent: 'steer' | 'queue', files?: File[]): void
@@ -111,7 +119,7 @@ function oneLine(text: string): string {
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { busy, queued, jobs, onKillJob, provider, providerName, draftKey, model, context, effort, focusSignal, onSend, onStop, onModelChange, onEffortChange, onProviderChange },
+  { busy, queued, jobs, onKillJob, provider, providerName, draftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, onEffortChange, onProviderChange },
   handle,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -389,6 +397,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           })}
         </div>}
       </div>
+      {canPlan && plan && <div className="plan-banner" role="status">
+        <span className="plan-banner-text">Reading and proposing — Milo is not changing anything.</span>
+        <button type="button" className="plan-approve" disabled={!planReady || busy} onClick={onApprovePlan}>Approve plan</button>
+      </div>}
       <div className="composer-box">
         {uploadError && <div className="composer-upload-error" role="alert">{uploadError}</div>}
         {files.length > 0 && <div className="composer-files" aria-live="polite">{files.map((file, index) => <span className="composer-file" key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name}<button type="button" aria-label={`Remove ${file.name}`} title={`Remove ${file.name}`} onClick={() => setFiles((current) => { const next = current.filter((_, item) => item !== index); fileDrafts.current.set(draftKey, next); return next })}><Icon name="x" size={12} /></button></span>)}</div>}
@@ -411,7 +423,19 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         />
         <div className="composer-toolbar">
           <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } fileDrafts.current.set(draftKey, next); return next }); event.target.value = '' }} />
-          <button className="composer-pill attach-button" type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={15} /></button>
+          <button className={`composer-pill attach-button${canPlan ? ' filled' : ''}`} type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={15} /></button>
+          {canPlan && <button
+            type="button"
+            className="composer-pill mode-pill"
+            aria-pressed={plan}
+            aria-label={plan ? 'Plan mode' : 'Build mode'}
+            disabled={busy}
+            title={busy ? 'Wait for the turn to finish before changing the mode' : plan ? 'Plan mode is on — Milo proposes and changes nothing' : 'Build mode — Milo can change the folder; switch to plan first'}
+            onClick={() => onPlanChange(!plan)}
+          >
+            <Icon name={plan ? 'list-check' : 'code'} size={15} />
+            <span>{plan ? 'Plan' : 'Build'}</span>
+          </button>}
           <div className="composer-model-wrap">
             <Select
               className="composer-pill"

@@ -32,6 +32,11 @@ enum ClientFrame {
     /// socket. Empty for every message with nothing attached.
     case send(text: String, intent: Intent? = nil, target: SendTarget? = nil, uploadIds: [String] = [])
     case control(Control, id: String? = nil)
+    /// Turn the session's planning mode on or off. The state belongs to the session, so
+    /// the daemon answers with a `plan` frame that every screen watching it sees.
+    case setPlan(Bool)
+    /// Approve the plan: the daemon leaves plan mode and starts the execution turn.
+    case approvePlan
     case command(text: String)
     /// Stop a background job. Pressing the control is the confirmation.
     case jobKill(id: String)
@@ -72,6 +77,10 @@ enum ClientFrame {
         case .control(let action, let id):
             guard let id else { return ["type": "control", "action": action.rawValue] }
             return ["type": "control", "action": action.rawValue, "id": id]
+        case .setPlan(let on):
+            return ["type": "control", "action": "plan", "plan": on]
+        case .approvePlan:
+            return ["type": "control", "action": "approve-plan"]
         case .command(let text):
             return ["type": "command", "text": text]
         case .jobKill(let id):
@@ -409,6 +418,9 @@ struct Ready: Decodable {
     /// be worked in, when the folder has gone. Set on a session that has said nothing yet
     /// too: which folder the work happens in is a fact of the session, not of its words.
     let project: Project?
+    /// Whether this session's turns are planning turns. Kept on the session, so a screen
+    /// that arrives mid-plan opens with the switch already on.
+    let plan: Bool?
 }
 
 // MARK: - What the server sends
@@ -422,6 +434,8 @@ enum ServerFrame: Decodable {
     case turnEnd(id: String, status: String, raw: String?, rawNoOutput: String?)
     case commandResult(CommandResult)
     case state(busy: Bool, queued: Int)
+    /// The session's planning turn went on or off, for every screen watching it.
+    case plan(Bool)
     case jobs([JobView])
     case suggestions([Idea])
     case routinesChanged
@@ -439,7 +453,7 @@ enum ServerFrame: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case type, id, text, turnId, event, request, expiresAt, allowed, status, raw, rawNoOutput
-        case busy, queued, jobs, items, message, panel
+        case busy, queued, plan, jobs, items, message, panel
     }
 
     init(from decoder: Decoder) throws {
@@ -480,6 +494,7 @@ enum ServerFrame: Decodable {
                 busy: try container.decode(Bool.self, forKey: .busy),
                 queued: try container.decode(Int.self, forKey: .queued)
             )
+        case "plan": self = .plan(try container.decode(Bool.self, forKey: .plan))
         case "jobs": self = .jobs(try container.decode([JobView].self, forKey: .jobs))
         case "suggestions": self = .suggestions(try container.decode([Idea].self, forKey: .items))
         case "routines-changed": self = .routinesChanged

@@ -14,7 +14,7 @@ import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
 import { rawTurn } from '../raw.js'
 import type { ClientFrame, FrameAttachment, JobView, PanelInput, PanelKind, PanelState, PanelTab, PanelView, PermissionRequest, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
-import { PERMISSION_TIMEOUT_MS } from './protocol.js'
+import { PERMISSION_TIMEOUT_MS, PLAN_APPROVAL } from './protocol.js'
 import { displayEvent } from './turn.js'
 import { panelsOf, transcriptOf } from './transcript.js'
 import type { PanelFacts } from '../../core/agent/system.js'
@@ -248,6 +248,9 @@ export class WebHub {
       // written with the rest of it opening a second row beside them.
       messages: this.transcript(conversation.session, running ? running.from + 1 : undefined),
       thinking: readDisplay().thinking,
+      // Whether this session is proposing rather than working. A client that opens
+      // mid-plan draws the switch on, and the catalog on the server already matches.
+      plan: conversation.session.planMode,
       // Read from the runtime, not a startup snapshot: a provider switch made at
       // runtime shows on the next connection without the page reconnecting.
       provider: this.runtime.provider.id,
@@ -296,6 +299,21 @@ export class WebHub {
         const result = this.turns.stop(this.liveOwner(conversation.session.id) ?? conversationId)
         this.sendState(conversationId)
         if (!result.stopped) client.send({ type: 'error', message: 'Nothing is running to stop.' })
+      } else if (frame.action === 'plan') {
+        // The switch is the session's, not the tab's: a sibling watching the same
+        // session is proposing with it, and has to see the same state.
+        conversation.session.setPlan(frame.plan === true)
+        this.emitTurn(conversation.session.id, { type: 'plan', plan: conversation.session.planMode })
+      } else if (frame.action === 'approve-plan') {
+        // Approval is one act: leave plan mode, say so, and let the execution turn
+        // follow in the same queue rather than waiting for a second click.
+        if (!conversation.session.planMode) {
+          client.send({ type: 'error', message: 'Plan mode is not on.' })
+          return
+        }
+        conversation.session.setPlan(false)
+        this.emitTurn(conversation.session.id, { type: 'plan', plan: false })
+        this.startTurn(conversationId, PLAN_APPROVAL)
       } else if (frame.id) {
         const allowed = frame.action === 'allow'
         // The permission belongs to the session it was raised in: a client of another

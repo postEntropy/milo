@@ -77,6 +77,13 @@ export default function App() {
   const [historyHits, setHistoryHits] = useState<HistoryHit[] | null>(null)
   const [busy, setBusy] = useState(false)
   const [queued, setQueued] = useState(0)
+  /** Whether this session's turns are proposing rather than working. */
+  const [plan, setPlan] = useState(false)
+  /**
+   * How many messages there were when plan mode went on. The approval belongs to the
+   * turn that ran *under* the plan, not to whatever the thread said before it.
+   */
+  const [planSince, setPlanSince] = useState(0)
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null)
   /** Counts finished turns: the routines screen re-reads its list when one ends. */
   const [turnEnds, setTurnEnds] = useState(0)
@@ -423,6 +430,9 @@ export default function App() {
       // own history, so a reload comes back to the same view.
       setPanel(frame.panel ?? null)
       setProject(frame.project ?? null)
+      setPlan(frame.plan ?? false)
+      // A reload joins the plan where it stands; a new proposal is what earns approval.
+      setPlanSince(frame.messages.length)
       setJobs(frame.jobs ?? [])
       // A session opens at its end, where the conversation is — the whole thread
       // is here at once, so there is no "scrolled there" to respect.
@@ -447,6 +457,13 @@ export default function App() {
       return
     }
     if (frame.type === 'error') { setNotice({ text: frame.message, error: true }); return }
+    // The switch belongs to the session, so a sibling tab moved it too. Turning it
+    // off retires the proposal with it; turning it on waits for a turn to propose.
+    if (frame.type === 'plan') {
+      setPlan(frame.plan)
+      if (!frame.plan) setPlanSince(0)
+      return
+    }
     if (frame.type === 'routines-changed') { setRoutinesTick((current) => current + 1); return }
     // A session started or stopped a turn anywhere in the install: the running dot is
     // re-read off the daemon rather than guessed at here.
@@ -607,6 +624,7 @@ export default function App() {
       setMessages([])
       setPanel(null)
       setProject(null)
+      setPlan(false)
       setSessionId(session.id)
       setView('chat')
       setSidebarOpen(false)
@@ -641,6 +659,7 @@ export default function App() {
       setMessages([])
       setPanel(null)
       setProject(null)
+      setPlan(false)
       setSessionId(session.id)
       setView('chat')
       setSidebarOpen(false)
@@ -1052,6 +1071,19 @@ export default function App() {
     return 0
   }, [messages])
 
+  /**
+   * Whether there is a plan to approve: the plan turn has answered with prose and
+   * is not still working. The button waits for that rather than sending an approval
+   * into a turn that has not proposed anything yet.
+   */
+  const lastMessage = messages[messages.length - 1]
+  const planReady =
+    plan &&
+    !busy &&
+    messages.length > planSince &&
+    lastMessage?.role === 'assistant' &&
+    lastMessage.parts.some((part) => part.kind === 'text' && part.text.trim() !== '')
+
   /** The main chat's thread: prose, tools, the plan and anything the model drew. */
   const thread = <>
     <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} />
@@ -1137,7 +1169,7 @@ export default function App() {
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock" ref={composerDockRef}>
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
+            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={Boolean(project)} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); socket.send({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => socket.send({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
           </div>
         </section>
         : null}

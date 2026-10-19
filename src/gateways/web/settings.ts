@@ -721,6 +721,9 @@ export class WebSettings {
       typeof body.title === 'string' ? body.title : undefined,
       project ? { project } : undefined,
     )
+    // A work session can be started planning: the first words are the proposal, and
+    // the session has to be in the mode before they arrive.
+    if (body.plan === true) session.setPlan(true)
     return { id: session.id }
   }
 

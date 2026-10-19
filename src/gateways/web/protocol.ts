@@ -14,6 +14,13 @@ export const PROTOCOL_VERSION = 9
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
+ * What the surface says when a plan is approved. The surface only sends the
+ * `approve-plan` control; the daemon owns the words, so the turn that executes
+ * the plan reads the same on the browser and on the phone.
+ */
+export const PLAN_APPROVAL = 'The plan is approved. Execute it.'
+
+/**
  * What a page is told when the protocol it speaks is not the server's. One sentence,
  * said here, so the page, the server and the test that reads a refusal word for word
  * are all reading the same one.
@@ -91,7 +98,7 @@ export interface SessionCardItem {
 export type ClientFrame =
   | { type: 'hello'; version: number; conversationId: string; genui?: boolean; client?: ClientKind }
   | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[] }
-  | { type: 'control'; action: 'stop' | 'allow' | 'deny'; id?: string }
+  | { type: 'control'; action: 'stop' | 'allow' | 'deny' | 'plan' | 'approve-plan'; id?: string; plan?: boolean }
   /** Stop a background job. Pressing the control is the confirmation. */
   | { type: 'job-kill'; id: string }
   | { type: 'command'; text: string }
@@ -195,7 +202,9 @@ export interface ActiveTurn {
 }
 
 export type ServerFrame =
-  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn; project?: ProjectView }
+  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn; project?: ProjectView; plan?: boolean }
+  /** The session's planning turn went on or off, for every screen watching it. */
+  | { type: 'plan'; plan: boolean }
   | { type: 'turn-start'; id: string; text: string }
   | { type: 'event'; turnId: string; event: AgentEvent }
   | { type: 'permission'; id: string; request: PermissionRequest; expiresAt: number }
@@ -314,8 +323,12 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
   ) {
     return frame as ClientFrame
   }
-  if (frame.type === 'control' && ['stop', 'allow', 'deny'].includes(String(frame.action))) {
-    return frame as ClientFrame
+  if (frame.type === 'control') {
+    if (frame.action === 'plan') {
+      return typeof frame.plan === 'boolean' ? (frame as ClientFrame) : null
+    }
+    if (frame.action === 'approve-plan') return frame as ClientFrame
+    if (['stop', 'allow', 'deny'].includes(String(frame.action))) return frame as ClientFrame
   }
   if (frame.type === 'job-kill' && typeof frame.id === 'string' && frame.id !== '') {
     return frame as ClientFrame

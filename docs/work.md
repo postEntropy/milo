@@ -17,6 +17,10 @@ the ordinary ones, with the folder they run in changed.
 - **Sessions** that ran there, newest first, with the running mark.
 - **New session here** — the composer starts an ordinary session in that folder. The first
   words may also be the ones that ask the agent to write the folder's rules.
+- **Build or Plan** — the composer's mode switch. Build works in the folder. Plan keeps
+  the tools that read and proposes a change; the write tools are out of the catalog and
+  the permission gate refuses them anyway. **Approve plan** leaves Plan and starts the
+  build turn with the plan as the turn before it.
 - **Rules** — whether the folder carries an `AGENTS.md` (`present`, `absent`, or `unreadable`
   with the reason). The file's text is not shown here; it is read in Files. A folder with no
   rules offers one control that starts a session told to write them.
@@ -73,6 +77,7 @@ the ordinary ones, with the folder they run in changed.
 | Folder tree and file pages | `src/core/work.ts` |
 | Changes and first state | `src/core/work-diff.ts` |
 | Project rules | `src/core/agent/instructions.ts` |
+| Plan / Build | `src/core/agent/system.ts` (`PLAN_SECTION`), `src/core/tools/permission.ts` (`withPlan`, `isPlanTool`) |
 | Daemon actions | `src/gateways/web/settings.ts` (`projects`, `project-*`) |
 | Web tab | `web/src/work/Work.tsx`, `web/src/App.tsx` (`/work`) |
 | Phone tab | `ios/Sources/Milo/Screens/WorkView.swift` |

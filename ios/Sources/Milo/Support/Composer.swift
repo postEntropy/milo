@@ -27,7 +27,8 @@ struct Composer: View {
     /// the send control raises are one action, so they are one function, on the screen.
     let send: (ClientFrame.Intent) -> Void
     /// Whether this session works in a project, which is what makes the composer two lines:
-    /// the work surface keeps the model on the bar, an ordinary chat keeps it in the panel.
+    /// the work surface keeps the plan switch on the bar; the model is in the `+` panel on
+    /// every composer, so it does not take a line here.
     let work: Bool
     /// Which composer this is: the one the open session is spoken into, or the one a project's
     /// own page carries, where the words being written are what starts a session.
@@ -45,9 +46,10 @@ struct Composer: View {
     /// — the one thing this field does that the chat's does not. Nil on a composer spoken
     /// into a session that already exists: that session's own bar says where it works.
     var project: String? = nil
-    /// Raising the model picker. The model is the composer's own line, so choosing one is the
-    /// composer's own action — the screen owns the sheet, as it owns the `+` panel.
-    let onModel: () -> Void
+    /// The planning switch before a session exists. A project's page starts the first
+    /// turn, so the choice has to be made there. Nil on a session composer, which reads
+    /// the session's own state instead — one control, placed where the session lives.
+    var startPlan: Binding<Bool>? = nil
     @Environment(AppModel.self) private var model
     /// Whether the send control is under a finger, for the give every filled control here has.
     /// A control driven by gestures rather than by a `Button` — the long press the panel hangs
@@ -71,6 +73,12 @@ struct Composer: View {
             // count — the browser's own order. Nothing of the strip is drawn at rest.
             if role == .session, !model.jobs.isEmpty {
                 JobStrip(jobs: model.jobs)
+            }
+
+            // The plan's own line, said once, with the one action it has. Only in a
+            // work session: a plan is about the folder the turn is working in.
+            if role == .session, work, model.planMode {
+                planBanner
             }
 
             if let quote {
@@ -164,8 +172,11 @@ struct Composer: View {
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(MiloTheme.foreground)
+                .foregroundStyle(work ? MiloTheme.foreground2 : MiloTheme.foreground)
                 .frame(width: 40, height: 40)
+                // Filled in a work session, where it sits beside the plan switch; a quiet
+                // control in an ordinary chat, where it is alone on the line.
+                .background(Circle().fill(work ? MiloTheme.surface : Color.clear))
                 .contentShape(Circle())
         }
         .buttonStyle(PressableStyle())
@@ -199,31 +210,36 @@ struct Composer: View {
         }
     }
 
-    /// A work session's second line: the files, the chosen model, and the way to send.
+    /// A work session's second line: the files, the shape of the turn, and the way to send.
+    /// The model lives in the `+` panel on every composer, so it does not take a line here.
     private var workRow: some View {
         HStack(spacing: MiloTheme.Space.one) {
             actionsButton
-            modelPill
+            planPill
             Spacer(minLength: MiloTheme.Space.two)
             sendControl
         }
         .padding(.horizontal, MiloTheme.Space.two)
     }
 
-    /// What this message is written with, on the work session's own line. Filled like every
-    /// control here, so it reads as something to press — and it says what is chosen now,
-    /// rather than making a setting something to go looking for.
-    private var modelPill: some View {
-        Button(action: onModel) {
-                HStack(spacing: MiloTheme.Space.two) {
-                    Image(systemName: "cpu")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text(model.modelLabel.isEmpty ? "Model" : model.modelLabel)
-                        .font(MiloTheme.Text.small)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 9, weight: .semibold))
+    /// Whether the plan switch is on: the session's own state, or the choice held for a
+    /// session that has not been started yet.
+    private var planOn: Bool {
+        startPlan?.wrappedValue ?? model.planMode
+    }
+
+    /// The shape of the turn: **Build** works in the folder, **Plan** reads and proposes.
+    /// Both are the same filled control; the mark and the word are what tell them apart.
+    private var planPill: some View {
+        Button {
+            if let startPlan { startPlan.wrappedValue.toggle() }
+            else { model.setPlan(!model.planMode) }
+        } label: {
+            HStack(spacing: MiloTheme.Space.two) {
+                Image(systemName: planOn ? "list.bullet.rectangle" : "hammer")
+                    .font(.system(size: 12, weight: .semibold))
+                Text(planOn ? "Plan" : "Build")
+                    .font(MiloTheme.Text.small)
             }
             .foregroundStyle(MiloTheme.foreground2)
             .padding(.horizontal, MiloTheme.Space.four)
@@ -232,8 +248,39 @@ struct Composer: View {
             .contentShape(Capsule())
         }
         .buttonStyle(PressableStyle())
-        .accessibilityLabel("Model")
-        .accessibilityValue(model.modelLabel)
+        .disabled(startPlan == nil && model.busy)
+        .opacity(startPlan == nil && model.busy ? 0.5 : 1)
+        .accessibilityLabel(planOn ? "Plan mode" : "Build mode")
+        .accessibilityHint(planOn ? "Switch to build mode" : "Switch to plan mode")
+        // A tick under the thumb when the shape of the turn changes — the same selection
+        // feedback the panel gives a submenu, because this is the same kind of choice.
+        .sensoryFeedback(.selection, trigger: planOn)
+    }
+
+    /// The plan's own line above the composer: what the turn is doing, and the one act
+    /// that ends it. Filled like every control; the accent is the approve, not the text.
+    private var planBanner: some View {
+        HStack(spacing: MiloTheme.Space.three) {
+            Image(systemName: "list.bullet.rectangle")
+                .font(MiloTheme.Text.small)
+                .foregroundStyle(MiloTheme.accent)
+            Text("Reading and proposing — Milo is not changing anything.")
+                .font(MiloTheme.Text.small)
+                .foregroundStyle(MiloTheme.foreground2)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button("Approve plan") { model.approvePlan() }
+                .font(MiloTheme.Text.small.weight(.semibold))
+                .foregroundStyle(MiloTheme.accentOn)
+                .padding(.horizontal, MiloTheme.Space.four)
+                .padding(.vertical, MiloTheme.Space.two + 1)
+                .background(Capsule().fill(MiloTheme.accent))
+                .disabled(model.busy || !model.planProposed)
+                .opacity(model.busy || !model.planProposed ? 0.5 : 1)
+        }
+        .padding(.horizontal, MiloTheme.Space.four)
+        .padding(.vertical, MiloTheme.Space.three)
+        .background(RoundedRectangle(cornerRadius: MiloTheme.Radius.md).fill(MiloTheme.surfaceWarm))
+        .padding(.horizontal, MiloTheme.margin)
     }
 
     /// What is being answered, held at the composer until the reply is sent: the words

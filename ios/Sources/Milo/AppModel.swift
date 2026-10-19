@@ -55,6 +55,12 @@ final class AppModel {
     private(set) var phase: Phase = .pairing
     private(set) var messages: [Message] = []
     private(set) var busy = false
+    /// Whether this session's turns are proposing rather than working. Kept on the
+    /// session, so a screen that reconnects mid-plan opens with the switch already on.
+    private(set) var planMode = false
+    /// Whether a turn has run under the plan. Approval belongs to the proposal that
+    /// turn made, not to whatever the thread said before plan mode went on.
+    private(set) var planProposed = false
     /// Messages stacked behind the turn running now, for the composer's queue chip.
     private(set) var queued = 0
     /// The background jobs still running in this session, for the strip above the
@@ -652,6 +658,21 @@ final class AppModel {
         client.send(.control(.stop))
     }
 
+    /// Turns the session into a planning turn, or back. The daemon owns the state: the
+    /// `plan` frame is what moves the switch, so a sibling screen agrees with this one.
+    func setPlan(_ on: Bool) {
+        // A switch moved now says nothing about the turn that already ran; the next
+        // turn under the plan is what earns approval.
+        planProposed = false
+        if !client.send(.setPlan(on)) { unsent() }
+    }
+
+    /// Approves the plan. The daemon leaves plan mode and starts the execution turn, so
+    /// there is no second message for the person to write.
+    func approvePlan() {
+        if !client.send(.approvePlan) { unsent() }
+    }
+
     func answerPermission(allowed: Bool) {
         guard let pending else { return }
         self.pending = nil
@@ -871,6 +892,8 @@ final class AppModel {
         turnStarted = nil
         began = false
         busy = false
+        planMode = false
+        planProposed = false
         // The turn being left is not what this phone waits on any more: the system is let go
         // of it rather than held open for an answer this chat no longer draws.
         continuedTurn.end()
@@ -1173,14 +1196,14 @@ final class AppModel {
      back to is the ordinary one, working there.
      */
     @discardableResult
-    func startWorkSession(project: String) async -> Bool {
+    func startWorkSession(project: String, plan: Bool = false) async -> Bool {
         guard let account else { return false }
         reopening = true
         owed = nil
         owedIntent = nil
         owedUploads = []
         resetSessionState()
-        let opened = await openFresh(account) { try await MiloApi.newSession($0, project: project) }
+        let opened = await openFresh(account) { try await MiloApi.newSession($0, project: project, plan: plan) }
         if !opened {
             reopening = false
             owed = nil
@@ -1641,6 +1664,9 @@ final class AppModel {
             let waitingForFirstSend = reopening && owed != nil && ready.messages.isEmpty && !messages.isEmpty
             reopening = false
             sessionProject = ready.project
+            planMode = ready.plan ?? false
+            // A reload joins the plan where it stands; a new proposal is what earns approval.
+            planProposed = false
             if !waitingForFirstSend, (!messages.isEmpty || !ready.messages.isEmpty) {
                 // The whole session, so a reconnect replaces rather than grows it.
                 messages = ready.messages.map {
@@ -1725,6 +1751,16 @@ final class AppModel {
             if pending?.id == id { pending = nil }
         case .turnEnd(_, let status, let raw, let rawNoOutput):
             busy = false
+            // A plan turn has something to approve only when it actually put words on
+            // the screen: a turn that ended in tool calls alone proposed nothing.
+            if planMode, messages.last(where: { !$0.isUser })?.parts.contains(where: {
+                if case .text(let text) = $0 {
+                    return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                }
+                return false
+            }) == true {
+                planProposed = true
+            }
             answerEnded += 1
             // The answer's own words, taken as the turn settles: what the phone says when
             // the chat is not what is on screen.
@@ -1782,6 +1818,9 @@ final class AppModel {
         case .state(let isBusy, let count):
             busy = isBusy
             queued = count
+        case .plan(let on):
+            planMode = on
+            if !on { planProposed = false }
         case .error(let message):
             note = Note(message)
         case .suggestions(let items):

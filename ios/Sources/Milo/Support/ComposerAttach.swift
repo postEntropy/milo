@@ -14,10 +14,9 @@ enum AttachKind: CaseIterable {
 @MainActor
 func composerActionRows(
     model: AppModel,
-    /// The way to the model picker, when the model is a line of this panel. `nil` where the
-    /// surface put the model on a line of its own under the field — one choice reached one
-    /// way, never two.
-    modelRow: (() -> Void)?,
+    /// The way to the model picker: a line of this panel on every composer, so the model
+    /// is one choice reached one way.
+    modelRow: @escaping () -> Void,
     ask: @escaping (AttachKind) -> Void
 ) -> [MenuRow] {
     // The files, and how hard the model thinks: what belongs to the message is what is
@@ -27,19 +26,17 @@ func composerActionRows(
         MenuRow(title: "Photo", symbol: "photo") { ask(.photo) },
         MenuRow(title: "File", symbol: "doc") { ask(.file) },
     ]
-    let picker = modelRow.flatMap { open in
-        MenuRow(
-            title: "Model",
-            subtitle: model.modelLabel.isEmpty ? nil : model.modelLabel,
-            symbol: "cpu",
-            action: open
-        )
-    }
+    let picker = MenuRow(
+        title: "Model",
+        subtitle: model.modelLabel.isEmpty ? nil : model.modelLabel,
+        symbol: "cpu",
+        action: modelRow
+    )
     // The bulb is the browser's own mark for this control, off its reasoning pill; the
     // levels live inside it as a submenu, so the root panel names what is being chosen and
     // a press unfolds the levels in place.
-    guard !model.efforts.isEmpty else { return attach + (picker.map { [$0] } ?? []) }
-    return attach + (picker.map { [$0] } ?? []) + [
+    guard !model.efforts.isEmpty else { return attach + [picker] }
+    return attach + [picker] + [
         MenuRow(
             title: "Reasoning effort",
             symbol: "lightbulb",

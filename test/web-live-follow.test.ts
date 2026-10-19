@@ -12,6 +12,7 @@ const { WebHub } = await import('../src/gateways/web/hub.js')
 const { WebSettings } = await import('../src/gateways/web/settings.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { DefaultPermissionPolicy } = await import('../src/core/tools/permission.js')
+const { PLAN_APPROVAL } = await import('../src/gateways/web/protocol.js')
 
 /** The desktop tab and the phone: two conversations a person may have open at once. */
 const DESKTOP = '11111111-2222-3333-4444-555555555555'
@@ -137,6 +138,8 @@ interface Frame {
   activeTurn?: { id: string }
   id?: string
   allowed?: boolean
+  plan?: boolean
+  text?: string
   messages?: Array<{ parts: Array<{ kind: string; text?: string }> }>
 }
 
@@ -279,6 +282,34 @@ describe('a turn on a session open in two conversations', () => {
     expect(desktop).toContainEqual(steered)
     expect(phone).toContainEqual(steered)
 
+    provider.answer()
+    expect(await waitFor(() => desktop.some((frame) => frame.type === 'turn-end'))).toBe(true)
+  })
+
+  it('turns the session into a plan on both screens, and approves it into a turn', async () => {
+    const provider = new HeldProvider()
+    const { hub, desktop, phone, at } = await twoScreens(provider)
+
+    hub.handle(at, { type: 'control', action: 'plan', plan: true }, DESKTOP)
+
+    // The switch belongs to the session: the sibling is proposing too.
+    const on = expect.objectContaining({ type: 'plan', plan: true })
+    expect(desktop).toContainEqual(on)
+    expect(phone).toContainEqual(on)
+
+    // A screen that arrives afterwards is handed the state it missed.
+    const arriving: Frame[] = []
+    await hub.connect(client(arriving), DESKTOP)
+    expect(arriving.find((frame) => frame.type === 'ready')?.plan).toBe(true)
+
+    hub.handle(at, { type: 'control', action: 'approve-plan' }, DESKTOP)
+
+    expect(desktop).toContainEqual(expect.objectContaining({ type: 'plan', plan: false }))
+    expect(
+      await waitFor(() => desktop.some((frame) => frame.type === 'turn-start' && frame.text === PLAN_APPROVAL)),
+    ).toBe(true)
+
+    await provider.reached()
     provider.answer()
     expect(await waitFor(() => desktop.some((frame) => frame.type === 'turn-end'))).toBe(true)
   })

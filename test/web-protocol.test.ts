@@ -25,6 +25,16 @@ describe('web protocol', () => {
     expect(parseClientFrame({ ...hello, genui: 'canvas' })).toBeNull()
   })
 
+  it('carries the planning switch, and refuses half of one', () => {
+    expect(parseClientFrame({ type: 'control', action: 'plan', plan: true })?.type).toBe('control')
+    expect(parseClientFrame({ type: 'control', action: 'plan', plan: false })?.type).toBe('control')
+    // A switch without a state is not a switch.
+    expect(parseClientFrame({ type: 'control', action: 'plan' })).toBeNull()
+    expect(parseClientFrame({ type: 'control', action: 'plan', plan: 'on' })).toBeNull()
+    // Approving names the act itself; the state is already on.
+    expect(parseClientFrame({ type: 'control', action: 'approve-plan' })?.type).toBe('control')
+  })
+
   it('carries a pinned destination, and refuses half of one', () => {
     const pinned = parseClientFrame({ type: 'send', text: 'every day at 8', target: { gateway: 'telegram', conversationId: '123' } })
     // Half a target is not one: guessing the other half is how a routine goes quiet.
@@ -74,5 +84,10 @@ describe('web protocol', () => {
     // server may send, and it is additive, so no version bump rides with it.
     const frame: ServerFrame = { type: 'sessions-changed' }
     expect(frame).toEqual({ type: 'sessions-changed' })
+  })
+
+  it('carries the session plan state as its own frame', () => {
+    const frame: ServerFrame = { type: 'plan', plan: true }
+    expect(frame).toEqual({ type: 'plan', plan: true })
   })
 })

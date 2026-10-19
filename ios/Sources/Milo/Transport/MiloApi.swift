@@ -199,13 +199,17 @@ enum MiloApi {
         try await call("models", ["provider": provider], account: account, as: [ModelInfo].self)
     }
 
-    static func newSession(_ account: Account, title: String? = nil, project: String? = nil) async throws {
+    static func newSession(_ account: Account, title: String? = nil, project: String? = nil, plan: Bool = false) async throws {
         var body: [String: Any] = ["conversationId": account.conversationId]
         if let title { body["title"] = title }
         // The folder this session works in. The daemon refuses an id it does not know,
         // which is what keeps a work session from starting in the install's own folder
         // while saying nothing about why.
         if let project { body["project"] = project }
+        // A work session started from the project's page may be started planning: the
+        // first words are the proposal, and the session must already be in the mode
+        // when they arrive.
+        if plan { body["plan"] = true }
         _ = try await call("new-session", body, account: account, as: Ack.self)
     }
 
