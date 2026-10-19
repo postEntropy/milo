@@ -11,6 +11,12 @@ apply, because they carry live state and behaviour the persona cannot know.
   and from the provider only when the id says nothing. An unknown family gets no section,
   never a guess. The briefing is about the family's vices: comment density for Claude,
   mid-work steering and not reverting someone else's change for GPT.
+- **Plan mode** — only while the session is proposing rather than working. The catalog
+  carries what reads, what stays inside Milo, and what delegates; the permission policy
+  refuses anything that would still change a file or run a command. The section asks for a
+  concrete plan — files, steps, risks, how it will be checked — and says the work has not
+  started. A surface turns it on and off; approving the plan ends it and starts the
+  execution turn.
 - **The code manual** — only when the session works in a project's folder. It says to read
   before writing, match the folder, avoid inventing commands and files, keep the change
   small, and check the work with the project's own tests, typecheck or lint. A session
@@ -23,9 +29,9 @@ apply, because they carry live state and behaviour the persona cannot know.
   the remembered notes and the compaction summary. The environment names the session's
   project; the code manual is what turns that fact into how to work.
 
-The subagent gets the same family section and the same project, because it runs under the
-same model and in the same folder. A routine gets the family section too: it is a turn
-like any other.
+The subagent gets the same family section, the same plan section when the parent is
+planning, and the same project, because it runs under the same model and in the same
+folder. A routine gets the family section too: it is a turn like any other.
 
 In a project, the `task` tool lets the model delegate on its own: a broad search or a long
 read is exactly what a subagent keeps out of the conversation. Outside a project, it waits
@@ -46,6 +52,7 @@ inside it.
 | Base persona | `src/core/agent/system.ts` (`DEFAULT_SYSTEM_PROMPT`) |
 | Family briefings | `src/core/agent/system.ts` (`FAMILY_SECTIONS`) |
 | Reading the family | `src/core/agent/model-family.ts` |
+| Plan section | `src/core/agent/system.ts` (`PLAN_SECTION`) |
 | Code manual | `src/core/agent/system.ts` (`PROJECT_CODE_SECTION`) |
 | Project rules | `src/core/agent/instructions.ts` |
 | Assembly order | `src/core/agent/system.ts` (`buildSystemPrompt`) |
@@ -57,7 +64,7 @@ These are separate decisions. A reference in a plan is not a feature.
 
 - A model catalog: context window, compaction threshold, reasoning effort.
 - An immutable snapshot per step (`StepContext`); the loop already records before it acts.
-- Plan mode and default permission rules.
+- Default permission rules: the rule file, the approval cache and the segment parser.
 - A global `~/.milo/AGENTS.md`, a `CLAUDE.md` fallback, and per-subfolder rules.
 - Headless `milo run`, OS-level sandbox, and the rest of the Codex surface.
 

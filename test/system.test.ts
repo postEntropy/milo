@@ -284,6 +284,16 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain("run the project's own tests")
   })
 
+  it('tells a planning turn to propose, and not to change anything', () => {
+    const base = { base: 'BASE', cwd: '/a', provider: 'p', model: 'm', tools: [], memories: [] }
+    const prompt = buildSystemPrompt({ ...base, plan: true })
+
+    expect(prompt).toContain('## Plan mode')
+    expect(prompt).toContain('not for changes')
+    expect(prompt).toContain('End the turn with a concrete plan')
+    expect(buildSystemPrompt(base)).not.toContain('## Plan mode')
+  })
+
   it('adds no code brief to a session with no project, or one that is gone', () => {
     const base = { base: 'BASE', cwd: '/a', provider: 'p', model: 'm', tools: [], memories: [] }
     expect(buildSystemPrompt(base)).not.toContain('## Working in this project')

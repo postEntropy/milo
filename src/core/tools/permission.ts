@@ -223,6 +223,38 @@ export function withGrants(
 }
 
 /**
+ * Whether a planning turn may keep this tool: it reads, its effect stays inside
+ * Milo's own state, or it delegates — and the subtask's own calls pass through the
+ * same gate. Everything else is left out of the catalog, so a write is not offered
+ * to a turn that has promised not to make one.
+ */
+export function isPlanTool(tool: Tool<unknown> | undefined): boolean {
+  return tool !== undefined && (tool.readOnly === true || tool.internal === true || tool.delegates === true)
+}
+
+/**
+ * A turn that is planning, not doing: reads stay, and anything that would change
+ * something is refused before the policy is even asked.
+ *
+ * The catalog already leaves the write tools out (see `Session.turn`); this is the
+ * backstop for a call that reached the gate anyway — a subagent's own catalog, an
+ * MCP tool nobody filtered — and it is what makes the promise in the prompt true
+ * rather than merely requested. `delegates` stays allowed: the subtask's own calls
+ * pass through this same wrapper, so its writes are refused one level down.
+ */
+export function withPlan(policy: PermissionPolicy): PermissionPolicy {
+  return {
+    get mode(): PermissionMode {
+      return policy.mode
+    },
+    setMode: (mode) => policy.setMode(mode),
+    update: (options) => policy.update(options),
+    decide: (tool, args, options) =>
+      actsOnSomething(tool, args) ? 'deny' : policy.decide(tool, args, options),
+  }
+}
+
+/**
  * What a confirmation prompt shows. For a command: the command — plus the
  * directory, since `cwd` changes what the same words do. For a write: the path
  * *and* the content, because approving a path without seeing what goes in it is

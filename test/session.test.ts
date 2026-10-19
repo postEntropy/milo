@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
@@ -21,6 +21,7 @@ import { DEFAULT_SESSIONS, type SessionsConfig } from '../src/core/config/schema
 import { MemoryRecapStore } from '../src/core/sessions/recap.js'
 import { FileSessionStore } from '../src/core/sessions/file-store.js'
 import { createToolRegistry, sessionsTool } from '../src/core/tools/index.js'
+import { DefaultPermissionPolicy } from '../src/core/tools/permission.js'
 import { ToolRegistry } from '../src/core/tools/registry.js'
 import type { Tool, ToolContext } from '../src/core/tools/types.js'
 
@@ -260,9 +261,12 @@ describe('Session', () => {
 
   it('clears the transcript but keeps the session identity', async () => {
     const { session, store } = await run('hello there')
+    session.setPlan(true)
     await session.clear()
 
     expect(session.messages).toHaveLength(0)
+    // The plan belonged to the conversation that was cleared.
+    expect(session.planMode).toBe(false)
     expect(session.id).toMatch(/^[a-z]+-[a-z]+-\d{1,3}$/)
     expect((await store.load(session.id))!.messages).toHaveLength(0)
   })
@@ -452,6 +456,57 @@ describe('Session', () => {
     expect(outside.lastTools?.find((tool) => tool.name === 'task')?.description).toContain(
       'do not delegate on your own initiative',
     )
+  })
+
+  it('keeps a planning turn to reads, and refuses a write that still reaches the gate', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-plan-'))
+
+    class PlanProvider implements Provider {
+      readonly id = 'plan'
+      last?: ChatRequest
+      calls = 0
+
+      async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+        this.last = req
+        if (this.calls++ === 0) {
+          yield {
+            type: 'tool-call',
+            id: 'c1',
+            name: 'write_file',
+            args: { path: 'x.txt', content: 'nope' },
+          }
+          yield { type: 'done', finishReason: 'tool_calls' }
+          return
+        }
+        yield { type: 'text', delta: 'A plan.' }
+        yield { type: 'done', finishReason: 'stop' }
+      }
+    }
+
+    const provider = new PlanProvider()
+    const { session } = await sessionWith(provider, {
+      cwd: dir,
+      permissionPolicy: new DefaultPermissionPolicy(),
+    })
+    session.setPlan(true)
+    expect(session.planMode).toBe(true)
+
+    const events: AgentEvent[] = []
+    for await (const event of session.send('plan the change')) events.push(event)
+
+    const names = provider.last?.tools?.map((tool) => tool.name) ?? []
+    expect(names).toContain('read_file')
+    expect(names).not.toContain('write_file')
+    expect(names).not.toContain('shell_command')
+    expect(provider.last?.system).toContain('## Plan mode')
+
+    const write = events.find(
+      (event): event is Extract<AgentEvent, { type: 'tool-end' }> =>
+        event.type === 'tool-end' && event.name === 'write_file',
+    )
+    expect(write).toMatchObject({ isError: true })
+    expect(write?.result).toContain('denied by the permission policy')
+    expect(existsSync(path.join(dir, 'x.txt'))).toBe(false)
   })
 
   it('says a turn began and then ended, once each', async () => {

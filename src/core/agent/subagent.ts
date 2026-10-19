@@ -8,6 +8,7 @@ import type { ToolContext, ToolRegistry, ToolResult } from '../tools/index.js'
 import type { BrowserFacts } from '../browser/index.js'
 import type { GoogleState } from '../google/state.js'
 import type { McpFacts } from '../mcp/servers.js'
+import { isPlanTool } from '../tools/permission.js'
 import { runAgent, type ToolPermission } from './loop.js'
 import { buildSystemPrompt, SUBAGENT_SYSTEM_PROMPT } from './system.js'
 
@@ -39,6 +40,12 @@ export interface SubagentRun {
   mcp?: McpFacts | null
   google?: GoogleState | null
   signal: AbortSignal
+  /**
+   * Whether this subtask is planning rather than doing. Its catalog keeps the tools
+   * that read, stay inside Milo, or delegate; the permission it inherits from the
+   * parent refuses anything that would still change something.
+   */
+  plan?: boolean
   /**
    * A step of the subtask that may have changed something — a file written, a command
    * run. A subagent works in the folder the parent turn works in, so what it changes is
@@ -75,7 +82,9 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
   // a person, and a subagent has no surface to draw it on. And except `sessions`:
   // pruning the install's conversations is the main turn's act, and the subagent's
   // context carries no session to manage or refuse against.
-  const tools = options.registry.specs().filter((tool) => tool.name !== 'task' && tool.name !== 'todo' && tool.name !== 'sessions')
+  const tools = options.registry.specs()
+    .filter((tool) => tool.name !== 'task' && tool.name !== 'todo' && tool.name !== 'sessions')
+    .filter((tool) => !options.plan || isPlanTool(options.registry.get(tool.name)))
   const system = buildSystemPrompt({
     base: SUBAGENT_SYSTEM_PROMPT,
     cwd: options.cwd,
@@ -89,6 +98,7 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     mcp: options.mcp ?? null,
     google: options.google ?? null,
     memories: [],
+    plan: options.plan,
   })
   const messages: Message[] = [
     { role: 'user', content: [{ type: 'text', text: options.input.prompt }] },

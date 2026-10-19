@@ -15,7 +15,7 @@ import { describeOutgoing, type OutgoingFile } from './outgoing.js'
 import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
 import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, SessionAdmin, ToolRegistry } from './tools/index.js'
 import type { JobManager } from './jobs/index.js'
-import { withGrants } from './tools/index.js'
+import { isPlanTool, withGrants, withPlan } from './tools/index.js'
 import { taskDescription } from './tools/task.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent, type RunTrace } from './agent/loop.js'
@@ -307,6 +307,13 @@ export class Session {
    * the same one the turn holds for as long as it runs.
    */
   private outgoing: OutgoingFile[] = []
+  /**
+   * Whether the turns that follow are planning turns: read the folder, propose,
+   * change nothing. Kept on the session rather than on one turn, because a plan
+   * may take more than one turn to settle; a surface turns it off when the plan
+   * is approved, and `clear` turns it off with the conversation it belonged to.
+   */
+  private plan = false
   /** Turns of this copy in flight, the wait for the lease included. */
   private sending = 0
 
@@ -363,6 +370,20 @@ export class Session {
 
   setMediaModels(mediaModels: MediaModelsConfig | undefined): void {
     this.options.mediaModels = mediaModels
+  }
+
+  /** Whether this session's turns are planning turns. Read by the surface that draws the switch. */
+  get planMode(): boolean {
+    return this.plan
+  }
+
+  /**
+   * Turns planning on or off for the turns that follow. Not written to the record:
+   * a restart is a safe place to leave it, and a session resumed from disk starts
+   * ready to work rather than stuck proposing.
+   */
+  setPlan(plan: boolean): void {
+    this.plan = plan
   }
 
   /**
@@ -576,6 +597,9 @@ export class Session {
       : this.options.provider
     const signal = opts?.signal
     const steering = opts?.steering
+    // Read once for the turn: a switch flipped mid-turn is the next turn's business,
+    // not something that changes the catalog under the model's feet.
+    const plan = this.plan
 
     // What this turn leaves in the log: the question, every tool it ran, and
     // what it answered — with the reasoning that got there.
@@ -628,6 +652,9 @@ export class Session {
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
       .filter((tool) => tool.name !== 'panel' || canPanel(surface))
       .filter((tool) => tool.name !== 'sessions' || sessionAdmin !== undefined)
+      // A planning turn may read, keep Milo's own state, or delegate; it may not
+      // write, run a command, commit, send a file, or prune the install's sessions.
+      .filter((tool) => !plan || isPlanTool(registry.get(tool.name)))
       .map((tool) => (tool.name === 'task' ? { ...tool, description: taskDescription(inProject) } : tool))
     // An instruction-only turn has nothing of the person's to recall against.
     const recalled = opts?.notice
@@ -650,6 +677,9 @@ export class Session {
       instructions: this.options.instructions?.(),
       provider: provider.id,
       model,
+      // The shape of this turn, not a fact of the session: a planning turn is told
+      // to propose, and the catalog it was handed has nothing to write with.
+      plan,
       // The session this turn is in, so a question about it is answerable without
       // going to read the sessions directory.
       sessionId: this.id,
@@ -702,8 +732,15 @@ export class Session {
     // the turn and by any subagent it delegates to.
     const abort = signal ?? new AbortController().signal
     const effort = this.options.reasoningEffort?.() ?? DEFAULT_REASONING_EFFORT
-    const permission = permissionPolicy
-      ? { policy: withGrants(permissionPolicy, this.options.grantedTools ?? [], cwd), ask: opts?.ask, cwd }
+    // A plan is a promise with a gate behind it: the catalog hides the writes, and
+    // the policy refuses one that reaches the gate anyway — a subagent's own call,
+    // a tool from a source that filtered nothing. The grant is layered first so a
+    // standing grant cannot widen a planning turn.
+    const granted = permissionPolicy
+      ? withGrants(permissionPolicy, this.options.grantedTools ?? [], cwd)
+      : undefined
+    const permission = granted
+      ? { policy: plan ? withPlan(granted) : granted, ask: opts?.ask, cwd }
       : undefined
     // Read through `this.scope` at call time: a gateway can rebind the session
     // to another conversation while it is running.
@@ -800,6 +837,9 @@ export class Session {
               mcp: this.mcpFacts(),
               google: this.options.google ?? null,
               signal: abort,
+              // The subtask is planning too: its catalog drops the writes, and the
+              // permission it inherits refuses one that is still called.
+              plan,
               permission,
               // A delegated write lands in the same folder this session works in, so it is
               // announced the same way: the subtask is not a second, silent writer.
@@ -1056,6 +1096,8 @@ export class Session {
       this.messages.length = 0
       this.summary = undefined
       this.record.droppedTokens = undefined
+      // The plan belonged to the conversation that just went away.
+      this.plan = false
       await this.recaps.remove(this.id) // the recap describes what just went away
       await this.persist()
     } finally {

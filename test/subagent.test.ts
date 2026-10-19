@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
 import { runSubagent, type SubagentRun } from '../src/core/agent/subagent.js'
 import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
-import { DefaultPermissionPolicy } from '../src/core/tools/permission.js'
+import { DefaultPermissionPolicy, withPlan } from '../src/core/tools/permission.js'
 import { ToolRegistry } from '../src/core/tools/registry.js'
 import { taskDescription, taskTool } from '../src/core/tools/task.js'
 import type { Tool, ToolContext } from '../src/core/tools/types.js'
@@ -160,6 +160,41 @@ describe('runSubagent', () => {
     const names = provider.last?.tools?.map((tool) => tool.name) ?? []
     expect(names).toContain('fake_read')
     expect(names).not.toContain('task')
+  })
+
+  it('keeps a planning subagent to reads, and refuses a write that still reaches it', async () => {
+    let wrote = false
+    const write: Tool<{ path: string }> = {
+      ...fakeWrite,
+      async execute(args) {
+        wrote = true
+        return { content: `WROTE:${args.path}` }
+      },
+    }
+    const provider = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'fake_write', args: { path: 'x' } },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      [
+        { type: 'text', delta: 'the plan' },
+        { type: 'done', finishReason: 'stop' },
+      ],
+    ])
+
+    const result = await run({
+      provider,
+      registry: new ToolRegistry([fakeRead, write]),
+      plan: true,
+      permission: { policy: withPlan(new DefaultPermissionPolicy()), cwd: process.cwd() },
+    })
+
+    const names = provider.last?.tools?.map((tool) => tool.name) ?? []
+    expect(names).toContain('fake_read')
+    expect(names).not.toContain('fake_write')
+    expect(provider.last?.system).toContain('## Plan mode')
+    expect(wrote).toBe(false)
+    expect(result.content).toBe('the plan')
   })
 
   it('gives the subagent its own system prompt: no surface, no memories', async () => {

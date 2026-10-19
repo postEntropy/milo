@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { DefaultPermissionPolicy, summarizeToolCall, withGrants } from '../src/core/tools/permission.js'
+import { DefaultPermissionPolicy, summarizeToolCall, withGrants, withPlan } from '../src/core/tools/permission.js'
 import type { DangerReviewer } from '../src/core/tools/permission.js'
 import type { Tool } from '../src/core/tools/types.js'
 
@@ -18,6 +18,16 @@ const writeTool: Tool<{ command: string }> = {
   name: 'shell_command',
   description: '',
   schema: z.object({ command: z.string() }),
+  async execute() {
+    return { content: '' }
+  },
+}
+
+const taskLike: Tool = {
+  name: 'task',
+  description: '',
+  schema: z.object({}),
+  delegates: true,
   async execute() {
     return { content: '' }
   },
@@ -44,6 +54,18 @@ describe('DefaultPermissionPolicy — ask mode', () => {
     const policy = new DefaultPermissionPolicy({ deny: ['read_file'], allow: ['shell_command'] })
     expect(await policy.decide(readTool, {})).toBe('deny')
     expect(await policy.decide(writeTool, { command: 'ls' })).toBe('allow')
+  })
+})
+
+describe('withPlan', () => {
+  it('keeps reads and delegation, and refuses anything that would change something', async () => {
+    // Even yolo does not widen a plan: the point of the turn is that nothing moves.
+    const policy = withPlan(new DefaultPermissionPolicy({ mode: 'yolo' }))
+
+    expect(await policy.decide(readTool, {})).toBe('allow')
+    expect(await policy.decide(taskLike, {})).toBe('allow')
+    expect(await policy.decide(writeTool, { command: 'ls' })).toBe('deny')
+    expect(await policy.decide(writeTool, { command: 'npm test' })).toBe('deny')
   })
 })
 

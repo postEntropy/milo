@@ -134,6 +134,18 @@ const PROJECT_CODE_SECTION = [
   "- A change is not finished until you have checked it: run the project's own tests, typecheck or lint when they exist, and say what you ran and what it answered. When no check exists, say that plainly rather than claiming it works.",
 ].join('\n')
 
+/**
+ * What a turn is told when it is planning rather than doing. The catalog has
+ * already dropped the tools that write; this says why, so the turn does not spend
+ * itself trying to call one or claiming work it did not do.
+ */
+const PLAN_SECTION = [
+  '## Plan mode',
+  '- This turn is for a plan, not for changes. Investigate with the read-only tools you have; you cannot edit a file or run a command that changes anything.',
+  '- End the turn with a concrete plan: the files to touch, the steps in order, the risks, and how the work will be checked. Do not say it is done; it has not started.',
+  '- If the plan needs a decision from the person, ask it here rather than guessing.',
+].join('\n')
+
 function familySection(provider: string, model: string): string | undefined {
   const family = modelFamily(provider, model)
   return family ? FAMILY_SECTIONS[family] : undefined
@@ -198,6 +210,12 @@ export interface SystemPromptInput {
    * section of the prompt, added only for a run that was told it draws.
    */
   genui?: boolean
+  /**
+   * Whether this turn is planning rather than doing. The catalog already carries
+   * only what a plan may use; this is the sentence that explains the shape of the
+   * turn, so the model proposes instead of trying to write.
+   */
+  plan?: boolean
   now?: Date
 }
 
@@ -471,6 +489,9 @@ export function buildSystemPrompt(input: SystemPromptInput): string {
   // doing code work, and one without a project is not.
   const family = familySection(input.provider, input.model)
   if (family) sections.push(family)
+  // The turn's own shape comes before the job's: a planning turn is not doing
+  // code yet, whatever folder it is reading.
+  if (input.plan) sections.push(PLAN_SECTION)
   if (input.project?.ok) sections.push(PROJECT_CODE_SECTION)
 
   const surface = input.surface
