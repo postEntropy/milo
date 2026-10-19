@@ -11,6 +11,7 @@ import type {
   Provider,
   ReasoningEffort,
   StreamEvent,
+  ToolSpec,
 } from '../src/core/providers/types.js'
 import type { HistoryEntry } from '../src/core/history.js'
 import { ROUTINE_GATEWAY } from '../src/core/routines.js'
@@ -30,11 +31,13 @@ class CapturingProvider implements Provider {
   lastSystem?: string
   lastMaxTokens?: number
   lastEffort?: ReasoningEffort
+  lastTools?: ToolSpec[]
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     this.lastSystem = req.system
     this.lastMaxTokens = req.maxTokens
     this.lastEffort = req.reasoningEffort
+    this.lastTools = req.tools
     yield { type: 'text', delta: 'SECRET_ASSISTANT_REPLY' }
     yield { type: 'done', finishReason: 'stop' }
   }
@@ -424,6 +427,31 @@ describe('Session', () => {
     }
     expect(provider.lastSystem).toContain('Second rule.')
     expect(provider.lastSystem).not.toContain('First rule.')
+  })
+
+  it('lets a project turn delegate on its own, and keeps the ask outside one', async () => {
+    const inProject = new CapturingProvider()
+    const { session } = await sessionWith(inProject, {
+      project: {
+        ok: true,
+        project: { id: 'p', name: 'milo', path: process.cwd(), createdAt: 0 },
+      },
+    })
+    for await (const _event of session.send('go')) {
+      // drain
+    }
+    expect(inProject.lastTools?.find((tool) => tool.name === 'task')?.description).toContain(
+      'on your own initiative',
+    )
+
+    const outside = new CapturingProvider()
+    const { session: plain } = await sessionWith(outside)
+    for await (const _event of plain.send('go')) {
+      // drain
+    }
+    expect(outside.lastTools?.find((tool) => tool.name === 'task')?.description).toContain(
+      'do not delegate on your own initiative',
+    )
   })
 
   it('says a turn began and then ended, once each', async () => {

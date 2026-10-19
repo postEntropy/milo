@@ -14,10 +14,26 @@ const schema = z.object({
 
 export type TaskArgs = z.infer<typeof schema>
 
+/**
+ * The default: a subagent is a thing the person asks for, not a decision the
+ * model makes on its own. A session in a project lifts that — a long read is
+ * exactly the work that crowds a code conversation — and the description the
+ * catalog carries is where the two differ.
+ */
+const TASK_DESCRIPTION =
+  'Delegate a subtask to a subagent that runs in its own context and returns only its final report — for a broad search, a read through many files, or a long investigation, whose intermediate steps would otherwise crowd this conversation. Use it only when the user has explicitly asked for a subagent or for the work to be delegated; do not delegate on your own initiative — do the work yourself with the tools you already have. The subagent does not see this conversation and cannot ask questions, so the prompt must stand on its own. It runs the same tools you do, though it cannot delegate again, and anything it needs confirmed is put to the user the same way yours would be.'
+
+const TASK_DESCRIPTION_IN_PROJECT =
+  'Delegate a subtask to a subagent that runs in its own context and returns only its final report — for a broad search, a read through many files, or a long investigation, whose intermediate steps would otherwise crowd this conversation. In a project, use it on your own initiative when the work is self-contained and reading it here would crowd this conversation; do not hand it a decision that needs this conversation. The subagent does not see this conversation and cannot ask questions, so the prompt must stand on its own. It runs the same tools you do, though it cannot delegate again, and anything it needs confirmed is put to the user the same way yours would be.'
+
+/** The description the catalog carries: whether the turn works in a project changes it. */
+export function taskDescription(project: boolean): string {
+  return project ? TASK_DESCRIPTION_IN_PROJECT : TASK_DESCRIPTION
+}
+
 export const taskTool: Tool<TaskArgs> = {
   name: 'task',
-  description:
-    'Delegate a subtask to a subagent that runs in its own context and returns only its final report — for a broad search, a read through many files, or a long investigation, whose intermediate steps would otherwise crowd this conversation. Use it only when the user has explicitly asked for a subagent or for the work to be delegated; do not delegate on your own initiative — do the work yourself with the tools you already have. The subagent does not see this conversation and cannot ask questions, so the prompt must stand on its own. It runs the same tools you do, though it cannot delegate again, and anything it needs confirmed is put to the user the same way yours would be.',
+  description: TASK_DESCRIPTION,
   schema,
   delegates: true,
   async execute(args, ctx) {

@@ -47,6 +47,9 @@ the ordinary ones, with the folder they run in changed.
   that — never as an empty change list that would read as "nothing changed".
 - Every path read is confined to the project's folder, and every refusal names what was
   wrong.
+- The model may delegate a broad read to a subagent on its own initiative here; outside a
+  project, delegation waits to be asked. The subagent works in the same folder and carries
+  the same rules.
 - The page re-reads while a turn writes (`work-changed`, held to one frame per second) and
   again when a turn ends (`sessions-changed`).
 - A folder that is gone is named as gone; a session started there would not work.

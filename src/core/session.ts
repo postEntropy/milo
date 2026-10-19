@@ -16,6 +16,7 @@ import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEf
 import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, SessionAdmin, ToolRegistry } from './tools/index.js'
 import type { JobManager } from './jobs/index.js'
 import { withGrants } from './tools/index.js'
+import { taskDescription } from './tools/task.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent, type RunTrace } from './agent/loop.js'
 import type { TraceWriter } from './traces.js'
@@ -621,9 +622,13 @@ export class Session {
             remove: (id) => adminSource.remove(id),
           }
         : undefined
+    // The catalog is what the model reads, so the one rule that depends on where
+    // the turn works is said there: in a project, delegation is the model's call.
+    const inProject = this.options.project?.ok === true
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
       .filter((tool) => tool.name !== 'panel' || canPanel(surface))
       .filter((tool) => tool.name !== 'sessions' || sessionAdmin !== undefined)
+      .map((tool) => (tool.name === 'task' ? { ...tool, description: taskDescription(inProject) } : tool))
     // An instruction-only turn has nothing of the person's to recall against.
     const recalled = opts?.notice
       ? []

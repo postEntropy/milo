@@ -4,7 +4,7 @@ import { runSubagent, type SubagentRun } from '../src/core/agent/subagent.js'
 import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
 import { DefaultPermissionPolicy } from '../src/core/tools/permission.js'
 import { ToolRegistry } from '../src/core/tools/registry.js'
-import { taskTool } from '../src/core/tools/task.js'
+import { taskDescription, taskTool } from '../src/core/tools/task.js'
 import type { Tool, ToolContext } from '../src/core/tools/types.js'
 
 class ScriptedProvider implements Provider {
@@ -73,6 +73,13 @@ describe('task tool', () => {
     // list every turn, so this is what keeps it from delegating on its own.
     expect(taskTool.description).toContain('only when the user has explicitly asked')
     expect(taskTool.description).toContain('do not delegate on your own initiative')
+  })
+
+  it('lets a project turn delegate on its own, with the same confirmations', () => {
+    expect(taskDescription(true)).toContain('on your own initiative')
+    expect(taskDescription(true)).not.toContain('do not delegate on your own initiative')
+    expect(taskDescription(true)).toContain('put to the user the same way')
+    expect(taskDescription(false)).toContain('do not delegate on your own initiative')
   })
 
   it('never asks on its own, but deny still blocks it', async () => {

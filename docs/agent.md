@@ -27,6 +27,11 @@ The subagent gets the same family section and the same project, because it runs 
 same model and in the same folder. A routine gets the family section too: it is a turn
 like any other.
 
+In a project, the `task` tool lets the model delegate on its own: a broad search or a long
+read is exactly what a subagent keeps out of the conversation. Outside a project, it waits
+to be asked. The tool's description is the whole rule, and it is chosen per turn from
+whether the session has a project.
+
 ## The hierarchy
 
 The person and the base policy outrank the folder's rules; the folder's rules outrank
