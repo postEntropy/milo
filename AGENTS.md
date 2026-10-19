@@ -48,6 +48,13 @@ form of the author's own taste notes, which live outside the repo in
 - A name must say what the thing does. A label that promises more than the behaviour is
   a defect, and so is a second name for something that already has one.
 
+## Work
+
+- Work is the code workspace: a tab of its own with projects, files, changes and rules. It
+  is a place, not a second system — a work session is an ordinary session in the project's
+  folder. What it is and is not is in [docs/work.md](docs/work.md); read that before
+  changing the tab.
+
 ## Code
 
 - No dead code, no speculative abstraction. An export only its own test uses is deleted;
