@@ -722,6 +722,7 @@ private struct ProjectChanges: View {
             }
         }
         .task { await read() }
+        .onChange(of: model.workMoved) { _, _ in Task { await read() } }
         // The file's own hunks, risen from the bottom: a diff is read on its own, and a long
         // one would otherwise stretch the project's page it changed in.
         .sheet(item: $reading) { file in DiffDetail(file: file) }
@@ -1002,6 +1003,7 @@ private struct ProjectFiles: View {
             }
         }
         .task { await read() }
+        .onChange(of: model.workMoved) { _, _ in Task { await read() } }
     }
 
     private func read() async {

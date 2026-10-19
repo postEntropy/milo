@@ -428,6 +428,10 @@ enum ServerFrame: Decodable {
     /// A session's turn began or ended somewhere in the install: re-read the list that
     /// shows it running.
     case sessionsChanged
+    /// A step may have changed what is on disk somewhere in the install: re-read the folder
+    /// being drawn. Not the same news as `sessionsChanged`, which is about which session is
+    /// running — this one is about the files, and arrives while a turn is still going.
+    case workChanged
     /// The panel beside the chat changed; null takes it down.
     case panel(PanelView?)
     case error(String)
@@ -480,6 +484,7 @@ enum ServerFrame: Decodable {
         case "suggestions": self = .suggestions(try container.decode([Idea].self, forKey: .items))
         case "routines-changed": self = .routinesChanged
         case "sessions-changed": self = .sessionsChanged
+        case "work-changed": self = .workChanged
         // Absent and null are the same thing here: nothing is open, which is the panel
         // being down rather than a frame that failed to read.
         case "panel": self = .panel(try container.decodeIfPresent(PanelView.self, forKey: .panel))

@@ -80,6 +80,13 @@ export default function App() {
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null)
   /** Counts finished turns: the routines screen re-reads its list when one ends. */
   const [turnEnds, setTurnEnds] = useState(0)
+  /**
+   * Counts the times the daemon said to re-read a folder: a session anywhere in the install
+   * beginning or ending a turn, or a step in one that may have changed what is on disk. The
+   * Work screen re-reads a folder's tree and changes on it — the same signal that moves the
+   * running dot beside a session, and the same news from the one place every turn goes through.
+   */
+  const [workTick, setWorkTick] = useState(0)
   /** Bumped when the server says a routine ran, so the history on screen re-reads. */
   const [routinesTick, setRoutinesTick] = useState(0)
   const [thinking, setThinking] = useState<ThinkingDisplay>('expanded')
@@ -439,7 +446,11 @@ export default function App() {
     if (frame.type === 'routines-changed') { setRoutinesTick((current) => current + 1); return }
     // A session started or stopped a turn anywhere in the install: the running dot is
     // re-read off the daemon rather than guessed at here.
-    if (frame.type === 'sessions-changed') { void refreshSessions(); return }
+    if (frame.type === 'sessions-changed') { setWorkTick((current) => current + 1); void refreshSessions(); return }
+    // A step somewhere may have changed what is on disk. The Work screen re-reads the folder
+    // it is showing — and only it: the rest of the app has nothing to re-read, and the tick
+    // reaches nothing else.
+    if (frame.type === 'work-changed') { setWorkTick((current) => current + 1); return }
     if (frame.type === 'panel') {
       // Milo shows something and the panel opens itself — that is the "here, look
       // at this". A resolved `null` is the model taking it down.
@@ -1110,7 +1121,7 @@ export default function App() {
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
         : view === 'work'
-        ? <Work tick={turnEnds} sessions={sessions} onOpenSession={(id) => void openSession(id)} onStartSession={startWorkSession} />
+        ? <Work tick={workTick} sessions={sessions} onOpenSession={(id) => void openSession(id)} onStartSession={startWorkSession} />
         : view === 'chat'
         ? <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>{thread}</div>

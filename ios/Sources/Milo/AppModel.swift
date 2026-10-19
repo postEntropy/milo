@@ -99,6 +99,13 @@ final class AppModel {
     /// beginning is the turn's first output, whenever that arrives.
     private(set) var answerBegan = 0
     private(set) var answerEnded = 0
+    /**
+     How many times the daemon said to re-read a folder: a session anywhere in the install
+     beginning or ending a turn, or a step in one that may have changed what is on disk. The
+     Work screen re-reads a folder's tree and changes on it — the same signal that moves the
+     running dot beside a session.
+     */
+    private(set) var workMoved = 0
     private(set) var connection: MiloClient.State = .idle
     /**
      Whether the socket is worth a line yet. Held back for a moment: leaving the app
@@ -1780,8 +1787,15 @@ final class AppModel {
             Task { await refreshRoutines() }
         case .sessionsChanged:
             // A session started or stopped a turn anywhere in the install: re-read the
-            // list, which carries the running flag, rather than guess it here.
+            // list, which carries the running flag, rather than guess it here — and say so
+            // to the screens that draw a folder's own contents.
+            workMoved += 1
             Task { await refreshSessions() }
+        case .workChanged:
+            // A step somewhere may have changed what is on disk, with the turn still
+            // running. Only the screens drawing a folder act on it: the rest re-read a
+            // signal that is not about them.
+            workMoved += 1
         case .panel(let view):
             // The model showed something, so it comes to the front the way it does in the
             // browser: what the surface beside the chat is for is being looked at. A null

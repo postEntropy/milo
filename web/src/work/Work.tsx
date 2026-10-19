@@ -88,7 +88,7 @@ type WorkDiff =
  * one project's own page a level in.
  */
 export function Work({ tick, sessions, onOpenSession, onStartSession }: {
-  /** Bumped when a turn ends, so a project's sessions re-read as they grow. */
+  /** Bumped when the daemon says to re-read a folder: a turn ended, or a step wrote. */
   tick: number
   /** Every session this client knows about — the same list the drawer draws. */
   sessions: WorkSession[]
@@ -379,7 +379,7 @@ function ProjectPage({
   project: Project
   /** This project's sessions, newest first — the caller's list, filtered. */
   sessions: WorkSession[]
-  /** Bumped when a turn ends: a session at work has changed the folder this draws. */
+  /** Bumped when the daemon says to re-read a folder: a turn ended, or a step wrote. */
   tick: number
   notice: Notice | null
   saving: boolean
@@ -432,8 +432,9 @@ function ProjectPage({
   }, [project.id])
 
   useEffect(() => { void readTree(); void readDiff() }, [readTree, readDiff])
-  // A turn that ran in this project may have written in its folder; both the tree and
-  // the changes are re-read rather than drawn from what this screen remembered.
+  // A turn running in this project may have written in its folder — and does, step by step,
+  // while it runs — so the tree and the changes are re-read rather than drawn from what this
+  // screen remembered.
   // biome-ignore lint/correctness/useExhaustiveDependencies: tick is a change signal only
   useEffect(() => { void readTree(); void readDiff() }, [tick, readTree, readDiff])
 
