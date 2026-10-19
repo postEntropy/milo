@@ -787,6 +787,8 @@ export class Session {
               // The same rules the parent's prompt carries: a delegated task works in
               // the same folder, and must follow the same conventions it keeps.
               instructions: this.options.instructions?.(),
+              // The same project, so a delegated task carries the same code brief.
+              project: this.options.project,
               // The same live state the parent's prompt carries, so a delegated
               // task can answer about the browser, the servers and Google too.
               browser: this.browserFacts(),

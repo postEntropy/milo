@@ -219,4 +219,36 @@ describe('runSubagent', () => {
     expect(result.isError).toBe(true)
     expect(result.content).toContain('could not finish')
   })
+
+  it('carries the family brief into a delegated task too', async () => {
+    const provider = new ScriptedProvider([
+      [
+        { type: 'text', delta: 'ok' },
+        { type: 'done', finishReason: 'stop' },
+      ],
+    ])
+
+    await run({ provider, model: 'claude-sonnet-5' })
+
+    expect(provider.last?.system).toContain('## Code you write')
+  })
+
+  it("carries the project's code brief into a delegated task too", async () => {
+    const provider = new ScriptedProvider([
+      [
+        { type: 'text', delta: 'ok' },
+        { type: 'done', finishReason: 'stop' },
+      ],
+    ])
+
+    await run({
+      provider,
+      project: {
+        ok: true,
+        project: { id: 'calm-otter-7', name: 'milo', path: '/home/me/milo', createdAt: 0 },
+      },
+    })
+
+    expect(provider.last?.system).toContain('## Working in this project')
+  })
 })

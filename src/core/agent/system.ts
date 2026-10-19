@@ -1,6 +1,7 @@
 import { DEFAULT_WORKING_DIRECTORY, scratchDir } from '../config/paths.js'
 import type { ProjectPlacement } from '../projects.js'
 import { INSTRUCTIONS_FILE, type ProjectInstructions } from './instructions.js'
+import { modelFamily, type ModelFamily } from './model-family.js'
 import { shortId, type MemoryItem } from '../memory/index.js'
 import type { ToolSpec } from '../providers/types.js'
 import type { SkillSummary } from '../skills/index.js'
@@ -95,6 +96,48 @@ export const DEFAULT_SYSTEM_PROMPT = `You are Milo, an assistant that helps with
   it is. The scratch space is on the machine you are changing, so it is not that place.
 - Do not leave a background process running when you are done with it: a job you started for
   your own work is yours to stop, and you say so when you do.`
+
+/**
+ * What a family of models needs to hear that the others do not.
+ *
+ * The base prompt is written for every model; these are the corrections that
+ * only make sense for one family. A gateway hides the family behind its own
+ * name, so `modelFamily` reads the id — and an unknown family gets no section
+ * rather than a guess.
+ */
+const FAMILY_SECTIONS: Record<ModelFamily, string> = {
+  anthropic: [
+    '## Code you write',
+    '- Match the surrounding comment density: where the code around it has none, add none. Comment what the code cannot say itself, not what it already says. An instruction from the user or the project outranks this.',
+  ].join('\n'),
+  openai: [
+    '## While you work',
+    '- A message that arrives while you are working steers that work: take the correction and carry on. Only a clear cancellation, or a request that cannot live with the current one, replaces the task.',
+    '- Never revert, reset or discard a change you did not make.',
+  ].join('\n'),
+}
+
+/**
+ * How code is worked in when the session has a project.
+ *
+ * A session with no project is not doing code, and carrying this manual into
+ * every chat would spend tokens on advice the turn cannot use. The project's
+ * own `AGENTS.md` still comes after this section and stays the more specific
+ * word on the folder.
+ */
+const PROJECT_CODE_SECTION = [
+  '## Working in this project',
+  "- You are working in a project's folder: it is code work, and the folder is the subject.",
+  '- Read before you write: the file, its neighbours, and the commands the project already uses. Change the smallest thing that solves the task and match the style around it.',
+  '- Do not invent a command, a file, an API or a directory. If you did not see it in the folder, it is not there.',
+  '- Do not add structure the task does not need: no speculative abstraction, no dead code. Do not reformat or undo work you did not do, and keep unrelated lines out of the change.',
+  "- A change is not finished until you have checked it: run the project's own tests, typecheck or lint when they exist, and say what you ran and what it answered. When no check exists, say that plainly rather than claiming it works.",
+].join('\n')
+
+function familySection(provider: string, model: string): string | undefined {
+  const family = modelFamily(provider, model)
+  return family ? FAMILY_SECTIONS[family] : undefined
+}
 
 /**
  * The base persona for a delegated subtask. It has no surface section and no
@@ -423,6 +466,13 @@ function setupSection(input: SystemPromptInput): string {
 
 export function buildSystemPrompt(input: SystemPromptInput): string {
   const sections: string[] = [input.base.trim()]
+
+  // The model's own vices first, then the job's: a session in a project is
+  // doing code work, and one without a project is not.
+  const family = familySection(input.provider, input.model)
+  if (family) sections.push(family)
+  if (input.project?.ok) sections.push(PROJECT_CODE_SECTION)
+
   const surface = input.surface
 
   // A turn that draws by writing has no tool to be taught in, so the rules and the

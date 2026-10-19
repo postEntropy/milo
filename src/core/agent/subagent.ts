@@ -1,6 +1,7 @@
 import { closeParagraph } from '../../util/format.js'
 import type { Message, Provider, ReasoningEffort } from '../providers/types.js'
 import type { SkillSummary } from '../skills/index.js'
+import type { ProjectPlacement } from '../projects.js'
 import type { ProjectInstructions } from './instructions.js'
 import type { RunTrace } from './loop.js'
 import type { ToolContext, ToolRegistry, ToolResult } from '../tools/index.js'
@@ -22,6 +23,12 @@ export interface SubagentRun {
    * turn has no project, or the project carries no instructions.
    */
   instructions?: ProjectInstructions
+  /**
+   * The project the parent turn works in, already resolved. A delegated task
+   * works in the same folder, so it carries the same project — and the code
+   * brief that comes with it.
+   */
+  project?: ProjectPlacement
   /**
    * The live state the setup section carries. A subagent is handed the parent's
    * whole catalog, so the browser, the external servers and the Google grant are
@@ -77,6 +84,7 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     tools,
     skills: options.skills,
     instructions: options.instructions,
+    project: options.project,
     browser: options.browser ?? null,
     mcp: options.mcp ?? null,
     google: options.google ?? null,

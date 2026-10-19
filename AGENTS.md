@@ -55,6 +55,12 @@ form of the author's own taste notes, which live outside the repo in
   folder. What it is and is not is in [docs/work.md](docs/work.md); read that before
   changing the tab.
 
+## Agent
+
+- What a turn is told — the base persona, the model-family briefing, the project's code
+  manual and the folder's rules — is in [docs/agent.md](docs/agent.md); read it before
+  changing the prompt or what a surface carries into it.
+
 ## Code
 
 - No dead code, no speculative abstraction. An export only its own test uses is deleted;
