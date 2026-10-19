@@ -116,6 +116,30 @@ describe('runSubagent', () => {
     expect(result.content).toBe('the report')
   })
 
+  it('says a step of its own that may have changed something in the folder', async () => {
+    const provider = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'fake_write', args: { path: 'a.txt' } },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      [
+        { type: 'text', delta: 'the report' },
+        { type: 'done', finishReason: 'stop' },
+      ],
+    ])
+    let changed = 0
+
+    await run({
+      provider,
+      registry: new ToolRegistry([fakeRead, fakeWrite]),
+      onSideEffect: () => { changed += 1 },
+    })
+
+    // A subtask works in the folder the parent turn works in, so its write is the same news
+    // as the parent's: a delegated step must not be the one that leaves a screen behind.
+    expect(changed).toBe(1)
+  })
+
   it('does not offer `task` to the subagent — delegation is one level deep', async () => {
     const provider = new ScriptedProvider([
       [

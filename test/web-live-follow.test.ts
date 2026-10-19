@@ -215,6 +215,27 @@ describe('a turn on a session open in two conversations', () => {
     expect(lastBusy(phone)).toBe(false)
   })
 
+  it('tells both screens the sessions moved when a turn begins and ends', async () => {
+    const provider = new HeldProvider()
+    const { hub, desktop, phone, at } = await twoScreens(provider)
+    const moved = (frames: Frame[]): number => frames.filter((frame) => frame.type === 'sessions-changed').length
+
+    // Beginning: a screen re-reads what shows a session running — and this is the same
+    // signal a project's page re-reads its folder on, so it has to be there on both ends.
+    hub.handle(at, { type: 'send', text: 'go' }, DESKTOP)
+    await provider.reached()
+    const began = moved(phone)
+    expect(began).toBeGreaterThanOrEqual(1)
+    expect(moved(desktop)).toBeGreaterThanOrEqual(1)
+
+    // Ending: said again, because the work has landed by then. Without this one a page
+    // would still be drawing the folder as it was before the turn wrote anything.
+    provider.answer()
+    expect(await waitFor(() => moved(phone) > began)).toBe(true)
+    // The conversation that did not run the turn is told too, not only the one that did.
+    expect(moved(desktop)).toBeGreaterThan(began)
+  })
+
   it('hands a screen that arrives mid-turn the same live turn', async () => {
     const provider = new HeldProvider()
     const { hub, at } = await twoScreens(provider)
@@ -348,6 +369,77 @@ describe('a turn on a session open in two conversations', () => {
     expect(fresh.find((frame) => frame.type === 'ready')?.sessionId).toBe(b.id)
 
     provider.answer()
+  })
+})
+
+/** Two steps that write in the folder, then an answer — the shape of a turn that edits files. */
+class WritingProvider implements Provider {
+  readonly id = 'writing'
+  private calls = 0
+
+  async *stream(_request: ChatRequest): AsyncGenerator<StreamEvent> {
+    this.calls += 1
+    if (this.calls === 1) {
+      yield { type: 'tool-call', id: 'w1', name: 'fake_write', args: { path: 'a.txt' } }
+      yield { type: 'tool-call', id: 'w2', name: 'fake_write', args: { path: 'b.txt' } }
+      yield { type: 'done', finishReason: 'tool_calls' }
+      return
+    }
+    yield { type: 'text', delta: 'both written' }
+    yield { type: 'done', finishReason: 'stop' }
+  }
+}
+
+/** A step that may have changed something: not read-only, which is all the daemon asks. */
+const writingRegistry = {
+  specs: () => [],
+  get: (name: string) => (name === 'fake_write'
+    ? { name: 'fake_write', description: 'Writes a file', schema: { type: 'object', properties: {} }, execute: async () => ({ content: 'wrote' }) }
+    : undefined),
+  execute: async () => ({ content: 'wrote' }),
+} as unknown as ToolRegistry
+
+describe('a turn that may have changed what is on disk', () => {
+  it('says so to both screens, once, and holds a burst of steps to the floor', async () => {
+    const provider = new WritingProvider()
+    const { hub, desktop, phone, at } = await twoScreens(provider, { registry: writingRegistry })
+    const wrote = (frames: Frame[]): number =>
+      frames.filter((frame) => frame.type === 'work-changed').length
+
+    hub.handle(at, { type: 'send', text: 'write both files' }, DESKTOP)
+    expect(await waitFor(() => desktop.some((frame) => frame.type === 'turn-end'))).toBe(true)
+
+    // The screen drawing a folder has something new to read while the turn is still going —
+    // and it is the install's news, not one conversation's, so the sibling is told too.
+    expect(wrote(desktop)).toBe(1)
+    expect(wrote(phone)).toBe(1)
+    // Two steps wrote and one frame went out: they were the same second, and each one costs
+    // every screen a tree and a diff. The turn's own end is what says the last word.
+    expect(desktop.filter((frame) => frame.type === 'sessions-changed').length).toBeGreaterThan(1)
+  })
+})
+
+describe('a turn on a session no socket asked for', () => {
+  it('tells the open screens that the install’s sessions moved', async () => {
+    // A gateway or a routine runs its turn straight on the runtime — nobody's socket asked
+    // for it. It still has to be announced: a screen watching the Work tab is watching the
+    // install, not only the conversation it happens to be sitting in.
+    const provider: Provider = {
+      id: 'answering',
+      async *stream(): AsyncGenerator<StreamEvent> {
+        yield { type: 'text', delta: 'done' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+    const { runtime, desktop, phone } = await twoScreens(provider)
+
+    const elsewhere = await runtime.getSession({ gateway: 'telegram', conversationId: 'chat-1' })
+    for await (const _event of elsewhere.send('go')) {
+      // drain
+    }
+
+    expect(await waitFor(() => phone.some((frame) => frame.type === 'sessions-changed'))).toBe(true)
+    expect(desktop.some((frame) => frame.type === 'sessions-changed')).toBe(true)
   })
 })
 

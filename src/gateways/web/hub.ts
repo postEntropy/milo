@@ -61,6 +61,17 @@ const IDEAS_SESSIONS = 5
  */
 const BROWSER_BEAT_MS = 2_000
 
+/**
+ * The least time between two `work-changed` frames, whatever the install is doing.
+ *
+ * Every one of them costs each screen drawing a folder a tree and a diff, and a turn makes
+ * a step a second — a run of edits would spend the whole turn re-reading a tree that is
+ * about to change again. A second is short enough to read as live and long enough that the
+ * cost does not grow with the number of steps. It cannot hide the last one: the turn's own
+ * end says `sessions-changed`, which those screens re-read on too.
+ */
+const WORK_CHANGED_FLOOR_MS = 1_000
+
 export interface WebClient {
   send(frame: ServerFrame): void
 }
@@ -171,6 +182,15 @@ export class WebHub {
   /** Stops the job subscription on the way out; see the constructor. */
   private detachJobs: (() => void) | null = null
 
+  /** Stops the sessions subscription on the way out; see the constructor. */
+  private detachSessions: (() => void) | null = null
+
+  /** Stops the work subscription on the way out; see the constructor. */
+  private detachWork: (() => void) | null = null
+
+  /** When the last `work-changed` went out, for the floor above; 0 before the first. */
+  private workChangedAt = 0
+
   /**
    * `cwd` is only ever needed to resolve a panel's file when a request is read
    * back from a transcript; the server passes its own, and the default matches
@@ -183,6 +203,14 @@ export class WebHub {
       this.runtime.jobs?.onChange(() => {
         this.broadcastJobs()
       }) ?? null
+    // A session began or ended a turn anywhere in this install: every open page is told,
+    // so the dot beside a session and a project's folder both follow the work. The runtime
+    // says it rather than this hub — a turn a gateway or a routine ran is announced too,
+    // and it is the one place every turn goes through.
+    this.detachSessions = this.runtime.onSessionsChanged(() => this.sessionsChanged())
+    // And a step that may have changed a folder: a screen drawing one re-reads it while the
+    // turn is still running, which is the whole of what makes a long turn watchable.
+    this.detachWork = this.runtime.onWorkChanged(() => this.workChanged())
   }
 
   async connect(client: WebClient, conversationId: string, genui?: boolean, clientKind?: ClientKind): Promise<void> {
@@ -371,6 +399,10 @@ export class WebHub {
     for (const id of this.conversations.keys()) this.turns.stop(id)
     this.detachJobs?.()
     this.detachJobs = null
+    this.detachSessions?.()
+    this.detachSessions = null
+    this.detachWork?.()
+    this.detachWork = null
   }
 
   stageUpload(file: IncomingFile): string {
@@ -426,12 +458,34 @@ export class WebHub {
   }
 
   /**
-   * A session started or ended a turn here. Like `routinesChanged`, this is not about
-   * one conversation — the sessions list shows the same session running on every
-   * surface — so it goes to every client, and each re-reads the list.
+   * A session started or ended a turn: told by the runtime, which every turn goes
+   * through, so a turn a gateway or a routine ran arrives here the same way as one a
+   * socket asked for. Like `routinesChanged`, this is not about one conversation — the
+   * sessions list shows the same session running on every surface — so it goes to every
+   * client, and each re-reads the list.
    */
   sessionsChanged(): void {
     const frame: ServerFrame = { type: 'sessions-changed' }
+    for (const conversation of this.conversations.values()) {
+      for (const client of conversation.clients) client.send(frame)
+    }
+  }
+
+  /**
+   * A step finished that may have changed what is on disk. Told by the runtime, so the same
+   * for a turn from a gateway or a routine, and held to the floor above: a turn makes many
+   * steps and each frame costs a screen drawing a folder a tree and a diff.
+   *
+   * Sent to every client although only some are drawing a folder — the frame says nothing
+   * about which, and the ones that are not are one no-op. Which folder it was is not carried
+   * either: a screen re-reads the one it is showing, which is the only one it can compare a
+   * step against, and the daemon would otherwise be matching paths on its behalf.
+   */
+  private workChanged(): void {
+    const now = Date.now()
+    if (now - this.workChangedAt < WORK_CHANGED_FLOOR_MS) return
+    this.workChangedAt = now
+    const frame: ServerFrame = { type: 'work-changed' }
     for (const conversation of this.conversations.values()) {
       for (const client of conversation.clients) client.send(frame)
     }
@@ -863,7 +917,6 @@ export class WebHub {
       if (activeConversation && sessionId) {
         live = { id, at: Date.now(), frames: [], from: activeConversation.session.messages.length, owner: conversationId }
         this.live.set(sessionId, live)
-        this.sessionsChanged()
       }
       if (sessionId) this.emitTurn(sessionId, { type: 'turn-start', id, text: files?.length
         ? [text, files.map((file) => `Attached ${file.name}`).join(', ')].filter(Boolean).join('\n')
@@ -1007,10 +1060,7 @@ export class WebHub {
         // Cleared before the `turn-end` goes out: the step that just finished is in
         // the session by now, so a client connecting in this gap is handed the whole
         // turn as history instead of a live row nothing would ever close.
-        if (live) {
-          if (sessionId && this.live.get(sessionId) === live) this.live.delete(sessionId)
-          this.sessionsChanged()
-        }
+        if (live && sessionId && this.live.get(sessionId) === live) this.live.delete(sessionId)
         // The answer's raw copy rides with the turn, so the just-streamed answer has it
         // too — not only a reload, which reads the same rendering back from the transcript.
         // The copy without the output rides beside it, and only where it differs: the two

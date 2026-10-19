@@ -35,6 +35,23 @@ export interface PermissionResult {
 /** Provided by the surface (CLI, Telegram, …) to ask the user inline. */
 export type PermissionAsker = (request: PermissionRequest) => Promise<PermissionResult>
 
+/**
+ * Whether a call may change something outside Milo — the file it writes, the command it
+ * runs. A read-only tool cannot, nor an internal one whose effect stays in Milo's own
+ * state, nor a delegating one whose effect is the subtask's own calls. And a tool whose
+ * danger lives in its arguments — scheduling a prompt that only reads is not the same act
+ * as scheduling one that may run a command — says for itself whether *this* call is the
+ * side effect worth asking about.
+ *
+ * One question, asked in one place: the gate that decides whether to prompt asks it, and
+ * so does a surface that draws what a turn changed. A false positive costs a re-read; a
+ * false negative leaves someone looking at what was there before.
+ */
+export function actsOnSomething(tool: Tool<unknown>, args: unknown): boolean {
+  if (tool.readOnly || tool.internal || tool.delegates) return false
+  return !tool.asksWhen || tool.asksWhen(args)
+}
+
 /** Returns P(dangerous) in 0..1 for a state string. */
 export interface DangerReviewer {
   review(state: string, signal?: AbortSignal): Promise<number>
@@ -122,11 +139,7 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   ): PermissionDecision | Promise<PermissionDecision> {
     if (this.mode === 'yolo') return 'allow'
     if (this.deny.has(tool.name)) return 'deny'
-    if (tool.readOnly || tool.internal || tool.delegates) return 'allow'
-    // A tool whose danger lives in its arguments — scheduling a prompt that only
-    // reads is not the same act as scheduling one that may run a command. It says
-    // for itself whether *this* call is the side effect worth asking about.
-    if (tool.asksWhen && !tool.asksWhen(args)) return 'allow'
+    if (!actsOnSomething(tool, args)) return 'allow'
     if (this.allow.has(tool.name)) return 'allow'
     if (this.mode === 'ask') return 'ask'
 

@@ -4,6 +4,14 @@ import { bindProblem, panelHeaders, readRawBody, startWebServer, webReachLines }
 
 const running: Array<{ stop(): Promise<void> }> = []
 
+/**
+ * The server is what these tests are about, not a whole install behind it — so this stands
+ * in for one. The hub the server builds asks a single thing of it: to be told when a
+ * session's turn begins or ends, and when a step may have changed what is on disk. Both are
+ * what a page re-reads what it draws on.
+ */
+const runtime = { onSessionsChanged: () => () => {}, onWorkChanged: () => () => {} } as never
+
 afterEach(async () => {
   await Promise.all(running.splice(0).map((server) => server.stop()))
 })
@@ -11,7 +19,7 @@ afterEach(async () => {
 describe('web server authentication', () => {
   it('requires its token for API access', async () => {
     const server = await startWebServer({
-      runtime: {} as never,
+      runtime,
       cwd: process.cwd(),
       host: '127.0.0.1',
       port: 0,
@@ -28,14 +36,14 @@ describe('web server authentication', () => {
   })
 
   it('requires its token for file uploads', async () => {
-    const server = await startWebServer({ runtime: {} as never, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
+    const server = await startWebServer({ runtime, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
     running.push(server)
     const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/upload`, { method: 'POST', body: 'file bytes' })
     expect(response.status).toBe(401)
   })
 
   it('accepts raw authenticated file uploads for a later chat send', async () => {
-    const server = await startWebServer({ runtime: {} as never, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
+    const server = await startWebServer({ runtime, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
     running.push(server)
     const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/upload`, {
       method: 'POST',
@@ -48,7 +56,7 @@ describe('web server authentication', () => {
 
   it('accepts the token it was handed, rather than minting its own', async () => {
     const server = await startWebServer({
-      runtime: {} as never,
+      runtime,
       cwd: process.cwd(),
       host: '127.0.0.1',
       port: 0,
@@ -67,7 +75,7 @@ describe('web server authentication', () => {
 
   it('lets the token alone decide, whatever origin the request claims', async () => {
     const server = await startWebServer({
-      runtime: {} as never,
+      runtime,
       cwd: process.cwd(),
       host: '127.0.0.1',
       port: 0,
@@ -93,7 +101,7 @@ describe('web server authentication', () => {
 
   it('refuses a request that carries no token, whatever its origin', async () => {
     const server = await startWebServer({
-      runtime: {} as never,
+      runtime,
       cwd: process.cwd(),
       host: '127.0.0.1',
       port: 0,
@@ -113,7 +121,7 @@ describe('web server authentication', () => {
 
   it('prints an openable address when bound to every interface', async () => {
     const server = await startWebServer({
-      runtime: {} as never,
+      runtime,
       cwd: process.cwd(),
       host: '0.0.0.0',
       port: 0,
@@ -137,7 +145,7 @@ describe('web server authentication', () => {
 
   it('lists no extra address when the bind is a fixed one', async () => {
     const server = await startWebServer({
-      runtime: {} as never,
+      runtime,
       cwd: process.cwd(),
       host: '127.0.0.1',
       port: 0,
@@ -151,7 +159,7 @@ describe('web server authentication', () => {
 describe('web server static UI', () => {
   it('serves the manifest as a manifest, so the install can go full screen', async () => {
     const server = await startWebServer({
-      runtime: {} as never,
+      runtime,
       cwd: process.cwd(),
       host: '127.0.0.1',
       port: 0,
@@ -169,7 +177,7 @@ describe('web server static UI', () => {
   })
 
   it('names the token in the manifest only for a caller that holds it', async () => {
-    const server = await startWebServer({ runtime: {} as never, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
+    const server = await startWebServer({ runtime, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
     running.push(server)
     const base = `http://127.0.0.1:${portOf(server.url)}`
     // An installed app opens at `start_url`, and an iPhone home screen carries no
@@ -182,7 +190,7 @@ describe('web server static UI', () => {
   })
 
   it('points the page at the manifest that carries the token', async () => {
-    const server = await startWebServer({ runtime: {} as never, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
+    const server = await startWebServer({ runtime, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
     running.push(server)
     const base = `http://127.0.0.1:${portOf(server.url)}`
     const html = await (await fetch(`${base}/?t=test-token`)).text()
@@ -249,7 +257,7 @@ describe('bindProblem', () => {
 
   it('reads a real refusal', async () => {
     const first = await startWebServer({
-      runtime: {} as never,
+      runtime,
       cwd: process.cwd(),
       host: '127.0.0.1',
       port: 0,
@@ -259,7 +267,7 @@ describe('bindProblem', () => {
     const port = portOf(first.url)
 
     const error = await startWebServer({
-      runtime: {} as never,
+      runtime,
       cwd: process.cwd(),
       host: '127.0.0.1',
       port,

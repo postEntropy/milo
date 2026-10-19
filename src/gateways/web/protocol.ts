@@ -207,6 +207,18 @@ export type ServerFrame =
   | { type: 'routines-changed' }
   /** A session's turn began or ended here: re-read the list that shows it running. */
   | { type: 'sessions-changed' }
+  /**
+   * A step finished that may have changed what is on disk — a file written, a command run
+   * — somewhere in this install. Not the same news as `sessions-changed`: that one is about
+   * which session is running, this one is about the folder a session works in. A screen
+   * drawing a folder re-reads it on this, so a long turn is followed as it happens.
+   *
+   * Carries nothing, and is throttled by the daemon: a turn makes a step a second, and each
+   * one costs a screen a tree and a diff. Only the screens drawing a folder act on it, and
+   * the turn's own end says it once more, unthrottled, so the floor cannot leave a screen
+   * showing the second-to-last state.
+   */
+  | { type: 'work-changed' }
   /** The panel beside the chat changed; null takes it down. */
   | { type: 'panel'; panel: PanelView | null }
   /** The background jobs still running, for the strip above the composer. */

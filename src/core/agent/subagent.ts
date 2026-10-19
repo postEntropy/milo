@@ -32,6 +32,13 @@ export interface SubagentRun {
   mcp?: McpFacts | null
   google?: GoogleState | null
   signal: AbortSignal
+  /**
+   * A step of the subtask that may have changed something — a file written, a command
+   * run. A subagent works in the folder the parent turn works in, so what it changes is
+   * the same folder a watching surface re-reads: without this, a delegated write would
+   * leave the screen showing what was there before it.
+   */
+  onSideEffect?: () => void
   /** The parent turn's policy and prompt, so the subagent's actions ask the same way. */
   permission?: ToolPermission
   maxSteps?: number
@@ -105,6 +112,7 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     reasoningEffort: options.reasoningEffort,
     signal: options.signal,
     permission: options.permission,
+    onSideEffect: options.onSideEffect,
     trace: options.trace,
   })) {
     if (event.type === 'text-delta') text += event.delta

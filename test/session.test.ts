@@ -426,6 +426,37 @@ describe('Session', () => {
     expect(provider.lastSystem).not.toContain('First rule.')
   })
 
+  it('says a turn began and then ended, once each', async () => {
+    const provider = new CapturingProvider()
+    let turns = 0
+    const { session } = await sessionWith(provider, { onTurn: () => { turns += 1 } })
+
+    for await (const _event of session.send('hello')) {
+      // drain
+    }
+
+    // Once when it began and once when it was over: the fact a watching surface reads.
+    expect(turns).toBe(2)
+  })
+
+  it('says a turn that failed ended too, so no screen is left showing it running', async () => {
+    const provider: Provider = {
+      id: 'exploding',
+      // biome-ignore lint/correctness/useYield: a provider that fails right away yields nothing
+      async *stream(): AsyncGenerator<StreamEvent> {
+        throw new Error('provider exploded')
+      },
+    }
+    let turns = 0
+    const { session } = await sessionWith(provider, { onTurn: () => { turns += 1 } })
+
+    for await (const _event of session.send('hello')) {
+      // drain
+    }
+
+    expect(turns).toBe(2)
+  })
+
   it('tells the model which browser it has, and whether it is up', async () => {
     // The model asked, out loud, and went looking through `ps` and `ss` instead:
     // the answer belongs in the prompt, where it costs a line.

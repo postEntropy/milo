@@ -199,6 +199,20 @@ export interface SessionOptions {
    * no conversation is bound to any more.
    */
   onIdle?: (session: Session) => void
+  /**
+   * Called when this session begins a turn and again when it is over — the plain fact
+   * "a turn ran here", whatever asked for it. It is how a surface that is not the one
+   * talking is told the install's work moved: the runtime hands every session it makes
+   * the same one, so a turn from a gateway or a routine is announced like any other.
+   */
+  onTurn?: () => void
+  /**
+   * Called when a step of a turn here may have changed something in the folder — a file
+   * written, an edit, a command — and not for one that only read. The runtime hands every
+   * session it makes the same one, which is how a screen showing a folder re-reads it
+   * while the turn is still running rather than only once it is over.
+   */
+  onSideEffect?: () => void
 }
 
 export interface SendOptions {
@@ -473,6 +487,8 @@ export class Session {
   async *send(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
     const signal = opts?.signal
     let lease: SessionLease | null = null
+    /** Whether a turn actually ran, so the end is announced only where a begin was. */
+    let ranTurn = false
     this.sending += 1
     try {
       const free = await this.store.tryAcquire(this.id)
@@ -508,6 +524,10 @@ export class Session {
       }
       const rebound = this.adoptLatest(lease.latest)
       if (rebound) yield { type: 'rebased', ...rebound }
+      // The turn is about to run. Said with the lease already held, so a screen that
+      // re-reads the install's sessions finds this one and draws it running.
+      ranTurn = true
+      this.options.onTurn?.()
       yield* this.turn(input, opts)
     } finally {
       try {
@@ -515,6 +535,9 @@ export class Session {
       } finally {
         this.sending -= 1
         this.notifyIfIdle()
+        // Said after the lease is let go, so the same re-read finds it over: the frame
+        // and the store agree by the time a screen acts on it.
+        if (ranTurn) this.options.onTurn?.()
       }
     }
   }
@@ -771,6 +794,9 @@ export class Session {
               google: this.options.google ?? null,
               signal: abort,
               permission,
+              // A delegated write lands in the same folder this session works in, so it is
+              // announced the same way: the subtask is not a second, silent writer.
+              onSideEffect: this.options.onSideEffect,
               maxSteps,
               maxTokens,
               temperature,
@@ -785,6 +811,10 @@ export class Session {
         temperature,
         signal,
         steering,
+        // A step that may have written in the folder, said to the session's owner while
+        // the turn is still running: this is what keeps a page drawing that folder from
+        // showing what was there before the turn began.
+        onSideEffect: this.options.onSideEffect,
         // Read at call time, so `/effort` takes effect on the next turn instead
         // of needing the runtime rebuilt. Never absent: a session built without
         // one still asks for Milo's default.

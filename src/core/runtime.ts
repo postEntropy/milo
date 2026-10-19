@@ -161,6 +161,10 @@ export class AgentRuntime {
   private readonly pendingRecaps = new Set<Promise<void>>()
   /** Scopes this process has opened a session for; see `sessionFor`. */
   private readonly opened = new Set<string>()
+  /** Told when a session here began or ended a turn; see `onSessionsChanged`. */
+  private readonly turnListeners = new Set<() => void>()
+  /** Told when a turn here may have changed what is on disk; see `onWorkChanged`. */
+  private readonly workListeners = new Set<() => void>()
 
   constructor(options: RuntimeOptions) {
     this.options = options
@@ -260,6 +264,40 @@ export class AgentRuntime {
     await this.store.setBinding(scopeKey(scope), record.id)
     this.opened.add(scopeKey(scope))
     return this.adopt(record, scope)
+  }
+
+  /**
+   * Told when a session in this install began or ended a turn — the news the web's
+   * `sessions-changed` frame carries, from the one place every turn goes through. A
+   * turn nobody's screen asked for, a gateway's or a routine's, is announced the same
+   * way, which is what keeps a surface that is only watching from going stale. The
+   * detach returned stops it; a surface takes one when it closes.
+   */
+  onSessionsChanged(listener: () => void): () => void {
+    this.turnListeners.add(listener)
+    return () => this.turnListeners.delete(listener)
+  }
+
+  /** The turn a session just began or ended, said to whoever is listening. */
+  private announceTurn(): void {
+    for (const listener of this.turnListeners) listener()
+  }
+
+  /**
+   * Told when a step of a turn in this install may have changed what is on disk — a file
+   * written, a command run. A different piece of news from `onSessionsChanged`: that one
+   * says which session is running, this one says the folder a session works in is not what
+   * it was. A surface drawing that folder re-reads it on this, so a long turn is followed
+   * as it happens instead of only once it is over. The detach returned stops it.
+   */
+  onWorkChanged(listener: () => void): () => void {
+    this.workListeners.add(listener)
+    return () => this.workListeners.delete(listener)
+  }
+
+  /** The step that may have changed something, said to whoever is listening. */
+  private announceWork(): void {
+    for (const listener of this.workListeners) listener()
   }
 
   /**
@@ -646,6 +684,12 @@ export class AgentRuntime {
       // without the runtime having to be rebuilt around it.
       reasoningEffort: () => this.reasoningEffort,
       onIdle: (idleSession) => this.onSessionIdle(idleSession),
+      // Every session made here announces its turns through the one place, so whatever
+      // asked it to run — a socket, a gateway, a routine — the install's watchers hear it.
+      onTurn: () => this.announceTurn(),
+      // And the steps of those turns that may have changed a folder, so a screen drawing
+      // one follows the work as it happens rather than only when the turn is over.
+      onSideEffect: () => this.announceWork(),
     })
     this.cacheSession(record.id, session)
     return session

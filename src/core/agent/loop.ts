@@ -16,6 +16,7 @@ import type {
 import type { TraceWriter } from '../traces.js'
 import type { ToolContext, ToolImage, ToolRegistry, ToolResult } from '../tools/index.js'
 import {
+  actsOnSomething,
   summarizeToolCall,
   type PermissionAsker,
   type PermissionPolicy,
@@ -92,6 +93,17 @@ export interface RunAgentOptions {
    * snapshot per step and every request after the first pays for all of them.
    */
   keepSnapshots?: number
+  /**
+   * Called once for each step that may have changed something outside Milo — a file
+   * written, an edit, a command run — and not for one that only read. The loop is the
+   * only place that knows what a step was, and `actsOnSomething` is the same judgement
+   * the permission gate makes, so a surface watching a folder re-reads it on exactly the
+   * steps that could have put something new in it.
+   *
+   * Said when the step is over, not when it starts: the change is on disk by then, which
+   * is the moment there is something to read.
+   */
+  onSideEffect?: () => void
   /**
    * Whether this run draws an interface. The model writes the tree in a fenced
    * block inside its own answer, and the loop lifts it out of the stream below.
@@ -365,6 +377,11 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
           result: result.content,
           isError: Boolean(result.isError),
         }
+        // Said whether or not the call reported a failure: a command that exits nonzero
+        // has usually written some of what it was doing, and a screen left showing the
+        // folder as it was before is worse than one re-read for nothing.
+        const ran = registry.get(call.name)
+        if (ran && actsOnSomething(ran, call.args)) options.onSideEffect?.()
         options.trace?.traces.record({
           at: new Date().toISOString(),
           event: 'tool.call',

@@ -122,6 +122,55 @@ describe('runAgent', () => {
     })
   })
 
+  it('says a step that may have changed something, and stays quiet for one that only read', async () => {
+    const peek: Tool<{ path: string }> = {
+      name: 'fake_peek',
+      description: 'fake peek',
+      schema: z.object({ path: z.string() }),
+      readOnly: true,
+      async execute(args) {
+        return { content: `FILE:${args.path}` }
+      },
+    }
+    const write: Tool<{ path: string }> = {
+      name: 'fake_write',
+      description: 'fake write',
+      schema: z.object({ path: z.string() }),
+      async execute(args) {
+        return { content: `WROTE:${args.path}` }
+      },
+    }
+    const provider = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'fake_peek', args: { path: 'a.txt' } },
+        { type: 'tool-call', id: 'c2', name: 'fake_write', args: { path: 'b.txt' } },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      [
+        { type: 'text', delta: 'both done' },
+        { type: 'done', finishReason: 'stop' },
+      ],
+    ])
+    const registry = new ToolRegistry([peek, write])
+    let changed = 0
+
+    for await (const _event of runAgent({
+      provider,
+      model: 'm',
+      tools: registry.specs(),
+      registry,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'read a, write b' }] }],
+      context: { cwd: process.cwd(), signal: new AbortController().signal },
+      onSideEffect: () => { changed += 1 },
+    })) {
+      // drain
+    }
+
+    // Two steps ran and one of them is news: a surface watching a folder has nothing new to
+    // read after a peek, and would pay for a tree and a diff to find that out.
+    expect(changed).toBe(1)
+  })
+
   it('keeps what was already shown when the provider dies mid-answer', async () => {
     // A body that fails after the 200: the surface has drawn part of the answer
     // already, and the transcript has to agree with what the person read.

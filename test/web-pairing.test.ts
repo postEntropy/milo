@@ -18,6 +18,13 @@ const { devicesFile } = await import('../src/core/config/paths.js')
 
 const running: Array<{ stop(): Promise<void> }> = []
 
+/**
+ * Pairing is what these tests are about, not a whole install behind the server — so this
+ * stands in for one. The hub the server builds asks one thing of it: to be told when a
+ * session's turn begins or ends, and when a step may have changed what is on disk.
+ */
+const runtime = { onSessionsChanged: () => () => {}, onWorkChanged: () => () => {} } as never
+
 beforeEach(() => {
   rmSync(path.join(home, 'devices.json'), { force: true })
   rmSync(path.join(home, 'pairing.json'), { force: true })
@@ -106,7 +113,7 @@ const claim = (base: string, body: unknown) =>
 
 async function server(): Promise<string> {
   const started = await startWebServer({
-    runtime: {} as never,
+    runtime,
     cwd: process.cwd(),
     host: '127.0.0.1',
     port: 0,
