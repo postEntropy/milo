@@ -28,8 +28,8 @@ the ordinary ones, with the folder they run in changed.
   A folder that is not a repository, or one with no commit yet, says so and offers the one
   action that records a first state. Untracked, binary and permission-only files say why
   there is no hunk to draw.
-- **Files** — the tree of the folder, read-only. A file opens one page at a time, cut where
-  the agent's own reader cuts it.
+- **Files** — the tree of the folder, read-only. A file rises in the same drawer a changed
+  file's hunks do, and opens one page at a time, cut where the agent's own reader cuts it.
 
 ## What Work is not
 

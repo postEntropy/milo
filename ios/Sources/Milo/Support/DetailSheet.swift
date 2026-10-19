@@ -2,7 +2,7 @@ import SwiftUI
 
 /**
  One thing's own detail, risen from the bottom of the screen: the hunks of a changed file,
- or the run a routine produced.
+ a file read from a project's folder, or the run a routine produced.
 
  The platform's own sheet, so the detents, the grabber and the swipe that puts it away are
  the platform's rather than drawn here. One container for both details, so the two cannot
