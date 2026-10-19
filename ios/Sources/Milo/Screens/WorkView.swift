@@ -961,8 +961,16 @@ private struct DiffDetail: View {
                                     .foregroundStyle(MiloTheme.muted)
                                     .padding(.top, MiloTheme.Space.three)
                                     .padding(.bottom, MiloTheme.Space.one)
-                                ForEach(hunk.lines) { line in
-                                    DiffLineRow(line: line, language: file.path)
+                                ForEach(runs(of: hunk.lines)) { run in
+                                    // One wash behind the whole run, not one per line: the
+                                    // lines touch inside it, so a changed block reads as a
+                                    // single block instead of a column of small ones.
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        ForEach(run.lines) { line in
+                                            DiffLineRow(line: line, language: file.path)
+                                        }
+                                    }
+                                    .background(run.wash)
                                 }
                             }
                         }
@@ -981,6 +989,37 @@ private struct DiffDetail: View {
             }
         }
     }
+
+    /// The hunk's lines cut into runs of one kind, in the order they were written: the
+    /// background belongs to the run, so two added lines in a row share one rectangle.
+    private func runs(of lines: [WorkDiffLine]) -> [DiffLineRun] {
+        var runs: [DiffLineRun] = []
+        for line in lines {
+            if runs.last?.kind == line.kind {
+                runs[runs.count - 1].lines.append(line)
+            } else {
+                runs.append(DiffLineRun(kind: line.kind, lines: [line]))
+            }
+        }
+        return runs
+    }
+}
+
+/// One run of consecutive lines that went the same way, drawn under a single wash.
+private struct DiffLineRun: Identifiable {
+    let kind: String
+    var lines: [WorkDiffLine]
+
+    var id: String { "\(kind)-\(lines.first?.id ?? "")" }
+
+    /// A wash, not a fill: which way the line went is read at a glance, and the code on top of
+    /// it is still what is being read — so the colour is strong enough to name the line and no
+    /// stronger. The browser mixes the same two into the same tone.
+    var wash: Color {
+        if kind == "add" { return MiloTheme.success.opacity(0.20) }
+        if kind == "remove" { return MiloTheme.danger.opacity(0.17) }
+        return .clear
+    }
 }
 
 /// One line of a hunk: its two line numbers, the diff's own marker, and the text — coloured
@@ -994,9 +1033,9 @@ private struct DiffLineRow: View {
     var body: some View {
         HStack(spacing: MiloTheme.Space.two) {
             Text(line.old.map(String.init) ?? "")
-                .frame(width: 34, alignment: .trailing)
+                .frame(width: 44, alignment: .trailing)
             Text(line.new.map(String.init) ?? "")
-                .frame(width: 34, alignment: .trailing)
+                .frame(width: 44, alignment: .trailing)
             Text(line.mark)
                 .foregroundStyle(line.isAdd ? MiloTheme.success : line.isRemove ? MiloTheme.danger : MiloTheme.muted)
             // An empty line is one space, so the row is the height its gutter numbers are and
@@ -1004,18 +1043,10 @@ private struct DiffLineRow: View {
             Text(line.text.isEmpty ? AttributedString(" ") : coloured(line.text, language: language))
             Spacer(minLength: 0)
         }
-        .font(MiloTheme.Text.small.monospaced())
+        // The size a file is read at in its own drawer: a changed line is code too, and the
+        // two drawers read alike now that both rise from the same place.
+        .font(MiloTheme.Text.mono)
         .padding(.horizontal, MiloTheme.Space.two)
-        .background(background)
-    }
-
-    /// A wash, not a fill: which way the line went is read at a glance, and the code on top of
-    /// it is still what is being read — so the colour is strong enough to name the line and no
-    /// stronger. The browser mixes the same two into the same tone.
-    private var background: Color {
-        if line.isAdd { return MiloTheme.success.opacity(0.20) }
-        if line.isRemove { return MiloTheme.danger.opacity(0.17) }
-        return .clear
     }
 }
 
