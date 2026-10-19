@@ -102,8 +102,8 @@ final class AppModel {
     /**
      How many times the daemon said to re-read a folder: a session anywhere in the install
      beginning or ending a turn, or a step in one that may have changed what is on disk. The
-     Work screen re-reads a folder's tree and changes on it — the same signal that moves the
-     running dot beside a session.
+     Work screen re-reads a folder's tree, changes and rules on it — the same signal that
+     moves the running dot beside a session.
      */
     private(set) var workMoved = 0
     private(set) var connection: MiloClient.State = .idle
@@ -1150,6 +1150,13 @@ final class AppModel {
     func projectDiff(_ id: String) async throws -> WorkDiff {
         guard let account else { throw ApiError.badAddress }
         return try await MiloApi.projectDiff(account, id: id)
+    }
+
+    /// Whether a project's folder carries rules of its own, and the words that ask for them.
+    /// Throws, so the page that asked says the reason inside itself.
+    func projectRules(_ id: String) async throws -> ProjectRules {
+        guard let account else { throw ApiError.badAddress }
+        return try await MiloApi.projectRules(account, id: id)
     }
 
     /// Recording what a project's folder holds now as its first state — the person's own

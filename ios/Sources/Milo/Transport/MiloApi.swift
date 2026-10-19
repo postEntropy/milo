@@ -371,6 +371,12 @@ enum MiloApi {
         try await call("project-diff", ["id": id], account: account, as: WorkDiff.self)
     }
 
+    /// Whether a project's folder carries rules of its own, and the words that ask the agent
+    /// to write them. The status only: the file's own text is not drawn on a screen.
+    static func projectRules(_ account: Account, id: String) async throws -> ProjectRules {
+        try await call("project-rules", ["id": id], account: account, as: ProjectRules.self)
+    }
+
     /// Records what a project's folder holds now as its first state, and answers with what
     /// the changes read from then on — empty, because there is now something to compare to.
     static func projectTrack(_ account: Account, id: String) async throws -> WorkDiff {
@@ -1106,6 +1112,32 @@ struct WorkDiff: Decodable {
         truncated = try container.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
         committed = try container.decodeIfPresent(Bool.self, forKey: .committed) ?? false
         reason = try container.decodeIfPresent(String.self, forKey: .reason)
+    }
+}
+
+/// Whether a project's folder carries rules of its own. The `prompt` — what a session is told
+/// to write or improve the file — rides along, so the phone and the browser ask with the same
+/// words instead of each keeping a copy of its own.
+struct ProjectRules: Decodable {
+    /// `present`, `absent` or `unreadable`.
+    let kind: String
+    /// Why the file could not be read, when it could not.
+    let error: String?
+    /// What a session is told to write or improve the file. The same words on every surface.
+    let prompt: String
+
+    var carriesRules: Bool { kind == "present" }
+    var isUnreadable: Bool { kind == "unreadable" }
+
+    private enum CodingKeys: String, CodingKey {
+        case kind, error, prompt
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try container.decodeIfPresent(String.self, forKey: .kind) ?? "absent"
+        error = try container.decodeIfPresent(String.self, forKey: .error)
+        prompt = try container.decodeIfPresent(String.self, forKey: .prompt) ?? ""
     }
 }
 

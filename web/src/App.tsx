@@ -83,8 +83,9 @@ export default function App() {
   /**
    * Counts the times the daemon said to re-read a folder: a session anywhere in the install
    * beginning or ending a turn, or a step in one that may have changed what is on disk. The
-   * Work screen re-reads a folder's tree and changes on it — the same signal that moves the
-   * running dot beside a session, and the same news from the one place every turn goes through.
+   * Work screen re-reads a folder's tree, changes and rules on it — the same signal that
+   * moves the running dot beside a session, and the same news from the one place every turn
+   * goes through.
    */
   const [workTick, setWorkTick] = useState(0)
   /** Bumped when the server says a routine ran, so the history on screen re-reads. */
@@ -621,10 +622,15 @@ export default function App() {
    * Start a work session in a project and open it — `newChat`'s move, with the
    * folder the session works in. The daemon binds the conversation to that
    * project, so the chat that opens is the ordinary one, working there.
+   *
+   * A `firstMessage` is said for the person: the words are owed exactly as a redo
+   * owes them (`pendingSend`), and go out once the new session is the one the socket
+   * speaks to. The Work screen uses it to ask for the project's rules to be written.
    */
-  const startWorkSession = useCallback(async (project: string): Promise<boolean> => {
+  const startWorkSession = useCallback(async (project: string, firstMessage?: string): Promise<boolean> => {
     editingTurn.current = null
     const nextConversationId = randomUUID()
+    pendingSend.current = firstMessage ?? null
     composerRef.current?.focus()
     setComposerFocus((current) => current + 1)
     try {
@@ -639,6 +645,7 @@ export default function App() {
       setConversationId(nextConversationId)
       return true
     } catch (error) {
+      pendingSend.current = null
       fail(error)
       return false
     }

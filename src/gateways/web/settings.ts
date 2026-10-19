@@ -86,6 +86,7 @@ import { taskListsTool } from '../../core/tools/task-lists.js'
 import {
   addProject,
   findProject,
+  placeProject,
   projectViews,
   readProjects,
   removeProject,
@@ -94,6 +95,7 @@ import {
 import { browseFolders } from '../../core/browse.js'
 import { workFile, workTree } from '../../core/work.js'
 import { startTracking, workDiff } from '../../core/work-diff.js'
+import { PROJECT_RULES_PROMPT, readProjectInstructions, rulesOf } from '../../core/agent/instructions.js'
 import { JobRegistry } from './jobs.js'
 import { transcriptOf, type RegisterFile } from './transcript.js'
 
@@ -173,6 +175,7 @@ export class WebSettings {
       case 'project-file': return this.projectFile(body)
       case 'project-diff': return this.projectDiff(body)
       case 'project-track': return this.projectTrack(body)
+      case 'project-rules': return this.projectRules(body)
       case 'routine-feed': return this.routineFeed()
       case 'routine-add': return this.addRoutine(body)
       case 'routine-remove': return this.removeRoutine(body)
@@ -806,6 +809,22 @@ export class WebSettings {
     const diff = await workDiff(id)
     if (!diff.ok) throw new Error(diff.error)
     return diff
+  }
+
+  /**
+   * Whether a project's folder carries rules, and the words that ask the agent to write
+   * them. Only the status travels: the file's own text is for the prompt, not for a
+   * screen, and a screen only says that the rules are there. The `prompt` is the same
+   * text on every surface — it lives in the core, so the phone and the browser hand over
+   * one thing rather than two that drift.
+   */
+  private projectRules(body: Record<string, unknown>): unknown {
+    const id = projectId(body.id)
+    const placement = placeProject(id)
+    // The project has to exist: a line about the rules of a project that is not there
+    // would be a screen answering for something that is not in the list.
+    if (!placement.project) throw new Error(`No project with the id ${id}.`)
+    return { ...rulesOf(readProjectInstructions(placement)), prompt: PROJECT_RULES_PROMPT }
   }
 
   private async resumeSession(body: Record<string, unknown>): Promise<unknown> {

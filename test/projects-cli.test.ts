@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -127,6 +127,29 @@ describe('milo projects', () => {
 
     const { lines } = await run('list')
     expect(lines[1]).toContain('is gone')
+  })
+
+  it('names the folder that carries rules of its own, and is silent when it does not', async () => {
+    const withRules = folder('milo')
+    writeFileSync(path.join(withRules, 'AGENTS.md'), 'Run the suite before you call it done.\n')
+    await run('add', withRules, '--name', 'Milo')
+    await run('add', folder('plain'), '--name', 'Plain')
+
+    const { lines } = await run('list')
+    // One line, and only where there is something to say: a folder with no rules of its
+    // own is the ordinary case, not a warning printed on every entry.
+    expect(lines.filter((line) => line.includes('rules:'))).toEqual(['     rules: AGENTS.md'])
+  })
+
+  it('says a rules file it cannot read, rather than staying quiet', async () => {
+    const where = folder('milo')
+    writeFileSync(path.join(where, 'AGENTS.md'), 'x'.repeat(17 * 1024))
+    await run('add', where, '--name', 'Milo')
+
+    const { lines } = await run('list')
+    const rules = lines.find((line) => line.includes('rules:')) ?? ''
+    expect(rules).toContain('rules: AGENTS.md — ')
+    expect(rules).toContain('over the')
   })
 
   it('answers an unknown subcommand with the valid ones', async () => {

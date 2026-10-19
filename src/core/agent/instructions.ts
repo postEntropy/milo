@@ -88,3 +88,33 @@ export function readProjectInstructions(placement: ProjectPlacement | undefined)
   if (text === '') return { kind: 'absent' }
   return { kind: 'present', text }
 }
+
+/**
+ * Whether a project carries rules, without the text — what a screen draws and what
+ * the CLI's list says. The file's own words never travel to a surface: a screen says
+ * that the rules are there, it does not read them out.
+ */
+export type ProjectRules =
+  | { kind: 'present' }
+  | { kind: 'absent' }
+  | { kind: 'unreadable'; error: string }
+
+/** The status of a read, with the file's text dropped. */
+export function rulesOf(instructions: ProjectInstructions): ProjectRules {
+  if (instructions.kind === 'present') return { kind: 'present' }
+  if (instructions.kind === 'unreadable') return { kind: 'unreadable', error: instructions.error }
+  return { kind: 'absent' }
+}
+
+/**
+ * What the agent is told when the person asks it to write the folder's rules. The
+ * text lives here, once, and each surface hands it over as it is — the web and the
+ * phone cannot share a constant across Swift and TypeScript, so they are served this.
+ */
+export const PROJECT_RULES_PROMPT = `Write or improve the \`${INSTRUCTIONS_FILE}\` at the root of this project's folder: the file that tells a session started here how this project is worked in.
+
+Read the folder before you write. Get the truth from what is actually there — the build, test and lint commands the project already uses, where its code lives, the conventions its own files show — and write only what you found. Do not invent a command, a script or a directory: if you did not see it, it is not a rule.
+
+Keep it short and specific to this project: what someone joining it would need and could not guess from the file names alone. Commands first, then the structure and the conventions that are not obvious from the outside.
+
+If an \`${INSTRUCTIONS_FILE}\` is already there, improve it where it stands: keep what is still true, correct what is not, add what is missing, and say in your reply what you changed. Do not rewrite it from scratch, and do not pad it.`

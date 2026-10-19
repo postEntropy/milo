@@ -1293,4 +1293,33 @@ describe('the Work screen’s projects', () => {
 
     await expect(settings.handle('project-track', { id })).rejects.toThrow('already has its first state recorded')
   })
+
+  it('says whether the folder carries rules, and hands over the words that write them', async () => {
+    const settings = new WebSettings(build(), home)
+    const where = folder('milo')
+    const id = await addProject(settings, where, 'Milo')
+
+    const none = (await settings.handle('project-rules', { id })) as { kind: string; prompt: string }
+    expect(none.kind).toBe('absent')
+    // One wording, served to every surface: the agent is told what to write in one place
+    // rather than the phone and the browser each keeping a copy.
+    expect(none.prompt).toContain('AGENTS.md')
+
+    writeFileSync(path.join(where, 'AGENTS.md'), 'Run the suite before you call it done.\n')
+    expect(((await settings.handle('project-rules', { id })) as { kind: string }).kind).toBe('present')
+
+    writeFileSync(path.join(where, 'AGENTS.md'), 'x'.repeat(17 * 1024))
+    const tooBig = (await settings.handle('project-rules', { id })) as { kind: string; error?: string }
+    expect(tooBig.kind).toBe('unreadable')
+    expect(tooBig.error).toContain('over the')
+    // The file's own text never travels: a screen says the rules are there, it does not read them out.
+    expect(tooBig).not.toHaveProperty('text')
+  })
+
+  it('refuses the rules of a project that is not in the list', async () => {
+    const settings = new WebSettings(build(), home)
+    await expect(settings.handle('project-rules', { id: 'calm-otter-9' })).rejects.toThrow(
+      'No project with the id calm-otter-9.',
+    )
+  })
 })

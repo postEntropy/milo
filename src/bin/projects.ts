@@ -8,6 +8,7 @@ import {
   type Project,
 } from '../core/projects.js'
 import { resolveToolPath } from '../core/tools/walk.js'
+import { INSTRUCTIONS_FILE, readProjectInstructions, rulesOf } from '../core/agent/instructions.js'
 import { errorMessage } from '../util/errors.js'
 
 export interface ProjectIo {
@@ -83,6 +84,12 @@ function list(out: ProjectIo['out']): number {
     // reading it would be answered.
     const placement = placeProject(project.id)
     out(`     ${project.path}${placement.ok ? '' : ` — ${placement.error}`}`)
+    // The folder's own rules, when it has any: a session started here follows them, and
+    // that is worth knowing before one is started. A folder with none says nothing —
+    // silence is the ordinary case, not a warning.
+    const rules = rulesOf(readProjectInstructions(placement))
+    if (rules.kind === 'present') out(`     rules: ${INSTRUCTIONS_FILE}`)
+    else if (rules.kind === 'unreadable') out(`     rules: ${INSTRUCTIONS_FILE} — ${rules.error}`)
   }
   return 0
 }

@@ -77,6 +77,14 @@ type DiffFile = {
 type WorkDiff =
   | { ok: true; source: 'git'; files: DiffFile[]; truncated: boolean; committed: boolean }
   | { ok: true; source: 'none'; reason: string }
+/** Whether a project's folder carries rules of its own, and the words that ask for them. */
+type ProjectRules = {
+  kind: 'present' | 'absent' | 'unreadable'
+  /** Why the file could not be read, when it could not. */
+  error?: string
+  /** What a session is told to write or improve the file — one wording, every surface. */
+  prompt: string
+}
 
 /**
  * Work: the folders a session may work in, and the sessions that ran in one.
@@ -94,7 +102,7 @@ export function Work({ tick, sessions, onOpenSession, onStartSession }: {
   sessions: WorkSession[]
   onOpenSession(id: string): void
   /** Start a work session in a project and open it. False when it could not. */
-  onStartSession(projectId: string): Promise<boolean>
+  onStartSession(projectId: string, firstMessage?: string): Promise<boolean>
 }) {
   const [projects, setProjects] = useState<Project[] | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -386,7 +394,7 @@ function ProjectPage({
   onDismiss(): void
   onBack(): void
   onOpenSession(id: string): void
-  onStartSession(projectId: string): Promise<boolean>
+  onStartSession(projectId: string, firstMessage?: string): Promise<boolean>
   onAct(body: Record<string, unknown>): Promise<boolean>
 }) {
   const [renaming, setRenaming] = useState(false)
@@ -397,6 +405,9 @@ function ProjectPage({
   const [open, setOpen] = useState<WorkNode | null>(null)
   const [diff, setDiff] = useState<WorkDiff | null>(null)
   const [diffError, setDiffError] = useState<string | null>(null)
+  /** What the folder carries as its own rules, and whether it carries any at all. */
+  const [rules, setRules] = useState<ProjectRules | null>(null)
+  const [rulesError, setRulesError] = useState<string | null>(null)
   /** The changed file whose hunks are drawn, by its own path. */
   const [openDiff, setOpenDiff] = useState<string | null>(null)
   /** Recording the folder as it is now, which is what makes the changes readable at all. */
@@ -431,12 +442,27 @@ function ProjectPage({
     }
   }, [project.id])
 
-  useEffect(() => { void readTree(); void readDiff() }, [readTree, readDiff])
+  /** The folder's own rules, and the words that ask for them — read once for this page. */
+  const rulesSeq = useRef(0)
+  const readRules = useCallback(async (): Promise<void> => {
+    const mine = ++rulesSeq.current
+    try {
+      const next = await api<ProjectRules>('project-rules', { id: project.id })
+      if (mine !== rulesSeq.current) return
+      setRules(next)
+      setRulesError(null)
+    } catch (error) {
+      if (mine !== rulesSeq.current) return
+      setRulesError(message(error))
+    }
+  }, [project.id])
+
+  useEffect(() => { void readTree(); void readDiff(); void readRules() }, [readTree, readDiff, readRules])
   // A turn running in this project may have written in its folder — and does, step by step,
-  // while it runs — so the tree and the changes are re-read rather than drawn from what this
-  // screen remembered.
+  // while it runs — so the tree, the changes and the rules are re-read rather than drawn from
+  // what this screen remembered.
   // biome-ignore lint/correctness/useExhaustiveDependencies: tick is a change signal only
-  useEffect(() => { void readTree(); void readDiff() }, [tick, readTree, readDiff])
+  useEffect(() => { void readTree(); void readDiff(); void readRules() }, [tick, readTree, readDiff, readRules])
 
   /**
    * Recording what the folder holds now as its first state: their folder, their
@@ -506,6 +532,31 @@ function ProjectPage({
           <span className="work-session-meta">{session.messageCount} msgs · {formatWhen(session.updatedAt)}</span>
         </button>)}
       </div>}
+
+    {/* A folder that is gone has no rules to read, and the reason is already on the bar. */}
+    {project.error === undefined && <section className="work-changes">
+      <header className="work-files-head">
+        <h2 className="work-files-title">Rules</h2>
+      </header>
+
+      {rulesError
+        ? <div className="panel-state"><p>Could not read this folder’s rules: {rulesError}</p><button className="button" type="button" onClick={() => void readRules()}>Try again</button></div>
+        : rules === null
+          ? <SkeletonList rows={1} label="Reading this folder’s rules…" />
+          : rules.kind === 'present'
+            ? <p className="list-empty">This folder’s rules are in <code>AGENTS.md</code>. A session started here follows them.</p>
+            : rules.kind === 'unreadable'
+              ? <p className="list-empty">This folder has an <code>AGENTS.md</code> that could not be read: {rules.error}</p>
+              : <div className="work-changes-none">
+                {/* What a project's own rules are, said once — and the one control that
+                    makes them: a session told to read the folder and write the file, which
+                    the person then watches, rather than a file written behind their back. */}
+                <p className="list-empty">This folder has no <code>AGENTS.md</code> — the file that tells a session started here how the project is worked in: its commands, its layout, its conventions.</p>
+                <button className="button" type="button" disabled={saving} onClick={() => void onStartSession(project.id, rules.prompt)}>
+                  <Icon name="edit" size={14} /> Write the rules
+                </button>
+              </div>}
+    </section>}
 
     {/* A folder that is gone has no diff to read, and the reason is already on the bar. */}
     {project.error === undefined && <section className="work-changes">
