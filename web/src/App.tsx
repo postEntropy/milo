@@ -7,7 +7,7 @@ import { trackVisualViewport } from './lib/viewport.js'
 import { MiloSocket, type ConnectionStatus } from './lib/ws.js'
 import { Composer, type ComposerHandle } from './chat/Composer.js'
 import { MessageList, type ChatMessage } from './chat/MessageList.js'
-import { appendReasoning, appendText, withWidget } from './chat/parts.js'
+import { appendDeltas, withDelta, withWidget, type PendingDelta } from './chat/parts.js'
 import { buildSuggestions } from './chat/suggestions.js'
 import { Permissions } from './chat/Permissions.js'
 import { Routines } from './routines/Routines.js'
@@ -151,7 +151,7 @@ export default function App() {
    * once a token — is what keeps a fast answer from re-parsing and re-rendering
    * the whole thread on every one of its chunks.
    */
-  const pendingDeltas = useRef(new Map<string, { text: string; reasoning: string }>())
+  const pendingDeltas = useRef(new Map<string, PendingDelta[]>())
   const drawFrame = useRef<number | null>(null)
 
   /** Whether what is showing is a phone's layout; the composer's dock reads it. */
@@ -386,13 +386,16 @@ export default function App() {
       setMessages((current) => current.map((message) => {
         const add = buffer.get(message.id)
         if (!add) return message
-        let next = message
-        if (add.text) {
-          const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-            next = { ...next, parts: appendText(next.parts, add.text), waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
+        // A batch is drawn in the order its tokens arrived: the thought that was
+        // still arriving when the answer began stays above it rather than splitting
+        // the paragraph it was written before.
+        const wrote = add.some((token) => token.kind === 'text')
+        const waited = wrote && message.waitingSince ? Date.now() - message.waitingSince : 0
+        return {
+          ...message,
+          parts: appendDeltas(message.parts, add),
+          ...(wrote ? { waitingSince: undefined, ...thoughtMsFor(waited, message) } : {}),
         }
-          if (add.reasoning) next = { ...next, parts: appendReasoning(next.parts, add.reasoning) }
-        return next
       }))
     }
     // Anything that is not a token is drawn in order: the text that led to it
@@ -473,10 +476,9 @@ export default function App() {
     if (frame.type === 'event') {
       const event = frame.event
       if (event.type === 'text-delta' || event.type === 'reasoning-delta') {
-        const buffered = pendingDeltas.current.get(frame.turnId) ?? { text: '', reasoning: '' }
-        if (event.type === 'text-delta') buffered.text += event.delta
-        else buffered.reasoning += event.delta
-        pendingDeltas.current.set(frame.turnId, buffered)
+        const buffered = pendingDeltas.current.get(frame.turnId) ?? []
+        const kind = event.type === 'text-delta' ? 'text' : 'reasoning'
+        pendingDeltas.current.set(frame.turnId, withDelta(buffered, kind, event.delta))
         if (drawFrame.current === null) drawFrame.current = requestAnimationFrame(drawDeltas)
         return
       }

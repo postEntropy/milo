@@ -52,3 +52,31 @@ export function appendReasoning(parts: TranscriptPart[], delta: string): Transcr
     ? [...parts.slice(0, -1), { ...last, text: last.text + delta }]
     : [...parts, { kind: 'reasoning', text: delta }]
 }
+
+/** A token waiting for the next frame, and the channel it arrived on. */
+export interface PendingDelta {
+  kind: 'text' | 'reasoning'
+  delta: string
+}
+
+/**
+ * Gathers a token into the batch a frame will draw, keeping the order it arrived
+ * in. A thought and the first words of the answer can land in the same batch —
+ * gathering them per channel would lose which came first and put the thought
+ * after words it came before, cutting the sentence around it.
+ */
+export function withDelta(batch: readonly PendingDelta[], kind: PendingDelta['kind'], delta: string): PendingDelta[] {
+  const last = batch[batch.length - 1]
+  return last?.kind === kind
+    ? [...batch.slice(0, -1), { kind, delta: last.delta + delta }]
+    : [...batch, { kind, delta }]
+}
+
+/** Draws one frame's tokens into a turn, in the order they arrived. */
+export function appendDeltas(parts: TranscriptPart[], batch: readonly PendingDelta[]): TranscriptPart[] {
+  let next = parts
+  for (const token of batch) {
+    next = token.kind === 'reasoning' ? appendReasoning(next, token.delta) : appendText(next, token.delta)
+  }
+  return next
+}
