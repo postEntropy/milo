@@ -35,9 +35,9 @@ export type PanelArgs = z.infer<typeof schema>
 export const panelTool: Tool<PanelArgs> = {
   name: 'panel',
   description: [
-    'Show something in the panel beside the chat, so the person sees it rather than reads it: a document or an HTML page you wrote, a screenshot, a PDF, any file — or the browser you are driving.',
-    'Reach for it when what you made or found is the point: a report, a plan, a chart or an HTML page you wrote, a screenshot, a PDF, or a file someone asked to see. Show it and name it in one line ("here, look") instead of only pasting its contents into the reply.',
-    'The panel opens itself, so nothing needs announcing.',
+    "Show something in the panel beside the chat, so the person reads or works in it: a document or an HTML page you wrote, a report, a PDF — or the browser you are driving. A picture is the chat's, not the panel's: a screenshot or any image goes there with `send_file`.",
+    'Reach for it when what you made or found is meant to be read beside the chat: a report, a plan, a chart or an HTML page you wrote, a PDF, or a document someone asked to see. Show it and name it in one line ("here, look") instead of only pasting its contents into the reply.',
+    'The call opens it: there is no separate open step.',
     'The panel holds one tab per thing: this opens a tab and puts it in front, or brings the tab already holding that same thing back to the front — it never takes away what is beside it. Your setup names the tabs that are open.',
     '`browser: true` shows the live browser you are driving, which the person can click and type in — use it to hand over a login, a 2FA code or a payment step you must not do yourself, and ask them to take it.',
     'Not on every turn: a passing mention, a link, or a short excerpt is prose, not a panel.',

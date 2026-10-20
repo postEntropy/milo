@@ -187,7 +187,8 @@ and `/` opens the command palette. Export and Clear sit in the top bar; sessions
 resumed and deleted. **Task lists** is a view of its own, showing the lists the `task_lists` tool keeps.
 
 The **Panel** sits beside the chat: the `panel` tool shows a file there (a document or HTML you wrote,
-a screenshot, a PDF — any type) or the **live browser** Milo is driving, which is also **interactive** —
+a PDF — anything meant to be read beside the chat; a screenshot or any picture goes to the chat
+instead) or the **live browser** Milo is driving, which is also **interactive** —
 click and type in it, which is where Milo hands over a login, a 2FA code or a payment it must not do
 itself. Milo opens it when it has something to show ("here, look at this"). It holds **one tab per
 thing**, per session: showing a second file does not take away the first, the strip at the top switches

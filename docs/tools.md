@@ -17,8 +17,8 @@
 | `recall` | yes | Which past session a question is about, and what it was about. |
 | `search_history` | yes | Term search over Milo's own past turns, reasoning and tool calls included. |
 | `routine` | — | Runs a prompt on a timer and delivers it to a chat. Asks only when the routine carries a standing grant; absent inside a routine's own run. |
-| `send_file` | no | Sends a file to the chat a turn is talking in — the live chat, or a routine's target — as a picture when it is an image. Asks; in a routine it needs a grant to run unattended. Not offered on the terminal, and its call is not drawn as a tool line. |
-| `panel` | — | Shows a file or the live browser in the Panel beside the web chat, one tab per thing — the tab already holding something comes forward rather than a second copy of it. Only the web app draws a panel, so it is offered on that surface alone; its call is not drawn as a tool line. |
+| `send_file` | no | Sends a file to the chat a turn is talking in — the live chat, or a routine's target — as a picture when it is an image. A screenshot or any picture the person should see goes here, never to the panel. Asks; in a routine it needs a grant to run unattended. Not offered on the terminal, and its call is not drawn as a tool line. |
+| `panel` | — | Shows a document or the live browser in the Panel beside the web chat, one tab per thing — the tab already holding something comes forward rather than a second copy of it. A picture is not the panel's: an image the person should see goes to the chat with `send_file`. Only the web app draws a panel, so it is offered on that surface alone; its call is not drawn as a tool line. |
 | `web_search` | yes | Registered only when a search provider is configured. |
 | `read_skill` | yes | Loads a skill's instructions on demand; registered only when a skill is installed. |
 | `gmail_search` | yes | Search the connected Gmail account; registered only when Google is on. `label:` reaches Gmail's own labels. |

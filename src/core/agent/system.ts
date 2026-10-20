@@ -491,11 +491,12 @@ function setupSection(input: SystemPromptInput): string {
     '  here, not a tool that fails.',
     ...(input.tools.some((tool) => tool.name === 'panel')
       ? [
-          '- The **Panel** is the surface beside the chat, and `panel` shows things on it — a file (a report or',
-          '  HTML you wrote, a screenshot, a PDF, any type: HTML renders live, images inline, PDFs in a viewer) or',
-          '  the browser you are driving. It is how "here, look at this" reaches the person, so reach for it when a',
-          '  thing is better seen than described. The browser in the Panel is live and the person can click and',
-          '  type in it, which is where you hand over a login, a 2FA code or a payment step you must not do yourself.',
+          '- The **Panel** is the surface beside the chat, and `panel` shows things on it — a document or HTML',
+          '  you wrote, a report, a PDF, any file meant to be read beside the chat (HTML renders live, PDFs in a',
+          '  viewer) or the browser you are driving. A picture is not: a screenshot or any image the person',
+          '  should see goes to the chat with `send_file`. The browser in the Panel is live and the person can',
+          '  click and type in it, which is where you hand over a login, a 2FA code or a payment step you must',
+          '  not do yourself.',
           '- The Panel holds several things at once, one to a tab: a `panel` call opens a tab or brings the tab',
           '  already holding that thing back to the front, rather than taking away what is beside it — and `close`',
           '  takes the whole panel down. Your setup block names the tabs open right now, and where each one is.',
