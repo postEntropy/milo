@@ -26,12 +26,15 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     /// Whether a turn holds this session right now — anywhere in the install, the
     /// daemon or a terminal. A row draws its running mark from this.
     var running: Bool?
+    /// Whether the session moved after the person last looked at it, on any surface.
+    /// A row draws its still mark from this; running outranks it.
+    var unread: Bool?
     /// The project this session works in, by id. Absent on a session working in the
     /// install's own folder — a screen names the project from the list of them.
     let project: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, createdAt, updatedAt, messageCount, preview, recap, running, project
+        case id, title, createdAt, updatedAt, messageCount, preview, recap, running, unread, project
     }
 
     /// Read leniently, and only `id` as the one thing it cannot do without: a row
@@ -43,6 +46,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         title = try container.decodeIfPresent(String.self, forKey: .title)
         recap = try container.decodeIfPresent(String.self, forKey: .recap)
         running = try container.decodeIfPresent(Bool.self, forKey: .running)
+        unread = try container.decodeIfPresent(Bool.self, forKey: .unread)
         project = try container.decodeIfPresent(String.self, forKey: .project)
         preview = try container.decodeIfPresent(String.self, forKey: .preview) ?? ""
         messageCount = try container.decodeIfPresent(Int.self, forKey: .messageCount) ?? 0
@@ -65,6 +69,14 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     var settled: SessionSummary {
         var copy = self
         copy.running = nil
+        return copy
+    }
+
+    /// The row as it reads once the session is on screen: the unread mark has been
+    /// answered, so it comes off here in the same move that tells the daemon.
+    var looked: SessionSummary {
+        var copy = self
+        copy.unread = nil
         return copy
     }
 }
@@ -250,6 +262,13 @@ enum MiloApi {
 
     static func renameSession(_ account: Account, id: String, title: String) async throws {
         _ = try await call("session-rename", ["id": id, "title": title], account: account, as: Ack.self)
+    }
+
+    /// The session is in front of the person: the daemon records the look, so the
+    /// unread mark clears here and on every other surface — the watermark is the
+    /// install's, not this phone's.
+    static func markSessionSeen(_ account: Account, id: String) async throws {
+        _ = try await call("session-seen", ["id": id], account: account, as: Ack.self)
     }
 
     static func deleteSession(_ account: Account, id: String) async throws {

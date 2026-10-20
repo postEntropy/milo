@@ -115,13 +115,14 @@ private struct WorkIndex: View {
         model.sessions.filter { $0.project == id }
     }
 
-    /// The newest few, plus any session still running: work in flight is never hidden behind
-    /// a count, however long it has been going.
+    /// The newest few, plus any session still running or still unread: work in flight
+    /// and work waiting to be read are never hidden behind a count, however long either
+    /// has been going.
     private func shownSessions(of id: String) -> [SessionSummary] {
         let all = sessions(of: id)
         let newest = all.prefix(Self.sessionsShown)
-        let running = all.dropFirst(Self.sessionsShown).filter { $0.running == true }
-        return (Array(newest) + running).sorted { $0.updatedAt > $1.updatedAt }
+        let waiting = all.dropFirst(Self.sessionsShown).filter { $0.running == true || $0.unread == true }
+        return (Array(newest) + waiting).sorted { $0.updatedAt > $1.updatedAt }
     }
 
     /// Opening a session from the index: the chat takes it, the way a project's page does.
@@ -203,6 +204,7 @@ private struct WorkIndex: View {
                                         project: project,
                                         sessions: mine.count,
                                         running: mine.contains { $0.running == true },
+                                        unread: mine.contains { $0.unread == true },
                                         expanded: expanded,
                                         expandable: !mine.isEmpty,
                                         onToggle: { toggle(project.id) },
@@ -359,6 +361,9 @@ private struct ProjectRow: View {
     let project: Project
     let sessions: Int
     let running: Bool
+    /// Whether any of the project's sessions moved and has not been read — said on the
+    /// card because a project's rows may be folded shut.
+    let unread: Bool
     let expanded: Bool
     /// Whether there are sessions to fold: a project with none carries no chevron, since a
     /// control that opens onto nothing is a promise it cannot keep.
@@ -399,9 +404,8 @@ private struct ProjectRow: View {
                 }
                 Spacer(minLength: MiloTheme.Space.two)
                 HStack(spacing: MiloTheme.Space.one) {
-                    if running {
-                        Circle().fill(MiloTheme.accent).frame(width: 6, height: 6)
-                    }
+                    // One mark, the same choice a session's own row makes.
+                    SessionMark(running: running, unread: unread, size: 6)
                     Text("\(sessions)")
                         .font(MiloTheme.Text.base.weight(.semibold).monospacedDigit())
                         .foregroundStyle(sessions > 0 ? MiloTheme.accent : MiloTheme.muted)
@@ -877,14 +881,9 @@ private struct SessionRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: MiloTheme.Space.two)
-            // A session running now, said with the accent the way the accent already points:
-            // one dot at the row's own edge, no words.
-            if session.running == true {
-                Circle()
-                    .fill(MiloTheme.accent)
-                    .frame(width: 7, height: 7)
-                    .accessibilityLabel("Running")
-            }
+            // A session running now, or one that moved and has not been read: the same
+            // one mark the drawer puts at a row's edge.
+            SessionMark(running: session.running, unread: session.unread)
         }
         .padding(.horizontal, MiloTheme.Space.four)
         .padding(.vertical, MiloTheme.Space.two)

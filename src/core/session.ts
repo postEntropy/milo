@@ -239,8 +239,10 @@ export interface SessionOptions {
    * "a turn ran here", whatever asked for it. It is how a surface that is not the one
    * talking is told the install's work moved: the runtime hands every session it makes
    * the same one, so a turn from a gateway or a routine is announced like any other.
+   * The phase is the caller's own: a turn begins on the surface that asked for it, while
+   * its end can arrive after that surface is gone.
    */
-  onTurn?: () => void
+  onTurn?: (phase: 'start' | 'end') => void
   /**
    * Called when a step of a turn here may have changed something in the folder — a file
    * written, an edit, a command — and not for one that only read. The runtime hands every
@@ -595,7 +597,7 @@ export class Session {
       // The turn is about to run. Said with the lease already held, so a screen that
       // re-reads the install's sessions finds this one and draws it running.
       ranTurn = true
-      this.options.onTurn?.()
+      this.options.onTurn?.('start')
       yield* this.turn(input, opts)
     } finally {
       try {
@@ -605,7 +607,7 @@ export class Session {
         this.notifyIfIdle()
         // Said after the lease is let go, so the same re-read finds it over: the frame
         // and the store agree by the time a screen acts on it.
-        if (ranTurn) this.options.onTurn?.()
+        if (ranTurn) this.options.onTurn?.('end')
       }
     }
   }

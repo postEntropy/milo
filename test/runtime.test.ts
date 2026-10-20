@@ -6,6 +6,7 @@ import { SqliteMemory } from '../src/core/memory/sqlite.js'
 import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
 import { AgentRuntime, type RuntimeOptions } from '../src/core/runtime.js'
 import { FileSessionStore } from '../src/core/sessions/file-store.js'
+import { MemorySessionSeen } from '../src/core/sessions/seen.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
 import { readProjectInstructions } from '../src/core/agent/instructions.js'
 
@@ -31,6 +32,8 @@ function runtimeOptions(dir: string): RuntimeOptions {
     memory: new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-mem-')) }),
     cwd: process.cwd(),
     store: new FileSessionStore({ dir }),
+    // The unread watermark in memory: a runtime test writes no file of the install's.
+    seen: new MemorySessionSeen(),
   }
 }
 

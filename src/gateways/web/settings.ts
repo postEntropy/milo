@@ -156,6 +156,7 @@ export class WebSettings {
       case 'clear-session': return this.clearSession(body)
       case 'session-delete': return this.deleteSession(body)
       case 'session-rename': return this.renameSession(body)
+      case 'session-seen': return this.sessionSeen(body)
       case 'transcript': return this.transcript(body)
       case 'session-peek': return this.sessionPeek(body)
       case 'export': return this.export(body)
@@ -912,6 +913,17 @@ export class WebSettings {
     }
     if (!(await this.runtime.removeSession(id))) throw new Error('Session not found.')
     return { removed: true }
+  }
+
+  /**
+   * A session was looked at. A screen calls this when the session is in front of
+   * the person — opened, or holding a turn it watched — so the unread mark clears
+   * here and on every other surface, which is what the install-wide watermark is
+   * for.
+   */
+  private sessionSeen(body: Record<string, unknown>): unknown {
+    this.runtime.markSessionSeen(sessionId(body.id))
+    return { seen: true }
   }
 
   private async renameSession(body: Record<string, unknown>): Promise<unknown> {

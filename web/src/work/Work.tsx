@@ -7,7 +7,7 @@ import {
   PROJECT_ICONS,
   isProjectIcon,
 } from '../../../src/core/project-icons.ts'
-import { SessionRow, type SessionSummary } from '../sessions/SessionRow.js'
+import { SessionMark, SessionRow, type SessionSummary } from '../sessions/SessionRow.js'
 import { Code } from '../ui/Code.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
@@ -33,15 +33,16 @@ const SESSIONS_SHOWN = 3
 const COLLAPSED_KEY = 'milo-work-collapsed'
 
 /**
- * The newest few, plus any session still running: work in flight is never hidden behind a
- * count, however long it has been going. The list is sorted here so the cut is the newest
- * whatever order the caller carried.
+ * The newest few, plus any session still running or still unread: work in flight
+ * and work waiting to be read are never hidden behind a count, however long either
+ * has been going. The list is sorted here so the cut is the newest whatever order
+ * the caller carried.
  */
 function inlineSessions(sessions: SessionSummary[]): SessionSummary[] {
   const newest = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
   const shown = newest.slice(0, SESSIONS_SHOWN)
-  const running = newest.slice(SESSIONS_SHOWN).filter((session) => session.running)
-  return [...shown, ...running].sort((a, b) => b.updatedAt - a.updatedAt)
+  const waiting = newest.slice(SESSIONS_SHOWN).filter((session) => session.running || session.unread)
+  return [...shown, ...waiting].sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 /** The projects folded shut on this client. No stored preference reads as all expanded. */
@@ -408,6 +409,7 @@ function WorkIndex({
                   project={project}
                   sessions={mine.length}
                   running={mine.some((session) => session.running)}
+                  unread={mine.some((session) => session.unread)}
                   onClick={() => onSelect(project.id)}
                 />
                 {mine.length > 0 && <button
@@ -440,7 +442,7 @@ function WorkIndex({
 }
 
 /** One project as the index draws it: its name, its folder, and how much work is there. */
-function ProjectRow({ project, sessions, running, onClick }: { project: Project; sessions: number; running: boolean; onClick(): void }) {
+function ProjectRow({ project, sessions, running, unread, onClick }: { project: Project; sessions: number; running: boolean; unread: boolean; onClick(): void }) {
   return <button className="work-card" type="button" onClick={onClick}>
     <span className="work-card-mark"><Icon name={projectMark(project.icon)} size={20} /></span>
     <span className="work-card-main">
@@ -450,7 +452,10 @@ function ProjectRow({ project, sessions, running, onClick }: { project: Project;
       <span className={`work-card-meta ${project.error ? 'gone' : ''}`}>{project.error ?? project.path}</span>
     </span>
     <span className="work-card-count">
-      {running && <span className="session-running" />}
+      {/* The card's own mark, because a project's rows may be folded shut: something
+          running there, or something waiting to be read, is never hidden behind the
+          count. */}
+      <SessionMark running={running} unread={unread} />
       <span className="work-open">{sessions}</span>
       <span>{sessions === 1 ? 'session' : 'sessions'}</span>
     </span>

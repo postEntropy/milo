@@ -12,9 +12,9 @@ the ordinary ones, with the folder they run in changed.
   Tools, the subagent, the prompt and permission decisions all read from there.
 - The tab has two levels: the projects, and one project's own page.
 - The index draws each project as a disclosure. Expanded by default, it holds the project's
-  newest sessions — three of them, with any running session always among them — and **All N
-  sessions** opens the page for the rest. The chevron at the card's edge folds them; the
-  card itself opens the page, and the sessions sit in the card's own body rather than in
+  newest sessions — three of them, with any running or unread session always among them — and
+  **All N sessions** opens the page for the rest. The chevron at the card's edge folds them;
+  the card itself opens the page, and the sessions sit in the card's own body rather than in
   rows of their own, opening and folding with a short animation. What was folded stays
   folded on that client, web and phone alike. A project with no sessions has nothing to
   fold: it stays shut and carries no chevron, and its count says zero.
@@ -70,6 +70,19 @@ the ordinary ones, with the folder they run in changed.
 - The page re-reads while a turn writes (`work-changed`, held to one frame per second) and
   again when a turn ends (`sessions-changed`).
 - A folder that is gone is named as gone; a session started there would not work.
+- A session carries one mark at its row's edge, never two: it **breathes** while a turn
+  runs there and stands **still** when the session moved after the person last looked at it.
+  Running outranks unread. The project's card wears the same mark when any of its sessions
+  is running or unread, because its rows may be folded shut.
+- The unread mark is counted from a watermark the install keeps in
+  `~/.milo/session-seen.json`, one moment per session — not from the transcript, which
+  cannot say when the person read it. Opening or resuming a session is a look, and so is
+  the start of a turn. The **end** of a turn is a look only where the answer is handed
+  over whole: a terminal, a chat with a push behind it. The browser and the phone decide
+  for themselves, writing the look when the answer lands while the thread is still the
+  screen showing — leaving the chat before the reply arrives is what leaves it unread.
+  A delivery with nobody looking (a routine's answer into a web chat no tab has open)
+  does the same.
 - Language, controls and vocabulary follow `AGENTS.md`.
 
 ## Deliberately later
@@ -94,3 +107,4 @@ the ordinary ones, with the folder they run in changed.
 | Phone tab | `ios/Sources/Milo/Screens/WorkView.swift` |
 | CLI | `src/bin/projects.ts` |
 | A session's project | `src/core/runtime.ts` (`adopt`), `src/core/sessions/` |
+| A session's unread mark | `src/core/sessions/seen.ts`, `~/.milo/session-seen.json` |

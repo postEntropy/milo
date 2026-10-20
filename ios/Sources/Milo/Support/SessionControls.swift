@@ -129,9 +129,8 @@ struct SessionPeek: View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
             VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
                 HStack(spacing: MiloTheme.Space.two) {
-                    if session.running == true {
-                        Circle().fill(MiloTheme.accent).frame(width: 7, height: 7)
-                    }
+                    // The card wears the row's own mark.
+                    SessionMark(running: session.running, unread: session.unread)
                     Text(session.label)
                         .font(MiloTheme.Text.body.weight(.medium))
                         .foregroundStyle(MiloTheme.foreground)

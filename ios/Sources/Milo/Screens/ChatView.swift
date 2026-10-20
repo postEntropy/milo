@@ -411,6 +411,10 @@ struct ChatView: View {
                 routines = true
             }
         }
+        // The model draws a reply's unread mark from this: the chat counts as being read
+        // only while it is the screen in front.
+        .onChange(of: threadOnScreen) { _, visible in model.threadOnScreen = visible }
+        .onAppear { model.threadOnScreen = threadOnScreen }
         .sessionRename($renaming)
         // Where the files come from: the platform's own chooser for each, over this screen —
         // the same pair a project's own page raises, from `ComposerAttach`.
@@ -469,6 +473,11 @@ struct ChatView: View {
     /// Whether the sessions are uncovered at all — at rest or under a hand — so the list is
     /// drawn only while something, the opening or the finger, is carrying the card off it.
     private var sessionsShown: Bool { travel > 0 }
+
+    /// Whether the thread is what the person is looking at: the chat's card is the one
+    /// showing and the sessions are not over it. A reply that lands while this is false is
+    /// unread — leaving the chat before the answer is what that means.
+    private var threadOnScreen: Bool { !routines && !tasks && !work && !settings && !drawer }
 
     /// How wide the panel comes out: most of the screen, because it carries reading matter
     /// rather than a list — and never all of it, so the chat it slid over stays the thing the

@@ -1,6 +1,8 @@
 export * from './types.js'
 export { FileSessionStore } from './file-store.js'
 export { MemorySessionStore } from './memory-store.js'
+export { FileSessionSeen, MemorySessionSeen } from './seen.js'
+export type { SessionSeen } from './seen.js'
 export { FileRecapStore, MemoryRecapStore } from './recap.js'
 export type { RecapStore, SessionRecap } from './recap.js'
 export { rankSessions, withRecaps } from './recall.js'

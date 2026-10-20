@@ -96,6 +96,12 @@ export const labelsFile = (): string => path.join(MILO_HOME, 'labels.json')
  * "new" mail from — Milo's own, like the labels, and never written to Gmail.
  */
 export const mailSeenFile = (): string => path.join(MILO_HOME, 'mail-seen.json')
+/**
+ * When each session was last looked at, by id — the watermark a session's unread
+ * mark counts from. Milo's own, beside the sessions it describes: a session that
+ * moved after this moment has something the person has not read.
+ */
+export const sessionSeenFile = (): string => path.join(MILO_HOME, 'session-seen.json')
 /** What was typed at the CLI's prompt, for the arrow keys to walk back through. */
 export const inputHistoryFile = (): string => path.join(MILO_HOME, 'input-history.json')
 /**

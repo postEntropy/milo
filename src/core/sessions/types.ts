@@ -56,6 +56,13 @@ export interface SessionSummary {
    * true for a turn running anywhere, a daemon or a terminal. Absent means no.
    */
   running?: boolean
+  /**
+   * Whether the session moved after the person last looked at it, on any surface.
+   * Absent means no. A running session is announced by `running` instead: the mark
+   * at a row's edge breathes while a turn is running and stands still once there
+   * is something waiting to be read.
+   */
+  unread?: boolean
 }
 
 /** The numbers behind `/stats`. */

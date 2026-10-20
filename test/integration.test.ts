@@ -11,6 +11,7 @@ import { TurnIndex } from '../src/core/memory/turns.js'
 import { createProvider } from '../src/core/providers/create.js'
 import { AgentRuntime } from '../src/core/runtime.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
+import { MemorySessionSeen } from '../src/core/sessions/seen.js'
 
 let server: Server
 let baseURL: string
@@ -91,6 +92,8 @@ describe('end-to-end turn', () => {
       memory,
       history,
       cwd: process.cwd(),
+      // The unread watermark in memory, so the run writes no file of the real install's.
+      seen: new MemorySessionSeen(),
     })
 
     const scope = { gateway: 'cli', chatId: 'it' }

@@ -93,6 +93,10 @@ final class AppModel {
     private(set) var modelName = ""
     private(set) var providerId = ""
     private(set) var sessionId = ""
+    /// Whether the thread is the screen in front — kept by `ChatView`, which knows when a
+    /// page is over it or the sessions are up. A reply that lands while this is false is
+    /// unread: it arrived after the person left the chat.
+    var threadOnScreen = true
 
     /// The running model without its vendor prefix, from the catalog's projected
     /// label when loaded or after the last `/` before the picker has been opened.
@@ -728,16 +732,35 @@ final class AppModel {
         defer { sessionsLoading = false }
         do {
             let next = try await MiloApi.sessions(account).sorted { $0.updatedAt > $1.updatedAt }
+            // The thread on screen is being read: a list that still calls it unread is
+            // behind that look, so the mark is not drawn on the session the person is in.
+            let shown = threadOnScreen ? next.map { $0.id == sessionId ? $0.looked : $0 } : next
             // The drawer is re-read whenever it opens, and a read that says exactly
             // what is already there has nothing to tell the screens: publishing it
             // again would rebuild the list under whatever is happening on screen.
             // Only a list that moved is handed over.
-            if next != sessions { sessions = next }
+            if shown != sessions { sessions = shown }
             cacheSessions(account)
             note = nil
         } catch {
             failed(error)
         }
+    }
+
+    /// The session is in front of the person: the daemon records the look, and the row
+    /// loses its mark here in the same move — the watermark is the install's, so the
+    /// browser is cleared with it. A mark that could not be written stays where it was:
+    /// reading it as seen would claim a look the daemon never recorded, and the next
+    /// read of the list tells the truth.
+    private func markSeen(_ id: String) async {
+        guard let account, !id.isEmpty else { return }
+        do {
+            try await MiloApi.markSessionSeen(account, id: id)
+        } catch {
+            return
+        }
+        sessions = sessions.map { $0.id == id ? $0.looked : $0 }
+        cacheSessions(account)
     }
 
     /// Writes down the list just read, so the next launch has it before the daemon
@@ -1829,6 +1852,8 @@ final class AppModel {
             // before the settings screen has ever been read.
             if let running = ready.effort { effort = running }
             sessionId = ready.sessionId
+            // It is on the screen now, wherever it was opened from.
+            Task { await markSeen(ready.sessionId) }
             note = nil
             pending = nil
             queued = 0
@@ -1902,6 +1927,13 @@ final class AppModel {
                 planProposed = true
             }
             answerEnded += 1
+            // The answer is read only if the thread is what the screen shows, with the app
+            // in front. A reply that landed after the person left the chat is exactly what
+            // the unread mark is for — which is why the daemon does not mark a web turn's
+            // end on its own.
+            if threadOnScreen, UIApplication.shared.applicationState == .active {
+                Task { await markSeen(sessionId) }
+            }
             // The answer's own words, taken as the turn settles: what the phone says when
             // the chat is not what is on screen.
             var answered: String?
@@ -1959,6 +1991,13 @@ final class AppModel {
                         cards: result.cards
                     )
                 )
+            }
+            // A delivery lands in the chat that is open — a routine's answer, a
+            // finished job's notice — and it is in front of the person only while that
+            // chat is the screen showing.
+            let seen = result.sessionId ?? sessionId
+            if threadOnScreen, UIApplication.shared.applicationState == .active {
+                Task { await markSeen(seen) }
             }
         case .state(let isBusy, let count):
             busy = isBusy

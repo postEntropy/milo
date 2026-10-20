@@ -269,6 +269,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    and the reduced-motion rule above holds it still. */
 .session-running { flex: none; width: 7px; height: 7px; margin-inline-end: var(--space-3); border-radius: 50%; background: var(--accent); animation: session-running 1.8s var(--ease-standard) infinite; }
 @keyframes session-running { 0%, 100% { opacity: 1; } 50% { opacity: .45; } }
+/* The same dot for a session that moved while it was not being looked at — and the
+   stillness is the whole difference: a pulse says something is happening now, a still
+   dot says something is waiting to be read. */
+.session-unread { flex: none; width: 7px; height: 7px; margin-inline-end: var(--space-3); border-radius: 50%; background: var(--accent); }
 .session-row-actions { position: relative; display: flex; align-items: center; flex: none; }
 .session-more-btn { display: flex; align-items: center; justify-content: center; width: var(--control-sm); height: var(--control-sm); flex: none; margin-inline-end: var(--space-3); border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0; color: var(--muted); opacity: 0; transition: opacity var(--motion-fast), color var(--motion-fast), background var(--motion-fast); }
 .session-item:hover .session-more-btn, .session-item.menu-open .session-more-btn, .session-item:has(.session-row:focus-visible) .session-more-btn { opacity: 1; }

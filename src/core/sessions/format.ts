@@ -110,7 +110,11 @@ export function formatSessionList(
     // session with neither a name nor a message yet is the id alone.
     const label = sessionLabel(session)
     const named = label ? `${session.id} — ${label}` : session.id
-    const name = markdown ? `**${named}**` : named
+    // A session that moved after it was last looked at leads with the mark, in the
+    // plain listing and the Markdown alike — the same ● the terminal draws, since
+    // both are read in a chat. Outside the bold so the mark itself is not shouted.
+    const mark = session.unread ? '● ' : ''
+    const name = markdown ? `${mark}**${named}**` : `${mark}${named}`
     // A session working in a project says which one, before the size and the
     // time: it is the context the other two are read in, and the same list is
     // drawn by every surface.

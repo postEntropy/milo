@@ -67,6 +67,8 @@ export default function App() {
     () => localStorage.getItem('milo-chat') || localStorage.getItem('milo-conversation') || randomUUID(),
   )
   const [sessionId, setSessionId] = useState('')
+  /** The session the socket is speaking to, for callbacks that outlive this render. */
+  const sessionIdRef = useRef('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   /** The project this session works in, as the server resolved it for this connection. */
@@ -105,6 +107,8 @@ export default function App() {
   const [identity, setIdentity] = useState({ provider: 'milo', providerName: 'Milo', model: '' })
   const [connection, setConnection] = useState<ConnectionStatus>({ state: 'connecting' })
   const [view, setViewRaw] = useState<View>(() => viewFromPath(location.pathname))
+  /** The screen in front, for callbacks that outlive this render. */
+  const viewRef = useRef<View>(view)
   /** The Email screen's place within its own path: null inbox, `new` compose, else a thread. */
   const [emailRoute, setEmailRoute] = useState<string | null>(() => emailRouteFromPath(location.pathname))
   /** Mail that arrived since the person last looked at the inbox, for the Email tab's badge. */
@@ -320,9 +324,55 @@ export default function App() {
   }, [])
 
   const refreshSessions = useCallback(async (): Promise<void> => {
-    try { setSessions(await api<SessionSummary[]>('sessions')) }
+    try {
+      const list = await api<SessionSummary[]>('sessions')
+      // The thread on screen is being read: a list that still calls it unread is behind
+      // that look, so the mark is not drawn on the session the person is in while the
+      // chat is the screen showing.
+      setSessions(viewRef.current === 'chat'
+        ? list.map((session) => (session.id === sessionIdRef.current ? { ...session, unread: undefined } : session))
+        : list)
+    }
     catch (error) { fail(error) }
   }, [fail])
+
+  /**
+   * The session is in front of the person — it was opened, something landed in it,
+   * or the tab came back. The mark is the daemon's and install-wide, so one look
+   * clears it on every surface; this also takes the mark off the list here at once
+   * instead of leaving a dot until the next re-read. A tab that is not visible is
+   * not a look: a background tab must not clear what the phone is still owed.
+   */
+  const markSeen = useCallback((id: string): void => {
+    if (!id || document.visibilityState !== 'visible') return
+    setSessions((current) => current.map((session) =>
+      session.id === id && session.unread ? { ...session, unread: undefined } : session))
+    // A mark that fails leaves the dot standing; the next re-read tells the truth,
+    // and nothing the person typed is at stake.
+    void api('session-seen', { id }).catch(() => undefined)
+  }, [])
+
+  /**
+   * What lands in the open session — the answer, or a delivery — is read only when the
+   * chat is the screen showing. Away from it (the Work tab, Settings, another session)
+   * it lands unread, which is the whole point of the mark.
+   */
+  const markSeenOnChat = useCallback((id: string): void => {
+    if (viewRef.current !== 'chat') return
+    markSeen(id)
+  }, [markSeen])
+
+  useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
+  useEffect(() => { viewRef.current = view }, [view])
+
+  // Coming back to the tab is looking at what is already on it.
+  useEffect(() => {
+    const onVisible = (): void => {
+      if (document.visibilityState === 'visible') markSeen(sessionIdRef.current)
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => document.removeEventListener('visibilitychange', onVisible)
+  }, [markSeen])
 
   // The budget the request is measured against — the window times the share that
   // makes Milo fold — read once per model. Same rule the core folds by, so the
@@ -427,6 +477,8 @@ export default function App() {
       setQueued(0)
       setConnection({ state: 'online' })
       setSessionId(frame.sessionId)
+      // It is on the screen now, wherever it was opened from.
+      markSeen(frame.sessionId)
       setThinking(frame.thinking)
       if (frame.effort) setEffort(frame.effort)
       setIdentity({ provider: frame.provider, providerName: frame.providerName, model: frame.model })
@@ -572,11 +624,18 @@ export default function App() {
         : message))
       setPendingPermission(null)
       setTurnEnds((current) => current + 1)
+      // The turn ran with this tab open, so its answer is being read — but only if the
+      // chat is still the screen showing: leaving it mid-turn is what makes the answer
+      // unread. The daemon has not marked the end of a web turn for that reason.
+      markSeenOnChat(sessionIdRef.current)
       void refreshSessions()
       return
     }
     if (frame.type === 'command-result') {
       if (frame.sessionId) setSessionId(frame.sessionId)
+      // A delivery lands in the chat that is open — a routine's answer, a finished
+      // job's notice — and it is in front of the person only while that chat is showing.
+      markSeenOnChat(frame.sessionId || sessionIdRef.current)
       // Actions and rich cards (e.g. /sessions pagination) are ephemeral in-memory UI
       // controls received over websocket; they re-render or re-issue commands when clicked.
       if (frame.messageId) {
@@ -614,7 +673,7 @@ export default function App() {
       }
       void refreshSessions()
     }
-  }, [refreshSessions])
+  }, [refreshSessions, markSeen, markSeenOnChat])
 
   const newChat = useCallback(async (): Promise<boolean> => {
     editingTurn.current = null

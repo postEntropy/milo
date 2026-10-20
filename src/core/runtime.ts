@@ -20,10 +20,12 @@ import type { ProjectInstructions } from './agent/instructions.js'
 import { Session } from './session.js'
 import {
   contextBudget,
+  FileSessionSeen,
   MemoryRecapStore,
   MemorySessionStore,
   type RecapStore,
   type SessionRecord,
+  type SessionSeen,
   type SessionStore,
   type SessionSummary,
   withRecaps,
@@ -100,6 +102,12 @@ export interface RuntimeOptions {
   store?: SessionStore
   /** Where a session's recap is kept, out of its transcript. In-memory by default. */
   recaps?: RecapStore
+  /**
+   * Where the moment each session was last looked at is kept — what the unread
+   * mark counts from. The install's own file by default; a runtime in a test can
+   * hold it in memory.
+   */
+  seen?: SessionSeen
   sessions?: SessionsConfig
   /** Where turns are logged for later recall; absent means nothing is logged. */
   history?: HistoryWriter
@@ -173,6 +181,7 @@ export class AgentRuntime {
   private readonly cache = new Map<string, Session>()
   private readonly store: SessionStore
   private readonly recaps: RecapStore
+  private readonly seen: SessionSeen
   private readonly options: RuntimeOptions
   /** Recaps being written in the background; a switch never waits for them. */
   private readonly pendingRecaps = new Set<Promise<void>>()
@@ -187,6 +196,7 @@ export class AgentRuntime {
     this.options = options
     this.store = options.store ?? new MemorySessionStore()
     this.recaps = options.recaps ?? new MemoryRecapStore()
+    this.seen = options.seen ?? new FileSessionSeen()
   }
 
   /** The session bound to `scope`, creating and binding one on first use. */
@@ -251,10 +261,12 @@ export class AgentRuntime {
       cached.scope = scope
       await this.store.setBinding(scopeKey(scope), id)
       this.opened.add(scopeKey(scope))
+      this.seen.mark(id)
       return this.touch(id, cached)
     }
     const record = await this.store.load(id)
     if (!record) return null
+    this.seen.mark(id)
     await this.detach(scope, id)
     const session = this.adopt(record, scope)
     await this.store.setBinding(scopeKey(scope), id)
@@ -327,12 +339,33 @@ export class AgentRuntime {
     const sessions = (await this.store.list())
       .filter((session) => session.scope?.gateway !== ROUTINE_GATEWAY)
     const withHistory = await withRecaps(sessions, this.recaps)
-    // One place says whether a session is running, so every surface reading this
-    // list agrees: the check is the store's own lease, true for a turn anywhere in
-    // the install. Set only when true, so a free session's summary is unchanged.
-    return Promise.all(withHistory.map(async (session) =>
-      (await this.store.busy(session.id)) ? { ...session, running: true } : session,
-    ))
+    // Every session is given a line to move from — the history's own on the first
+    // listing, and the birth mark of anything created since. Seeding only the ids
+    // that have no mark keeps an install whose first look came before its first
+    // listing from leaving the rest of the history without one.
+    const looked = this.seen.seed(withHistory)
+    // One place says whether a session is running, and whether it moved after the
+    // person last looked at it, so every surface reading this list agrees: the
+    // lease is the store's own, true for a turn anywhere in the install, and the
+    // watermark comes from the one file a look is written to.
+    return Promise.all(withHistory.map(async (session) => {
+      const lookedAt = looked.get(session.id)
+      const unread = lookedAt !== undefined && session.updatedAt > lookedAt
+      const running = await this.store.busy(session.id)
+      return {
+        ...session,
+        ...(running ? { running: true } : {}),
+        ...(unread ? { unread: true } : {}),
+      }
+    }))
+  }
+
+  /**
+   * Records that the person looked at a session, from whichever surface showed it.
+   * The mark is the install's, not the surface's: one look clears it everywhere.
+   */
+  markSessionSeen(id: string): void {
+    this.seen.mark(id)
   }
 
   /**
@@ -369,6 +402,7 @@ export class AgentRuntime {
     this.cache.delete(id)
     await this.store.remove(id)
     await this.recaps.remove(id)
+    this.seen.forget(id)
     return true
   }
 
@@ -599,6 +633,10 @@ export class AgentRuntime {
   ): Promise<Session> {
     await this.detach(scope)
     const record = await this.store.create(scope, options?.project)
+    // The session's mark starts where it was born. A session with no mark at all would
+    // read as looked at forever, and the first thing it is owed is exactly what the
+    // mark is for: an answer a routine delivers into a chat nobody has open.
+    this.seen.mark(record.id, record.createdAt)
     if (title?.trim()) record.title = title.trim()
     await this.store.setBinding(scopeKey(scope), record.id)
     // This run has opened the scope. A surface that starts a session and then opens it —
@@ -713,7 +751,15 @@ export class AgentRuntime {
       onIdle: (idleSession) => this.onSessionIdle(idleSession),
       // Every session made here announces its turns through the one place, so whatever
       // asked it to run — a socket, a gateway, a routine — the install's watchers hear it.
-      onTurn: () => this.announceTurn(),
+      // A turn's *start* is the surface asking for it, with the person's own words on
+      // screen. Its end is a look only where the answer is handed over whole: a terminal,
+      // a chat with a push behind it. The browser and the phone are not that — the answer
+      // can land after the person has left the chat, and then it is exactly what the
+      // unread mark is for, until a screen still showing the thread says it was read.
+      onTurn: (phase) => {
+        if (phase === 'start' || scope.gateway !== 'web') this.seen.mark(record.id)
+        this.announceTurn()
+      },
       // And the steps of those turns that may have changed a folder, so a screen drawing
       // one follows the work as it happens rather than only when the turn is over.
       onSideEffect: () => this.announceWork(),

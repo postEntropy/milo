@@ -12,6 +12,8 @@ export type SessionSummary = {
   updatedAt: number
   recap?: string
   running?: boolean
+  /** The session moved after it was last looked at; absent when it did not. */
+  unread?: boolean
   project?: string
 }
 
@@ -24,6 +26,19 @@ export function sessionLabel(session: SessionSummary): string {
 export function sessionMeta(session: SessionSummary): string {
   const count = `${session.messageCount} ${session.messageCount === 1 ? 'message' : 'messages'}`
   return session.messageCount > 0 ? `${count} · ${formatWhen(session.updatedAt)}` : formatWhen(session.updatedAt)
+}
+
+/**
+ * The mark a session's row wears, read off the session's own state: one dot, never
+ * two. Running outranks unread — it is the newer news — so a session that is both
+ * drawing a turn and holding something unread reads as running until the turn ends.
+ * The pulse is the whole difference: it says something is happening now, while the
+ * still dot says something is waiting to be read.
+ */
+export function SessionMark({ running, unread }: { running?: boolean; unread?: boolean }) {
+  if (running) return <span className="session-running" role="img" aria-label="Running" />
+  if (unread) return <span className="session-unread" role="img" aria-label="Unread" />
+  return null
 }
 
 /**
@@ -112,7 +127,7 @@ export function SessionRow({
         </button>
       )}
 
-      {session.running && <span className="session-running" role="img" aria-label="Running" />}
+      <SessionMark running={session.running} unread={session.unread} />
 
       <div className="session-row-actions" ref={menuRef}>
         <button
