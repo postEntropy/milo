@@ -222,12 +222,23 @@ export function countTurns(messages: Message[]): number {
  * The messages a surface draws as the conversation: what the person said and
  * what the model answered. A tool result is not a message of its own — it
  * belongs to the turn that called it, and one message can carry several calls —
- * so counting it inflates the size shown for every conversation.
+ * and neither is each step of one answer: a turn that calls a tool, reads the
+ * result and speaks again is drawn as a single message, the way
+ * `transcriptOf` groups it. Counting either inflates the size shown for every
+ * conversation.
  */
 export function countMessages(messages: Message[]): number {
   let count = 0
+  let answering = false
   for (const message of messages) {
-    if (message.role === 'user' || message.role === 'assistant') count += 1
+    if (message.role === 'assistant') {
+      if (!answering) count += 1
+      answering = true
+      continue
+    }
+    if (message.role === 'tool') continue
+    if (message.role === 'user') count += 1
+    answering = false
   }
   return count
 }

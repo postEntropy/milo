@@ -60,7 +60,7 @@ describe('FileSessionStore', () => {
     expect((await store.fork('calm-otter-1'))?.project).toBe('gentle-heron-2')
   })
 
-  it('counts the conversation, not the tool results behind it', async () => {
+  it('counts the conversation, not the tool steps behind it', async () => {
     const store = new FileSessionStore({ dir: tempDir() })
     const created = await store.create()
     created.messages.push(
@@ -81,7 +81,9 @@ describe('FileSessionStore', () => {
     await store.save(created, created.version)
 
     const summary = (await store.list())[0]!
-    expect(summary.messageCount).toBe(3)
+    // The ask and the answer it took two steps to give: the calls are the
+    // answer's own work, not messages of their own.
+    expect(summary.messageCount).toBe(2)
   })
 
   it('keeps the ids it hands out unique', async () => {
