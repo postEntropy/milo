@@ -31,7 +31,25 @@ marked.use({
  */
 export const Markdown = memo(function Markdown({ text }: { text: string }) {
   const html = useMemo(() => {
-    const clean = DOMPurify.sanitize(marked.parse(text) as string, { USE_PROFILES: { html: true } })
+    // A link in an answer leads away from the conversation, so it opens in its own
+    // tab instead of navigating the app out from under itself. Added and taken back
+    // around this one call, as the mail body's own hardening is.
+    const away = (node: Element): void => {
+      const href = node.tagName === 'A' ? node.getAttribute('href') : null
+      if (href === null || href.startsWith('#')) return
+      node.setAttribute('target', '_blank')
+      node.setAttribute('rel', 'noreferrer noopener')
+    }
+    DOMPurify.addHook('afterSanitizeAttributes', away)
+    let clean: string
+    try {
+      clean = DOMPurify.sanitize(marked.parse(text) as string, {
+        USE_PROFILES: { html: true },
+        ADD_ATTR: ['target', 'rel'],
+      })
+    } finally {
+      DOMPurify.removeHook('afterSanitizeAttributes', away)
+    }
     // A fence the model closes with nothing inside it would draw as an empty box, since
     // the block carries its own padding — drop it instead of painting the gap.
     return clean.replace(/<pre><code[^>]*>\s*<\/code><\/pre>/g, '')
