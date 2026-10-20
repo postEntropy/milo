@@ -527,8 +527,8 @@ function Reasoning({ text, thoughtMs, open }: { text: string; thoughtMs?: number
   const [expanded, setExpanded] = useState(open)
   useEffect(() => { setExpanded(open) }, [open])
   return <div className={`reasoning ${expanded ? 'open' : ''}`}>
-    <button className="reasoning-summary" type="button" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
-      <Icon name="spark" size={15} /> {thoughtLabel(thoughtMs)} <Icon className="reasoning-chevron" name="chevron" size={14} />
+    <button className="reasoning-summary" type="button" aria-expanded={expanded} aria-label={expanded ? 'Hide thinking' : 'Show thinking'} onClick={() => setExpanded((value) => !value)}>
+      {thoughtLabel(thoughtMs)}
     </button>
     <div className="reasoning-collapse"><div className="reasoning-clip"><div className="reasoning-body">{text}</div></div></div>
   </div>

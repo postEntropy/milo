@@ -463,11 +463,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-prose table { display: block; overflow: auto; margin: var(--space-6) 0; border-collapse: collapse; background: var(--surface-warm); font-size: var(--text-sm); }
 .message-prose th, .message-prose td { border: 1px solid var(--border-soft); padding: var(--space-4) var(--space-6); text-align: start; }
 .message-prose th { background: var(--surface); color: var(--fg); font-weight: 600; }
-.reasoning { overflow: hidden; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--surface-warm); }
-.reasoning-summary { display: flex; width: 100%; min-height: var(--control-md); align-items: center; gap: var(--space-4); border: 0; background: transparent; padding: var(--space-4) var(--space-6); color: var(--fg-2); cursor: pointer; font-size: var(--text-sm); font-weight: 500; text-align: start; }
-.reasoning-summary:hover { background: var(--surface); }
-.reasoning-chevron { margin-inline-start: auto; color: var(--muted); transition: transform var(--motion-base) var(--ease-standard); }
-.reasoning.open .reasoning-chevron { transform: rotate(90deg); }
+/* A thought is a line, not a card: its name in the quiet tone, and the thought under
+   it once opened — the phone's treatment. The whole line is the control, so it wears
+   no box, no mark and no chevron. */
+.reasoning { overflow: hidden; }
+.reasoning-summary { display: flex; width: 100%; align-items: center; border: 0; background: transparent; padding: 0; color: var(--muted); cursor: pointer; font-size: var(--text-sm); text-align: start; transition: color var(--motion-fast); }
+.reasoning-summary:hover { color: var(--fg-2); }
 /* The body grows and folds by animating the row it sits in from zero to its own
    height, so the thinking opens and closes rather than appearing all at once.
    The clip carries no padding of its own: padding on a grid item is a floor its
@@ -475,7 +476,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .reasoning-collapse { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--motion-base) var(--ease-standard); }
 .reasoning.open .reasoning-collapse { grid-template-rows: 1fr; }
 .reasoning-clip { overflow: hidden; }
-.reasoning-body { padding: var(--space-1) var(--space-7) var(--space-6); color: var(--muted); font-family: var(--font-body); font-size: var(--text-md); line-height: 1.6; white-space: pre-wrap; }
+.reasoning-body { padding-top: var(--space-4); color: var(--muted); font-family: var(--font-body); font-size: var(--text-sm); line-height: 1.6; white-space: pre-wrap; }
 /* The wait for the model's next output, before there is anything of its own to
    show: the glyph the terminal uses, steady, and the glare travelling along the word,
    so the row says it is working without anything blinking and without wearing the
