@@ -150,6 +150,11 @@ describe('buildSystemPrompt', () => {
     expect(DEFAULT_SYSTEM_PROMPT).toMatch(/background process/i)
   })
 
+  it('tests a cause before measuring a symptom', () => {
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/measuring the symptom/i)
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/one look, not an instrument/i)
+  })
+
   it('names a private scratch space, kept out of the project', () => {
     const prompt = buildSystemPrompt({
       base: 'BASE',
