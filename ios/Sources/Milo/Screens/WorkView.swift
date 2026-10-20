@@ -123,10 +123,6 @@ private struct WorkIndex: View {
                 .padding(MiloTheme.Space.five)
                 .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
 
-                if let error = model.projectsError {
-                    MiloErrorPill(text: error)
-                }
-
                 VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
                     Text("Your projects")
                         .font(MiloTheme.Text.title)
@@ -187,7 +183,15 @@ private struct WorkIndex: View {
             .animation(.smooth(duration: 0.22), value: model.connectionLine)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            createBar
+            VStack(spacing: MiloTheme.Space.two) {
+                // The refusal sits beside the control that asked, so a tap that did not
+                // take is answered where the finger is rather than above the fold.
+                if let error = model.projectsError {
+                    MiloErrorPill(text: error)
+                        .padding(.horizontal, MiloTheme.margin)
+                }
+                createBar
+            }
         }
         .refreshable {
             await model.refreshProjects()
@@ -236,8 +240,14 @@ private struct WorkIndex: View {
     /// typed, because the folder that matters is on the machine Milo runs on and this phone
     /// cannot reach it — see `FolderPicker`.
     private var createBar: some View {
-        MiloWideButton(title: "New project", systemImage: "folder", primary: true) { picking = true }
-            .disabled(model.projectsSaving)
+        // `busy` carries the saving state into the control itself: a button disabled by a
+        // flag no one can see is a tap that vanishes.
+        MiloWideButton(
+            title: model.projectsSaving ? "Saving…" : "New project",
+            systemImage: "folder",
+            primary: true,
+            busy: model.projectsSaving
+        ) { picking = true }
             .padding(.horizontal, MiloTheme.margin)
             .padding(.bottom, MiloTheme.Space.two)
             .padding(.top, MiloTheme.Space.one)
@@ -1384,6 +1394,10 @@ private struct FolderPicker: View {
                         Text(error)
                             .font(MiloTheme.Text.small)
                             .foregroundStyle(MiloTheme.danger)
+                        // A folder that could not be read left the way forward disabled;
+                        // this is the way to ask again instead of a dead end.
+                        Button("Try again") { Task { await open(listing?.path) } }
+                            .disabled(busy)
                     }
                 }
 

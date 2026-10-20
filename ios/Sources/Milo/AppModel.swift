@@ -174,6 +174,11 @@ final class AppModel {
     private(set) var projects: [Project] = []
     private(set) var projectsLoading = false
     private(set) var projectsSaving = false
+    /// Bumped per read and per action, so a read already on its way — asked before a write
+    /// landed — cannot overwrite the list the write answered with.
+    private var projectsSeq = 0
+    /// How many reads are in the air, so the spinner lasts until the last of them answers.
+    private var projectsReads = 0
     /// Why the projects could not be read, or why an action on one was refused — the
     /// Work screen draws this; a change that went through is drawn by the list itself.
     private(set) var projectsError: String?
@@ -1095,17 +1100,29 @@ final class AppModel {
 
     func refreshProjects() async {
         guard let account else { return }
+        projectsSeq += 1
+        let mine = projectsSeq
+        projectsReads += 1
         projectsLoading = true
-        defer { projectsLoading = false }
+        defer {
+            projectsReads -= 1
+            projectsLoading = projectsReads > 0
+        }
         do {
-            projects = try await MiloApi.projects(account)
+            let next = try await MiloApi.projects(account)
+            // A read asked before a create, rename or remove has the older answer; the
+            // write already drew the list it answered with.
+            guard mine == projectsSeq else { return }
+            projects = next
             projectsError = nil
         } catch is URLError {
+            guard mine == projectsSeq else { return }
             // The socket's own glass pill already speaks for a connection that is down or
             // reconnecting; saying it again in the list would draw two notices for one outage.
             connectionSaid = true
             projectsError = nil
         } catch {
+            guard mine == projectsSeq else { return }
             projectsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
@@ -1130,7 +1147,13 @@ final class AppModel {
     /// One action, the whole list back: the daemon's store is the one that decides. What
     /// it answered is returned, and a refusal is left in `projectsError`.
     private func actOnProjects(_ body: [String: String]) async -> String? {
-        guard let account else { return nil }
+        guard let account else {
+            projectsError = "This phone is not paired with a daemon — pair it again to work with projects."
+            return nil
+        }
+        // Anything a read was already bringing back was asked before this write; its
+        // answer is the older one, and drawing it would make the write look undone.
+        projectsSeq += 1
         projectsSaving = true
         projectsError = nil
         defer { projectsSaving = false }
