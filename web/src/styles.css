@@ -58,11 +58,11 @@
   --focus-outline: color-mix(in oklab, var(--fg) 25%, transparent);
   /* Corner rounding: one scale for the whole interface. A value is picked by the role a
      thing plays — never per component. `--radius-pill` and `50%` are shapes, not levels. */
-  --radius-xs: 6px;     /* marks read inline with text: inline code, id/size badges */
-  --radius-sm: 8px;    /* small icon buttons, menu options, tiny inner fields, chips */
-  --radius-md: 12px;    /* single-line rows, list/nav items, inputs, standard buttons */
-  --radius-lg: 16px;    /* cards, panels, popovers, code/blocks, notices, iframes */
-  --radius-xl: 20px;    /* the big surfaces: composer, user bubble, suggestions, approval */
+  --radius-xs: 8px;     /* marks read inline with text: inline code, id/size badges */
+  --radius-sm: 12px;    /* small icon buttons, menu options, tiny inner fields, chips */
+  --radius-md: 16px;    /* single-line rows, list/nav items, inputs, standard buttons */
+  --radius-lg: 18px;    /* cards, panels, popovers, code/blocks, notices, iframes */
+  --radius-xl: 22px;    /* the big surfaces: composer, user bubble, suggestions, approval */
   --radius-pill: 999px; /* pills, chips, switches, round buttons */
   /* Type: one ladder for the whole interface, picked by the role a thing plays. The ten
      sizes between 10 and 14px doing one job each are why text read uneven everywhere. */
@@ -211,7 +211,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    below — take the sidebar's own small step rather than the base UI size: both are one
    line to scan in a column, and at the base size the column read heavier than the
    content it indexes. */
-.new-chat { display: flex; width: auto; flex: 1; min-height: var(--control-lg); align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--surface-raised); padding: 0 var(--space-7); color: var(--fg-2); font-size: var(--text-xs); font-weight: 500; transition: background var(--motion-fast); }
+.new-chat { display: flex; width: auto; flex: 1; min-height: var(--control-md); align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--surface-raised); padding: 0 var(--space-7); color: var(--fg-2); font-size: var(--text-xs); font-weight: 500; transition: background var(--motion-fast); }
 .new-chat:hover { background: var(--border-soft); }
 .new-chat.is-hidden { display: none; }
 /* The search folds behind the magnifier at the end of the row at every width, so the
