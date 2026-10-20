@@ -4,7 +4,7 @@ import { TurnQueue } from '../src/gateways/turns.js'
 const tick = (ms = 10) => new Promise((resolve) => setTimeout(resolve, ms))
 
 describe('TurnQueue', () => {
-  it('runs one turn at a time per conversation', async () => {
+  it('runs one turn at a time per chat', async () => {
     const queue = new TurnQueue()
     const order: string[] = []
 
@@ -21,7 +21,7 @@ describe('TurnQueue', () => {
     expect(order).toEqual(['first:start', 'first:end', 'second:start', 'second:end'])
   })
 
-  it('does not hold up another conversation', async () => {
+  it('does not hold up another chat', async () => {
     const queue = new TurnQueue()
     const order: string[] = []
 
@@ -35,7 +35,7 @@ describe('TurnQueue', () => {
     })
     await tick(50)
 
-    // The second conversation finishes well before the first one does.
+    // The second chat finishes well before the first one does.
     expect(order).toEqual(['slow:start', 'other', 'slow:end'])
   })
 
@@ -55,7 +55,7 @@ describe('TurnQueue', () => {
     expect(order).toEqual(['boom', 'recovered'])
   })
 
-  it('forgets a conversation once it is idle', async () => {
+  it('forgets a chat once it is idle', async () => {
     const queue = new TurnQueue()
     queue.run('chat-1', async () => undefined)
     await tick(30)

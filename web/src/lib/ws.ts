@@ -6,7 +6,7 @@ export type { ConnectionState, ConnectionStatus } from './connection.js'
 
 export class MiloSocket {
   private socket: WebSocket | null = null
-  private conversationId = ''
+  private chatId = ''
   /**
    * Whether this client draws a generated interface; declared on the handshake.
    * `null` says nothing at all, which is what a plain chat does — and what leaves
@@ -23,8 +23,8 @@ export class MiloSocket {
   /** What the server said when it refused, before the handshake finished. */
   private refusal = ''
 
-  connect(conversationId: string, genui: boolean | null = null): void {
-    this.conversationId = conversationId
+  connect(chatId: string, genui: boolean | null = null): void {
+    this.chatId = chatId
     this.genui = genui
     this.closed = false
     this.retire()
@@ -54,8 +54,8 @@ export class MiloSocket {
     this.socket.send(JSON.stringify(frame))
   }
 
-  sendFor(conversationId: string, frame: ClientFrame): void {
-    if (this.conversationId !== conversationId) throw new Error('The active chat changed while files were uploading. Send them again.')
+  sendFor(chatId: string, frame: ClientFrame): void {
+    if (this.chatId !== chatId) throw new Error('The active chat changed while files were uploading. Send them again.')
     this.send(frame)
   }
 
@@ -75,7 +75,7 @@ export class MiloSocket {
   }
 
   private open(): void {
-    const conversationId = this.conversationId
+    const chatId = this.chatId
     const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = new URL(`${scheme}//${location.host}/ws`)
     url.searchParams.set('t', apiToken())
@@ -87,7 +87,7 @@ export class MiloSocket {
     socket.addEventListener('open', () => {
       if (this.socket !== socket) return
       this.retry = 0
-      socket.send(JSON.stringify({ type: 'hello', version: PROTOCOL_VERSION, conversationId, ...(this.genui ? { genui: this.genui } : {}) }))
+      socket.send(JSON.stringify({ type: 'hello', version: PROTOCOL_VERSION, chatId, ...(this.genui ? { genui: this.genui } : {}) }))
     })
     socket.addEventListener('message', (event) => {
       if (this.socket !== socket) return

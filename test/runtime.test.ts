@@ -34,7 +34,7 @@ function runtimeOptions(dir: string): RuntimeOptions {
   }
 }
 
-const cli = { gateway: 'cli', conversationId: 'main' }
+const cli = { gateway: 'cli', chatId: 'main' }
 
 async function drain(promise: AsyncGenerator<unknown>): Promise<void> {
   for await (const _event of promise) {
@@ -155,16 +155,16 @@ describe('AgentRuntime sessions', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
     const runtime = new AgentRuntime(runtimeOptions(dir))
 
-    const telegram = await runtime.getSession({ gateway: 'telegram', conversationId: '42' })
+    const telegram = await runtime.getSession({ gateway: 'telegram', chatId: '42' })
     await drain(telegram.send('from telegram'))
 
     const opened = await runtime.resumeSession(
-      { gateway: 'discord', conversationId: '99' },
+      { gateway: 'discord', chatId: '99' },
       telegram.id,
     )
     expect(opened?.id).toBe(telegram.id)
 
-    const discord = await runtime.getSession({ gateway: 'discord', conversationId: '99' })
+    const discord = await runtime.getSession({ gateway: 'discord', chatId: '99' })
     expect(discord.id).toBe(telegram.id)
     expect(discord.messages.length).toBeGreaterThan(0)
   })
@@ -173,15 +173,15 @@ describe('AgentRuntime sessions', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
     const runtime = new AgentRuntime({ ...runtimeOptions(dir), maxCachedSessions: 2 })
 
-    const s1 = await runtime.newSession({ gateway: 'cli', conversationId: '1' })
-    await runtime.newSession({ gateway: 'cli', conversationId: '2' })
+    const s1 = await runtime.newSession({ gateway: 'cli', chatId: '1' })
+    await runtime.newSession({ gateway: 'cli', chatId: '2' })
     expect(runtime.sessionCount).toBe(2)
 
-    await runtime.newSession({ gateway: 'cli', conversationId: '3' })
+    await runtime.newSession({ gateway: 'cli', chatId: '3' })
     expect(runtime.sessionCount).toBe(2)
 
     // s1 was evicted from memory, but still exists in the store and can be reloaded
-    const reloaded = await runtime.resumeSession({ gateway: 'cli', conversationId: '1' }, s1.id)
+    const reloaded = await runtime.resumeSession({ gateway: 'cli', chatId: '1' }, s1.id)
     expect(reloaded?.id).toBe(s1.id)
   })
 
@@ -189,7 +189,7 @@ describe('AgentRuntime sessions', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
     const runtime = new AgentRuntime(runtimeOptions(dir))
 
-    const routineSession = await runtime.newSession({ gateway: 'routine', conversationId: 'daily' })
+    const routineSession = await runtime.newSession({ gateway: 'routine', chatId: 'daily' })
     expect(runtime.sessionCount).toBe(1)
     await drain(routineSession.send('run routine'))
     // Once the turn completes and work is idle, it is removed from the in-memory cache

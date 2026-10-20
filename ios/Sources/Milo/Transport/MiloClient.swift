@@ -84,7 +84,7 @@ final class MiloClient {
     private func open() {
         guard let account, let url = account.socketURL,
               let hello = try? JSONSerialization.data(
-                  withJSONObject: ClientFrame.hello(conversationId: account.conversationId).json
+                  withJSONObject: ClientFrame.hello(chatId: account.chatId).json
               )
         else { return }
         state = .connecting

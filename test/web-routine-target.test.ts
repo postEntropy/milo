@@ -15,7 +15,7 @@ process.env.MILO_HOME = home
 const { WebHub } = await import('../src/gateways/web/hub.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 
-const CONVERSATION = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+const CHAT = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 
 /** Emits one `probe` call and then the answer, so the turn has a tool to look through. */
 class ProbeProvider implements Provider {
@@ -82,15 +82,15 @@ describe('a routine asked for from the routines screen', () => {
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 
-    await hub.connect(client, CONVERSATION)
+    await hub.connect(client, CHAT)
     hub.handle(
       client,
-      { type: 'send', text: 'every day at 8, tell me what moved', target: { gateway: 'telegram', conversationId: '123' } },
-      CONVERSATION,
+      { type: 'send', text: 'every day at 8, tell me what moved', target: { gateway: 'telegram', chatId: '123' } },
+      CHAT,
     )
     await vi.waitFor(() => expect(frames.some((frame) => frame.type === 'turn-end')).toBe(true))
 
-    expect(seen).toEqual([{ gateway: 'telegram', conversationId: '123' }])
+    expect(seen).toEqual([{ gateway: 'telegram', chatId: '123' }])
     hub.close()
   })
 
@@ -100,11 +100,11 @@ describe('a routine asked for from the routines screen', () => {
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 
-    await hub.connect(client, CONVERSATION)
-    hub.handle(client, { type: 'send', text: 'every day at 8, tell me what moved' }, CONVERSATION)
+    await hub.connect(client, CHAT)
+    hub.handle(client, { type: 'send', text: 'every day at 8, tell me what moved' }, CHAT)
     await vi.waitFor(() => expect(frames.some((frame) => frame.type === 'turn-end')).toBe(true))
 
-    expect(seen).toEqual([{ gateway: 'web', conversationId: CONVERSATION }])
+    expect(seen).toEqual([{ gateway: 'web', chatId: CHAT }])
     hub.close()
   })
 
@@ -114,15 +114,15 @@ describe('a routine asked for from the routines screen', () => {
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 
-    await hub.connect(client, CONVERSATION)
+    await hub.connect(client, CHAT)
     hub.handle(
       client,
-      { type: 'send', text: 'every day at 8, keep it on the routines screen', target: { gateway: 'none', conversationId: CONVERSATION } },
-      CONVERSATION,
+      { type: 'send', text: 'every day at 8, keep it on the routines screen', target: { gateway: 'none', chatId: CHAT } },
+      CHAT,
     )
     await vi.waitFor(() => expect(frames.some((frame) => frame.type === 'turn-end')).toBe(true))
 
-    expect(seen).toEqual([{ gateway: 'none', conversationId: CONVERSATION }])
+    expect(seen).toEqual([{ gateway: 'none', chatId: CHAT }])
     hub.close()
   })
 })

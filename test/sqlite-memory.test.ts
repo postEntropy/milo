@@ -19,7 +19,7 @@ function open(dir = tempDir()) {
 describe('SqliteMemory', () => {
   it('remembers and recalls by keyword overlap', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 't1' }
+    const scope = { gateway: 'cli', chatId: 't1' }
 
     await memory.remember(scope, [{ text: 'My editor is Neovim and I run tmux' }])
     const hits = await memory.recall(scope, 'which editor do I use?', { limit: 3 })
@@ -30,9 +30,9 @@ describe('SqliteMemory', () => {
 
   it('keeps memories isolated per conversation scope', async () => {
     const { memory } = open()
-    await memory.remember({ gateway: 'cli', conversationId: 'a' }, [{ text: 'secret bananas' }])
+    await memory.remember({ gateway: 'cli', chatId: 'a' }, [{ text: 'secret bananas' }])
 
-    const hits = await memory.recall({ gateway: 'cli', conversationId: 'b' }, 'bananas', {
+    const hits = await memory.recall({ gateway: 'cli', chatId: 'b' }, 'bananas', {
       limit: 3,
     })
     expect(hits).toEqual([])
@@ -40,7 +40,7 @@ describe('SqliteMemory', () => {
 
   it('returns nothing for an unrelated query', async () => {
     const { memory, dir } = open()
-    const scope = { gateway: 'cli', conversationId: 't2' }
+    const scope = { gateway: 'cli', chatId: 't2' }
     await memory.remember(scope, [{ text: 'I like turtles' }])
 
     expect(sqliteMemoryStatus(sqliteMemoryFile(dir)).facts).toBe(1)
@@ -49,7 +49,7 @@ describe('SqliteMemory', () => {
 
   it('matches on a short technical term', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 't3' }
+    const scope = { gateway: 'cli', chatId: 't3' }
     await memory.remember(scope, [{ text: 'the deploy script ends with rm of the cache dir' }])
 
     // Two-character words used to be dropped from the index, so the question
@@ -60,7 +60,7 @@ describe('SqliteMemory', () => {
 
   it('does not surface a memory just for being recent', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 't4' }
+    const scope = { gateway: 'cli', chatId: 't4' }
     await memory.remember(scope, [{ text: 'the staging database password rotates on mondays' }])
 
     expect(await memory.recall(scope, 'zzz qqq', { limit: 3 })).toEqual([])
@@ -68,7 +68,7 @@ describe('SqliteMemory', () => {
 
   it('answers nothing for a query that is all stopwords', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 'stop' }
+    const scope = { gateway: 'cli', chatId: 'stop' }
     await memory.remember(scope, [{ text: 'I like turtles' }])
 
     expect(await memory.recall(scope, 'the of and', { limit: 3 })).toEqual([])
@@ -76,7 +76,7 @@ describe('SqliteMemory', () => {
 
   it('takes a query full of punctuation without failing the turn', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 'syntax' }
+    const scope = { gateway: 'cli', chatId: 'syntax' }
     await memory.remember(scope, [{ text: 'the ingress controller sits behind a proxy' }])
 
     // The tokenizer is what keeps this safe: nothing but words reaches MATCH, so
@@ -89,7 +89,7 @@ describe('SqliteMemory', () => {
 
   it('matches with or without the accent', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 'accent' }
+    const scope = { gateway: 'cli', chatId: 'accent' }
     await memory.remember(scope, [{ text: 'a configuração do proxy está pronta' }])
 
     // `você` would prove nothing here: it is a stopword, so it never reaches the
@@ -100,7 +100,7 @@ describe('SqliteMemory', () => {
 
   it('keeps one row for the same note saved twice', async () => {
     const { memory, dir } = open()
-    const scope = { gateway: 'cli', conversationId: 'dup' }
+    const scope = { gateway: 'cli', chatId: 'dup' }
     await memory.remember(scope, [{ text: 'Renato prefere tabs' }])
     await memory.remember(scope, [{ text: '  renato   prefere TABS ' }])
 
@@ -110,7 +110,7 @@ describe('SqliteMemory', () => {
 
   it('returns no more than the limit asked for', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 'limit' }
+    const scope = { gateway: 'cli', chatId: 'limit' }
     await memory.remember(
       scope,
       Array.from({ length: 10 }, (_, i) => ({ text: `common note ${i}` })),
@@ -121,8 +121,8 @@ describe('SqliteMemory', () => {
 
   it('reports size and counts for the setup screen', async () => {
     const { memory, dir } = open()
-    await memory.remember({ gateway: 'cli', conversationId: 'status' }, [{ text: 'um fato' }])
-    await memory.remember({ gateway: 'telegram', conversationId: '9' }, [{ text: 'outro' }])
+    await memory.remember({ gateway: 'cli', chatId: 'status' }, [{ text: 'um fato' }])
+    await memory.remember({ gateway: 'telegram', chatId: '9' }, [{ text: 'outro' }])
 
     const status = sqliteMemoryStatus(sqliteMemoryFile(dir))
     expect(status.backend).toBe('sqlite')
@@ -138,7 +138,7 @@ describe('SqliteMemory', () => {
 
   it('drives recall from the FTS index instead of probing it once per row', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 'plan' }
+    const scope = { gateway: 'cli', chatId: 'plan' }
     // 500, the size the defect was measured at: with a small corpus the planner
     // happens to pick the good order anyway, so a guard built on 60 rows would
     // hold the regression in place rather than catch it.
@@ -173,7 +173,7 @@ describe('SqliteMemory', () => {
 
   it('lists what it keeps, newest first', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 'list' }
+    const scope = { gateway: 'cli', chatId: 'list' }
     await memory.remember(scope, [{ text: 'um turno antigo' }])
     await memory.remember(scope, [{ text: 'Renato prefere bullet points' }])
 
@@ -187,7 +187,7 @@ describe('SqliteMemory', () => {
 
   it('reads the list a page at a time when an offset is given', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 'page' }
+    const scope = { gateway: 'cli', chatId: 'page' }
     await memory.remember(scope, [{ text: 'um' }, { text: 'dois' }, { text: 'tres' }])
 
     expect((await memory.list(scope, { limit: 2 })).map((note) => note.text)).toEqual([
@@ -203,7 +203,7 @@ describe('SqliteMemory', () => {
 
   it('drops one note by the front of its id, and only then', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 'forget' }
+    const scope = { gateway: 'cli', chatId: 'forget' }
     await memory.remember(scope, [
       { text: 'o deploy sai na sexta' },
       { text: 'a senha gira na segunda' },
@@ -221,7 +221,7 @@ describe('SqliteMemory', () => {
 
   it('keeps one fact when the same words come back reworded', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 'same' }
+    const scope = { gateway: 'cli', chatId: 'same' }
     await memory.remember(scope, [{ text: 'o deploy sai na sexta.' }])
     await memory.remember(scope, [{ text: 'Deploy sai na sexta' }])
 
@@ -233,7 +233,7 @@ describe('SqliteMemory', () => {
 
   it('never folds a fact that differs in a content word', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 'correction' }
+    const scope = { gateway: 'cli', chatId: 'correction' }
     await memory.remember(scope, [{ text: 'a senha gira na segunda' }])
     await memory.remember(scope, [{ text: 'a senha gira na terça' }])
 
@@ -246,7 +246,7 @@ describe('SqliteMemory', () => {
 
   it('counts short words and numbers, so versão 1 is not versão 2', async () => {
     const { memory } = open()
-    const scope = { gateway: 'cli', conversationId: 'digits' }
+    const scope = { gateway: 'cli', chatId: 'digits' }
     await memory.remember(scope, [
       { text: 'a versao atual e a 1' },
       { text: 'a versao atual e a 2' },
@@ -295,7 +295,7 @@ describe('SqliteMemory', () => {
     old.close()
 
     const memory = new SqliteMemory({ dir })
-    const notes = await memory.list({ gateway: 'local', conversationId: 'install' })
+    const notes = await memory.list({ gateway: 'local', chatId: 'install' })
     expect(notes.map((note) => note.text)).toEqual(['prefere bullet points'])
 
     // And the column is gone rather than left empty, so nothing can write one.
@@ -310,7 +310,7 @@ describe('SqliteMemory', () => {
 })
 
 describe('the admission gate', () => {
-  const scope = { gateway: 'cli', conversationId: 'gate' }
+  const scope = { gateway: 'cli', chatId: 'gate' }
 
   it('refuses a question the model filed as a fact', async () => {
     const { memory, dir } = open()
@@ -347,7 +347,7 @@ describe('the admission gate', () => {
 })
 
 describe('folding a fact repeated at two lengths', () => {
-  const scope = { gateway: 'cli', conversationId: 'fold' }
+  const scope = { gateway: 'cli', chatId: 'fold' }
 
   it('keeps the richer note when the leaner one arrives second', async () => {
     const { memory } = open()
@@ -381,7 +381,7 @@ describe('folding a fact repeated at two lengths', () => {
 describe('the sweep', () => {
   // The install scope on purpose: `unify` would move any other scope's rows into
   // it the moment the store is opened, and this seeds the database before that.
-  const scope = { gateway: 'local', conversationId: 'install' }
+  const scope = { gateway: 'local', chatId: 'install' }
 
   it('drops the junk already stored and folds the duplicates, counting both', async () => {
     const dir = tempDir()

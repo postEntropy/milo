@@ -176,7 +176,7 @@ describe('the turn index over the log', () => {
     // would catch them drifting apart: the writer writes JSONL, the index reads
     // it, and recall answers from what came out.
     const index = new TurnIndex({ dir: historyDir })
-    const hits = await index.recall({ gateway: 'cli', conversationId: 'main' }, 'neovim')
+    const hits = await index.recall({ gateway: 'cli', chatId: 'main' }, 'neovim')
     expect(hits.map((hit) => hit.text)).toEqual(['meu editor e o neovim'])
     index.close()
   })

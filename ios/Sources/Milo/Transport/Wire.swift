@@ -5,7 +5,7 @@ import Foundation
  `src/gateways/web/protocol.ts`; the server refuses any other number aloud, so a
  drift between the two is a refusal rather than a mis-drawn chat.
  */
-let miloProtocolVersion = 9
+let miloProtocolVersion = 10
 
 // MARK: - What the app sends
 
@@ -19,14 +19,14 @@ struct SendTarget: Equatable {
     let gateway: Gateway
     /// The chat to post into. Required even for `none`: the server takes half a target
     /// as none at all, and the phone passes its own conversation the way the browser does.
-    let conversationId: String
+    let chatId: String
 }
 
 enum ClientFrame {
     enum Intent: String { case steer, queue }
     enum Control: String { case stop, allow, always, deny }
 
-    case hello(conversationId: String)
+    case hello(chatId: String)
     /// The files the message carries: the daemon's names for bytes this app has already
     /// posted to `/upload`, which is how a file reaches a turn — the bytes never ride the
     /// socket. Empty for every message with nothing attached.
@@ -59,18 +59,18 @@ enum ClientFrame {
     /// no second spelling of the wire to keep in step with the server's.
     var json: [String: Any] {
         switch self {
-        case .hello(let conversationId):
+        case .hello(let chatId):
             // The phone draws a generated interface, so it says so: without it the
             // daemon never teaches the model to draw one and no `ui` event is ever sent.
             // It names itself too: this app and the browser reach the daemon through the
             // same web gateway, and that is what lets it hold the turn for a phone —
             // shorter answers, spoken to a small screen.
-            return ["type": "hello", "version": miloProtocolVersion, "conversationId": conversationId, "genui": true, "client": "ios"]
+            return ["type": "hello", "version": miloProtocolVersion, "chatId": chatId, "genui": true, "client": "ios"]
         case .send(let text, let intent, let target, let uploadIds):
             var frame: [String: Any] = ["type": "send", "text": text]
             if let intent { frame["intent"] = intent.rawValue }
             if let target {
-                frame["target"] = ["gateway": target.gateway.rawValue, "conversationId": target.conversationId]
+                frame["target"] = ["gateway": target.gateway.rawValue, "chatId": target.chatId]
             }
             if !uploadIds.isEmpty { frame["uploadIds"] = uploadIds }
             return frame

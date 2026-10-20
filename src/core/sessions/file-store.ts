@@ -5,14 +5,13 @@ import lockfile, { type LockOptions } from 'proper-lockfile'
 import { ensurePrivateDir, writePrivateFile } from '../../util/fs.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
-import type { MemoryScope } from '../memory/types.js'
+import { readScope, type MemoryScope } from '../memory/types.js'
 import type { Message } from '../providers/types.js'
 import { KeyedMutex, waitForLease } from './lease.js'
 import { generateNickname } from './nickname.js'
 import { sliceMessagesUpToTurn } from './compact.js'
 import {
   INITIAL_SESSION_VERSION,
-  isScope,
   isValidSessionId,
   SessionConflictError,
   toSummary,
@@ -520,7 +519,7 @@ function parseRecord(value: unknown): SessionRecord | null {
     droppedTokens: typeof raw.droppedTokens === 'number' ? raw.droppedTokens : undefined,
     // Records written before the scope was kept read as having none; they are
     // still readable, just unattributable.
-    scope: isScope(raw.scope) ? raw.scope : undefined,
+    scope: readScope(raw.scope),
     project: typeof raw.project === 'string' && raw.project.length > 0 ? raw.project : undefined,
   }
 }

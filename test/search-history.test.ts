@@ -103,7 +103,7 @@ describe('search_history', () => {
     }
 
     const session = new Session({
-      scope: { gateway: 'cli', conversationId: 'e2e' },
+      scope: { gateway: 'cli', chatId: 'e2e' },
       provider,
       model: 'test-model',
       system: 'BASE',

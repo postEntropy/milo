@@ -80,7 +80,7 @@ export class TelegramGateway implements Gateway {
         { command: 'stats', description: 'Numbers for the current session' },
         { command: 'mode', description: 'Permission mode: ask, auto or yolo' },
         { command: 'yolo', description: 'Toggle yolo mode' },
-        { command: 'clear', description: 'Forget this conversation' },
+        { command: 'clear', description: 'Forget this session' },
         { command: 'status', description: 'Show the current permission mode' },
         { command: 'compact', description: 'Fold the oldest turns into the summary now' },
         { command: 'stop', description: 'Stop the turn running now' },
@@ -121,7 +121,7 @@ export class TelegramGateway implements Gateway {
 
       const context: ActionContext = {
         gateway: 'telegram',
-        conversationId: chatId,
+        chatId: chatId,
         userId: String(ctx.from?.id ?? ''),
         messageId: messageId !== undefined ? String(messageId) : undefined,
         answer: async (text) => {
@@ -256,7 +256,7 @@ export class TelegramGateway implements Gateway {
     images: ImagePart[] = [],
     files?: IncomingFile[],
   ): Promise<void> {
-    const scope: MemoryScope = { gateway: 'telegram', conversationId: chatId }
+    const scope: MemoryScope = { gateway: 'telegram', chatId: chatId }
     const session = await this.options.runtime.sessionFor(scope)
     // Who is asking decides whether the single-person lock opens: an allowlist
     // naming this chat is a room, and a room is not one person. The same answer
@@ -319,22 +319,22 @@ export class TelegramGateway implements Gateway {
     })
 
     const surface: ChatSurface = {
-      post: async (_conversationId, placeholder) =>
+      post: async (_chatId, placeholder) =>
         String(await messenger.post(chatId, placeholder)),
-      edit: async (_conversationId, messageId, value) => {
+      edit: async (_chatId, messageId, value) => {
         await messenger.edit(chatId, Number(messageId), value).catch((error) => {
           logWarn(`telegram: could not edit message ${messageId}: ${errorMessage(error)}`)
         })
       },
-      ask: (_conversationId, _messageId, request) => this.ask(bot, chatId, request, signal),
-      files: (_conversationId, files) => this.postFiles(chatId, files),
+      ask: (_chatId, _messageId, request) => this.ask(bot, chatId, request, signal),
+      files: (_chatId, files) => this.postFiles(chatId, files),
       typing: () => this.typing(bot, chatId),
     }
 
     const display = readDisplay()
     const failure = await runTurns({
       session,
-      conversationId: chatId,
+      chatId: chatId,
       text,
       surface,
       maxLength: MAX_LENGTH,
@@ -451,14 +451,14 @@ export class TelegramGateway implements Gateway {
    * the chat; anything else goes as a document, which is a download rather than a
    * preview but arrives the same.
    */
-  async deliver(conversationId: string, message: OutgoingMessage): Promise<void> {
+  async deliver(chatId: string, message: OutgoingMessage): Promise<void> {
     const bot = this.bot
     if (!bot) throw new Error('telegram gateway is not running')
     const text = message.text ?? ''
     const files = message.files ?? []
 
     if (files.length === 0) {
-      for (const part of chunk(text, MAX_LENGTH)) await bot.api.sendMessage(conversationId, part)
+      for (const part of chunk(text, MAX_LENGTH)) await bot.api.sendMessage(chatId, part)
       return
     }
 
@@ -468,10 +468,10 @@ export class TelegramGateway implements Gateway {
     const caption = trimmed.length > 0 && trimmed.length <= CAPTION_MAX ? trimmed : ''
     for (const [index, file] of files.entries()) {
       const first = index === 0
-      await this.sendFile(bot, conversationId, file, first ? (file.caption ?? caption) : file.caption)
+      await this.sendFile(bot, chatId, file, first ? (file.caption ?? caption) : file.caption)
     }
     if (!caption && trimmed) {
-      for (const part of chunk(text, MAX_LENGTH)) await bot.api.sendMessage(conversationId, part)
+      for (const part of chunk(text, MAX_LENGTH)) await bot.api.sendMessage(chatId, part)
     }
   }
 

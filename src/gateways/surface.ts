@@ -8,16 +8,16 @@ import type { PermissionRequest, PermissionResult } from '../core/tools/permissi
  */
 export interface ChatSurface {
   /** Post the initial placeholder and return a message handle. */
-  post(conversationId: string, text: string): Promise<string>
+  post(chatId: string, text: string): Promise<string>
   /** Replace the message text (called as the answer streams). */
-  edit(conversationId: string, messageId: string, text: string): Promise<void>
+  edit(chatId: string, messageId: string, text: string): Promise<void>
   /** Ask for permission inline; must resolve a denial on expiry. */
-  ask(conversationId: string, messageId: string, request: PermissionRequest): Promise<PermissionResult>
+  ask(chatId: string, messageId: string, request: PermissionRequest): Promise<PermissionResult>
   /**
    * Post the files the turn asked to send, as their own messages. Called once the
    * turn is over, so the files follow the answer rather than interrupting it.
    */
-  files(conversationId: string, files: OutgoingFile[]): Promise<void>
+  files(chatId: string, files: OutgoingFile[]): Promise<void>
   /**
    * Keep the transport's own "Milo is working" indicator on — Telegram's chat
    * action, Discord's typing — until the returned function is called.
@@ -28,5 +28,5 @@ export interface ChatSurface {
    * stops it when it ends — including when it ends badly: an indicator nobody
    * stopped keeps saying the bot is working at a turn that is long over.
    */
-  typing(conversationId: string): () => void
+  typing(chatId: string): () => void
 }

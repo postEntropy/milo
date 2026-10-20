@@ -93,7 +93,7 @@ describe('end-to-end turn', () => {
       cwd: process.cwd(),
     })
 
-    const scope = { gateway: 'cli', conversationId: 'it' }
+    const scope = { gateway: 'cli', chatId: 'it' }
     const session = await runtime.getSession(scope)
 
     const events: AgentEvent[] = []

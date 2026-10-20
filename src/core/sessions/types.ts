@@ -212,17 +212,6 @@ export function isValidSessionId(id: string): boolean {
   return SESSION_ID_PATTERN.test(id)
 }
 
-/** Whether a scope read off disk is one worth keeping, rather than a torn write. */
-export function isScope(value: unknown): value is MemoryScope {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
-  const scope = value as Record<string, unknown>
-  return (
-    typeof scope.gateway === 'string' &&
-    typeof scope.conversationId === 'string' &&
-    (scope.userId === undefined || typeof scope.userId === 'string')
-  )
-}
-
 export function countTurns(messages: Message[]): number {
   let turns = 0
   for (const message of messages) if (message.role === 'user') turns += 1

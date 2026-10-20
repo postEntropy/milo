@@ -11,7 +11,7 @@ import { shellCommand, showsToolCall, toolLabel, toolLine } from './tool-line.js
 
 export interface RunTurnOptions {
   session: Session
-  conversationId: string
+  chatId: string
   text: string
   images?: ImagePart[]
   audio?: AudioPart[]
@@ -76,16 +76,16 @@ export async function runTurns(options: RunTurnOptions): Promise<string | null> 
  * permission requests to the surface's inline prompt.
  */
 export async function runTurn(options: RunTurnOptions): Promise<void> {
-  const { session, conversationId, surface, maxLength } = options
+  const { session, chatId, surface, maxLength } = options
   const flushMs = options.flushMs ?? DEFAULT_FLUSH_MS
   const display = options.display ?? DEFAULT_DISPLAY
 
-  const messageId = await surface.post(conversationId, '…')
+  const messageId = await surface.post(chatId, '…')
   // The transport's own working indicator, kept on for as long as the turn runs.
   // The wait before the first token is the longest part of a turn and a bare '…'
   // does not say whether anything is happening. Stopped in the `finally` below,
   // the failing turn included.
-  const stopTyping = surface.typing(conversationId)
+  const stopTyping = surface.typing(chatId)
   let text = options.text
   let images = options.images ?? []
   let audio = options.audio ?? []
@@ -109,7 +109,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
     const now = Date.now()
     if (!force && now - lastFlush < flushMs) return
     lastFlush = now
-    await surface.edit(conversationId, messageId, clamp(output, maxLength))
+    await surface.edit(chatId, messageId, clamp(output, maxLength))
   }
 
   /**
@@ -186,7 +186,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
       audio,
       ...(mediaModel ? { model: mediaModel } : {}),
       ...(options.sessionsAllowed === false ? { sessionsAllowed: false } : {}),
-      ask: (request) => surface.ask(conversationId, messageId, request),
+      ask: (request) => surface.ask(chatId, messageId, request),
     })) {
       switch (event.type) {
         case 'reasoning-delta':
@@ -294,14 +294,14 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   if (!answered && reasoningChars > 0 && display.thinking === 'collapsed') {
     output += `${output === '' ? '' : '\n\n'}⚠ no answer came back: this model sends everything it says as reasoning, and /thinking collapsed hides it.`
   }
-  await surface.edit(conversationId, messageId, clamp(output.trim() || '(no response)', maxLength))
+  await surface.edit(chatId, messageId, clamp(output.trim() || '(no response)', maxLength))
 
   // The files the turn asked to send, read once it is over: they follow the
   // answer as their own messages rather than riding as a caption on it. Read
   // here, per turn, so a correction that runs as a second turn cannot overwrite
   // what the first one sent.
   const files = session.takeOutgoing()
-  if (files.length > 0) await surface.files(conversationId, files)
+  if (files.length > 0) await surface.files(chatId, files)
 }
 
 /** The first non-empty line of a thought, flattened. */

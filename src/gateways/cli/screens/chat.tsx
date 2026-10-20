@@ -120,7 +120,7 @@ const HELP_TEXT = [
   '/jobs — the background jobs, and how they are doing',
   '/skills — the skills installed, and where they live',
   '/memory [forget <id>] — what Milo keeps, and how to drop one of them',
-  '/clear — forget this conversation',
+  '/clear — forget this session',
   '/compact — fold the oldest turns into the summary now',
   '/stop — stop the turn running now, and anything queued behind it',
   '/steer <text> — hand text to the turn running now (Ctrl+Enter does the same)',

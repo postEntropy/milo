@@ -19,18 +19,18 @@ function makeHarness(stream: StreamFn, askAnswer: PermissionResult = { allowed: 
 
   const surface: ChatSurface = {
     post: async () => 'm1',
-    edit: async (_conversationId, _messageId, text) => {
+    edit: async (_chatId, _messageId, text) => {
       edits.push(text)
     },
-    ask: async (_conversationId, _messageId, request) => {
+    ask: async (_chatId, _messageId, request) => {
       asks.push(request)
       return askAnswer
     },
-    files: async (_conversationId, files) => {
+    files: async (_chatId, files) => {
       posted.push(...files)
     },
-    typing: (conversationId) => {
-      typing.starts.push(conversationId)
+    typing: (chatId) => {
+      typing.starts.push(chatId)
       return () => {
         typing.stops += 1
       }
@@ -44,7 +44,7 @@ function makeHarness(stream: StreamFn, askAnswer: PermissionResult = { allowed: 
   } as unknown as Session
 
   const run = (maxLength = 1000, steering?: string[]) =>
-    runTurn({ session, conversationId: 'c1', text: 'hi', surface, maxLength, display, flushMs: 0, steering })
+    runTurn({ session, chatId: 'c1', text: 'hi', surface, maxLength, display, flushMs: 0, steering })
 
   return { edits, asks, posted, typing, run }
 }

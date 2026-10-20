@@ -62,7 +62,9 @@ function emailRouteFromPath(pathname: string): string | null {
 }
 
 export default function App() {
-  const [conversationId, setConversationId] = useState(() => localStorage.getItem('milo-conversation') || randomUUID())
+  const [chatId, setChatId] = useState(
+    () => localStorage.getItem('milo-chat') || localStorage.getItem('milo-conversation') || randomUUID(),
+  )
   const [sessionId, setSessionId] = useState('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [sessions, setSessions] = useState<SessionSummary[]>([])
@@ -252,11 +254,12 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    localStorage.setItem('milo-conversation', conversationId)
+    localStorage.setItem('milo-chat', chatId)
+    localStorage.removeItem('milo-conversation')
     localStorage.setItem('milo-sidebar', sidebarCollapsed ? 'collapsed' : 'open')
     if (theme === 'system') localStorage.removeItem('milo-theme')
     else localStorage.setItem('milo-theme', theme)
-  }, [conversationId, theme, sidebarCollapsed])
+  }, [chatId, theme, sidebarCollapsed])
 
   // The theme goes on the document as the app paints, and the phone's own bars take
   // its colour: the explicit choice and a system flip both land here. The `theme-color`
@@ -360,16 +363,16 @@ export default function App() {
    */
   const redo = useCallback(async (text: string, upToTurn: number): Promise<void> => {
     if (!sessionId) return
-    const nextConversationId = randomUUID()
+    const nextChatId = randomUUID()
     pendingSend.current = text
     try {
-      const res = await api<{ id: string }>('fork-session', { conversationId: nextConversationId, sessionId, upToTurn })
+      const res = await api<{ id: string }>('fork-session', { chatId: nextChatId, sessionId, upToTurn })
       socket.close()
       setMessages([])
       setPanel(null)
       setProject(null)
       setSessionId(res.id)
-      setConversationId(nextConversationId)
+      setChatId(nextChatId)
       setView('chat')
     } catch (error) {
       pendingSend.current = null
@@ -614,7 +617,7 @@ export default function App() {
 
   const newChat = useCallback(async (): Promise<boolean> => {
     editingTurn.current = null
-    const nextConversationId = randomUUID()
+    const nextChatId = randomUUID()
     // Inside the click that asked for it, before any state moves: a focus handed
     // over a tick later is a focus the browser is free to drop. The counter is
     // the other half — when this chat is not the view on screen, the composer
@@ -622,7 +625,7 @@ export default function App() {
     composerRef.current?.focus()
     setComposerFocus((current) => current + 1)
     try {
-      const session = await api<{ id: string }>('new-session', { conversationId: nextConversationId })
+      const session = await api<{ id: string }>('new-session', { chatId: nextChatId })
       socket.close()
       setMessages([])
       setPanel(null)
@@ -631,7 +634,7 @@ export default function App() {
       setSessionId(session.id)
       setView('chat')
       setSidebarOpen(false)
-      setConversationId(nextConversationId)
+      setChatId(nextChatId)
       return true
     } catch (error) {
       // Reported here, and said as a failure to the caller: a delete that moves
@@ -652,12 +655,12 @@ export default function App() {
    */
   const startWorkSession = useCallback(async (project: string, firstMessage?: string): Promise<boolean> => {
     editingTurn.current = null
-    const nextConversationId = randomUUID()
+    const nextChatId = randomUUID()
     pendingSend.current = firstMessage ?? null
     composerRef.current?.focus()
     setComposerFocus((current) => current + 1)
     try {
-      const session = await api<{ id: string }>('new-session', { conversationId: nextConversationId, project })
+      const session = await api<{ id: string }>('new-session', { chatId: nextChatId, project })
       socket.close()
       setMessages([])
       setPanel(null)
@@ -666,7 +669,7 @@ export default function App() {
       setSessionId(session.id)
       setView('chat')
       setSidebarOpen(false)
-      setConversationId(nextConversationId)
+      setChatId(nextChatId)
       return true
     } catch (error) {
       pendingSend.current = null
@@ -753,10 +756,10 @@ export default function App() {
     // This page can draw a generated interface; whether one is drawn at all is the
     // `display.genui` setting, which the turn reads — so the capability is said here
     // and the preference is Milo's.
-    socket.connect(conversationId, true)
+    socket.connect(chatId, true)
     void refreshSessions()
     return () => { unsubscribe(); unsubscribeStatus(); socket.close() }
-  }, [conversationId, socket, handleFrame, refreshSessions])
+  }, [chatId, socket, handleFrame, refreshSessions])
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -821,7 +824,7 @@ export default function App() {
    * not this chat — the sentence then does not have to say it.
    */
   const send = useCallback((text: string, intent: 'queue' | 'steer' = 'queue', files?: File[], target?: SendTarget): void => {
-    const sendingConversation = conversationId
+    const sendingChat = chatId
     // An edit is a redo from the turn it was made on: the words go again with the
     // session forked to before them, rather than a second copy piling on top.
     if (editingTurn.current !== null && !files?.length) {
@@ -838,11 +841,11 @@ export default function App() {
         setMessages((current) => [...current, { id: `user-${randomUUID()}`, role: 'user', parts: [{ kind: 'text', text }], at: Date.now() }])
         socket.send({ type: 'command', text })
       } else {
-        socket.sendFor(sendingConversation, { type: 'send', text, intent, ...(target ? { target } : {}), ...(uploadIds.length ? { uploadIds } : {}) })
+        socket.sendFor(sendingChat, { type: 'send', text, intent, ...(target ? { target } : {}), ...(uploadIds.length ? { uploadIds } : {}) })
       }
       setNotice(null)
     })().catch(fail)
-  }, [socket, fail, redo, conversationId])
+  }, [socket, fail, redo, chatId])
 
   useEffect(() => { sendRef.current = send }, [send])
 
@@ -863,15 +866,15 @@ export default function App() {
 
   const openSession = useCallback(async (id: string): Promise<void> => {
     editingTurn.current = null
-    const nextConversationId = randomUUID()
+    const nextChatId = randomUUID()
     try {
-      await api('resume-session', { conversationId: nextConversationId, id })
+      await api('resume-session', { chatId: nextChatId, id })
       socket.close()
       setMessages([])
       setPanel(null)
       setProject(null)
       setSessionId(id)
-      setConversationId(nextConversationId)
+      setChatId(nextChatId)
       setView('chat')
       setSidebarOpen(false)
     } catch (error) { fail(error) }
@@ -880,12 +883,12 @@ export default function App() {
   const forkSession = useCallback(async (upToTurn: number): Promise<void> => {
     if (!sessionId) return
     editingTurn.current = null
-    const nextConversationId = randomUUID()
+    const nextChatId = randomUUID()
     composerRef.current?.focus()
     setComposerFocus((current) => current + 1)
     try {
       const res = await api<{ id: string }>('fork-session', {
-        conversationId: nextConversationId,
+        chatId: nextChatId,
         sessionId,
         upToTurn,
       })
@@ -894,7 +897,7 @@ export default function App() {
       setPanel(null)
       setProject(null)
       setSessionId(res.id)
-      setConversationId(nextConversationId)
+      setChatId(nextChatId)
       setView('chat')
       setSidebarOpen(false)
       setNotice({ text: 'Branched into a new session.', error: false })
@@ -958,7 +961,7 @@ export default function App() {
     // This page can draw a generated interface; whether one is drawn at all is the
     // `display.genui` setting, which the turn reads — so the capability is said here
     // and the preference is Milo's.
-    socket.connect(conversationId, true)
+    socket.connect(chatId, true)
     setView('chat')
   }
 
@@ -1159,9 +1162,9 @@ export default function App() {
         </div>
       </header>
       {view === 'settings'
-        ? <Settings section={settingsSection} onSection={setSettingsSection} conversationId={conversationId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} onDirtyChange={noteDirty} />
+        ? <Settings section={settingsSection} onSection={setSettingsSection} chatId={chatId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} onDirtyChange={noteDirty} />
         : view === 'routines'
-        ? <Routines conversationId={conversationId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
+        ? <Routines chatId={chatId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
         : view === 'work'
@@ -1172,7 +1175,7 @@ export default function App() {
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock" ref={composerDockRef}>
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} provider={identity.provider} providerName={identity.providerName} draftKey={conversationId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={Boolean(project)} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); socket.send({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => socket.send({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
+            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} provider={identity.provider} providerName={identity.providerName} draftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={Boolean(project)} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); socket.send({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => socket.send({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
           </div>
         </section>
         : null}

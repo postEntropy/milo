@@ -54,7 +54,7 @@ const USAGE = [
   '  milo routines add "<prompt>" --at 08:00 [--days mon-fri] --gateway telegram --to <chat id>',
   '  milo routines add "<prompt>" --at 09:00 --day-of-month 25 --month dec --gateway telegram --to <chat id>',
   '  milo routines add "<prompt>" --every 2h --gateway discord --to <channel id>',
-  '  milo routines add "<prompt>" --every 6h --gateway web --to <conversation id>',
+  '  milo routines add "<prompt>" --every 6h --gateway web --to <chat id>',
   '  milo routines add "<prompt>" --every 1m --limit 5 --gateway none    at most five runs',
   '  milo routines remove <id>                  delete a routine',
   '  milo routines enable|disable <id>          turn a routine on or off',
@@ -67,7 +67,7 @@ const USAGE = [
   'ran out starts the count over.',
   '',
   'A routine fires only while `milo serve` is running, and delivers its answer to',
-  'the chat named by --gateway/--to (telegram, discord or web — a web conversation',
+  'the chat named by --gateway/--to (telegram, discord or web — on the web, the chat',
   'is the id in the browser\'s address). Times are local; `--days` takes mon,wed or',
   'a range like mon-fri, `--day-of-month` takes 1,15 or 1-15, and `--month` takes',
   'dec or 12. A clock time is scheduled by day of the week or by day of the month,',
@@ -162,7 +162,7 @@ interface AddFlags {
   dayOfMonth?: string[]
   month?: string[]
   gateway?: RoutineGateway | 'none'
-  conversationId?: string
+  chatId?: string
   limit?: number
   allow?: string[]
   yes: boolean
@@ -203,7 +203,7 @@ function parseAdd(argv: string[]): AddFlags {
         throw new Error(`--gateway must be one of ${ROUTINE_GATEWAYS.join(', ')}, or none.`)
       }
       flags.gateway = gateway as RoutineGateway | 'none'
-    } else if (token === '--to' || token === '--conversation') flags.conversationId = value()
+    } else if (token === '--to' || token === '--chat') flags.chatId = value()
     else if (token.startsWith('-')) throw new Error(`Unknown option ${token}.`)
     else positionals.push(token)
   }
@@ -235,8 +235,8 @@ async function add(argv: string[], context: Required<RoutineIo>): Promise<number
   let target: RoutineTarget
   if (flags.gateway === 'none') {
     target = { gateway: 'none' }
-  } else if (flags.gateway && flags.conversationId) {
-    target = { gateway: flags.gateway, conversationId: flags.conversationId }
+  } else if (flags.gateway && flags.chatId) {
+    target = { gateway: flags.gateway, chatId: flags.chatId }
   } else {
     context.err('add needs --gateway telegram|discord|web with --to <chat id>, or --gateway none to keep the runs on the Routines screen.')
     context.err(USAGE)

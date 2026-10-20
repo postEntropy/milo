@@ -20,7 +20,7 @@ const { ChatScreen } = await import('../src/gateways/cli/screens/chat.js')
 const { ModelPicker } = await import('../src/gateways/cli/screens/model-picker.js')
 
 const tick = (ms = 40) => new Promise((resolve) => setTimeout(resolve, ms))
-const scope = { gateway: 'cli', conversationId: 'test' }
+const scope = { gateway: 'cli', chatId: 'test' }
 const UP = '\u001b[A'
 const DOWN = '\u001b[B'
 

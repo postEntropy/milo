@@ -16,7 +16,7 @@ const { FileSessionStore } = await import('../src/core/sessions/file-store.js')
 const { MemoryRecapStore } = await import('../src/core/sessions/recap.js')
 const { pruneSessions } = await import('../src/core/sessions/retention.js')
 
-const CONVERSATION = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+const CHAT = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true })
@@ -59,7 +59,7 @@ function routine(id: string): Routine {
     name: 'daily briefing',
     prompt: 'look at the repo',
     when: { kind: 'every', minutes: 60 },
-    target: { gateway: 'web', conversationId: CONVERSATION },
+    target: { gateway: 'web', chatId: CHAT },
     enabled: true,
     createdAt: Date.UTC(2026, 8, 25),
   }
@@ -76,7 +76,7 @@ describe('a routine run is a session of its own', () => {
     expect(result.id).toBeTruthy()
     // The record on disk says whose run it is, which is what survives the next
     // run replacing the binding.
-    expect((await runtime.loadSession(result.id!))?.scope).toEqual({ gateway: ROUTINE_GATEWAY, conversationId: r.id })
+    expect((await runtime.loadSession(result.id!))?.scope).toEqual({ gateway: ROUTINE_GATEWAY, chatId: r.id })
     expect((await runtime.listRuns(r.id)).map((run) => run.id)).toEqual([result.id])
     // Nobody talks in a run, so it is not offered as a conversation to open.
     expect(await runtime.listSessions()).toEqual([])
@@ -120,7 +120,7 @@ describe('a routine’s history outlives the generic prune', () => {
 
     const run = await runRoutineOnce(runtime, r)
     for (let index = 0; index < 3; index += 1) {
-      const session = await runtime.newSession({ gateway: 'web', conversationId: CONVERSATION })
+      const session = await runtime.newSession({ gateway: 'web', chatId: CHAT })
       for await (const _event of session.send(`hello ${index}`)) { /* drain */ }
     }
 

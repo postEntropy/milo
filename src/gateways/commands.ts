@@ -659,7 +659,7 @@ export async function handleCommand(
 
     case 'clear':
       await context.resetSession?.()
-      return { handled: true, reply: 'Conversation cleared.' }
+      return { handled: true, reply: 'Session cleared.' }
 
     case 'skills':
       return { handled: true, reply: formatSkillList(context.skills?.() ?? []) }
@@ -706,7 +706,7 @@ export async function handleCommand(
         handled: true,
         reply: written
           ? describeExport(written)
-          : `Nothing to export for ${stats.id}: the log has nothing from it yet. A conversation is written out as it runs, so a session that has not had a turn has nothing.`,
+          : `Nothing to export for ${stats.id}: the log has nothing from it yet. A session is written out as it runs, so a session that has not had a turn has nothing.`,
       }
     }
 

@@ -298,7 +298,7 @@ async function runOnce(draws: boolean, provider: Provider, model: string, prompt
     // record — and none of it goes to the log on disk.
     traces: collector,
   })
-  const session = await runtime.sessionFor({ gateway: 'web', conversationId: randomUUID() })
+  const session = await runtime.sessionFor({ gateway: 'web', chatId: randomUUID() })
 
   const started = performance.now()
   let textMs: number | null = null

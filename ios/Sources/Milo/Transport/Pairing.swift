@@ -83,7 +83,7 @@ enum Pairing {
     static func probe(_ account: Account, timeout: TimeInterval = 8) async -> PairProbe {
         guard let url = account.socketURL,
               let hello = try? JSONSerialization.data(
-                  withJSONObject: ClientFrame.hello(conversationId: account.conversationId).json
+                  withJSONObject: ClientFrame.hello(chatId: account.chatId).json
               )
         else { return .noSocket }
         return await PairProber(url: url, hello: hello, timeout: timeout).run()

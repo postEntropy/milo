@@ -156,7 +156,7 @@ export interface NewSessionOptions {
   /** Tools the run may use with nobody to ask — a routine's standing grants. */
   grantedTools?: string[]
   /** The chat its turns may send files to — a routine's own target. */
-  deliverTo?: { gateway: string; conversationId: string }
+  deliverTo?: { gateway: string; chatId: string }
   /**
    * The project this session works in, by id. Absent is the install's own
    * directory — what every session before this one used.
@@ -344,7 +344,7 @@ export class AgentRuntime {
     return (await this.store.list()).filter(
       (session) =>
         session.scope?.gateway === ROUTINE_GATEWAY &&
-        session.scope.conversationId === routineId,
+        session.scope.chatId === routineId,
     )
   }
 

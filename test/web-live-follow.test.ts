@@ -180,9 +180,9 @@ async function twoScreens(
   // One session, and both conversations resumed onto it. Resuming both (not only the
   // phone) is what keeps the desktop's socket on this session too: a scope the process
   // has not opened is handed a fresh session, which would put the two screens apart.
-  const session = await runtime.newSession({ gateway: 'web', conversationId: DESKTOP })
-  await settings.handle('resume-session', { conversationId: DESKTOP, id: session.id })
-  await settings.handle('resume-session', { conversationId: PHONE, id: session.id })
+  const session = await runtime.newSession({ gateway: 'web', chatId: DESKTOP })
+  await settings.handle('resume-session', { chatId: DESKTOP, id: session.id })
+  await settings.handle('resume-session', { chatId: PHONE, id: session.id })
 
   const desktop: Frame[] = []
   const phone: Frame[] = []
@@ -374,22 +374,22 @@ describe('a turn on a session open in two conversations', () => {
     const hub = new WebHub(runtime)
 
     // The phone has session A open, with a turn running on it.
-    const a = await runtime.newSession({ gateway: 'web', conversationId: DESKTOP })
-    await settings.handle('resume-session', { conversationId: DESKTOP, id: a.id })
+    const a = await runtime.newSession({ gateway: 'web', chatId: DESKTOP })
+    await settings.handle('resume-session', { chatId: DESKTOP, id: a.id })
     const phone = client([])
     await hub.connect(phone, DESKTOP)
     hub.handle(phone, { type: 'send', text: 'go' }, DESKTOP)
     await provider.reached()
 
-    const b = await runtime.newSession({ gateway: 'web', conversationId: SPARE })
+    const b = await runtime.newSession({ gateway: 'web', chatId: SPARE })
     // The switch, as an app does it: B is bound to a conversation the daemon has not
     // seen, before that conversation is connected.
-    await settings.handle('resume-session', { conversationId: SWITCHED, id: b.id })
+    await settings.handle('resume-session', { chatId: SWITCHED, id: b.id })
 
     // On the same conversation the daemon will not swap the session out from under the
     // running turn, so the reconnect still replays A — which is exactly why the apps
     // open a session on a conversation id of its own rather than reusing one.
-    await settings.handle('resume-session', { conversationId: DESKTOP, id: b.id })
+    await settings.handle('resume-session', { chatId: DESKTOP, id: b.id })
     const same: Frame[] = []
     await hub.connect(client(same), DESKTOP)
     expect(same.find((frame) => frame.type === 'ready')?.sessionId).toBe(a.id)
@@ -464,7 +464,7 @@ describe('a turn on a session no socket asked for', () => {
     }
     const { runtime, desktop, phone } = await twoScreens(provider)
 
-    const elsewhere = await runtime.getSession({ gateway: 'telegram', conversationId: 'chat-1' })
+    const elsewhere = await runtime.getSession({ gateway: 'telegram', chatId: 'chat-1' })
     for await (const _event of elsewhere.send('go')) {
       // drain
     }

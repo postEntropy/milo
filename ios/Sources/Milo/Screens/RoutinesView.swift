@@ -728,7 +728,7 @@ private struct NewRoutine: View {
     @Environment(AppModel.self) private var model
     @State private var ask = ""
     @State private var destination: Destination = .chat
-    @State private var chatId = ""
+    @State private var typedChatId = ""
     /// Where the creation turn starts in the chat's transcript; nil until asked.
     @State private var createdFrom: Int?
 
@@ -760,7 +760,7 @@ private struct NewRoutine: View {
         !ask.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !model.busy
             && model.connection == .online
-            && (!destination.needsChatId || !chatId.trimmingCharacters(in: .whitespaces).isEmpty)
+            && (!destination.needsChatId || !typedChatId.trimmingCharacters(in: .whitespaces).isEmpty)
     }
 
     /// What has been asked here and answered here: nothing until the first ask.
@@ -801,7 +801,7 @@ private struct NewRoutine: View {
                 .listRowInsets(Self.row)
                 .listRowBackground(Color.clear)
                 if destination.needsChatId {
-                    TextField("a chat or channel id", text: $chatId)
+                    TextField("a chat or channel id", text: $typedChatId)
                         .autocorrectionDisabled()
                         .textInputAutocapitalization(.never)
                         .padding(MiloTheme.Space.four)
@@ -865,7 +865,7 @@ private struct NewRoutine: View {
         ask = ""
         // The destination is pinned on the turn, so a routine named for Telegram is made
         // for Telegram even though the chat it was asked in is this one.
-        model.send(text, target: SendTarget(gateway: gateway, conversationId: conversationId))
+        model.send(text, target: SendTarget(gateway: gateway, chatId: destinationChatId))
     }
 
     private var gateway: SendTarget.Gateway {
@@ -878,9 +878,9 @@ private struct NewRoutine: View {
     }
 
     /// The chat to post into. The bot gateways take the id that was typed; this chat and
-    /// the Routines screen carry this phone's own conversation, the way the browser does.
-    private var conversationId: String {
-        destination.needsChatId ? chatId.trimmingCharacters(in: .whitespaces) : account.conversationId
+    /// the Routines screen carry this phone's own chat, the way the browser does.
+    private var destinationChatId: String {
+        destination.needsChatId ? typedChatId.trimmingCharacters(in: .whitespaces) : account.chatId
     }
 }
 

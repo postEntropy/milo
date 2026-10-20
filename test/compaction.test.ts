@@ -101,7 +101,7 @@ async function compactingSession(
   record.messages = seed
 
   const session = new Session({
-    scope: { gateway: 'cli', conversationId: 'c' },
+    scope: { gateway: 'cli', chatId: 'c' },
     provider,
     model: 'm',
     system: 'BASE',
@@ -162,7 +162,7 @@ async function manualSession(
   record.messages = seed
 
   const session = new Session({
-    scope: { gateway: 'cli', conversationId: 'c' },
+    scope: { gateway: 'cli', chatId: 'c' },
     provider,
     model: 'm',
     system: 'BASE',
@@ -591,7 +591,7 @@ describe('Session compaction', () => {
     const provider = new ScriptedProvider()
 
     const session = new Session({
-      scope: { gateway: 'cli', conversationId: 'c' },
+      scope: { gateway: 'cli', chatId: 'c' },
       provider,
       model: 'm',
       system: 'BASE',

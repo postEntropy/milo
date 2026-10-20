@@ -49,7 +49,7 @@ async function run(input: string) {
   const provider = new CapturingProvider()
   const memory = new SqliteMemory({ dir })
   const store = new MemorySessionStore()
-  const scope: MemoryScope = { gateway: 'cli', conversationId: 't' }
+  const scope: MemoryScope = { gateway: 'cli', chatId: 't' }
   const base: Extra = {
     model: 'test-model',
     system: 'BASE',
@@ -71,7 +71,7 @@ async function sessionWith(provider: Provider, extra: Partial<SessionOptions> = 
   const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
   const memory = new SqliteMemory({ dir })
   const store = new MemorySessionStore()
-  const scope: MemoryScope = { gateway: 'cli', conversationId: 'abort' }
+  const scope: MemoryScope = { gateway: 'cli', chatId: 'abort' }
   const record = await store.create()
   const session = new Session({
     model: 'test-model',
@@ -122,7 +122,7 @@ describe('Session', () => {
     // A file store, not the in-memory one: it hands back a copy, so reading it
     // mid-turn says what is really on disk.
     const store = new FileSessionStore({ dir: path.join(dir, 'sessions') })
-    const scope: MemoryScope = { gateway: 'cli', conversationId: 'steer' }
+    const scope: MemoryScope = { gateway: 'cli', chatId: 'steer' }
     const record = await store.create()
     const logged: HistoryEntry[] = []
 
@@ -183,7 +183,7 @@ describe('Session', () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
     const memory = new SqliteMemory({ dir })
     const store = new MemorySessionStore()
-    const scope: MemoryScope = { gateway: 'cli', conversationId: 'remember' }
+    const scope: MemoryScope = { gateway: 'cli', chatId: 'remember' }
     const record = await store.create()
 
     // First step asks for a tool, second answers — the shape of a real turn.
@@ -700,7 +700,7 @@ describe('a session another writer has moved on from', () => {
       registry: createToolRegistry(),
       memory: new SqliteMemory({ dir }),
       store,
-      scope: { gateway: 'cli', conversationId: 'elsewhere' },
+      scope: { gateway: 'cli', chatId: 'elsewhere' },
       record,
       cwd: process.cwd(),
       provider,
@@ -747,7 +747,7 @@ describe('how long a turn took to say anything', () => {
       const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
       const store = new MemorySessionStore()
       const record = await store.create()
-      const scope: MemoryScope = { gateway: 'cli', conversationId: 't' }
+      const scope: MemoryScope = { gateway: 'cli', chatId: 't' }
       const session = new Session({
         model: 'test-model',
         system: 'BASE',
@@ -805,7 +805,7 @@ describe('recapping a session another writer moved on', () => {
       memory: new SqliteMemory({ dir }),
       store,
       recaps,
-      scope: { gateway: 'cli', conversationId: 'recap' },
+      scope: { gateway: 'cli', chatId: 'recap' },
       record,
       cwd: process.cwd(),
       provider: new CapturingProvider(),
@@ -872,7 +872,7 @@ describe('naming a session from its first turn', () => {
       registry: createToolRegistry(),
       memory: new SqliteMemory({ dir }),
       store,
-      scope: { gateway: options.gateway ?? 'cli', conversationId: 'naming' },
+      scope: { gateway: options.gateway ?? 'cli', chatId: 'naming' },
       record,
       cwd: process.cwd(),
       provider,
@@ -993,14 +993,14 @@ describe('a reader that stops at the wait', () => {
         yield { type: 'done', finishReason: 'stop' }
       },
     }
-    const build = async (conversationId: string) =>
+    const build = async (chatId: string) =>
       new Session({
         model: 'test-model',
         system: 'BASE',
         registry: createToolRegistry(),
         memory: new SqliteMemory({ dir }),
         store,
-        scope: { gateway: 'cli', conversationId },
+        scope: { gateway: 'cli', chatId },
         record: (await store.load(record.id))!,
         cwd: process.cwd(),
         provider,
@@ -1050,7 +1050,7 @@ describe('a session another writer summarized away', () => {
       registry: createToolRegistry(),
       memory: new SqliteMemory({ dir }),
       store,
-      scope: { gateway: 'cli', conversationId: 'summarized' },
+      scope: { gateway: 'cli', chatId: 'summarized' },
       record,
       cwd: process.cwd(),
       provider,
@@ -1087,7 +1087,7 @@ describe('a session another writer summarized away', () => {
       registry: createToolRegistry(),
       memory: new SqliteMemory({ dir }),
       store,
-      scope: { gateway: 'cli', conversationId: 'cleared' },
+      scope: { gateway: 'cli', chatId: 'cleared' },
       record,
       cwd: process.cwd(),
       provider,
@@ -1122,7 +1122,7 @@ describe('a session deleted while it was open', () => {
       registry: createToolRegistry(),
       memory: new SqliteMemory({ dir }),
       store,
-      scope: { gateway: 'cli', conversationId: 'gone' },
+      scope: { gateway: 'cli', chatId: 'gone' },
       record,
       cwd: process.cwd(),
       provider,
@@ -1174,14 +1174,14 @@ describe('one turn per session', () => {
       },
     }
 
-    const build = async (conversationId: string) =>
+    const build = async (chatId: string) =>
       new Session({
         model: 'test-model',
         system: 'BASE',
         registry: createToolRegistry(),
         memory: new SqliteMemory({ dir }),
         store,
-        scope: { gateway: 'cli', conversationId },
+        scope: { gateway: 'cli', chatId },
         // Two turns over one store: a second terminal, or a daemon and a CLI.
         record: (await store.load(record.id))!,
         cwd: process.cwd(),
@@ -1262,7 +1262,7 @@ describe('delegation to a subagent', () => {
   async function delegate(provider: Provider) {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
     const store = new MemorySessionStore()
-    const scope: MemoryScope = { gateway: 'cli', conversationId: 'task' }
+    const scope: MemoryScope = { gateway: 'cli', chatId: 'task' }
     const record = await store.create()
     const session = new Session({
       model: 'test-model',
@@ -1368,7 +1368,7 @@ describe('what a turn may do with the install\'s sessions', () => {
       registry: new ToolRegistry([sessionsTool, probe]),
       memory: new SqliteMemory({ dir }),
       store,
-      scope: { gateway: 'cli', conversationId: 't' },
+      scope: { gateway: 'cli', chatId: 't' },
       record,
       cwd: process.cwd(),
       provider,
@@ -1404,7 +1404,7 @@ describe('what a turn may do with the install\'s sessions', () => {
   it('withholds it from a routine\'s own run', async () => {
     const { provider, seen } = await turn({
       sessionAdmin: store(),
-      scope: { gateway: ROUTINE_GATEWAY, conversationId: 'r' },
+      scope: { gateway: ROUTINE_GATEWAY, chatId: 'r' },
     })
     expect(provider.calls[0]).not.toContain('sessions')
     expect(seen?.sessionAdmin).toBeUndefined()
@@ -1434,7 +1434,7 @@ describe('the tools a surface is offered', () => {
       registry: createToolRegistry(),
       memory: new SqliteMemory({ dir }),
       store,
-      scope: { gateway, conversationId: 'surface' },
+      scope: { gateway, chatId: 'surface' },
       record,
       cwd: process.cwd(),
       provider,
@@ -1490,7 +1490,7 @@ describe('an always answer', () => {
       registry: createToolRegistry(),
       memory: new SqliteMemory({ dir }),
       store,
-      scope: { gateway: 'cli', conversationId: 'always' },
+      scope: { gateway: 'cli', chatId: 'always' },
       record,
       cwd: dir,
       provider: new TwoWrites(),
@@ -1563,7 +1563,7 @@ describe('the verification gate', () => {
       registry: createToolRegistry(),
       memory: new SqliteMemory({ dir }),
       store,
-      scope: { gateway: 'cli', conversationId: 'gate' },
+      scope: { gateway: 'cli', chatId: 'gate' },
       record,
       cwd: dir,
       provider: new GateProvider(options.write ?? true),

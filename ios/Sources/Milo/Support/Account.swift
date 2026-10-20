@@ -9,7 +9,7 @@ struct Account: Equatable {
     var host: String
     var port: Int
     var token: String
-    var conversationId: String
+    var chatId: String
 
     var display: String { "\(host):\(port)" }
 
@@ -72,27 +72,35 @@ func parseAddress(_ raw: String, defaultPort: Int = 7717) -> (host: String, port
 enum AccountStore {
     private static let hostKey = "milo.host"
     private static let portKey = "milo.port"
-    private static let conversationKey = "milo.conversation"
+    private static let chatKey = "milo.chat"
+    /// The name the chat went by before the field was renamed. Read once and moved,
+    /// so a paired phone keeps the chat it opens on rather than starting a new one.
+    private static let legacyChatKey = "milo.conversation"
     private static let tokenKey = "milo.token"
-    /// The conversation survives unpairing: pairing again should reopen the same
-    /// chat rather than start a second one beside it.
-    static var conversationId: String {
+    /// The chat survives unpairing: pairing again should reopen the same session
+    /// rather than start a second one beside it.
+    static var chatId: String {
         let defaults = UserDefaults.standard
-        if let existing = defaults.string(forKey: conversationKey), !existing.isEmpty { return existing }
+        let existing = defaults.string(forKey: chatKey) ?? defaults.string(forKey: legacyChatKey)
+        if let existing, !existing.isEmpty {
+            defaults.set(existing, forKey: chatKey)
+            defaults.removeObject(forKey: legacyChatKey)
+            return existing
+        }
         let made = UUID().uuidString.lowercased()
-        defaults.set(made, forKey: conversationKey)
+        defaults.set(made, forKey: chatKey)
         return made
     }
 
     /**
-     A conversation id for a session opened from here, not yet saved. The browser mints
-     one per session it opens — its `conversationId` is that session's scope, never a
+     A chat id for a session opened from here, not yet saved. The browser mints
+     one per session it opens — its `chatId` is that session's scope, never a
      fixed address — and the phone does the same: a scope the daemon is already bound
      to is left alone (and one with a turn running is not swapped underneath), so
      opening a session on a **new** scope is what makes the switch land. Saved with the
      account only once the daemon has taken it.
      */
-    static func freshConversationId() -> String {
+    static func freshChatId() -> String {
         UUID().uuidString.lowercased()
     }
 
@@ -102,7 +110,7 @@ enum AccountStore {
               let host = defaults.string(forKey: hostKey) else { return nil }
         let port = defaults.integer(forKey: portKey)
         guard port > 0 else { return nil }
-        return Account(host: host, port: port, token: token, conversationId: conversationId)
+        return Account(host: host, port: port, token: token, chatId: chatId)
     }
 
     static func save(_ account: Account) {
@@ -110,7 +118,7 @@ enum AccountStore {
         let defaults = UserDefaults.standard
         defaults.set(account.host, forKey: hostKey)
         defaults.set(account.port, forKey: portKey)
-        defaults.set(account.conversationId, forKey: conversationKey)
+        defaults.set(account.chatId, forKey: chatKey)
     }
 
     static func clear() {

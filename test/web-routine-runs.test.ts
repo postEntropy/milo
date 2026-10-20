@@ -13,7 +13,7 @@ const { WebSettings } = await import('../src/gateways/web/settings.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { createToolRegistry } = await import('../src/core/tools/index.js')
 
-const CONVERSATION = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+const CHAT = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true })
@@ -82,7 +82,7 @@ describe('web Settings reads a routine’s runs', () => {
     const created = await settings.handle('routine-add', {
       prompt: 'look at the repo',
       every: '6h',
-      target: { gateway: 'web', conversationId: CONVERSATION },
+      target: { gateway: 'web', chatId: CHAT },
     }) as { routine: { id: string } }
 
     const { runId } = await settings.handle('routine-run', { id: created.routine.id }) as { runId: string }
@@ -107,7 +107,7 @@ describe('web Settings reads a routine’s runs', () => {
     const created = await settings.handle('routine-add', {
       prompt: 'look at the repo',
       every: '6h',
-      target: { gateway: 'web', conversationId: CONVERSATION },
+      target: { gateway: 'web', chatId: CHAT },
     }) as { routine: { id: string } }
     await settings.handle('routine-run', { id: created.routine.id })
 
@@ -126,7 +126,7 @@ describe('web Settings reads a routine’s runs', () => {
     const created = await settings.handle('routine-add', {
       prompt: 'screenshot the page',
       every: '6h',
-      target: { gateway: 'web', conversationId: CONVERSATION },
+      target: { gateway: 'web', chatId: CHAT },
       allow: ['send_file'],
     }) as { routine: { id: string } }
 
@@ -148,15 +148,15 @@ describe('web Settings reads a routine’s runs', () => {
     const created = await settings.handle('routine-add', {
       prompt: 'look at the repo',
       every: '6h',
-      target: { gateway: 'web', conversationId: CONVERSATION },
+      target: { gateway: 'web', chatId: CHAT },
     }) as { routine: { id: string } }
     const { runId } = await settings.handle('routine-run', { id: created.routine.id }) as { runId: string }
 
-    const before = (await runtime.getSession({ gateway: 'web', conversationId: CONVERSATION })).id
+    const before = (await runtime.getSession({ gateway: 'web', chatId: CHAT })).id
     await settings.handle('run-transcript', { id: runId })
     // Read-only: the run is loaded and drawn, never bound — so opening a past run
     // does not move the conversation somebody is sitting in.
-    expect((await runtime.getSession({ gateway: 'web', conversationId: CONVERSATION })).id).toBe(before)
+    expect((await runtime.getSession({ gateway: 'web', chatId: CHAT })).id).toBe(before)
   })
 
   it('says so when the run or the routine is not there', async () => {
@@ -172,7 +172,7 @@ describe('web Settings reads a routine’s runs', () => {
     const created = await settings.handle('routine-add', {
       prompt: 'look at the repo',
       every: '6h',
-      target: { gateway: 'web', conversationId: CONVERSATION },
+      target: { gateway: 'web', chatId: CHAT },
     }) as { routine: { id: string } }
 
     type View = { id: string; nextRunAt: number | null; nextRuns: number[] }

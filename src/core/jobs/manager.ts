@@ -12,6 +12,7 @@ import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import { ensurePrivateDir, writePrivateFile } from '../../util/fs.js'
 import { jobDir, jobLogFile, jobMetaFile, jobsDir } from '../config/paths.js'
+import { readScope } from '../memory/types.js'
 import type {
   JobFacts,
   JobInfo,
@@ -398,7 +399,7 @@ export class JobManager {
         command: parsed.command,
         cwd: typeof parsed.cwd === 'string' ? parsed.cwd : '',
         notify: (parsed.notify as JobNotify) ?? 'auto',
-        origin: parsed.origin ?? { gateway: 'local', conversationId: 'install' },
+        origin: readScope(parsed.origin) ?? { gateway: 'local', chatId: 'install' },
         sessionId: typeof parsed.sessionId === 'string' ? parsed.sessionId : undefined,
         state: (parsed.state as JobState) ?? 'error',
         startedAt: typeof parsed.startedAt === 'number' ? parsed.startedAt : 0,

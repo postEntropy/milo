@@ -25,7 +25,7 @@ import type { Item } from './transcript.js'
 
 type Screen = 'setup' | 'chat' | 'model' | 'settings'
 
-const CLI_SCOPE: MemoryScope = { gateway: 'cli', conversationId: 'main' }
+const CLI_SCOPE: MemoryScope = { gateway: 'cli', chatId: 'main' }
 
 export interface ShellProps {
   initial: LoadedConfig | null

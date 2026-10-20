@@ -183,7 +183,7 @@ describe('a capability the registry can add is named in the prompt', () => {
             command: 'echo hi',
             cwd: '/tmp/x',
             notify: 'auto',
-            origin: { gateway: 'cli', conversationId: 'c' },
+            origin: { gateway: 'cli', chatId: 'c' },
             state: 'running',
             startedAt: Date.now(),
             logPath: '/tmp/x/output.log',

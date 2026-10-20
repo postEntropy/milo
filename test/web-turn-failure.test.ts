@@ -10,7 +10,7 @@ process.env.MILO_HOME = home
 const { WebHub } = await import('../src/gateways/web/hub.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 
-const CONVERSATION = '11111111-2222-3333-4444-555555555555'
+const CHAT = '11111111-2222-3333-4444-555555555555'
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true })
@@ -78,8 +78,8 @@ describe('a web turn that fails', () => {
     const frames: Frame[] = []
     const page = client(frames)
 
-    await hub.connect(page, CONVERSATION)
-    hub.handle(page, { type: 'send', text: 'do it' }, CONVERSATION)
+    await hub.connect(page, CHAT)
+    hub.handle(page, { type: 'send', text: 'do it' }, CHAT)
     await waitFor(() => frames.some((frame) => frame.type === 'turn-end'))
 
     const failure = frames.find((frame) => frame.type === 'event' && frame.event?.type === 'error')
@@ -92,7 +92,7 @@ describe('a web turn that fails', () => {
 
     // The trace is the one seen by hand: the turn stopped on its last tool result,
     // and the refusal was written after it, where a reopened conversation reads it.
-    const session = await runtime.getSession({ gateway: 'web', conversationId: CONVERSATION })
+    const session = await runtime.getSession({ gateway: 'web', chatId: CHAT })
     await waitFor(() => session.messages.at(-1)?.role === 'assistant')
     expect(session.messages.some((message) => message.role === 'tool')).toBe(true)
     expect(JSON.stringify(session.messages.at(-1)?.content)).toContain(
@@ -118,14 +118,14 @@ describe('a web turn that fails', () => {
     const frames: Frame[] = []
     const page = client(frames)
 
-    await hub.connect(page, CONVERSATION)
-    hub.handle(page, { type: 'send', text: 'do it' }, CONVERSATION)
+    await hub.connect(page, CHAT)
+    hub.handle(page, { type: 'send', text: 'do it' }, CHAT)
     await waitFor(() => frames.some((frame) => frame.type === 'turn-end'))
     expect(frames.find((frame) => frame.type === 'event' && frame.event?.type === 'error')?.event?.message)
       .toBe('the session store is gone')
 
     const reopened: Frame[] = []
-    await hub.connect(client(reopened), CONVERSATION)
+    await hub.connect(client(reopened), CHAT)
     const text = (reopened.find((frame) => frame.type === 'ready')?.messages ?? [])
       .flatMap((message) => message.parts)
       .filter((part) => part.kind === 'text')

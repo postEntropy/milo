@@ -7,7 +7,7 @@ import { TURNS_SQL, TurnIndex, turnIndexFile } from '../src/core/memory/turns.js
 
 const tempDir = () => mkdtempSync(path.join(tmpdir(), 'milo-turns-'))
 
-const scope = { gateway: 'cli', conversationId: 'main' }
+const scope = { gateway: 'cli', chatId: 'main' }
 const DAY = '2026-09-25'
 
 function entry(kind: string, text: string, extra: Record<string, unknown> = {}) {

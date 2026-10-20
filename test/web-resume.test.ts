@@ -54,10 +54,10 @@ describe('opening a past session in the web', () => {
     const settings = new WebSettings(runtime, home)
     const hub = new WebHub(runtime)
 
-    const past = await runtime.newSession({ gateway: 'web', conversationId: PAST_CONVERSATION })
+    const past = await runtime.newSession({ gateway: 'web', chatId: PAST_CONVERSATION })
     await past.appendNotice('the thing we talked about')
 
-    await settings.handle('resume-session', { conversationId: NEXT_CONVERSATION, id: past.id })
+    await settings.handle('resume-session', { chatId: NEXT_CONVERSATION, id: past.id })
     const frames: ServerFrame[] = []
     await hub.connect({ send: (frame) => frames.push(frame) }, NEXT_CONVERSATION)
 
@@ -103,7 +103,7 @@ describe('what the ready frame says about the session', () => {
     const project = await withProject(settings)
     // The Work screen's own move: a session started in a project. The socket opens the
     // conversation right after, and the project is said there — before a word is written.
-    await settings.handle('new-session', { conversationId: PAST_CONVERSATION, project: project.id })
+    await settings.handle('new-session', { chatId: PAST_CONVERSATION, project: project.id })
 
     const frames: ServerFrame[] = []
     await new WebHub(runtime).connect({ send: (frame) => frames.push(frame) }, PAST_CONVERSATION)
@@ -117,7 +117,7 @@ describe('what the ready frame says about the session', () => {
     const settings = new WebSettings(runtime, home)
     const project = await withProject(settings)
     rmSync(where, { recursive: true })
-    await settings.handle('new-session', { conversationId: PAST_CONVERSATION, project: project.id })
+    await settings.handle('new-session', { chatId: PAST_CONVERSATION, project: project.id })
 
     const frames: ServerFrame[] = []
     await new WebHub(runtime).connect({ send: (frame) => frames.push(frame) }, PAST_CONVERSATION)
@@ -129,7 +129,7 @@ describe('what the ready frame says about the session', () => {
 
   it('says nothing about a project on an ordinary chat', async () => {
     const runtime = build()
-    await runtime.newSession({ gateway: 'web', conversationId: PAST_CONVERSATION })
+    await runtime.newSession({ gateway: 'web', chatId: PAST_CONVERSATION })
 
     const frames: ServerFrame[] = []
     await new WebHub(runtime).connect({ send: (frame) => frames.push(frame) }, PAST_CONVERSATION)

@@ -10,7 +10,7 @@ process.env.MILO_HOME = home
 const { WebHub } = await import('../src/gateways/web/hub.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 
-const CONVERSATION = '11111111-2222-3333-4444-555555555555'
+const CHAT = '11111111-2222-3333-4444-555555555555'
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true })
@@ -71,8 +71,8 @@ describe('a web turn’s copies on the wire', () => {
     const frames: Frame[] = []
     const page = client(frames)
 
-    await hub.connect(page, CONVERSATION)
-    hub.handle(page, { type: 'send', text: 'look at a.txt' }, CONVERSATION)
+    await hub.connect(page, CHAT)
+    hub.handle(page, { type: 'send', text: 'look at a.txt' }, CHAT)
     await waitFor(() => frames.some((frame) => frame.type === 'turn-end'))
 
     const end = frames.find((frame) => frame.type === 'turn-end')

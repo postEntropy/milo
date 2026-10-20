@@ -216,7 +216,7 @@ export class DiscordGateway implements Gateway {
 
       const context: ActionContext = {
         gateway: 'discord',
-        conversationId: interaction.channelId ?? '',
+        chatId: interaction.channelId ?? '',
         userId: interaction.user.id,
         messageId: interaction.message?.id,
         answer: async () => {},
@@ -283,7 +283,7 @@ export class DiscordGateway implements Gateway {
     images: ImagePart[] = [],
     files?: IncomingFile[],
   ): Promise<void> {
-    const scope: MemoryScope = { gateway: 'discord', conversationId: message.channelId }
+    const scope: MemoryScope = { gateway: 'discord', chatId: message.channelId }
     const session = await this.options.runtime.sessionFor(scope)
     // The same answer that decides whether `/sessions` is locked decides whether the
     // agent sees the `sessions` tool: an allowlist naming this channel is a room, and
@@ -341,11 +341,11 @@ export class DiscordGateway implements Gateway {
 
     let postedMessage: Message | null = null
     const surface: ChatSurface = {
-      post: async (_conversationId, placeholder) => {
+      post: async (_chatId, placeholder) => {
         postedMessage = await message.reply(placeholder)
         return postedMessage.id
       },
-      edit: async (_conversationId, messageId, value) => {
+      edit: async (_chatId, messageId, value) => {
         try {
           const target =
             postedMessage && postedMessage.id === messageId
@@ -356,15 +356,15 @@ export class DiscordGateway implements Gateway {
           logWarn(`discord: could not edit message ${messageId}: ${errorMessage(error)}`)
         }
       },
-      ask: (_conversationId, _messageId, request) => ask(message, request, signal),
-      files: (_conversationId, files) => this.postFiles(message.channelId, files),
+      ask: (_chatId, _messageId, request) => ask(message, request, signal),
+      files: (_chatId, files) => this.postFiles(message.channelId, files),
       typing: () => this.typing(message.channel),
     }
 
     const display = readDisplay()
     const failure = await runTurns({
       session,
-      conversationId: message.channelId,
+      chatId: message.channelId,
       text,
       surface,
       maxLength: MAX_LENGTH,
@@ -412,8 +412,8 @@ export class DiscordGateway implements Gateway {
    * messages, with no turn behind it. Discord shows a picture from its file
    * attachments directly, so every file rides as one.
    */
-  async deliver(conversationId: string, message: OutgoingMessage): Promise<void> {
-    const channel = await this.sendable(conversationId)
+  async deliver(chatId: string, message: OutgoingMessage): Promise<void> {
+    const channel = await this.sendable(chatId)
     const text = message.text ?? ''
     const files = message.files ?? []
 
@@ -440,8 +440,8 @@ export class DiscordGateway implements Gateway {
    * A live turn's own files, posted once the turn is over. The answer is already
    * in the channel, so the files follow it as their own messages.
    */
-  private async postFiles(conversationId: string, files: OutgoingFile[]): Promise<void> {
-    const channel = await this.sendable(conversationId)
+  private async postFiles(chatId: string, files: OutgoingFile[]): Promise<void> {
+    const channel = await this.sendable(chatId)
     const { AttachmentBuilder } = await import('discord.js')
     for (let index = 0; index < files.length; index += FILES_PER_MESSAGE) {
       const builders = files
@@ -452,12 +452,12 @@ export class DiscordGateway implements Gateway {
   }
 
   /** The channel a delivery can be sent to, or a throw saying why it cannot. */
-  private async sendable(conversationId: string) {
+  private async sendable(chatId: string) {
     const client = this.client
     if (!client) throw new Error('discord gateway is not running')
-    const channel = await client.channels.fetch(conversationId)
+    const channel = await client.channels.fetch(chatId)
     if (!channel?.isSendable()) {
-      throw new Error(`discord channel ${conversationId} cannot receive messages`)
+      throw new Error(`discord channel ${chatId} cannot receive messages`)
     }
     return channel
   }

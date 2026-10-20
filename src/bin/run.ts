@@ -32,15 +32,15 @@ export interface RunSession {
 /** The part of a runtime `milo run` uses. Narrow, so a test can answer without one. */
 export interface RunRuntime {
   newSession(
-    scope: { gateway: string; conversationId: string },
+    scope: { gateway: string; chatId: string },
     title?: string,
     options?: { project?: string },
   ): Promise<RunSession>
   resumeSession(
-    scope: { gateway: string; conversationId: string },
+    scope: { gateway: string; chatId: string },
     id: string,
   ): Promise<RunSession | null>
-  getSession(scope: { gateway: string; conversationId: string }): Promise<RunSession>
+  getSession(scope: { gateway: string; chatId: string }): Promise<RunSession>
   permissions?: { update(options: { mode?: PermissionMode; allow?: string[] }): void }
   close(): Promise<void>
 }
@@ -62,7 +62,7 @@ export interface RunDeps {
 }
 
 /** The terminal's own scope, so `--continue` reaches the session it last used. */
-const RUN_SCOPE = { gateway: 'cli', conversationId: 'main' }
+const RUN_SCOPE = { gateway: 'cli', chatId: 'main' }
 
 const defaultIo: RunIo = {
   out: (text) => process.stdout.write(text),

@@ -111,7 +111,7 @@ async function ask(session: Session, input: string) {
 describe('a fact said in one message, asked about in the next', () => {
   it('answers from it within the same session', async () => {
     const provider = new NoteReadingProvider()
-    const { build } = install({ gateway: 'cli', conversationId: 'editor' }, provider)
+    const { build } = install({ gateway: 'cli', chatId: 'editor' }, provider)
     const session = await build()
 
     const before = await ask(session, 'my editor is Neovim')
@@ -129,7 +129,7 @@ describe('a fact said in one message, asked about in the next', () => {
 
   it('answers from it in a brand-new session whose transcript is empty', async () => {
     const provider = new NoteReadingProvider()
-    const { build } = install({ gateway: 'cli', conversationId: 'editor-new' }, provider)
+    const { build } = install({ gateway: 'cli', chatId: 'editor-new' }, provider)
 
     await ask(await build(), 'my editor is Neovim')
 
@@ -145,7 +145,7 @@ describe('a fact said in one message, asked about in the next', () => {
 
   it('answers "I do not know" when nothing was ever stored', async () => {
     const { build } = install(
-      { gateway: 'cli', conversationId: 'editor-unknown' },
+      { gateway: 'cli', chatId: 'editor-unknown' },
       new NoteReadingProvider(),
     )
     const { answer } = await ask(await build(), 'which editor do I use?')
@@ -166,7 +166,7 @@ describe('a fact said in one message, asked about in the next', () => {
       },
       { type: 'done', finishReason: 'tool_calls' },
     ])
-    const { build } = install({ gateway: 'cli', conversationId: 'deploy' }, provider)
+    const { build } = install({ gateway: 'cli', chatId: 'deploy' }, provider)
 
     const saved = await ask(await build(), 'note that for later')
     expect(saved.events).toContainEqual(
@@ -179,12 +179,12 @@ describe('a fact said in one message, asked about in the next', () => {
 
   it('answers in one surface what was said in another', async () => {
     const provider = new NoteReadingProvider()
-    const { build } = install({ gateway: 'cli', conversationId: 'unused' }, provider)
+    const { build } = install({ gateway: 'cli', chatId: 'unused' }, provider)
 
-    await ask(await build({ gateway: 'cli', conversationId: 'main' }), 'my editor is Neovim')
+    await ask(await build({ gateway: 'cli', chatId: 'main' }), 'my editor is Neovim')
 
     const { answer } = await ask(
-      await build({ gateway: 'telegram', conversationId: '8924510981' }),
+      await build({ gateway: 'telegram', chatId: '8924510981' }),
       'which editor do I use?',
     )
     expect(answer).toContain('Neovim')
@@ -215,7 +215,7 @@ describe('reading a finished turn for facts', () => {
     }
 
     const { build, memory, scope } = install(
-      { gateway: 'cli', conversationId: 'derive' },
+      { gateway: 'cli', chatId: 'derive' },
       provider,
       { derive: true },
     )
@@ -244,7 +244,7 @@ describe('reading a finished turn for facts', () => {
       },
     }
 
-    const { build } = install({ gateway: 'cli', conversationId: 'no-derive' }, provider)
+    const { build } = install({ gateway: 'cli', chatId: 'no-derive' }, provider)
     const session = await build()
     await ask(session, 'oi')
     await session.settle()

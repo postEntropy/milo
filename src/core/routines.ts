@@ -45,7 +45,7 @@ export type RoutineWhen =
  * a log, not a message.
  */
 export type RoutineTarget =
-  | { gateway: RoutineGateway; conversationId: string }
+  | { gateway: RoutineGateway; chatId: string }
   | { gateway: 'none' }
 
 export interface Routine {
@@ -314,7 +314,7 @@ function describeDayPart(when: Extract<RoutineWhen, { kind: 'at' }>): string {
 }
 
 export function describeTarget(target: RoutineTarget): string {
-  return target.gateway === 'none' ? 'the Routines screen' : `${target.gateway}:${target.conversationId}`
+  return target.gateway === 'none' ? 'the Routines screen' : `${target.gateway}:${target.chatId}`
 }
 
 /**
@@ -366,7 +366,7 @@ function readRoutinesStrict(): Routine[] {
     throw new Error(`routines.json is not valid JSON: ${errorMessage(error)}`)
   }
   if (!Array.isArray(parsed)) throw new Error('routines.json does not hold a list.')
-  return parsed.filter(isRoutine).map((routine) => ({
+  return parsed.map(readRoutine).filter(isRoutine).map((routine) => ({
     ...routine,
     enabled: routine.enabled !== false,
     allow: Array.isArray(routine.allow)
@@ -629,7 +629,7 @@ export async function runRoutineOnce(
   routine: Routine,
 ): Promise<RoutineRunResult> {
   const session = await runtime.newSession(
-    { gateway: ROUTINE_GATEWAY, conversationId: routine.id },
+    { gateway: ROUTINE_GATEWAY, chatId: routine.id },
     routine.name,
     // A run always has somewhere for a file to land: its own record, which the
     // Routines screen draws. A `none` routine posts to no chat, and that is the
@@ -638,7 +638,7 @@ export async function runRoutineOnce(
     {
       grantedTools: routine.allow,
       deliverTo: routine.target.gateway === 'none'
-        ? { gateway: ROUTINE_GATEWAY, conversationId: routine.id }
+        ? { gateway: ROUTINE_GATEWAY, chatId: routine.id }
         : routine.target,
     },
   )
@@ -1002,6 +1002,27 @@ function describeMonths(months: number[]): string {
   return [...months].sort((a, b) => a - b).map((month) => MONTH_LABELS[month - 1]!).join(', ')
 }
 
+/**
+ * A routine as it was written to disk, with its destination read under the name
+ * the chat field went by before the rename. Translated before the list is
+ * filtered: read the old name as absent and the routine would disappear from the
+ * list instead of keeping the chat it delivers to.
+ */
+function readRoutine(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const routine = value as Record<string, unknown>
+  return { ...routine, target: readTarget(routine.target) }
+}
+
+function readTarget(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value
+  const target = value as Record<string, unknown>
+  if (target.chatId !== undefined || target.gateway === 'none') return value
+  if (typeof target.conversationId !== 'string') return value
+  const { conversationId: legacy, ...rest } = target
+  return { ...rest, chatId: legacy }
+}
+
 function isRoutine(value: unknown): value is Routine {
   if (!value || typeof value !== 'object') return false
   const routine = value as Record<string, unknown>
@@ -1045,7 +1066,7 @@ function isTarget(value: unknown): value is RoutineTarget {
   if (target.gateway === 'none') return true
   return (
     ROUTINE_GATEWAYS.includes(target.gateway as RoutineGateway) &&
-    typeof target.conversationId === 'string' &&
-    target.conversationId.length > 0
+    typeof target.chatId === 'string' &&
+    target.chatId.length > 0
   )
 }

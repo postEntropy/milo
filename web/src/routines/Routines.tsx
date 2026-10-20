@@ -86,7 +86,7 @@ const GATEWAYS = [
  * person's. It lives here rather than in Settings because a routine is a thing
  * you use, not a setting you configure.
  */
-export function Routines({ conversationId, chat, tick }: { conversationId: string; chat: RoutinesChat; tick: number }) {
+export function Routines({ chatId, chat, tick }: { chatId: string; chat: RoutinesChat; tick: number }) {
   const [routines, setRoutines] = useState<RoutineSummary[] | null>(null)
   const [routineId, setRoutineId] = useState<string | null>(null)
   /** The run a timeline row asked for, opened when its routine's page mounts. */
@@ -145,7 +145,7 @@ export function Routines({ conversationId, chat, tick }: { conversationId: strin
     setOpenedRun(null)
   }
 
-  if (composing) return <NewRoutine conversationId={conversationId} chat={chat} onBack={close} />
+  if (composing) return <NewRoutine chatId={chatId} chat={chat} onBack={close} />
   const routine = routines?.find((entry) => entry.id === routineId)
   if (routine) return <RoutineDetail
     key={routine.id}
@@ -480,10 +480,10 @@ function RoutineDetail({
   </Shell>
 }
 
-function NewRoutine({ conversationId, chat, onBack }: { conversationId: string; chat: RoutinesChat; onBack(): void }) {
+function NewRoutine({ chatId, chat, onBack }: { chatId: string; chat: RoutinesChat; onBack(): void }) {
   const [ask, setAsk] = useState('')
   const [gateway, setGateway] = useState<SendTarget['gateway']>('web')
-  const [target, setTarget] = useState(conversationId)
+  const [target, setTarget] = useState(chatId)
   /** Where the creation turn starts in the chat's transcript; null until asked. */
   const [createdFrom, setCreatedFrom] = useState<number | null>(null)
 
@@ -498,8 +498,8 @@ function NewRoutine({ conversationId, chat, onBack }: { conversationId: string; 
     // is pinned on the turn, so a routine named for Telegram is made for
     // Telegram even though the chat it was asked in is this one.
     chat.send(text, gateway === 'web'
-      ? { gateway: 'web', conversationId }
-      : { gateway, conversationId: gateway === 'none' ? conversationId : target.trim() })
+      ? { gateway: 'web', chatId }
+      : { gateway, chatId: gateway === 'none' ? chatId : target.trim() })
   }
 
   /** What has been asked here and answered here: nothing until the first ask. */
@@ -524,10 +524,10 @@ function NewRoutine({ conversationId, chat, onBack }: { conversationId: string; 
             onChange={(next) => {
               const picked = next as SendTarget['gateway']
               setGateway(picked)
-              setTarget(picked === 'web' ? conversationId : '')
+              setTarget(picked === 'web' ? chatId : '')
             }}
           /></Field>
-          <Field label="Conversation id"><input value={target} onChange={(event) => setTarget(event.target.value)} placeholder="a chat or channel id" disabled={gateway === 'web' || gateway === 'none'} /><small>{gateway === 'web' ? 'This browser’s conversation.' : gateway === 'none' ? 'Kept on the Routines screen — no chat.' : 'The chat to post into.'}</small></Field>
+          <Field label="Chat id"><input value={target} onChange={(event) => setTarget(event.target.value)} placeholder="a chat or channel id" disabled={gateway === 'web' || gateway === 'none'} /><small>{gateway === 'web' ? 'This browser’s chat.' : gateway === 'none' ? 'Kept on the Routines screen — no chat.' : 'The chat to post into.'}</small></Field>
         </div>
       </div>
       <div className="ask-actions">

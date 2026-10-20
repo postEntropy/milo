@@ -26,13 +26,13 @@ describe('installMemory', () => {
   it('files every conversation in the same memory', async () => {
     const memory = installMemory(new SqliteMemory({ dir: tempDir() }))
 
-    await memory.remember({ gateway: 'cli', conversationId: 'main' }, [
+    await memory.remember({ gateway: 'cli', chatId: 'main' }, [
       { text: 'a tag de release e v0.1.0' },
     ])
 
     // A different surface and a different conversation: the same memory.
     const hits = await memory.recall(
-      { gateway: 'telegram', conversationId: '8924510981' },
+      { gateway: 'telegram', chatId: '8924510981' },
       'qual a tag de release?',
     )
     expect(hits.some((hit) => hit.text.includes('release'))).toBe(true)
@@ -41,11 +41,11 @@ describe('installMemory', () => {
   it('answers from the facts first and fills the rest with what was said', async () => {
     const turns = history([note('meu editor e o neovim'), note('uso tmux tambem')])
     const memory = installMemory(new SqliteMemory({ dir: tempDir() }), turns)
-    await memory.remember({ gateway: 'cli', conversationId: 'main' }, [
+    await memory.remember({ gateway: 'cli', chatId: 'main' }, [
       { text: 'prefere bullet points' },
     ])
 
-    const hits = await memory.recall({ gateway: 'cli', conversationId: 'main' }, 'bullet tmux', {
+    const hits = await memory.recall({ gateway: 'cli', chatId: 'main' }, 'bullet tmux', {
       limit: 3,
     })
 
@@ -68,11 +68,11 @@ describe('installMemory', () => {
   it('does not ask the history when the facts already fill the reply', async () => {
     const turns = history([note('nao deveria aparecer')])
     const memory = installMemory(new SqliteMemory({ dir: tempDir() }), turns)
-    await memory.remember({ gateway: 'cli', conversationId: 'main' }, [
+    await memory.remember({ gateway: 'cli', chatId: 'main' }, [
       { text: 'prefere bullet points' },
     ])
 
-    const hits = await memory.recall({ gateway: 'cli', conversationId: 'main' }, 'bullet', {
+    const hits = await memory.recall({ gateway: 'cli', chatId: 'main' }, 'bullet', {
       limit: 1,
     })
     expect(hits.map((hit) => hit.text)).toEqual(['prefere bullet points'])
@@ -84,11 +84,11 @@ describe('installMemory', () => {
     // A fact and the turn it was extracted from: the same words, so one line.
     const turns = history([note('prefere bullet points'), note('a senha gira na segunda')])
     const memory = installMemory(new SqliteMemory({ dir: tempDir() }), turns)
-    await memory.remember({ gateway: 'cli', conversationId: 'main' }, [
+    await memory.remember({ gateway: 'cli', chatId: 'main' }, [
       { text: 'Prefere bullet points' },
     ])
 
-    const hits = await memory.recall({ gateway: 'cli', conversationId: 'main' }, 'bullet senha', {
+    const hits = await memory.recall({ gateway: 'cli', chatId: 'main' }, 'bullet senha', {
       limit: 5,
     })
     expect(hits.map((hit) => hit.text)).toEqual([
@@ -99,9 +99,9 @@ describe('installMemory', () => {
 
   it('answers from the facts alone when the install has no history index', async () => {
     const memory = installMemory(new SqliteMemory({ dir: tempDir() }))
-    await memory.remember({ gateway: 'cli', conversationId: 'main' }, [{ text: 'um fato so' }])
+    await memory.remember({ gateway: 'cli', chatId: 'main' }, [{ text: 'um fato so' }])
 
-    const hits = await memory.recall({ gateway: 'cli', conversationId: 'main' }, 'fato', {
+    const hits = await memory.recall({ gateway: 'cli', chatId: 'main' }, 'fato', {
       limit: 5,
     })
     expect(hits.map((hit) => hit.text)).toEqual(['um fato so'])
@@ -123,10 +123,10 @@ describe('a store older than the one scope', () => {
   it('moves notes filed per conversation into the install scope', async () => {
     const dir = tempDir()
     const before = new SqliteMemory({ dir })
-    await before.remember({ gateway: 'cli', conversationId: 'main' }, [
+    await before.remember({ gateway: 'cli', chatId: 'main' }, [
       { text: 'o deploy sai na sexta' },
     ])
-    await before.remember({ gateway: 'telegram', conversationId: '42' }, [
+    await before.remember({ gateway: 'telegram', chatId: '42' }, [
       { text: 'a senha gira na segunda' },
     ])
     before.close()
@@ -140,7 +140,7 @@ describe('a store older than the one scope', () => {
     ])
     // And nothing is left behind under the conversation it was filed in.
     expect(
-      await after.recall({ gateway: 'cli', conversationId: 'main' }, 'deploy', { limit: 5 }),
+      await after.recall({ gateway: 'cli', chatId: 'main' }, 'deploy', { limit: 5 }),
     ).toEqual([])
     after.close()
   })
@@ -148,10 +148,10 @@ describe('a store older than the one scope', () => {
   it('keeps one row when the same note was filed in two conversations', async () => {
     const dir = tempDir()
     const before = new SqliteMemory({ dir })
-    await before.remember({ gateway: 'cli', conversationId: 'main' }, [
+    await before.remember({ gateway: 'cli', chatId: 'main' }, [
       { text: 'a senha gira na segunda' },
     ])
-    await before.remember({ gateway: 'telegram', conversationId: '42' }, [
+    await before.remember({ gateway: 'telegram', chatId: '42' }, [
       { text: 'A senha gira na segunda' },
     ])
     before.close()
@@ -166,7 +166,7 @@ describe('a store older than the one scope', () => {
   it('does not duplicate anything when the store is reopened', async () => {
     const dir = tempDir()
     const first = new SqliteMemory({ dir })
-    await first.remember({ gateway: 'cli', conversationId: 'main' }, [
+    await first.remember({ gateway: 'cli', chatId: 'main' }, [
       { text: 'o deploy sai na sexta' },
     ])
     first.close()

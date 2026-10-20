@@ -136,11 +136,11 @@ function describeMcpServer(server: McpServer): string {
 const TOOL_DETAIL_LABELS: Record<(typeof TOOL_LEVELS)[number], string> = { full: 'Full detail', name: 'Name only', off: 'Hidden' }
 const REASONING_LABELS: Record<(typeof THINKING_LEVELS)[number], string> = { expanded: 'Expanded', collapsed: 'Collapsed' }
 
-export function Settings({ section, onSection, conversationId, sessionId, onClose, onSessionChange, theme, onThemeChange, onDirtyChange }: {
+export function Settings({ section, onSection, chatId, sessionId, onClose, onSessionChange, theme, onThemeChange, onDirtyChange }: {
   /** The open section; null is the index of them, which a phone shows and a wide screen replaces with the first. */
   section: string | null
   onSection(section: string | null): void
-  conversationId: string
+  chatId: string
   sessionId: string
   onClose(): void
   onSessionChange(id: string): void
@@ -774,10 +774,10 @@ export function Settings({ section, onSection, conversationId, sessionId, onClos
           {data.sessions.length === 0 ? <p className="list-empty">No saved sessions yet.</p> : data.sessions.map((session) => <div className="entry-row" key={session.id}>
             <div><div className="secret-name">{session.title || session.preview || session.id}{session.id === sessionId ? ' · current' : ''}</div><div className="secret-state">{session.preview} · {session.messageCount} msgs · {formatWhen(session.updatedAt)}</div></div>
             <div className="row-actions">
-              <button className="button" type="button" onClick={async () => { await api('resume-session', { conversationId, id: session.id }); onSessionChange(session.id) }}>Open</button>
+              <button className="button" type="button" onClick={async () => { await api('resume-session', { chatId, id: session.id }); onSessionChange(session.id) }}>Open</button>
               <button className="button" type="button" onClick={() => void exportSession(session.id)}><Icon name="download" size={13} /></button>
               {session.id === sessionId
-                ? <button className="button" type="button" onClick={async () => { await api('clear-session', { conversationId }); await load(); setNotice({ text: 'Conversation cleared.', error: false }) }}>Clear</button>
+                ? <button className="button" type="button" onClick={async () => { await api('clear-session', { chatId }); await load(); setNotice({ text: 'Session cleared.', error: false }) }}>Clear</button>
                 : <button className="button danger" type="button" onClick={() => void deleteSession(session.id)}><Icon name="trash" size={13} /></button>}
             </div>
           </div>)}

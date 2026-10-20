@@ -14,7 +14,7 @@ const { WebHub } = await import('../src/gateways/web/hub.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { createToolRegistry } = await import('../src/core/tools/index.js')
 
-const CONVERSATION = '11111111-2222-3333-4444-555555555555'
+const CHAT = '11111111-2222-3333-4444-555555555555'
 
 /**
  * The configuration this home runs on. Drawing is off unless it is turned on, so this
@@ -157,9 +157,9 @@ function widget(label: string, id: string): Record<string, unknown> {
 async function turn(hub: InstanceType<typeof WebHub>, genui?: boolean): Promise<ServerFrame[]> {
   const frames: ServerFrame[] = []
   const client = { send: (frame: ServerFrame) => frames.push(frame) }
-  await hub.connect(client, CONVERSATION, genui)
+  await hub.connect(client, CHAT, genui)
   frames.length = 0
-  hub.handle(client, { type: 'send', text: 'make me a savings calculator' }, CONVERSATION)
+  hub.handle(client, { type: 'send', text: 'make me a savings calculator' }, CHAT)
   expect(await waitFor(() => frames.some((frame) => frame.type === 'turn-end'))).toBe(true)
   return frames
 }
@@ -175,7 +175,7 @@ function proseOf(frames: ServerFrame[]): string {
 /** Opens the conversation again and reads the assistant's turn back, the way a reload does. */
 async function reopen(runtime: InstanceType<typeof AgentRuntime>, genui: boolean): Promise<TranscriptPart[]> {
   const opening: ServerFrame[] = []
-  await new WebHub(runtime, home).connect({ send: (frame) => opening.push(frame) }, CONVERSATION, genui)
+  await new WebHub(runtime, home).connect({ send: (frame) => opening.push(frame) }, CHAT, genui)
   const ready = opening.find((frame): frame is Extract<ServerFrame, { type: 'ready' }> => frame.type === 'ready')
   return (ready?.messages ?? [])
     .filter((message) => message.role === 'assistant')

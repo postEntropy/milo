@@ -11,7 +11,7 @@ const { WebHub } = await import('../src/gateways/web/hub.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { JobManager } = await import('../src/core/jobs/index.js')
 
-const CONVERSATION = '11111111-2222-3333-4444-555555555555'
+const CHAT = '11111111-2222-3333-4444-555555555555'
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true })
@@ -53,7 +53,7 @@ describe('the jobs strip', () => {
     const jobs = new JobManager()
     const hub = new WebHub(build(jobs))
     const frames: Frame[] = []
-    await hub.connect(client(frames), CONVERSATION)
+    await hub.connect(client(frames), CHAT)
     const sessionId = frames.find((frame) => frame.type === 'ready')?.sessionId
     expect(sessionId).toEqual(expect.any(String))
 
@@ -62,13 +62,13 @@ describe('the jobs strip', () => {
     const mine = jobs.start({
       command: 'sleep 30',
       cwd: home,
-      origin: { gateway: 'web', conversationId: CONVERSATION },
+      origin: { gateway: 'web', chatId: CHAT },
       sessionId,
     })
     jobs.start({
       command: 'sleep 30',
       cwd: home,
-      origin: { gateway: 'web', conversationId: 'another-conversation' },
+      origin: { gateway: 'web', chatId: 'another-conversation' },
       sessionId: 'another-session',
     })
     expect(mine.ok).toBe(true)
@@ -84,7 +84,7 @@ describe('the jobs strip', () => {
     const elsewhere = jobs.start({
       command: 'sleep 30',
       cwd: home,
-      origin: { gateway: 'web', conversationId: 'another-conversation' },
+      origin: { gateway: 'web', chatId: 'another-conversation' },
       sessionId: 'another-session',
     })
     expect(elsewhere.ok).toBe(true)
@@ -92,8 +92,8 @@ describe('the jobs strip', () => {
 
     const frames: Frame[] = []
     const page = client(frames)
-    await hub.connect(page, CONVERSATION)
-    hub.handle(page, { type: 'job-kill', id: elsewhere.job.id }, CONVERSATION)
+    await hub.connect(page, CHAT)
+    hub.handle(page, { type: 'job-kill', id: elsewhere.job.id }, CHAT)
 
     // The job is still running: this conversation did not start it.
     expect(jobs.get(elsewhere.job.id)?.state).toBe('running')

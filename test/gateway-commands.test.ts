@@ -30,7 +30,7 @@ describe('/jobs', () => {
     command: 'yt-dlp https://example.com/v',
     cwd: '/',
     notify: 'auto',
-    origin: { gateway: 'cli', conversationId: 'main' },
+    origin: { gateway: 'cli', chatId: 'main' },
     state: 'running',
     startedAt: Date.now() - 65_000,
     logPath: '/l',

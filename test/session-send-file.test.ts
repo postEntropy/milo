@@ -32,7 +32,7 @@ class ShotProvider implements Provider {
 }
 
 /** A real turn over a real Session, with a file the tool can name. */
-async function run(deliverTo?: { gateway: string; conversationId: string }, gateway = 'routine') {
+async function run(deliverTo?: { gateway: string; chatId: string }, gateway = 'routine') {
   const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-send-'))
   const file = path.join(dir, 'shot.png')
   writeFileSync(file, 'not really a png')
@@ -41,7 +41,7 @@ async function run(deliverTo?: { gateway: string; conversationId: string }, gate
   const record = await store.create()
   const provider = new ShotProvider(file)
   const session = new Session({
-    scope: { gateway, conversationId: 'calm-otter-1' },
+    scope: { gateway, chatId: 'calm-otter-1' },
     provider,
     model: 'm',
     system: 'BASE',
@@ -62,7 +62,7 @@ async function run(deliverTo?: { gateway: string; conversationId: string }, gate
 
 describe('a turn that sends a file', () => {
   it('collects the file for the chat the session delivers to', async () => {
-    const { session, events, ended, provider } = await run({ gateway: 'telegram', conversationId: '123' })
+    const { session, events, ended, provider } = await run({ gateway: 'telegram', chatId: '123' })
 
     // Offered, because this turn has a chat to deliver to.
     expect(provider.offered[0]).toContain('send_file')

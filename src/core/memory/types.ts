@@ -1,7 +1,27 @@
 export interface MemoryScope {
   gateway: string
-  conversationId: string
+  chatId: string
   userId?: string
+}
+
+/**
+ * An address read back from disk. The chat field is named `chatId` everywhere now,
+ * but records written before the rename say `conversationId`; read as absent, a
+ * routine's old run would lose the chat it came from and an old job would forget
+ * where to announce its end. The name is translated here, once, and the caller gets
+ * the current shape.
+ */
+export function readScope(value: unknown): MemoryScope | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const raw = value as Record<string, unknown>
+  const chatId = typeof raw.chatId === 'string' ? raw.chatId : raw.conversationId
+  if (typeof raw.gateway !== 'string' || typeof chatId !== 'string') return undefined
+  if (raw.userId !== undefined && typeof raw.userId !== 'string') return undefined
+  return {
+    gateway: raw.gateway,
+    chatId,
+    ...(typeof raw.userId === 'string' ? { userId: raw.userId } : {}),
+  }
 }
 
 export interface MemoryInput {
@@ -66,7 +86,7 @@ export interface TurnSource {
 }
 
 export function scopeKey(scope: MemoryScope): string {
-  return [scope.gateway, scope.conversationId, scope.userId].filter(Boolean).join(':')
+  return [scope.gateway, scope.chatId, scope.userId].filter(Boolean).join(':')
 }
 
 /**
@@ -77,7 +97,7 @@ export function scopeKey(scope: MemoryScope): string {
  * The conversation scope still decides which *transcript* a message belongs to —
  * that is the part that stays per chat.
  */
-export const INSTALL_SCOPE: MemoryScope = { gateway: 'local', conversationId: 'install' }
+export const INSTALL_SCOPE: MemoryScope = { gateway: 'local', chatId: 'install' }
 
 /**
  * Enough of a note's id to name it without pasting a whole uuid: the prefix a

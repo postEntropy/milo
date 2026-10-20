@@ -13,7 +13,7 @@ const { AgentRuntime } = await import('../src/core/runtime.js')
 const { createToolRegistry } = await import('../src/core/tools/index.js')
 const { parseClientFrame } = await import('../src/gateways/web/protocol.js')
 
-const CONVERSATION = '11111111-2222-3333-4444-555555555555'
+const CHAT = '11111111-2222-3333-4444-555555555555'
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true })
@@ -75,9 +75,9 @@ function viewOf(frames: ServerFrame[]): PanelView | null {
 /** Opens the chat, runs one turn to completion, and hands back the client watching. */
 async function turn(hub: InstanceType<typeof WebHub>, frames: ServerFrame[]): Promise<{ send(frame: ServerFrame): void }> {
   const client = { send: (frame: ServerFrame) => frames.push(frame) }
-  await hub.connect(client, CONVERSATION)
+  await hub.connect(client, CHAT)
   frames.length = 0 // the handshake; only what follows is the turn
-  hub.handle(client, { type: 'send', text: 'show me' }, CONVERSATION)
+  hub.handle(client, { type: 'send', text: 'show me' }, CHAT)
   expect(await waitFor(() => frames.some((frame) => frame.type === 'turn-end'))).toBe(true)
   return client
 }
@@ -196,13 +196,13 @@ describe('the panel beside a web chat', () => {
     const client = await turn(hub, frames)
     const tabs = viewOf(frames)!.tabs
 
-    hub.handle(client, { type: 'panel-activate', key: tabs[0]!.key }, CONVERSATION)
+    hub.handle(client, { type: 'panel-activate', key: tabs[0]!.key }, CHAT)
     expect(viewOf(frames)?.active).toBe(0)
 
-    hub.handle(client, { type: 'panel-close', key: tabs[0]!.key }, CONVERSATION)
+    hub.handle(client, { type: 'panel-close', key: tabs[0]!.key }, CHAT)
     expect(viewOf(frames)?.tabs.map((tab) => tab.title)).toEqual(['second.md'])
 
-    hub.handle(client, { type: 'panel-close', key: tabs[1]!.key }, CONVERSATION)
+    hub.handle(client, { type: 'panel-close', key: tabs[1]!.key }, CHAT)
     expect(viewOf(frames)).toBeNull()
   })
 
@@ -214,8 +214,8 @@ describe('the panel beside a web chat', () => {
     const client = await turn(hub, frames)
     const before = panelFrames(frames).length
 
-    hub.handle(client, { type: 'panel-activate', key: 'not-a-tab' }, CONVERSATION)
-    hub.handle(client, { type: 'panel-close', key: 'not-a-tab' }, CONVERSATION)
+    hub.handle(client, { type: 'panel-activate', key: 'not-a-tab' }, CHAT)
+    hub.handle(client, { type: 'panel-close', key: 'not-a-tab' }, CHAT)
 
     expect(panelFrames(frames).length).toBe(before)
     expect(viewOf(frames)?.tabs).toHaveLength(1)
@@ -233,7 +233,7 @@ describe('the panel beside a web chat', () => {
     // the tabs again, replayed from the requests the transcript kept.
     const second = new WebHub(runtime, home)
     const opening: ServerFrame[] = []
-    await second.connect({ send: (frame) => opening.push(frame) }, CONVERSATION)
+    await second.connect({ send: (frame) => opening.push(frame) }, CHAT)
     const ready = opening.find((frame): frame is Extract<ServerFrame, { type: 'ready' }> => frame.type === 'ready')
     expect(ready?.panel?.tabs.map((tab) => tab.kind)).toEqual(['document', 'browser'])
     expect(ready?.panel?.active).toBe(1)
@@ -249,7 +249,7 @@ describe('the panel beside a web chat', () => {
 
     const second = new WebHub(runtime, home)
     const opening: ServerFrame[] = []
-    await second.connect({ send: (frame) => opening.push(frame) }, CONVERSATION)
+    await second.connect({ send: (frame) => opening.push(frame) }, CHAT)
     const ready = opening.find((frame): frame is Extract<ServerFrame, { type: 'ready' }> => frame.type === 'ready')
     expect(ready?.panel).toBeNull()
   })
@@ -264,7 +264,7 @@ describe('the panel beside a web chat', () => {
 
     // The prompt is built once per send, so it is the *next* turn that is told what
     // the last one opened — what a turn opens itself comes back as its tool result.
-    hub.handle(client, { type: 'send', text: 'what is open?' }, CONVERSATION)
+    hub.handle(client, { type: 'send', text: 'what is open?' }, CHAT)
     expect(await waitFor(() => frames.filter((frame) => frame.type === 'turn-end').length === 2)).toBe(true)
 
     const prompt = provider.systems.at(-1) ?? ''
@@ -291,10 +291,10 @@ describe('the panel beside a web chat', () => {
     const hub = new WebHub(build(new PanelProvider([{ browser: true }])), home)
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
-    await hub.connect(client, CONVERSATION)
+    await hub.connect(client, CHAT)
     frames.length = 0
 
-    hub.handle(client, { type: 'panel-input', input: { kind: 'click', x: 0.5, y: 0.5 } }, CONVERSATION)
+    hub.handle(client, { type: 'panel-input', input: { kind: 'click', x: 0.5, y: 0.5 } }, CHAT)
 
     expect(await waitFor(() => frames.some((frame) => frame.type === 'error'))).toBe(true)
   })

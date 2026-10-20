@@ -40,7 +40,7 @@ class FakeRuntime implements RunRuntime {
   constructor(private readonly session: RunSession | null) {}
 
   async newSession(
-    _scope: { gateway: string; conversationId: string },
+    _scope: { gateway: string; chatId: string },
     _title?: string,
     options?: Opened,
   ): Promise<RunSession> {
@@ -49,7 +49,7 @@ class FakeRuntime implements RunRuntime {
   }
 
   async resumeSession(
-    _scope: { gateway: string; conversationId: string },
+    _scope: { gateway: string; chatId: string },
     id: string,
   ): Promise<RunSession | null> {
     this.resumed.push(id)

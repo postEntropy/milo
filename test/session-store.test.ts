@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process'
-import { mkdtempSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -465,6 +465,27 @@ describe('concurrent writers', () => {
     loaded.messages.push(message('since'))
     await store.save(loaded, loaded.version)
     expect((await store.load('calm-otter-1'))!.version).toBe(INITIAL_SESSION_VERSION + 1)
+  })
+
+  it('reads the chat a record named before the field was renamed', async () => {
+    const dir = tempDir()
+    writeFileSync(
+      path.join(dir, 'calm-otter-1.json'),
+      JSON.stringify({
+        ...record('calm-otter-1'),
+        scope: { gateway: 'routine', conversationId: 'gentle-heron-2' },
+      }),
+    )
+    const store = new FileSessionStore({ dir })
+
+    // A routine's older runs stay attributable: the record's own address is read
+    // under the name it was written with and handed over as the current one.
+    const loaded = (await store.load('calm-otter-1'))!
+    expect(loaded.scope).toEqual({ gateway: 'routine', chatId: 'gentle-heron-2' })
+
+    await store.save(loaded, loaded.version)
+    const saved = JSON.parse(readFileSync(path.join(dir, 'calm-otter-1.json'), 'utf8')) as { scope: unknown }
+    expect(saved.scope).toEqual({ gateway: 'routine', chatId: 'gentle-heron-2' })
   })
 })
 

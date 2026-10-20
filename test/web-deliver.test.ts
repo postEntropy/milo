@@ -12,7 +12,7 @@ const { WebHub } = await import('../src/gateways/web/hub.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { createToolRegistry } = await import('../src/core/tools/index.js')
 
-const CONVERSATION = '11111111-2222-3333-4444-555555555555'
+const CHAT = '11111111-2222-3333-4444-555555555555'
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true })
@@ -113,9 +113,9 @@ describe('a routine delivering into a web chat', () => {
     const shot = path.join(home, 'shot.png')
     writeFileSync(shot, 'not really a png')
 
-    await hub.connect(client, CONVERSATION)
+    await hub.connect(client, CHAT)
     frames.length = 0 // the handshake; only what follows is the delivery
-    await hub.deliver(CONVERSATION, {
+    await hub.deliver(CHAT, {
       text: 'the screen',
       files: [{ path: shot, name: 'shot.png', mimeType: 'image/png' }],
     })
@@ -134,29 +134,29 @@ describe('a routine delivering into a web chat', () => {
     const runtime = build()
     const hub = new WebHub(runtime)
 
-    await hub.deliver(CONVERSATION, { text: 'nightly report' })
+    await hub.deliver(CHAT, { text: 'nightly report' })
 
     // No client, so nothing was broadcast — the session is the only copy, and
     // that is exactly why the delivery is written before it is announced.
     expect(await transcript(runtime)).toEqual(['nightly report'])
   })
 
-  it('refuses anything that is not a conversation id', async () => {
+  it('refuses anything that is not a chat id', async () => {
     const hub = new WebHub(build())
-    await expect(hub.deliver('not-a-uuid', { text: 'x' })).rejects.toThrow('not a web conversation id')
+    await expect(hub.deliver('not-a-uuid', { text: 'x' })).rejects.toThrow('not a web chat id')
   })
 })
 
-describe('a turn in a web conversation', () => {
+describe('a turn in a web chat', () => {
   it('ends with a state frame that says it is over, so the composer lets go', async () => {
     const hub = new WebHub(build())
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 
-    await hub.connect(client, CONVERSATION)
+    await hub.connect(client, CHAT)
     frames.length = 0 // the handshake; only what follows is the turn
 
-    hub.handle(client, { type: 'send', text: 'hello' }, CONVERSATION)
+    hub.handle(client, { type: 'send', text: 'hello' }, CHAT)
     expect(await waitFor(() => frames.some((frame) => frame.type === 'turn-end'))).toBe(true)
     // The frame that frees the button is sent on the queue's promise, which is a
     // tick after `turn-end`. Without that tick the last state frame on the wire
@@ -176,10 +176,10 @@ describe('a turn in a web conversation', () => {
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 
-    await hub.connect(client, CONVERSATION)
+    await hub.connect(client, CHAT)
     frames.length = 0 // the handshake; only what follows is the command
 
-    hub.handle(client, { type: 'command', text: '/help' }, CONVERSATION)
+    hub.handle(client, { type: 'command', text: '/help' }, CHAT)
     expect(await waitFor(() => frames.some((frame) => frame.type === 'command-result'))).toBe(true)
     // A slash command is instantaneous, so it must never report itself as running:
     // the frame that frees the stop button rides the queue's promise, a tick after
@@ -202,9 +202,9 @@ describe('a turn in a web conversation', () => {
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 
-    await hub.connect(client, CONVERSATION)
+    await hub.connect(client, CHAT)
     frames.length = 0 // the handshake; only what follows is the turn
-    hub.handle(client, { type: 'send', text: 'screenshot and send it' }, CONVERSATION)
+    hub.handle(client, { type: 'send', text: 'screenshot and send it' }, CHAT)
 
     const delivered = (): Extract<ServerFrame, { type: 'command-result' }> | undefined =>
       frames.find(
@@ -238,15 +238,15 @@ describe('a file a client sends with a message', () => {
       data: Buffer.from('the milk is off'),
     })
 
-    await hub.connect(client, CONVERSATION)
+    await hub.connect(client, CHAT)
     frames.length = 0 // the handshake; only what follows is the message
-    hub.handle(client, { type: 'send', text: 'what does this say?', uploadIds: [uploadId] }, CONVERSATION)
+    hub.handle(client, { type: 'send', text: 'what does this say?', uploadIds: [uploadId] }, CHAT)
     expect(await waitFor(() => frames.some((frame) => frame.type === 'turn-end'))).toBe(true)
 
     // What the model was handed: the person's words and the file's on the *same*
     // user message. A staged file that reached the turn as nothing would still end
     // the turn, so the reading is of the message and not of the frame.
-    const session = await runtime.getSession({ gateway: 'web', conversationId: CONVERSATION })
+    const session = await runtime.getSession({ gateway: 'web', chatId: CHAT })
     const said = session.messages
       .filter((message) => message.role === 'user')
       .flatMap((message) => message.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])))
@@ -262,14 +262,14 @@ describe('a file a client sends with a message', () => {
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 
-    await hub.connect(client, CONVERSATION)
+    await hub.connect(client, CHAT)
     frames.length = 0
-    hub.handle(client, { type: 'send', text: 'look at this', uploadIds: ['never-staged'] }, CONVERSATION)
+    hub.handle(client, { type: 'send', text: 'look at this', uploadIds: ['never-staged'] }, CHAT)
     expect(await waitFor(() => frames.some((frame) => frame.type === 'error'))).toBe(true)
 
     // The refusal is said where the message was sent — and no turn ran, so the
     // person is not left with an answer about a file the daemon never had.
-    const session = await runtime.getSession({ gateway: 'web', conversationId: CONVERSATION })
+    const session = await runtime.getSession({ gateway: 'web', chatId: CHAT })
     expect(session.messages).toEqual([])
   })
 })

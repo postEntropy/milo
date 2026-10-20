@@ -64,7 +64,7 @@ const schema = z.object({
     .enum(['telegram', 'discord', 'web', 'none'])
     .optional()
     .describe('Where to deliver. "none" keeps the runs on the Routines screen and posts them nowhere. Absent: the chat this request came from, when it can receive messages. On "update": absent leaves the destination as it is.'),
-  conversationId: z
+  chatId: z
     .string()
     .optional()
     .describe('The chat or channel id on that gateway. Absent: the chat this request came from. Not needed when gateway is "none".'),
@@ -96,7 +96,7 @@ const NOT_A_TIME =
 export const routineTool: Tool<RoutineArgs> = {
   name: 'routine',
   description:
-    'Manage routines: a prompt Milo runs on a timer and delivers to a chat — or to no chat at all — with nobody there when it fires. Use it when the person wants something to happen on a schedule ("every two hours", "every weekday at 8", "the 1st of each month") or wants to change, pause or drop one they already have. What the person says comes in natural language; you turn it into a routine. "every two hours" is `every: "2h"`; "every 30 seconds" is `every: "30s"` (seconds and minutes are both fine — the shortest is one second); "every day at 8" is `at: "08:00"`; "every Monday at 9" is `at: "09:00"` with `days: ["mon"]`; "weekdays at 8" is `at: "08:00"` with `days: ["mon-fri"]`; "the 1st of each month at 9" is `at: "09:00"` with `dayOfMonth: ["1"]`; "every 25 December" is `at: "09:00"` with `month: ["dec"]` and `dayOfMonth: ["25"]`; and "every Monday in July" is `at: "09:00"` with `days: ["mon"]` and `month: ["jul"]` — a day of the week and a day of the month are never combined, so pick one. A routine fires at its next time and every time after; it does not run while `milo serve` is down, and a time missed that way is skipped rather than caught up. A routine repeats forever unless it is given a ceiling: `limit: 5` runs it at most five times and then it stops itself, and a run the person asks for by hand is not counted against it. "Every minute for five minutes" is `every: "1m"` with `limit: 5` — do that arithmetic and say it back to the person. It delivers to the chat the request came from when that chat can receive messages; from a surface that cannot (the CLI), name `gateway` and `conversationId` — ask the person which chat, do not guess. A routine may also deliver nowhere: `gateway: "none"` (what the web UI calls "Routines screen only") keeps every run on the Routines screen and posts to no chat — reach for it whenever the person does not want the answer in a chat, and say that back to them. Its answer is text, and it can also deliver files with `send_file` — a picture as a picture, anything else as a document. That is the only thing that makes a picture a picture: the file lands on the run\'s own record, which is what the Routines screen draws, so a routine whose output IS an image must `send_file` it even when it delivers nowhere — a path in the answer is text. So "every morning, screenshot the screen and send it" is `shell_command` plus `send_file`, both named in `allow`. A routine runs with nobody to confirm anything: reading needs no permission, but anything that writes, runs a command, sends a file or changes mail has to be named in `allow` — so "every day, bin anything labelled newsletter" needs `gmail_modify` (with `mail_labels` to find it) — and the person is asked to approve those tools before the routine exists. Ask them in the conversation rather than deciding for them, and keep the list to what the prompt actually needs. Always say the name, the time, the destination and the granted tools back, so they can correct it before it ever fires.\n\nTo change or remove a routine, first call this tool with `action: "list"` — it names every routine with its id. Then call again with `action: "update"` or `"remove"` and that `id`. Do not guess an id. On `update`, pass only what changes: a new `at`/`every` (and the `days`, `dayOfMonth` or `month` it keeps — restate the whole schedule, the fields you leave out are not carried over), a new `gateway`+`conversationId` or `"none"`, a new `prompt` or `name`, `enabled` to pause or resume, or a new `allow`. An `update` with nothing to change changes nothing. Say what the routine is now after an update, and confirm which one you removed — by name, not id.',
+    'Manage routines: a prompt Milo runs on a timer and delivers to a chat — or to no chat at all — with nobody there when it fires. Use it when the person wants something to happen on a schedule ("every two hours", "every weekday at 8", "the 1st of each month") or wants to change, pause or drop one they already have. What the person says comes in natural language; you turn it into a routine. "every two hours" is `every: "2h"`; "every 30 seconds" is `every: "30s"` (seconds and minutes are both fine — the shortest is one second); "every day at 8" is `at: "08:00"`; "every Monday at 9" is `at: "09:00"` with `days: ["mon"]`; "weekdays at 8" is `at: "08:00"` with `days: ["mon-fri"]`; "the 1st of each month at 9" is `at: "09:00"` with `dayOfMonth: ["1"]`; "every 25 December" is `at: "09:00"` with `month: ["dec"]` and `dayOfMonth: ["25"]`; and "every Monday in July" is `at: "09:00"` with `days: ["mon"]` and `month: ["jul"]` — a day of the week and a day of the month are never combined, so pick one. A routine fires at its next time and every time after; it does not run while `milo serve` is down, and a time missed that way is skipped rather than caught up. A routine repeats forever unless it is given a ceiling: `limit: 5` runs it at most five times and then it stops itself, and a run the person asks for by hand is not counted against it. "Every minute for five minutes" is `every: "1m"` with `limit: 5` — do that arithmetic and say it back to the person. It delivers to the chat the request came from when that chat can receive messages; from a surface that cannot (the CLI), name `gateway` and `chatId` — ask the person which chat, do not guess. A routine may also deliver nowhere: `gateway: "none"` (what the web UI calls "Routines screen only") keeps every run on the Routines screen and posts to no chat — reach for it whenever the person does not want the answer in a chat, and say that back to them. Its answer is text, and it can also deliver files with `send_file` — a picture as a picture, anything else as a document. That is the only thing that makes a picture a picture: the file lands on the run\'s own record, which is what the Routines screen draws, so a routine whose output IS an image must `send_file` it even when it delivers nowhere — a path in the answer is text. So "every morning, screenshot the screen and send it" is `shell_command` plus `send_file`, both named in `allow`. A routine runs with nobody to confirm anything: reading needs no permission, but anything that writes, runs a command, sends a file or changes mail has to be named in `allow` — so "every day, bin anything labelled newsletter" needs `gmail_modify` (with `mail_labels` to find it) — and the person is asked to approve those tools before the routine exists. Ask them in the conversation rather than deciding for them, and keep the list to what the prompt actually needs. Always say the name, the time, the destination and the granted tools back, so they can correct it before it ever fires.\n\nTo change or remove a routine, first call this tool with `action: "list"` — it names every routine with its id. Then call again with `action: "update"` or `"remove"` and that `id`. Do not guess an id. On `update`, pass only what changes: a new `at`/`every` (and the `days`, `dayOfMonth` or `month` it keeps — restate the whole schedule, the fields you leave out are not carried over), a new `gateway`+`chatId` or `"none"`, a new `prompt` or `name`, `enabled` to pause or resume, or a new `allow`. An `update` with nothing to change changes nothing. Say what the routine is now after an update, and confirm which one you removed — by name, not id.',
   schema,
   // Creating a prompt that only reads is the person's own request; but changing an
   // existing routine's prompt, or re-arming it, is a change to a standing instruction
@@ -167,7 +167,7 @@ async function handleCreate(args: RoutineArgs, ctx: ToolContext, routines: Routi
   if (!target) {
     return {
       content:
-        'I need to know where to deliver: pass `gateway` ("telegram", "discord", "web", or "none" for the Routines screen) and `conversationId`.',
+        'I need to know where to deliver: pass `gateway` ("telegram", "discord", "web", or "none" for the Routines screen) and `chatId`.',
       isError: true,
     }
   }
@@ -217,13 +217,13 @@ async function handleUpdate(args: RoutineArgs, routines: RoutineStore): Promise<
   }
 
   let target: RoutineTarget | undefined
-  if (args.gateway !== undefined || args.conversationId !== undefined) {
+  if (args.gateway !== undefined || args.chatId !== undefined) {
     if (args.gateway === 'none') target = { gateway: 'none' }
-    else if (args.gateway && args.conversationId) target = { gateway: args.gateway, conversationId: args.conversationId }
+    else if (args.gateway && args.chatId) target = { gateway: args.gateway, chatId: args.chatId }
     else {
       return {
         content:
-          'A destination needs both a gateway ("telegram", "discord" or "web") and a `conversationId`, or `gateway: "none"` for the Routines screen.',
+          'A destination needs both a gateway ("telegram", "discord" or "web") and a `chatId`, or `gateway: "none"` for the Routines screen.',
         isError: true,
       }
     }
@@ -270,16 +270,16 @@ function resolveTarget(args: RoutineArgs, ctx: ToolContext): RoutineTarget | nul
   // Delivering nowhere is a choice, not a missing half: the runs are kept on the
   // Routines screen and no chat is named.
   if (args.gateway === 'none') return { gateway: 'none' }
-  if (args.gateway && args.conversationId) {
-    return { gateway: args.gateway, conversationId: args.conversationId }
+  if (args.gateway && args.chatId) {
+    return { gateway: args.gateway, chatId: args.chatId }
   }
   // Half a target is not one: guessing the other half is how a routine goes quiet.
-  if (args.gateway || args.conversationId) return null
+  if (args.gateway || args.chatId) return null
 
   const origin = ctx.origin
   if (origin?.gateway === 'none') return { gateway: 'none' }
   if (origin && (ROUTINE_GATEWAYS as readonly string[]).includes(origin.gateway)) {
-    return { gateway: origin.gateway as RoutineGateway, conversationId: origin.conversationId }
+    return { gateway: origin.gateway as RoutineGateway, chatId: origin.chatId }
   }
   return null
 }

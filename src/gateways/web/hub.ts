@@ -79,8 +79,8 @@ export interface WebClient {
 /**
  * The turn running on a session right now, with every frame it has said.
  *
- * Keyed by the session, not the conversation: two screens bound to one session —
- * the desktop tab left open and the phone that picked it up — are two conversations
+ * Keyed by the session, not the chat: two screens bound to one session —
+ * the desktop tab left open and the phone that picked it up — are two chats
  * over one `Session`, and both are owed the same live answer. A client can arrive in
  * the middle of it — a phone that was locked, a page reloaded — long after its
  * `turn-start` went out, and the session on disk is written a step at a time, so the
@@ -97,7 +97,7 @@ interface LiveTurn {
   at: number
   from: number
   frames: ServerFrame[]
-  /** The conversation whose queue runs this turn; a sibling's own message joins it. */
+  /** The chat whose queue runs this turn; a sibling's own message joins it. */
   owner: string
   /**
    * The permission the turn is waiting on, when it is waiting on one. It goes out as
@@ -107,19 +107,19 @@ interface LiveTurn {
   permission?: { id: string; request: PermissionRequest; expiresAt: number }
 }
 
-interface Conversation {
+interface Chat {
   scope: MemoryScope
   session: Session
   clients: Set<WebClient>
   /**
-   * Whether a client on this conversation said it draws a generated interface.
+   * Whether a client on this chat said it draws a generated interface.
    * Declared on connect and read on every turn, so drawing is taught only where
    * its tree can actually be drawn: a plain web chat sits beside one that can,
    * and is taught nothing.
    */
   genui?: boolean
   /**
-   * The client app that last named itself on this conversation, when one did. The
+   * The client app that last named itself on this chat, when one did. The
    * phone and the browser reach the same gateway, so this is what lets a turn be
    * held for the phone. Declared on connect and read on every turn, like `genui` —
    * a client that says nothing leaves it as it was.
@@ -134,26 +134,26 @@ interface Conversation {
 }
 
 export class WebHub {
-  private readonly conversations = new Map<string, Conversation>()
+  private readonly chats = new Map<string, Chat>()
   /**
    * The turn running on each session, by session id. One session can be open in
-   * several conversations — the desktop and the phone — and this is what makes the
-   * live answer theirs in common rather than each conversation's own.
+   * several chats — the desktop and the phone — and this is what makes the
+   * live answer theirs in common rather than each chat's own.
    */
   private readonly live = new Map<string, LiveTurn>()
   private readonly turns = new TurnQueue()
   private readonly pending = new PendingDecisions()
   /**
-   * The files delivered into this process's conversations, by id. Only what is
+   * The files delivered into this process's chats, by id. Only what is
    * here is ever served, so the browser cannot ask for a path of its own naming.
-   * Rebuilt from a transcript as conversations are opened, which is why the id is
+   * Rebuilt from a transcript as chats are opened, which is why the id is
    * a hash of the path rather than a fresh token each time.
    */
   private readonly attachments = new Map<string, { path: string; name: string; mimeType: string }>()
   private readonly stagedUploads = new Map<string, { file: IncomingFile; expires: number; timer: NodeJS.Timeout }>()
   /**
    * The ideas the home currently gets, and what they were drawn from. One slot,
-   * not one per conversation: what grounds them — the notes and the recent
+   * not one per chat: what grounds them — the notes and the recent
    * sessions — belongs to the install, so every empty chat gets the same ones.
    */
   private ideaCache: { key: string; at: number; items: Idea[] } | null = null
@@ -198,7 +198,7 @@ export class WebHub {
    */
   constructor(private readonly runtime: AgentRuntime, private readonly cwd: string = process.cwd()) {
     // A job belongs to the session that started it, so each open chat is told about
-    // its own and its strip never draws another conversation's work.
+    // its own and its strip never draws another chat's work.
     this.detachJobs =
       this.runtime.jobs?.onChange(() => {
         this.broadcastJobs()
@@ -213,52 +213,52 @@ export class WebHub {
     this.detachWork = this.runtime.onWorkChanged(() => this.workChanged())
   }
 
-  async connect(client: WebClient, conversationId: string, genui?: boolean, clientKind?: ClientKind): Promise<void> {
-    if (!/^[0-9a-f-]{36}$/i.test(conversationId)) throw new Error('Invalid conversation id.')
-    let conversation = this.conversations.get(conversationId)
-    if (!conversation) {
-      const scope: MemoryScope = { gateway: 'web', conversationId }
-      conversation = { scope, session: await this.runtime.sessionFor(scope), clients: new Set() }
-      this.conversations.set(conversationId, conversation)
-    } else if (!this.turns.busy(conversationId)) {
-      conversation.session = await this.runtime.getSession(conversation.scope)
+  async connect(client: WebClient, chatId: string, genui?: boolean, clientKind?: ClientKind): Promise<void> {
+    if (!/^[0-9a-f-]{36}$/i.test(chatId)) throw new Error('Invalid chat id.')
+    let chat = this.chats.get(chatId)
+    if (!chat) {
+      const scope: MemoryScope = { gateway: 'web', chatId }
+      chat = { scope, session: await this.runtime.sessionFor(scope), clients: new Set() }
+      this.chats.set(chatId, chat)
+    } else if (!this.turns.busy(chatId)) {
+      chat.session = await this.runtime.getSession(chat.scope)
     }
     // A client that says nothing leaves the capability as it was: the plain chat
     // and a reload that does not repeat it must not take it away mid-session.
-    if (genui !== undefined) conversation.genui = genui
-    if (clientKind !== undefined) conversation.client = clientKind
-    conversation.clients.add(client)
+    if (genui !== undefined) chat.genui = genui
+    if (clientKind !== undefined) chat.client = clientKind
+    chat.clients.add(client)
     // The turn running now, when there is one: this client missed its `turn-start`,
     // so the id it is drawn under rides with the ready and the events it has already
     // said are replayed under it, in order, before anything new arrives.
-    const running = this.live.get(conversation.session.id)
+    const running = this.live.get(chat.session.id)
     // The folder this session works in, when it works in one: said here so a surface names it
     // without reading the project list itself — and said on a session with nothing in it yet,
     // which is the session that is about to work there.
-    const placement = conversation.session.project
+    const placement = chat.session.project
     const project = placement ? placedProject(placement) : undefined
     client.send({
       type: 'ready',
       version: 1,
-      sessionId: conversation.session.id,
+      sessionId: chat.session.id,
       ...(project ? { project } : {}),
       // A late client is handed the history up to and including the running turn's own
       // user message. Everything after it is that turn's output, which the frames below
       // replay — so the answer is drawn once, as one row, and not as the steps already
       // written with the rest of it opening a second row beside them.
-      messages: this.transcript(conversation.session, running ? running.from + 1 : undefined),
+      messages: this.transcript(chat.session, running ? running.from + 1 : undefined),
       thinking: readDisplay().thinking,
       // Whether this session is proposing rather than working. A client that opens
       // mid-plan draws the switch on, and the catalog on the server already matches.
-      plan: conversation.session.planMode,
+      plan: chat.session.planMode,
       // Read from the runtime, not a startup snapshot: a provider switch made at
       // runtime shows on the next connection without the page reconnecting.
       provider: this.runtime.provider.id,
       providerName: this.runtime.providerName,
       model: this.runtime.model,
       effort: this.runtime.reasoningEffort,
-      panel: this.panelFor(conversation),
-      jobs: this.jobsView(conversation.session.id),
+      panel: this.panelFor(chat),
+      jobs: this.jobsView(chat.session.id),
       ...(running ? { activeTurn: { id: running.id, at: running.at } } : {}),
     })
     if (running) for (const frame of running.frames) client.send(frame)
@@ -269,10 +269,10 @@ export class WebHub {
     if (asking) {
       client.send({ type: 'permission', id: asking.id, request: asking.request, expiresAt: asking.expiresAt })
     }
-    this.sendState(conversationId)
+    this.sendState(chatId)
     // An empty home asks for ideas in the background: the page is already drawn
     // from the standing four, which the ideas arrive to take the place of.
-    if (conversation.session.messages.length === 0) this.ensureIdeas()
+    if (chat.session.messages.length === 0) this.ensureIdeas()
   }
 
   /**
@@ -285,46 +285,46 @@ export class WebHub {
    * being lost. Only the stop control, and `/stop`, end a turn.
    */
   disconnect(client: WebClient): void {
-    for (const conversation of this.conversations.values()) conversation.clients.delete(client)
+    for (const chat of this.chats.values()) chat.clients.delete(client)
   }
 
-  handle(client: WebClient, frame: ClientFrame, conversationId: string): void {
-    const conversation = this.conversations.get(conversationId)
-    if (!conversation?.clients.has(client)) return
+  handle(client: WebClient, frame: ClientFrame, chatId: string): void {
+    const chat = this.chats.get(chatId)
+    if (!chat?.clients.has(client)) return
 
     if (frame.type === 'control') {
       if (frame.action === 'stop') {
         // The turn may be running in a sibling's queue: stopping is the session's own
-        // act, not the asking conversation's, so it lands on whoever owns it.
-        const result = this.turns.stop(this.liveOwner(conversation.session.id) ?? conversationId)
-        this.sendState(conversationId)
+        // act, not the asking chat's, so it lands on whoever owns it.
+        const result = this.turns.stop(this.liveOwner(chat.session.id) ?? chatId)
+        this.sendState(chatId)
         if (!result.stopped) client.send({ type: 'error', message: 'Nothing is running to stop.' })
       } else if (frame.action === 'plan') {
         // The switch is the session's, not the tab's: a sibling watching the same
         // session is proposing with it, and has to see the same state.
-        conversation.session.setPlan(frame.plan === true)
-        this.emitTurn(conversation.session.id, { type: 'plan', plan: conversation.session.planMode })
+        chat.session.setPlan(frame.plan === true)
+        this.emitTurn(chat.session.id, { type: 'plan', plan: chat.session.planMode })
       } else if (frame.action === 'approve-plan') {
         // Approval is one act: leave plan mode, say so, and let the execution turn
         // follow in the same queue rather than waiting for a second click.
-        if (!conversation.session.planMode) {
+        if (!chat.session.planMode) {
           client.send({ type: 'error', message: 'Plan mode is not on.' })
           return
         }
-        conversation.session.setPlan(false)
-        this.emitTurn(conversation.session.id, { type: 'plan', plan: false })
-        this.startTurn(conversationId, PLAN_APPROVAL)
+        chat.session.setPlan(false)
+        this.emitTurn(chat.session.id, { type: 'plan', plan: false })
+        this.startTurn(chatId, PLAN_APPROVAL)
       } else if (frame.id) {
         const allowed = frame.action !== 'deny'
         const remember = frame.action === 'always'
         // The permission belongs to the session it was raised in: a client of another
         // session cannot answer it, even holding the id — and a client of a sibling
-        // conversation can, because the question is the session's own.
+        // chat can, because the question is the session's own.
         if (
           this.pending.resolve(
             frame.id,
             { allowed, ...(remember ? { remember: true } : {}) },
-            conversation.session.id,
+            chat.session.id,
           )
         ) {
           client.send({ type: 'permission-result', id: frame.id, allowed, ...(remember ? { remember: true } : {}) })
@@ -338,8 +338,8 @@ export class WebHub {
     if (frame.type === 'job-kill') {
       // The person pressing stop is the confirmation; the manager kills the child
       // and its change broadcast redraws the strip without this job. Scoped to the
-      // session this client is in: another conversation's job is not theirs to stop.
-      const killed = this.runtime.jobs?.kill(frame.id, conversation.session.id) ?? false
+      // session this client is in: another chat's job is not theirs to stop.
+      const killed = this.runtime.jobs?.kill(frame.id, chat.session.id) ?? false
       if (!killed) client.send({ type: 'error', message: `No running job "${frame.id}".` })
       return
     }
@@ -355,10 +355,10 @@ export class WebHub {
       if (!frame.text.trim() && !files.length) return
       // A message from a sibling goes into the queue the session's turn lives in, so
       // it runs after the one in flight and its frames reach both screens. With
-      // nothing live, the queue is this conversation's own — the cross-process case,
+      // nothing live, the queue is this chat's own — the cross-process case,
       // which the lease serialises into `waiting`/`waited` exactly as before.
-      const sessionId = conversation.session.id
-      const key = this.liveOwner(sessionId) ?? conversationId
+      const sessionId = chat.session.id
+      const key = this.liveOwner(sessionId) ?? chatId
       if (files.length) {
         this.startTurn(key, frame.text, frame.target, [], files)
         return
@@ -385,16 +385,16 @@ export class WebHub {
     // The person's own move on the strip: their own action, so nothing is
     // confirmed, and everyone watching the chat sees the same tab come forward.
     if (frame.type === 'panel-activate') {
-      this.activateTab(conversationId, frame.key)
+      this.activateTab(chatId, frame.key)
       return
     }
 
     if (frame.type === 'panel-close') {
-      this.closeTab(conversationId, frame.key)
+      this.closeTab(chatId, frame.key)
       return
     }
 
-    if (frame.type === 'command') void this.command(client, conversation, frame.text).catch((error: unknown) => {
+    if (frame.type === 'command') void this.command(client, chat, frame.text).catch((error: unknown) => {
       client.send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     })
 
@@ -405,7 +405,7 @@ export class WebHub {
       // UI controls that re-invoke the command when interacted with.
       if (actionId.startsWith('sessions:')) {
         const page = actionId.slice('sessions:'.length)
-        void this.command(client, conversation, `/sessions ${page}`, messageId).catch((error: unknown) => {
+        void this.command(client, chat, `/sessions ${page}`, messageId).catch((error: unknown) => {
           client.send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
         })
         return
@@ -421,7 +421,7 @@ export class WebHub {
     this.browserUrlWatch?.()
     this.browserUrlWatch = null
     this.runtime.browser?.stopScreencast()
-    for (const id of this.conversations.keys()) this.turns.stop(id)
+    for (const id of this.chats.keys()) this.turns.stop(id)
     this.detachJobs?.()
     this.detachJobs = null
     this.detachSessions?.()
@@ -471,28 +471,28 @@ export class WebHub {
   }
 
   /**
-   * A routine ran. This is not about one conversation, so it goes to every client
+   * A routine ran. This is not about one chat, so it goes to every client
    * on the server: a Routines screen that is open anywhere is showing a history
    * that just changed.
    */
   routinesChanged(): void {
     const frame: ServerFrame = { type: 'routines-changed' }
-    for (const conversation of this.conversations.values()) {
-      for (const client of conversation.clients) client.send(frame)
+    for (const chat of this.chats.values()) {
+      for (const client of chat.clients) client.send(frame)
     }
   }
 
   /**
    * A session started or ended a turn: told by the runtime, which every turn goes
    * through, so a turn a gateway or a routine ran arrives here the same way as one a
-   * socket asked for. Like `routinesChanged`, this is not about one conversation — the
+   * socket asked for. Like `routinesChanged`, this is not about one chat — the
    * sessions list shows the same session running on every surface — so it goes to every
    * client, and each re-reads the list.
    */
   sessionsChanged(): void {
     const frame: ServerFrame = { type: 'sessions-changed' }
-    for (const conversation of this.conversations.values()) {
-      for (const client of conversation.clients) client.send(frame)
+    for (const chat of this.chats.values()) {
+      for (const client of chat.clients) client.send(frame)
     }
   }
 
@@ -511,31 +511,31 @@ export class WebHub {
     if (now - this.workChangedAt < WORK_CHANGED_FLOOR_MS) return
     this.workChangedAt = now
     const frame: ServerFrame = { type: 'work-changed' }
-    for (const conversation of this.conversations.values()) {
-      for (const client of conversation.clients) client.send(frame)
+    for (const chat of this.chats.values()) {
+      for (const client of chat.clients) client.send(frame)
     }
   }
 
   /**
-   * Posts a message into a conversation with no turn behind it — how a routine
+   * Posts a message into a chat with no turn behind it — how a routine
    * reaches a web chat, and how a live turn's own files reach it too: the answer
    * is already on screen, so the files arrive as their own message. It is written
-   * into the conversation's session first, so it is there when the tab is next
+   * into the chat's session first, so it is there when the tab is next
    * opened, and then broadcast to whoever is watching right now; the broadcast is
    * a no-op when nobody is. The frame is the one a command reply uses, so the
    * chat renders it and lists it like any other message without the protocol
    * knowing about routines.
    */
-  async deliver(conversationId: string, message: OutgoingMessage): Promise<void> {
-    if (!/^[0-9a-f-]{36}$/i.test(conversationId)) {
-      throw new Error(`not a web conversation id: ${conversationId}`)
+  async deliver(chatId: string, message: OutgoingMessage): Promise<void> {
+    if (!/^[0-9a-f-]{36}$/i.test(chatId)) {
+      throw new Error(`not a web chat id: ${chatId}`)
     }
     const files = message.files ?? []
     const text = message.text ?? ''
-    const session = await this.runtime.getSession({ gateway: 'web', conversationId })
+    const session = await this.runtime.getSession({ gateway: 'web', chatId })
     await session.appendNotice(text, files)
     const attachments = files.map((file) => this.register(file))
-    // Said to every screen on the session, not only the conversation it was addressed
+    // Said to every screen on the session, not only the chat it was addressed
     // to: the file is the session's own message, and a sibling watching it is owed the
     // same. Kept on the live turn too, so a client that arrives mid-turn still gets it
     // — the ready it is handed is cut at the turn's start, before this landed.
@@ -553,18 +553,18 @@ export class WebHub {
   }
 
   /**
-   * Shows a message that is *already* in the conversation's transcript — the
+   * Shows a message that is *already* in the chat's transcript — the
    * announcement of a finished background job, whose turn ran on the
-   * conversation's own session. Unlike `deliver` it does not write the transcript
+   * chat's own session. Unlike `deliver` it does not write the transcript
    * again, so the message is not doubled; a reload reads it from the transcript.
    */
-  async showNotice(conversationId: string, message: OutgoingMessage): Promise<void> {
+  async showNotice(chatId: string, message: OutgoingMessage): Promise<void> {
     const files = message.files ?? []
     const text = message.text ?? ''
     const attachments = files.map((file) => this.register(file))
     // The whole session, like `deliver`: a finished job's announcement belongs to the
     // session it ran on, and a sibling watching that session is owed it too.
-    const session = await this.runtime.getSession({ gateway: 'web', conversationId })
+    const session = await this.runtime.getSession({ gateway: 'web', chatId })
     this.emitTurn(session.id, {
       type: 'command-result',
       reply: text,
@@ -575,7 +575,7 @@ export class WebHub {
 
   /**
    * Notes a delivered file under its id and describes it for the browser. The id
-   * is the path's hash, so opening the same conversation again — a reload, a tab
+   * is the path's hash, so opening the same chat again — a reload, a tab
    * reopened later — registers the same id the page was already given.
    *
    * Public because it is this process, not the caller, that owns what may be
@@ -590,17 +590,17 @@ export class WebHub {
   }
 
   /**
-   * The panel a conversation was left showing. Seeded once, when the conversation
+   * The panel a chat was left showing. Seeded once, when the chat
    * opens, by replaying the requests its history kept through the very rule a live
    * one goes through — so a reload and a fresh show cannot disagree — and resolved
    * afresh on every read, from each file's current contents rather than a snapshot.
    */
-  private panelFor(conversation: Conversation): PanelView | null {
-    if (!conversation.panel) {
-      conversation.panel = { requests: [], active: 0 }
-      for (const request of panelsOf(conversation.session.messages)) this.showPanel(conversation, request)
+  private panelFor(chat: Chat): PanelView | null {
+    if (!chat.panel) {
+      chat.panel = { requests: [], active: 0 }
+      for (const request of panelsOf(chat.session.messages)) this.showPanel(chat, request)
     }
-    return this.panelView(conversation)
+    return this.panelView(chat)
   }
 
   /**
@@ -610,20 +610,20 @@ export class WebHub {
    * report every time it revises it. `close` takes the whole panel down, which is
    * what the model means by it.
    */
-  private showPanel(conversation: Conversation, request: PanelRequest): void {
+  private showPanel(chat: Chat, request: PanelRequest): void {
     if (request.close) {
-      conversation.panel = { requests: [], active: 0 }
+      chat.panel = { requests: [], active: 0 }
       return
     }
     const state = this.resolvePanel(request)
     if (!state) return
-    const tabs = conversation.panel?.requests ?? []
+    const tabs = chat.panel?.requests ?? []
     const key = panelKeyOf(state)
     const existing = tabs.findIndex((one) => {
       const resolved = this.resolvePanel(one)
       return resolved ? panelKeyOf(resolved) === key : false
     })
-    conversation.panel = existing >= 0
+    chat.panel = existing >= 0
       ? { requests: tabs, active: existing }
       : { requests: [...tabs, request], active: tabs.length }
   }
@@ -634,8 +634,8 @@ export class WebHub {
    * with it, and the one in front shifts with the rest. Null when nothing is left,
    * which is the panel being down.
    */
-  private panelView(conversation: Conversation): PanelView | null {
-    const panel = conversation.panel
+  private panelView(chat: Chat): PanelView | null {
+    const panel = chat.panel
     if (!panel || panel.requests.length === 0) return null
     const tabs: PanelTab[] = []
     const kept: PanelRequest[] = []
@@ -648,11 +648,11 @@ export class WebHub {
       tabs.push({ ...state, key: panelKeyOf(state) })
     })
     if (tabs.length === 0) {
-      conversation.panel = { requests: [], active: 0 }
+      chat.panel = { requests: [], active: 0 }
       return null
     }
     active = Math.min(active, tabs.length - 1)
-    conversation.panel = { requests: kept, active }
+    chat.panel = { requests: kept, active }
     return { tabs, active }
   }
 
@@ -662,8 +662,8 @@ export class WebHub {
    * is the hub's own — the page is never given one — and the browser tab carries
    * the page it is on.
    */
-  private panelFacts(conversation: Conversation): PanelFacts {
-    const view = this.panelView(conversation)
+  private panelFacts(chat: Chat): PanelFacts {
+    const view = this.panelView(chat)
     if (!view) return { tabs: [], active: 0 }
     return {
       tabs: view.tabs.map((tab) => {
@@ -680,44 +680,44 @@ export class WebHub {
   }
 
   /** Brings a tab to the front, by key. A key that is not open is ignored. */
-  private activateTab(conversationId: string, key: string): void {
-    const conversation = this.conversations.get(conversationId)
-    if (!conversation) return
-    const index = this.panelView(conversation)?.tabs.findIndex((tab) => tab.key === key) ?? -1
-    if (index < 0 || !conversation.panel) return
-    conversation.panel = { requests: conversation.panel.requests, active: index }
-    this.broadcast(conversationId, { type: 'panel', panel: this.panelView(conversation) })
+  private activateTab(chatId: string, key: string): void {
+    const chat = this.chats.get(chatId)
+    if (!chat) return
+    const index = this.panelView(chat)?.tabs.findIndex((tab) => tab.key === key) ?? -1
+    if (index < 0 || !chat.panel) return
+    chat.panel = { requests: chat.panel.requests, active: index }
+    this.broadcast(chatId, { type: 'panel', panel: this.panelView(chat) })
   }
 
   /** Closes a tab, by key. Closing the last one leaves the panel down. */
-  private closeTab(conversationId: string, key: string): void {
-    const conversation = this.conversations.get(conversationId)
-    if (!conversation) return
-    const index = this.panelView(conversation)?.tabs.findIndex((tab) => tab.key === key) ?? -1
-    if (index < 0 || !conversation.panel) return
-    const requests = conversation.panel.requests.filter((_, at) => at !== index)
-    conversation.panel = { requests, active: Math.min(index, Math.max(0, requests.length - 1)) }
-    this.broadcast(conversationId, { type: 'panel', panel: this.panelView(conversation) })
+  private closeTab(chatId: string, key: string): void {
+    const chat = this.chats.get(chatId)
+    if (!chat) return
+    const index = this.panelView(chat)?.tabs.findIndex((tab) => tab.key === key) ?? -1
+    if (index < 0 || !chat.panel) return
+    const requests = chat.panel.requests.filter((_, at) => at !== index)
+    chat.panel = { requests, active: Math.min(index, Math.max(0, requests.length - 1)) }
+    this.broadcast(chatId, { type: 'panel', panel: this.panelView(chat) })
   }
 
   /**
    * Follows the live browser's URL, so a panel drawing it is not left on the
    * snapshot it opened with. Subscribed once, the first time a browser panel is
-   * resolved; every conversation showing the browser tab is then told afresh.
+   * resolved; every chat showing the browser tab is then told afresh.
    */
   private watchBrowserUrl(): void {
     const browser = this.runtime.browser
     if (!browser || this.browserUrlWatch) return
     this.browserUrlWatch = browser.onNavigate(() => {
-      for (const [id, conversation] of this.conversations) {
-        if (this.hasBrowserTab(conversation)) this.broadcast(id, { type: 'panel', panel: this.panelView(conversation) })
+      for (const [id, chat] of this.chats) {
+        if (this.hasBrowserTab(chat)) this.broadcast(id, { type: 'panel', panel: this.panelView(chat) })
       }
     })
   }
 
-  /** Whether the panel a conversation holds has the browser tab on it. */
-  private hasBrowserTab(conversation: Conversation): boolean {
-    return (conversation.panel?.requests ?? []).some((request) => request.browser)
+  /** Whether the panel a chat holds has the browser tab on it. */
+  private hasBrowserTab(chat: Chat): boolean {
+    return (chat.panel?.requests ?? []).some((request) => request.browser)
   }
 
   /**
@@ -904,19 +904,19 @@ export class WebHub {
   }
 
   /**
-   * Sends the cached ideas to every conversation still showing a home. A chat
+   * Sends the cached ideas to every chat still showing a home. A chat
    * that has spoken has no home to fill, so it is left alone.
    */
   private deliverIdeas(): void {
     const items = this.ideaCache?.items
     if (!items || items.length === 0) return
     const frame: ServerFrame = { type: 'suggestions', items }
-    for (const [id, conversation] of this.conversations) {
-      if (conversation.session.messages.length === 0) this.broadcast(id, frame)
+    for (const [id, chat] of this.chats) {
+      if (chat.session.messages.length === 0) this.broadcast(id, frame)
     }
   }
 
-  private startTurn(conversationId: string, text: string, target?: SendTarget, images: ImagePart[] = [], files?: IncomingFile[]): void {
+  private startTurn(chatId: string, text: string, target?: SendTarget, images: ImagePart[] = [], files?: IncomingFile[]): void {
     // A person who is already typing does not want ideas. The call they started
     // is about to be wasted work, so it is cut here rather than left to finish
     // behind the turn and replace cards nobody is looking at any more.
@@ -930,17 +930,17 @@ export class WebHub {
     // pressing it answered "nothing is running to stop". The frame under it is the
     // other half: sent at once, so a message enqueued behind a running turn shows
     // up as queued now rather than when that turn ends.
-    this.turns.run(conversationId, async (inbox, signal) => {
+    this.turns.run(chatId, async (inbox, signal) => {
       const id = randomUUID()
-      const activeConversation = this.conversations.get(conversationId)
+      const activeChat = this.chats.get(chatId)
       // Kept as it is said, frame by frame, for a client that arrives in the middle of
       // it: by then the `turn-start` below is long gone, and the session on disk grows
       // only a step at a time. Keyed by the session, so a sibling screen gets it too;
-      // `owner` is the conversation whose queue is running it.
-      let sessionId = activeConversation?.session.id
+      // `owner` is the chat whose queue is running it.
+      let sessionId = activeChat?.session.id
       let live: LiveTurn | undefined
-      if (activeConversation && sessionId) {
-        live = { id, at: Date.now(), frames: [], from: activeConversation.session.messages.length, owner: conversationId }
+      if (activeChat && sessionId) {
+        live = { id, at: Date.now(), frames: [], from: activeChat.session.messages.length, owner: chatId }
         this.live.set(sessionId, live)
       }
       if (sessionId) this.emitTurn(sessionId, { type: 'turn-start', id, text: files?.length
@@ -949,7 +949,7 @@ export class WebHub {
       // Said again now the live turn is open: the state frame the caller sent when it
       // queued this turn read `busy` before the queue had registered it, so it still
       // said false. This is the one that turns the sibling's composer busy.
-      this.sendState(conversationId)
+      this.sendState(chatId)
       let status: 'done' | 'stopped' | 'error' = 'done'
       /** The first refusal the turn itself reported, kept for the written record. */
       let failureReason: string | undefined
@@ -965,13 +965,13 @@ export class WebHub {
       try {
         let currentText = text || (currentFiles?.length ? 'Please inspect the attached media.' : '')
         while (currentText && !signal.aborted) {
-          const conversation = this.conversations.get(conversationId)
-          if (!conversation) return
-          let session = await this.runtime.getSession(conversation.scope)
-          conversation.session = session
+          const chat = this.chats.get(chatId)
+          if (!chat) return
+          let session = await this.runtime.getSession(chat.scope)
+          chat.session = session
           if (runFrom === undefined) runFrom = session.messages.length
           // A turn can outlive the session it opened on (`/new`, a resume): the live
-          // turn moves to the session the conversation is bound to now, so the screens
+          // turn moves to the session the chat is bound to now, so the screens
           // watching that session keep receiving it and the old key is left clean.
           if (live && session.id !== sessionId) {
             if (sessionId) this.live.delete(sessionId)
@@ -992,16 +992,16 @@ export class WebHub {
           }
           const command = currentFiles?.length
             ? { handled: false as const }
-            : await handleCommand(currentText, this.commandContext(conversation, session, signal))
+            : await handleCommand(currentText, this.commandContext(chat, session, signal))
           if (command.handled) {
-            session = await this.runtime.getSession(conversation.scope)
-            conversation.session = session
-            this.broadcast(conversationId, { type: 'command-result', reply: command.reply ?? '', markdown: command.markdown, actions: command.actions, cards: command.cards, sessionId: session.id })
+            session = await this.runtime.getSession(chat.scope)
+            chat.session = session
+            this.broadcast(chatId, { type: 'command-result', reply: command.reply ?? '', markdown: command.markdown, actions: command.actions, cards: command.cards, sessionId: session.id })
             const queuedText = inbox.shift()
             if (queuedText?.startsWith('/')) {
-              const queuedCommand = await handleCommand(queuedText, this.commandContext(conversation, session, signal))
-              conversation.session = await this.runtime.getSession(conversation.scope)
-              if (queuedCommand.handled) this.broadcast(conversationId, { type: 'command-result', reply: queuedCommand.reply ?? '', markdown: queuedCommand.markdown, actions: queuedCommand.actions, cards: queuedCommand.cards, sessionId: conversation.session.id })
+              const queuedCommand = await handleCommand(queuedText, this.commandContext(chat, session, signal))
+              chat.session = await this.runtime.getSession(chat.scope)
+              if (queuedCommand.handled) this.broadcast(chatId, { type: 'command-result', reply: queuedCommand.reply ?? '', markdown: queuedCommand.markdown, actions: queuedCommand.actions, cards: queuedCommand.cards, sessionId: chat.session.id })
               currentText = inbox.shift() ?? ''
             } else {
               currentText = queuedText ?? ''
@@ -1012,15 +1012,15 @@ export class WebHub {
           for await (const event of session.send(currentText, {
             signal,
             steering: inbox,
-            // Whether this conversation's clients draw a generated interface, so the
+            // Whether this chat's clients draw a generated interface, so the
             // teaching reaches the model only where it can be shown: the surface says
             // it draws one, and the setting has been turned on (unset is off — the
             // feature is experimental, and the teaching rides every turn).
-            genui: conversation.genui === true && display.genui === true,
-            // Who is holding the conversation: the phone said it is the phone, which
+            genui: chat.genui === true && display.genui === true,
+            // Who is holding the chat: the phone said it is the phone, which
             // the gateway alone cannot tell from a browser. Named per turn, like
             // `genui`, and absent until a client declares one.
-            client: conversation.client,
+            client: chat.client,
             ...(currentImages.length ? { images: currentImages } : {}),
             ...(currentAudio.length ? { audio: currentAudio } : {}),
             ...(currentModel ? { model: currentModel } : {}),
@@ -1030,17 +1030,17 @@ export class WebHub {
             ...(target ? { origin: target } : {}),
             // What is on the panel, so the model knows what the person is looking
             // at, and where each tab's contents are, without having to ask.
-            panel: this.panelFacts(conversation),
+            panel: this.panelFacts(chat),
             ask: async (request) => {
               const permissionId = randomUUID()
               const expiresAt = Date.now() + PERMISSION_TIMEOUT_MS
               // Held on the session's live turn while it waits: the frame below reaches
               // the clients that are here, and this is what a client arriving later is
               // told. The question is the session's own, so any screen bound to it can
-              // answer — not only the conversation whose queue raised it.
+              // answer — not only the chat whose queue raised it.
               if (live) live.permission = { id: permissionId, request, expiresAt }
               if (sessionId) this.emitTurn(sessionId, { type: 'permission', id: permissionId, request, expiresAt })
-              const result = await this.pending.wait(permissionId, PERMISSION_TIMEOUT_MS, signal, sessionId ?? conversationId)
+              const result = await this.pending.wait(permissionId, PERMISSION_TIMEOUT_MS, signal, sessionId ?? chatId)
               if (live?.permission?.id === permissionId) live.permission = undefined
               if (sessionId) {
                 this.emitTurn(sessionId, {
@@ -1064,8 +1064,8 @@ export class WebHub {
             // to a view here and sent as its own frame, never as a raw `event`. A
             // `close` request leaves no tabs, which is the model taking the panel down.
             if (event.type === 'panel') {
-              this.showPanel(conversation, event.request)
-              this.broadcast(conversationId, { type: 'panel', panel: this.panelView(conversation) })
+              this.showPanel(chat, event.request)
+              this.broadcast(chatId, { type: 'panel', panel: this.panelView(chat) })
               continue
             }
             displayEvent(event, id, display, (frame) => { if (sessionId) this.emitTurn(sessionId, frame) })
@@ -1079,9 +1079,9 @@ export class WebHub {
           const files = session.takeOutgoing()
           if (files.length > 0) {
             try {
-              await this.deliver(conversationId, { files })
+              await this.deliver(chatId, { files })
             } catch (error) {
-              this.reportTurnFailure(conversationId, id, errorMessage(error))
+              this.reportTurnFailure(chatId, id, errorMessage(error))
             }
           }
           currentText = inbox.shift() ?? ''
@@ -1093,10 +1093,10 @@ export class WebHub {
           status = 'stopped'
         } else {
           status = 'error'
-          this.reportTurnFailure(conversationId, id, errorMessage(error))
+          this.reportTurnFailure(chatId, id, errorMessage(error))
         }
       } finally {
-        const endedConversation = this.conversations.get(conversationId)
+        const endedChat = this.chats.get(chatId)
         // Cleared before the `turn-end` goes out: the step that just finished is in
         // the session by now, so a client connecting in this gap is handed the whole
         // turn as history instead of a live row nothing would ever close.
@@ -1105,23 +1105,23 @@ export class WebHub {
         // too — not only a reload, which reads the same rendering back from the transcript.
         // The copy without the output rides beside it, and only where it differs: the two
         // are choices under one control, not two copies of the same words.
-        const messages = endedConversation && runFrom !== undefined
-          ? endedConversation.session.messages.slice(runFrom)
+        const messages = endedChat && runFrom !== undefined
+          ? endedChat.session.messages.slice(runFrom)
           : null
         const raw = messages ? rawTurn(messages) : null
         const noOutput = messages ? rawTurn(messages, { output: false }) : null
         if (sessionId) this.emitTurn(sessionId, { type: 'turn-end', id, status, ...(raw ? { raw } : {}), ...(noOutput && noOutput !== raw ? { rawNoOutput: noOutput } : {}) })
         // The refusal the turn reported is taken down with the turn, so it is written
         // after the turn-end: the live screens have the message's own status, and this
-        // is what the conversation shows again when it is reopened.
+        // is what the chat shows again when it is reopened.
         if (failureReason) {
           void failedSession?.appendNotice(`⚠ the turn failed: ${failureReason}`).catch((error: unknown) => {
             logWarn(`could not write down a failed turn: ${errorMessage(error)}`)
           })
         }
       }
-    }, () => this.sendState(conversationId))
-    this.sendState(conversationId)
+    }, () => this.sendState(chatId))
+    this.sendState(chatId)
   }
 
   /**
@@ -1130,29 +1130,29 @@ export class WebHub {
    * that shape is for a frame the server refused, and work that stopped halfway
    * vanishing without a reason is what makes it look like nothing happened.
    */
-  private reportTurnFailure(conversationId: string, turnId: string, reason: string): void {
-    const session = this.conversations.get(conversationId)?.session
+  private reportTurnFailure(chatId: string, turnId: string, reason: string): void {
+    const session = this.chats.get(chatId)?.session
     // A turn frame, so it reaches every screen on the session — not only the one whose
     // queue started it.
     if (session) this.emitTurn(session.id, { type: 'event', turnId, event: { type: 'error', message: reason } })
-    logWarn(`turn failed on web:${conversationId}: ${reason}`)
+    logWarn(`turn failed on web:${chatId}: ${reason}`)
     void session?.appendNotice(`⚠ the turn failed: ${reason}`).catch((error: unknown) => {
       logWarn(`could not write down a failed turn: ${errorMessage(error)}`)
     })
   }
 
-  private async command(client: WebClient, conversation: Conversation, text: string, messageId?: string): Promise<void> {
-    const context = this.commandContext(conversation, conversation.session, new AbortController().signal)
-    // The turn controls act on the session, not the asking conversation: `/stop`,
+  private async command(client: WebClient, chat: Chat, text: string, messageId?: string): Promise<void> {
+    const context = this.commandContext(chat, chat.session, new AbortController().signal)
+    // The turn controls act on the session, not the asking chat: `/stop`,
     // `/steer` and `/queue` reach the queue the session's turn is running in.
-    const key = this.liveOwner(conversation.session.id) ?? conversation.scope.conversationId
+    const key = this.liveOwner(chat.session.id) ?? chat.scope.chatId
     const result = handleTurnControl(text, {
       turn: turnOf(this.turns, key),
       start: (pending) => this.startTurn(key, pending),
     })
     if (result.handled) {
       client.send({ type: 'command-result', reply: result.reply ?? '', ...(messageId ? { messageId } : {}) })
-      this.sendState(conversation.scope.conversationId)
+      this.sendState(chat.scope.chatId)
       return
     }
     // The state frame goes on the queue's settle handler, not inside `work`: read
@@ -1162,8 +1162,8 @@ export class WebHub {
     this.turns.run(key, async () => {
       const response = await handleCommand(text, context)
       if (!response.handled) return
-      const refreshed = await this.runtime.getSession(conversation.scope)
-      conversation.session = refreshed
+      const refreshed = await this.runtime.getSession(chat.scope)
+      chat.session = refreshed
       client.send({
         type: 'command-result',
         reply: response.reply ?? '',
@@ -1173,13 +1173,13 @@ export class WebHub {
         sessionId: refreshed.id,
         ...(messageId ? { messageId } : {}),
       })
-    }, () => this.sendState(conversation.scope.conversationId))
+    }, () => this.sendState(chat.scope.chatId))
   }
 
-  private commandContext(conversation: Conversation, session: Session, signal: AbortSignal): CommandContext {
+  private commandContext(chat: Chat, session: Session, signal: AbortSignal): CommandContext {
     return buildCommandContext({
       runtime: this.runtime,
-      scope: conversation.scope,
+      scope: chat.scope,
       session,
       // No allowlist, deliberately: this surface is not a bot answering a room.
       // Whoever holds the token *is* the owner, so the single-person lock — which
@@ -1196,35 +1196,35 @@ export class WebHub {
    * a second, idle send. A turn in another process is not seen here; the sessions
    * list carries that one from the store's lease.
    */
-  private sendState(conversationId: string): void {
-    const conversation = this.conversations.get(conversationId)
-    if (!conversation) return
-    const sessionId = conversation.session.id
-    const key = this.liveOwner(sessionId) ?? conversationId
+  private sendState(chatId: string): void {
+    const chat = this.chats.get(chatId)
+    if (!chat) return
+    const sessionId = chat.session.id
+    const key = this.liveOwner(sessionId) ?? chatId
     const frame: ServerFrame = {
       type: 'state',
       busy: this.turns.busy(key) || this.live.has(sessionId),
       queued: this.turns.queued(key),
     }
-    for (const bound of this.conversationsOf(sessionId)) for (const client of bound.clients) client.send(frame)
+    for (const bound of this.chatsOf(sessionId)) for (const client of bound.clients) client.send(frame)
   }
 
-  /** Every conversation bound to a session — the screens its live turn speaks to. */
-  private conversationsOf(sessionId: string): Conversation[] {
-    const found: Conversation[] = []
-    for (const conversation of this.conversations.values()) {
-      if (conversation.session.id === sessionId) found.push(conversation)
+  /** Every chat bound to a session — the screens its live turn speaks to. */
+  private chatsOf(sessionId: string): Chat[] {
+    const found: Chat[] = []
+    for (const chat of this.chats.values()) {
+      if (chat.session.id === sessionId) found.push(chat)
     }
     return found
   }
 
-  /** The conversation whose queue runs this session's turn, when one is running. */
+  /** The chat whose queue runs this session's turn, when one is running. */
   private liveOwner(sessionId: string): string | undefined {
     return this.live.get(sessionId)?.owner
   }
 
-  private broadcast(conversationId: string, frame: ServerFrame): void {
-    for (const client of this.conversations.get(conversationId)?.clients ?? []) client.send(frame)
+  private broadcast(chatId: string, frame: ServerFrame): void {
+    for (const client of this.chats.get(chatId)?.clients ?? []) client.send(frame)
   }
 
   /**
@@ -1240,27 +1240,27 @@ export class WebHub {
    */
   private emitTurn(sessionId: string, frame: ServerFrame): void {
     this.live.get(sessionId)?.frames.push(frame)
-    for (const conversation of this.conversationsOf(sessionId)) {
-      for (const client of conversation.clients) client.send(frame)
+    for (const chat of this.chatsOf(sessionId)) {
+      for (const client of chat.clients) client.send(frame)
     }
   }
 
   /**
    * Each open chat the jobs of the session it is bound to, and nothing else. Sent to
-   * every conversation, empty included, so a strip clears the moment its job ends.
+   * every chat, empty included, so a strip clears the moment its job ends.
    */
   private broadcastJobs(): void {
-    for (const conversation of this.conversations.values()) {
-      if (conversation.clients.size === 0) continue
-      const frame: ServerFrame = { type: 'jobs', jobs: this.jobsView(conversation.session.id) }
-      for (const client of conversation.clients) client.send(frame)
+    for (const chat of this.chats.values()) {
+      if (chat.clients.size === 0) continue
+      const frame: ServerFrame = { type: 'jobs', jobs: this.jobsView(chat.session.id) }
+      for (const client of chat.clients) client.send(frame)
     }
   }
 
   /**
    * The jobs still running in one session, as its strip draws them. Only the ones
    * still going: a job that ended is announced in the chat, and a strip that kept it
-   * would be saying something the conversation already said.
+   * would be saying something the chat already said.
    */
   private jobsView(sessionId: string): JobView[] {
     return (this.runtime.jobs?.list(sessionId) ?? [])

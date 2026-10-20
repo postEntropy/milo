@@ -351,7 +351,7 @@ final class AppModel {
         // replay that session instead of a new one.
         reopening = true
         var next = account
-        next.conversationId = AccountStore.freshConversationId()
+        next.chatId = AccountStore.freshChatId()
         do {
             try await MiloApi.newSession(next)
             AccountStore.save(next)
@@ -396,7 +396,7 @@ final class AppModel {
                 host: address.host,
                 port: address.port,
                 token: device.token,
-                conversationId: AccountStore.conversationId
+                chatId: AccountStore.chatId
             )
             // Pairing a code proves only the HTTP route that mints the token. The socket
             // the chat runs on is a second upgrade and can fail where the claim went
@@ -765,7 +765,7 @@ final class AppModel {
     @discardableResult
     private func openFresh(_ account: Account, bind: (Account) async throws -> Void) async -> Bool {
         var next = account
-        next.conversationId = AccountStore.freshConversationId()
+        next.chatId = AccountStore.freshChatId()
         do {
             try await bind(next)
             AccountStore.save(next)
@@ -789,7 +789,7 @@ final class AppModel {
                 // Onto a fresh conversation, so the move lands even while a turn runs
                 // on the session being left.
                 var next = account
-                next.conversationId = AccountStore.freshConversationId()
+                next.chatId = AccountStore.freshChatId()
                 try await MiloApi.newSession(next)
                 AccountStore.save(next)
                 phase = .chat(next)
@@ -875,7 +875,7 @@ final class AppModel {
         owedIntent = nil
         owedUploads = []
         var next = account
-        next.conversationId = AccountStore.freshConversationId()
+        next.chatId = AccountStore.freshChatId()
         do {
             try await MiloApi.forkSession(next, id: from, upToTurn: turn)
             AccountStore.save(next)

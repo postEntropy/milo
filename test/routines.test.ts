@@ -262,7 +262,7 @@ describe('the store', () => {
   const routine = (over: Record<string, unknown> = {}) => ({
     prompt: 'look at the repo',
     when: at('08:00'),
-    target: { gateway: 'telegram' as const, conversationId: '123' },
+    target: { gateway: 'telegram' as const, chatId: '123' },
     enabled: true,
     ...over,
   })
@@ -284,14 +284,33 @@ describe('the store', () => {
     expect(readRoutines()).toEqual([])
   })
 
+  it('keeps the chat a routine named before the field was renamed', () => {
+    writeFileSync(
+      routinesFile(),
+      JSON.stringify([
+        {
+          id: 'calm-otter-2',
+          prompt: 'x',
+          when: at('08:00'),
+          target: { gateway: 'web', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' },
+        },
+      ]),
+    )
+    // Still delivers where it was pointed, rather than dropping out of the list.
+    expect(readRoutines()[0]!.target).toEqual({
+      gateway: 'web',
+      chatId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+    })
+  })
+
   it('drops entries it cannot trust instead of failing to start', () => {
     writeFileSync(
       routinesFile(),
       JSON.stringify([
-        { id: 'ok-otter-1', prompt: 'x', when: at('08:00'), target: { gateway: 'telegram', conversationId: '1' } },
-        { id: 'no-prompt', when: at('08:00'), target: { gateway: 'telegram', conversationId: '1' } },
-        { id: 'bad-when', prompt: 'x', when: { kind: 'sometimes' }, target: { gateway: 'telegram', conversationId: '1' } },
-        { id: 'bad-target', prompt: 'x', when: at('08:00'), target: { gateway: 'email', conversationId: '1' } },
+        { id: 'ok-otter-1', prompt: 'x', when: at('08:00'), target: { gateway: 'telegram', chatId: '1' } },
+        { id: 'no-prompt', when: at('08:00'), target: { gateway: 'telegram', chatId: '1' } },
+        { id: 'bad-when', prompt: 'x', when: { kind: 'sometimes' }, target: { gateway: 'telegram', chatId: '1' } },
+        { id: 'bad-target', prompt: 'x', when: at('08:00'), target: { gateway: 'email', chatId: '1' } },
         'not even an object',
       ]),
     )
@@ -303,11 +322,11 @@ describe('the store', () => {
       routinesFile(),
       JSON.stringify([
         // A day of the week and a day of the month in one schedule.
-        { id: 'both-days-1', prompt: 'x', when: { kind: 'at', time: '09:00', days: [1], dayOfMonth: [1] }, target: { gateway: 'telegram', conversationId: '1' } },
+        { id: 'both-days-1', prompt: 'x', when: { kind: 'at', time: '09:00', days: [1], dayOfMonth: [1] }, target: { gateway: 'telegram', chatId: '1' } },
         // The 31st of a month that has 30 days, and February's own impossible 31st.
-        { id: 'bad-date-1', prompt: 'x', when: { kind: 'at', time: '09:00', dayOfMonth: [31], month: [2] }, target: { gateway: 'telegram', conversationId: '1' } },
+        { id: 'bad-date-1', prompt: 'x', when: { kind: 'at', time: '09:00', dayOfMonth: [31], month: [2] }, target: { gateway: 'telegram', chatId: '1' } },
         // The 29th of February is a real date.
-        { id: 'ok-date-1', prompt: 'x', when: { kind: 'at', time: '09:00', dayOfMonth: [29], month: [2] }, target: { gateway: 'telegram', conversationId: '1' } },
+        { id: 'ok-date-1', prompt: 'x', when: { kind: 'at', time: '09:00', dayOfMonth: [29], month: [2] }, target: { gateway: 'telegram', chatId: '1' } },
       ]),
     )
     expect(readRoutines().map((entry) => entry.id)).toEqual(['ok-date-1'])
@@ -317,7 +336,7 @@ describe('the store', () => {
     writeFileSync(
       routinesFile(),
       JSON.stringify([
-        { id: 'ok-otter-1', prompt: 'x', when: at('08:00'), target: { gateway: 'telegram', conversationId: '1' } },
+        { id: 'ok-otter-1', prompt: 'x', when: at('08:00'), target: { gateway: 'telegram', chatId: '1' } },
       ]),
     )
     expect(readRoutines()[0]!.enabled).toBe(true)
@@ -331,7 +350,7 @@ describe('the store', () => {
           id: 'ok-otter-1',
           prompt: 'x',
           when: at('08:00'),
-          target: { gateway: 'web', conversationId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' },
+          target: { gateway: 'web', chatId: 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee' },
         },
       ]),
     )
@@ -464,14 +483,14 @@ describe('the store', () => {
 
     const updated = await updateRoutine(added.id, {
       when: at('09:00', [1, 2, 3, 4, 5]),
-      target: { gateway: 'discord', conversationId: '999' },
+      target: { gateway: 'discord', chatId: '999' },
       enabled: false,
     })
 
     expect(updated?.id).toBe(added.id)
     expect(updated?.createdAt).toBe(added.createdAt)
     expect(updated?.when).toEqual(at('09:00', [1, 2, 3, 4, 5]))
-    expect(updated?.target).toEqual({ gateway: 'discord', conversationId: '999' })
+    expect(updated?.target).toEqual({ gateway: 'discord', chatId: '999' })
     expect(updated?.enabled).toBe(false)
     // What the patch left out is kept as it was.
     expect(findRoutine(added.id)).toMatchObject({ prompt: 'look at the repo', name: 'briefing' })
@@ -510,7 +529,7 @@ describe('the store', () => {
     writeFileSync(
       routinesFile(),
       JSON.stringify([
-        { id: 'calm-otter-1', prompt: 'x', when: at('08:00'), target: { gateway: 'telegram', conversationId: '1' } },
+        { id: 'calm-otter-1', prompt: 'x', when: at('08:00'), target: { gateway: 'telegram', chatId: '1' } },
       ]),
     )
     expect(readRoutines()[0]!.allow).toBeUndefined()
@@ -594,7 +613,7 @@ describe('the store', () => {
           id: 'calm-otter-9',
           prompt: 'from the CLI',
           when: at('08:00'),
-          target: { gateway: 'telegram', conversationId: '1' },
+          target: { gateway: 'telegram', chatId: '1' },
           enabled: true,
         },
       ]),
@@ -614,7 +633,7 @@ const sample = (over: Partial<Routine> = {}): Routine => ({
   name: 'briefing',
   prompt: 'look at the repo',
   when: at('08:00'),
-  target: { gateway: 'telegram', conversationId: '123' },
+  target: { gateway: 'telegram', chatId: '123' },
   enabled: true,
   createdAt: 0,
   ...over,
@@ -631,7 +650,7 @@ interface FakeRun {
 /** What the stub session was pinned with, so a test can read it back. */
 interface SentSession {
   grantedTools?: string[]
-  deliverTo?: { gateway: string; conversationId: string }
+  deliverTo?: { gateway: string; chatId: string }
 }
 
 /** A runtime whose one session answers in whatever way the test asked for. */
@@ -883,20 +902,20 @@ describe('RoutineScheduler', () => {
 
     expect(h.sessions).toEqual([{
       grantedTools: ['shell_command'],
-      deliverTo: { gateway: 'telegram', conversationId: '123' },
+      deliverTo: { gateway: 'telegram', chatId: '123' },
     }])
     h.scheduler.stop()
   })
 
   it("tells the run which chat it may send files to, the routine's own target", async () => {
-    await writeRoutines([sample({ when: every(1), target: { gateway: 'discord', conversationId: '987' } })])
+    await writeRoutines([sample({ when: every(1), target: { gateway: 'discord', chatId: '987' } })])
     const h = harness()
     h.scheduler.start()
 
     h.setClock(new Date(2026, 8, 25, 8, 0, 40))
     await h.advance(120_000)
 
-    expect(h.sessions).toEqual([{ grantedTools: undefined, deliverTo: { gateway: 'discord', conversationId: '987' } }])
+    expect(h.sessions).toEqual([{ grantedTools: undefined, deliverTo: { gateway: 'discord', chatId: '987' } }])
     h.scheduler.stop()
   })
 

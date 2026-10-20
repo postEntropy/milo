@@ -708,8 +708,8 @@ export class WebSettings {
   }
 
   private async newSession(body: Record<string, unknown>): Promise<unknown> {
-    const conversationId = validConversationId(body.conversationId)
-    const scope = { gateway: 'web', conversationId }
+    const chatId = validChatId(body.chatId)
+    const scope = { gateway: 'web', chatId }
     // A work session is started in a project. The id is checked here rather than
     // written blind: a session pointed at a project that is not in the list would
     // start and then work somewhere else, saying nothing about why.
@@ -857,28 +857,28 @@ export class WebSettings {
   }
 
   private async resumeSession(body: Record<string, unknown>): Promise<unknown> {
-    const conversationId = validConversationId(body.conversationId)
+    const chatId = validChatId(body.chatId)
     if (typeof body.id !== 'string') throw new Error('Invalid session id.')
-    const session = await this.runtime.resumeSession({ gateway: 'web', conversationId }, body.id)
+    const session = await this.runtime.resumeSession({ gateway: 'web', chatId }, body.id)
     if (!session) throw new Error('Session not found.')
     return { id: session.id }
   }
 
   private async forkSession(body: Record<string, unknown>): Promise<unknown> {
-    const conversationId = validConversationId(body.conversationId)
+    const chatId = validChatId(body.chatId)
     const rawId = body.sessionId ?? body.id
     if (typeof rawId !== 'string') throw new Error('Invalid session id.')
     const sourceId = sessionId(rawId)
     const upToTurn = typeof body.upToTurn === 'number' ? body.upToTurn : undefined
     const title = typeof body.title === 'string' ? body.title : undefined
-    const session = await this.runtime.forkSession({ gateway: 'web', conversationId }, sourceId, { upToTurn, title })
+    const session = await this.runtime.forkSession({ gateway: 'web', chatId }, sourceId, { upToTurn, title })
     if (!session) throw new Error('Session not found.')
     return { id: session.id }
   }
 
   private async clearSession(body: Record<string, unknown>): Promise<unknown> {
-    const conversationId = validConversationId(body.conversationId)
-    const session = await this.runtime.getSession({ gateway: 'web', conversationId })
+    const chatId = validChatId(body.chatId)
+    const session = await this.runtime.getSession({ gateway: 'web', chatId })
     await session.clear()
     return { cleared: true }
   }
@@ -891,7 +891,7 @@ export class WebSettings {
   private async deleteSession(body: Record<string, unknown>): Promise<unknown> {
     const id = sessionId(body.id)
     if (typeof body.current === 'string' && body.current === id) {
-      throw new Error('That is the conversation you are in — start a new one first.')
+      throw new Error('That is the session you are in — start a new one first.')
     }
     if (!(await this.runtime.removeSession(id))) throw new Error('Session not found.')
     return { removed: true }
@@ -1217,8 +1217,8 @@ function maskRecord(record: Record<string, string>): Record<string, { set: boole
   return Object.fromEntries(Object.entries(record).map(([id, value]) => [id, { set: Boolean(value), ...(value ? { masked: '••••••••••••••••' } : {}) }]))
 }
 
-function validConversationId(value: unknown): string {
-  if (typeof value !== 'string' || !/^[0-9a-f-]{36}$/i.test(value)) throw new Error('Invalid conversation id.')
+function validChatId(value: unknown): string {
+  if (typeof value !== 'string' || !/^[0-9a-f-]{36}$/i.test(value)) throw new Error('Invalid chat id.')
   return value
 }
 
@@ -1318,7 +1318,7 @@ function routineTarget(value: unknown): RoutineTarget {
   if (!(ROUTINE_GATEWAYS as readonly string[]).includes(gateway)) {
     throw new Error(`The destination must be one of ${ROUTINE_GATEWAYS.join(', ')}, or none.`)
   }
-  const conversationId = optionalText(target.conversationId)
-  if (!conversationId) throw new Error('The destination needs a conversation id.')
-  return { gateway: gateway as RoutineGateway, conversationId }
+  const chatId = optionalText(target.chatId)
+  if (!chatId) throw new Error('The destination needs a chat id.')
+  return { gateway: gateway as RoutineGateway, chatId }
 }

@@ -83,7 +83,7 @@ export const shellTool: Tool<ShellArgs> = {
       const started = ctx.jobs!.start({
         command: args.command,
         cwd,
-        origin: ctx.origin ?? { gateway: 'local', conversationId: 'install' },
+        origin: ctx.origin ?? { gateway: 'local', chatId: 'install' },
         sessionId: ctx.sessionId,
         notify: args.notify,
       })

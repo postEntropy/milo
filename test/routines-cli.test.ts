@@ -134,7 +134,7 @@ describe('milo routines', () => {
     expect(saved).toMatchObject({
       prompt: 'look at the repo',
       when: { kind: 'at', time: '08:00', days: [1, 2, 3, 4, 5] },
-      target: { gateway: 'telegram', conversationId: '123' },
+      target: { gateway: 'telegram', chatId: '123' },
       enabled: true,
     })
   })

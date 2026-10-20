@@ -43,7 +43,7 @@ async function harness(options: { onEdit?: (value: string) => void } = {}) {
   const store = new MemorySessionStore()
   const record = await store.create()
   const session = new Session({
-    scope: { gateway: 'telegram', conversationId: 'chat-1' },
+    scope: { gateway: 'telegram', chatId: 'chat-1' },
     provider,
     model: 'm',
     system: 'BASE',
@@ -58,7 +58,7 @@ async function harness(options: { onEdit?: (value: string) => void } = {}) {
   const edits: string[] = []
   const surface: ChatSurface = {
     post: async () => 'm1',
-    edit: async (_conversationId, _messageId, value) => {
+    edit: async (_chatId, _messageId, value) => {
       edits.push(value)
       options.onEdit?.(value)
     },
@@ -79,7 +79,7 @@ function turnOn(
   return (steering, signal) =>
     runTurn({
       session,
-      conversationId: 'chat-1',
+      chatId: 'chat-1',
       text,
       surface,
       maxLength: 2000,
@@ -105,7 +105,7 @@ describe('the turns a gateway runs behind one message', () => {
 
     await runTurns({
       session,
-      conversationId: 'chat-1',
+      chatId: 'chat-1',
       text: 'first',
       surface,
       maxLength: 2000,
@@ -136,7 +136,7 @@ describe('the turns a gateway runs behind one message', () => {
 
     const failure = await runTurns({
       session,
-      conversationId: 'chat-1',
+      chatId: 'chat-1',
       text: 'first',
       surface,
       maxLength: 2000,
@@ -162,7 +162,7 @@ describe('the turns a gateway runs behind one message', () => {
 
     const failure = await runTurns({
       session,
-      conversationId: 'chat-1',
+      chatId: 'chat-1',
       text: 'first',
       surface: failing,
       maxLength: 2000,
@@ -240,7 +240,7 @@ describe('steering on a chat gateway', () => {
     queue.run('chat-1', (steering) =>
       runTurn({
         session,
-        conversationId: 'chat-1',
+        chatId: 'chat-1',
         text: 'read a.txt',
         surface,
         maxLength: 2000,
@@ -269,7 +269,7 @@ describe('steering on a chat gateway', () => {
     queue.run('chat-1', (steering) =>
       runTurn({
         session,
-        conversationId: 'chat-1',
+        chatId: 'chat-1',
         text: 'hello',
         surface,
         maxLength: 2000,

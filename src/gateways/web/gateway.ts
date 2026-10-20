@@ -62,14 +62,14 @@ export class WebGateway implements Gateway {
     this.running = null
   }
 
-  async deliver(conversationId: string, message: OutgoingMessage): Promise<void> {
+  async deliver(chatId: string, message: OutgoingMessage): Promise<void> {
     if (!this.running) throw new Error('the web UI is not running')
-    await this.running.deliver(conversationId, message)
+    await this.running.deliver(chatId, message)
   }
 
   /** Shows a finished job's announcement, already written to the transcript. */
-  async showNotice(conversationId: string, message: OutgoingMessage): Promise<void> {
-    await this.running?.showNotice(conversationId, message)
+  async showNotice(chatId: string, message: OutgoingMessage): Promise<void> {
+    await this.running?.showNotice(chatId, message)
   }
 
   /** A routine ran: every page open on the web UI re-reads the history it shows. */

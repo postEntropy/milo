@@ -6,12 +6,16 @@ import type { TodoItem } from '../../core/todos.js'
 import type { VerificationResult } from '../../core/verification.js'
 import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
 
-// 9: a `ui` event carries `draft` while the block is still being written, so the
-// widget fills in as the tree arrives. A page from 8 would drop the flag and draw
-// every draft as a finished widget, one under another, so it is refused — which is
-// what the version is for. 8 made the handshake's `genui` a flag again: there is one
-// way a turn draws, so a page naming a transport named something that no longer exists.
-export const PROTOCOL_VERSION = 9
+// 10: the gateway's chat is `chatId`, not `conversationId`, in the handshake and in a
+// routine's target. A page from 9 would name a field this daemon no longer reads, and
+// a routine made from it would lose the chat it delivers to — so it is refused as a
+// skew instead. 9: a `ui` event carries `draft` while the block is still being written,
+// so the widget fills in as the tree arrives. A page from 8 would drop the flag and
+// draw every draft as a finished widget, one under another, so it is refused — which
+// is what the version is for. 8 made the handshake's `genui` a flag again: there is
+// one way a turn draws, so a page naming a transport named something that no longer
+// exists.
+export const PROTOCOL_VERSION = 10
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
@@ -28,6 +32,18 @@ export const PLAN_APPROVAL = 'The plan is approved. Execute it.'
  */
 export function protocolRefusal(clientVersion: number): string {
   return `This client speaks protocol ${clientVersion} and this server speaks ${PROTOCOL_VERSION}. Update the client, or restart the server, and reconnect.`
+}
+
+/**
+ * The protocol number a handshake names, read from the raw frame. A frame's own
+ * shape can change with the version, so the skew has to be recognized before the
+ * frame is parsed: a client from an older protocol must be told to update, not
+ * answered as unreadable.
+ */
+export function helloVersion(value: unknown): number | undefined {
+  if (!value || typeof value !== 'object') return undefined
+  const frame = value as Record<string, unknown>
+  return frame.type === 'hello' && typeof frame.version === 'number' ? frame.version : undefined
 }
 
 export const PERMISSION_MODES = ['ask', 'auto', 'yolo'] as const
@@ -73,7 +89,7 @@ export type AgentEvent =
  */
 export interface SendTarget {
   gateway: 'telegram' | 'discord' | 'web' | 'none'
-  conversationId: string
+  chatId: string
 }
 
 const TARGET_GATEWAYS = ['telegram', 'discord', 'web', 'none'] as const
@@ -99,7 +115,7 @@ export interface SessionCardItem {
 }
 
 export type ClientFrame =
-  | { type: 'hello'; version: number; conversationId: string; genui?: boolean; client?: ClientKind }
+  | { type: 'hello'; version: number; chatId: string; genui?: boolean; client?: ClientKind }
   | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[] }
   | {
       type: 'control'
@@ -211,7 +227,6 @@ export interface ActiveTurn {
 }
 
 export type ServerFrame =
-  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn; project?: ProjectView; plan?: boolean }
   /** The session's planning turn went on or off, for every screen watching it. */
   | { type: 'plan'; plan: boolean }
   | { type: 'turn-start'; id: string; text: string }
@@ -322,7 +337,7 @@ export function proseOf(message: { parts: TranscriptPart[] }): string {
 export function parseClientFrame(value: unknown): ClientFrame | null {
   if (!value || typeof value !== 'object') return null
   const frame = value as Record<string, unknown>
-  if (frame.type === 'hello' && typeof frame.conversationId === 'string' && typeof frame.version === 'number' && (frame.genui === undefined || typeof frame.genui === 'boolean') && (frame.client === undefined || (CLIENT_KINDS as readonly string[]).includes(String(frame.client)))) {
+  if (frame.type === 'hello' && typeof frame.chatId === 'string' && typeof frame.version === 'number' && (frame.genui === undefined || typeof frame.genui === 'boolean') && (frame.client === undefined || (CLIENT_KINDS as readonly string[]).includes(String(frame.client)))) {
     return frame as ClientFrame
   }
   if (
@@ -379,6 +394,6 @@ function isSendTarget(value: unknown): boolean {
   if (!value || typeof value !== 'object') return false
   const target = value as Record<string, unknown>
   return (TARGET_GATEWAYS as readonly string[]).includes(String(target.gateway))
-    && typeof target.conversationId === 'string'
-    && target.conversationId.trim() !== ''
+    && typeof target.chatId === 'string'
+    && target.chatId.trim() !== ''
 }

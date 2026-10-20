@@ -354,7 +354,7 @@ gateways:
     allowlist: ["123456789"]
 ```
 
-An entry matches either the sender's **user id** or the **conversation id** (chat, channel or guild),
+An entry matches either the sender's **user id** or the **chat id** (a chat, channel or guild),
 so you can allow one person or a whole room. An empty list means anyone; a non-empty list fails closed
 for everyone else, and a blocked sender is told their own id. `milo setup` → Gateways walks through
 token → access → enable. The allowlist is read when `milo serve` starts, so restart it after changing

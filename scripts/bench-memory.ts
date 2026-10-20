@@ -14,7 +14,7 @@ import type { Memory, MemoryInput, MemoryScope } from '../src/core/memory/types.
  *
  * `RUNS=500 npm run bench:memory`
  */
-const SCOPE: MemoryScope = { gateway: 'cli', conversationId: 'bench' }
+const SCOPE: MemoryScope = { gateway: 'cli', chatId: 'bench' }
 const RUNS = Number(process.env.RUNS ?? 200)
 
 const QUERIES = [

@@ -12,7 +12,7 @@ const briefing = (over: Partial<Routine> = {}): Routine => ({
   name: 'daily briefing',
   prompt: 'look at the repo',
   when: every(120),
-  target: { gateway: 'telegram', conversationId: '123' },
+  target: { gateway: 'telegram', chatId: '123' },
   enabled: true,
   createdAt: 0,
   ...over,
@@ -70,7 +70,7 @@ function harness(over: Partial<ToolContext> = {}, fail?: string, seed: Routine[]
 
 describe('the routine tool', () => {
   it('turns "every two hours" into an interval aimed at the current chat', async () => {
-    const { ctx, added } = harness({ origin: { gateway: 'telegram', conversationId: '123' } })
+    const { ctx, added } = harness({ origin: { gateway: 'telegram', chatId: '123' } })
 
     const result = await routineTool.execute({ prompt: 'look at the repo', every: '2h' }, ctx)
 
@@ -80,7 +80,7 @@ describe('the routine tool', () => {
         prompt: 'look at the repo',
         name: undefined,
         when: { kind: 'every', minutes: 120 },
-        target: { gateway: 'telegram', conversationId: '123' },
+        target: { gateway: 'telegram', chatId: '123' },
         enabled: true,
       },
     ])
@@ -91,7 +91,7 @@ describe('the routine tool', () => {
   })
 
   it('caps a routine at the runs it was allowed, and says what the cap does', async () => {
-    const { ctx, added } = harness({ origin: { gateway: 'web', conversationId: 'conv-1' } })
+    const { ctx, added } = harness({ origin: { gateway: 'web', chatId: 'conv-1' } })
 
     const result = await routineTool.execute({ prompt: 'ping', every: '1m', limit: 5 }, ctx)
 
@@ -121,7 +121,7 @@ describe('the routine tool', () => {
 
   it('reads weekday mornings, and aims them at the chat they came from', async () => {
     const { ctx, added } = harness({
-      origin: { gateway: 'discord', conversationId: '999' },
+      origin: { gateway: 'discord', chatId: '999' },
     })
 
     const result = await routineTool.execute(
@@ -131,12 +131,12 @@ describe('the routine tool', () => {
 
     expect(result.isError).toBeFalsy()
     expect(added[0]!.when).toEqual({ kind: 'at', time: '08:00', days: [1, 2, 3, 4, 5] })
-    expect(added[0]!.target).toEqual({ gateway: 'discord', conversationId: '999' })
+    expect(added[0]!.target).toEqual({ gateway: 'discord', chatId: '999' })
     expect(result.content).toContain('08:00, mon–fri')
   })
 
   it('reads a date, and says the day and the month back', async () => {
-    const { ctx, added } = harness({ origin: { gateway: 'telegram', conversationId: '123' } })
+    const { ctx, added } = harness({ origin: { gateway: 'telegram', chatId: '123' } })
 
     const result = await routineTool.execute(
       { prompt: 'briefing', at: '9h', dayOfMonth: ['25'], month: ['dec'] },
@@ -149,7 +149,7 @@ describe('the routine tool', () => {
   })
 
   it('refuses a weekday and a day of the month together, and says the valid shapes', async () => {
-    const { ctx, added } = harness({ origin: { gateway: 'telegram', conversationId: '123' } })
+    const { ctx, added } = harness({ origin: { gateway: 'telegram', chatId: '123' } })
 
     const result = await routineTool.execute({ prompt: 'x', at: '9h', days: ['mon'], dayOfMonth: ['1'] }, ctx)
 
@@ -159,7 +159,7 @@ describe('the routine tool', () => {
   })
 
   it('carries the tools a writing routine needs, and says what it was granted', async () => {
-    const { ctx, added } = harness({ origin: { gateway: 'telegram', conversationId: '123' } })
+    const { ctx, added } = harness({ origin: { gateway: 'telegram', chatId: '123' } })
 
     const result = await routineTool.execute(
       { prompt: 'append the tick to the csv', every: '1m', allow: ['shell_command', 'write_file'] },
@@ -172,7 +172,7 @@ describe('the routine tool', () => {
   })
 
   it('asks for no grant when the routine only reads', async () => {
-    const { ctx } = harness({ origin: { gateway: 'telegram', conversationId: '123' } })
+    const { ctx } = harness({ origin: { gateway: 'telegram', chatId: '123' } })
 
     // The policy reads this to decide whether the call needs a confirmation.
     expect(routineTool.asksWhen?.({ prompt: 'x', every: '1h' })).toBe(false)
@@ -181,18 +181,18 @@ describe('the routine tool', () => {
   })
 
   it('lets an explicit destination win over where the turn came from', async () => {
-    const { ctx, added } = harness({ origin: { gateway: 'telegram', conversationId: '123' } })
+    const { ctx, added } = harness({ origin: { gateway: 'telegram', chatId: '123' } })
 
     await routineTool.execute(
-      { prompt: 'x', every: '1h', gateway: 'discord', conversationId: '42' },
+      { prompt: 'x', every: '1h', gateway: 'discord', chatId: '42' },
       ctx,
     )
 
-    expect(added[0]!.target).toEqual({ gateway: 'discord', conversationId: '42' })
+    expect(added[0]!.target).toEqual({ gateway: 'discord', chatId: '42' })
   })
 
   it('asks which chat when the turn cannot receive one', async () => {
-    const { ctx, added } = harness({ origin: { gateway: 'cli', conversationId: 'main' } })
+    const { ctx, added } = harness({ origin: { gateway: 'cli', chatId: 'main' } })
 
     const result = await routineTool.execute({ prompt: 'x', every: '1h' }, ctx)
 
@@ -202,7 +202,7 @@ describe('the routine tool', () => {
   })
 
   it('refuses half a destination rather than guessing the other half', async () => {
-    const { ctx, added } = harness({ origin: { gateway: 'telegram', conversationId: '123' } })
+    const { ctx, added } = harness({ origin: { gateway: 'telegram', chatId: '123' } })
 
     const result = await routineTool.execute({ prompt: 'x', every: '1h', gateway: 'discord' }, ctx)
 
@@ -211,7 +211,7 @@ describe('the routine tool', () => {
   })
 
   it('refuses a time it cannot read, and says so', async () => {
-    const { ctx, added } = harness({ origin: { gateway: 'telegram', conversationId: '123' } })
+    const { ctx, added } = harness({ origin: { gateway: 'telegram', chatId: '123' } })
 
     const result = await routineTool.execute({ prompt: 'x', at: 'some day' }, ctx)
 
@@ -229,7 +229,7 @@ describe('the routine tool', () => {
   })
 
   it('surfaces the store refusing, rather than claiming success', async () => {
-    const { ctx } = harness({ origin: { gateway: 'telegram', conversationId: '123' } }, 'at most 50')
+    const { ctx } = harness({ origin: { gateway: 'telegram', chatId: '123' } }, 'at most 50')
 
     const result = await routineTool.execute({ prompt: 'x', every: '1h' }, ctx)
 
@@ -292,10 +292,10 @@ describe('the routine tool changing and dropping one', () => {
     const { ctx, updated } = harness({}, undefined, [briefing()])
 
     await routineTool.execute(
-      { action: 'update', id: 'calm-otter-1', gateway: 'discord', conversationId: '42' },
+      { action: 'update', id: 'calm-otter-1', gateway: 'discord', chatId: '42' },
       ctx,
     )
-    expect(updated[0]!.patch).toEqual({ target: { gateway: 'discord', conversationId: '42' } })
+    expect(updated[0]!.patch).toEqual({ target: { gateway: 'discord', chatId: '42' } })
 
     await routineTool.execute({ action: 'update', id: 'calm-otter-1', gateway: 'none' }, ctx)
     expect(updated[1]!.patch).toEqual({ target: { gateway: 'none' } })

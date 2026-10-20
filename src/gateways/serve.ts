@@ -57,7 +57,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   // names wins over the one the config holds.
   const web = loaded.config.web
   /** Kept so the scheduler can tell an open Routines screen that a run happened. */
-  let webUi: { routinesChanged(): void; showNotice(conversationId: string, message: OutgoingMessage): Promise<void> } | undefined
+  let webUi: { routinesChanged(): void; showNotice(chatId: string, message: OutgoingMessage): Promise<void> } | undefined
   if (!options.noWeb && web.enabled) {
     const { WebGateway } = await import('./web/gateway.js')
     const gateway = new WebGateway({
@@ -96,12 +96,12 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
       ...(message.files.length > 0 ? { files: message.files } : {}),
     }
     if (job.origin.gateway === 'web') {
-      await webUi?.showNotice(job.origin.conversationId, outgoing)
+      await webUi?.showNotice(job.origin.chatId, outgoing)
       return
     }
     const gateway = gateways.find((candidate) => candidate.id === job.origin.gateway)
     if (!gateway?.deliver) throw new Error(`no ${job.origin.gateway} surface to deliver to`)
-    await gateway.deliver(job.origin.conversationId, outgoing)
+    await gateway.deliver(job.origin.chatId, outgoing)
   })
 
   // The prompts that run on a timer. It shares this runtime, so a routine's turn
@@ -116,7 +116,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
       if (routine.target.gateway === 'none') return
       const gateway = gateways.find((candidate) => candidate.id === routine.target.gateway)
       if (!gateway?.deliver) throw new Error(`no ${routine.target.gateway} surface to deliver to`)
-      await gateway.deliver(routine.target.conversationId, message)
+      await gateway.deliver(routine.target.chatId, message)
     },
     // The scheduler runs in this process, so a page showing the run history is
     // told at once rather than left to poll for it.

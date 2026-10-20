@@ -232,7 +232,7 @@ describe('runServe', () => {
           id: 'calm-otter-1',
           prompt: 'briefing',
           when: { kind: 'at', time: '08:00' },
-          target: { gateway: 'telegram', conversationId: '123' },
+          target: { gateway: 'telegram', chatId: '123' },
           enabled: true,
           createdAt: 0,
         },

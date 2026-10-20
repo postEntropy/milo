@@ -9,7 +9,7 @@ import type { AgentRuntime } from '../../core/runtime.js'
 import { isImage, type OutgoingMessage } from '../../core/outgoing.js'
 import { errorMessage } from '../../util/errors.js'
 import { hyperlink } from '../../util/terminal.js'
-import { parseClientFrame, PROTOCOL_VERSION, protocolRefusal, type ServerFrame } from './protocol.js'
+import { helloVersion, parseClientFrame, PROTOCOL_VERSION, protocolRefusal, type ServerFrame } from './protocol.js'
 import { WebHub } from './hub.js'
 import { WebSettings } from './settings.js'
 import { addDevice, deviceForToken } from './devices.js'
@@ -84,9 +84,9 @@ export interface RunningWebServer {
    */
   urls: string[]
   /** Posts a message into a conversation with no turn behind it (a routine's answer). */
-  deliver(conversationId: string, message: OutgoingMessage): Promise<void>
+  deliver(chatId: string, message: OutgoingMessage): Promise<void>
   /** Shows a message already in the transcript (a finished job's announcement). */
-  showNotice(conversationId: string, message: OutgoingMessage): Promise<void>
+  showNotice(chatId: string, message: OutgoingMessage): Promise<void>
   /** Tells every open page that a routine ran, so the history it shows re-reads. */
   routinesChanged(): void
   stop(): Promise<void>
@@ -117,7 +117,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     })
   })
   webSocketServer.on('connection', (socket: WebSocket) => {
-    let conversationId: string | undefined
+    let chatId: string | undefined
     const client = {
       send(frame: ServerFrame): void {
         if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame))
@@ -131,39 +131,41 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
         client.send({ type: 'error', message: 'Invalid JSON frame.' })
         return
       }
+      // Recognized before the frame is parsed: a frame's own shape can change with the
+      // version, and a client from an older protocol must be told to update rather than
+      // answered as unreadable. A skew is almost always a page served from a bundle
+      // older than the server — the number lives inside the build, not in the source —
+      // so the message says both numbers rather than leaving the person to guess which
+      // side is the stale one.
+      const version = helloVersion(parsed)
+      if (version !== undefined && version !== PROTOCOL_VERSION) {
+        client.send({ type: 'error', message: protocolRefusal(version) })
+        socket.close(1002, 'Invalid handshake')
+        return
+      }
       const frame = parseClientFrame(parsed)
       if (!frame) {
         client.send({ type: 'error', message: 'Invalid client frame.' })
         return
       }
       if (frame.type === 'hello') {
-        // The two refusals are named apart because they are fixed differently. A
-        // version skew is almost always a page served from a bundle older than the
-        // server — the number lives inside the build, not in the source — so the
-        // message says both numbers rather than leaving the person to guess which
-        // side is the stale one.
-        if (conversationId) {
+        if (chatId) {
           client.send({ type: 'error', message: 'Duplicate handshake.' })
           socket.close(1002, 'Invalid handshake')
           return
         }
-        if (frame.version !== PROTOCOL_VERSION) {
-          client.send({ type: 'error', message: protocolRefusal(frame.version) })
-          socket.close(1002, 'Invalid handshake')
-          return
-        }
-        conversationId = frame.conversationId
-        void hub.connect(client, conversationId, frame.genui, frame.client).catch((error: unknown) => {
+        chatId = frame.chatId
+        void hub.connect(client, chatId, frame.genui, frame.client).catch((error: unknown) => {
           client.send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
-          socket.close(1011, 'Could not open conversation')
+          socket.close(1011, 'Could not open chat')
         })
         return
       }
-      if (!conversationId) {
+      if (!chatId) {
         client.send({ type: 'error', message: 'Send the hello frame first.' })
         return
       }
-      hub.handle(client, frame, conversationId)
+      hub.handle(client, frame, chatId)
     })
     socket.on('close', () => hub.disconnect(client))
   })
@@ -193,8 +195,8 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     token,
     url,
     urls,
-    deliver: (conversationId, message) => hub.deliver(conversationId, message),
-    showNotice: (conversationId, message) => hub.showNotice(conversationId, message),
+    deliver: (chatId, message) => hub.deliver(chatId, message),
+    showNotice: (chatId, message) => hub.showNotice(chatId, message),
     routinesChanged: () => hub.routinesChanged(),
     stop: () => new Promise<void>((resolve, reject) => {
       hub.close()

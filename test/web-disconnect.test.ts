@@ -12,7 +12,7 @@ const { WebHub } = await import('../src/gateways/web/hub.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { DefaultPermissionPolicy } = await import('../src/core/tools/permission.js')
 
-const CONVERSATION = '11111111-2222-3333-4444-555555555555'
+const CHAT = '11111111-2222-3333-4444-555555555555'
 
 afterEach(() => {
   rmSync(home, { recursive: true, force: true })
@@ -212,7 +212,7 @@ function transcriptText(frame: Frame | undefined): string[] {
 
 /** Every text part of the conversation's transcript, in order. */
 async function transcript(runtime: InstanceType<typeof AgentRuntime>): Promise<string[]> {
-  const session = await runtime.getSession({ gateway: 'web', conversationId: CONVERSATION })
+  const session = await runtime.getSession({ gateway: 'web', chatId: CHAT })
   return session.messages.flatMap((message) =>
     message.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])))
 }
@@ -225,8 +225,8 @@ describe('a client leaving a web conversation', () => {
     const frames: Frame[] = []
     const page = client(frames)
 
-    await hub.connect(page, CONVERSATION)
-    hub.handle(page, { type: 'send', text: 'still there?' }, CONVERSATION)
+    await hub.connect(page, CHAT)
+    hub.handle(page, { type: 'send', text: 'still there?' }, CHAT)
     await provider.reached()
 
     // A reload, a closed tab and a phone locking all close this socket exactly
@@ -251,15 +251,15 @@ describe('a client arriving in the middle of a turn', () => {
 
     const watching: Frame[] = []
     const first = client(watching)
-    await hub.connect(first, CONVERSATION)
-    hub.handle(first, { type: 'send', text: 'are you still there?' }, CONVERSATION)
+    await hub.connect(first, CHAT)
+    hub.handle(first, { type: 'send', text: 'are you still there?' }, CHAT)
     await provider.reached()
     // The turn is provably in flight: the model call is held open, and the piece it
     // had already said went out to a client that is now gone.
     hub.disconnect(first)
 
     const arriving: Frame[] = []
-    await hub.connect(client(arriving), CONVERSATION)
+    await hub.connect(client(arriving), CHAT)
 
     // The words are in neither half of what a client arriving now is otherwise
     // given: the session on disk is written a step at a time and this step has not
@@ -297,15 +297,15 @@ describe('the step behind the one in flight', () => {
 
     const gone: Frame[] = []
     const first = client(gone)
-    await hub.connect(first, CONVERSATION)
-    hub.handle(first, { type: 'send', text: 'go' }, CONVERSATION)
+    await hub.connect(first, CHAT)
+    hub.handle(first, { type: 'send', text: 'go' }, CHAT)
     // The first step is over — its words went into the session and its read ran — and
     // the second one is the step in flight.
     await provider.reached()
     hub.disconnect(first)
 
     const arriving: Frame[] = []
-    await hub.connect(client(arriving), CONVERSATION)
+    await hub.connect(client(arriving), CHAT)
 
     const ready = arriving.find((frame) => frame.type === 'ready')
     expect(ready?.activeTurn?.id).toEqual(expect.any(String))
@@ -340,8 +340,8 @@ describe('a question the turn is waiting on', () => {
 
     const gone: Frame[] = []
     const first = client(gone)
-    await hub.connect(first, CONVERSATION)
-    hub.handle(first, { type: 'send', text: 'run it' }, CONVERSATION)
+    await hub.connect(first, CHAT)
+    hub.handle(first, { type: 'send', text: 'run it' }, CHAT)
     await waitFor(() => gone.some((frame) => frame.type === 'permission'))
     const asked = gone.find((frame) => frame.type === 'permission')
 
@@ -351,7 +351,7 @@ describe('a question the turn is waiting on', () => {
 
     const arriving: Frame[] = []
     const second = client(arriving)
-    await hub.connect(second, CONVERSATION)
+    await hub.connect(second, CHAT)
     const again = arriving.find((frame) => frame.type === 'permission')
     expect(again?.id).toBe(asked?.id)
     // The deadline is the daemon's, so the countdown this client draws is the one
@@ -359,7 +359,7 @@ describe('a question the turn is waiting on', () => {
     expect(again?.expiresAt).toBe(asked?.expiresAt)
 
     // And the answer it gives is the one the turn is waiting for.
-    hub.handle(second, { type: 'control', action: 'allow', id: again?.id ?? '' }, CONVERSATION)
+    hub.handle(second, { type: 'control', action: 'allow', id: again?.id ?? '' }, CHAT)
     await waitFor(() => arriving.some((frame) => frame.type === 'permission-result'))
     expect(arriving.find((frame) => frame.type === 'permission-result')?.allowed).toBe(true)
     expect(await waitFor(() => arriving.some((frame) => frame.type === 'turn-end'))).toBe(true)

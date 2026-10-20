@@ -34,7 +34,7 @@ const { AgentRuntime } = await import('../src/core/runtime.js')
 const { saveAuth, readConfig } = await import('../src/core/config/load.js')
 const { fileHistory } = await import('../src/core/history.js')
 
-const CONVERSATION = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
+const CHAT = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 
 afterEach(() => {
   // The tree is rebuilt rather than only removed: a later test writes into it.
@@ -257,7 +257,7 @@ describe('web Settings routines', () => {
     const created = await settings.handle('routine-add', {
       prompt: 'look at the repo and tell me what moved',
       every: '2h',
-      target: { gateway: 'web', conversationId: CONVERSATION },
+      target: { gateway: 'web', chatId: CHAT },
     }) as { routine: { id: string; name: string } }
     // Unnamed at creation, so it takes the prompt's own first words — as a name reads.
     expect(created.routine.name).toBe('Look at the repo and tell me what moved')
@@ -266,12 +266,12 @@ describe('web Settings routines', () => {
     let listed = await settings.handle('routines') as View[]
     expect(listed).toHaveLength(1)
     expect(listed[0]!.whenLabel).toBe('every 2h')
-    expect(listed[0]!.targetLabel).toBe(`web:${CONVERSATION}`)
+    expect(listed[0]!.targetLabel).toBe(`web:${CHAT}`)
     expect(listed[0]!.nextRunAt).toBeGreaterThan(Date.now())
 
     // It is the same file the timer reads, so `milo routines` sees it too.
     const onDisk = JSON.parse(readFileSync(path.join(home, 'routines.json'), 'utf8'))
-    expect(onDisk[0].target).toEqual({ gateway: 'web', conversationId: CONVERSATION })
+    expect(onDisk[0].target).toEqual({ gateway: 'web', chatId: CHAT })
 
     await settings.handle('routine-enable', { id: created.routine.id, enabled: false })
     listed = await settings.handle('routines') as View[]
@@ -288,7 +288,7 @@ describe('web Settings routines', () => {
     await settings.handle('routine-add', {
       prompt: 'ping',
       every: '2h',
-      target: { gateway: 'web', conversationId: CONVERSATION },
+      target: { gateway: 'web', chatId: CHAT },
     })
 
     // What the timer leaves when the last allowed run happens: the count is in the file
@@ -312,10 +312,10 @@ describe('web Settings routines', () => {
     await expect(settings.handle('routine-add', {
       prompt: 'x',
       every: '2h',
-      target: { gateway: 'carrier-pigeon', conversationId: '1' },
+      target: { gateway: 'carrier-pigeon', chatId: '1' },
     })).rejects.toThrow('destination')
     await expect(settings.handle('routine-add', { prompt: 'x', every: '2h' })).rejects.toThrow('destination')
-    await expect(settings.handle('routine-add', { prompt: 'x', target: { gateway: 'web', conversationId: '1' } }))
+    await expect(settings.handle('routine-add', { prompt: 'x', target: { gateway: 'web', chatId: '1' } }))
       .rejects.toThrow('Set a time')
   })
 
@@ -325,7 +325,7 @@ describe('web Settings routines', () => {
     const created = await settings.handle('routine-add', {
       prompt: 'say nothing',
       every: '6h',
-      target: { gateway: 'web', conversationId: CONVERSATION },
+      target: { gateway: 'web', chatId: CHAT },
     }) as { routine: { id: string } }
 
     // The fake provider streams nothing, so the run succeeds with an empty answer.
@@ -345,15 +345,15 @@ describe('web Settings sessions', () => {
     writeConfig()
     const runtime = build({})
     const settings = new WebSettings(runtime, home)
-    const scope = { gateway: 'web', conversationId: CONVERSATION }
+    const scope = { gateway: 'web', chatId: CHAT }
 
-    const planned = await settings.handle('new-session', { conversationId: CONVERSATION, plan: true }) as { id: string }
+    const planned = await settings.handle('new-session', { chatId: CHAT, plan: true }) as { id: string }
     const planning = await runtime.getSession(scope)
     expect(planning.id).toBe(planned.id)
     expect(planning.planMode).toBe(true)
 
     // The ordinary start is Build: nothing turns plan mode on by accident.
-    const plain = await settings.handle('new-session', { conversationId: CONVERSATION }) as { id: string }
+    const plain = await settings.handle('new-session', { chatId: CHAT }) as { id: string }
     const building = await runtime.getSession(scope)
     expect(building.id).toBe(plain.id)
     expect(building.planMode).toBe(false)
@@ -364,9 +364,9 @@ describe('web Settings sessions', () => {
     const runtime = build({})
     const settings = new WebSettings(runtime, home)
 
-    const session = await runtime.newSession({ gateway: 'web', conversationId: CONVERSATION })
+    const session = await runtime.newSession({ gateway: 'web', chatId: CHAT })
     await expect(settings.handle('session-delete', { id: session.id, current: session.id }))
-      .rejects.toThrow('conversation you are in')
+      .rejects.toThrow('session you are in')
 
     expect(await settings.handle('session-delete', { id: session.id, current: 'other-otter-1' }))
       .toEqual({ removed: true })
@@ -401,7 +401,7 @@ describe('web Settings sessions', () => {
     const runtime = build({})
     const settings = new WebSettings(runtime, home)
 
-    const session = await runtime.newSession({ gateway: 'web', conversationId: CONVERSATION })
+    const session = await runtime.newSession({ gateway: 'web', chatId: CHAT })
     expect(await settings.handle('session-rename', { id: session.id, title: 'My Project' }))
       .toEqual({ renamed: true, id: session.id, title: 'My Project' })
 
@@ -556,7 +556,7 @@ describe('web Settings config', () => {
 
     // A session started after the save is named by the rule just written, without
     // the process being restarted.
-    const session = await runtime.newSession({ gateway: 'web', conversationId: CONVERSATION })
+    const session = await runtime.newSession({ gateway: 'web', chatId: CHAT })
     for await (const _event of session.send('how do I fold a transcript?')) {
       // drain
     }
@@ -1167,7 +1167,7 @@ describe('the Work screen’s projects', () => {
     const id = await addProject(settings, folder('milo'), 'Milo')
 
     const created = (await settings.handle('new-session', {
-      conversationId: CONVERSATION,
+      chatId: CHAT,
       project: id,
     })) as { id: string }
 
@@ -1180,7 +1180,7 @@ describe('the Work screen’s projects', () => {
     const id = await addProject(settings, folder('milo'), 'Milo')
 
     await expect(
-      settings.handle('new-session', { conversationId: CONVERSATION, project: 'calm-otter-9' }),
+      settings.handle('new-session', { chatId: CHAT, project: 'calm-otter-9' }),
     ).rejects.toThrow(`Known: ${id} — Milo`)
   })
 

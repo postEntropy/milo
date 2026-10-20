@@ -47,7 +47,7 @@ function fakeEmbedder(model = 'fake-1'): Embedder & { calls: string[][] } {
 }
 
 const tempDir = () => mkdtempSync(path.join(tmpdir(), 'milo-semantic-'))
-const scope = { gateway: 'cli', conversationId: 'semantic' }
+const scope = { gateway: 'cli', chatId: 'semantic' }
 
 describe('recall by meaning', () => {
   it('finds a note that shares no word with the question', async () => {

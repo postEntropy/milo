@@ -23,7 +23,7 @@ export type {
  */
 export interface ActionContext {
   gateway: 'telegram' | 'discord' | 'web' | 'cli'
-  conversationId: string
+  chatId: string
   userId?: string
   messageId?: string
   /** Acknowledge the interaction (e.g. answerCallbackQuery in Telegram) */

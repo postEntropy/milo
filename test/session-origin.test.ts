@@ -49,7 +49,7 @@ async function run(origin?: MemoryScope) {
   const store = new MemorySessionStore()
   const record = await store.create()
   const session = new Session({
-    scope: { gateway: 'web', conversationId: 'the-browser-chat' },
+    scope: { gateway: 'web', chatId: 'the-browser-chat' },
     provider: new ProbeProvider(),
     model: 'm',
     system: 'BASE',
@@ -77,15 +77,15 @@ describe('the address a turn is pinned to', () => {
    */
   it('hands the pinned destination to the tools, over the chat the turn runs in', async () => {
     seen.length = 0
-    await run({ gateway: 'telegram', conversationId: '123' })
+    await run({ gateway: 'telegram', chatId: '123' })
 
-    expect(seen).toEqual([{ gateway: 'telegram', conversationId: '123' }])
+    expect(seen).toEqual([{ gateway: 'telegram', chatId: '123' }])
   })
 
   it("falls back to the session's own chat when nothing is pinned", async () => {
     seen.length = 0
     await run()
 
-    expect(seen).toEqual([{ gateway: 'web', conversationId: 'the-browser-chat' }])
+    expect(seen).toEqual([{ gateway: 'web', chatId: 'the-browser-chat' }])
   })
 })

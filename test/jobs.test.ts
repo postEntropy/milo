@@ -18,7 +18,7 @@ const { createJobStatusTool, createJobKillTool } = await import('../src/core/too
 const { shellTool } = await import('../src/core/tools/shell.js')
 const { jobDir, jobMetaFile, jobsDir } = await import('../src/core/config/paths.js')
 
-const origin = { gateway: 'cli', conversationId: 'main' }
+const origin = { gateway: 'cli', chatId: 'main' }
 const signal = new AbortController().signal
 const ctx = (jobs: InstanceType<typeof JobManager>): ToolContext => ({
   cwd: process.cwd(),
@@ -79,6 +79,26 @@ describe('JobManager', () => {
     await jobs.close()
   })
 
+  it('reads the chat a job named before the field was renamed', () => {
+    const id = 'job_1'
+    mkdirSync(jobDir(id), { recursive: true })
+    writeFileSync(
+      jobMetaFile(id),
+      JSON.stringify({
+        id,
+        command: 'echo hi',
+        cwd: '/',
+        notify: 'auto',
+        origin: { gateway: 'telegram', conversationId: '123' },
+        state: 'done',
+        startedAt: Date.now(),
+      }),
+    )
+    const jobs = new JobManager()
+    // An old job still knows where its end is announced.
+    expect(jobs.get(id)?.origin).toEqual({ gateway: 'telegram', chatId: '123' })
+  })
+
   it('reads a job a dead process left running back as interrupted', () => {
     const id = 'job_1'
     mkdirSync(jobDir(id), { recursive: true })
@@ -136,7 +156,7 @@ describe('shell_command background', () => {
     const jobs = new JobManager()
     const result = await shellTool.execute(
       { command: 'echo inline', background: true },
-      { ...ctx(jobs), origin: { gateway: 'routine', conversationId: 'r1' } },
+      { ...ctx(jobs), origin: { gateway: 'routine', chatId: 'r1' } },
     )
     expect(result.content).toContain('ran in the foreground')
     expect(result.content).toContain('inline')

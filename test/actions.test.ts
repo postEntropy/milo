@@ -17,7 +17,7 @@ describe('ActionRouter', () => {
 
     const context: ActionContext = {
       gateway: 'telegram',
-      conversationId: '123',
+      chatId: '123',
       answer: vi.fn(async () => {}),
       edit: vi.fn(async () => {}),
     }
@@ -34,7 +34,7 @@ describe('ActionRouter', () => {
 
     const context: ActionContext = {
       gateway: 'discord',
-      conversationId: '456',
+      chatId: '456',
       answer: vi.fn(async () => {}),
       edit: vi.fn(async () => {}),
     }
@@ -48,7 +48,7 @@ describe('ActionRouter', () => {
     const router = new ActionRouter()
     const context: ActionContext = {
       gateway: 'web',
-      conversationId: '789',
+      chatId: '789',
       answer: vi.fn(async () => {}),
       edit: vi.fn(async () => {}),
     }

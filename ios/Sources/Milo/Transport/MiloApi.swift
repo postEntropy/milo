@@ -200,7 +200,7 @@ enum MiloApi {
     }
 
     static func newSession(_ account: Account, title: String? = nil, project: String? = nil, plan: Bool = false) async throws {
-        var body: [String: Any] = ["conversationId": account.conversationId]
+        var body: [String: Any] = ["chatId": account.chatId]
         if let title { body["title"] = title }
         // The folder this session works in. The daemon refuses an id it does not know,
         // which is what keeps a work session from starting in the install's own folder
@@ -216,7 +216,7 @@ enum MiloApi {
     static func resumeSession(_ account: Account, id: String) async throws {
         _ = try await call(
             "resume-session",
-            ["conversationId": account.conversationId, "id": id],
+            ["chatId": account.chatId, "id": id],
             account: account,
             as: Ack.self
         )
@@ -232,7 +232,7 @@ enum MiloApi {
     static func forkSession(_ account: Account, id: String, upToTurn: Int) async throws {
         _ = try await call(
             "fork-session",
-            ["conversationId": account.conversationId, "sessionId": id, "upToTurn": upToTurn],
+            ["chatId": account.chatId, "sessionId": id, "upToTurn": upToTurn],
             account: account,
             as: Ack.self
         )

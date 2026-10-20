@@ -193,7 +193,7 @@ export interface SessionOptions {
    * everywhere else, where the live surface the turn talks through is the
    * destination.
    */
-  deliverTo?: { gateway: string; conversationId: string }
+  deliverTo?: { gateway: string; chatId: string }
   /**
    * Tools this run may use with nobody to ask — a routine's standing grants,
    * decided by the person when it was created. Layered on the policy for this

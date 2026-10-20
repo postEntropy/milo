@@ -77,7 +77,7 @@ afterEach(() => {
 describe('createRuntime', () => {
   it('wires sessions, memory and the permission policy together', async () => {
     const runtime = createRuntime(loadedConfig('https://x.test/v1'), process.cwd())
-    const session = await runtime.getSession({ gateway: 'cli', conversationId: 't' })
+    const session = await runtime.getSession({ gateway: 'cli', chatId: 't' })
 
     expect(session.id).toMatch(/^[a-z]+-[a-z]+-\d{1,3}$/)
     expect(runtime.permissions?.mode).toBe('auto')
@@ -236,7 +236,7 @@ describe('createRuntime', () => {
 
   it('closes cleanly when nothing was ever used', async () => {
     const runtime = createRuntime(loadedConfig('https://x.test/v1'), process.cwd())
-    const session = await runtime.getSession({ gateway: 'cli', conversationId: 'idle' })
+    const session = await runtime.getSession({ gateway: 'cli', chatId: 'idle' })
 
     expect(session.id).toMatch(/^[a-z]+-[a-z]+-\d{1,3}$/)
     await expect(runtime.close()).resolves.toBeUndefined()
@@ -267,7 +267,7 @@ describe('createRuntime', () => {
       ),
     )
 
-    const cli = { gateway: 'cli', conversationId: 'restart' }
+    const cli = { gateway: 'cli', chatId: 'restart' }
 
     const run = createRuntime(loadedConfig('https://x.test/v1'), process.cwd())
     const opened = await run.sessionFor(cli)
@@ -304,7 +304,7 @@ describe('createRuntime', () => {
     )
 
     const runtime = createRuntime(loadedConfig('https://x.test/v1'), process.cwd())
-    const session = await runtime.getSession({ gateway: 'cli', conversationId: 'history' })
+    const session = await runtime.getSession({ gateway: 'cli', chatId: 'history' })
     for await (const _event of session.send('write this down')) {
       // drain
     }

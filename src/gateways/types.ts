@@ -13,7 +13,7 @@ export interface Gateway {
    * written to out of band: the CLI is a prompt someone is sitting at, not a
    * place a timer can speak into.
    */
-  deliver?(conversationId: string, message: OutgoingMessage): Promise<void>
+  deliver?(chatId: string, message: OutgoingMessage): Promise<void>
 }
 
 export interface GatewayRuntimeOptions {
