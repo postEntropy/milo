@@ -423,7 +423,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         />
         <div className="composer-toolbar">
           <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } fileDrafts.current.set(draftKey, next); return next }); event.target.value = '' }} />
-          <button className={`composer-pill attach-button${canPlan ? ' filled' : ''}`} type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={15} /></button>
+          <button className={`composer-pill attach-button${canPlan ? ' filled' : ''}`} type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={14} /></button>
           {canPlan && <button
             type="button"
             className="composer-pill mode-pill"

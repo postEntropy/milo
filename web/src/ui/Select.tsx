@@ -169,7 +169,7 @@ export function Select({
         }
       }}
     >
-      {icon && <Icon name={icon} size={13} />}
+      {icon && <Icon name={icon} size={15} />}
       <span className="select-value">{triggerLabel ?? current?.label ?? value}</span>
       {current?.meta}
       {caret && <Icon className="select-caret" name="chevron" size={15} />}

@@ -702,7 +702,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .composer-file button { display: inline-flex; border: 0; border-radius: 50%; background: var(--surface); padding: var(--space-2); color: var(--fg); cursor: pointer; }
 /* A secondary control in Work, where the mode and model pills sit beside it; a quiet
    one in an ordinary chat, where it is the only control on that line. */
-.composer-pill.attach-button { display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; }
+.composer-pill.attach-button { display: inline-flex; width: var(--control-sm); height: var(--control-sm); flex: none; align-items: center; justify-content: center; border: 0; background: transparent; padding: 0; }
 .composer-pill.attach-button.filled { background: var(--bg); }
 .composer-pill.attach-button.filled:hover { background: var(--surface-warm); }
 .composer-box textarea::placeholder { color: var(--muted); }
@@ -747,7 +747,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    wearing a pill: one height, radius, fill and type for both, and each carries
    the caret that says it opens a menu. Declared after `.select-trigger` so the
    pill's own compact size wins over the plain trigger's roomy field size. */
-.composer-pill { width: auto; max-width: 240px; min-height: var(--control-sm); gap: var(--space-3); border-radius: var(--radius-pill); background: var(--bg); padding: var(--space-3) var(--space-5); color: var(--fg-2); font-size: var(--text-xs); font-weight: 500; }
+.composer-pill { display: inline-flex; width: auto; max-width: 240px; min-height: var(--control-sm); align-items: center; gap: var(--space-3); border: 0; border-radius: var(--radius-pill); background: var(--bg); padding: var(--space-3) var(--space-5); color: var(--fg-2); font-size: var(--text-xs); font-weight: 500; }
 .composer-pill:hover { background: var(--surface-warm); }
 /* Build and plan are the same filled control; the mark and the word are what tell
    them apart, never a colour of their own. */
