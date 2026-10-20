@@ -777,13 +777,15 @@ struct ChatView: View {
         case .actions:
             // What belongs to the message being written: the files, and how hard the model
             // thinks — one set of rows, from `ComposerAttach`, so the panel a project's own
-            // page raises is this one.
+            // page raises is this one. The model's own line is only in the panel on an
+            // ordinary chat: a work session carries it on the composer's bar.
+            let modelRow: (() -> Void)? = model.sessionProject == nil ? {
+                closeMenu()
+                self.picker = true
+            } : nil
             rows = composerActionRows(
                 model: model,
-                modelRow: {
-                    closeMenu()
-                    self.picker = true
-                },
+                modelRow: modelRow,
                 ask: { ask in
                     closeMenu()
                     self.attach = ask
@@ -1274,8 +1276,13 @@ struct ChatView: View {
                 menu: $menu,
                 send: send,
                 // A session in a project is a work session: its composer carries the plan
-                // switch on the field's line. The model is in the `+` panel on every surface.
-                work: model.sessionProject != nil
+                // switch and the model on the field's line. An ordinary chat keeps the model
+                // in the `+` panel.
+                work: model.sessionProject != nil,
+                onModel: {
+                    closeMenu()
+                    picker = true
+                }
             )
                 // How tall the composer came out, so the panel opens above it rather than
                 // through it — see `composerHeight`.

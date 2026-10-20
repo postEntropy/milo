@@ -27,8 +27,8 @@ struct Composer: View {
     /// the send control raises are one action, so they are one function, on the screen.
     let send: (ClientFrame.Intent) -> Void
     /// Whether this session works in a project, which is what makes the composer two lines:
-    /// the work surface keeps the plan switch on the bar; the model is in the `+` panel on
-    /// every composer, so it does not take a line here.
+    /// the work surface keeps the plan switch and the model on the bar, an ordinary chat
+    /// keeps the model in the `+` panel.
     let work: Bool
     /// Which composer this is: the one the open session is spoken into, or the one a project's
     /// own page carries, where the words being written are what starts a session.
@@ -50,6 +50,10 @@ struct Composer: View {
     /// turn, so the choice has to be made there. Nil on a session composer, which reads
     /// the session's own state instead — one control, placed where the session lives.
     var startPlan: Binding<Bool>? = nil
+    /// Raising the model picker, from the pill beside the plan switch. The screen owns the
+    /// sheet, as it owns the `+` panel — the model is a line of the composer, so choosing
+    /// one is the composer's own action.
+    let onModel: () -> Void
     @Environment(AppModel.self) private var model
     /// Whether the send control is under a finger, for the give every filled control here has.
     /// A control driven by gestures rather than by a `Button` — the long press the panel hangs
@@ -133,8 +137,12 @@ struct Composer: View {
     /// finger gets. Half of the difference is where that mark's left edge sits, and the
     /// field's text starts on that line — so the two rows of a work composer read as one
     /// column instead of the words hanging off the left of the control below them.
-    private static let mark: CGFloat = 20
+    private static let mark: CGFloat = 17
     private static let markLead: CGFloat = (40 - mark) / 2
+
+    /// The mark a pill carries: the plan switch and the model are one row, so their marks
+    /// are one size.
+    private static let pillMark: CGFloat = 13
 
     /// What the field says while it is empty.
     ///
@@ -171,13 +179,17 @@ struct Composer: View {
             menu = menu == .actions ? nil : .actions
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: 20, weight: .semibold))
+                .font(.system(size: Self.mark, weight: .semibold))
                 .foregroundStyle(work ? MiloTheme.foreground2 : MiloTheme.foreground)
-                .frame(width: 40, height: 40)
+                // The fill is the pills' own height, not the finger's box: a disc taller
+                // than the controls beside it reads as a bigger control, whatever the
+                // glyph inside it measures.
+                .frame(width: 34, height: 34)
                 // Filled in a work session, where it sits beside the plan switch; a quiet
                 // control in an ordinary chat, where it is alone on the line.
                 .background(Circle().fill(work ? MiloTheme.surface : Color.clear))
-                .contentShape(Circle())
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle())
         .accessibilityLabel("More")
@@ -210,16 +222,44 @@ struct Composer: View {
         }
     }
 
-    /// A work session's second line: the files, the shape of the turn, and the way to send.
-    /// The model lives in the `+` panel on every composer, so it does not take a line here.
+    /// A work session's second line: the files, the shape of the turn, what it runs on, and
+    /// the way to send.
     private var workRow: some View {
         HStack(spacing: MiloTheme.Space.one) {
             actionsButton
             planPill
+            modelPill
             Spacer(minLength: MiloTheme.Space.two)
             sendControl
         }
         .padding(.horizontal, MiloTheme.Space.two)
+    }
+
+    /// What this message is written with, on the work session's own line. Filled like every
+    /// control here, so it reads as something to press — and it says what is chosen now,
+    /// rather than making a setting something to go looking for.
+    private var modelPill: some View {
+        Button(action: onModel) {
+            HStack(spacing: MiloTheme.Space.two) {
+                Image(systemName: "cpu")
+                    .font(.system(size: Self.pillMark, weight: .semibold))
+                Text(model.modelLabel.isEmpty ? "Model" : model.modelLabel)
+                    .font(MiloTheme.Text.small)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+            }
+            .foregroundStyle(MiloTheme.foreground2)
+            .padding(.horizontal, MiloTheme.Space.four)
+            .padding(.vertical, MiloTheme.Space.two + 1)
+            .background(Capsule().fill(MiloTheme.surface))
+            .contentShape(Capsule())
+        }
+        .buttonStyle(PressableStyle())
+        .accessibilityLabel("Model")
+        .accessibilityValue(model.modelLabel)
+        .accessibilityHint("Choose the model")
     }
 
     /// Whether the plan switch is on: the session's own state, or the choice held for a
@@ -237,7 +277,7 @@ struct Composer: View {
         } label: {
             HStack(spacing: MiloTheme.Space.two) {
                 Image(systemName: planOn ? "list.bullet.rectangle" : "hammer")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: Self.pillMark, weight: .semibold))
                 Text(planOn ? "Plan" : "Build")
                     .font(MiloTheme.Text.small)
             }

@@ -481,7 +481,8 @@ private struct ProjectDetail: View {
                     work: true,
                     role: .start,
                     project: project?.name,
-                    startPlan: $planStart
+                    startPlan: $planStart,
+                    onModel: openModelPicker
                 )
                 // How tall the composer came out, so the `+`'s panel stands over the field
                 // rather than through it — the chat's own arrangement.
@@ -545,21 +546,25 @@ private struct ProjectDetail: View {
         }
     }
 
-    /// What the `+`'s panel holds here: the files, the model, and how hard it thinks — one
-    /// set of rows on every composer, so the model is reached the same way everywhere.
+    /// What the `+`'s panel holds here: the files, and how hard it thinks — one set of rows
+    /// on every composer. The model is not among them: this composer carries it on the bar.
     private var panelRows: [MenuRow] {
         composerActionRows(
             model: model,
-            modelRow: {
-                menu = nil
-                composing = false
-                picker = true
-            },
+            modelRow: nil,
             ask: { ask in
                 menu = nil
                 attach = ask
             }
         )
+    }
+
+    /// Raising the model picker from the pill beside the plan switch: the sheet belongs to
+    /// this page, as the `+` panel does, and the keys go away while it is up.
+    private func openModelPicker() {
+        menu = nil
+        composing = false
+        picker = true
     }
 
     private func open(_ id: String) {
