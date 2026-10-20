@@ -436,6 +436,94 @@ describe('runAgent', () => {
     expect(last.type).toBe('error')
     expect(last.message).toContain('answered with what it had')
   })
+
+  it('drops a tool call the model wrote as text when the steps run out', async () => {
+    const leaked = [
+      '<｜｜DSML｜｜ calls>',
+      '<｜｜DSML｜｜ invoke name="shell_command">',
+      '<｜｜DSML｜｜ parameter name="command" string="true">ls</｜｜DSML｜｜ parameter>',
+      '</｜｜DSML｜｜ invoke>',
+      '</｜｜DSML｜｜ calls>',
+    ].join('\n')
+    const provider = new ScriptedProvider([
+      [{ type: 'tool-call', id: 'c1', name: 'fake_read', args: { path: 'a' } }, { type: 'done', finishReason: 'tool_calls' }],
+      [{ type: 'tool-call', id: 'c2', name: 'fake_read', args: { path: 'b' } }, { type: 'done', finishReason: 'tool_calls' }],
+      // Split across deltas, the way a written-out call arrives.
+      [
+        { type: 'text', delta: leaked.slice(0, 24) },
+        { type: 'text', delta: leaked.slice(24) },
+        { type: 'done', finishReason: 'stop' },
+      ],
+    ])
+    const registry = new ToolRegistry([fakeTool])
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'go' }] }]
+
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider,
+      model: 'm',
+      tools: registry.specs(),
+      registry,
+      messages,
+      context: { cwd: process.cwd(), signal: new AbortController().signal },
+      maxSteps: 2,
+    })) {
+      events.push(event)
+    }
+
+    // Nothing readable was said, so nothing readable is kept or shown — and the
+    // turn says so instead of passing a tool call off as an answer.
+    const streamed = events.flatMap((event) => (event.type === 'text-delta' ? [event.delta] : []))
+    expect(streamed.join('')).toBe('')
+    // The two steps left their tool calls behind; what must not be there is a
+    // closing answer made of the call the model could not make.
+    const spoken = messages.flatMap((message) =>
+      message.role === 'assistant' ? message.content.filter((part) => part.type === 'text') : [],
+    )
+    expect(spoken).toHaveLength(0)
+    const last = events.at(-1) as { type: string; message?: string }
+    expect(last.type).toBe('error')
+    expect(last.message).toContain('without a final answer')
+  })
+
+  it('keeps the prose a model wrote before a call it could not make', async () => {
+    const leaked = [
+      'I fixed the glyph.',
+      '<｜｜DSML｜｜ calls>',
+      '<｜｜DSML｜｜ invoke name="shell_command">',
+      '</｜｜DSML｜｜ invoke>',
+      '</｜｜DSML｜｜ calls>',
+    ].join('\n')
+    const provider = new ScriptedProvider([
+      [{ type: 'tool-call', id: 'c1', name: 'fake_read', args: { path: 'a' } }, { type: 'done', finishReason: 'tool_calls' }],
+      [{ type: 'tool-call', id: 'c2', name: 'fake_read', args: { path: 'b' } }, { type: 'done', finishReason: 'tool_calls' }],
+      [{ type: 'text', delta: leaked }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const registry = new ToolRegistry([fakeTool])
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'go' }] }]
+
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider,
+      model: 'm',
+      tools: registry.specs(),
+      registry,
+      messages,
+      context: { cwd: process.cwd(), signal: new AbortController().signal },
+      maxSteps: 2,
+    })) {
+      events.push(event)
+    }
+
+    const streamed = events.flatMap((event) => (event.type === 'text-delta' ? [event.delta] : []))
+    expect(streamed.join('')).toBe('I fixed the glyph.')
+    expect(messages.at(-1)).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'I fixed the glyph.' }],
+    })
+    const last = events.at(-1) as { type: string; message?: string }
+    expect(last.message).toContain('answered with what it had')
+  })
 })
 
 describe('runAgent — steering', () => {

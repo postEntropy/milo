@@ -148,8 +148,27 @@ const OUT_OF_STEPS = [
   'You have run out of steps for this turn.',
   'Answer now, in the language of the conversation, with what you have:',
   'what you found, what you could not get to, and what you would try next.',
-  'This is the last request of the turn — do not call tools.',
+  'This is the last request of the turn — do not call tools, and write plain prose:',
+  'no tool call, no XML and no markup.',
 ].join(' ')
+
+/** The fullwidth bar, U+FF5C, that the protocol tokens of a written-out call use. */
+const PROTOCOL_MARK = '\uFF5C'
+
+/**
+ * What the no-tools request actually said. A model that answers it with a tool call
+ * written as text (`<｜｜DSML｜｜ invoke ...>`) has not answered: the span holding the
+ * protocol tokens is dropped, and prose before or after it is kept.
+ */
+function readableClosing(raw: string): string {
+  const first = raw.indexOf(PROTOCOL_MARK)
+  if (first < 0) return raw.trim()
+  const start = raw.lastIndexOf('\n', first) + 1
+  const last = raw.lastIndexOf(PROTOCOL_MARK)
+  const newline = raw.indexOf('\n', last)
+  const end = newline < 0 ? raw.length : newline + 1
+  return (raw.slice(0, start) + raw.slice(end)).trim()
+}
 
 /**
  * What a call the turn never reached is answered as, when a stop lands between
@@ -421,8 +440,10 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
 
   // Out of steps with the tools still in hand. The instruction rides on the
   // system prompt rather than on a user message, so the transcript is not left
-  // carrying a sentence nobody said.
-  let closing = ''
+  // carrying a sentence nobody said. The answer is read whole before it is given
+  // out: a written-out tool call arrives over several deltas, and a piece of one
+  // is not something a surface can read.
+  let rawClosing = ''
   const closingFence = options.genui ? new GenUiFence({ drafts: true }) : null
   for await (const event of provider.stream({
     model: options.model,
@@ -436,21 +457,19 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     signal: options.signal,
     ...(tag ? { trace: tag } : {}),
   })) {
-    if (event.type === 'text') {
-      closing += event.delta
-      if (closingFence) {
-        for (const part of fenceEvents(closingFence.push(event.delta))) yield part
-      } else {
-        yield { type: 'text-delta', delta: event.delta }
-      }
-    } else if (event.type === 'reasoning') {
-      yield { type: 'reasoning-delta', delta: event.delta }
+    if (event.type === 'text') rawClosing += event.delta
+    else if (event.type === 'reasoning') yield { type: 'reasoning-delta', delta: event.delta }
+  }
+  const closing = readableClosing(rawClosing)
+  if (closing) {
+    if (closingFence) {
+      for (const part of fenceEvents(closingFence.push(closing))) yield part
+      for (const part of fenceEvents(closingFence.finish())) yield part
+    } else {
+      yield { type: 'text-delta', delta: closing }
     }
+    messages.push({ role: 'assistant', content: [{ type: 'text', text: closing }] })
   }
-  if (closingFence) {
-    for (const part of fenceEvents(closingFence.finish())) yield part
-  }
-  if (closing) messages.push({ role: 'assistant', content: [{ type: 'text', text: closing }] })
 
   yield {
     type: 'error',
