@@ -1187,6 +1187,19 @@ final class AppModel {
         return try await MiloApi.projectTree(account, id: id)
     }
 
+    /// A folder made in a project's folder. Throws, so the section that asked says the
+    /// reason; what comes back is the whole tree, drawn without a second read.
+    func projectFolder(_ id: String, parent: String, name: String) async throws -> WorkTree {
+        guard let account else { throw ApiError.badAddress }
+        return try await MiloApi.projectFolder(account, id: id, parent: parent, name: name)
+    }
+
+    /// A folder made while choosing one, answered with the listing inside it.
+    func createFolder(_ parent: String, name: String) async throws -> FolderListing {
+        guard let account else { throw ApiError.badAddress }
+        return try await MiloApi.createFolder(account, parent: parent, name: name)
+    }
+
     /// One page of a project's file. `offset` continues a longer file; where the page
     /// stopped and how much is left are the daemon's own numbers.
     func projectFile(_ id: String, path: String, offset: Int? = nil) async throws -> WorkFilePage {
@@ -1791,6 +1804,8 @@ final class AppModel {
             // The answer's own words, taken as the turn settles: what the phone says when
             // the chat is not what is on screen.
             var answered: String?
+            /// Whether the row already carries the words the daemon gave for the failure.
+            var saidWhy = false
             if let index = messages.lastIndex(where: { $0.streaming }) {
                 messages[index].streaming = false
                 messages[index].waiting = false
@@ -1800,10 +1815,13 @@ final class AppModel {
                 if let raw { messages[index].raw = raw }
                 if let rawNoOutput { messages[index].rawNoOutput = rawNoOutput }
                 if status == "stopped" { messages[index].status = "Stopped · the partial reply was kept." }
+                saidWhy = messages[index].status != nil
                 answered = messages[index].prose
             }
             turnStarted = nil
-            if status == "error" { note = Note("That turn ended in an error.") }
+            // The row keeps the provider's reason; a generic toast over it would be
+            // the screen saying less than the message behind it.
+            if status == "error", !saidWhy { note = Note("That turn ended in an error.") }
             // Whatever the phone was kept awake for is over. The holds are let go here —
             // after the notice, where there is one to hand over — because the app is
             // suspended soon after they end, and a post still in flight when that happens
@@ -1981,6 +1999,11 @@ final class AppModel {
                 $0.parts = AppModel.settled($0.parts)
             }
         case .error(let message):
+            // The turn's own row keeps the reason, not only the toast: a failure that
+            // lives for nine seconds and leaves a blank bubble is a failure that looks
+            // like nothing happened. The daemon writes the same words down, so a
+            // reopened conversation still says it.
+            mutatingLast { $0.status = "Error: \(message)" }
             note = Note(message)
         case .other:
             break
