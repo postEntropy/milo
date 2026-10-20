@@ -21,6 +21,7 @@ import { buildSessionsList, type ActionRow, type SessionCardItem } from './actio
 import { projectNames } from '../core/projects.js'
 import { normalize } from './access.js'
 import { errorMessage } from '../util/errors.js'
+import { COMMAND_CATALOG } from './command-catalog.js'
 
 export interface CommandContext {
   policy?: PermissionPolicy
@@ -104,29 +105,7 @@ export interface CommandResult {
 
 const HELP = [
   'Commands:',
-  '/mode ask|auto|yolo — permission mode, saved for every surface',
-  '/yolo — toggle yolo mode',
-  '/tools full|name|off — how much of each tool call to show',
-  '/thinking expanded|collapsed — open the model\'s reasoning under the question or leave it folded (display only; /effort is what changes how it thinks)',
-  "/effort low|medium|high — how hard the model thinks (the one that costs)",
-  '/provider [id] — the provider the install answers with: list them, or switch to one',
-  "/model [id] — the model the install answers with: list the current provider's, or switch to one",
-  '/new [title] — start a new session',
-  '/sessions [page] — list saved sessions',
-  '/resume <id> — switch to another session',
-  '/fork [id] [turn] — branch into a new session from this or a named session',
-  '/stats — numbers for the current session',
-  '/jobs [kill <id>] — the background jobs, and how they are doing',
-  '/compact — fold the oldest turns into the summary now, instead of when the context fills up',
-  '/export [md|json] — write this conversation out as a file, tool calls and reasoning included',
-  '/skills — the skills installed, and where they live',
-  '/memory [forget <id>] — what Milo keeps, and how to drop one of them',
-  '/clear — forget this conversation',
-  '/status — permission mode and display settings',
-  '/stop — stop the turn running now, and anything queued behind it',
-  '/steer <text> — hand text to the turn running now, at its next step',
-  '/queue <text> — say it as its own turn, after the one running now',
-  '/help — this message',
+  ...COMMAND_CATALOG.map((command) => `/${command.name}${command.usage ?? ''} — ${command.hint}`),
   'A plain message sent while Milo is working is a correction: it joins that turn at its next step instead of starting a second one. /queue is how you ask for it to be said afterwards.',
   'Adding a provider or a key: run `milo setup` in a terminal.',
 ].join('\n')

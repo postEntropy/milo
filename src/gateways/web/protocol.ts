@@ -5,6 +5,7 @@ import type { ProjectView } from '../../core/projects.js'
 import type { TodoItem } from '../../core/todos.js'
 import type { VerificationResult } from '../../core/verification.js'
 import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
+import type { CommandEntry } from '../command-catalog.js'
 
 // 10: the gateway's chat is `chatId`, not `conversationId`, in the handshake and in a
 // routine's target. A page from 9 would name a field this daemon no longer reads, and
@@ -227,6 +228,7 @@ export interface ActiveTurn {
 }
 
 export type ServerFrame =
+  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn; project?: ProjectView; plan?: boolean; commands?: CommandEntry[] }
   /** The session's planning turn went on or off, for every screen watching it. */
   | { type: 'plan'; plan: boolean }
   | { type: 'turn-start'; id: string; text: string }

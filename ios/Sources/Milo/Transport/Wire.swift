@@ -226,6 +226,18 @@ struct Idea: Decodable, Hashable {
     let symbol: String?
 }
 
+/// One command `/` offers, as the daemon lists them (`src/gateways/command-catalog.ts`).
+/// The browser imports the same list; the phone is handed it in the `ready` frame, so the
+/// two palettes cannot drift.
+struct CommandEntry: Decodable, Identifiable, Hashable {
+    let name: String
+    /// What follows the name in a usage line, when the command takes one.
+    let usage: String?
+    let hint: String
+
+    var id: String { name }
+}
+
 struct CommandResult: Decodable {
     let reply: String
     let markdown: String?
@@ -433,6 +445,8 @@ struct Ready: Decodable {
     /// Whether this session's turns are planning turns. Kept on the session, so a screen
     /// that arrives mid-plan opens with the switch already on.
     let plan: Bool?
+    /// What `/` offers, from the daemon's own catalog.
+    let commands: [CommandEntry]?
 }
 
 // MARK: - What the server sends

@@ -98,6 +98,12 @@ struct Composer: View {
                 }
             }
 
+            // What `/` offers, above the field: the browser's own palette, drawn from the
+            // daemon's catalog so the two surfaces cannot drift.
+            if !palette.isEmpty {
+                commandPalette
+            }
+
             // One capsule, two arrangements, and the surface is one in either: what is
             // written, and what it is written with.
             //
@@ -164,6 +170,56 @@ struct Composer: View {
             .font(.body)
             .foregroundStyle(MiloTheme.foreground)
             .padding(.vertical, MiloTheme.Space.two + 2)
+    }
+
+    /// What `/` offers for what is typed: the names beginning with it, until a space says
+    /// the command is chosen — the browser's own rule. The list itself is the daemon's,
+    /// sent with the handshake, so the two palettes cannot drift.
+    private var palette: [CommandEntry] {
+        guard draft.hasPrefix("/"), !draft.contains(" "), !draft.contains("\n") else { return [] }
+        let query = draft.dropFirst().lowercased()
+        return Array(model.commands.filter { $0.name.hasPrefix(query) }.prefix(8))
+    }
+
+    /// A command picked: its name goes into the field with the space that ends the
+    /// palette, and the cursor stays where the words go.
+    private func choose(_ command: CommandEntry) {
+        draft = "/\(command.name) "
+        focused = true
+    }
+
+    /// The palette's lines, filled like every control here and drawn on the app's own
+    /// glass rather than the platform's menu — the same material as the `+` panel.
+    private var commandPalette: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+            ForEach(palette) { command in
+                Button { choose(command) } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: MiloTheme.Space.two) {
+                        Text("/\(command.name)")
+                            .font(MiloTheme.Text.small.weight(.semibold).monospaced())
+                            .foregroundStyle(MiloTheme.foreground)
+                        Text(command.hint)
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, MiloTheme.Space.three)
+                    .frame(height: 34)
+                    .background(
+                        MiloTheme.surfaceWarm,
+                        in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                }
+                .buttonStyle(PressableStyle())
+                .accessibilityLabel("/\(command.name), \(command.hint)")
+            }
+        }
+        .padding(MiloTheme.Space.two)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .padding(.horizontal, MiloTheme.margin)
     }
 
     /// The `+`, raising the panel of what belongs to the message.

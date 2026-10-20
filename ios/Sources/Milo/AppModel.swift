@@ -67,6 +67,8 @@ final class AppModel {
     /// composer. The daemon scopes them to the chat, so the strip never draws another
     /// conversation's work.
     private(set) var jobs: [JobView] = []
+    /// What `/` offers, sent with the handshake: the same list the browser draws.
+    private(set) var commands: [CommandEntry] = []
     /**
      A line the app has to say, where the reply would land, and whether it is a
      failure: a thing that went right is not said in the red a refusal wears. The
@@ -1735,6 +1737,7 @@ final class AppModel {
             // The jobs running when this screen opened: the strip is drawn from the
             // handshake rather than waiting for the next change to reach it.
             jobs = ready.jobs ?? []
+            commands = ready.commands ?? []
             // The panel this conversation was left showing, if it was: the handshake hands
             // the tabs back, and whether they are covered comes from the preference. A
             // reload therefore brings a panel back the way it was left, never opening one

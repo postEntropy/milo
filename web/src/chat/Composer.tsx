@@ -7,6 +7,7 @@ import { shortModel } from '../../../src/gateways/model-label.ts'
 import { formatDuration } from '../../../src/util/format.ts'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { quotedLead } from '../../../src/core/sessions/format.ts'
+import { COMMAND_CATALOG } from '../../../src/gateways/command-catalog.ts'
 import { EFFORT_LEVELS, type JobView } from '@protocol'
 import { Icon } from '../ui/Icons.js'
 import { Select } from '../ui/Select.js'
@@ -88,30 +89,6 @@ function useFoldedToolbar(): boolean {
  */
 const RING_CIRCUMFERENCE = 2 * Math.PI * 9
 
-/** What `/` offers: the names the gateways share, with what each one does. */
-const COMMANDS: Array<{ name: string; hint: string }> = [
-  { name: 'help', hint: 'the commands, and what they do' },
-  { name: 'status', hint: 'permission mode, display and effort' },
-  { name: 'mode', hint: 'permission mode: ask | auto | yolo' },
-  { name: 'yolo', hint: 'toggle yolo mode' },
-  { name: 'tools', hint: 'how much of a tool call to show: full | name | off' },
-  { name: 'thinking', hint: "draw the model's reasoning: expanded | collapsed" },
-  { name: 'effort', hint: 'how hard the model thinks: low | medium | high' },
-  { name: 'new', hint: 'start a new session' },
-  { name: 'sessions', hint: 'the saved sessions' },
-  { name: 'resume', hint: 'switch to a session: /resume <id>' },
-  { name: 'stats', hint: 'numbers for the current session' },
-  { name: 'jobs', hint: 'the background jobs, and how they are doing' },
-  { name: 'compact', hint: 'fold the oldest turns into the summary now' },
-  { name: 'export', hint: 'write this conversation to a file: /export [md|json]' },
-  { name: 'skills', hint: 'the skills installed, and where they live' },
-  { name: 'memory', hint: 'what Milo keeps: /memory [forget <id>]' },
-  { name: 'clear', hint: 'forget this conversation' },
-  { name: 'stop', hint: 'stop the turn running now' },
-  { name: 'steer', hint: 'hand text to the turn running now' },
-  { name: 'queue', hint: 'say it as its own turn, after this one' },
-]
-
 /** A command as one line for the strip: whitespace flattened and clipped. */
 function oneLine(text: string): string {
   const flat = text.replace(/\s+/g, ' ').trim()
@@ -170,7 +147,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const palette = useMemo(() => {
     if (!draft.startsWith('/') || draft.includes(' ') || dismissed === draft) return []
     const query = draft.slice(1).toLowerCase()
-    return COMMANDS.filter((command) => command.name.startsWith(query)).slice(0, 8)
+    return COMMAND_CATALOG.filter((command) => command.name.startsWith(query)).slice(0, 8)
   }, [draft, dismissed])
 
   useEffect(() => {

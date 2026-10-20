@@ -73,29 +73,44 @@ function buildWith(provider: Provider): InstanceType<typeof AgentRuntime> {
 
 /** Every text part of a session's transcript, in order. */
 async function transcript(runtime: InstanceType<typeof AgentRuntime>): Promise<string[]> {
-  const session = await runtime.getSession({ gateway: 'web', conversationId: CONVERSATION })
+  const session = await runtime.getSession({ gateway: 'web', chatId: CHAT })
   return session.messages.flatMap((message) =>
     message.content.flatMap((part) => (part.type === 'text' ? [part.text] : [])))
 }
 
 /** Every delivered-file part of a session's transcript, in order. */
 async function attachments(runtime: InstanceType<typeof AgentRuntime>) {
-  const session = await runtime.getSession({ gateway: 'web', conversationId: CONVERSATION })
+  const session = await runtime.getSession({ gateway: 'web', chatId: CHAT })
   return session.messages.flatMap((message) =>
     message.content.flatMap((part) =>
       part.type === 'file' ? [{ path: part.path, name: part.name, mimeType: part.mimeType }] : []))
 }
 
+describe('a handshake', () => {
+  it('hands the commands / offers to a client that cannot import them', async () => {
+    const hub = new WebHub(build())
+    const frames: ServerFrame[] = []
+    const client = { send: (frame: ServerFrame) => frames.push(frame) }
+
+    await hub.connect(client, CHAT)
+
+    const ready = frames.find((frame) => frame.type === 'ready')
+    const commands = ready?.type === 'ready' ? ready.commands ?? [] : []
+    expect(commands.map((command) => command.name)).toContain('help')
+    expect(commands.find((command) => command.name === 'mode')?.usage).toBe(' ask|auto|yolo')
+  })
+})
+
 describe('a routine delivering into a web chat', () => {
-  it('writes the message into the conversation and hands it to whoever is watching', async () => {
+  it('writes the message into the chat and hands it to whoever is watching', async () => {
     const runtime = build()
     const hub = new WebHub(runtime)
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
 
-    await hub.connect(client, CONVERSATION)
+    await hub.connect(client, CHAT)
     frames.length = 0 // the handshake; only what follows is the delivery
-    await hub.deliver(CONVERSATION, { text: 'daily briefing\n\nnothing moved' })
+    await hub.deliver(CHAT, { text: 'daily briefing\n\nnothing moved' })
 
     expect(frames).toContainEqual({
       type: 'command-result',

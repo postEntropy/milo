@@ -13,6 +13,7 @@ import { buildCommandContext, handleCommand, handleTurnControl, turnOf, type Com
 import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
 import { rawTurn } from '../raw.js'
+import { COMMAND_CATALOG } from '../command-catalog.js'
 import type { ClientFrame, FrameAttachment, JobView, PanelInput, PanelKind, PanelState, PanelTab, PanelView, PermissionRequest, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
 import { PERMISSION_TIMEOUT_MS, PLAN_APPROVAL } from './protocol.js'
 import { displayEvent } from './turn.js'
@@ -259,6 +260,9 @@ export class WebHub {
       effort: this.runtime.reasoningEffort,
       panel: this.panelFor(chat),
       jobs: this.jobsView(chat.session.id),
+      // What `/` offers. The browser imports the same list; the phone is handed it
+      // here, because it cannot.
+      commands: COMMAND_CATALOG,
       ...(running ? { activeTurn: { id: running.id, at: running.at } } : {}),
     })
     if (running) for (const frame of running.frames) client.send(frame)
