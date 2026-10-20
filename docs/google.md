@@ -8,7 +8,7 @@ mark read), `compose` (drafts) or `send` — and there is no default: a run with
 stops and lists the levels rather than picking one. Google grants access one level at a time and
 cannot widen it later, so more access means reconnecting. `milo google status` says what is connected
 and at which level, and `milo google forget` drops the grant while keeping the app identity. The same
-flow is `milo setup` → **Tools** → **Google**, and Settings → Google in the web UI.
+flow is `milo setup` → **Tools** → **Google**, and Settings → Tools → Google in the web UI.
 
 ```yaml
 google:

@@ -63,9 +63,17 @@ On the first run an onboarding wizard asks for a provider, API key and model, an
 - `~/.milo/rules.yml` — permission rules for shell commands, hand-edited
   (see [Rules file](docs/tools.md#rules-file)). A project may add `<project>/.milo/rules.yml`; its rules
   are read first.
+- `~/.milo/AGENTS.md` — the install's own rules, above every project's and carried in every session
+  (see [The agent](docs/agent.md#what-a-turn-is-told)).
 - `~/.milo/auth.json` — API keys, bot tokens and the Google grant (`0600`).
 - `~/.milo/input-history.json` — what was typed at the CLI's prompt, for `↑`/`↓`.
-- `~/.milo/task-lists.json` — the named task lists, shared by every session (see [Task lists](docs/sessions.md#task-lists)).
+- `~/.milo/projects.json` — the folders Work lists, each an id, a name and a path
+  (see [Work](docs/work.md)).
+- `~/.milo/task-lists.json` — the named task lists, shared by every session
+  (see [Task lists](docs/sessions.md#task-lists)).
+- `~/.milo/routines.json` — the prompts Milo runs on a timer (see [Routines](docs/routines.md)).
+- `~/.milo/labels.json` — the mail labels Milo sorts with, never written back to Gmail;
+  `mail-seen.json` is the sidebar badge's watermark (see [Google](docs/google.md#google)).
 - `~/.milo/mcp.json` — the external tool servers, hand-edited (see [MCP servers](docs/mcp.md#mcp-servers)).
 - `~/.milo/mcp-cache.json` — what each MCP server last said its tools were. Derived: deleting it costs
   one round trip.
@@ -75,13 +83,18 @@ On the first run an onboarding wizard asks for a provider, API key and model, an
 - `~/.milo/history/` — the log: one JSONL per day, plus `turns.db`, its index.
 - `~/.milo/traces.jsonl` — the execution log: one line per model request, classifier, tool and turn,
   with its latency (see [Execution log](docs/history.md#execution-log)).
+- `~/.milo/models.json` — the model profiles the context window and capabilities come from, cached for
+  a week.
+- `~/.milo/jobs/` — the background jobs' output and state, kept after they end.
+- `~/.milo/devices.json` — the phones paired with this Milo, each token kept hashed; `pairing.json` is
+  the one open code.
 - `~/.milo/skills/` — one `<name>/SKILL.md` per skill (see [Skills](docs/skills.md#skills)).
 - `~/.milo/browser/` — the browser's own profile (`profile/`), a downloaded Chrome (`chrome/`) and
   profiles copied out of a browser you use (`profiles/`) — not the browser you use (see
   [Browser](docs/browser.md#browser)).
-- `~/.milo/exports/` — conversations written out by `/export` (`0600`).
+- `~/.milo/exports/` — sessions written out by `/export` (`0600`).
 
-A corrupt `config.yml` is reported at startup; the settings a running conversation changes read it
+A corrupt `config.yml` is reported at startup; the settings a running session changes read it
 defensively, so a file that cannot be parsed leaves the current values alone. A write is an edit rather
 than a rewrite: only the keys whose values moved are replaced, and comments and order stay.
 
@@ -124,7 +137,7 @@ A session can be pointed at a registered project, so its tools and its prompt wo
 folder: `milo --project <id|name|folder>` opens the chat there, and `--cwd <folder>` does the
 same for a folder that is not in the list.
 
-### One turn, no conversation
+### One turn, no chat
 
 `milo run` is the terminal's headless turn: the prompt in, the answer out, and an exit code
 that says whether it finished. It is what a script or a cron job calls.
@@ -185,6 +198,10 @@ The chat is the terminal's turn model: messages stream in, reasoning folds under
 lines appear as they run, a confirmation is an Allow/Deny card, `Enter` queues and `Ctrl+Enter` steers,
 and `/` opens the command palette. Export and Clear sit in the top bar; sessions can be searched,
 resumed and deleted. **Task lists** is a view of its own, showing the lists the `task_lists` tool keeps.
+**Work** is the code workspace: the registered projects, one project's sessions, its files, its git
+changes and its rules, with a session started in that folder (see [Work](docs/work.md)). **Email** is
+the connected inbox — read, search, label, summarize and answer, as far as the Google grant allows
+(see [Google](docs/google.md)).
 
 The **Panel** sits beside the chat: the `panel` tool shows a file there (a document or HTML you wrote,
 a PDF — anything meant to be read beside the chat; a screenshot or any picture goes to the chat
@@ -199,9 +216,9 @@ reload brings the tabs back folded unless you keep it open. The browser streams 
 is on screen.
 
 **Settings** (the sidebar's last row) is `milo setup` in the browser — provider and model, API keys,
-memory, routines, gateways, tools and the browser, permissions, display, skills and sessions. The long
-setup jobs stream their output into a panel: the Chrome for Testing download, a profile copy, the local
-embedding engine.
+memory, gateways, the web server, tools and the browser, permissions, display, skills and sessions.
+The long setup jobs stream their output into a panel: the Chrome for Testing download, a profile copy,
+the local embedding engine.
 
 One thing to know before pointing a browser at it:
 
@@ -238,13 +255,15 @@ and said again, and a session's own id copied. **Sessions** is a drawer that rea
 starts a new session; the **model picker** is searched by slug, display name and the daemon's shortened
 label. **Routines** is a page of its own — run one now, pause or remove it, and read its run history as
 the same thread the chat draws — with a **local reminder** set at each routine's next fire times,
-because a closed phone cannot be reached any other way. **Settings** draws the install's own — the
-model, the theme and the GenUI toggle, memory, tools and web search, the skills, the MCP servers, the
-permission mode, the connections, the reply notice, the daemon and Unpair. The **Panel** sits beside
-the chat: the `panel` tool shows a document, a picture, a PDF, an HTML page or the **live browser** Milo
-is driving, and it is interactive — which is where Milo hands over a login, a 2FA code or a payment it
-must not do itself. The phone draws a **generated interface** (the `genui` fence in an answer) too,
-being one of the two surfaces that can (`canDraw`, `src/core/session.ts`).
+because a closed phone cannot be reached any other way. **Task lists** is a page of its own, showing the
+lists the `task_lists` tool keeps, and **Work** draws the projects, a folder's files, changes and rules,
+and starts a session there. **Settings** draws the install's own — the model, the theme and the GenUI
+toggle, memory, tools and web search, the skills, the MCP servers, the permission mode, the
+connections, the reply notice, the daemon and Unpair. The **Panel** sits beside the chat: the `panel`
+tool shows a document, a PDF, an HTML page or the **live browser** Milo is driving, and it is
+interactive — which is where Milo hands over a login, a 2FA code or a payment it must not do itself.
+A picture is the chat's, not the panel's. The phone draws a **generated interface** (the `genui` fence
+in an answer) too, being one of the two surfaces that can (`canDraw`, `src/core/session.ts`).
 
 The phone's own notices: **Notify when Milo replies** raises a local banner carrying the first of the
 answer's words when the chat is not what is on screen, and a tap opens the session the notice names. A
@@ -254,8 +273,8 @@ it and can end it under pressure. A real push would need an Apple Developer acco
 so an answer that outlives even that is read on return, with no banner.
 
 `milo serve --no-web` closes the phone's door with the browser's: the phone is a client of that server
-and of nothing else. What it still lacks against the browser — session search and clear, the task lists,
-the Email and Google screens, and the settings the browser still has over it — has not been built yet.
+and of nothing else. What it still lacks against the browser — session search and clear, the Email and
+Google screens, and the settings the browser still has over it — has not been built yet.
 
 ### Pairing a phone
 
@@ -302,7 +321,7 @@ export DISCORD_BOT_TOKEN=...
 npm run serve
 ```
 
-Each conversation maps to its own session (`telegram:<chatId>`, `discord:<channelId>`), while what Milo
+Each chat maps to its own session (`telegram:<chatId>`, `discord:<channelId>`), while what Milo
 remembers is one store for the whole install. Replies stream by editing one message, and tool activity
 becomes one line per call — a **quote box** with the tool's icon, its **bold** name and the one value
 worth showing. A tool that fails adds `❌ <name> failed` as another line of the same shape.
@@ -341,8 +360,8 @@ for everyone else, and a blocked sender is told their own id. `milo setup` → G
 token → access → enable. The allowlist is read when `milo serve` starts, so restart it after changing
 it.
 
-Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/fork`, `/stats`, `/compact`,
-`/export`, `/skills`, `/memory`, `/mode ask|auto|yolo`, `/yolo`, `/tools full|name|off`,
+Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/fork`, `/stats`, `/jobs`,
+`/compact`, `/export`, `/skills`, `/memory`, `/mode ask|auto|yolo`, `/yolo`, `/tools full|name|off`,
 `/thinking expanded|collapsed`, `/effort low|medium|high`, `/provider [id]`, `/model [id]`, `/clear`,
 `/status`.
 A mode change from a chat is written to `config.yml` and survives a restart; sessions are written to
@@ -386,7 +405,9 @@ The deep reference lives in `docs/`:
 | [MCP servers](docs/mcp.md) | Calling tools that live in an external server, over stdio. |
 | [Routines](docs/routines.md) | Prompts Milo runs on a timer and delivers to a chat. |
 | [Sessions](docs/sessions.md) | Sessions, task lists and compaction. |
-| [History](docs/history.md) | The history log, taking a conversation out, and the execution log. |
+| [Work](docs/work.md) | Projects, a folder's files, changes and rules, and Plan/Build. |
+| [The agent](docs/agent.md) | What a turn is told: persona, family, code manual, rules and verification. |
+| [History](docs/history.md) | The history log, taking a session out, and the execution log. |
 | [Memory](docs/memory.md) | The store, recall by meaning, and the migration off the old JSON store. |
 | [Skills](docs/skills.md) | The `SKILL.md` procedure format and installing skills. |
 | [Development](docs/development.md) | Running from source, the checks, and the source layout. |

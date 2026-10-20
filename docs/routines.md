@@ -1,7 +1,7 @@
 # Routines
 
 A prompt Milo runs on a timer and delivers to a chat, with nobody there when it fires. It opens its own
-conversation, runs the prompt, and posts the answer to the chat you named. Made in chat, in your own
+session, runs the prompt, and posts the answer to the chat you named. Made in chat, in your own
 words — the `routine` tool turns the sentence into one and defaults the destination to the chat you
 said it in, and the same tool lists them and moves, renames, pauses or removes one by its id — or on
 the terminal:
@@ -45,7 +45,7 @@ Three things to know before relying on one:
   that writes, runs or sends a file is a standing grant it carries (`--allow shell_command,send_file`),
   confirmed at creation. At fire time a granted tool runs and anything else keeps the policy's answer —
   with nobody to ask, a refusal. An explicit deny still denies.
-- **Each run is a new conversation** (`routine:<id>`), named after the routine, so it shows up in
+- **Each run is a new session** (`routine:<id>`), named after the routine, so it shows up in
   `/sessions` and is searchable.
 
 The answer is posted at the target when the run finishes, split if long. A run can also deliver
@@ -55,7 +55,7 @@ routine. A failure is posted too (`⚠ routine "…" failed: …`), a run still 
 comes is skipped rather than stacked, and a routine cannot create routines.
 
 The browser and the phone have a **Routines** screen: the list, one routine's own page — the schedule,
-where it delivers, its run history read back as the same thread a conversation draws — run it now,
+where it delivers, its run history read back as the same thread a session draws — run it now,
 pause or remove it, and a new one made the same conversational way, as a turn. On the phone the screen
 also asks to **remind** you: it schedules a local notification at each of a routine's next fire times,
 because the daemon cannot reach a closed phone any other way. That is a reminder that a routine is

@@ -13,12 +13,16 @@
 | `fetch_url` | yes | One http(s) URL, served back as text; a long page comes back in pages. |
 | `write_file` | no | Creates or replaces a file; asks for confirmation. |
 | `edit_file` | no | Exact string replacement; asks for confirmation. |
+| `apply_patch` | no | Changes several files in one call, as one approval; every file and hunk is checked before anything is written. |
+| `format` | no | Runs the formatter the project already has (Biome, Prettier, Ruff, Cargo or gofmt) over the changed files or one path; `check` writes nothing. |
 | `remember` | — | Saves a durable fact; only touches Milo's own memory, so it never asks. |
+| `memories` | — | The notes Milo keeps, the same store `/memory` shows: list, page, forget. Only Milo's own state; forgetting asks. |
 | `recall` | yes | Which past session a question is about, and what it was about. |
 | `search_history` | yes | Term search over Milo's own past turns, reasoning and tool calls included. |
+| `sessions` | — | Lists the saved sessions or removes one; removal asks and cannot take the session it runs in. |
 | `routine` | — | Runs a prompt on a timer and delivers it to a chat. Asks only when the routine carries a standing grant; absent inside a routine's own run. |
 | `send_file` | no | Sends a file to the chat a turn is talking in — the live chat, or a routine's target — as a picture when it is an image. A screenshot or any picture the person should see goes here, never to the panel. Asks; in a routine it needs a grant to run unattended. Not offered on the terminal, and its call is not drawn as a tool line. |
-| `panel` | — | Shows a document or the live browser in the Panel beside the web chat, one tab per thing — the tab already holding something comes forward rather than a second copy of it. A picture is not the panel's: an image the person should see goes to the chat with `send_file`. Only the web app draws a panel, so it is offered on that surface alone; its call is not drawn as a tool line. |
+| `panel` | — | Shows a document or the live browser in the Panel beside the chat, one tab per thing — the tab already holding something comes forward rather than a second copy of it. A picture is not the panel's: an image the person should see goes to the chat with `send_file`. The web app and the phone draw a panel, so it is offered there alone; its call is not drawn as a tool line. |
 | `web_search` | yes | Registered only when a search provider is configured. |
 | `read_skill` | yes | Loads a skill's instructions on demand; registered only when a skill is installed. |
 | `gmail_search` | yes | Search the connected Gmail account; registered only when Google is on. `label:` reaches Gmail's own labels. |
@@ -27,12 +31,14 @@
 | `mail_labels` | — | Lists and edits Milo's own mail labels — local to `~/.milo/labels.json`, never written to Gmail — and says which messages carry one. Sorts mail to answer, so it is not read-only, but only touches Milo's own state, so it never asks. |
 | `drive_search` | yes | Search the connected Drive. |
 | `drive_read` | yes | One Drive file as text; Docs and Sheets come back exported. |
-| `task` | — | Runs a subtask in its own context; only the report comes back. Only on request; never asks itself. |
+| `task` | — | Runs a subtask in its own context; only the report comes back. In a project the model may delegate on its own; outside one, only on request. Never asks itself. |
 | `browser_open` | yes | Opens an http(s) URL and returns the page as numbered elements. Only when the browser is on. |
 | `browser_snapshot` | yes | The current page again: its elements, its text, or a picture of the viewport for the model. |
 | `browser_screenshot` | no | A picture of the viewport written to a file, for the person. Asks, because it writes. |
 | `browser_act` | no | Click, double-click, type, press, hover, scroll, choose, upload — and the page afterwards. |
 | `shell_command` | no | Runs with `/bin/sh`; asks for confirmation first. |
+| `job_status` | yes | A background job's state, exit code and output tail. Only where a job manager exists. |
+| `job_kill` | no | Stops a running background job; asks for confirmation. |
 
 Read-only tools never ask, so exploring is free: `glob` and `grep` replace the `ls`, `find` and `rg`
 calls that would otherwise go through `shell_command` and its prompt. Both skip build output and
@@ -226,7 +232,7 @@ The terminal renders the answer as **light markdown**: fenced code blocks keep t
 and bold are styled, headings lose their hashes, and consecutive tool calls stack with no blank line
 between them. Tables and nested lists are left as plain text. A bot trims a turn that outgrows the
 message limit in the **middle**, keeping the beginning and the end. A command's reply is split into
-whole messages instead — `/sessions` lists ten conversations with their recaps, which is more than one
+whole messages instead — `/sessions` lists ten sessions with their recaps, which is more than one
 message holds.
 
 ## Output limit
@@ -264,9 +270,10 @@ simply not registered.
 ## Subagents
 
 `task` hands a self-contained piece of work to a subagent: it runs the same loop with a **fresh
-transcript** and returns only its final report. It is **on request only** — Milo does not delegate on
-its own initiative. The subagent does not see the conversation and cannot ask anything, and it runs the
-same tools as the parent **except `task` itself**, so a delegation is one level deep. `task` never asks
-on its own, while every write or command the subagent attempts is put to the user the same way the
-parent's would be; a `deny` entry for `task` blocks the delegation outright. Its own reads and searches
-are not streamed — only the report comes back.
+transcript** and returns only its final report. Outside a project it is **on request only**; in a
+project the model may delegate on its own, because a long read is exactly what crowds a code session.
+The subagent does not see the session and cannot ask anything, and it runs the same tools as the parent
+**except `task` itself**, so a delegation is one level deep. `task` never asks on its own, while every
+write or command the subagent attempts is put to the user the same way the parent's would be; a `deny`
+entry for `task` blocks the delegation outright. Its own reads and searches are not streamed — only the
+report comes back.

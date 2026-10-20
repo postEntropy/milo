@@ -2,12 +2,13 @@
 
 Memory sits behind a thin, vendor-agnostic interface (`remember` / `recall`). Milo's own store is **one
 SQLite file** at `~/.milo/memory/memory.db`, written `0600`, searched with FTS5/BM25 — no account, no
-key, no service, no network, and with the embedder off nothing you said leaves the machine. Third-party
-backends (mem0, Honcho, Zep/Graphiti, Letta, Hindsight) plug in behind the same interface.
+key, no service, no network, and with the embedder off nothing you said leaves the machine. It is the
+only backend: `scripts/eval-mem0.ts` runs the same eval set through mem0 as a yardstick, not as a store
+Milo uses.
 
 The store holds:
 
-- **`fact`** — something worth keeping past the conversation: what `remember` saves, and what the end of
+- **`fact`** — something worth keeping past the session: what `remember` saves, and what the end of
   a turn is read for. Nothing ever evicts one.
 - **the turns themselves** — what the person typed, already in the history log and indexed from there by
   `turns.db`. One copy, in the artifact that outlives every session, `/clear` and compaction.

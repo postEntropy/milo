@@ -4,7 +4,7 @@ A real Chromium over the DevTools protocol, driven through the page's own DOM �
 browser and not a desktop.
 
 It is **off until it is turned on** — `milo setup` → **Tools** → **Browser**, or
-`"browser": { "enabled": true }`. Off means the three tools are not in the catalog at all.
+`"browser": { "enabled": true }`. Off means the four tools are not in the catalog at all.
 
 **Any Chromium will do.** `milo setup` → Tools → Browser → **Browser to run** enumerates the favourites
 — Chromium, Chrome, Brave, Edge, Vivaldi, Opera, and forks like Helium — from `PATH`, `/opt`, and each
@@ -13,9 +13,10 @@ platform's own places, de-duplicated. Firefox is not on that list: it speaks Web
 [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/) build into
 `~/.milo/browser/chrome/` — an archive, no installer, no sudo.
 
-**Three tools, split by side effect.** `browser_open` and `browser_snapshot` are read-only, so looking
+**Four tools, split by side effect.** `browser_open` and `browser_snapshot` are read-only, so looking
 around never asks. `browser_act` clicks, double-clicks, types, presses, hovers, scrolls, chooses and
-uploads, and it is the one that asks. There is no `navigate` action inside it.
+uploads, and it asks; `browser_screenshot` writes a picture to a path and asks too. There is no
+`navigate` action inside `browser_act`.
 
 What the model is shown decides whether it picks the right element:
 

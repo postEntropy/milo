@@ -23,10 +23,11 @@ description: How to cut and ship a release in this repo
 the model sees, so a skill without one is skipped.
 
 Only the **index** — each skill's name and its one-line description — rides along with every request;
-the instructions are loaded by the `read_skill` tool **only when a task matches**, and that tool is not
-registered at all when no skill is installed. Skills are read once at startup, so adding one means
-restarting `milo`; editing the body of one that exists does not, since the tool re-reads it per call.
-`/skills` lists what was found.
+the instructions are loaded by the `read_skill` tool **only when a task matches**. That tool is
+registered at startup when at least one skill is installed. The index is re-read from the directory on
+every turn, so a skill added, removed or renamed while Milo runs joins the next turn; a body is re-read
+per call, so an edit lands on the next load. `/skills` reads the same library. Adding the first skill
+to an install that had none still needs a restart before the tool exists.
 
 `~/.milo/skills/` is created at startup and when `milo setup` opens its **Skills** section. The
 directory is Milo's own; it does not read `~/.commandcode/skills`, though a symlink across is all it

@@ -5,25 +5,25 @@ under `~/.milo/history/`, written `0600`, a line per event: every question, ever
 call with its arguments and result, and the model's reasoning, each tagged with the session's name and
 the address it came from. A turn writes its lines in one `append`.
 
-The reasoning is kept in the transcript and is not part of the conversation, so neither wire sends it
-back — except the Anthropic wire, which signs its thinking blocks and requires them echoed once
-thinking is on.
+The reasoning is kept in the transcript but not replayed to the model, so neither wire sends it back —
+except the Anthropic wire, which signs its thinking blocks and requires them echoed once thinking is
+on.
 
 `search_history` is the read side: terms (all of them have to appear, any case), the newest matches from
 the last 30 days, reading the reasoning, the tool arguments and the tool results. Pass `session` to stay
-inside one conversation. Recall reads the log through an index bounded by `history.windowDays` (default
+inside one session. Recall reads the log through an index bounded by `history.windowDays` (default
 365; `0` keeps every day). The log itself is never trimmed on its own: `milo history` reports what it
 holds, and `milo history trim --older-than <days>` (or `--before <date>`) deletes the days you name.
 
-## Taking a conversation out
+## Taking a session out
 
-`/export` writes the current conversation to `~/.milo/exports/` — Markdown by default, `/export json` for
+`/export` writes the current session to `~/.milo/exports/` — Markdown by default, `/export json` for
 the entries themselves — and replies with the path, the counts and the size. It is the whole log: every
 message, every tool call with its arguments and its **full** result, and the reasoning, in order. It
 reads the **history log**, not the session's transcript, which is compacted and drops old screenshots. A
 session with no turns exports nothing and says so.
 
-`recall` answers the other half — not *what* was said but *which conversation* — ranking saved sessions
+`recall` answers the other half — not *what* was said but *which session* — ranking saved sessions
 by how well their recap, title and first words match the query. `search_history` walks the day files;
 recall runs before every turn and uses an index, `~/.milo/history/turns.db`, derived from those files
 and rebuildable from them.

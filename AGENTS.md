@@ -1,7 +1,7 @@
 # Working in this repo
 
-Milo is one core drawn by several surfaces: a terminal UI, the chat gateways (Telegram,
-Discord) and the web app. These are the rules the project is held to. They are the short
+Milo is one core drawn by several surfaces: a terminal UI, the web app, the iPhone and the
+chat gateways (Telegram, Discord). These are the rules the project is held to. They are the short
 form of the author's own taste notes, which live outside the repo in
 `.commandcode/taste/` — read those when a rule below needs its reasoning.
 
@@ -19,7 +19,7 @@ form of the author's own taste notes, which live outside the repo in
   implementations that drift. Shared formatting lives in `src/core`; the `/sessions`
   list is `buildSessionsList` in `src/gateways/actions.ts`.
 - A capability belongs to the whole class it belongs to, not to the surface that asked
-  for it: touching one gateway means touching the CLI, Telegram, Discord and web.
+  for it: touching one gateway means touching the CLI, Telegram, Discord, web and the phone.
 - Email carries no exception. Reading and writing are both core capabilities the web **Email**
   screen and the agent reach through the same functions: the agent's `gmail_modify` and
   `mail_labels` are gated on the grant and ask before acting, and they reach the bin — Gmail's
@@ -50,10 +50,10 @@ form of the author's own taste notes, which live outside the repo in
 
 ## Work
 
-- Work is the code workspace: a tab of its own with projects, files, changes and rules. It
-  is a place, not a second system — a work session is an ordinary session in the project's
-  folder. What it is and is not is in [docs/work.md](docs/work.md); read that before
-  changing the tab.
+- Work is the code workspace: a tab of its own in the web app and on the phone, with
+  projects, files, changes and rules. It is a place, not a second system — a work session is
+  an ordinary session in the project's folder. What it is and is not is in
+  [docs/work.md](docs/work.md); read that before changing the tab.
 
 ## Agent
 
@@ -75,9 +75,10 @@ form of the author's own taste notes, which live outside the repo in
 
 ## Tests
 
-- `test/conventions.test.ts` encodes two of the rules above: English copy on the
-  surfaces the person reads, and no outlined controls. It fails on purpose when a new
-  string or button breaks one — fix the code, not the check.
+- `test/conventions.test.ts` encodes four of the rules above: English copy on the surfaces
+  the person reads, no outlined controls, and the shared scales for corner rounding and type
+  sizes. It fails on purpose when a new string, button or raw literal breaks one — fix the
+  code, not the check.
 - Test names are sentences about behaviour: `it('pages the list five at a time')`.
 - Before calling anything done:
   `npm test`, `npm run typecheck`, `npm --prefix web run typecheck`, `npm run lint`.
