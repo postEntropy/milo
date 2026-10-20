@@ -72,7 +72,7 @@ function client(frames: Frame[]): { send(frame: unknown): void } {
 }
 
 describe('a web turn that fails', () => {
-  it('says so on the turn, where the failure happened, and never as a notice', async () => {
+  it('says so on the turn, where the failure happened, and never as a bare error frame', async () => {
     const runtime = build(new DiesAfterToolProvider())
     const hub = new WebHub(runtime)
     const frames: Frame[] = []
@@ -90,9 +90,14 @@ describe('a web turn that fails', () => {
     // disappears — the way a dead turn ends up explained by nothing at all.
     expect(frames.some((frame) => frame.type === 'error')).toBe(false)
 
-    // The trace is the one seen by hand: the turn stopped on its last tool result.
+    // The trace is the one seen by hand: the turn stopped on its last tool result,
+    // and the refusal was written after it, where a reopened conversation reads it.
     const session = await runtime.getSession({ gateway: 'web', conversationId: CONVERSATION })
-    expect(session.messages.at(-1)?.role).toBe('tool')
+    await waitFor(() => session.messages.at(-1)?.role === 'assistant')
+    expect(session.messages.some((message) => message.role === 'tool')).toBe(true)
+    expect(JSON.stringify(session.messages.at(-1)?.content)).toContain(
+      'the turn failed: the model call broke',
+    )
   })
 
   it('writes the reason down, so the conversation shows it again when reopened', async () => {

@@ -951,6 +951,10 @@ export class WebHub {
       // said false. This is the one that turns the sibling's composer busy.
       this.sendState(conversationId)
       let status: 'done' | 'stopped' | 'error' = 'done'
+      /** The first refusal the turn itself reported, kept for the written record. */
+      let failureReason: string | undefined
+      /** The session the failure happened on, which is not always the one still bound. */
+      let failedSession: Session | undefined
       const display = readDisplay()
       let currentImages = images
       let currentAudio: import('../../core/providers/types.js').AudioPart[] = []
@@ -1049,7 +1053,11 @@ export class WebHub {
               return result
             },
           })) {
-            if (event.type === 'error') status = 'error'
+            if (event.type === 'error') {
+              status = 'error'
+              failureReason ??= event.message
+              failedSession = session
+            }
             if (event.type === 'aborted') status = 'stopped'
             // The panel is display state of the surface that draws one — the browser
             // and the phone — not something the other surfaces draw: it is resolved
@@ -1103,6 +1111,14 @@ export class WebHub {
         const raw = messages ? rawTurn(messages) : null
         const noOutput = messages ? rawTurn(messages, { output: false }) : null
         if (sessionId) this.emitTurn(sessionId, { type: 'turn-end', id, status, ...(raw ? { raw } : {}), ...(noOutput && noOutput !== raw ? { rawNoOutput: noOutput } : {}) })
+        // The refusal the turn reported is taken down with the turn, so it is written
+        // after the turn-end: the live screens have the message's own status, and this
+        // is what the conversation shows again when it is reopened.
+        if (failureReason) {
+          void failedSession?.appendNotice(`⚠ the turn failed: ${failureReason}`).catch((error: unknown) => {
+            logWarn(`could not write down a failed turn: ${errorMessage(error)}`)
+          })
+        }
       }
     }, () => this.sendState(conversationId))
     this.sendState(conversationId)
