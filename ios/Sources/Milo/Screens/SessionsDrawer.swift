@@ -173,10 +173,18 @@ struct SessionsDrawer: View {
     private func row(_ session: SessionSummary) -> some View {
         let current = session.id == model.sessionId
         return HStack(spacing: MiloTheme.Space.two) {
-            Text(session.label)
-                .font(MiloTheme.Text.body)
-                .foregroundStyle(MiloTheme.foreground)
-                .lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(session.label)
+                    .font(MiloTheme.Text.body)
+                    .foregroundStyle(MiloTheme.foreground)
+                    .lineLimit(1)
+                // How much was said, and when — the browser's own second line on a
+                // session's row, so a list of names is not all the drawer says.
+                Text(session.meta)
+                    .font(MiloTheme.Text.meta.monospacedDigit())
+                    .foregroundStyle(MiloTheme.muted)
+                    .lineLimit(1)
+            }
             Spacer(minLength: MiloTheme.Space.two)
             // A session running now, said with the accent the way the accent already
             // points: one dot at the row's own edge, no words.

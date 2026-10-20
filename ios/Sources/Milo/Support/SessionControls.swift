@@ -1,21 +1,38 @@
 import SwiftUI
 
+extension SessionSummary {
+    /// What a row says under the name: how much has been said and when — the browser's
+    /// own `sessionMeta`, on the phone. A session nobody has spoken in yet has no count
+    /// to give, so it says only when it was made.
+    var meta: String {
+        let when = RelativeTime.when(updatedAt)
+        guard messageCount > 0 else { return when }
+        return "\(messageCount) \(messageCount == 1 ? "message" : "messages") · \(when)"
+    }
+}
+
 /**
  The controls a session answers to, wherever they are offered: the press on its own row
  in the drawer, and the dots beside the new-session control in the session's own header.
- One declaration, so the two cannot drift — and the browser's own four, in the browser's
- own order.
+ One declaration, so the two cannot drift — and the browser's own, in the browser's own
+ order.
  */
 @ViewBuilder
 func sessionActions(
     onRename: @escaping () -> Void,
     onExport: @escaping () -> Void,
     onCopy: @escaping () -> Void,
+    onClear: (() -> Void)? = nil,
     onDelete: @escaping () -> Void
 ) -> some View {
     menuItem("Rename", "pencil", action: onRename)
     menuItem("Export", "arrow.down.doc", action: onExport)
     menuItem("Copy ID", "doc.on.doc", action: onCopy)
+    // Only the session this chat is in can be cleared: the daemon clears the session
+    // the chat is bound to, and the transcript it empties is this one's.
+    if let onClear {
+        menuItem("Clear transcript", "eraser", action: onClear)
+    }
     // A destructive line: the menu draws its words in the platform's own red, and the mark
     // beside them wears whatever tone the line is told — so it is told that same red, since
     // the accent it would otherwise take makes the trash the loudest thing on the row.
@@ -119,7 +136,7 @@ struct SessionPeek: View {
                         .foregroundStyle(MiloTheme.foreground)
                         .lineLimit(1)
                 }
-                Text("\(session.messageCount) \(session.messageCount == 1 ? "message" : "messages") · \(RelativeTime.when(session.updatedAt))")
+                Text(session.meta)
                     .font(MiloTheme.Text.small.monospacedDigit())
                     .foregroundStyle(MiloTheme.muted)
             }
