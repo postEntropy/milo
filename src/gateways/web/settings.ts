@@ -85,12 +85,14 @@ import { readTaskLists } from '../../core/task-lists.js'
 import { taskListsTool } from '../../core/tools/task-lists.js'
 import {
   addProject,
+  byRecentUse,
   findProject,
   placeProject,
   projectViews,
   readProjects,
   removeProject,
   updateProject,
+  type ProjectView,
 } from '../../core/projects.js'
 import { browseFolders, createFolder } from '../../core/browse.js'
 import { createWorkFolder, workFile, workTree } from '../../core/work.js'
@@ -168,7 +170,7 @@ export class WebSettings {
       case 'routines': return this.listRoutines()
       case 'task-lists': return readTaskLists()
       case 'task-list-action': return this.taskListAction(body)
-      case 'projects': return projectViews()
+      case 'projects': return this.projects()
       case 'project-action': return this.projectAction(body)
       case 'browse-folders': return browseFolders(optionalText(body.path), { cwd: this.cwd })
       case 'folder-create': return this.folderCreate(body)
@@ -730,6 +732,15 @@ export class WebSettings {
   }
 
   /**
+   * The projects, in the one order every surface draws them: the folder worked in
+   * most recently first. The views say whether each folder is still there; the
+   * sessions say when it was last used.
+   */
+  private async projects(): Promise<ProjectView[]> {
+    return byRecentUse(projectViews(), await this.runtime.listSessions())
+  }
+
+  /**
    * Adding, changing and dropping a project from the Work screen. Every argument
    * is validated here, and a refusal comes back as the reason the store gave —
    * which names the folder or the project it is about. Like the task lists, the
@@ -741,12 +752,12 @@ export class WebSettings {
     if (action === 'add') {
       const outcome = await addProject({ path: requireText(body.path, 'folder'), name: optionalText(body.name) })
       if (!outcome.ok) throw new Error(outcome.error)
-      return { result: `Added ${outcome.project.name} at ${outcome.project.path}.`, projects: projectViews() }
+      return { result: `Added ${outcome.project.name} at ${outcome.project.path}.`, projects: await this.projects() }
     }
     const id = projectId(body.id)
     if (action === 'remove') {
       if (!(await removeProject(id))) throw new Error(`No project ${id}.`)
-      return { result: `Removed ${id}. Its sessions stay, without a project.`, projects: projectViews() }
+      return { result: `Removed ${id}. Its sessions stay, without a project.`, projects: await this.projects() }
     }
     if (action === 'update') {
       const name = body.name === undefined ? undefined : (optionalText(body.name) ?? '')
@@ -759,7 +770,7 @@ export class WebSettings {
         ...(path !== undefined ? { path } : {}),
       })
       if (!outcome.ok) throw new Error(outcome.error)
-      return { result: `Updated ${outcome.project.name}.`, projects: projectViews() }
+      return { result: `Updated ${outcome.project.name}.`, projects: await this.projects() }
     }
     throw new Error(`Invalid project action: "${String(action)}". Use add, update or remove.`)
   }

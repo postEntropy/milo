@@ -9,6 +9,7 @@ process.env.MILO_HOME = home
 
 const {
   addProject,
+  byRecentUse,
   findProject,
   MAX_PROJECTS,
   placedProject,
@@ -178,6 +179,41 @@ describe('placeProject', () => {
       id: 'no-such-1',
       error: 'the project no-such-1 is not in the list any more',
     })
+  })
+})
+
+describe('byRecentUse', () => {
+  const list = () => [
+    { id: 'calm-otter-1', name: 'A', path: '/tmp/a', createdAt: 1 },
+    { id: 'calm-otter-2', name: 'B', path: '/tmp/b', createdAt: 2 },
+  ]
+
+  it('puts the project whose session moved last at the top', () => {
+    const ordered = byRecentUse(list(), [
+      { project: 'calm-otter-1', updatedAt: 10 },
+      { project: 'calm-otter-2', updatedAt: 20 },
+    ])
+    expect(ordered.map((project) => project.id)).toEqual(['calm-otter-2', 'calm-otter-1'])
+  })
+
+  it('reads a project by its newest session, not by one that came later in the list', () => {
+    const ordered = byRecentUse(list(), [
+      { project: 'calm-otter-1', updatedAt: 50 },
+      { project: 'calm-otter-1', updatedAt: 10 },
+      { project: 'calm-otter-2', updatedAt: 20 },
+    ])
+    expect(ordered.map((project) => project.id)).toEqual(['calm-otter-1', 'calm-otter-2'])
+  })
+
+  it('keeps a project no session ran in beneath the ones that did, in file order', () => {
+    const projects = [...list(), { id: 'calm-otter-3', name: 'C', path: '/tmp/c', createdAt: 3 }]
+    const ordered = byRecentUse(projects, [{ project: 'calm-otter-2', updatedAt: 20 }])
+    expect(ordered.map((project) => project.id)).toEqual(['calm-otter-2', 'calm-otter-1', 'calm-otter-3'])
+  })
+
+  it('leaves a session with no project out of the order', () => {
+    const ordered = byRecentUse(list(), [{ updatedAt: 99 }])
+    expect(ordered.map((project) => project.id)).toEqual(['calm-otter-1', 'calm-otter-2'])
   })
 })
 

@@ -233,6 +233,30 @@ export function projectViews(): ProjectView[] {
   })
 }
 
+/** What a project's place in the list is read from: one session's folder, and when it last moved. */
+export interface ProjectUse {
+  /** The project the session works in; absent for a session with none. */
+  project?: string
+  updatedAt: number
+}
+
+/**
+ * The list in the order a person reaches for it: the folder worked in most recently
+ * first. A project's recency is its newest session's `updatedAt`, not the moment it
+ * was registered — the list is a workbench, and what was touched last is what is
+ * wanted next. A project no session ever ran in has no recency and keeps its place
+ * in the file, under the ones that do.
+ */
+export function byRecentUse<T extends Project>(projects: readonly T[], sessions: readonly ProjectUse[]): T[] {
+  const lastUsed = new Map<string, number>()
+  for (const session of sessions) {
+    if (!session.project) continue
+    const seen = lastUsed.get(session.project)
+    if (seen === undefined || session.updatedAt > seen) lastUsed.set(session.project, session.updatedAt)
+  }
+  return [...projects].sort((a, b) => (lastUsed.get(b.id) ?? 0) - (lastUsed.get(a.id) ?? 0))
+}
+
 /** Why this project cannot be worked in right now, or nothing when it can. */
 function missingReason(project: Project): string | undefined {
   return isFolder(project.path) ? undefined : `the folder of ${project.name} is gone (${project.path})`

@@ -9,6 +9,8 @@ process.env.MILO_HOME = home
 
 const { runProjects } = await import('../src/bin/projects.js')
 const { readProjects } = await import('../src/core/projects.js')
+const { FileSessionStore } = await import('../src/core/sessions/index.js')
+const { sessionsDir } = await import('../src/core/config/paths.js')
 
 interface Ran {
   lines: string[]
@@ -37,10 +39,12 @@ describe('milo projects', () => {
   beforeEach(() => {
     // Every test starts from an empty list; the file itself is the state.
     rmSync(path.join(home, 'projects.json'), { force: true })
+    rmSync(sessionsDir(), { recursive: true, force: true })
   })
 
   afterEach(() => {
     rmSync(path.join(home, 'projects.json'), { force: true })
+    rmSync(sessionsDir(), { recursive: true, force: true })
   })
 
   it('says there are none, and how to add one', async () => {
@@ -59,6 +63,23 @@ describe('milo projects', () => {
     const listed = await run('list')
     expect(listed.lines[0]).toContain('Milo')
     expect(listed.lines[1]).toContain(where)
+  })
+
+  it('lists the project worked in most recently first', async () => {
+    await run('add', folder('older'), '--name', 'Older')
+    await run('add', folder('newer'), '--name', 'Newer')
+    const [older, newer] = readProjects()
+    const store = new FileSessionStore({ dir: sessionsDir() })
+    for (const [project, updatedAt] of [[older!.id, 10], [newer!.id, 20]] as const) {
+      const record = await store.create({ gateway: 'cli', chatId: project }, project)
+      record.updatedAt = updatedAt
+      record.messages.push({ role: 'user', content: [{ type: 'text', text: 'hi' }] })
+      await store.save(record, record.version)
+    }
+
+    const { lines } = await run('list')
+    expect(lines[0]).toContain('Newer')
+    expect(lines[2]).toContain('Older')
   })
 
   it('names a project after its folder when no name is given', async () => {

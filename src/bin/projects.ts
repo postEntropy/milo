@@ -1,12 +1,15 @@
 import process from 'node:process'
 import {
   addProject,
+  byRecentUse,
   placeProject,
   readProjects,
   removeProject,
   updateProject,
   type Project,
 } from '../core/projects.js'
+import { sessionsDir } from '../core/config/paths.js'
+import { FileSessionStore } from '../core/sessions/index.js'
 import { resolveToolPath } from '../core/tools/walk.js'
 import { readProjectInstructions, rulesOf } from '../core/agent/instructions.js'
 import { errorMessage } from '../util/errors.js'
@@ -45,7 +48,7 @@ export async function runProjects(argv: string[], io: Partial<ProjectIo> = {}): 
   try {
     switch (command ?? 'list') {
       case 'list':
-        return list(out)
+        return await list(out)
       case 'add':
         return await add(rest, out, err)
       case 'rename':
@@ -69,7 +72,11 @@ export async function runProjects(argv: string[], io: Partial<ProjectIo> = {}): 
   }
 }
 
-function list(out: ProjectIo['out']): number {
+/**
+ * The same order the Work screen draws: the folder worked in most recently first,
+ * read from the sessions themselves rather than remembered in the file.
+ */
+async function list(out: ProjectIo['out']): Promise<number> {
   const projects = readProjects()
   if (projects.length === 0) {
     out('No projects.')
@@ -77,7 +84,8 @@ function list(out: ProjectIo['out']): number {
     return 0
   }
 
-  for (const project of projects) {
+  const sessions = await new FileSessionStore({ dir: sessionsDir() }).list()
+  for (const project of byRecentUse(projects, sessions)) {
     out(`${project.name}  (${project.id})`)
     // Where it is, and whether it is still there: a project whose folder went is
     // the one thing worth saying in a list, and it is said the same way a session
