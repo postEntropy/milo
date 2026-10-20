@@ -17,6 +17,8 @@ struct SessionsDrawer: View {
     /// The session being renamed, by id: the row's own press names one, and the alert
     /// the modifier presents does the rest.
     @State private var renaming: String?
+    /// What is typed into the search field, narrowing the list to the rows that carry it.
+    @State private var query = ""
 
     var body: some View {
         HStack(spacing: 0) {
@@ -53,10 +55,19 @@ struct SessionsDrawer: View {
                     .foregroundStyle(MiloTheme.muted)
                     .padding(.horizontal, MiloTheme.Space.four)
                     .padding(.top, MiloTheme.Space.two)
+            } else {
+                searchField
             }
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                    if groups.isEmpty, searched {
+                        Text("No sessions found.")
+                            .font(MiloTheme.Text.base)
+                            .foregroundStyle(MiloTheme.muted)
+                            .padding(.horizontal, MiloTheme.Space.three)
+                            .padding(.top, MiloTheme.Space.two)
+                    }
                     ForEach(groups, id: \.title) { group in
                         Text(group.title)
                             .font(MiloTheme.Text.meta.weight(.medium))
@@ -145,6 +156,50 @@ struct SessionsDrawer: View {
         .accessibilityLabel(title)
     }
 
+    /// What the search field narrows the list to: the words on the row, the preview and
+    /// the id — the browser's own fields, so the same query finds the same rows on both.
+    private var searched: Bool {
+        !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var filtered: [SessionSummary] {
+        let text = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !text.isEmpty else { return model.sessions }
+        return model.sessions.filter {
+            "\($0.title ?? "") \($0.preview) \($0.id)".lowercased().contains(text)
+        }
+    }
+
+    /// The search field, filled like every control here rather than outlined: a field on
+    /// the drawer's own surface, with the mark the browser's own search carries.
+    private var searchField: some View {
+        HStack(spacing: MiloTheme.Space.two) {
+            Image(systemName: "magnifyingglass")
+                .font(MiloTheme.Text.small)
+                .foregroundStyle(MiloTheme.muted)
+            TextField("Search sessions", text: $query)
+                .font(MiloTheme.Text.base)
+                .foregroundStyle(MiloTheme.foreground)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+                .submitLabel(.search)
+            if searched {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, MiloTheme.Space.three)
+        .frame(height: 38)
+        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+        .padding(.horizontal, MiloTheme.Space.three)
+    }
+
     /// The list the way the browser buckets it: how recent, newest group first, with the
     /// same four headings and the same boundaries — a session sits under the same one on
     /// both surfaces. `updatedAt` is in milliseconds, as the daemon sends it.
@@ -161,7 +216,7 @@ struct SessionsDrawer: View {
             .map { range in
                 (
                     title: range.title,
-                    sessions: model.sessions.filter { $0.updatedAt >= range.from && $0.updatedAt < range.to }
+                    sessions: filtered.filter { $0.updatedAt >= range.from && $0.updatedAt < range.to }
                 )
             }
             .filter { !$0.sessions.isEmpty }
