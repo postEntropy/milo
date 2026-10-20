@@ -92,8 +92,8 @@ import {
   removeProject,
   updateProject,
 } from '../../core/projects.js'
-import { browseFolders } from '../../core/browse.js'
-import { workFile, workTree } from '../../core/work.js'
+import { browseFolders, createFolder } from '../../core/browse.js'
+import { createWorkFolder, workFile, workTree } from '../../core/work.js'
 import { startTracking, workDiff } from '../../core/work-diff.js'
 import { PROJECT_RULES_PROMPT, readProjectInstructions, rulesOf } from '../../core/agent/instructions.js'
 import { JobRegistry } from './jobs.js'
@@ -171,7 +171,9 @@ export class WebSettings {
       case 'projects': return projectViews()
       case 'project-action': return this.projectAction(body)
       case 'browse-folders': return browseFolders(optionalText(body.path), { cwd: this.cwd })
+      case 'folder-create': return this.folderCreate(body)
       case 'project-tree': return this.projectTree(body)
+      case 'project-folder': return this.projectFolder(body)
       case 'project-file': return this.projectFile(body)
       case 'project-diff': return this.projectDiff(body)
       case 'project-track': return this.projectTrack(body)
@@ -769,6 +771,30 @@ export class WebSettings {
    */
   private async projectTree(body: Record<string, unknown>): Promise<unknown> {
     const outcome = await workTree(projectId(body.id))
+    if (!outcome.ok) throw new Error(outcome.error)
+    return outcome
+  }
+
+  /**
+   * A folder made while choosing one: the picker a project is added with can make the
+   * folder it was missing instead of ending at "there is no folder at …". It answers the
+   * listing inside the new folder, so the picker stands in it.
+   */
+  private folderCreate(body: Record<string, unknown>): unknown {
+    return createFolder(optionalText(body.parent), requireText(body.name, 'folder'), { cwd: this.cwd })
+  }
+
+  /**
+   * A folder made in a project, for the Work screen. The id, the parent and the name are
+   * checked in the core; the answer is the whole tree after the write, so the screen draws
+   * the folder it just made in the same round trip.
+   */
+  private async projectFolder(body: Record<string, unknown>): Promise<unknown> {
+    const outcome = await createWorkFolder(
+      projectId(body.id),
+      optionalText(body.parent) ?? '',
+      requireText(body.name, 'folder'),
+    )
     if (!outcome.ok) throw new Error(outcome.error)
     return outcome
   }

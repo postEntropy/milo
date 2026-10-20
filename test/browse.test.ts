@@ -2,7 +2,7 @@ import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node
 import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { browseFolders } from '../src/core/browse.js'
+import { browseFolders, createFolder } from '../src/core/browse.js'
 
 const tree = mkdtempSync(path.join(tmpdir(), 'milo-browse-'))
 
@@ -70,5 +70,31 @@ describe('browseFolders', () => {
   it('leaves the tree as it found it', () => {
     rmSync(tree, { recursive: true, force: true })
     mkdirSync(tree, { recursive: true })
+  })
+})
+
+describe('createFolder', () => {
+  it('makes the folder and answers standing inside it', () => {
+    const dir = folder('create-work')
+
+    const listing = createFolder(dir, 'fresh')
+    expect(listing.path).toBe(path.join(dir, 'fresh'))
+    expect(listing.name).toBe('fresh')
+    expect(browseFolders(dir).folders.map((entry) => entry.name)).toContain('fresh')
+  })
+
+  it('says a name it cannot make, and one already there', () => {
+    const dir = folder('create-bad')
+
+    expect(() => createFolder(dir, '  ')).toThrow('a folder needs a name')
+    expect(() => createFolder(dir, 'a/b')).toThrow('a/b is not a folder name.')
+    mkdirSync(path.join(dir, 'taken'))
+    expect(() => createFolder(dir, 'taken')).toThrow(`${path.join(dir, 'taken')} already exists.`)
+  })
+
+  it('says which folder it could not find instead of making one somewhere else', () => {
+    const missing = path.join(tree, 'nowhere')
+
+    expect(() => createFolder(missing, 'x')).toThrow(`there is no folder at ${missing}`)
   })
 })

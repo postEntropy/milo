@@ -1233,6 +1233,32 @@ describe('the Work screen’s projects', () => {
     expect(page.next).toBeUndefined()
   })
 
+  it('makes a folder in a project, and one while choosing where a project goes', async () => {
+    const settings = new WebSettings(build(), home)
+    const where = folder('makes-folders')
+    const id = await addProject(settings, where, 'Folders')
+
+    const tree = (await settings.handle('project-folder', { id, name: 'notes' })) as {
+      nodes: Array<{ kind: string; rel: string }>
+    }
+    expect(tree.nodes.map((node) => `${node.kind}:${node.rel}`)).toEqual(['folder:notes'])
+
+    const inside = (await settings.handle('project-folder', { id, parent: 'notes', name: 'inbox' })) as {
+      nodes: Array<{ kind: string; rel: string; children?: Array<{ rel: string }> }>
+    }
+    expect(inside.nodes[0]?.children?.map((node) => node.rel)).toEqual(['notes/inbox'])
+
+    const chosen = (await settings.handle('folder-create', { parent: home, name: 'chosen' })) as {
+      path: string
+      name: string
+    }
+    expect(chosen.path).toBe(path.join(home, 'chosen'))
+    expect(chosen.name).toBe('chosen')
+
+    await expect(settings.handle('project-folder', { id, name: '../escape' })).rejects.toThrow('is not a folder name.')
+    await expect(settings.handle('folder-create', { name: '' })).rejects.toThrow('A folder is required.')
+  })
+
   it('refuses a file outside the project, one it cannot read, and a tree of no project', async () => {
     const settings = new WebSettings(build(), home)
     const id = await addProject(settings, folder('tree-refusals'), 'Tree')

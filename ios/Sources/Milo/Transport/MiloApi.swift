@@ -363,6 +363,16 @@ enum MiloApi {
         try await call("project-tree", ["id": id], account: account, as: WorkTree.self)
     }
 
+    /// A folder made in a project's folder; the daemon answers with the whole tree after it.
+    static func projectFolder(_ account: Account, id: String, parent: String, name: String) async throws -> WorkTree {
+        try await call("project-folder", ["id": id, "parent": parent, "name": name], account: account, as: WorkTree.self)
+    }
+
+    /// A folder made while choosing one, answered with the listing inside it.
+    static func createFolder(_ account: Account, parent: String, name: String) async throws -> FolderListing {
+        try await call("folder-create", ["parent": parent, "name": name], account: account, as: FolderListing.self)
+    }
+
     /// One page of a project's file, cut where the agent's own reader cuts it.
     static func projectFile(_ account: Account, id: String, path: String, offset: Int? = nil) async throws -> WorkFilePage {
         var body: [String: Any] = ["id": id, "path": path]

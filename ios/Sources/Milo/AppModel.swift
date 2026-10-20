@@ -1140,6 +1140,9 @@ final class AppModel {
             return outcome.result
         } catch is URLError {
             connectionSaid = true
+            // The pill says the connection is down; this says what it meant for the act
+            // the person just took, which the pill cannot.
+            projectsError = "The connection dropped before the change was saved."
             return nil
         } catch {
             projectsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

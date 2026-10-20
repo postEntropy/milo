@@ -1070,6 +1070,10 @@ private struct ProjectFiles: View {
     /// file's hunks rise in, rather than a reader that pushes the tree it came from down
     /// the page.
     @State private var reading: WorkNode?
+    /// The folder a new one is being made in, by its project-relative path — the empty
+    /// string for the project's own root. Nil while the name is not being asked for.
+    @State private var naming: String?
+    @State private var folderDraft = ""
 
     var body: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
@@ -1083,6 +1087,11 @@ private struct ProjectFiles: View {
                         .font(MiloTheme.Text.meta.monospacedDigit())
                         .foregroundStyle(MiloTheme.muted)
                 }
+                MiloIconButton(systemName: "folder.badge.plus", size: 15, span: 34, disabled: tree == nil) {
+                    folderDraft = ""
+                    naming = ""
+                }
+                .accessibilityLabel("New folder")
             }
 
             if let error {
@@ -1091,13 +1100,20 @@ private struct ProjectFiles: View {
 
             if let tree {
                 if tree.nodes.isEmpty {
-                    Text("This folder has no files in it.")
+                    Text("This folder is empty.")
                         .font(MiloTheme.Text.small)
                         .foregroundStyle(MiloTheme.muted)
                 } else {
                     VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
                         ForEach(tree.nodes) { node in
-                            WorkNodeRow(node: node, onOpen: { reading = $0 })
+                            WorkNodeRow(
+                                node: node,
+                                onOpen: { reading = $0 },
+                                onNewFolder: { parent in
+                                    folderDraft = ""
+                                    naming = parent.rel
+                                }
+                            )
                         }
                     }
                     .padding(MiloTheme.Space.three)
@@ -1133,6 +1149,31 @@ private struct ProjectFiles: View {
         .sheet(item: $reading) { node in
             WorkFileDetail(projectId: projectId, node: node)
         }
+        .alert(
+            "New folder",
+            isPresented: Binding(get: { naming != nil }, set: { if !$0 { naming = nil } })
+        ) {
+            TextField("Folder name", text: $folderDraft)
+            Button("Create") { create() }
+            Button("Cancel", role: .cancel) { naming = nil }
+        } message: {
+            Text(naming == "" ? "In this project's folder." : "In \(naming ?? "").")
+        }
+    }
+
+    private func create() {
+        guard let parent = naming else { return }
+        let name = folderDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        naming = nil
+        guard !name.isEmpty else { return }
+        Task {
+            do {
+                tree = try await model.projectFolder(projectId, parent: parent, name: name)
+                error = nil
+            } catch {
+                self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            }
+        }
     }
 
     private func read() async {
@@ -1150,12 +1191,15 @@ private struct ProjectFiles: View {
 private struct WorkNodeRow: View {
     let node: WorkNode
     let onOpen: (WorkNode) -> Void
+    /// A new folder asked for inside this one — offered on a folder's hold, so a name is
+    /// made where it belongs rather than at the root and moved.
+    let onNewFolder: (WorkNode) -> Void
 
     var body: some View {
         if node.isFolder {
             DisclosureGroup {
                 ForEach(node.children) { child in
-                    WorkNodeRow(node: child, onOpen: onOpen)
+                    WorkNodeRow(node: child, onOpen: onOpen, onNewFolder: onNewFolder)
                 }
             } label: {
                 HStack(spacing: MiloTheme.Space.two) {
@@ -1175,6 +1219,9 @@ private struct WorkNodeRow: View {
                 .padding(.vertical, MiloTheme.Space.two)
             }
             .tint(MiloTheme.muted)
+            .contextMenu {
+                menuItem("New folder", "folder.badge.plus") { onNewFolder(node) }
+            }
         } else {
             Button {
                 onOpen(node)
@@ -1324,6 +1371,10 @@ private struct FolderPicker: View {
     @State private var listing: FolderListing?
     @State private var error: String?
     @State private var busy = false
+    /// Whether a folder name is being asked for — a project's folder may not exist yet,
+    /// and a picker with no way to make one is a picker that can only say no.
+    @State private var naming = false
+    @State private var folderDraft = ""
 
     var body: some View {
         NavigationStack {
@@ -1397,6 +1448,16 @@ private struct FolderPicker: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
+                ToolbarItem(placement: .primaryAction) {
+                    Button {
+                        folderDraft = ""
+                        naming = true
+                    } label: {
+                        Image(systemName: "folder.badge.plus")
+                    }
+                    .accessibilityLabel("New folder")
+                    .disabled(listing == nil || busy)
+                }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Use this folder") {
                         guard let path = listing?.path else { return }
@@ -1407,6 +1468,31 @@ private struct FolderPicker: View {
                 }
             }
             .task { await open(nil) }
+            .alert("New folder", isPresented: $naming) {
+                TextField("Folder name", text: $folderDraft)
+                Button("Create") { create() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("Inside \(listing?.path ?? "this folder").")
+            }
+        }
+    }
+
+    private func create() {
+        guard let parent = listing?.path else { return }
+        let name = folderDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else { return }
+        Task { await make(parent: parent, name: name) }
+    }
+
+    private func make(parent: String, name: String) async {
+        busy = true
+        defer { busy = false }
+        do {
+            listing = try await model.createFolder(parent, name: name)
+            error = nil
+        } catch {
+            self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
 

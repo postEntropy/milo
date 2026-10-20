@@ -1629,6 +1629,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .work-files-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-6); margin-bottom: var(--space-5); }
 .work-files-title { color: var(--fg); font-size: var(--text-lg); font-weight: 600; }
 .work-files-count { color: var(--muted); font: var(--text-2xs) var(--font-mono); white-space: nowrap; }
+.work-files-side { display: flex; align-items: center; gap: var(--space-4); }
 .work-files-note { margin-top: var(--space-5); color: var(--muted); font-size: var(--text-xs); }
 .work-tree { display: flex; flex-direction: column; gap: var(--space-1); border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-4); }
 .work-tree-branch, .work-tree-children { display: flex; flex-direction: column; gap: var(--space-1); }

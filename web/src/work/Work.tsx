@@ -414,6 +414,10 @@ function ProjectPage({
   const [openDiff, setOpenDiff] = useState<string | null>(null)
   /** Recording the folder as it is now, which is what makes the changes readable at all. */
   const [tracking, setTracking] = useState(false)
+  /** The folder name being typed, or null while the form is closed. */
+  const [folderName, setFolderName] = useState<string | null>(null)
+  const [folderBusy, setFolderBusy] = useState(false)
+  const [folderError, setFolderError] = useState<string | null>(null)
 
   /** Bumped per read, so a slower earlier walk cannot overwrite a newer one. */
   const treeSeq = useRef(0)
@@ -485,6 +489,28 @@ function ProjectPage({
       setTracking(false)
     }
   }, [project.id])
+
+  /**
+   * A folder made in the project's own folder. The daemon answers with the whole tree
+   * after the write — a folder holding no file is still drawn — so the section shows it
+   * without a second read.
+   */
+  const createFolder = useCallback(async (event: FormEvent<HTMLFormElement>): Promise<void> => {
+    event.preventDefault()
+    const name = folderName?.trim() ?? ''
+    if (!name) return
+    setFolderBusy(true)
+    setFolderError(null)
+    try {
+      const next = await api<WorkTree>('project-folder', { id: project.id, name })
+      setTree(next)
+      setFolderName(null)
+    } catch (error) {
+      setFolderError(message(error))
+    } finally {
+      setFolderBusy(false)
+    }
+  }, [folderName, project.id])
 
   function saveRename(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
@@ -607,8 +633,30 @@ function ProjectPage({
     {project.error === undefined && <section className="work-files">
       <header className="work-files-head">
         <h2 className="work-files-title">Files</h2>
-        {tree && <span className="work-files-count">{tree.files} {tree.files === 1 ? 'file' : 'files'}</span>}
+        <div className="work-files-side">
+          {tree && <span className="work-files-count">{tree.files} {tree.files === 1 ? 'file' : 'files'}</span>}
+          {/* A folder may need to exist before a session can work in it: the tree makes
+              one, and draws it in the same answer. It is disabled until the tree has been
+              read, so a tap is never a guess about where it lands. */}
+          <button
+            className="icon-button"
+            type="button"
+            aria-label="New folder"
+            title="New folder"
+            disabled={saving || tree === null}
+            onClick={() => { setFolderError(null); setFolderName('') }}
+          ><Icon name="plus" size={16} /></button>
+        </div>
       </header>
+
+      {folderName !== null && <form className="work-rename" onSubmit={(event) => void createFolder(event)}>
+        <Field label="Folder name"><input value={folderName} onChange={(event) => setFolderName(event.target.value)} maxLength={80} /></Field>
+        <div className="save-actions">
+          <button className="button" type="button" onClick={() => { setFolderName(null); setFolderError(null) }}>Cancel</button>
+          <button className="button primary" type="submit" disabled={folderBusy || !folderName.trim()}>{folderBusy ? 'Creating…' : 'Create folder'}</button>
+        </div>
+      </form>}
+      {folderError && <p className="work-file-error">{folderError}</p>}
 
       {open && <FileView
         project={project.id}
@@ -621,7 +669,7 @@ function ProjectPage({
         : tree === null
           ? <SkeletonList rows={4} label="Reading this folder…" />
           : tree.nodes.length === 0
-            ? <p className="list-empty">This folder has no files in it.</p>
+            ? <p className="list-empty">This folder is empty.</p>
             : <div className="work-tree">
               {tree.nodes.map((node) => <TreeNode key={node.rel} node={node} openRel={open?.rel ?? null} onOpen={setOpen} />)}
             </div>}

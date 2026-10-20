@@ -1,4 +1,4 @@
-import { readdirSync, statSync, type Dirent } from 'node:fs'
+import { mkdirSync, readdirSync, statSync, type Dirent } from 'node:fs'
 import { homedir } from 'node:os'
 import { basename, dirname, join, parse } from 'node:path'
 import { errorMessage } from '../util/errors.js'
@@ -62,6 +62,47 @@ export function browseFolders(target?: string, options: { cwd?: string } = {}): 
     folders: folders.slice(0, MAX_FOLDERS),
     truncated: folders.length > MAX_FOLDERS,
   }
+}
+
+/**
+ * Why a name cannot be a folder's, or nothing when it can be: one segment, and neither
+ * the folder it is in nor the one above it.
+ */
+export function folderNameProblem(name: string): string | undefined {
+  const trimmed = name.trim()
+  if (!trimmed) return 'a folder needs a name'
+  if (trimmed === '.' || trimmed === '..' || trimmed.includes('/') || trimmed.includes('\\') || trimmed.includes('\0')) {
+    return `${trimmed} is not a folder name.`
+  }
+  return undefined
+}
+
+/**
+ * A folder made inside one of the daemon's own folders, for the picker a project is
+ * chosen with — the folder a project needs may not exist yet. It answers with the listing
+ * *inside* the new folder, so the person who made one to work in is already standing in it.
+ */
+export function createFolder(
+  parent: string | undefined,
+  name: string,
+  options: { cwd?: string } = {},
+): FolderListing {
+  const problem = folderNameProblem(name)
+  if (problem) throw new Error(problem)
+
+  const folder = name.trim()
+  const asked = parent?.trim()
+  const path = asked ? resolveToolPath(options.cwd ?? homedir(), asked) : homedir()
+  if (!isFolder(path)) throw new Error(`there is no folder at ${path}`)
+
+  const target = join(path, folder)
+  try {
+    mkdirSync(target)
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EEXIST') throw new Error(`${target} already exists.`)
+    throw new Error(`could not create ${target}: ${errorMessage(error)}`)
+  }
+  return browseFolders(target)
 }
 
 function isFolder(path: string): boolean {

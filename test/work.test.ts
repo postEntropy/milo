@@ -9,7 +9,7 @@ const home = mkdtempSync(path.join(tmpdir(), 'milo-work-'))
 process.env.MILO_HOME = home
 
 const { addProject } = await import('../src/core/projects.js')
-const { workFile, workTree } = await import('../src/core/work.js')
+const { createWorkFolder, workFile, workTree } = await import('../src/core/work.js')
 const { projectsFile } = await import('../src/core/config/paths.js')
 
 let counter = 0
@@ -63,7 +63,7 @@ describe('workTree', () => {
     expect(tree.truncated).toBe(false)
   })
 
-  it('leaves out what the walk ignores, and the folders that hold nothing', async () => {
+  it('draws a folder holding no file, and leaves out what the walk ignores', async () => {
     const { id, path: where } = await project({
       'kept.txt': '',
       'node_modules/dep/index.js': '',
@@ -73,7 +73,7 @@ describe('workTree', () => {
     mkdirSync(path.join(where, 'empty'), { recursive: true })
 
     const tree = await workTree(id)
-    expect(tree.ok && flat(tree.nodes)).toEqual(['kept.txt'])
+    expect(tree.ok && flat(tree.nodes)).toEqual(['empty/', 'kept.txt'])
   })
 
   it('cuts the tree at its ceiling and says that it did', async () => {
@@ -99,6 +99,69 @@ describe('workTree', () => {
 
     const tree = await workTree(id)
     expect(tree).toEqual({ ok: false, error: `the folder of Demo is gone (${where})` })
+  })
+})
+
+describe('createWorkFolder', () => {
+  it('makes a folder at the project’s root and answers the tree already holding it', async () => {
+    const { id } = await project({ 'a.txt': '' })
+
+    const tree = await createWorkFolder(id, '', 'notes')
+    expect(tree.ok && flat(tree.nodes)).toEqual(['notes/', 'a.txt'])
+  })
+
+  it('makes one inside a folder, by that folder’s path', async () => {
+    const { id } = await project({ 'src/a.ts': '' })
+
+    const tree = await createWorkFolder(id, 'src', 'components')
+    expect(tree.ok && flat(tree.nodes)).toEqual(['src/', 'src/components/', 'src/a.ts'])
+  })
+
+  it('says a name it cannot use rather than making nothing', async () => {
+    const { id } = await project({})
+
+    expect(await createWorkFolder(id, '', '  ')).toEqual({ ok: false, error: 'a folder needs a name' })
+    expect(await createWorkFolder(id, '', 'a/b')).toEqual({ ok: false, error: 'a/b is not a folder name.' })
+    expect(await createWorkFolder(id, '', '..')).toEqual({ ok: false, error: '.. is not a folder name.' })
+  })
+
+  it('refuses a name the tree leaves out, so a made folder is not then hidden', async () => {
+    const { id } = await project({})
+
+    expect(await createWorkFolder(id, '', 'node_modules')).toEqual({
+      ok: false,
+      error: 'node_modules is a folder the file tree leaves out — choose another name.',
+    })
+  })
+
+  it('says a name already taken, and a parent that is not there', async () => {
+    const { id, path: where } = await project({})
+    mkdirSync(path.join(where, 'taken'))
+
+    expect(await createWorkFolder(id, '', 'taken')).toEqual({ ok: false, error: 'taken already exists.' })
+    const missing = await createWorkFolder(id, 'nope', 'inner')
+    expect(missing.ok).toBe(false)
+    if (missing.ok) return
+    expect(missing.error).toContain('could not read nope:')
+  })
+
+  it('refuses a parent that climbs out of the project', async () => {
+    const { id } = await project({})
+
+    expect(await createWorkFolder(id, '../outside', 'x')).toEqual({
+      ok: false,
+      error: '../outside is not inside Demo.',
+    })
+  })
+
+  it('refuses a parent that leads out through a symlink', async () => {
+    const { id, path: where } = await project({})
+    symlinkSync('/etc', path.join(where, 'shortcut'))
+
+    expect(await createWorkFolder(id, 'shortcut', 'milo-test')).toEqual({
+      ok: false,
+      error: 'shortcut is not inside Demo.',
+    })
   })
 })
 

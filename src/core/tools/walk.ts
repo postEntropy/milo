@@ -45,6 +45,12 @@ export interface WalkEntry {
 
 export interface WalkResult {
   entries: WalkEntry[]
+  /**
+   * Directories met on the way, relative to the root, ignoring the same names the walk
+   * does. A folder holding no file is still a folder; a tree built only from the paths
+   * files are in would hide it.
+   */
+  folders: string[]
   /** The file cap was hit, so the tree was only partly walked. */
   truncated: boolean
   /** The caller cancelled, so the tree was only partly walked. */
@@ -73,13 +79,14 @@ export async function walk(options: WalkOptions): Promise<WalkResult> {
   const ignore = options.ignore ?? DEFAULT_IGNORES
   const maxEntries = options.maxEntries ?? MAX_ENTRIES
   const entries: WalkEntry[] = []
+  const folders: string[] = []
   const warnings: string[] = []
   const queue = [options.root]
 
   for (let index = 0; index < queue.length; index += 1) {
     // A cancelled walk is reported as cancelled, never as a complete one.
-    if (options.signal?.aborted) return { entries, truncated: false, aborted: true, warnings }
-    if (entries.length >= maxEntries) return { entries, truncated: true, warnings }
+    if (options.signal?.aborted) return { entries, folders, truncated: false, aborted: true, warnings }
+    if (entries.length >= maxEntries) return { entries, folders, truncated: true, warnings }
 
     const dir = queue[index]!
     let dirents: Dirent[]
@@ -91,12 +98,15 @@ export async function walk(options: WalkOptions): Promise<WalkResult> {
     }
 
     for (const dirent of dirents) {
-      if (options.signal?.aborted) return { entries, truncated: false, aborted: true, warnings }
-      if (entries.length >= maxEntries) return { entries, truncated: true, warnings }
+      if (options.signal?.aborted) return { entries, folders, truncated: false, aborted: true, warnings }
+      if (entries.length >= maxEntries) return { entries, folders, truncated: true, warnings }
 
       const full = path.join(dir, dirent.name)
       if (dirent.isDirectory()) {
-        if (!ignore.has(dirent.name)) queue.push(full)
+        if (!ignore.has(dirent.name)) {
+          folders.push(toPosix(path.relative(options.root, full)))
+          queue.push(full)
+        }
         continue
       }
       // Symlinks are skipped rather than followed: a link pointing back up the
@@ -119,7 +129,7 @@ export async function walk(options: WalkOptions): Promise<WalkResult> {
     }
   }
 
-  return { entries, truncated: false, warnings }
+  return { entries, folders, truncated: false, warnings }
 }
 
 export function resolveToolPath(cwd: string, target: string | undefined): string {
