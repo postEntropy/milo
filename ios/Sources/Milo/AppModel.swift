@@ -54,6 +54,10 @@ final class AppModel {
 
     private(set) var phase: Phase = .pairing
     private(set) var messages: [Message] = []
+    /// Bumped when a thread kept from the session being left is replaced by the one the
+    /// handshake brought. The screen cross-fades the two on this, rather than swapping
+    /// the old words for the new under the card.
+    private(set) var threadHandover = 0
     private(set) var busy = false
     /// Whether this session's turns are proposing rather than working. Kept on the
     /// session, so a screen that reconnects mid-plan opens with the switch already on.
@@ -200,7 +204,9 @@ final class AppModel {
     /// The lines the welcome screen draws, from what is actually here — the browser's
     /// own builder, over the session list and the ideas.
     var suggestions: [Suggestion] {
-        buildSuggestions(sessions: sessions, ideas: ideas, currentId: sessionId)
+        // The chats, as the drawer lists them: a work session belongs to its project's
+        // page in Work, so the welcome does not offer one to pick up here.
+        buildSuggestions(sessions: sessions.filter { $0.project == nil }, ideas: ideas, currentId: sessionId)
     }
 
     // The panel beside the chat.
@@ -254,6 +260,10 @@ final class AppModel {
     private var owedIntent: ClientFrame.Intent?
     private var owedUploads: [String] = []
     private var reopening = false
+    /// Whether the thread on screen is the one being left, kept until the socket hands
+    /// over the session being opened. It tells the handshake's own "the person already
+    /// spoke in this fresh session" rule that these words are not that session's.
+    private var threadKept = false
 
     private var account: Account? {
         if case .chat(let account) = phase { return account }
@@ -282,6 +292,9 @@ final class AppModel {
     func load() async {
         if let account = AccountStore.load() {
             phase = .chat(account)
+            // The list the daemon last answered with, so a launch while it is down still
+            // names the sessions that were there. The refresh below replaces it.
+            restoreSessions()
         } else {
             phase = .pairing
         }
@@ -435,7 +448,9 @@ final class AppModel {
         client.disconnect()
         AccountStore.clear()
         messages = []
+        threadKept = false
         sessions = []
+        UserDefaults.standard.removeObject(forKey: Self.sessionsCacheKey)
         ideas = []
         jobs = []
         routines = []
@@ -471,6 +486,14 @@ final class AppModel {
         // The chat exists only inside a bound install, so this is the account the upload
         // goes to rather than a second source for one.
         guard let account else { return }
+        // Words typed into the session being opened are the first thing said there: the
+        // thread kept from the one being left goes at once, and the empty id makes this
+        // bubble the thing the handshake leaves alone — the fresh-session path exactly.
+        if threadKept {
+            messages = []
+            sessionId = ""
+            threadKept = false
+        }
         messages.append(
             Message(
                 isUser: true,
@@ -688,16 +711,53 @@ final class AppModel {
 
     // MARK: - Sessions
 
+    /// The drawer as the daemon last described it, kept on the phone so a launch while
+    /// the daemon is down still names the sessions that were there. The address it came
+    /// from is part of what is kept: a list written by one install is never drawn as
+    /// another's, and unpairing takes it away with the install it described.
+    private struct SessionsCache: Codable {
+        let daemon: String
+        let sessions: [SessionSummary]
+    }
+
+    private static let sessionsCacheKey = "sessions-cache"
+
     func refreshSessions() async {
         guard let account else { return }
         sessionsLoading = true
         defer { sessionsLoading = false }
         do {
-            sessions = try await MiloApi.sessions(account).sorted { $0.updatedAt > $1.updatedAt }
+            let next = try await MiloApi.sessions(account).sorted { $0.updatedAt > $1.updatedAt }
+            // The drawer is re-read whenever it opens, and a read that says exactly
+            // what is already there has nothing to tell the screens: publishing it
+            // again would rebuild the list under whatever is happening on screen.
+            // Only a list that moved is handed over.
+            if next != sessions { sessions = next }
+            cacheSessions(account)
             note = nil
         } catch {
             failed(error)
         }
+    }
+
+    /// Writes down the list just read, so the next launch has it before the daemon
+    /// answers — or when it cannot.
+    private func cacheSessions(_ account: Account) {
+        guard let data = try? JSONEncoder().encode(SessionsCache(daemon: account.display, sessions: sessions)) else {
+            return
+        }
+        UserDefaults.standard.set(data, forKey: Self.sessionsCacheKey)
+    }
+
+    /// Brings back the list the daemon last answered with, when it was this install's.
+    /// The running mark is dropped on the way in: it described a turn that may be over,
+    /// and a row read from disk has no way to know.
+    private func restoreSessions() {
+        guard let account,
+              let data = UserDefaults.standard.data(forKey: Self.sessionsCacheKey),
+              let cached = try? JSONDecoder().decode(SessionsCache.self, from: data),
+              cached.daemon == account.display else { return }
+        sessions = cached.sessions.map(\.settled).sorted { $0.updatedAt > $1.updatedAt }
     }
 
     func newSession() async {
@@ -905,10 +965,21 @@ final class AppModel {
     }
 
     /// Clears the visible state of the session being left before opening the next one.
-    private func resetSessionState() {
+    /// `keepingThread` leaves the words on screen until the handshake brings the session
+    /// being opened: a switch that cleared here would slide the card over an empty chat
+    /// and fill it in a moment later, which reads as a flash. A fresh session clears at
+    /// once instead — there is nothing of it to wait for.
+    private func resetSessionState(keepingThread: Bool = false) {
         client.disconnect()
-        messages = []
-        sessionId = ""
+        threadKept = keepingThread
+        if !keepingThread {
+            messages = []
+            // An empty id is the socket forgetting its session before the next one
+            // answers. A kept thread keeps it too: the screen is still that session
+            // until the handshake names the next, and an id going out and back in
+            // would make the thread jump to its top under the card.
+            sessionId = ""
+        }
         pending = nil
         turnStarted = nil
         began = false
@@ -940,7 +1011,7 @@ final class AppModel {
     private func reopen(_ account: Account) async {
         if !reopening {
             reopening = true
-            resetSessionState()
+            resetSessionState(keepingThread: true)
         }
         client.connect(to: account)
     }
@@ -1716,7 +1787,9 @@ final class AppModel {
     private func received(_ frame: ServerFrame) {
         switch frame {
         case .ready(let ready):
-            let waitingForFirstSend = reopening && owed != nil && ready.messages.isEmpty && !messages.isEmpty
+            let keptThread = threadKept
+            let waitingForFirstSend = reopening && !keptThread && owed != nil && ready.messages.isEmpty && !messages.isEmpty
+            threadKept = false
             reopening = false
             sessionProject = ready.project
             planMode = ready.plan ?? false
@@ -1736,6 +1809,12 @@ final class AppModel {
                         raw: $0.raw,
                         rawNoOutput: $0.rawNoOutput
                     )
+                }
+                // The words kept from the session being left give way to these ones as one
+                // move: the screen cross-fades the two, so a session opened from the drawer
+                // lands rather than appearing whole under the card.
+                if keptThread {
+                    withAnimation(.smooth(duration: 0.3)) { threadHandover += 1 }
                 }
             }
             modelName = ready.model

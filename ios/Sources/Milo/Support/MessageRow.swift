@@ -22,6 +22,17 @@ struct SettlesIn: Transition {
     }
 }
 
+/// One thread giving way to another: the words a session is opened from cross-fade with the
+/// ones the handshake brought, rising a little as they land. Slower and quieter than
+/// `SettlesIn` — this is a whole conversation arriving at once, not a message into one.
+struct ThreadSwap: Transition {
+    func body(content: Content, phase: TransitionPhase) -> some View {
+        content
+            .opacity(phase.isIdentity ? 1 : 0)
+            .offset(y: phase.isIdentity ? 0 : 8)
+    }
+}
+
 struct MessageRow: View {
     let message: AppModel.Message
     /// Which turn this message belongs to — what a fork cuts at.

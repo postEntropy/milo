@@ -15,7 +15,7 @@ enum ApiError: LocalizedError {
     }
 }
 
-struct SessionSummary: Decodable, Identifiable, Hashable {
+struct SessionSummary: Codable, Identifiable, Hashable {
     let id: String
     let title: String?
     let createdAt: Double
@@ -25,7 +25,7 @@ struct SessionSummary: Decodable, Identifiable, Hashable {
     let recap: String?
     /// Whether a turn holds this session right now — anywhere in the install, the
     /// daemon or a terminal. A row draws its running mark from this.
-    let running: Bool?
+    var running: Bool?
     /// The project this session works in, by id. Absent on a session working in the
     /// install's own folder — a screen names the project from the list of them.
     let project: String?
@@ -56,6 +56,16 @@ struct SessionSummary: Decodable, Identifiable, Hashable {
         if !named.isEmpty { return named }
         let opening = preview.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
         return opening.isEmpty ? "Empty session" : String(opening.prefix(70))
+    }
+
+    /// The row as it reads from the phone's own copy of the list: that copy describes the
+    /// session when the daemon last answered, so the mark saying a turn holds it right now
+    /// is not carried — a cached row that claimed to be running would be a claim about the
+    /// present nobody made.
+    var settled: SessionSummary {
+        var copy = self
+        copy.running = nil
+        return copy
     }
 }
 

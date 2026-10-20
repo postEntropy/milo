@@ -49,8 +49,8 @@ struct SessionsDrawer: View {
                 pageTab("Work", symbol: "folder", selected: workSelected, action: onWork)
             }
 
-            if model.sessions.isEmpty {
-                Text("No sessions yet")
+            if chats.isEmpty {
+                Text(model.sessions.isEmpty ? "No sessions yet" : "No chats yet")
                     .font(MiloTheme.Text.base)
                     .foregroundStyle(MiloTheme.muted)
                     .padding(.horizontal, MiloTheme.Space.four)
@@ -162,10 +162,17 @@ struct SessionsDrawer: View {
         !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// The sessions this drawer holds: the chats. A session working in a project belongs
+    /// to that project's page in Work, where it is opened beside the folder it works in —
+    /// listing it here as well would offer the same session under two different roofs.
+    private var chats: [SessionSummary] {
+        model.sessions.filter { $0.project == nil }
+    }
+
     private var filtered: [SessionSummary] {
         let text = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard !text.isEmpty else { return model.sessions }
-        return model.sessions.filter {
+        guard !text.isEmpty else { return chats }
+        return chats.filter {
             "\($0.title ?? "") \($0.preview) \($0.id)".lowercased().contains(text)
         }
     }
@@ -177,7 +184,7 @@ struct SessionsDrawer: View {
             Image(systemName: "magnifyingglass")
                 .font(MiloTheme.Text.small)
                 .foregroundStyle(MiloTheme.muted)
-            TextField("Search sessions", text: $query)
+            TextField("Search chats", text: $query)
                 .font(MiloTheme.Text.base)
                 .foregroundStyle(MiloTheme.foreground)
                 .textInputAutocapitalization(.never)
@@ -258,10 +265,11 @@ struct SessionsDrawer: View {
         )
         .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
         .onTapGesture {
-            Task {
-                await model.resume(session.id)
-                onClose()
-            }
+            // The card answers the tap, not the daemon: the drawer slides closed while
+            // the binding is made, instead of holding still through a round trip and
+            // moving only once it lands.
+            onClose()
+            Task { await model.resume(session.id) }
         }
         // A row that opens a session reads as a control, the way the button it used to be
         // did: a tap is not the only way to answer one.
