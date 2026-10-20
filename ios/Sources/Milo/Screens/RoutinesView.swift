@@ -24,24 +24,22 @@ struct RoutinesView: View {
 
     /// Where this page can navigate: one routine's page, or the field that makes one.
     private enum Route: Hashable {
-        /// A run to open on arrival, when a timeline row named one.
-        case detail(routine: String, run: String?)
+        case detail(routine: String)
         case new
     }
 
     var body: some View {
         NavigationStack(path: $path) {
             RoutineList(
-                onSelect: { path.append(.detail(routine: $0, run: nil)) },
-                onOpen: { routine, run in path.append(.detail(routine: routine, run: run)) },
+                onSelect: { path.append(.detail(routine: $0)) },
                 onCompose: { path.append(.new) },
                 onSessions: onSessions
             )
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: Route.self) { route in
                 switch route {
-                case .detail(let routine, let run):
-                    RoutineDetail(routineId: routine, initialRun: run)
+                case .detail(let routine):
+                    RoutineDetail(routineId: routine)
                 case .new:
                     NewRoutine(account: account)
                 }
@@ -68,7 +66,7 @@ struct RoutinesView: View {
     private func openPending() {
         guard let id = model.pendingRoutine else { return }
         model.pendingRoutine = nil
-        path = [.detail(routine: id, run: nil)]
+        path = [.detail(routine: id)]
     }
 }
 
@@ -76,12 +74,15 @@ struct RoutinesView: View {
 
 private struct RoutineList: View {
     let onSelect: (String) -> Void
-    let onOpen: (String, String) -> Void
     let onCompose: () -> Void
     let onSessions: () -> Void
 
     @Environment(AppModel.self) private var model
     @State private var feed: [RoutineFeedEntry] = []
+    /// The output being read, risen from the bottom of the screen. A timeline row reads
+    /// its run here rather than opening the routine behind it: the person asked for the
+    /// output, not for the page it belongs to.
+    @State private var reading: ReadingRun?
 
     private var enabled: Int { model.routines.filter(\.enabled).count }
 
@@ -178,7 +179,12 @@ private struct RoutineList: View {
                             .font(MiloTheme.Text.title)
                             .foregroundStyle(MiloTheme.foreground)
                         ForEach(feed) { entry in
-                            Button { onOpen(entry.routineId, entry.runId) } label: {
+                            Button {
+                                reading = ReadingRun(
+                                    run: RoutineRun(id: entry.runId, at: entry.at),
+                                    name: entry.routine
+                                )
+                            } label: {
                                 VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
                                     HStack {
                                         Text(entry.routine).font(MiloTheme.Text.base.weight(.semibold))
@@ -245,6 +251,11 @@ private struct RoutineList: View {
         }
         .task { await model.refreshRoutines() }
         .task { await loadFeed() }
+        // The output itself, risen from the bottom of the screen — the same drawer a
+        // run on a routine's page opens, over the list it was read from.
+        .sheet(item: $reading) { open in
+            RunDetail(run: open.run, name: open.name)
+        }
     }
 
     private func loadFeed() async {
@@ -318,7 +329,6 @@ private struct RoutineRow: View {
 
 private struct RoutineDetail: View {
     let routineId: String
-    let initialRun: String?
 
     @Environment(AppModel.self) private var model
     @State private var runs: [RoutineRun] = []
@@ -566,10 +576,6 @@ private struct RoutineDetail: View {
             let page = try await model.routineRuns(routineId, offset: reset ? 0 : runs.count, limit: Self.page)
             runs = reset ? page.runs : runs + page.runs
             total = page.total
-            // A run named from outside — a tapped reminder, a row on the front page — is what
-            // this page was opened for, so it opens with it. Arriving any other way opens
-            // nothing: the latest run is listed, and reading it is the person's own tap.
-            if reset { read(initialRun) }
         } catch {
             runsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
@@ -581,9 +587,9 @@ private struct RoutineDetail: View {
         index == 0 ? "Latest run" : "Run \(total - index)"
     }
 
-    /// Opens the drawer on one of the runs the list is showing, by id: the run a tapped
-    /// reminder named, or the one just fired. A run the list has not caught up with opens
-    /// nothing — there is no row for it to have been read from.
+    /// Opens the drawer on one of the runs the list is showing, by id: the one just fired.
+    /// A run the list has not caught up with opens nothing — there is no row for it to have
+    /// been read from.
     private func read(_ id: String?) {
         guard let id, let index = runs.firstIndex(where: { $0.id == id }) else { return }
         reading = ReadingRun(run: runs[index], name: runName(index: index))
