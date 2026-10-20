@@ -17,5 +17,21 @@ export default defineConfig({
       '/ws': { target: 'ws://127.0.0.1:7717', ws: true },
     },
   },
-  build: { outDir: 'dist', emptyOutDir: true },
+  build: {
+    outDir: 'dist',
+    emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // One file per dependency family rather than one bundle: the runtime a version bump
+        // never touches stays cached while the app is rebuilt, and no single file crosses
+        // the size Rollup warns about. Everything still loads with the first screen.
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('react') || id.includes('scheduler')) return 'react'
+          if (id.includes('marked') || id.includes('dompurify')) return 'markdown'
+          return 'vendor'
+        },
+      },
+    },
+  },
 })
