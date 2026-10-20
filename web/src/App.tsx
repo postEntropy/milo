@@ -19,13 +19,13 @@ import { settingsSectionFromPath } from './settings/sections.js'
 import { Panel } from './panel/Panel.js'
 import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, ThinkingDisplay, TranscriptPart } from '@protocol'
 import { drawsToolFailure, toolText } from '../../src/gateways/tool-line.ts'
-import { describeCompaction, describeRebase, sessionLabel as sharedSessionLabel } from '../../src/core/sessions/format.ts'
+import { describeCompaction, describeRebase } from '../../src/core/sessions/format.ts'
+import { SessionRow, sessionLabel, type SessionSummary } from './sessions/SessionRow.js'
 import { Icon } from './ui/Icons.js'
-import { Notice, useAutoDismiss } from './ui/Notice.js'
+import { Notice, useAutoDismiss, type Report } from './ui/Notice.js'
 import { miloAvatar } from './ui/milo.js'
 import { projectMark } from './work/marks.js'
 
-type SessionSummary = { id: string; title?: string; preview: string; messageCount: number; updatedAt: number; recap?: string; running?: boolean; project?: string }
 type PendingPermission = { id: string; request: PermissionRequest; expiresAt: number }
 type SessionGroup = { label: string; sessions: SessionSummary[] }
 /** A project as the wire carries it: what it is called, where it is, and why it cannot be
@@ -250,8 +250,8 @@ export default function App() {
     composerRef.current?.insertQuote(text)
   }, [])
 
-  const fail = useCallback((error: unknown): void => {
-    setNotice({ text: error instanceof Error ? error.message : String(error), error: true })
+  const fail = useCallback((error: unknown, report: Report = setNotice): void => {
+    report({ text: error instanceof Error ? error.message : String(error), error: true })
   }, [])
 
   useEffect(() => {
@@ -975,17 +975,17 @@ export default function App() {
 
   const noteDirty = useCallback((dirty: boolean): void => { setSettingsDirty(dirty) }, [])
 
-  async function exportSession(id = sessionId): Promise<void> {
+  async function exportSession(id = sessionId, report: Report = setNotice): Promise<void> {
     if (!id) return
     try {
       const result = await api<{ path: string } | null>('export', { id, format: 'md' })
-      setNotice(result
+      report(result
         ? { text: `Exported to ${result.path}`, error: false }
         : { text: 'Nothing to export yet — this session has no log.', error: true })
-    } catch (error) { fail(error) }
+    } catch (error) { fail(error, report) }
   }
 
-  async function deleteSession(id: string): Promise<void> {
+  async function deleteSession(id: string, report: Report = setNotice): Promise<void> {
     try {
       if (id === sessionId) {
         // Move off the session first — and only delete it if that worked. Ending
@@ -994,16 +994,16 @@ export default function App() {
       }
       await api('session-delete', { id })
       setSessions((current) => current.filter((s) => s.id !== id))
-      setNotice({ text: 'Session deleted.', error: false })
-    } catch (error) { fail(error) }
+      report({ text: 'Session deleted.', error: false })
+    } catch (error) { fail(error, report) }
   }
 
-  async function renameSession(id: string, title: string): Promise<void> {
+  async function renameSession(id: string, title: string, report: Report = setNotice): Promise<void> {
     try {
       await api('session-rename', { id, title })
       setSessions((current) => current.map((s) => s.id === id ? { ...s, title: title.trim() || undefined } : s))
-      setNotice({ text: 'Session renamed.', error: false })
-    } catch (error) { fail(error) }
+      report({ text: 'Session renamed.', error: false })
+    } catch (error) { fail(error, report) }
   }
 
   /**
@@ -1012,9 +1012,9 @@ export default function App() {
    * raise, so a copy the browser refused says so rather than leaving the reader
    * believing the id is on the clipboard when it never landed.
    */
-  function copySessionId(id: string): void {
+  function copySessionId(id: string, report: Report = setNotice): void {
     void copyText(id).then((copied) => {
-      setNotice(copied
+      report(copied
         ? { text: 'Session ID copied.', error: false }
         : { text: 'Could not copy the session ID.', error: true })
     })
@@ -1169,7 +1169,17 @@ export default function App() {
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
         : view === 'work'
-        ? <Work tick={workTick} sessions={sessions} onOpenSession={(id) => void openSession(id)} onStartSession={startWorkSession} />
+        ? <Work
+          tick={workTick}
+          sessions={sessions}
+          sessionId={sessionId}
+          onOpenSession={(id) => void openSession(id)}
+          onStartSession={startWorkSession}
+          onRenameSession={renameSession}
+          onExportSession={exportSession}
+          onCopySessionId={copySessionId}
+          onDeleteSession={deleteSession}
+        />
         : view === 'chat'
         ? <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>{thread}</div>
@@ -1187,165 +1197,6 @@ export default function App() {
     </main>
     {view === 'chat' && panelOpen && panel && panel.tabs.length > 0 && <Panel view={panel} onClose={() => setPanelVisible(false)} onInput={panelInput} onActivateTab={activateTab} onCloseTab={closeTab} />}
   </div>
-}
-
-function SessionRow({
-  session,
-  active,
-  onClick,
-  onRename,
-  onExport,
-  onCopy,
-  onDelete,
-}: {
-  session: SessionSummary
-  active: boolean
-  onClick(): void
-  onRename(id: string, title: string): Promise<void>
-  onExport(id: string): Promise<void>
-  onCopy(id: string): void
-  onDelete(id: string): Promise<void>
-}) {
-  const [editing, setEditing] = useState(false)
-  const [editTitle, setEditTitle] = useState(session.title ?? '')
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
-
-  useEffect(() => {
-    if (!menuOpen) return
-    const onDocClick = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        setMenuOpen(false)
-      }
-    }
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') setMenuOpen(false)
-    }
-    window.addEventListener('click', onDocClick)
-    window.addEventListener('keydown', onKey)
-    return () => {
-      window.removeEventListener('click', onDocClick)
-      window.removeEventListener('keydown', onKey)
-    }
-  }, [menuOpen])
-
-  const handleSaveRename = async () => {
-    setEditing(false)
-    if (editTitle.trim() !== (session.title ?? '')) {
-      await onRename(session.id, editTitle.trim())
-    }
-  }
-
-  return (
-    <div className={`session-item ${active ? 'active' : ''} ${menuOpen ? 'menu-open' : ''}`}>
-      {editing ? (
-        <form
-          className="session-rename-form"
-          onSubmit={(e) => {
-            e.preventDefault()
-            void handleSaveRename()
-          }}
-        >
-          <input
-            className="session-rename-input"
-            // biome-ignore lint/a11y/noAutofocus: intentional focus for inline rename
-            autoFocus
-            value={editTitle}
-            onChange={(e) => setEditTitle(e.target.value)}
-            onBlur={() => void handleSaveRename()}
-            onKeyDown={(e) => {
-              if (e.key === 'Escape') {
-                setEditing(false)
-                setEditTitle(session.title ?? '')
-              }
-            }}
-          />
-        </form>
-      ) : (
-        <button className="session-row" type="button" onClick={onClick}>
-          <span className="session-content">
-            <span className="session-title">{sessionLabel(session)}</span>
-            <span className="session-preview">{sessionMeta(session)}</span>
-          </span>
-        </button>
-      )}
-
-      {session.running && <span className="session-running" role="img" aria-label="Running" />}
-
-      <div className="session-row-actions" ref={menuRef}>
-        <button
-          className={`session-more-btn ${menuOpen ? 'open' : ''}`}
-          type="button"
-          title="Session actions"
-          aria-label="Session actions"
-          onClick={(e) => {
-            e.stopPropagation()
-            setMenuOpen((prev) => !prev)
-          }}
-        >
-          <Icon name="dots" size={16} />
-        </button>
-
-        {menuOpen && (
-          <div className="session-dropdown" role="menu">
-            <button
-              className="session-dropdown-item"
-              type="button"
-              role="menuitem"
-              onClick={(e) => {
-                e.stopPropagation()
-                setMenuOpen(false)
-                setEditTitle(session.title || session.preview || '')
-                setEditing(true)
-              }}
-            >
-              <Icon name="edit" size={16} />
-              <span>Rename</span>
-            </button>
-            <button
-              className="session-dropdown-item"
-              type="button"
-              role="menuitem"
-              onClick={(e) => {
-                e.stopPropagation()
-                setMenuOpen(false)
-                void onExport(session.id)
-              }}
-            >
-              <Icon name="download" size={16} />
-              <span>Export</span>
-            </button>
-            <button
-              className="session-dropdown-item"
-              type="button"
-              role="menuitem"
-              onClick={(e) => {
-                e.stopPropagation()
-                setMenuOpen(false)
-                onCopy(session.id)
-              }}
-            >
-              <Icon name="copy" size={16} />
-              <span>Copy ID</span>
-            </button>
-            <button
-              className="session-dropdown-item danger"
-              type="button"
-              role="menuitem"
-              onClick={(e) => {
-                e.stopPropagation()
-                setMenuOpen(false)
-                void onDelete(session.id)
-              }}
-            >
-              <Icon name="trash" size={16} />
-              <span>Delete</span>
-            </button>
-          </div>
-        )}
-      </div>
-    </div>
-  )
 }
 
 function formatMs(ms: number): string {
@@ -1373,28 +1224,6 @@ function settled(parts: TranscriptPart[]): TranscriptPart[] {
   return parts.map((part) => part.kind === 'tool' && part.tool.state === 'running'
     ? { ...part, tool: { ...part.tool, state: undefined } }
     : part)
-}
-
-/** What a session is called on screen: its message, never the generated id. */
-function sessionLabel(session: SessionSummary): string {
-  return sharedSessionLabel(session) || session.recap || 'New session'
-}
-
-function sessionMeta(session: SessionSummary): string {
-  const count = `${session.messageCount} ${session.messageCount === 1 ? 'message' : 'messages'}`
-  return session.messageCount > 0 ? `${count} · ${formatWhen(session.updatedAt)}` : formatWhen(session.updatedAt)
-}
-
-function formatWhen(timestamp: number): string {
-  const elapsed = Date.now() - timestamp
-  const minute = 60_000
-  const hour = minute * 60
-  const day = hour * 24
-  if (elapsed < minute) return 'just now'
-  if (elapsed < hour) return `${Math.floor(elapsed / minute)} min ago`
-  if (elapsed < day) return `${Math.floor(elapsed / hour)} h ago`
-  if (elapsed < day * 7) return `${Math.floor(elapsed / day)} d ago`
-  return new Date(timestamp).toLocaleDateString()
 }
 
 /** Sessions bucketed by how recent they are, newest group first — the list itself arrives already sorted newest-first. */

@@ -1,17 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
-import { formatBytes, formatWhen, message } from '../lib/format.js'
+import { formatBytes, message } from '../lib/format.js'
 import { languageOf } from '../../../src/core/highlight.ts'
 import {
   DEFAULT_PROJECT_ICON,
   PROJECT_ICONS,
   isProjectIcon,
 } from '../../../src/core/project-icons.ts'
-import { sessionLabel } from '../../../src/core/sessions/format.ts'
+import { SessionRow, type SessionSummary } from '../sessions/SessionRow.js'
 import { Code } from '../ui/Code.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
-import { Notice, useAutoDismiss } from '../ui/Notice.js'
+import { Notice, useAutoDismiss, type Report } from '../ui/Notice.js'
 import { PageHeader } from '../ui/PageHeader.js'
 import { SkeletonList } from '../ui/Skeleton.js'
 import { WaitLine } from '../ui/WaitLine.js'
@@ -27,15 +27,40 @@ type FolderListing = {
   folders: Array<{ name: string; path: string }>
   truncated: boolean
 }
-/** The part of a session this screen reads: which project it works in, and what it is. */
-type WorkSession = {
-  id: string
-  title?: string
-  preview: string
-  messageCount: number
-  updatedAt: number
-  project?: string
-  running?: boolean
+/** How many of a project's sessions the index draws before sending the rest to its page. */
+const SESSIONS_SHOWN = 3
+/** Which projects the person folded shut, by id: expanded is the default, so only that is kept. */
+const COLLAPSED_KEY = 'milo-work-collapsed'
+
+/**
+ * The newest few, plus any session still running: work in flight is never hidden behind a
+ * count, however long it has been going. The list is sorted here so the cut is the newest
+ * whatever order the caller carried.
+ */
+function inlineSessions(sessions: SessionSummary[]): SessionSummary[] {
+  const newest = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
+  const shown = newest.slice(0, SESSIONS_SHOWN)
+  const running = newest.slice(SESSIONS_SHOWN).filter((session) => session.running)
+  return [...shown, ...running].sort((a, b) => b.updatedAt - a.updatedAt)
+}
+
+/** The projects folded shut on this client. No stored preference reads as all expanded. */
+function readCollapsed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeCollapsed(ids: Set<string>): void {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...ids]))
+  } catch {
+    // A folded project that does not survive a reload is a preference, not data lost.
+  }
 }
 /** One entry of a project's folder, as the daemon nests it. */
 type WorkNode = {
@@ -103,14 +128,30 @@ type ProjectRules = {
  * The screen is drawn like its sibling workspaces: the projects as a panel, and
  * one project's own page a level in.
  */
-export function Work({ tick, sessions, onOpenSession, onStartSession }: {
+export function Work({
+  tick,
+  sessions,
+  sessionId,
+  onOpenSession,
+  onStartSession,
+  onRenameSession,
+  onExportSession,
+  onCopySessionId,
+  onDeleteSession,
+}: {
   /** Bumped when the daemon says to re-read a folder: a turn ended, or a step wrote. */
   tick: number
   /** Every session this client knows about — the same list the drawer draws. */
-  sessions: WorkSession[]
+  sessions: SessionSummary[]
+  /** The session the chat is in, marked where Work draws it. */
+  sessionId?: string
   onOpenSession(id: string): void
   /** Start a work session in a project and open it. False when it could not. */
   onStartSession(projectId: string, firstMessage?: string): Promise<boolean>
+  onRenameSession(id: string, title: string, report: Report): Promise<void>
+  onExportSession(id: string, report: Report): Promise<void>
+  onCopySessionId(id: string, report: Report): void
+  onDeleteSession(id: string, report: Report): Promise<void>
 }) {
   const [projects, setProjects] = useState<Project[] | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
@@ -163,15 +204,25 @@ export function Work({ tick, sessions, onOpenSession, onStartSession }: {
     }
   }, [])
 
+  const actions: SessionActions = {
+    activeId: sessionId,
+    rename: onRenameSession,
+    exportSession: onExportSession,
+    copyId: onCopySessionId,
+    remove: onDeleteSession,
+  }
+
   const selected = projects?.find((project) => project.id === selectedId) ?? null
   if (selected) {
     return <ProjectPage
       key={selected.id}
       project={selected}
-      sessions={sessions.filter((session) => session.project === selected.id)}
+      sessions={sessions.filter((session) => session.project === selected.id).sort((a, b) => b.updatedAt - a.updatedAt)}
       tick={tick}
       notice={notice}
       saving={saving}
+      actions={actions}
+      report={setNotice}
       onDismiss={() => setNotice(null)}
       onBack={() => setSelectedId(null)}
       onOpenSession={onOpenSession}
@@ -185,8 +236,11 @@ export function Work({ tick, sessions, onOpenSession, onStartSession }: {
     notice={notice}
     loadError={loadError}
     saving={saving}
+    actions={actions}
+    report={setNotice}
     onDismiss={() => setNotice(null)}
     onSelect={setSelectedId}
+    onOpenSession={onOpenSession}
     onNew={() => setPicking(true)}
     onRetry={() => { setLoadError(null); void refresh() }}
     picker={picking ? <FolderPicker
@@ -194,6 +248,65 @@ export function Work({ tick, sessions, onOpenSession, onStartSession }: {
       onChoose={(path) => { setPicking(false); void act({ action: 'add', path }) }}
     /> : undefined}
   />
+}
+
+/** The session actions a row offers, wherever Work draws one. The report says where the
+ *  answer lands: the drawer shows its notice in the chat, Work shows it on this screen. */
+type SessionActions = {
+  activeId?: string
+  rename(id: string, title: string, report: Report): Promise<void>
+  exportSession(id: string, report: Report): Promise<void>
+  copyId(id: string, report: Report): void
+  remove(id: string, report: Report): Promise<void>
+}
+
+/**
+ * The body of a project. It stays in the grid, folded to nothing, so the card grows and
+ * shrinks instead of snapping — the same fold the reasoning panel keeps. The clip is
+ * released once the body is open, so a session's menu can lift past it, and a folded body
+ * is `inert`: nothing inside it can be tabbed to or pressed while it is shut.
+ */
+function ProjectSessions({ open, id, children }: { open: boolean; id: string; children: ReactNode }) {
+  const [settled, setSettled] = useState(open)
+
+  useEffect(() => {
+    if (!open) {
+      setSettled(false)
+      return
+    }
+    const timer = window.setTimeout(() => setSettled(true), 260)
+    return () => window.clearTimeout(timer)
+  }, [open])
+
+  return <div
+    className={`work-project-sessions ${open ? 'open' : ''} ${settled ? 'settled' : ''}`}
+    id={id}
+    aria-hidden={!open}
+    inert={!open}
+  >
+    <div className="work-project-clip">{children}</div>
+  </div>
+}
+
+/** One project's sessions, drawn as the drawer draws them — the same row, the same actions. */
+function SessionList({ sessions, actions, report, onOpen }: {
+  sessions: SessionSummary[]
+  actions: SessionActions
+  report: Report
+  onOpen(id: string): void
+}) {
+  return <>
+    {sessions.map((session) => <SessionRow
+      key={session.id}
+      session={session}
+      active={session.id === actions.activeId}
+      onClick={() => onOpen(session.id)}
+      onRename={(id, title) => actions.rename(id, title, report)}
+      onExport={(id) => actions.exportSession(id, report)}
+      onCopy={(id) => actions.copyId(id, report)}
+      onDelete={(id) => actions.remove(id, report)}
+    />)}
+  </>
 }
 
 /** The workspace frame, so both levels of this view sit in the same place. */
@@ -219,27 +332,45 @@ function WorkIndex({
   notice,
   loadError,
   saving,
+  actions,
+  report,
   onDismiss,
   onSelect,
+  onOpenSession,
   onNew,
   onRetry,
   picker,
 }: {
   /** Null until the projects have been read once: "none" and "not yet" are not the same. */
   projects: Project[] | null
-  sessions: WorkSession[]
+  sessions: SessionSummary[]
   notice: Notice | null
   /** Set when the projects could not be read; null once they have been. */
   loadError: string | null
   saving: boolean
+  actions: SessionActions
+  /** Where a row's own action says what it did: this screen's notice, not the chat's. */
+  report: Report
   onDismiss(): void
   onSelect(id: string): void
+  onOpenSession(id: string): void
   /** Adding a project, which is choosing a folder on the machine Milo runs on. */
   onNew(): void
   onRetry(): void
   /** The folder picker, drawn over this screen while it is up. */
   picker?: ReactNode
 }) {
+  /** Folded shut here, on this client. Expanded is the default, so only that is kept. */
+  const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed)
+
+  function toggle(id: string): void {
+    const next = new Set(collapsed)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setCollapsed(next)
+    writeCollapsed(next)
+  }
+
   return <>
     <Shell
     notice={notice}
@@ -262,7 +393,43 @@ function WorkIndex({
           <NewProject saving={saving} label="New project" onNew={onNew} />
         </div>
         : <div className="work-list">
-          {projects.map((project) => <ProjectRow key={project.id} project={project} sessions={sessions.filter((session) => session.project === project.id)} onClick={() => onSelect(project.id)} />)}
+          {projects.map((project) => {
+            const mine = sessions.filter((session) => session.project === project.id)
+            const shown = inlineSessions(mine)
+            // A project with nothing in it has nothing to fold: its count says zero and the
+            // card stays shut, rather than opening onto a line that says the same thing.
+            const open = mine.length > 0 && !collapsed.has(project.id)
+            return <div className="work-project" key={project.id}>
+              {/* One card, not two: the header opens the project's page, and the chevron at its
+                  own edge folds the sessions in and out. The body is the same surface, so what
+                  belongs to the project reads as one object rather than a card and loose rows. */}
+              <div className="work-project-head">
+                <ProjectRow
+                  project={project}
+                  sessions={mine.length}
+                  running={mine.some((session) => session.running)}
+                  onClick={() => onSelect(project.id)}
+                />
+                {mine.length > 0 && <button
+                  className="work-twist"
+                  type="button"
+                  aria-expanded={open}
+                  aria-controls={open ? `work-sessions-${project.id}` : undefined}
+                  aria-label={`${open ? 'Collapse' : 'Expand'} ${project.name}`}
+                  onClick={() => toggle(project.id)}
+                ><Icon className="work-twist-mark" name="chevron" size={16} /></button>}
+              </div>
+              {mine.length > 0 && <ProjectSessions open={open} id={`work-sessions-${project.id}`}>
+                <div className="work-project-body">
+                  <SessionList sessions={shown} actions={actions} report={report} onOpen={onOpenSession} />
+                  {mine.length > shown.length && <button className="work-all" type="button" onClick={() => onSelect(project.id)}>
+                    <span>All {mine.length} sessions</span>
+                    <Icon name="chevron" size={15} />
+                  </button>}
+                </div>
+              </ProjectSessions>}
+            </div>
+          })}
         </div>}
     {projects && projects.length > 0 && <div className="work-footer">
       <NewProject saving={saving} label="New project" onNew={onNew} />
@@ -273,8 +440,7 @@ function WorkIndex({
 }
 
 /** One project as the index draws it: its name, its folder, and how much work is there. */
-function ProjectRow({ project, sessions, onClick }: { project: Project; sessions: WorkSession[]; onClick(): void }) {
-  const running = sessions.some((session) => session.running)
+function ProjectRow({ project, sessions, running, onClick }: { project: Project; sessions: number; running: boolean; onClick(): void }) {
   return <button className="work-card" type="button" onClick={onClick}>
     <span className="work-card-mark"><Icon name={projectMark(project.icon)} size={20} /></span>
     <span className="work-card-main">
@@ -285,10 +451,9 @@ function ProjectRow({ project, sessions, onClick }: { project: Project; sessions
     </span>
     <span className="work-card-count">
       {running && <span className="session-running" />}
-      <span className="work-open">{sessions.length}</span>
-      <span>{sessions.length === 1 ? 'session' : 'sessions'}</span>
+      <span className="work-open">{sessions}</span>
+      <span>{sessions === 1 ? 'session' : 'sessions'}</span>
     </span>
-    <Icon className="work-card-chevron" name="chevron" size={16} />
   </button>
 }
 
@@ -387,6 +552,8 @@ function ProjectPage({
   tick,
   notice,
   saving,
+  actions,
+  report,
   onDismiss,
   onBack,
   onOpenSession,
@@ -395,11 +562,14 @@ function ProjectPage({
 }: {
   project: Project
   /** This project's sessions, newest first — the caller's list, filtered. */
-  sessions: WorkSession[]
+  sessions: SessionSummary[]
   /** Bumped when the daemon says to re-read a folder: a turn ended, or a step wrote. */
   tick: number
   notice: Notice | null
   saving: boolean
+  actions: SessionActions
+  /** Where a row's own action says what it did: this screen's notice, not the chat's. */
+  report: Report
   onDismiss(): void
   onBack(): void
   onOpenSession(id: string): void
@@ -588,11 +758,7 @@ function ProjectPage({
     {sessions.length === 0
       ? <p className="list-empty">No sessions yet. Start one above, or ask Milo for something that needs this folder.</p>
       : <div className="work-sessions">
-        {sessions.map((session) => <button className="work-session" key={session.id} type="button" onClick={() => onOpenSession(session.id)}>
-          {session.running && <span className="session-running" />}
-          <span className="work-session-label">{sessionLabel(session) || session.id}</span>
-          <span className="work-session-meta">{session.messageCount} msgs · {formatWhen(session.updatedAt)}</span>
-        </button>)}
+        <SessionList sessions={sessions} actions={actions} report={report} onOpen={onOpenSession} />
       </div>}
 
     {/* A folder that is gone has no rules to read, and the reason is already on the bar. */}

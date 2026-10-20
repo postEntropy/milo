@@ -40,7 +40,8 @@ struct WorkView: View {
         NavigationStack(path: $path) {
             WorkIndex(
                 onSelect: { path.append($0) },
-                onSessions: onSessions
+                onSessions: onSessions,
+                onChat: onChat
             )
             .toolbar(.hidden, for: .navigationBar)
             .navigationDestination(for: String.self) { projectId in
@@ -74,19 +75,60 @@ struct WorkView: View {
 private struct WorkIndex: View {
     let onSelect: (String) -> Void
     let onSessions: () -> Void
+    /// Going back to the chat — where a session opened from a row here lives. The flag says
+    /// whether the cursor belongs in the composer, which is not the case for a resumed one.
+    let onChat: (Bool) -> Void
 
     @Environment(AppModel.self) private var model
     @State private var picking = false
     @State private var renaming: Project?
     @State private var renameDraft = ""
     @State private var removing: Project?
+    /// The session being renamed from one of the rows below: the alert is presented once, by
+    /// this screen, and the row only says which one.
+    @State private var renamingSession: String?
     /// The project whose mark is being chosen from the row's own menu.
     @State private var choosingIcon: Project?
+    /// The projects folded shut, by id. Expanded is the default, so only that is kept.
+    @AppStorage("work-collapsed") private var collapsedRaw = ""
+
+    /// How many of a project's sessions the index draws before the rest are one tap away.
+    private static let sessionsShown = 3
+
+    private var collapsed: Set<String> {
+        Set(collapsedRaw.split(separator: ",").map(String.init))
+    }
+
+    private func toggle(_ id: String) {
+        var ids = collapsed
+        if ids.contains(id) {
+            ids.remove(id)
+        } else {
+            ids.insert(id)
+        }
+        collapsedRaw = ids.sorted().joined(separator: ",")
+    }
 
     /// The sessions that work in a project — the drawer's own list, filtered, so the screen
     /// and the drawer cannot disagree about which session belongs where.
     private func sessions(of id: String) -> [SessionSummary] {
         model.sessions.filter { $0.project == id }
+    }
+
+    /// The newest few, plus any session still running: work in flight is never hidden behind
+    /// a count, however long it has been going.
+    private func shownSessions(of id: String) -> [SessionSummary] {
+        let all = sessions(of: id)
+        let newest = all.prefix(Self.sessionsShown)
+        let running = all.dropFirst(Self.sessionsShown).filter { $0.running == true }
+        return (Array(newest) + running).sorted { $0.updatedAt > $1.updatedAt }
+    }
+
+    /// Opening a session from the index: the chat takes it, the way a project's page does.
+    private func open(_ id: String) {
+        Task {
+            if await model.resume(id) { onChat(false) }
+        }
     }
 
     var body: some View {
@@ -146,20 +188,66 @@ private struct WorkIndex: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
                     } else {
-                        VStack(spacing: MiloTheme.Space.two) {
+                        VStack(spacing: MiloTheme.Space.four) {
                             ForEach(model.projects) { project in
-                                ProjectRow(
-                                    project: project,
-                                    sessions: sessions(of: project.id).count,
-                                    running: sessions(of: project.id).contains { $0.running == true },
-                                    onOpen: { onSelect(project.id) },
-                                    onIcon: { choosingIcon = project },
-                                    onRename: {
-                                        renameDraft = project.name
-                                        renaming = project
-                                    },
-                                    onRemove: { removing = project }
-                                )
+                                let mine = sessions(of: project.id)
+                                let shown = shownSessions(of: project.id)
+                                // A project with nothing in it has nothing to fold: its count
+                                // says zero and the card stays shut.
+                                let expanded = !mine.isEmpty && !collapsed.contains(project.id)
+                                // One card, not two: the header opens the project's page, the
+                                // chevron at its edge folds the sessions, and the body shares
+                                // the header's surface so the two read as one object.
+                                VStack(spacing: 0) {
+                                    ProjectRow(
+                                        project: project,
+                                        sessions: mine.count,
+                                        running: mine.contains { $0.running == true },
+                                        expanded: expanded,
+                                        expandable: !mine.isEmpty,
+                                        onToggle: { toggle(project.id) },
+                                        onOpen: { onSelect(project.id) },
+                                        onIcon: { choosingIcon = project },
+                                        onRename: {
+                                            renameDraft = project.name
+                                            renaming = project
+                                        },
+                                        onRemove: { removing = project }
+                                    )
+                                    // The newest few, drawn as the drawer draws a session. A
+                                    // running one is always among them; the rest are a tap away
+                                    // on the project's own page, where the folder lives.
+                                    Fold(open: expanded) {
+                                        VStack(spacing: 0) {
+                                            ForEach(shown) { session in
+                                                SessionRow(
+                                                    session: session,
+                                                    renaming: $renamingSession,
+                                                    onOpen: { open(session.id) }
+                                                )
+                                            }
+                                            if mine.count > shown.count {
+                                                Button { onSelect(project.id) } label: {
+                                                    HStack(spacing: MiloTheme.Space.two) {
+                                                        Text("All \(mine.count) sessions")
+                                                        Spacer(minLength: MiloTheme.Space.two)
+                                                        Image(systemName: "chevron.right")
+                                                            .font(.system(size: 12, weight: .semibold))
+                                                    }
+                                                    .font(MiloTheme.Text.small.weight(.medium))
+                                                    .foregroundStyle(MiloTheme.muted)
+                                                    .padding(.horizontal, MiloTheme.Space.four)
+                                                    .padding(.vertical, MiloTheme.Space.two)
+                                                    .contentShape(Rectangle())
+                                                }
+                                                .buttonStyle(.plain)
+                                                .accessibilityLabel("All \(mine.count) sessions")
+                                            }
+                                        }
+                                        .padding(.bottom, MiloTheme.Space.two)
+                                    }
+                                }
+                                .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
                             }
                         }
                     }
@@ -200,6 +288,7 @@ private struct WorkIndex: View {
             await model.refreshProjects()
         }
         .task { await model.refreshProjects() }
+        .sessionRename($renamingSession)
         .sheet(isPresented: $picking) {
             FolderPicker { path in
                 Task { await model.createProject(folder: path) }
@@ -270,6 +359,11 @@ private struct ProjectRow: View {
     let project: Project
     let sessions: Int
     let running: Bool
+    let expanded: Bool
+    /// Whether there are sessions to fold: a project with none carries no chevron, since a
+    /// control that opens onto nothing is a promise it cannot keep.
+    let expandable: Bool
+    let onToggle: () -> Void
     let onOpen: () -> Void
     let onIcon: () -> Void
     let onRename: () -> Void
@@ -277,54 +371,73 @@ private struct ProjectRow: View {
 
     /// A tap opens it, a hold lifts its menu — and, as in the drawer, the row is not a `Button`:
     /// a `ButtonStyle` takes the press for its own animation, and the platform's long press
-    /// then never reaches the row, so nothing is ever raised.
+    /// then never reaches the row, so nothing is ever raised. The chevron is a control of its
+    /// own at the card's edge, so folding the sessions never opens the page.
     var body: some View {
-        HStack(spacing: MiloTheme.Space.three) {
-            Image(systemName: ProjectMark.symbol(project.icon))
-                .font(.system(size: 20, weight: .regular))
-                .foregroundStyle(MiloTheme.muted2)
-                .frame(width: 28, alignment: .center)
-            VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
-                Text(project.name)
-                    .font(MiloTheme.Text.body.weight(.semibold))
-                    .foregroundStyle(MiloTheme.foreground)
-                    .lineLimit(1)
-                // Only a folder that is gone is said: where it is is the store's business,
-                // and a path under every name was a second line saying nothing the person
-                // asked for. A gone one is said rather than left as a project that looks
-                // workable — a session started in it would not work there.
-                if let error = project.error {
-                    Text(error)
-                        .font(MiloTheme.Text.meta)
-                        .foregroundStyle(MiloTheme.danger)
+        HStack(spacing: MiloTheme.Space.two) {
+            HStack(spacing: MiloTheme.Space.three) {
+                Image(systemName: ProjectMark.symbol(project.icon))
+                    .font(.system(size: 20, weight: .regular))
+                    .foregroundStyle(MiloTheme.muted2)
+                    .frame(width: 28, alignment: .center)
+                VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                    Text(project.name)
+                        .font(MiloTheme.Text.body.weight(.semibold))
+                        .foregroundStyle(MiloTheme.foreground)
                         .lineLimit(1)
-                        .truncationMode(.middle)
+                    // Only a folder that is gone is said: where it is is the store's business,
+                    // and a path under every name was a second line saying nothing the person
+                    // asked for. A gone one is said rather than left as a project that looks
+                    // workable — a session started in it would not work there.
+                    if let error = project.error {
+                        Text(error)
+                            .font(MiloTheme.Text.meta)
+                            .foregroundStyle(MiloTheme.danger)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                }
+                Spacer(minLength: MiloTheme.Space.two)
+                HStack(spacing: MiloTheme.Space.one) {
+                    if running {
+                        Circle().fill(MiloTheme.accent).frame(width: 6, height: 6)
+                    }
+                    Text("\(sessions)")
+                        .font(MiloTheme.Text.base.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(sessions > 0 ? MiloTheme.accent : MiloTheme.muted)
+                    Text(sessions == 1 ? "session" : "sessions")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
                 }
             }
-            Spacer(minLength: MiloTheme.Space.two)
-            HStack(spacing: MiloTheme.Space.one) {
-                if running {
-                    Circle().fill(MiloTheme.accent).frame(width: 6, height: 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture(perform: onOpen)
+            // A row that opens a project reads as a control, the way the button it used to be
+            // did: a tap is not the only way to answer one.
+            .accessibilityAddTraits(.isButton)
+            .accessibilityLabel("\(project.name), \(sessions) \(sessions == 1 ? "session" : "sessions")")
+
+            // The only chevron the card carries: it folds the sessions at the card's own edge,
+            // so it cannot be mistaken for a second way into the project's page.
+            if expandable {
+                Button(action: onToggle) {
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(MiloTheme.muted)
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                        .animation(.snappy(duration: 0.26), value: expanded)
+                        .frame(width: 40, height: 40)
+                        .contentShape(Rectangle())
                 }
-                Text("\(sessions)")
-                    .font(MiloTheme.Text.base.weight(.semibold).monospacedDigit())
-                    .foregroundStyle(sessions > 0 ? MiloTheme.accent : MiloTheme.muted)
-                Text(sessions == 1 ? "session" : "sessions")
-                    .font(MiloTheme.Text.small)
-                    .foregroundStyle(MiloTheme.muted)
+                .buttonStyle(.plain)
+                .accessibilityLabel(expanded ? "Collapse sessions" : "Expand sessions")
             }
-            Image(systemName: "chevron.right")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(MiloTheme.muted)
         }
-        .padding(MiloTheme.Space.four)
+        .padding(.leading, MiloTheme.Space.four)
+        .padding(.trailing, MiloTheme.Space.two)
+        .padding(.vertical, MiloTheme.Space.two)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
-        .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
-        .onTapGesture(perform: onOpen)
-        // A row that opens a project reads as a control, the way the button it used to be did:
-        // a tap is not the only way to answer one.
-        .accessibilityAddTraits(.isButton)
         .contextMenu {
             menuItem("Icon", ProjectMark.symbol(project.icon), action: onIcon)
             menuItem("Rename", "pencil", action: onRename)
@@ -333,6 +446,89 @@ private struct ProjectRow: View {
             }
             .tint(Color(.systemRed))
         }
+    }
+}
+
+/// A body that folds to nothing rather than appearing and vanishing: the content's own
+/// measured height becomes the frame while open, and the frame animates between that and
+/// zero. The rows leave the hierarchy once the fold is over, so a closed project reads no
+/// session it is not showing. The measurement is taken only once the fold has settled —
+/// a geometry read taken mid-animation is the animated height, not the content's.
+private struct Fold<Content: View>: View {
+    let open: Bool
+    let content: Content
+    @State private var mounted: Bool
+    @State private var settled: Bool
+    @State private var height: CGFloat = 0
+    /// The last height read while the fold was moving: applied once it settles, since a
+    /// frame measured mid-animation is the animated height, not the content's own.
+    @State private var sample: CGFloat = 0
+    @State private var measured = false
+
+    private static var duration: Double { 0.26 }
+
+    init(open: Bool, @ViewBuilder content: () -> Content) {
+        self.open = open
+        self.content = content()
+        _mounted = State(initialValue: open)
+        _settled = State(initialValue: open)
+    }
+
+    var body: some View {
+        Group {
+            if mounted {
+                content
+                    .background(
+                        GeometryReader { proxy in
+                            Color.clear.preference(key: FoldHeight.self, value: proxy.size.height)
+                        }
+                    )
+            }
+        }
+        .frame(height: open ? (measured ? height : nil) : 0, alignment: .top)
+        .clipped()
+        .opacity(open ? 1 : 0)
+        .onPreferenceChange(FoldHeight.self) { next in
+            guard open, next > 0 else { return }
+            if settled {
+                height = next
+                measured = true
+            } else {
+                sample = max(sample, next)
+            }
+        }
+        .onChange(of: settled) { _, now in
+            if now, sample > 0 {
+                height = sample
+                measured = true
+                sample = 0
+            }
+        }
+        .animation(.snappy(duration: Self.duration), value: open)
+        .animation(.snappy(duration: Self.duration), value: height)
+        .onChange(of: open) { _, next in
+            if next {
+                mounted = true
+                Task {
+                    try? await Task.sleep(for: .milliseconds(Int(Self.duration * 1000)))
+                    if open { settled = true }
+                }
+                return
+            }
+            settled = false
+            sample = 0
+            Task {
+                try? await Task.sleep(for: .milliseconds(Int(Self.duration * 1000)))
+                if !open { mounted = false }
+            }
+        }
+    }
+}
+
+private struct FoldHeight: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -668,22 +864,32 @@ private struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: MiloTheme.Space.three) {
-            if session.running == true {
-                Circle().fill(MiloTheme.accent).frame(width: 6, height: 6)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(session.label)
+                    .font(MiloTheme.Text.base)
+                    .foregroundStyle(MiloTheme.foreground)
+                    .lineLimit(1)
+                // How much was said, and when — the drawer's own second line, so a project's
+                // list and the drawer say the same thing about the same session.
+                Text(session.meta)
+                    .font(MiloTheme.Text.meta.monospacedDigit())
+                    .foregroundStyle(MiloTheme.muted)
+                    .lineLimit(1)
             }
-            Text(session.label)
-                .font(MiloTheme.Text.base)
-                .foregroundStyle(MiloTheme.foreground)
-                .lineLimit(1)
             Spacer(minLength: MiloTheme.Space.two)
-            Text(RelativeTime.when(session.updatedAt))
-                .font(MiloTheme.Text.meta.monospacedDigit())
-                .foregroundStyle(MiloTheme.muted)
+            // A session running now, said with the accent the way the accent already points:
+            // one dot at the row's own edge, no words.
+            if session.running == true {
+                Circle()
+                    .fill(MiloTheme.accent)
+                    .frame(width: 7, height: 7)
+                    .accessibilityLabel("Running")
+            }
         }
-        .padding(MiloTheme.Space.four)
+        .padding(.horizontal, MiloTheme.Space.four)
+        .padding(.vertical, MiloTheme.Space.two)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
-        .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
         // A row that opens a session reads as a control, the way the button it used to be
         // did: a tap is not the only way to answer one.

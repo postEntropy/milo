@@ -1545,9 +1545,37 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 /* Work: the folders a session can work in, and the sessions that ran in one. */
-.work-list { display: flex; flex-direction: column; gap: var(--space-3); }
-.work-card { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto 16px; align-items: center; gap: var(--space-7); width: 100%; min-height: 68px; border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-6) var(--space-7); color: inherit; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
-.work-card:hover { background: var(--surface-warm); }
+.work-list { display: flex; flex-direction: column; gap: var(--space-5); }
+/* A project is one card: the header opens its page, the chevron at the edge folds the
+   sessions, and the body shares the header's surface so the two read as one object rather
+   than a filled tile beside a filled row. */
+.work-project { display: flex; flex-direction: column; border-radius: var(--radius-lg); background: var(--surface); transition: background var(--motion-fast); }
+.work-project:has(.work-project-head:hover) { background: var(--surface-warm); }
+.work-project-head { display: flex; align-items: stretch; }
+.work-twist { display: grid; flex: none; width: 48px; place-items: center; border: 0; border-radius: 0 var(--radius-lg) var(--radius-lg) 0; background: transparent; padding: 0; color: var(--muted); transition: color var(--motion-fast); }
+.work-twist:hover { color: var(--fg); }
+.work-twist-mark { transition: transform var(--motion-fast) var(--ease-standard); }
+.work-twist[aria-expanded="true"] .work-twist-mark { transform: rotate(90deg); }
+/* The body folds by animating the grid row it sits in from zero to its own height — the
+   same fold the reasoning panel keeps. The clip is released once open, so a row's menu can
+   lift past the body; the clip itself carries no padding, which would be a floor the row
+   could not shrink past. */
+.work-project-sessions { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--motion-base) var(--ease-standard), opacity var(--motion-base) var(--ease-standard); }
+.work-project-sessions.open { grid-template-rows: 1fr; opacity: 1; }
+.work-project-clip { overflow: hidden; min-height: 0; }
+.work-project-sessions.open.settled .work-project-clip { overflow: visible; }
+.work-project-body { display: flex; flex-direction: column; padding: var(--space-2); }
+/* Inside the card the row's own fill is the card's own: the hover is the warmer tone, and
+   the row's menu still lifts above the card. The rows sit closer than in the drawer, which
+   has a whole sidebar to fill. */
+.work-project-sessions .session-item { margin: 0; }
+.work-project-sessions .session-item .session-row { padding-top: var(--space-3); padding-bottom: var(--space-3); }
+.work-project-sessions .session-item:hover, .work-project-sessions .session-item.menu-open { background: var(--surface-warm); }
+.work-project-sessions .session-item.active { background: var(--surface-raised); }
+/* The rest of a project's sessions: a row in the body, not a second card. */
+.work-all { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--control-md); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-3) var(--space-5); color: var(--muted); font-size: var(--text-sm); font-weight: 500; text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
+.work-all:hover { background: var(--surface-warm); color: var(--fg); }
+.work-card { display: grid; flex: 1 1 auto; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: var(--space-7); min-width: 0; min-height: 56px; border: 0; border-radius: var(--radius-lg) 0 0 var(--radius-lg); background: transparent; padding: var(--space-4) var(--space-4) var(--space-4) var(--space-7); color: inherit; text-align: start; }
 .work-card:active { transform: translateY(1px); }
 .work-card-mark { display: grid; place-items: center; color: var(--muted); }
 .work-card-main { display: flex; min-width: 0; flex-direction: column; gap: var(--space-3); }
@@ -1557,7 +1585,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .work-card-meta.gone { color: var(--warn); }
 .work-card-count { display: flex; align-items: center; gap: var(--space-3); color: var(--muted); font-size: var(--text-2xs); white-space: nowrap; }
 .work-open { color: var(--fg-2); font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
-.work-card-chevron { color: var(--muted); }
 .work-footer { display: flex; margin-top: var(--space-8); }
 .work-new { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); width: min(560px, 100%); }
 .work-input { min-width: 0; flex: 1 1 240px; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-5) var(--space-6); color: var(--fg); font: var(--text-sm) var(--font-mono); transition: box-shadow var(--motion-fast); }
@@ -1579,11 +1606,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .work-rename .field { flex: 1; max-width: 420px; }
 .work-start { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-5); margin-bottom: var(--space-8); }
 .work-start-note { color: var(--muted); font-size: var(--text-xs); }
-.work-sessions { display: flex; flex-direction: column; gap: var(--space-3); }
-.work-session { display: flex; align-items: center; gap: var(--space-4); width: 100%; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-5) var(--space-6); color: inherit; text-align: start; transition: background var(--motion-fast); }
-.work-session:hover { background: var(--surface-warm); }
-.work-session-label { overflow: hidden; min-width: 0; flex: 1; color: var(--fg-2); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
-.work-session-meta { flex: none; color: var(--muted); font: var(--text-2xs) var(--font-mono); white-space: nowrap; }
+.work-sessions { display: flex; flex-direction: column; }
 @media (max-width: 620px) {
   .work-new, .work-footer { width: 100%; }
   .work-input, .work-input-name { flex: 1 1 100%; }
@@ -1592,6 +1615,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .work-rename { align-items: stretch; flex-direction: column; }
   .work-rename .field { max-width: none; }
   .work-card { padding-inline: var(--space-6); }
+  .work-twist { width: 40px; }
 }
 
 /* The changes a project's folder holds, read from its own repository: one row per

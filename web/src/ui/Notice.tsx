@@ -4,6 +4,9 @@ import { Icon } from './Icons.js'
 /** What a surface says about the last thing that happened. */
 export type Notice = { text: string; error: boolean }
 
+/** Where an action's notice goes: the surface that asked, which is the one showing it. */
+export type Report = (notice: Notice) => void
+
 /**
  * A notice is not a thing to keep: it says what just happened and then gets out
  * of the way, so an action does not leave a line standing on the screen after it.

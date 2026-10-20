@@ -11,6 +11,13 @@ the ordinary ones, with the folder they run in changed.
 - A **work session** is an ordinary session whose working directory is the project's folder.
   Tools, the subagent, the prompt and permission decisions all read from there.
 - The tab has two levels: the projects, and one project's own page.
+- The index draws each project as a disclosure. Expanded by default, it holds the project's
+  newest sessions — three of them, with any running session always among them — and **All N
+  sessions** opens the page for the rest. The chevron at the card's edge folds them; the
+  card itself opens the page, and the sessions sit in the card's own body rather than in
+  rows of their own, opening and folding with a short animation. What was folded stays
+  folded on that client, web and phone alike. A project with no sessions has nothing to
+  fold: it stays shut and carries no chevron, and its count says zero.
 
 ## The project's page
 
@@ -49,7 +56,10 @@ the ordinary ones, with the folder they run in changed.
 - One implementation per behaviour: `src/core/work.ts` (tree and file pages),
   `src/core/work-diff.ts` (git changes and the first state) and
   `src/core/agent/instructions.ts` (the folder's rules). The screens draw the shape those
-  return; they do not parse git or the folder themselves.
+  return; they do not parse git or the folder themselves. A session is drawn by one row per
+  client — `web/src/sessions/SessionRow.tsx`, and the phone's `SessionRow` with the actions
+  from `Support/SessionControls.swift` — so the drawer, the index and a project's page cannot
+  disagree about a session's name, its second line or what it answers to.
 - Git is the source of truth for changes. A folder that is not a repository is answered as
   that — never as an empty change list that would read as "nothing changed".
 - Every path read is confined to the project's folder, and every refusal names what was
@@ -80,6 +90,7 @@ the ordinary ones, with the folder they run in changed.
 | Plan / Build | `src/core/agent/system.ts` (`PLAN_SECTION`), `src/core/tools/permission.ts` (`withPlan`, `isPlanTool`) |
 | Daemon actions | `src/gateways/web/settings.ts` (`projects`, `project-*`) |
 | Web tab | `web/src/work/Work.tsx`, `web/src/App.tsx` (`/work`) |
+| A session row | `web/src/sessions/SessionRow.tsx`, `ios/Sources/Milo/Screens/WorkView.swift` |
 | Phone tab | `ios/Sources/Milo/Screens/WorkView.swift` |
 | CLI | `src/bin/projects.ts` |
 | A session's project | `src/core/runtime.ts` (`adopt`), `src/core/sessions/` |
