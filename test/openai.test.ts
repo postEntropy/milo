@@ -28,11 +28,12 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-async function collect(provider: OpenAIProvider): Promise<StreamEvent[]> {
+async function collect(provider: OpenAIProvider, maxTokens?: number): Promise<StreamEvent[]> {
   const events: StreamEvent[] = []
   for await (const event of provider.stream({
     model: 'test-model',
     messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+    ...(maxTokens !== undefined ? { maxTokens } : {}),
   })) {
     events.push(event)
   }
@@ -193,5 +194,59 @@ describe('OpenAIProvider', () => {
       apiKey: 'bad',
     })
     await expect(collect(provider)).rejects.toThrow(/401/)
+  })
+
+  it('asks again with the ceiling the provider names, and keeps it for the turns after', async () => {
+    // The shape seen by hand: a catalog declared another route's ceiling, and the
+    // route that serves the model says what it actually accepts.
+    const refusal = JSON.stringify({
+      error: {
+        message: JSON.stringify({
+          code: 400,
+          reason: 'INVALID_REQUEST_BODY',
+          message: 'max_tokens (current value: 943718) must be between 0 and 393216 ',
+        }),
+      },
+    })
+    const sent: Array<Record<string, unknown>> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string | URL, init?: RequestInit) => {
+        sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+        if (sent.length === 1) return new Response(refusal, { status: 400, statusText: 'Bad Request' })
+        return new Response(
+          streamOf([frame({ choices: [{ delta: { content: 'ok' } }] }), 'data: [DONE]\n\n']),
+          { status: 200, headers: { 'content-type': 'text/event-stream' } },
+        )
+      }),
+    )
+
+    const provider = new OpenAIProvider({ id: 'test', baseURL: 'https://example.test/v1' })
+    const events = await collect(provider, 943_718)
+    const text = events
+      .filter((event): event is { type: 'text'; delta: string } => event.type === 'text')
+      .map((event) => event.delta)
+      .join('')
+
+    expect(text).toBe('ok')
+    expect(sent[0]?.max_tokens).toBe(943_718)
+    expect(sent[1]?.max_tokens).toBe(393_216)
+
+    // The turn after it is not refused first: the client starts at the learned limit.
+    await collect(provider, 943_718)
+    expect(sent[2]?.max_tokens).toBe(393_216)
+    expect(sent).toHaveLength(3)
+  })
+
+  it('says the provider’s own sentence when it cannot ask again', async () => {
+    const refusal = JSON.stringify({ error: { message: JSON.stringify({ message: 'the model is not enabled' }) } })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(refusal, { status: 400, statusText: 'Bad Request' })),
+    )
+
+    await expect(
+      collect(new OpenAIProvider({ id: 'test', baseURL: 'https://example.test/v1' })),
+    ).rejects.toThrow('Provider request failed (400 Bad Request): the model is not enabled')
   })
 })

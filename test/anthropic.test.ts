@@ -226,4 +226,36 @@ describe('AnthropicProvider', () => {
       /before the message was complete/,
     )
   })
+
+  it('asks again with the ceiling the route names, and keeps it for the turns after', async () => {
+    const refusal = JSON.stringify({
+      type: 'error',
+      error: {
+        type: 'invalid_request_error',
+        message:
+          'max_tokens: 4096 > 2048, which is the maximum allowed number of output tokens for claude-test',
+      },
+    })
+    const sent: Array<Record<string, unknown>> = []
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string | URL, init?: RequestInit) => {
+        sent.push(JSON.parse(String(init?.body)) as Record<string, unknown>)
+        if (sent.length === 1) return new Response(refusal, { status: 400, statusText: 'Bad Request' })
+        return new Response(streamOf([frame({ type: 'message_delta', delta: { stop_reason: 'end_turn' } })]), {
+          status: 200,
+          headers: { 'content-type': 'text/event-stream' },
+        })
+      }),
+    )
+
+    const provider = new AnthropicProvider({ id: 'test', baseURL: 'https://a.test/v1' })
+    await collect(provider)
+    expect(sent[0]?.max_tokens).toBe(4096)
+    expect(sent[1]?.max_tokens).toBe(2048)
+
+    await collect(provider)
+    expect(sent[2]?.max_tokens).toBe(2048)
+    expect(sent).toHaveLength(3)
+  })
 })

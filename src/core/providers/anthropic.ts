@@ -1,9 +1,10 @@
 import { parseSSE } from './sse.js'
 import { fetchWithRetry } from './retry.js'
 import { errorMessage } from '../../util/errors.js'
-import { logDebug } from '../../util/log.js'
+import { logDebug, logWarn } from '../../util/log.js'
 import { toolImages } from '../images.js'
 import { readImageBase64 } from '../images.js'
+import { clampOutput, outputTokenCap, readFailure } from './failure.js'
 import {
   parseToolArgs,
   type ChatRequest,
@@ -61,6 +62,8 @@ export class AnthropicProvider implements Provider {
   private readonly baseURL: string
   private readonly apiKey?: string
   private readonly headers: Record<string, string>
+  /** The most this route said it accepts as `max_tokens`, learned from a refusal. */
+  private maxTokensCap?: number
 
   constructor(options: AnthropicProviderOptions) {
     this.id = options.id
@@ -71,56 +74,87 @@ export class AnthropicProvider implements Provider {
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     const thinking = thinkingBlock(req)
-    const body: Record<string, unknown> = {
-      model: req.model,
-      // A thinking budget has to sit strictly below `max_tokens`, so asking to
-      // think raises the ceiling enough to leave room to answer in.
-      max_tokens: thinking
-        ? Math.max(req.maxTokens ?? DEFAULT_MAX_TOKENS, thinking.budget_tokens + 1024)
-        : (req.maxTokens ?? DEFAULT_MAX_TOKENS),
-      stream: true,
-      messages: await toAnthropicMessages(req.messages),
-    }
-    if (req.system) {
-      body.system = [
-        {
-          type: 'text',
-          text: req.system,
-          cache_control: { type: 'ephemeral' },
-        },
-      ]
-    }
-    if (req.tools?.length) {
-      const tools = req.tools.map(toAnthropicTool)
+    const messages = await toAnthropicMessages(req.messages)
+    const tools = req.tools?.length ? req.tools.map(toAnthropicTool) : undefined
+    if (tools?.length) {
       tools[tools.length - 1] = {
         ...tools[tools.length - 1],
         cache_control: { type: 'ephemeral' },
       }
-      body.tools = tools
     }
-    // Thinking is only compatible with the default temperature, so a configured
-    // one is left off rather than sent to be rejected.
-    if (typeof req.temperature === 'number' && !thinking) body.temperature = req.temperature
-    if (thinking) body.thinking = thinking
 
-    const response = await fetchWithRetry(
-      `${this.baseURL}/messages`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'anthropic-version': ANTHROPIC_VERSION,
-          ...(this.apiKey ? { 'x-api-key': this.apiKey } : {}),
-          ...this.headers,
+    /**
+     * The body this wire sends for a wanted ceiling. A thinking budget has to sit
+     * strictly below `max_tokens`, so asking to think raises the ceiling enough to
+     * leave room to answer in; a ceiling the route caps lower than the budget is
+     * answered without thinking rather than sent to be refused for it.
+     */
+    const build = (wanted: number): Record<string, unknown> => {
+      const maxTokens = clampOutput(wanted, this.maxTokensCap) ?? DEFAULT_MAX_TOKENS
+      const thinks = thinking !== null && thinking.budget_tokens + 1024 <= maxTokens
+      return {
+        model: req.model,
+        max_tokens: maxTokens,
+        stream: true,
+        messages,
+        ...(req.system
+          ? {
+              system: [
+                {
+                  type: 'text',
+                  text: req.system,
+                  cache_control: { type: 'ephemeral' },
+                },
+              ],
+            }
+          : {}),
+        ...(tools?.length ? { tools } : {}),
+        // Thinking is only compatible with the default temperature, so a configured
+        // one is left off rather than sent to be rejected.
+        ...(typeof req.temperature === 'number' && !thinks ? { temperature: req.temperature } : {}),
+        ...(thinks ? { thinking } : {}),
+      }
+    }
+
+    const wanted = thinking
+      ? Math.max(req.maxTokens ?? DEFAULT_MAX_TOKENS, thinking.budget_tokens + 1024)
+      : (req.maxTokens ?? DEFAULT_MAX_TOKENS)
+
+    const send = (payload: Record<string, unknown>): Promise<Response> =>
+      fetchWithRetry(
+        `${this.baseURL}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'anthropic-version': ANTHROPIC_VERSION,
+            ...(this.apiKey ? { 'x-api-key': this.apiKey } : {}),
+            ...this.headers,
+          },
+          body: JSON.stringify(payload),
+          signal: req.signal,
         },
-        body: JSON.stringify(body),
-        signal: req.signal,
-      },
-      { signal: req.signal },
-    )
+        { signal: req.signal },
+      )
 
-    if (!response.ok || !response.body) {
-      throw new Error(await httpError(response))
+    let response = await send(build(wanted))
+    if (!response.ok) {
+      const failure = await readFailure(response)
+      // A ceiling a catalog declared may be another route's. When the refusal names
+      // the one this route accepts, the request is asked once more with it — and the
+      // limit is kept, so the turns after this one start where the server said to.
+      const cap = response.status === 400 ? outputTokenCap(failure.detail) : undefined
+      if (cap === undefined) throw new Error(failure.message)
+      this.maxTokensCap = cap
+      logWarn(
+        `provider ${this.id} refused max_tokens and accepts at most ${cap}; asking again with that`,
+      )
+      response = await send(build(wanted))
+      if (!response.ok) throw new Error((await readFailure(response)).message)
+    }
+
+    if (!response.body) {
+      throw new Error(`Provider request failed (${response.status} ${response.statusText})`)
     }
 
     const blocks = new Map<number, Block>()
@@ -355,14 +389,4 @@ function mapStopReason(reason: string): FinishReason {
     default:
       return 'stop'
   }
-}
-
-async function httpError(response: Response): Promise<string> {
-  let detail = ''
-  try {
-    detail = (await response.text()).slice(0, 500)
-  } catch {
-    // ignore
-  }
-  return `Provider request failed (${response.status} ${response.statusText})${detail ? `: ${detail}` : ''}`
 }

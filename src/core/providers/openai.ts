@@ -1,8 +1,9 @@
 import { parseSSE } from './sse.js'
 import { fetchWithRetry } from './retry.js'
 import { errorMessage } from '../../util/errors.js'
-import { logDebug } from '../../util/log.js'
+import { logDebug, logWarn } from '../../util/log.js'
 import { readImageBase64, toolImages } from '../images.js'
+import { clampOutput, outputTokenCap, readFailure } from './failure.js'
 import { readFileSync } from 'node:fs'
 import {
   parseToolArgs,
@@ -46,6 +47,12 @@ export class OpenAIProvider implements Provider {
   private readonly baseURL: string
   private readonly apiKey?: string
   private readonly headers: Record<string, string>
+  /**
+   * The most this route said it accepts as `max_tokens`, learned from a refusal.
+   * A catalog can declare another route's ceiling; the server's own word is the one
+   * that holds for every request after the one that taught it.
+   */
+  private maxTokensCap?: number
 
   constructor(options: OpenAIProviderOptions) {
     this.id = options.id
@@ -55,6 +62,7 @@ export class OpenAIProvider implements Provider {
   }
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+    const maxTokens = clampOutput(req.maxTokens, this.maxTokensCap)
     const body: Record<string, unknown> = {
       model: req.model,
       stream: true,
@@ -66,26 +74,43 @@ export class OpenAIProvider implements Provider {
       body.tool_choice = 'auto'
     }
     if (typeof req.temperature === 'number') body.temperature = req.temperature
-    if (typeof req.maxTokens === 'number') body.max_tokens = req.maxTokens
+    if (typeof maxTokens === 'number') body.max_tokens = maxTokens
     if (req.reasoningEffort) body.reasoning_effort = req.reasoningEffort
 
-    const response = await fetchWithRetry(
-      `${this.baseURL}/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
-          ...this.headers,
+    const send = (payload: Record<string, unknown>): Promise<Response> =>
+      fetchWithRetry(
+        `${this.baseURL}/chat/completions`,
+        {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...(this.apiKey ? { authorization: `Bearer ${this.apiKey}` } : {}),
+            ...this.headers,
+          },
+          body: JSON.stringify(payload),
+          signal: req.signal,
         },
-        body: JSON.stringify(body),
-        signal: req.signal,
-      },
-      { signal: req.signal },
-    )
+        { signal: req.signal },
+      )
 
-    if (!response.ok || !response.body) {
-      throw new Error(await httpError(response))
+    let response = await send(body)
+    if (!response.ok) {
+      const failure = await readFailure(response)
+      // A ceiling a catalog declared may be another route's. When the refusal names
+      // the one this route accepts, the request is asked once more with it — and the
+      // limit is kept, so the turns after this one start where the server said to.
+      const cap = response.status === 400 ? outputTokenCap(failure.detail) : undefined
+      if (cap === undefined) throw new Error(failure.message)
+      this.maxTokensCap = cap
+      logWarn(
+        `provider ${this.id} refused max_tokens=${String(body.max_tokens)} and accepts at most ${cap}; asking again with that`,
+      )
+      response = await send({ ...body, max_tokens: cap })
+      if (!response.ok) throw new Error((await readFailure(response)).message)
+    }
+
+    if (!response.body) {
+      throw new Error(`Provider request failed (${response.status} ${response.statusText})`)
     }
 
     const pending = new Map<number, PendingToolCall>()
@@ -296,14 +321,4 @@ function mapFinishReason(reason: string): FinishReason {
     default:
       return 'stop'
   }
-}
-
-async function httpError(response: Response): Promise<string> {
-  let detail = ''
-  try {
-    detail = (await response.text()).slice(0, 500)
-  } catch {
-    // ignore
-  }
-  return `Provider request failed (${response.status} ${response.statusText})${detail ? `: ${detail}` : ''}`
 }
