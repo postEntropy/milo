@@ -23,13 +23,14 @@ import { describeCompaction, describeRebase, sessionLabel as sharedSessionLabel 
 import { Icon } from './ui/Icons.js'
 import { Notice, useAutoDismiss } from './ui/Notice.js'
 import { miloAvatar } from './ui/milo.js'
+import { projectMark } from './work/marks.js'
 
 type SessionSummary = { id: string; title?: string; preview: string; messageCount: number; updatedAt: number; recap?: string; running?: boolean; project?: string }
 type PendingPermission = { id: string; request: PermissionRequest; expiresAt: number }
 type SessionGroup = { label: string; sessions: SessionSummary[] }
 /** A project as the wire carries it: what it is called, where it is, and why it cannot be
  *  worked in when it cannot. */
-type Project = { id: string; name: string; path: string; error?: string }
+type Project = { id: string; name: string; path: string; icon?: string; error?: string }
 /** A past turn the search box found, with the session it belongs to. */
 type HistoryHit = { session: string; at: string; kind: string; text: string }
 
@@ -1147,11 +1148,11 @@ export default function App() {
             the only place that names it. */}
         <div className="topbar-title">{view === 'chat' && <>
           {/* The project over the name: a session in one is work in a place, and which place
-              is the first thing to know about it — said even before the first word, and with
-              the folder's own mark, because it is a folder on the machine Milo runs on. A
-              project whose folder has gone says so rather than reading as workable. */}
+              is the first thing to know about it — said even before the first word, with the
+              mark the project wears (a folder until another one is chosen). A project whose
+              folder has gone says so rather than reading as workable. */}
           {project && <p className={project.error ? 'gone' : undefined} title={project.error}>
-            <Icon name="folder" size={12} /> {project.name}
+            <Icon name={projectMark(project.icon)} size={12} /> {project.name}
           </p>}
           <h1>{currentSession ? sessionLabel(currentSession) : 'New session'}</h1>
         </>}</div>

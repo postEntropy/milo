@@ -9,6 +9,7 @@ import {
   type Project,
 } from '../core/projects.js'
 import { sessionsDir } from '../core/config/paths.js'
+import { projectIconNames } from '../core/project-icons.js'
 import { FileSessionStore } from '../core/sessions/index.js'
 import { resolveToolPath } from '../core/tools/walk.js'
 import { readProjectInstructions, rulesOf } from '../core/agent/instructions.js'
@@ -22,9 +23,10 @@ export interface ProjectIo {
 const USAGE = [
   'Usage:',
   '  milo projects                              list them',
-  '  milo projects add <folder> [--name Milo]   register a folder a session may work in',
+  '  milo projects add <folder> [--name Milo] [--icon code]   register a folder a session may work in',
   '  milo projects rename <id|folder|name> [--name Milo]   rename one',
   '  milo projects move <id|folder|name> <folder>   point it at another folder',
+  '  milo projects icon <id|folder|name> [icon]    choose the mark it wears',
   '  milo projects remove <id|folder|name>      drop it (the sessions that ran in it stay)',
   '',
   'A project is a folder the work happens in. A session started in one runs there —',
@@ -55,6 +57,8 @@ export async function runProjects(argv: string[], io: Partial<ProjectIo> = {}): 
         return await rename(rest, out, err)
       case 'move':
         return await move(rest, out, err)
+      case 'icon':
+        return await icon(rest, out, err)
       case 'remove':
       case 'rm':
         return await remove(rest, out, err)
@@ -103,14 +107,14 @@ async function list(out: ProjectIo['out']): Promise<number> {
 }
 
 async function add(argv: string[], out: ProjectIo['out'], err: ProjectIo['err']): Promise<number> {
-  const { positionals, name } = parseFlags(argv)
+  const { positionals, name, icon } = parseFlags(argv)
   const folder = positionals[0]
   if (!folder) {
     err('add needs a folder: milo projects add ~/code/milo --name Milo')
     err(USAGE)
     return 1
   }
-  const outcome = await addProject({ path: folder, name })
+  const outcome = await addProject({ path: folder, name, icon })
   if (!outcome.ok) {
     err(outcome.error)
     return 1
@@ -121,7 +125,13 @@ async function add(argv: string[], out: ProjectIo['out'], err: ProjectIo['err'])
 }
 
 async function rename(argv: string[], out: ProjectIo['out'], err: ProjectIo['err']): Promise<number> {
-  const { positionals, name } = parseFlags(argv)
+  const { positionals, name, icon } = parseFlags(argv)
+  // A flag this command does not act on is said, not swallowed: a rename that quietly
+  // ignored an icon would look like it had set one.
+  if (icon !== undefined) {
+    err('rename does not take --icon: use milo projects icon <project> <icon>')
+    return 1
+  }
   const selector = positionals[0]
   if (!selector) {
     err('rename needs a project: milo projects rename milo --name "Milo Work"')
@@ -150,7 +160,11 @@ async function rename(argv: string[], out: ProjectIo['out'], err: ProjectIo['err
 }
 
 async function move(argv: string[], out: ProjectIo['out'], err: ProjectIo['err']): Promise<number> {
-  const { positionals } = parseFlags(argv)
+  const { positionals, name, icon } = parseFlags(argv)
+  if (name !== undefined || icon !== undefined) {
+    err('move takes no flags: milo projects move <project> <folder>')
+    return 1
+  }
   const [selector, folder] = positionals
   if (!selector || !folder) {
     err('move needs a project and a folder: milo projects move milo ~/code/other')
@@ -168,6 +182,32 @@ async function move(argv: string[], out: ProjectIo['out'], err: ProjectIo['err']
     return 1
   }
   out(`${outcome.project.name} (${outcome.project.id}) now works in ${outcome.project.path}.`)
+  return 0
+}
+
+/**
+ * The mark a project wears, from the fixed set the screens draw: an id here, an SF Symbol
+ * on the phone and a drawing in the browser. With no mark named it answers with the ones
+ * that exist, so a terminal does not have to guess or read the screens' source.
+ */
+async function icon(argv: string[], out: ProjectIo['out'], err: ProjectIo['err']): Promise<number> {
+  const [selector, mark] = parseFlags(argv).positionals
+  if (!selector || !mark) {
+    err('icon needs a project and a mark: milo projects icon milo code')
+    err(`Icons: ${projectIconNames()}`)
+    return 1
+  }
+  const found = locate(selector)
+  if (!found.ok) {
+    err(found.error)
+    return 1
+  }
+  const outcome = await updateProject(found.project.id, { icon: mark })
+  if (!outcome.ok) {
+    err(outcome.error)
+    return 1
+  }
+  out(`${outcome.project.name} (${outcome.project.id}) now wears ${mark}.`)
   return 0
 }
 
@@ -192,23 +232,28 @@ async function remove(argv: string[], out: ProjectIo['out'], err: ProjectIo['err
   return 0
 }
 
-/** The one flag: what to call the project. */
-function parseFlags(argv: string[]): { positionals: string[]; name?: string } {
+/** The flags: what to call the project, and the mark it wears. */
+function parseFlags(argv: string[]): { positionals: string[]; name?: string; icon?: string } {
   const positionals: string[] = []
   let name: string | undefined
+  let icon: string | undefined
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]!
     if (token === '--name') {
       const next = argv[++index]
       if (next === undefined) throw new Error('--name needs a value.')
       name = next
+    } else if (token === '--icon') {
+      const next = argv[++index]
+      if (next === undefined) throw new Error('--icon needs a value.')
+      icon = next
     } else if (token.startsWith('-')) {
       throw new Error(`Unknown option ${token}.`)
     } else {
       positionals.push(token)
     }
   }
-  return { positionals, name }
+  return { positionals, name, icon }
 }
 
 /**

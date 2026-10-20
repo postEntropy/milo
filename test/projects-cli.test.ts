@@ -9,6 +9,7 @@ process.env.MILO_HOME = home
 
 const { runProjects } = await import('../src/bin/projects.js')
 const { readProjects } = await import('../src/core/projects.js')
+const { projectIconNames } = await import('../src/core/project-icons.js')
 const { FileSessionStore } = await import('../src/core/sessions/index.js')
 const { sessionsDir } = await import('../src/core/config/paths.js')
 
@@ -113,6 +114,30 @@ describe('milo projects', () => {
     const moved = await run('move', 'Milo Work', folder('other'))
     expect(moved.lines[0]).toContain(path.join(home, 'other'))
     expect(readProjects()[0]!.path).toBe(path.join(home, 'other'))
+  })
+
+  it('chooses the mark a project wears, and lists the ones there are', async () => {
+    const where = folder('milo')
+    await run('add', where, '--name', 'Milo', '--icon', 'code')
+    expect(readProjects()[0]!.icon).toBe('code')
+
+    const listed = await run('icon')
+    expect(listed.code).toBe(1)
+    expect(listed.errors[1]).toBe(`Icons: ${projectIconNames()}`)
+
+    const changed = await run('icon', 'Milo', 'terminal')
+    expect(changed.code).toBe(0)
+    expect(changed.lines[0]).toContain('now wears terminal')
+    expect(readProjects()[0]!.icon).toBe('terminal')
+  })
+
+  it('refuses a mark outside the catalog, naming the ones there are', async () => {
+    await run('add', folder('milo'), '--name', 'Milo')
+    const { errors, code } = await run('icon', 'Milo', 'unicorn')
+    expect(code).toBe(1)
+    expect(errors[0]).toContain('no icon called "unicorn"')
+    expect(errors[0]).toContain('use one of: folder, code')
+    expect(readProjects()[0]!.icon).toBeUndefined()
   })
 
   it('refuses a rename with nothing to rename it to', async () => {

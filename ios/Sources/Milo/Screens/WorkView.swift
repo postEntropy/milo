@@ -80,6 +80,8 @@ private struct WorkIndex: View {
     @State private var renaming: Project?
     @State private var renameDraft = ""
     @State private var removing: Project?
+    /// The project whose mark is being chosen from the row's own menu.
+    @State private var choosingIcon: Project?
 
     /// The sessions that work in a project — the drawer's own list, filtered, so the screen
     /// and the drawer cannot disagree about which session belongs where.
@@ -151,6 +153,7 @@ private struct WorkIndex: View {
                                     sessions: sessions(of: project.id).count,
                                     running: sessions(of: project.id).contains { $0.running == true },
                                     onOpen: { onSelect(project.id) },
+                                    onIcon: { choosingIcon = project },
                                     onRename: {
                                         renameDraft = project.name
                                         renaming = project
@@ -200,6 +203,14 @@ private struct WorkIndex: View {
         .sheet(isPresented: $picking) {
             FolderPicker { path in
                 Task { await model.createProject(folder: path) }
+            }
+        }
+        .sheet(item: $choosingIcon) { project in
+            DetailSheet {
+                ProjectIconSheet(selected: project.icon) { icon in
+                    choosingIcon = nil
+                    Task { await model.setProjectIcon(id: project.id, icon: icon) }
+                }
             }
         }
         .alert(
@@ -260,6 +271,7 @@ private struct ProjectRow: View {
     let sessions: Int
     let running: Bool
     let onOpen: () -> Void
+    let onIcon: () -> Void
     let onRename: () -> Void
     let onRemove: () -> Void
 
@@ -268,6 +280,10 @@ private struct ProjectRow: View {
     /// then never reaches the row, so nothing is ever raised.
     var body: some View {
         HStack(spacing: MiloTheme.Space.three) {
+            Image(systemName: ProjectMark.symbol(project.icon))
+                .font(.system(size: 20, weight: .regular))
+                .foregroundStyle(MiloTheme.muted2)
+                .frame(width: 28, alignment: .center)
             VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
                 Text(project.name)
                     .font(MiloTheme.Text.body.weight(.semibold))
@@ -310,6 +326,7 @@ private struct ProjectRow: View {
         // a tap is not the only way to answer one.
         .accessibilityAddTraits(.isButton)
         .contextMenu {
+            menuItem("Icon", ProjectMark.symbol(project.icon), action: onIcon)
             menuItem("Rename", "pencil", action: onRename)
             Button(role: .destructive, action: onRemove) {
                 Label("Remove", systemImage: "trash")
@@ -349,6 +366,8 @@ private struct ProjectDetail: View {
     /// Whether the folder's own rules are open in the drawer: asked for from the project's
     /// menu, rather than standing on the page as a section of its own.
     @State private var showingRules = false
+    /// Whether the marks are open in the drawer, chosen from the same menu.
+    @State private var choosingIcon = false
     /// Whether the session started from this page's first words should be planning.
     /// The session does not exist yet, so the choice is held here until it does.
     @State private var planStart = false
@@ -430,11 +449,11 @@ private struct ProjectDetail: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
-                // The project, named where a title goes: with the folder's mark and at the
+                // The project, named where a title goes: with the mark it wears and at the
                 // platform's own title weight, and said before anything has been written into it
                 // — which folder the work happens in is a fact of the project, not of its words.
                 HStack(spacing: MiloTheme.Space.two) {
-                    Image(systemName: "folder")
+                    Image(systemName: ProjectMark.symbol(project?.icon))
                         .font(.system(size: 13, weight: .semibold))
                     Text(project?.name ?? projectId)
                         .font(.headline)
@@ -445,6 +464,7 @@ private struct ProjectDetail: View {
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
+                    menuItem("Icon", ProjectMark.symbol(project?.icon)) { choosingIcon = true }
                     menuItem("Rename", "pencil") {
                         renameDraft = project?.name ?? ""
                         renaming = true
@@ -536,6 +556,16 @@ private struct ProjectDetail: View {
                     // the chat, and it would otherwise open under the sheet.
                     showingRules = false
                     begin(with: prompt, drafts: [], intent: .queue)
+                }
+            }
+        }
+        .sheet(isPresented: $choosingIcon) {
+            DetailSheet {
+                ProjectIconSheet(selected: project?.icon) { icon in
+                    // The drawer goes before the write: what it answered is drawn on the page
+                    // behind it, and a refusal's pill must not be hidden under the sheet.
+                    choosingIcon = false
+                    Task { await model.setProjectIcon(id: projectId, icon: icon) }
                 }
             }
         }
@@ -659,6 +689,73 @@ private struct SessionRow: View {
         // did: a tap is not the only way to answer one.
         .accessibilityAddTraits(.isButton)
         .sessionMenu(session, renaming: $renaming)
+    }
+}
+
+// MARK: - The mark a project wears
+
+/**
+ The marks a project can wear, as a grid in a drawer. The catalog is the daemon's — the same
+ ids the browser offers — and only the drawing is this platform's: an SF Symbol per choice.
+ A mark is a glance, chosen once in a while, so it is not a section of the project's page.
+ */
+private struct ProjectIconSheet: View {
+    /// What the write answers.
+    let onPick: (String) -> Void
+
+    @State private var chosen: String
+
+    init(selected: String?, onPick: @escaping (String) -> Void) {
+        // An id this build does not know draws as the neutral mark, and the grid says so.
+        let known = selected.flatMap { id in
+            ProjectMark.choices.contains { $0.id == id } ? id : nil
+        }
+        _chosen = State(initialValue: known ?? ProjectMark.neutral)
+        self.onPick = onPick
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            Text("Project icon")
+                .font(MiloTheme.Text.title)
+                .foregroundStyle(MiloTheme.foreground)
+            Text("The mark this project wears in the Work list, in the welcome and over its sessions.")
+                .font(MiloTheme.Text.small)
+                .foregroundStyle(MiloTheme.muted)
+
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 76), spacing: MiloTheme.Space.three)],
+                spacing: MiloTheme.Space.three
+            ) {
+                ForEach(ProjectMark.choices) { choice in
+                    Button {
+                        chosen = choice.id
+                        onPick(choice.id)
+                    } label: {
+                        VStack(spacing: MiloTheme.Space.two) {
+                            Image(systemName: choice.symbol)
+                                .font(.system(size: 22, weight: .regular))
+                                .frame(height: 26)
+                            Text(choice.label)
+                                .font(MiloTheme.Text.meta)
+                                .lineLimit(1)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, MiloTheme.Space.three)
+                        .foregroundStyle(choice.id == chosen ? MiloTheme.accent : MiloTheme.foreground2)
+                        .background(
+                            choice.id == chosen ? MiloTheme.surfaceRaised : MiloTheme.surface,
+                            in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
+                        )
+                        .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                    }
+                    .buttonStyle(PressableStyle())
+                    .accessibilityLabel(choice.label)
+                    .accessibilityAddTraits(choice.id == chosen ? .isSelected : [])
+                }
+            }
+            .sensoryFeedback(.selection, trigger: chosen)
+        }
     }
 }
 

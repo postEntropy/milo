@@ -1057,7 +1057,7 @@ struct ChatView: View {
                 // words. A project whose folder has gone says so rather than reading as workable.
                 if let project = model.sessionProject {
                     HStack(spacing: MiloTheme.Space.two) {
-                        Image(systemName: "folder")
+                        Image(systemName: ProjectMark.symbol(project.icon))
                             .font(.system(size: 13, weight: .semibold))
                         Text(project.name)
                             .font(.headline)
@@ -1418,7 +1418,7 @@ struct WelcomeView: View {
             onOpenProject(project.id)
         } label: {
             HStack(spacing: MiloTheme.Space.three) {
-                Image(systemName: "folder")
+                Image(systemName: ProjectMark.symbol(project.icon))
                     .font(.system(size: 20, weight: .regular))
                     .foregroundStyle(MiloTheme.muted2)
                     .frame(width: 28, alignment: .center)

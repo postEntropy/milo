@@ -19,6 +19,7 @@ const {
   updateProject,
 } = await import('../src/core/projects.js')
 const { projectsFile } = await import('../src/core/config/paths.js')
+const { projectIconNames } = await import('../src/core/project-icons.js')
 
 /** A folder that is there, for a project to point at. */
 const folder = (name: string): string => {
@@ -54,6 +55,20 @@ describe('addProject', () => {
   it('keeps the name it was given', async () => {
     const outcome = await addProject({ path: folder('milo'), name: '  Milo  ' })
     expect(outcome.ok && outcome.project.name).toBe('Milo')
+  })
+
+  it('keeps the mark it was given', async () => {
+    const outcome = await addProject({ path: folder('milo'), icon: 'code' })
+    expect(outcome.ok && outcome.project.icon).toBe('code')
+    expect(readProjects()[0]?.icon).toBe('code')
+  })
+
+  it('refuses a mark outside the catalog, naming the ones there are', async () => {
+    expect(await addProject({ path: folder('milo'), icon: 'unicorn' })).toEqual({
+      ok: false,
+      error: `no icon called "unicorn" — use one of: ${projectIconNames()}`,
+    })
+    expect(readProjects()).toEqual([])
   })
 
   it('reads a folder that is not there as a refusal, and says which one', async () => {
@@ -125,6 +140,33 @@ describe('updateProject', () => {
     if (!first.ok || !second.ok) throw new Error('the projects were not added')
     const outcome = await updateProject(second.project.id, { path: first.project.path })
     expect(outcome).toEqual({ ok: false, error: `${first.project.path} is already the project One` })
+  })
+
+  it('changes the mark, and leaves the rest alone', async () => {
+    const added = await addProject({ path: folder('milo') })
+    if (!added.ok) throw new Error('the project was not added')
+    const outcome = await updateProject(added.project.id, { icon: 'terminal' })
+    expect(outcome.ok && outcome.project.icon).toBe('terminal')
+    expect(outcome.ok && outcome.project.name).toBe('milo')
+  })
+
+  it('refuses a mark outside the catalog, naming the ones there are', async () => {
+    const added = await addProject({ path: folder('milo') })
+    if (!added.ok) throw new Error('the project was not added')
+    expect(await updateProject(added.project.id, { icon: 'unicorn' })).toEqual({
+      ok: false,
+      error: `no icon called "unicorn" — use one of: ${projectIconNames()}`,
+    })
+    expect(readProjects()[0]?.icon).toBeUndefined()
+  })
+
+  it('keeps a mark this build does not know, so a rename does not erase it', async () => {
+    const where = folder('milo')
+    writeList([{ id: 'kept-1', name: 'Kept', path: where, createdAt: 1, icon: 'hologram' }])
+    expect(readProjects()[0]?.icon).toBe('hologram')
+    const outcome = await updateProject('kept-1', { name: 'Renamed' })
+    expect(outcome.ok).toBe(true)
+    expect(readProjects()[0]?.icon).toBe('hologram')
   })
 
   it('answers when no project has that id', async () => {

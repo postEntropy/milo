@@ -1227,6 +1227,11 @@ final class AppModel {
     }
 
     @discardableResult
+    func setProjectIcon(id: String, icon: String) async -> String? {
+        await actOnProjects(["action": "update", "id": id, "icon": icon])
+    }
+
+    @discardableResult
     func removeProject(id: String) async -> String? {
         await actOnProjects(["action": "remove", "id": id])
     }

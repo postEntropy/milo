@@ -750,7 +750,11 @@ export class WebSettings {
   private async projectAction(body: Record<string, unknown>): Promise<unknown> {
     const action = body.action
     if (action === 'add') {
-      const outcome = await addProject({ path: requireText(body.path, 'folder'), name: optionalText(body.name) })
+      const outcome = await addProject({
+        path: requireText(body.path, 'folder'),
+        name: optionalText(body.name),
+        icon: body.icon === undefined ? undefined : requireText(body.icon, 'icon'),
+      })
       if (!outcome.ok) throw new Error(outcome.error)
       return { result: `Added ${outcome.project.name} at ${outcome.project.path}.`, projects: await this.projects() }
     }
@@ -762,12 +766,14 @@ export class WebSettings {
     if (action === 'update') {
       const name = body.name === undefined ? undefined : (optionalText(body.name) ?? '')
       const path = body.path === undefined ? undefined : requireText(body.path, 'folder')
-      if (name === undefined && path === undefined) {
-        throw new Error('An update needs a name, a folder, or both.')
+      const icon = body.icon === undefined ? undefined : requireText(body.icon, 'icon')
+      if (name === undefined && path === undefined && icon === undefined) {
+        throw new Error('An update needs a name, a folder, or an icon.')
       }
       const outcome = await updateProject(id, {
         ...(name !== undefined ? { name } : {}),
         ...(path !== undefined ? { path } : {}),
+        ...(icon !== undefined ? { icon } : {}),
       })
       if (!outcome.ok) throw new Error(outcome.error)
       return { result: `Updated ${outcome.project.name}.`, projects: await this.projects() }

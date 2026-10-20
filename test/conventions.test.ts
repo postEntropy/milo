@@ -3,6 +3,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { buildSystemPrompt } from '../src/core/agent/system.js'
+import { PROJECT_ICONS } from '../src/core/project-icons.js'
 import { findHardcodedRadius, findHardcodedType, findOutlinedControls, findPortugueseCopy, sourceFiles, type Hit } from './conventions.js'
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
@@ -115,6 +116,18 @@ describe('type sizes come from the shared ladder', () => {
     expect(findHardcodedType('a.css', '.row { font: 600 11px/1.2 var(--font-body); }')).toHaveLength(1)
     expect(findHardcodedType('a.css', '.row { font-size: var(--text-sm); }')).toEqual([])
     expect(findHardcodedType('a.css', '.row { font-size: 1rem; }')).toEqual([])
+  })
+})
+
+describe('a project mark is the same mark on every surface', () => {
+  it('offers the phone every icon the core knows, with the catalog’s own words', () => {
+    // Swift cannot import the catalog, so the phone keeps a table of its own; this is the
+    // seam where the two drift. An id only the phone has is a mark the daemon refuses, and
+    // one only the core has is a mark the phone never offers.
+    const swift = readFileSync(path.join(repoRoot, 'ios/Sources/Milo/Support/ProjectMark.swift'), 'utf8')
+    const onPhone = [...swift.matchAll(/id: "([^"]+)", label: "([^"]+)", symbol: "([^"]+)"/g)]
+      .map((match) => `${match[1]}:${match[2]}`)
+    expect(onPhone).toEqual(PROJECT_ICONS.map((icon) => `${icon.id}:${icon.label}`))
   })
 })
 

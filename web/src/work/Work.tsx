@@ -2,6 +2,11 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { api } from '../lib/api.js'
 import { formatBytes, formatWhen, message } from '../lib/format.js'
 import { languageOf } from '../../../src/core/highlight.ts'
+import {
+  DEFAULT_PROJECT_ICON,
+  PROJECT_ICONS,
+  isProjectIcon,
+} from '../../../src/core/project-icons.ts'
 import { sessionLabel } from '../../../src/core/sessions/format.ts'
 import { Code } from '../ui/Code.js'
 import { Field } from '../ui/Form.js'
@@ -10,9 +15,10 @@ import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { PageHeader } from '../ui/PageHeader.js'
 import { SkeletonList } from '../ui/Skeleton.js'
 import { WaitLine } from '../ui/WaitLine.js'
+import { projectMark } from './marks.js'
 
 /** A folder a session may work in, as the daemon reports it. */
-type Project = { id: string; name: string; path: string; createdAt: number; error?: string }
+type Project = { id: string; name: string; path: string; createdAt: number; icon?: string; error?: string }
 /** A directory of the machine Milo runs on, as the daemon lists it. */
 type FolderListing = {
   path: string
@@ -270,6 +276,7 @@ function WorkIndex({
 function ProjectRow({ project, sessions, onClick }: { project: Project; sessions: WorkSession[]; onClick(): void }) {
   const running = sessions.some((session) => session.running)
   return <button className="work-card" type="button" onClick={onClick}>
+    <span className="work-card-mark"><Icon name={projectMark(project.icon)} size={20} /></span>
     <span className="work-card-main">
       <span className="work-card-name">{project.name}</span>
       {/* A folder that is gone is said here rather than left as a project that looks
@@ -401,6 +408,10 @@ function ProjectPage({
 }) {
   const [renaming, setRenaming] = useState(false)
   const [rename, setRename] = useState(project.name)
+  /** Whether the marks are open: the palette sits under the bar, a press away. */
+  const [choosingIcon, setChoosingIcon] = useState(false)
+  /** The mark this project wears now — an id this build does not know reads as the neutral one. */
+  const chosenIcon = isProjectIcon(project.icon) ? project.icon : DEFAULT_PROJECT_ICON
   const [tree, setTree] = useState<WorkTree | null>(null)
   const [treeError, setTreeError] = useState<string | null>(null)
   /** The file being read, by its project-relative path. */
@@ -519,6 +530,16 @@ function ProjectPage({
     void onAct({ action: 'update', id: project.id, name: next }).then((ok) => { if (ok) setRenaming(false) })
   }
 
+  /**
+   * Choosing a mark: the daemon is the store, so the palette waits for its answer and
+   * closes only when the list came back changed. A press on the mark already worn is a
+   * way out, not a write.
+   */
+  function chooseIcon(mark: string): void {
+    if (mark === chosenIcon) { setChoosingIcon(false); return }
+    void onAct({ action: 'update', id: project.id, icon: mark }).then((ok) => { if (ok) setChoosingIcon(false) })
+  }
+
   function removeProject(): void {
     if (window.confirm(`Remove “${project.name}” from the list? Its sessions stay.`)) {
       void onAct({ action: 'remove', id: project.id })
@@ -530,14 +551,27 @@ function ProjectPage({
     onDismiss={onDismiss}
     head={<PageHeader
       back={<button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Work</span></button>}
-      title={project.name}
+      title={<span className="work-title"><span className="work-title-mark"><Icon name={projectMark(project.icon)} size={18} /></span><span>{project.name}</span></span>}
       description={project.error ?? project.path}
       action={<div className="work-actions">
+        <button className="button" type="button" aria-expanded={choosingIcon} onClick={() => setChoosingIcon((open) => !open)}><Icon name={projectMark(project.icon)} size={14} /> Icon</button>
         <button className="button" type="button" onClick={() => { setRename(project.name); setRenaming(true) }}><Icon name="edit" size={14} /> Rename</button>
         <button className="button danger" type="button" disabled={saving} onClick={removeProject}><Icon name="trash" size={14} /> Remove</button>
       </div>}
     />}
   >
+    {choosingIcon && <fieldset className="work-icons" aria-label="Project icon">
+      {PROJECT_ICONS.map((choice) => <button
+        className="work-icon"
+        key={choice.id}
+        type="button"
+        aria-pressed={choice.id === chosenIcon}
+        aria-label={choice.label}
+        title={choice.label}
+        disabled={saving}
+        onClick={() => chooseIcon(choice.id)}
+      ><Icon name={projectMark(choice.id)} size={18} /></button>)}
+    </fieldset>}
     {renaming && <form className="work-rename" onSubmit={saveRename}>
       <Field label="Project name"><input value={rename} onChange={(event) => setRename(event.target.value)} maxLength={80} /></Field>
       <div className="save-actions">

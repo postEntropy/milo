@@ -5,6 +5,7 @@ import { errorMessage } from '../util/errors.js'
 import { writePrivateFile } from '../util/fs.js'
 import { logWarn } from '../util/log.js'
 import { projectsFile } from './config/paths.js'
+import { isProjectIcon, projectIconNames } from './project-icons.js'
 import { generateNickname } from './sessions/nickname.js'
 import { resolveToolPath } from './tools/walk.js'
 
@@ -32,6 +33,12 @@ export interface Project {
   path: string
   createdAt: number
   /**
+   * The mark the project wears, one of `PROJECT_ICONS` — absent until one is chosen, and
+   * drawn as `folder` until then. Kept as a plain string on a read, so a build that does
+   * not know a newer id neither draws it nor erases it on its next rename.
+   */
+  icon?: string
+  /**
    * The checks this project runs after a turn that wrote, when the verification
    * gate is on. Absent means "discover them from the folder"; present is the
    * person's own list, and the only thing run.
@@ -48,6 +55,8 @@ export interface NewProject {
    * and what is kept is the absolute one.
    */
   path: string
+  /** The mark it starts with, one of `PROJECT_ICONS`; absent leaves it to be chosen. */
+  icon?: string
 }
 
 /**
@@ -291,6 +300,8 @@ async function changeProjects<T>(
  */
 export async function addProject(input: NewProject): Promise<ProjectOutcome> {
   if (!input.path.trim()) return { ok: false, error: 'a project needs a folder' }
+  const iconProblem = projectIconProblem(input.icon)
+  if (iconProblem) return { ok: false, error: iconProblem }
   const folder = resolveToolPath(process.cwd(), input.path)
   const problem = folderProblem(folder)
   if (problem) return { ok: false, error: problem }
@@ -303,21 +314,23 @@ export async function addProject(input: NewProject): Promise<ProjectOutcome> {
     if (taken) return { result: { ok: false, error: `${folder} is already the project ${taken.name}` } }
     const id = generateNickname((candidate) => projects.some((project) => project.id === candidate))
     const project: Project = { id, name, path: folder, createdAt: Date.now() }
+    if (input.icon !== undefined) project.icon = input.icon
     return { result: { ok: true, project }, next: [...projects, project] }
   })
 }
 
 /**
- * Renames a project, moves it to another folder, or both. The id and the creation
- * time are the store's — a patch cannot move them — and what the patch leaves out
- * is kept as it was. A name set to nothing falls back to the folder's own name,
- * the same rule `addProject` keeps, so clearing one is a rename and not a lost
- * name.
+ * Renames a project, moves it to another folder, changes its mark, or any of them. The id
+ * and the creation time are the store's — a patch cannot move them — and what the patch
+ * leaves out is kept as it was. A name set to nothing falls back to the folder's own name,
+ * the same rule `addProject` keeps, so clearing one is a rename and not a lost name.
  */
 export async function updateProject(
   id: string,
-  patch: { name?: string; path?: string },
+  patch: { name?: string; path?: string; icon?: string },
 ): Promise<ProjectOutcome> {
+  const iconProblem = projectIconProblem(patch.icon)
+  if (iconProblem) return { ok: false, error: iconProblem }
   let folder: string | undefined
   if (patch.path !== undefined) {
     if (!patch.path.trim()) return { ok: false, error: 'a project needs a folder' }
@@ -336,6 +349,7 @@ export async function updateProject(
     if (patch.name !== undefined) {
       target.name = patch.name.trim() || basename(target.path)
     }
+    if (patch.icon !== undefined) target.icon = patch.icon
     return { result: { ok: true, project: target }, next: projects }
   })
 }
@@ -352,6 +366,12 @@ export async function removeProject(id: string): Promise<boolean> {
 /** Why this folder cannot be a project's, or nothing when it can. */
 function folderProblem(folder: string): string | undefined {
   return isFolder(folder) ? undefined : `there is no folder at ${folder}`
+}
+
+/** Why this mark cannot be a project's, or nothing when it can — naming the valid ones. */
+function projectIconProblem(icon: string | undefined): string | undefined {
+  if (icon === undefined || isProjectIcon(icon)) return undefined
+  return `no icon called "${icon}" — use one of: ${projectIconNames()}`
 }
 
 function isFolder(path: string): boolean {

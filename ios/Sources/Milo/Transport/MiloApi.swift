@@ -895,12 +895,16 @@ struct Project: Decodable, Identifiable, Hashable {
     let id: String
     let name: String
     let path: String
+    /// The mark it wears, one of the core's project icons. Absent until one is chosen; the
+    /// screens draw the neutral folder either way, and an id this build does not know is
+    /// kept as it came so a later write does not erase it.
+    let icon: String?
     /// Why the folder cannot be worked in right now, when it cannot. The daemon says it
     /// rather than this screen inferring it from a path that stopped existing.
     let error: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, path, error
+        case id, name, path, icon, error
     }
 
     init(from decoder: Decoder) throws {
@@ -908,6 +912,7 @@ struct Project: Decodable, Identifiable, Hashable {
         id = try container.decode(String.self, forKey: .id)
         name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
         path = try container.decodeIfPresent(String.self, forKey: .path) ?? ""
+        icon = try container.decodeIfPresent(String.self, forKey: .icon)
         error = try container.decodeIfPresent(String.self, forKey: .error)
     }
 }
