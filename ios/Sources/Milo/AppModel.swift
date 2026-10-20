@@ -804,6 +804,20 @@ final class AppModel {
         }
     }
 
+    /// Forgets what was said in this chat, keeping the session itself — `/clear`'s own
+    /// act, offered from the session's menu. The socket is reopened so the thread is drawn
+    /// from the record the daemon just emptied, never from what the app still holds.
+    func clear() async {
+        guard let account else { return }
+        do {
+            try await MiloApi.clearSession(account)
+            await reopen(account)
+            await refreshSessions()
+        } catch {
+            failed(error)
+        }
+    }
+
     /// Writes the session out on the machine hosting Milo. Nothing here changes, so
     /// the one thing it has to say is where the file landed — or that there was no log
     /// to write, which is the daemon answering nothing rather than refusing.

@@ -246,6 +246,12 @@ enum MiloApi {
         _ = try await call("session-delete", ["id": id], account: account, as: Ack.self)
     }
 
+    /// Forgets what was said in this chat's session, keeping the session's identity —
+    /// `/clear`'s own act. The daemon clears the one this chat is bound to.
+    static func clearSession(_ account: Account) async throws {
+        _ = try await call("clear-session", ["chatId": account.chatId], account: account, as: Ack.self)
+    }
+
     /**
      Where a session left off: the last few things said, oldest first. Read without
      opening it — the card a long press lifts is a look at a session, not a visit, so this

@@ -81,6 +81,7 @@ private struct SessionMenu: ViewModifier {
                     onRename: { renaming = session.id },
                     onExport: { Task { await model.export(session.id) } },
                     onCopy: { model.copyId(session.id) },
+                    onClear: session.id == model.sessionId ? { Task { await model.clear() } } : nil,
                     onDelete: { Task { await model.delete(session.id) } }
                 )
             } preview: {
