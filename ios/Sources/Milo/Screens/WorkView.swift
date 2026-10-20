@@ -14,8 +14,8 @@ struct WorkView: View {
     /// back from one is the platform's own, the edge swipe it answers and the control the stack
     /// draws beside the project's name.
     @Binding var pushed: Bool
-    /// The project the shell asked for — set when the drag out of a session in one comes this
-    /// way, so the page opens on the project rather than on the list. Cleared as it opens.
+    /// The project the shell asked for — set when the welcome sends a person to a project's
+    /// home, so the page opens on the project rather than on the list. Cleared as it opens.
     @Binding var opening: String?
     /// Opening the sessions from here. The drawer belongs to the chat, and this screen
     /// reaches it through the same control and the same swipe.
@@ -346,6 +346,9 @@ private struct ProjectDetail: View {
     /// rather than covering what is being written — the chat's own arrangement.
     @State private var composerHeight: CGFloat = 0
     @State private var picker = false
+    /// Whether the folder's own rules are open in the drawer: asked for from the project's
+    /// menu, rather than standing on the page as a section of its own.
+    @State private var showingRules = false
     /// Whether the session started from this page's first words should be planning.
     /// The session does not exist yet, so the choice is held here until it does.
     @State private var planStart = false
@@ -396,9 +399,6 @@ private struct ProjectDetail: View {
 
                     // A folder that is gone has nothing to read, and the bar already says why.
                     if project.error == nil {
-                        ProjectRulesSection(projectId: projectId) { prompt in
-                            begin(with: prompt, drafts: [], intent: .queue)
-                        }
                         ProjectChanges(projectId: projectId)
                         ProjectFiles(projectId: projectId)
                     }
@@ -448,6 +448,11 @@ private struct ProjectDetail: View {
                     menuItem("Rename", "pencil") {
                         renameDraft = project?.name ?? ""
                         renaming = true
+                    }
+                    // The rules belong to the project rather than to its page: a folder that
+                    // is gone has none to read, so the line goes with it.
+                    if project?.error == nil {
+                        menuItem("Rules", "doc.text") { showingRules = true }
                     }
                     Button(role: .destructive) { confirmRemove = true } label: {
                         Label("Remove", systemImage: "trash")
@@ -522,6 +527,18 @@ private struct ProjectDetail: View {
             model.showNote(message)
         }
         .sheet(isPresented: $picker) { ModelPickerSheet() }
+        // The folder's rules, risen from the bottom like any other detail: a page that is
+        // read once in a while does not take a section of the project's own page.
+        .sheet(isPresented: $showingRules) {
+            DetailSheet {
+                ProjectRulesSection(projectId: projectId) { prompt in
+                    // The drawer goes before the session it asks for: the answer is a turn in
+                    // the chat, and it would otherwise open under the sheet.
+                    showingRules = false
+                    begin(with: prompt, drafts: [], intent: .queue)
+                }
+            }
+        }
         .alert("Rename project", isPresented: $renaming) {
             TextField("Project name", text: $renameDraft)
             Button("Save") {
