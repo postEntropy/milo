@@ -675,8 +675,22 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   to { opacity: 1; transform: none; }
 }
 .attachments { display: flex; flex-direction: column; gap: var(--space-4); }
-.attachment-image { display: block; width: fit-content; max-width: 100%; }
+/* The picture is a button, not a link: it opens over the app instead of taking the
+   person to the file's own address, where the conversation is gone. */
+.attachment-image { display: block; width: fit-content; max-width: 100%; border: 0; padding: 0; background: transparent; }
 .attachment-image img { display: block; max-width: min(420px, 100%); max-height: 420px; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--surface); }
+/* The picture, over the app. The scrim carries the app away behind it and is the
+   way out by the back; the X is the way out in front. Nothing else is drawn on the
+   picture, which is the thing being read. */
+.image-viewer { position: fixed; z-index: 100; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr); grid-template-columns: minmax(0, 1fr); place-items: center; padding: var(--space-9); overflow: auto; overscroll-behavior: contain; touch-action: pinch-zoom; animation: fade-in var(--motion-base) var(--ease-standard); }
+.image-viewer-scrim { position: fixed; inset: 0; border: 0; padding: 0; background: color-mix(in oklab, var(--fg) 72%, transparent); backdrop-filter: blur(3px); }
+.image-viewer-img { position: relative; max-width: 100%; max-height: 100%; border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-menu); animation: image-in var(--motion-base) var(--ease-standard); }
+.image-viewer-x { position: fixed; top: calc(max(8px, env(safe-area-inset-top)) + var(--space-4)); right: var(--space-7); display: grid; width: var(--control-md); height: var(--control-md); place-items: center; border: 0; border-radius: var(--radius-sm); background: var(--surface-raised); color: var(--fg-2); box-shadow: var(--shadow-menu); transition: background var(--motion-fast), color var(--motion-fast); }
+.image-viewer-x:hover { background: var(--surface); color: var(--fg); }
+/* Leaving: the picture goes back the way it came, and the app it covers comes
+   back into its place. The overlay is taken off the screen once this is over. */
+.image-viewer.closing { animation: image-viewer-out var(--motion-base) var(--ease-standard) forwards; }
+.image-viewer.closing .image-viewer-img { animation: image-out var(--motion-base) var(--ease-standard) forwards; }
 .attachment-file { display: flex; max-width: 100%; min-height: var(--control-lg); align-items: center; gap: var(--space-5); border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-4) var(--space-6); color: var(--fg-2); font-size: var(--text-xs); text-decoration: none; }
 .attachment-name { overflow: hidden; color: var(--fg); font: 500 var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .attachment-size { margin-inline-start: auto; color: var(--muted); }
@@ -1462,6 +1476,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @keyframes fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+/* A picture arriving and leaving: it settles in with a small growth and goes
+   back the way it came, the same road both ways. */
+@keyframes image-in {
+  from { opacity: 0; transform: scale(.94); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes image-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(.97); }
+}
+@keyframes image-viewer-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 /* The panel opening: a wide-screen column arrives on a nudge; on a phone it is a
    whole layer, so it travels the screen the way the drawer does. */

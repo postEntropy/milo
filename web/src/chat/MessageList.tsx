@@ -1,4 +1,4 @@
-import { memo, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useCopy, type CopyState } from '../lib/clipboard.js'
 import { formatTokens } from '../lib/format.js'
 import { formatWhen, formatSeconds } from '../../../src/core/sessions/format.ts'
@@ -12,6 +12,7 @@ import { attachmentUrl } from '../lib/api.js'
 import { Markdown } from './Markdown.js'
 import { GenUi } from './genui/GenUi.js'
 import { Icon, type IconName } from '../ui/Icons.js'
+import { ImageViewer } from '../ui/ImageViewer.js'
 import { WaitLine } from '../ui/WaitLine.js'
 import { defaultSuggestions, type Suggestion } from './suggestions.js'
 
@@ -34,12 +35,21 @@ export interface ChatMessage extends TranscriptMessage {
 /**
  * The files delivered into this conversation. A picture shows itself, opening
  * full size when clicked; anything else is a row to download.
+ *
+ * The picture opens over the app, not at its own address: a link would take the
+ * person out of the conversation and into the browser's own picture, with no way
+ * back to the thread but the browser's own history.
  */
 function Attachments({ items }: { items: FrameAttachment[] }) {
-  return <div className="attachments">{items.map((item) => item.image
-    ? <a className="attachment-image" key={item.id} href={attachmentUrl(item.id)}><img src={attachmentUrl(item.id)} alt={item.name} loading="lazy" /></a>
-    : <a className="attachment-file" key={item.id} href={attachmentUrl(item.id)} download={item.name}><Icon name="file" size={16} /><span className="attachment-name">{item.name}</span><small className="attachment-size">{formatBytes(item.size)}</small></a>,
-  )}</div>
+  const [open, setOpen] = useState<FrameAttachment | null>(null)
+  const close = useCallback((): void => setOpen(null), [])
+  return <>
+    <div className="attachments">{items.map((item) => item.image
+      ? <button className="attachment-image" key={item.id} type="button" title={`Open ${item.name}`} onClick={() => setOpen(item)}><img src={attachmentUrl(item.id)} alt={item.name} loading="lazy" /></button>
+      : <a className="attachment-file" key={item.id} href={attachmentUrl(item.id)} download={item.name}><Icon name="file" size={16} /><span className="attachment-name">{item.name}</span><small className="attachment-size">{formatBytes(item.size)}</small></a>,
+    )}</div>
+    {open && <ImageViewer src={attachmentUrl(open.id)} name={open.name} onClose={close} />}
+  </>
 }
 
 function formatBytes(bytes: number): string {
