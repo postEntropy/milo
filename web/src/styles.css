@@ -233,11 +233,31 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    down, so the row never shows the same glyph twice. Last, and so the one rule that
    outranks the toggle it hides. */
 .sidebar-search.open ~ .sidebar-search-toggle { display: none; }
-.session-region { display: flex; flex: 1; min-height: 0; }
+/* The switch is fixed above the list it names, so the two halves stay in reach however
+   far the list has scrolled — it is the list's heading, not its first row. */
+.session-region { display: flex; flex: 1; flex-direction: column; min-height: 0; }
 .session-list { flex: 1; min-height: 0; overflow: auto; padding: var(--space-3) var(--space-7) var(--space-6); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
-/* The three page tabs above and the sessions below are two different things: the
-   label says where the second begins, and the day labels under it read as its groups. */
-.sidebar-sessions-label { margin-top: var(--space-6); }
+/* The two halves of the list — Chat and Work — chosen rather than navigated to. Work is
+   not a page beside Routines any more, it is the other half of this list, so the control
+   that picks it belongs to the list and says whose it is. Filled like every control:
+   a track, and the half in front raised inside it. */
+.session-mode { display: flex; gap: var(--space-1); min-width: 0; margin: var(--space-6) var(--space-7) 0; border: 0; border-radius: var(--radius-pill); background: var(--surface); padding: var(--space-1); }
+.session-mode button { flex: 1; min-height: var(--control-sm); border: 0; border-radius: var(--radius-pill); background: transparent; padding: 0 var(--space-5); color: var(--muted); font-size: var(--text-xs); font-weight: 600; transition: background var(--motion-fast), color var(--motion-fast); }
+.session-mode button:hover { color: var(--fg-2); }
+.session-mode button.on { background: var(--surface-raised); color: var(--fg); }
+/* The Work side: a project's own name over the sessions it holds. The heading is a
+   control that opens the project's page — a heading, not a card, because the list is
+   one column and the mark already says which folder the rows work in. */
+.work-group + .work-group { margin-top: var(--space-5); }
+.work-group-head { display: flex; align-items: center; gap: var(--space-5); width: 100%; min-height: var(--control-md); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-3) var(--space-5); color: var(--fg-2); font-size: var(--text-xs); font-weight: 600; text-align: start; transition: background var(--motion-fast); }
+.work-group-head:hover { background: var(--surface); }
+.work-group-head > svg { flex: none; color: var(--muted); }
+.work-group-head.gone { color: var(--muted); }
+.work-group-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.work-group-note { flex: none; color: var(--muted); font-size: var(--text-2xs); font-weight: 500; }
+.work-group-all { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); width: 100%; border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-3) var(--space-5) var(--space-3) var(--space-8); color: var(--muted); font-size: var(--text-2xs); text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
+.work-group-all:hover { background: var(--surface); color: var(--fg-2); }
+.work-group-all > svg { flex: none; }
 .session-group + .session-group { margin-top: var(--space-4); }
 .section-label { padding: var(--space-7) var(--space-4) var(--space-3); color: var(--muted); font-size: var(--text-2xs); font-weight: 500; letter-spacing: .06em; text-transform: uppercase; }
 /* What the past turns said about the search, over the matching sessions: the log
@@ -286,6 +306,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-rename-input { width: 100%; height: 32px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); padding: var(--space-2) var(--space-4); color: var(--fg); font-size: var(--text-sm); font-family: inherit; outline: none; }
 .session-rename-input:focus { border-color: var(--accent); }
 .list-empty { padding: var(--space-7) var(--space-5); color: var(--muted); font-size: var(--text-sm); text-align: center; }
+/* A list that could not be read keeps its own way to try again, under the words: the
+   line and the control are the whole of that state, so nothing is raised over a chat
+   the failure does not touch. */
+.list-empty .button { margin-top: var(--space-5); }
 /* In the sidebar the empty line sits where a row would — left, at the rows' own width —
    rather than floating centred in the space the list is about to fill. */
 .session-list > .list-empty { padding: var(--space-4) var(--space-5); font-size: var(--text-xs); text-align: start; }

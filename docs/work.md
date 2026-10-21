@@ -1,8 +1,8 @@
 # Work
 
-Work is Milo's code workspace: a tab of its own in the web app and on the phone, where a
-project's folder is the subject. It is a **place**, not a second system — the sessions are
-the ordinary ones, with the folder they run in changed.
+Work is Milo's code workspace: one half of the session list in the web app and on the phone,
+where a project's folder is the subject. It is a **place**, not a second system — the sessions
+are the ordinary ones, with the folder they run in changed.
 
 ## The shape
 
@@ -10,14 +10,45 @@ the ordinary ones, with the folder they run in changed.
   an id, a name and a path, nothing else.
 - A **work session** is an ordinary session whose working directory is the project's folder.
   Tools, the subagent, the prompt and permission decisions all read from there.
-- The tab has two levels: the projects, and one project's own page.
+- The session list is split in two by the **Chat | Work** switch at its head. Chat holds the
+  sessions working in Milo's own folder, grouped by day; Work holds the projects, each with
+  its newest sessions under it. A session belongs to the side its project is on. A session
+  whose project was removed from the list is a **chat** — it is a session with no project to
+  be in, and counting it as work would take it out of both lists. Until the projects have
+  been read once, a session naming one is treated as work rather than shown under the wrong
+  roof.
+- Each side has a home. Chat goes back to the last chat, or starts one. Work goes back to the
+  last work session, or to the project index. Pressing the side already in front goes up to
+  that home, which for Work is the projects.
+- The Work side of the list draws a project's newest sessions — three of them, with any
+  running or unread session always among them — and **All N sessions** opens the page for
+  the rest. A project with no sessions is only its own row.
+- The Work screen itself has two levels: the projects, and one project's own page.
 - The index draws each project as a disclosure. Expanded by default, it holds the project's
-  newest sessions — three of them, with any running or unread session always among them — and
-  **All N sessions** opens the page for the rest. The chevron at the card's edge folds them;
-  the card itself opens the page, and the sessions sit in the card's own body rather than in
-  rows of their own, opening and folding with a short animation. What was folded stays
-  folded on that client, web and phone alike. A project with no sessions has nothing to
-  fold: it stays shut and carries no chevron, and its count says zero.
+  newest sessions, three of them plus anything running or unread; the chevron at the card's
+  edge folds them; the card itself opens the page, and the sessions sit in the card's own
+  body rather than in rows of their own, opening and folding with a short animation. What was
+  folded stays folded on that client, web and phone alike. A project with no sessions has
+  nothing to fold: it stays shut and carries no chevron, and its count says zero.
+- On the phone the switch sits in the drawer and opens on the world of the session in front.
+  Choosing a side moves the card behind the drawer to where that world begins, while the list
+  stays in front: swiping the drawer away lands where the switch said it would. Rows open
+  their own place — a chat, a work session, or a project's page.
+- The switch is the platform's own segmented control — the shape iOS gives "two sides of one
+  list" — full width over the rows. The welcome does not offer it: a chat starts there, and
+  the drawer is where the two worlds are chosen.
+- The drawer's search folds behind a glass magnifier in its title row. Asked for, the field
+  takes the switch's row and the cursor; closing it gives the list back whole.
+- Routines and Task lists are pages, not sides of the switch, and neither world owns them:
+  they sit *above* it, so the switch never narrows them and the list below is only ever
+  sessions.
+- A project opened from the drawer is the **whole** of Work:
+  there is no index under it, because the index was never opened. Its way out is the sessions
+  it was come from, and the bar carries that way in its leading place. A project pushed from
+  the index is a level of that screen and keeps the platform's back to the list.
+- **New session** is always a chat: the composer's own control, the topbar's `+`. A session in
+  a project starts from that project's page, and in the drawer's Work list the primary control
+  is **New project**, which raises the folder picker on the index.
 
 ## The project's page
 
@@ -41,7 +72,7 @@ the ordinary ones, with the folder they run in changed.
 ## What Work is not
 
 - No editor. The person edits in their own editor; the agent edits through its tools. The
-  tab reads.
+  Work side reads.
 - No second store. Projects and sessions are the install's, and the same session list feeds
   every surface.
 - No per-project model, instructions or permission configuration beyond `AGENTS.md` — or
@@ -49,7 +80,7 @@ the ordinary ones, with the folder they run in changed.
 - A surface of the web app and the phone. Telegram and Discord are not Work and will not
   be: their session list names a session's project and that is the whole of it. The CLI
   manages projects with `milo projects`, and works in one with `milo --project <ref>` or
-  `milo run --project <ref>` — the same session and the same folder, without the tab.
+  `milo run --project <ref>` — the same session and the same folder, without the list.
 
 ## Behaviour
 
@@ -59,7 +90,11 @@ the ordinary ones, with the folder they run in changed.
   return; they do not parse git or the folder themselves. A session is drawn by one row per
   client — `web/src/sessions/SessionRow.tsx`, and the phone's `SessionRow` with the actions
   from `Support/SessionControls.swift` — so the drawer, the index and a project's page cannot
-  disagree about a session's name, its second line or what it answers to.
+  disagree about a session's name, its second line or what it answers to. Which side a
+  session belongs to, and how many of a project's are drawn, are one rule per client:
+  `web/src/sessions/scopes.ts` and `web/src/work/sessions.ts` in the browser,
+  `ios/Sources/Milo/Support/WorkSessions.swift` on the phone. The switch itself is one
+  control on the phone (`Support/ModeSwitch.swift`), in the drawer.
 - Git is the source of truth for changes. A folder that is not a repository is answered as
   that — never as an empty change list that would read as "nothing changed".
 - Every path read is confined to the project's folder, and every refusal names what was
@@ -90,7 +125,7 @@ the ordinary ones, with the folder they run in changed.
 - Rules per subfolder. `AGENTS.md` (or `CLAUDE.md`) is read at the project's root; a rule
   that follows a monorepo's packages needs the path the turn is touching first.
 - MCP per project — an external tool server stays the install's.
-- An editor in the tab.
+- An editor in the Work side.
 
 ## Code map
 
@@ -102,9 +137,12 @@ the ordinary ones, with the folder they run in changed.
 | Project rules | `src/core/agent/instructions.ts` |
 | Plan / Build | `src/core/agent/system.ts` (`PLAN_SECTION`), `src/core/tools/permission.ts` (`withPlan`, `isPlanTool`) |
 | Daemon actions | `src/gateways/web/settings.ts` (`projects`, `project-*`) |
-| Web tab | `web/src/work/Work.tsx`, `web/src/App.tsx` (`/work`) |
+| The Chat \| Work switch | `web/src/App.tsx`, `ios/Sources/Milo/Support/ModeSwitch.swift` |
+| Which side a session is on | `web/src/sessions/scopes.ts`, `ios/Sources/Milo/Support/WorkSessions.swift` |
+| Work side of the web list | `web/src/sessions/WorkList.tsx`, `web/src/work/sessions.ts` |
+| Work screen | `web/src/work/Work.tsx`, `web/src/App.tsx` (`/work`) |
 | A session row | `web/src/sessions/SessionRow.tsx`, `ios/Sources/Milo/Screens/WorkView.swift` |
-| Phone tab | `ios/Sources/Milo/Screens/WorkView.swift` |
+| Phone screen | `ios/Sources/Milo/Screens/WorkView.swift`, `ios/Sources/Milo/Screens/SessionsDrawer.swift` |
 | CLI | `src/bin/projects.ts` |
 | A session's project | `src/core/runtime.ts` (`adopt`), `src/core/sessions/` |
 | A session's unread mark | `src/core/sessions/seen.ts`, `~/.milo/session-seen.json` |

@@ -2,20 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { sessionLabel as sharedSessionLabel } from '../../../src/core/sessions/format.ts'
 import { formatWhen } from '../lib/format.js'
 import { Icon } from '../ui/Icons.js'
-
-/** A saved session as the wire carries it: what it is called, when it moved, and where it works. */
-export type SessionSummary = {
-  id: string
-  title?: string
-  preview: string
-  messageCount: number
-  updatedAt: number
-  recap?: string
-  running?: boolean
-  /** The session moved after it was last looked at; absent when it did not. */
-  unread?: boolean
-  project?: string
-}
+import type { SessionSummary } from './types.js'
 
 /** What a session is called on screen: its message, never the generated id. */
 export function sessionLabel(session: SessionSummary): string {

@@ -192,6 +192,14 @@ final class AppModel {
     /// Why the projects could not be read, or why an action on one was refused — the
     /// Work screen draws this; a change that went through is drawn by the list itself.
     private(set) var projectsError: String?
+    /// Whether a read of the projects has answered at least once. Before that, a session
+    /// naming a project is treated as work rather than shown under the chats: the id may
+    /// still be one of them, and the wrong roof is worse than a beat of nothing.
+    private(set) var projectsRead = false
+    /// The session each world was last in, so the drawer's switch goes back to it: a work
+    /// session cannot become a chat, so leaving one is going back to the chat last read.
+    private(set) var lastChatSession: String?
+    private(set) var lastWorkSession: String?
     /// A session a tapped reply notice asked to open; the chat reads it, then clears it.
     var pendingSession: String?
     /// Whether the session now opening came from such a tap. Taken back by the chat once it
@@ -208,9 +216,16 @@ final class AppModel {
     /// The lines the welcome screen draws, from what is actually here — the browser's
     /// own builder, over the session list and the ideas.
     var suggestions: [Suggestion] {
-        // The chats, as the drawer lists them: a work session belongs to its project's
-        // page in Work, so the welcome does not offer one to pick up here.
-        buildSuggestions(sessions: sessions.filter { $0.project == nil }, ideas: ideas, currentId: sessionId)
+        // The chats, as the drawer lists them: a work session belongs to Work, so the
+        // welcome does not offer one to pick up here. A session whose project was removed is
+        // a chat like the drawer treats it, and is offered again rather than lost.
+        buildSuggestions(
+            sessions: sessions.filter {
+                !isWorkSession($0, projects: projects, read: projectsRead)
+            },
+            ideas: ideas,
+            currentId: sessionId
+        )
     }
 
     // The panel beside the chat.
@@ -462,6 +477,9 @@ final class AppModel {
         taskListsError = nil
         projects = []
         projectsError = nil
+        projectsRead = false
+        lastChatSession = nil
+        lastWorkSession = nil
         panel = nil
         pending = nil
         note = nil
@@ -1225,6 +1243,7 @@ final class AppModel {
             guard mine == projectsSeq else { return }
             projects = next
             projectsError = nil
+            projectsRead = true
         } catch is URLError {
             guard mine == projectsSeq else { return }
             // The socket's own glass pill already speaks for a connection that is down or
@@ -1275,6 +1294,7 @@ final class AppModel {
         do {
             let outcome = try await MiloApi.projectAction(account, body)
             projects = outcome.projects
+            projectsRead = true
             return outcome.result
         } catch is URLError {
             connectionSaid = true
@@ -1820,6 +1840,13 @@ final class AppModel {
             threadKept = false
             reopening = false
             sessionProject = ready.project
+            // Where each world was left, for the drawer's switch: a chat is a chat, and a
+            // session working in a project belongs to Work.
+            if ready.project == nil {
+                lastChatSession = ready.sessionId
+            } else {
+                lastWorkSession = ready.sessionId
+            }
             planMode = ready.plan ?? false
             // A reload joins the plan where it stands; a new proposal is what earns approval.
             planProposed = false

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, uploadFile, withToken } from './lib/api.js'
 import { copyText } from './lib/clipboard.js'
+import { message } from './lib/format.js'
 import { isPhone, usePhone } from './lib/phone.js'
 import { randomUUID } from './lib/uuid.js'
 import { trackVisualViewport } from './lib/viewport.js'
@@ -20,7 +21,11 @@ import { Panel } from './panel/Panel.js'
 import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, ThinkingDisplay, TranscriptPart } from '@protocol'
 import { drawsToolFailure, toolText } from '../../src/gateways/tool-line.ts'
 import { describeCompaction, describeRebase } from '../../src/core/sessions/format.ts'
-import { SessionRow, sessionLabel, type SessionSummary } from './sessions/SessionRow.js'
+import { SessionRow, sessionLabel } from './sessions/SessionRow.js'
+import type { SessionSummary } from './sessions/types.js'
+import { chatSessions, isWorkSession } from './sessions/scopes.js'
+import { WorkList } from './sessions/WorkList.js'
+import type { ProjectView } from '../../src/core/projects.ts'
 import { Icon } from './ui/Icons.js'
 import { Notice, useAutoDismiss, type Report } from './ui/Notice.js'
 import { miloAvatar } from './ui/milo.js'
@@ -28,9 +33,6 @@ import { projectMark } from './work/marks.js'
 
 type PendingPermission = { id: string; request: PermissionRequest; expiresAt: number }
 type SessionGroup = { label: string; sessions: SessionSummary[] }
-/** A project as the wire carries it: what it is called, where it is, and why it cannot be
- *  worked in when it cannot. */
-type Project = { id: string; name: string; path: string; icon?: string; error?: string }
 /** A past turn the search box found, with the session it belongs to. */
 type HistoryHit = { session: string; at: string; kind: string; text: string }
 
@@ -72,7 +74,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([])
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   /** The project this session works in, as the server resolved it for this connection. */
-  const [project, setProject] = useState<Project | null>(null)
+  const [project, setProject] = useState<ProjectView | null>(null)
   /** Ideas the model drew for the empty home; null until they arrive. */
   const [ideas, setIdeas] = useState<{ title: string; prompt: string }[] | null>(null)
   /** The budget the request is measured against, for the meter; null until read. */
@@ -100,6 +102,17 @@ export default function App() {
    * goes through.
    */
   const [workTick, setWorkTick] = useState(0)
+  /**
+   * The install's projects, read here once: the drawer's Work list groups sessions by
+   * them, and the Work screen draws them. One read, so the two cannot disagree about
+   * which project a session works in.
+   */
+  const [projects, setProjects] = useState<ProjectView[] | null>(null)
+  /** Why the projects could not be read; null once they have been. */
+  const [projectsError, setProjectsError] = useState<string | null>(null)
+  /** Set by the drawer's New project, answered by the Work screen raising its folder picker. */
+  const [pickProject, setPickProject] = useState(false)
+  const clearPickProject = useCallback((): void => setPickProject(false), [])
   /** Bumped when the server says a routine ran, so the history on screen re-reads. */
   const [routinesTick, setRoutinesTick] = useState(0)
   const [thinking, setThinking] = useState<ThinkingDisplay>('expanded')
@@ -114,6 +127,12 @@ export default function App() {
    * project is pressed, and cleared whenever Work is entered any other way.
    */
   const [workProject, setWorkProject] = useState<string | null>(null)
+  /**
+   * Where each side of the drawer's switch was left, by session id: the two lists are the
+   * two worlds, and the switch goes back to the one last read. Kept for this page only —
+   * a reload reconnects to `milo-chat`, and the switch follows that session.
+   */
+  const places = useRef<{ chat: string; work: string }>({ chat: '', work: '' })
   /** The Email screen's place within its own path: null inbox, `new` compose, else a thread. */
   const [emailRoute, setEmailRoute] = useState<string | null>(() => emailRouteFromPath(location.pathname))
   /** Mail that arrived since the person last looked at the inbox, for the Email tab's badge. */
@@ -328,6 +347,32 @@ export default function App() {
     return () => window.removeEventListener('popstate', fromPath)
   }, [])
 
+  /** Bumped per read, so a slower earlier answer cannot overwrite a newer one. */
+  const projectsSeq = useRef(0)
+  const refreshProjects = useCallback(async (): Promise<void> => {
+    const mine = ++projectsSeq.current
+    try {
+      const next = await api<ProjectView[]>('projects')
+      if (mine !== projectsSeq.current) return
+      setProjects(next)
+      setProjectsError(null)
+    } catch (error) {
+      if (mine !== projectsSeq.current) return
+      setProjectsError(message(error))
+    }
+  }, [])
+
+  // The projects change when one is added, renamed or removed anywhere in the install:
+  // the same signal that re-reads Work's folder re-reads the list the drawer groups by.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: workTick is a change signal only
+  useEffect(() => { void refreshProjects() }, [refreshProjects, workTick])
+
+  /** Asking again, which drops the old reason first: the list shows it is reading. */
+  const retryProjects = useCallback((): void => {
+    setProjectsError(null)
+    void refreshProjects()
+  }, [refreshProjects])
+
   const refreshSessions = useCallback(async (): Promise<void> => {
     try {
       const list = await api<SessionSummary[]>('sessions')
@@ -369,6 +414,12 @@ export default function App() {
 
   useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
   useEffect(() => { viewRef.current = view }, [view])
+
+  // A New project that could not reach the Work screen — unsaved settings, a confirm
+  // declined — is dropped instead of raising the picker the next time Work is opened.
+  useEffect(() => {
+    if (pickProject && view !== 'work') setPickProject(false)
+  }, [pickProject, view])
 
   // Coming back to the tab is looking at what is already on it.
   useEffect(() => {
@@ -491,6 +542,9 @@ export default function App() {
       // own history, so a reload comes back to the same view.
       setPanel(frame.panel ?? null)
       setProject(frame.project ?? null)
+      // The drawer's switch is the two worlds, and this is where the session in front is
+      // remembered for the one it belongs to.
+      places.current[frame.project ? 'work' : 'chat'] = frame.sessionId
       setPlan(frame.plan ?? false)
       // A reload joins the plan where it stands; a new proposal is what earns approval.
       setPlanSince(frame.messages.length)
@@ -945,6 +999,49 @@ export default function App() {
     } catch (error) { fail(error) }
   }, [socket, fail, setView])
 
+  const currentSession = sessions.find((session) => session.id === sessionId)
+  /**
+   * Which half of the session list is in front: the Work screen itself, or a session
+   * working in a project. Every other screen keeps the mode of the session behind it. The
+   * list's own record counts as well as the resolved project, so opening a session that is
+   * in a project does not flash the chats while its handshake lands.
+   */
+  const mode: 'chat' | 'work' = view === 'work'
+    || project !== null
+    || (currentSession !== undefined && isWorkSession(currentSession, projects))
+    ? 'work'
+    : 'chat'
+
+  /**
+   * The drawer's Chat | Work switch, which picks the world rather than a page. The
+   * session in front is kept when it already belongs to that world; otherwise the one
+   * that side was left on; otherwise that side's own home — a fresh chat, or the Work
+   * index. Pressing the side already in front goes up to that home: the Work index for
+   * Work, and for Chat the chat itself, which is where it already is.
+   */
+  const switchTo = useCallback((next: 'chat' | 'work'): void => {
+    setSidebarOpen(false)
+    if (next === 'work') {
+      if (mode === 'work') {
+        setWorkProject(null)
+        if (view !== 'work') setView('work')
+        return
+      }
+      const left = sessions.find((session) => session.id === places.current.work)
+      if (left && isWorkSession(left, projects)) { void openSession(left.id); return }
+      setWorkProject(null)
+      setView('work')
+      return
+    }
+    if (mode === 'chat') {
+      if (view !== 'chat') setView('chat')
+      return
+    }
+    const left = sessions.find((session) => session.id === places.current.chat)
+    if (left && !isWorkSession(left, projects)) { void openSession(left.id); return }
+    void newChat()
+  }, [mode, view, sessions, projects, setView, openSession, newChat])
+
   const forkSession = useCallback(async (upToTurn: number): Promise<void> => {
     if (!sessionId) return
     editingTurn.current = null
@@ -1121,16 +1218,13 @@ export default function App() {
     } catch (error) { fail(error) }
   }, [fail])
 
-  const currentSession = sessions.find((session) => session.id === sessionId)
-  const query = search.trim().toLowerCase()
-  const visibleSessions = sessions
-    .filter((session) => session.messageCount > 0)
-    .filter((session) => `${session.title ?? ''} ${session.preview} ${session.id}`.toLowerCase().includes(query))
-    .sort((a, b) => b.updatedAt - a.updatedAt)
-  const sessionGroups = groupSessions(visibleSessions)
+  const chatList = chatSessions(sessions, projects, search)
+  const sessionGroups = groupSessions(chatList)
+  // The welcome offers what is left of the Chat side: a work session belongs to Work, and
+  // opening one from here would carry the person out of the list they are looking at.
   const suggestions = useMemo(
-    () => buildSuggestions({ sessions, ideas, currentId: sessionId }),
-    [sessions, ideas, sessionId],
+    () => buildSuggestions({ sessions: chatSessions(sessions, projects), ideas, currentId: sessionId }),
+    [sessions, projects, ideas, sessionId],
   )
   // The size of what the model last read is the size of the conversation, which is
   // what the meter measures against the window.
@@ -1169,21 +1263,42 @@ export default function App() {
         <div className="sidebar-pad">
           <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={18} /><span>Routines</span></button>
           <button className={`sidebar-tab ${view === 'tasks' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'tasks' ? 'chat' : 'tasks'); setSidebarOpen(false) }}><Icon name="list-check" size={18} /><span>Task lists</span></button>
-          <button className={`sidebar-tab ${view === 'work' ? 'active' : ''}`} type="button" onClick={() => { if (view !== 'work') setWorkProject(null); setView(view === 'work' ? 'chat' : 'work'); setSidebarOpen(false) }}><Icon name="folder" size={18} /><span>Work</span></button>
           <button className={`sidebar-tab ${view === 'email' ? 'active' : ''}`} type="button" onClick={() => { setEmailRoute(null); setView(view === 'email' ? 'chat' : 'email'); setSidebarOpen(false) }}><Icon name="mail" size={18} /><span>Email</span>{mailUnread !== null && mailUnread.count > 0 && <span className="sidebar-badge">{mailUnread.more ? `${mailUnread.count}+` : mailUnread.count}</span>}</button>
         </div>
         <div className="session-region">
-          <nav className="session-list" aria-label="Sessions">
-            <div className="section-label sidebar-sessions-label">Sessions</div>
-            {historyHits && historyHits.length > 0 && <div className="history-hits">
-              <div className="section-label">In past turns</div>
-              {historyHits.map((hit) => <button className="history-hit" key={`${hit.session}-${hit.at}-${hit.text.slice(0, 32)}`} type="button" title={hit.session} onClick={() => void openSession(hit.session)}>
-                <span className="history-hit-text">{hit.text || `${hit.kind} turn`}</span>
-                <span className="history-hit-where">{hit.kind} · {hit.session}</span>
-              </button>)}
-            </div>}
-            {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} onRename={renameSession} onExport={exportSession} onCopy={copySessionId} onDelete={deleteSession} />)}</div>)}
-            {visibleSessions.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
+          {/* The two halves of the list: the sessions that work in Milo's own folder, and
+              the ones that work in a project. The switch says whose list this is, and Work
+              is no longer a fourth page beside Routines — it is the other half of this one. */}
+          <fieldset className="session-mode">
+            <legend className="sr-only">Session lists</legend>
+            <button className={mode === 'chat' ? 'on' : ''} type="button" aria-pressed={mode === 'chat'} onClick={() => switchTo('chat')}>Chat</button>
+            <button className={mode === 'work' ? 'on' : ''} type="button" aria-pressed={mode === 'work'} onClick={() => switchTo('work')}>Work</button>
+          </fieldset>
+          <nav className="session-list" aria-label={mode === 'work' ? 'Work sessions' : 'Chat sessions'}>
+            {mode === 'chat' ? <>
+              {historyHits && historyHits.length > 0 && <div className="history-hits">
+                <div className="section-label">In past turns</div>
+                {historyHits.map((hit) => <button className="history-hit" key={`${hit.session}-${hit.at}-${hit.text.slice(0, 32)}`} type="button" title={hit.session} onClick={() => void openSession(hit.session)}>
+                  <span className="history-hit-text">{hit.text || `${hit.kind} turn`}</span>
+                  <span className="history-hit-where">{hit.kind} · {hit.session}</span>
+                </button>)}
+              </div>}
+              {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} onRename={renameSession} onExport={exportSession} onCopy={copySessionId} onDelete={deleteSession} />)}</div>)}
+              {chatList.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
+            </> : <WorkList
+              projects={projects}
+              loadError={projectsError}
+              sessions={sessions}
+              activeId={sessionId}
+              query={search}
+              onRetry={retryProjects}
+              onOpenProject={(id) => { setWorkProject(id); setView('work'); setSidebarOpen(false) }}
+              onOpenSession={(id) => void openSession(id)}
+              onRename={renameSession}
+              onExport={exportSession}
+              onCopy={copySessionId}
+              onDelete={deleteSession}
+            />}
           </nav>
         </div>
         {/* The sidebar's one action row, at its foot: start a session, find one, and
@@ -1195,7 +1310,9 @@ export default function App() {
             <input ref={searchRef} aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} />
             <button className="sidebar-search-close" type="button" aria-label="Close search" onClick={closeSearch}><Icon name="x" size={15} /></button>
           </div>
-          <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /><span className="new-chat-label">New session</span></button>
+          {mode === 'work'
+            ? <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New project" aria-label="New project" onClick={() => { setWorkProject(null); setView('work'); setPickProject(true); setSidebarOpen(false) }}><Icon name="plus" size={18} /><span className="new-chat-label">New project</span></button>
+            : <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /><span className="new-chat-label">New session</span></button>}
           <button className="sidebar-search-toggle" type="button" title="Search sessions" aria-label="Search sessions" aria-expanded={searchOpen} onClick={() => setSearchOpen((open) => !open)}><Icon name="search" size={18} /></button>
           <button className={`sidebar-settings-toggle ${view === 'settings' ? 'active' : ''}`} type="button" title="Settings" aria-label="Settings" onClick={() => { if (view === 'settings') { leaveSettings(); return } setSettingsSection(null); setView('settings'); setSidebarOpen(false) }}><Icon name="settings" size={18} /></button>
         </div>
@@ -1242,10 +1359,16 @@ export default function App() {
         : view === 'work'
         ? <Work
           tick={workTick}
+          projects={projects}
+          loadError={projectsError}
+          pickProject={pickProject}
           sessions={sessions}
           sessionId={sessionId}
           projectId={workProject}
           onProject={setWorkProject}
+          onProjects={setProjects}
+          onRetry={retryProjects}
+          onPicked={clearPickProject}
           onOpenSession={(id) => void openSession(id)}
           onStartSession={startWorkSession}
           onRenameSession={renameSession}

@@ -2,12 +2,15 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNod
 import { api } from '../lib/api.js'
 import { formatBytes, message } from '../lib/format.js'
 import { languageOf } from '../../../src/core/highlight.ts'
+import type { ProjectView } from '../../../src/core/projects.ts'
 import {
   DEFAULT_PROJECT_ICON,
   PROJECT_ICONS,
   isProjectIcon,
 } from '../../../src/core/project-icons.ts'
-import { SessionMark, SessionRow, type SessionSummary } from '../sessions/SessionRow.js'
+import { SessionMark, SessionRow } from '../sessions/SessionRow.js'
+import type { SessionSummary } from '../sessions/types.js'
+import { inlineSessions } from './sessions.js'
 import { Code } from '../ui/Code.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
@@ -17,8 +20,6 @@ import { SkeletonList } from '../ui/Skeleton.js'
 import { WaitLine } from '../ui/WaitLine.js'
 import { projectMark } from './marks.js'
 
-/** A folder a session may work in, as the daemon reports it. */
-type Project = { id: string; name: string; path: string; createdAt: number; icon?: string; error?: string }
 /** A directory of the machine Milo runs on, as the daemon lists it. */
 type FolderListing = {
   path: string
@@ -27,23 +28,8 @@ type FolderListing = {
   folders: Array<{ name: string; path: string }>
   truncated: boolean
 }
-/** How many of a project's sessions the index draws before sending the rest to its page. */
-const SESSIONS_SHOWN = 3
 /** Which projects the person folded shut, by id: expanded is the default, so only that is kept. */
 const COLLAPSED_KEY = 'milo-work-collapsed'
-
-/**
- * The newest few, plus any session still running or still unread: work in flight
- * and work waiting to be read are never hidden behind a count, however long either
- * has been going. The list is sorted here so the cut is the newest whatever order
- * the caller carried.
- */
-function inlineSessions(sessions: SessionSummary[]): SessionSummary[] {
-  const newest = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
-  const shown = newest.slice(0, SESSIONS_SHOWN)
-  const waiting = newest.slice(SESSIONS_SHOWN).filter((session) => session.running || session.unread)
-  return [...shown, ...waiting].sort((a, b) => b.updatedAt - a.updatedAt)
-}
 
 /** The projects folded shut on this client. No stored preference reads as all expanded. */
 function readCollapsed(): Set<string> {
@@ -131,10 +117,16 @@ type ProjectRules = {
  */
 export function Work({
   tick,
+  projects,
+  loadError,
+  pickProject,
   sessions,
   sessionId,
   projectId,
   onProject,
+  onProjects,
+  onRetry,
+  onPicked,
   onOpenSession,
   onStartSession,
   onRenameSession,
@@ -144,6 +136,12 @@ export function Work({
 }: {
   /** Bumped when the daemon says to re-read a folder: a turn ended, or a step wrote. */
   tick: number
+  /** The projects this client knows of, read once in `App` for this screen and the drawer. */
+  projects: ProjectView[] | null
+  /** Why the projects could not be read; null once they have been. */
+  loadError: string | null
+  /** Set by the drawer's New project: raise the folder picker for the person. */
+  pickProject: boolean
   /** Every session this client knows about — the same list the drawer draws. */
   sessions: SessionSummary[]
   /** The session the chat is in, marked where Work draws it. */
@@ -152,6 +150,10 @@ export function Work({
   projectId: string | null
   /** Opening a project's page, and going back to the index with null. */
   onProject(id: string | null): void
+  /** The list a change here answered with, so the drawer draws it too. */
+  onProjects(next: ProjectView[]): void
+  onRetry(): void
+  onPicked(): void
   onOpenSession(id: string): void
   /** Start a work session in a project and open it. False when it could not. */
   onStartSession(projectId: string, firstMessage?: string): Promise<boolean>
@@ -160,36 +162,21 @@ export function Work({
   onCopySessionId(id: string, report: Report): void
   onDeleteSession(id: string, report: Report): Promise<void>
 }) {
-  const [projects, setProjects] = useState<Project[] | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   useAutoDismiss(notice, setNotice)
   const [saving, setSaving] = useState(false)
-  /** Why the projects could not be read, held apart from the transient notice so a
-      failed read keeps its own sentence and its way to try again. */
-  const [loadError, setLoadError] = useState<string | null>(null)
   /** Whether the folder picker is up — how a project is added. */
   const [picking, setPicking] = useState(false)
 
-  /** Bumped per read, so a slower earlier answer cannot overwrite a newer one. */
-  const loadSeq = useRef(0)
-  const refresh = useCallback(async (): Promise<void> => {
-    const mine = ++loadSeq.current
-    try {
-      const next = await api<Project[]>('projects')
-      if (mine !== loadSeq.current) return
-      setProjects(next)
-      setLoadError(null)
-    } catch (error) {
-      if (mine !== loadSeq.current) return
-      setLoadError(message(error))
-    }
-  }, [])
+  // The drawer's New project is the same act as this screen's own button: it asks for
+  // the picker here, where adding a project lives, and the ask is answered once.
+  useEffect(() => {
+    if (!pickProject) return
+    setNotice(null)
+    setPicking(true)
+    onPicked()
+  }, [pickProject, onPicked])
 
-  useEffect(() => { void refresh() }, [refresh])
-  // A chat turn may have started a session in a project through Milo; redraw the
-  // list it changed rather than what this screen remembered.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: tick is a change signal only
-  useEffect(() => { void refresh() }, [tick, refresh])
   // A project removed here or on another surface stops being the one this screen
   // shows, rather than leaving a page whose project is gone.
   useEffect(() => {
@@ -201,8 +188,8 @@ export function Work({
     setSaving(true)
     setNotice(null)
     try {
-      const result = await api<{ result: string; projects: Project[] }>('project-action', body)
-      setProjects(result.projects)
+      const result = await api<{ result: string; projects: ProjectView[] }>('project-action', body)
+      onProjects(result.projects)
       setNotice({ text: result.result, error: false })
       return true
     } catch (error) {
@@ -211,7 +198,7 @@ export function Work({
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [onProjects])
 
   const actions: SessionActions = {
     activeId: sessionId,
@@ -251,7 +238,7 @@ export function Work({
     onSelect={onProject}
     onOpenSession={onOpenSession}
     onNew={() => setPicking(true)}
-    onRetry={() => { setLoadError(null); void refresh() }}
+    onRetry={onRetry}
     picker={picking ? <FolderPicker
       onClose={() => setPicking(false)}
       onChoose={(path) => { setPicking(false); void act({ action: 'add', path }) }}
@@ -351,7 +338,7 @@ function WorkIndex({
   picker,
 }: {
   /** Null until the projects have been read once: "none" and "not yet" are not the same. */
-  projects: Project[] | null
+  projects: ProjectView[] | null
   sessions: SessionSummary[]
   notice: Notice | null
   /** Set when the projects could not be read; null once they have been. */
@@ -450,7 +437,7 @@ function WorkIndex({
 }
 
 /** One project as the index draws it: its name, its folder, and how much work is there. */
-function ProjectRow({ project, sessions, running, unread, onClick }: { project: Project; sessions: number; running: boolean; unread: boolean; onClick(): void }) {
+function ProjectRow({ project, sessions, running, unread, onClick }: { project: ProjectView; sessions: number; running: boolean; unread: boolean; onClick(): void }) {
   return <button className="work-card" type="button" onClick={onClick}>
     <span className="work-card-mark"><Icon name={projectMark(project.icon)} size={20} /></span>
     <span className="work-card-main">
@@ -573,7 +560,7 @@ function ProjectPage({
   onStartSession,
   onAct,
 }: {
-  project: Project
+  project: ProjectView
   /** This project's sessions, newest first — the caller's list, filtered. */
   sessions: SessionSummary[]
   /** Bumped when the daemon says to re-read a folder: a turn ended, or a step wrote. */

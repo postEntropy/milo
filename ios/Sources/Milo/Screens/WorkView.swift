@@ -9,14 +9,18 @@ import SwiftUI
  task lists: the projects on the front page, and one project's own page a level in.
  */
 struct WorkView: View {
-    /// Whether one project's own page is open on top of the index, told to the shell: the
-    /// drawer's swipe belongs to the index, and over a page it keeps out of the way — the way
-    /// back from one is the platform's own, the edge swipe it answers and the control the stack
-    /// draws beside the project's name.
+    /// Whether one project's own page is open *on top of the index*, told to the shell: the
+    /// drawer's swipe belongs to the index, and over a page pushed from it the swipe keeps out
+    /// of the way — the way back from one is the platform's own, the edge swipe it answers and
+    /// the control the stack draws beside the project's name.
     @Binding var pushed: Bool
-    /// The project the shell asked for — set when the welcome sends a person to a project's
-    /// home, so the page opens on the project rather than on the list. Cleared as it opens.
+    /// The project the shell named — from the drawer's Work list, the welcome's chooser, or a
+    /// bar. It is the whole of Work while it is set: there is no index under it, because the
+    /// index was never opened, and the way out is the sessions it was come from.
     @Binding var opening: String?
+    /// Set when the drawer's New project asked for it: the folder picker is raised as the
+    /// index opens, rather than naming a screen and leaving the act two taps away.
+    @Binding var newProject: Bool
     /// Opening the sessions from here. The drawer belongs to the chat, and this screen
     /// reaches it through the same control and the same swipe.
     let onSessions: () -> Void
@@ -24,55 +28,80 @@ struct WorkView: View {
     /// whether the cursor belongs in the composer, which it does for the one just started.
     let onChat: (Bool) -> Void
     @Environment(AppModel.self) private var model
+    /// The index's own stack: a project card pushes its page over the projects, and the
+    /// platform's back returns to them.
     @State private var path: [String] = []
 
-    /// The project the shell named, opened on top of the index — as if it had been chosen
-    /// there. Only while the index is what is showing: a page already open is the person's
-    /// own place, and a second look would take them off it.
-    private func openAsked() {
-        guard let wanted = opening, path.isEmpty else { return }
-        opening = nil
-        guard model.projects.contains(where: { $0.id == wanted }) else { return }
-        path = [wanted]
-    }
-
     var body: some View {
-        NavigationStack(path: $path) {
-            WorkIndex(
-                onSelect: { path.append($0) },
-                onSessions: onSessions,
-                onChat: onChat
-            )
-            .toolbar(.hidden, for: .navigationBar)
-            .navigationDestination(for: String.self) { projectId in
-                ProjectDetail(
-                    projectId: projectId,
-                    onRemoved: { path.removeAll { $0 == projectId } },
-                    onChat: onChat
-                )
+        Group {
+            if let opening {
+                // Opened from outside the index, so it *is* Work — a stack of its own with
+                // nothing beneath, where the bar carries the way into the sessions instead of
+                // a back that would go to a list nobody opened.
+                NavigationStack {
+                    ProjectDetail(
+                        projectId: opening,
+                        root: true,
+                        onRemoved: { self.opening = nil },
+                        onChat: onChat,
+                        onSessions: onSessions
+                    )
+                    .id(opening)
+                }
+            } else {
+                NavigationStack(path: $path) {
+                    WorkIndex(
+                        newProject: $newProject,
+                        onSelect: { path.append($0) },
+                        onSessions: onSessions,
+                        onChat: onChat
+                    )
+                    .toolbar(.hidden, for: .navigationBar)
+                    .navigationDestination(for: String.self) { projectId in
+                        ProjectDetail(
+                            projectId: projectId,
+                            root: false,
+                            onRemoved: { path.removeAll { $0 == projectId } },
+                            onChat: onChat,
+                            onSessions: onSessions
+                        )
+                    }
+                }
+                // A page pushed over the index keeps the platform's way back — the leading
+                // control and the edge swipe — so the sessions stay out of that drag.
+                .onChange(of: path) { _, next in
+                    if opening == nil { pushed = !next.isEmpty }
+                }
             }
         }
-        // No drag of this screen's own over the stack: the way back from a page is the platform's
-        // own — the edge swipe the stack already answers, and the control it draws beside the
-        // project's name — rather than a second gesture that only mimics them from the middle of
-        // the screen.
-        .onChange(of: path) { _, next in pushed = !next.isEmpty }
+        // A project that is the whole of Work has nothing under it to go back to, so the
+        // card's own swipe is free to open the sessions: that is where it was come from.
+        .onChange(of: opening) { _, next in
+            if next != nil { path = [] }
+            pushed = next == nil && !path.isEmpty
+        }
         // A chat turn may have started a session in a project through Milo; re-read the list
         // it changed rather than what this screen remembered.
         .onChange(of: model.answerEnded) { _, _ in
             Task { await model.refreshProjects() }
         }
-        .onAppear {
-            pushed = !path.isEmpty
-            openAsked()
+        .onAppear { pushed = opening == nil && !path.isEmpty }
+        // Adding a project belongs to the index: a page, and the project it was showing, are
+        // left behind so the picker comes up where the act happens.
+        .onChange(of: newProject) { _, asked in
+            if asked {
+                opening = nil
+                path = []
+            }
         }
-        .onChange(of: opening) { _, _ in openAsked() }
     }
 }
 
 // MARK: - The index
 
 private struct WorkIndex: View {
+    /// The drawer's New project, answered here — where adding a folder lives.
+    @Binding var newProject: Bool
     let onSelect: (String) -> Void
     let onSessions: () -> Void
     /// Going back to the chat — where a session opened from a row here lives. The flag says
@@ -117,12 +146,9 @@ private struct WorkIndex: View {
 
     /// The newest few, plus any session still running or still unread: work in flight
     /// and work waiting to be read are never hidden behind a count, however long either
-    /// has been going.
+    /// has been going. The drawer's Work list cuts the same list the same way.
     private func shownSessions(of id: String) -> [SessionSummary] {
-        let all = sessions(of: id)
-        let newest = all.prefix(Self.sessionsShown)
-        let waiting = all.dropFirst(Self.sessionsShown).filter { $0.running == true || $0.unread == true }
-        return (Array(newest) + waiting).sorted { $0.updatedAt > $1.updatedAt }
+        inlineWorkSessions(sessions(of: id), limit: Self.sessionsShown)
     }
 
     /// Opening a session from the index: the chat takes it, the way a project's page does.
@@ -290,6 +316,10 @@ private struct WorkIndex: View {
             await model.refreshProjects()
         }
         .task { await model.refreshProjects() }
+        // The drawer's New project is the same act as this screen's own control: the picker
+        // is raised here, once per ask.
+        .onAppear { answerNewProject() }
+        .onChange(of: newProject) { _, _ in answerNewProject() }
         .sessionRename($renamingSession)
         .sheet(isPresented: $picking) {
             FolderPicker { path in
@@ -336,6 +366,14 @@ private struct WorkIndex: View {
 
     private var workingCount: Int {
         model.sessions.filter { $0.project != nil }.count
+    }
+
+    /// The drawer's New project, answered where adding a folder lives: the picker is raised
+    /// and the ask is cleared as it is, so coming back to the index never asks again.
+    private func answerNewProject() {
+        guard newProject else { return }
+        newProject = false
+        picking = true
     }
 
     /// Adding a project, which is choosing a folder: the picker is raised rather than a path
@@ -540,9 +578,14 @@ private struct FoldHeight: PreferenceKey {
 
 private struct ProjectDetail: View {
     let projectId: String
+    /// Whether this is the whole of Work, rather than a page pushed over the index: the bar
+    /// then carries the way into the sessions, and there is no leading back to draw.
+    let root: Bool
     let onRemoved: () -> Void
     /// The way back to the chat, told whether the cursor belongs in the composer.
     let onChat: (Bool) -> Void
+    /// Opening the sessions from the leading place of a page that is the whole of Work.
+    let onSessions: () -> Void
 
     @Environment(AppModel.self) private var model
     @State private var renaming = false
@@ -641,13 +684,21 @@ private struct ProjectDetail: View {
         }
         .background(MiloTheme.background)
         // The bar the stack already draws, carrying what it does not draw itself: the project
-        // named with its folder, and the project's own actions. The way back is the stack's own —
-        // the control it puts at the leading place, and the swipe from the screen's edge that goes
-        // with it — as a routine's own page keeps it. The connection line is not here: it belongs
-        // to the bars of the roots, as it does over a routine's own page.
+        // named with its folder, and the project's own actions. Pushed over the index, the way
+        // back is the stack's own — the control it puts at the leading place, and the swipe from
+        // the screen's edge that goes with it. Opened as the whole of Work there is nothing under
+        // it to go back to, so the leading place carries the sessions instead: the drawer it was
+        // come from, one press or one swipe away, rather than a list nobody opened. The
+        // connection line is not here: it belongs to the bars of the roots, as it does over a
+        // routine's own page.
         .toolbar(.visible, for: .navigationBar)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
+            if root {
+                ToolbarItem(placement: .topBarLeading) {
+                    SessionsButton(action: onSessions)
+                }
+            }
             ToolbarItem(placement: .principal) {
                 // The project, named where a title goes: with the mark it wears and at the
                 // platform's own title weight, and said before anything has been written into it
