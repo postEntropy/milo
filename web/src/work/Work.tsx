@@ -133,6 +133,8 @@ export function Work({
   tick,
   sessions,
   sessionId,
+  projectId,
+  onProject,
   onOpenSession,
   onStartSession,
   onRenameSession,
@@ -146,6 +148,10 @@ export function Work({
   sessions: SessionSummary[]
   /** The session the chat is in, marked where Work draws it. */
   sessionId?: string
+  /** The project whose own page is open on top of the index; null draws the index. */
+  projectId: string | null
+  /** Opening a project's page, and going back to the index with null. */
+  onProject(id: string | null): void
   onOpenSession(id: string): void
   /** Start a work session in a project and open it. False when it could not. */
   onStartSession(projectId: string, firstMessage?: string): Promise<boolean>
@@ -155,7 +161,6 @@ export function Work({
   onDeleteSession(id: string, report: Report): Promise<void>
 }) {
   const [projects, setProjects] = useState<Project[] | null>(null)
-  const [selectedId, setSelectedId] = useState<string | null>(null)
   const [notice, setNotice] = useState<Notice | null>(null)
   useAutoDismiss(notice, setNotice)
   const [saving, setSaving] = useState(false)
@@ -173,7 +178,6 @@ export function Work({
       const next = await api<Project[]>('projects')
       if (mine !== loadSeq.current) return
       setProjects(next)
-      setSelectedId((current) => (current && next.some((project) => project.id === current) ? current : null))
       setLoadError(null)
     } catch (error) {
       if (mine !== loadSeq.current) return
@@ -186,6 +190,11 @@ export function Work({
   // list it changed rather than what this screen remembered.
   // biome-ignore lint/correctness/useExhaustiveDependencies: tick is a change signal only
   useEffect(() => { void refresh() }, [tick, refresh])
+  // A project removed here or on another surface stops being the one this screen
+  // shows, rather than leaving a page whose project is gone.
+  useEffect(() => {
+    if (projects && projectId && !projects.some((project) => project.id === projectId)) onProject(null)
+  }, [projects, projectId, onProject])
 
   /** One action, the whole list back: the store is the one that decides. */
   const act = useCallback(async (body: Record<string, unknown>): Promise<boolean> => {
@@ -194,7 +203,6 @@ export function Work({
     try {
       const result = await api<{ result: string; projects: Project[] }>('project-action', body)
       setProjects(result.projects)
-      setSelectedId((current) => (current && result.projects.some((project) => project.id === current) ? current : null))
       setNotice({ text: result.result, error: false })
       return true
     } catch (error) {
@@ -213,7 +221,7 @@ export function Work({
     remove: onDeleteSession,
   }
 
-  const selected = projects?.find((project) => project.id === selectedId) ?? null
+  const selected = projects?.find((project) => project.id === projectId) ?? null
   if (selected) {
     return <ProjectPage
       key={selected.id}
@@ -225,7 +233,7 @@ export function Work({
       actions={actions}
       report={setNotice}
       onDismiss={() => setNotice(null)}
-      onBack={() => setSelectedId(null)}
+      onBack={() => onProject(null)}
       onOpenSession={onOpenSession}
       onStartSession={onStartSession}
       onAct={act}
@@ -240,7 +248,7 @@ export function Work({
     actions={actions}
     report={setNotice}
     onDismiss={() => setNotice(null)}
-    onSelect={setSelectedId}
+    onSelect={onProject}
     onOpenSession={onOpenSession}
     onNew={() => setPicking(true)}
     onRetry={() => { setLoadError(null); void refresh() }}

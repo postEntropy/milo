@@ -109,6 +109,11 @@ export default function App() {
   const [view, setViewRaw] = useState<View>(() => viewFromPath(location.pathname))
   /** The screen in front, for callbacks that outlive this render. */
   const viewRef = useRef<View>(view)
+  /**
+   * The project Work should open on top of its index — set when the session's own
+   * project is pressed, and cleared whenever Work is entered any other way.
+   */
+  const [workProject, setWorkProject] = useState<string | null>(null)
   /** The Email screen's place within its own path: null inbox, `new` compose, else a thread. */
   const [emailRoute, setEmailRoute] = useState<string | null>(() => emailRouteFromPath(location.pathname))
   /** Mail that arrived since the person last looked at the inbox, for the Email tab's badge. */
@@ -1164,7 +1169,7 @@ export default function App() {
         <div className="sidebar-pad">
           <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={18} /><span>Routines</span></button>
           <button className={`sidebar-tab ${view === 'tasks' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'tasks' ? 'chat' : 'tasks'); setSidebarOpen(false) }}><Icon name="list-check" size={18} /><span>Task lists</span></button>
-          <button className={`sidebar-tab ${view === 'work' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'work' ? 'chat' : 'work'); setSidebarOpen(false) }}><Icon name="folder" size={18} /><span>Work</span></button>
+          <button className={`sidebar-tab ${view === 'work' ? 'active' : ''}`} type="button" onClick={() => { if (view !== 'work') setWorkProject(null); setView(view === 'work' ? 'chat' : 'work'); setSidebarOpen(false) }}><Icon name="folder" size={18} /><span>Work</span></button>
           <button className={`sidebar-tab ${view === 'email' ? 'active' : ''}`} type="button" onClick={() => { setEmailRoute(null); setView(view === 'email' ? 'chat' : 'email'); setSidebarOpen(false) }}><Icon name="mail" size={18} /><span>Email</span>{mailUnread !== null && mailUnread.count > 0 && <span className="sidebar-badge">{mailUnread.more ? `${mailUnread.count}+` : mailUnread.count}</span>}</button>
         </div>
         <div className="session-region">
@@ -1209,10 +1214,17 @@ export default function App() {
           {/* The project over the name: a session in one is work in a place, and which place
               is the first thing to know about it — said even before the first word, with the
               mark the project wears (a folder until another one is chosen). A project whose
-              folder has gone says so rather than reading as workable. */}
-          {project && <p className={project.error ? 'gone' : undefined} title={project.error}>
-            <Icon name={projectMark(project.icon)} size={12} /> {project.name}
-          </p>}
+              folder has gone says so rather than reading as workable. Pressing it opens that
+              project's own page in Work. */}
+          {project && <button
+            className={`topbar-project ${project.error ? 'gone' : ''}`}
+            type="button"
+            title={project.error ?? `Open ${project.name}`}
+            aria-label={project.error ? `Project: ${project.name}, ${project.error}` : `Open the ${project.name} project`}
+            onClick={() => { setWorkProject(project.id); setView('work'); setSidebarOpen(false) }}
+          >
+            <Icon name={projectMark(project.icon)} size={12} /> <span>{project.name}</span>
+          </button>}
           <h1>{currentSession ? sessionLabel(currentSession) : 'New session'}</h1>
         </>}</div>
         <div className="topbar-actions">
@@ -1232,6 +1244,8 @@ export default function App() {
           tick={workTick}
           sessions={sessions}
           sessionId={sessionId}
+          projectId={workProject}
+          onProject={setWorkProject}
           onOpenSession={(id) => void openSession(id)}
           onStartSession={startWorkSession}
           onRenameSession={renameSession}
