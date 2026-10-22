@@ -94,8 +94,8 @@ export function TaskLists({ tick }: { tick: number }) {
 }
 
 /** The workspace frame, so both levels of this view sit in the same place. */
-function Shell({ head, notice, onDismiss, children, className = '' }: { head: ReactNode; notice: Notice | null; onDismiss(): void; children: ReactNode; className?: string }) {
-  return <main className={`settings-workspace ${className}`}>
+function Shell({ head, notice, onDismiss, children }: { head: ReactNode; notice: Notice | null; onDismiss(): void; children: ReactNode }) {
+  return <main className="settings-workspace">
     <div className="settings-inner">
       <div className="settings-panel-stack">
         <section className="settings-section">
@@ -133,22 +133,15 @@ function TaskListIndex({
   onCreate(name: string): void
   onRetry(): void
 }) {
-  const [creating, setCreating] = useState(false)
   return <Shell
-    className="dashboard"
     notice={notice}
     onDismiss={onDismiss}
     head={<PageHeader
       title="Task lists"
-      action={lists && lists.length > 0 ? <>
-        <div className="panel-count"><strong>{openCount}</strong><span>open</span></div>
-        <button className="button primary" type="button" onClick={() => setCreating((open) => !open)}><Icon name="plus" size={15} /> New list</button>
-      </> : undefined}
+      description="Keep the things you and Milo are working on, together across sessions."
+      action={lists && lists.length > 0 ? <div className="panel-count"><strong>{openCount}</strong><span>open</span></div> : undefined}
     />}
   >
-    {creating && lists && lists.length > 0 && <div className="tasklist-create">
-      <TaskListCreate saving={saving} autoFocus onCreate={(name) => { onCreate(name); setCreating(false) }} />
-    </div>}
     {lists === null
       ? loadError
         ? <div className="panel-state"><p>Could not read your task lists: {loadError}</p><button className="button" type="button" onClick={onRetry}>Try again</button></div>
@@ -160,39 +153,32 @@ function TaskListIndex({
           <p className="panel-empty-copy">Create a list for a project, an idea, or anything else you want Milo to keep track of with you.</p>
           <TaskListCreate saving={saving} onCreate={onCreate} />
         </div>
-        : <div className="task-grid">
+        : <div className="tasklist-list">
           {lists.map((list) => <TaskListRow key={list.id} list={list} onClick={() => onSelect(list.id)} />)}
         </div>}
+    {lists && lists.length > 0 && <div className="tasklist-footer">
+      <TaskListCreate saving={saving} onCreate={onCreate} />
+    </div>}
   </Shell>
 }
-
-/** How many open tasks a list's card names before it counts the rest. */
-const TILE_TASKS = 3
 
 /** One list as the index draws it: its name, what it holds, and how much is left. */
 function TaskListRow({ list, onClick }: { list: TaskList; onClick(): void }) {
   const total = list.items.length
   const open = list.items.filter((item) => !item.completed).length
   const activity = list.items.reduce((latest, item) => Math.max(latest, item.createdAt), list.createdAt)
-  const next = list.items.filter((item) => !item.completed).slice(0, TILE_TASKS)
-  return <button className="task-tile" type="button" onClick={onClick}>
-    <span className="task-tile-head">
-      <span className="task-tile-name">{list.name}</span>
-      <span className="task-tile-count">{total > 0 && open === 0 ? 'All done' : `${open} open`}</span>
+  return <button className="tasklist-card" type="button" onClick={onClick}>
+    <span className="tasklist-card-main">
+      <span className="tasklist-card-name">{list.name}</span>
+      <span className="tasklist-card-meta">{total === 0 ? 'No tasks yet' : `${total} ${total === 1 ? 'task' : 'tasks'} · last added ${formatWhen(activity)}`}</span>
     </span>
-    {next.length > 0 && <span className="task-tile-items">
-      {next.map((item) => <span className="task-tile-item" key={item.id}>{item.content}</span>)}
-      {open > next.length && <span className="task-tile-more">+{open - next.length} more</span>}
-    </span>}
-    <span className="task-tile-foot">
-      <span>{total === 0 ? 'No tasks yet' : `${total} ${total === 1 ? 'task' : 'tasks'} · last added ${formatWhen(activity)}`}</span>
-      {total > 0 && <span className="task-tile-bar" aria-hidden="true"><span className="task-tile-fill" style={{ width: `${((total - open) / total) * 100}%` }} /></span>}
-    </span>
+    <span className="tasklist-card-count"><span className="tasklist-open">{open}</span><span>open</span></span>
+    <Icon className="tasklist-card-chevron" name="chevron" size={16} />
   </button>
 }
 
-/** The one field that makes a list, used by the empty state and the page's own action. */
-function TaskListCreate({ saving, autoFocus, onCreate }: { saving: boolean; autoFocus?: boolean; onCreate(name: string): void }) {
+/** The one field that makes a list, used by the empty state and the list's foot. */
+function TaskListCreate({ saving, onCreate }: { saving: boolean; onCreate(name: string): void }) {
   const [name, setName] = useState('')
   function submit(event: FormEvent<HTMLFormElement>): void {
     event.preventDefault()
@@ -202,8 +188,7 @@ function TaskListCreate({ saving, autoFocus, onCreate }: { saving: boolean; auto
     setName('')
   }
   return <form className="tasklist-new" onSubmit={submit}>
-    {/* biome-ignore lint/a11y/noAutofocus: the field the press just opened takes the cursor — the list's name is the whole of what is asked for */}
-    <input className="tasklist-input" autoFocus={autoFocus} aria-label="New list name" placeholder="New list name" value={name} onChange={(event) => setName(event.target.value)} maxLength={80} />
+    <input className="tasklist-input" aria-label="New list name" placeholder="New list name" value={name} onChange={(event) => setName(event.target.value)} maxLength={80} />
     <button className="button primary" type="submit" disabled={saving || !name.trim()}><Icon name="plus" size={15} /> Create list</button>
   </form>
 }

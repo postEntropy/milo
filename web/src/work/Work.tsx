@@ -9,8 +9,8 @@ import {
   isProjectIcon,
 } from '../../../src/core/project-icons.ts'
 import { SessionMark, SessionRow } from '../sessions/SessionRow.js'
-import { inlineSessions } from './sessions.js'
 import type { SessionSummary } from '../sessions/types.js'
+import { inlineSessions } from './sessions.js'
 import { Code } from '../ui/Code.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
@@ -27,6 +27,27 @@ type FolderListing = {
   parent?: string
   folders: Array<{ name: string; path: string }>
   truncated: boolean
+}
+/** Which projects the person folded shut, by id: expanded is the default, so only that is kept. */
+const COLLAPSED_KEY = 'milo-work-collapsed'
+
+/** The projects folded shut on this client. No stored preference reads as all expanded. */
+function readCollapsed(): Set<string> {
+  try {
+    const raw = localStorage.getItem(COLLAPSED_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : []
+    return new Set(Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === 'string') : [])
+  } catch {
+    return new Set()
+  }
+}
+
+function writeCollapsed(ids: Set<string>): void {
+  try {
+    localStorage.setItem(COLLAPSED_KEY, JSON.stringify([...ids]))
+  } catch {
+    // A folded project that does not survive a reload is a preference, not data lost.
+  }
 }
 /** One entry of a project's folder, as the daemon nests it. */
 type WorkNode = {
@@ -235,6 +256,34 @@ type SessionActions = {
   remove(id: string, report: Report): Promise<void>
 }
 
+/**
+ * The body of a project. It stays in the grid, folded to nothing, so the card grows and
+ * shrinks instead of snapping — the same fold the reasoning panel keeps. The clip is
+ * released once the body is open, so a session's menu can lift past it, and a folded body
+ * is `inert`: nothing inside it can be tabbed to or pressed while it is shut.
+ */
+function ProjectSessions({ open, id, children }: { open: boolean; id: string; children: ReactNode }) {
+  const [settled, setSettled] = useState(open)
+
+  useEffect(() => {
+    if (!open) {
+      setSettled(false)
+      return
+    }
+    const timer = window.setTimeout(() => setSettled(true), 260)
+    return () => window.clearTimeout(timer)
+  }, [open])
+
+  return <div
+    className={`work-project-sessions ${open ? 'open' : ''} ${settled ? 'settled' : ''}`}
+    id={id}
+    aria-hidden={!open}
+    inert={!open}
+  >
+    <div className="work-project-clip">{children}</div>
+  </div>
+}
+
 /** One project's sessions, drawn as the drawer draws them — the same row, the same actions. */
 function SessionList({ sessions, actions, report, onOpen }: {
   sessions: SessionSummary[]
@@ -257,8 +306,8 @@ function SessionList({ sessions, actions, report, onOpen }: {
 }
 
 /** The workspace frame, so both levels of this view sit in the same place. */
-function Shell({ head, notice, onDismiss, children, className = '' }: { head: ReactNode; notice: Notice | null; onDismiss(): void; children: ReactNode; className?: string }) {
-  return <main className={`settings-workspace ${className}`}>
+function Shell({ head, notice, onDismiss, children }: { head: ReactNode; notice: Notice | null; onDismiss(): void; children: ReactNode }) {
+  return <main className="settings-workspace">
     <div className="settings-inner">
       <div className="settings-panel-stack">
         <section className="settings-section">
@@ -296,6 +345,7 @@ function WorkIndex({
   loadError: string | null
   saving: boolean
   actions: SessionActions
+  /** Where a row's own action says what it did: this screen's notice, not the chat's. */
   report: Report
   onDismiss(): void
   onSelect(id: string): void
@@ -306,19 +356,25 @@ function WorkIndex({
   /** The folder picker, drawn over this screen while it is up. */
   picker?: ReactNode
 }) {
+  /** Folded shut here, on this client. Expanded is the default, so only that is kept. */
+  const [collapsed, setCollapsed] = useState<Set<string>>(readCollapsed)
+
+  function toggle(id: string): void {
+    const next = new Set(collapsed)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setCollapsed(next)
+    writeCollapsed(next)
+  }
+
   return <>
     <Shell
-    className="dashboard"
     notice={notice}
     onDismiss={onDismiss}
     head={<PageHeader
       title="Work"
-      action={projects && projects.length > 0
-        ? <div className="work-head-actions">
-          <div className="panel-count"><strong>{projects.length}</strong><span>{projects.length === 1 ? 'project' : 'projects'}</span></div>
-          <NewProject saving={saving} label="New project" onNew={onNew} />
-        </div>
-        : undefined}
+      description="The folders a session can work in, and the sessions that ran there."
+      action={projects && projects.length > 0 ? <div className="panel-count"><strong>{projects.length}</strong><span>{projects.length === 1 ? 'project' : 'projects'}</span></div> : undefined}
     />}
   >
     {projects === null
@@ -332,35 +388,73 @@ function WorkIndex({
           <p className="panel-empty-copy">A project is a folder a session works in. Point one at a repository and every session started in it reads, writes and runs commands there — not in Milo's own directory.</p>
           <NewProject saving={saving} label="New project" onNew={onNew} />
         </div>
-        : <div className="project-grid">
+        : <div className="work-list">
           {projects.map((project) => {
             const mine = sessions.filter((session) => session.project === project.id)
             const shown = inlineSessions(mine)
-            return <div className={`project-card${project.error ? ' gone' : ''}`} key={project.id}>
-              {/* The head opens the project's page; the sessions under it open themselves, with
-                  the drawer's own row and actions. */}
-              <button className="project-card-head" type="button" onClick={() => onSelect(project.id)}>
-                <span className="project-card-mark"><Icon name={projectMark(project.icon)} size={20} /></span>
-                <span className="project-card-text">
-                  <span className="project-card-name">{project.name}</span>
-                  {/* A folder that is gone says so here, rather than looking workable: a session
-                      started in it would not work there. */}
-                  <span className="project-card-path">{project.error ?? project.path}</span>
-                </span>
-                <SessionMark running={mine.some((session) => session.running)} unread={mine.some((session) => session.unread)} />
-              </button>
-              {mine.length === 0
-                ? <p className="project-card-empty">No sessions yet</p>
-                : <div className="project-card-sessions">
+            // A project with nothing in it has nothing to fold: its count says zero and the
+            // card stays shut, rather than opening onto a line that says the same thing.
+            const open = mine.length > 0 && !collapsed.has(project.id)
+            return <div className="work-project" key={project.id}>
+              {/* One card, not two: the header opens the project's page, and the chevron at its
+                  own edge folds the sessions in and out. The body is the same surface, so what
+                  belongs to the project reads as one object rather than a card and loose rows. */}
+              <div className="work-project-head">
+                <ProjectRow
+                  project={project}
+                  sessions={mine.length}
+                  running={mine.some((session) => session.running)}
+                  unread={mine.some((session) => session.unread)}
+                  onClick={() => onSelect(project.id)}
+                />
+                {mine.length > 0 && <button
+                  className="work-twist"
+                  type="button"
+                  aria-expanded={open}
+                  aria-controls={open ? `work-sessions-${project.id}` : undefined}
+                  aria-label={`${open ? 'Collapse' : 'Expand'} ${project.name}`}
+                  onClick={() => toggle(project.id)}
+                ><Icon className="work-twist-mark" name="chevron" size={16} /></button>}
+              </div>
+              {mine.length > 0 && <ProjectSessions open={open} id={`work-sessions-${project.id}`}>
+                <div className="work-project-body">
                   <SessionList sessions={shown} actions={actions} report={report} onOpen={onOpenSession} />
-                </div>}
-              {mine.length > shown.length && <button className="project-card-all" type="button" onClick={() => onSelect(project.id)}>All {mine.length} sessions</button>}
+                  {mine.length > shown.length && <button className="work-all" type="button" onClick={() => onSelect(project.id)}>
+                    <span>All {mine.length} sessions</span>
+                    <Icon name="chevron" size={15} />
+                  </button>}
+                </div>
+              </ProjectSessions>}
             </div>
           })}
         </div>}
+    {projects && projects.length > 0 && <div className="work-footer">
+      <NewProject saving={saving} label="New project" onNew={onNew} />
+    </div>}
     </Shell>
     {picker}
   </>
+}
+
+/** One project as the index draws it: its name, its folder, and how much work is there. */
+function ProjectRow({ project, sessions, running, unread, onClick }: { project: ProjectView; sessions: number; running: boolean; unread: boolean; onClick(): void }) {
+  return <button className="work-card" type="button" onClick={onClick}>
+    <span className="work-card-mark"><Icon name={projectMark(project.icon)} size={20} /></span>
+    <span className="work-card-main">
+      <span className="work-card-name">{project.name}</span>
+      {/* A folder that is gone is said here rather than left as a project that looks
+          workable: a session started in it would not work there. */}
+      <span className={`work-card-meta ${project.error ? 'gone' : ''}`}>{project.error ?? project.path}</span>
+    </span>
+    <span className="work-card-count">
+      {/* The card's own mark, because a project's rows may be folded shut: something
+          running there, or something waiting to be read, is never hidden behind the
+          count. */}
+      <SessionMark running={running} unread={unread} />
+      <span className="work-open">{sessions}</span>
+      <span>{sessions === 1 ? 'session' : 'sessions'}</span>
+    </span>
+  </button>
 }
 
 /**

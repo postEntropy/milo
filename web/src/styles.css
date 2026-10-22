@@ -1176,34 +1176,30 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .panel-count { display: flex; align-items: baseline; gap: var(--space-3); padding-bottom: var(--space-1); color: var(--muted); font-size: var(--text-xs); white-space: nowrap; }
 .panel-count strong { color: var(--fg-2); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
 .panel-count-divider { width: 1px; height: 13px; margin-inline: var(--space-3); background: var(--border-soft); }
-/* Routines are cards in the dashboard: the card opens the routine, and the two controls
-   it carries sit at its edge. */
-/* The routines page is the cards with what they have said beside them: the page holds
-   two columns where there is room for two, and one where there is not. */
-.routine-dashboard { display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: start; gap: var(--space-7); }
-.routine-dashboard:not(:has(.routine-feed)) { grid-template-columns: minmax(0, 1fr); }
-@media (max-width: 760px) { .routine-dashboard { grid-template-columns: minmax(0, 1fr); } }
-/* A routine is a row: whether it is on, what it does and when, and — at the right — what
-   it last did. Rows rather than tiles, because a schedule is read down a list. */
-.routine-list { display: flex; flex-direction: column; gap: var(--space-4); }
-.routine-tile { display: flex; align-items: center; gap: var(--space-4); border-radius: var(--radius-lg); background: var(--surface); padding-inline-end: var(--space-6); transition: background var(--motion-fast); }
-.routine-tile:hover { background: var(--border-soft); }
-.routine-tile-open { display: flex; min-width: 0; flex: 1; align-items: center; gap: var(--space-7); border: 0; border-radius: var(--radius-lg); background: transparent; padding: var(--space-7) var(--space-8); color: inherit; text-align: start; }
-.routine-tile-main { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: var(--space-3); }
-.routine-tile-name { overflow: hidden; color: var(--fg); font-size: var(--text-md); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.routine-tile-when { display: flex; min-width: 0; align-items: center; gap: var(--space-3); overflow: hidden; color: var(--muted); font-size: var(--text-xs); white-space: nowrap; }
-.routine-tile-when svg.icon { flex: none; }
-.routine-tile-status { display: flex; flex: none; flex-direction: column; align-items: flex-end; gap: var(--space-2); }
-.routine-tile-label { color: var(--muted); font-size: var(--text-2xs); letter-spacing: .04em; text-transform: uppercase; }
-.routine-tile-state { color: var(--fg-2); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
-.routine-tile-state.failed, .routine-fact strong.failed { color: var(--danger); }
-.routine-tile-actions { display: flex; flex: none; gap: var(--space-2); }
-.routine-row-action { display: grid; width: var(--control-md); height: var(--control-md); place-items: center; border: 0; border-radius: var(--radius-sm); background: var(--surface-raised); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
-.routine-row-action:hover { background: var(--bg); color: var(--fg); }
-@media (max-width: 620px) { .routine-tile-status { display: none; } }
+.routine-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.routine-row { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto 16px; align-items: center; gap: var(--space-7); width: 100%; min-height: 68px; border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-6) var(--space-7); text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
+.routine-row:hover { background: var(--surface-warm); }
+/* The part that opens the routine is its own control inside the card, so the row
+   keeps the whole width and the buttons beside it have a column of their own
+   rather than a layer over what the routine says. */
+.routine-row-open { display: grid; grid-template-columns: minmax(0, 1fr) minmax(140px, 200px); align-items: center; gap: var(--space-7); min-width: 0; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0; color: inherit; font: inherit; text-align: start; }
+.routine-row-actions { display: flex; flex: none; gap: var(--space-2); }
+.routine-row-action { display: grid; width: var(--control-sm); height: var(--control-sm); place-items: center; border: 0; border-radius: var(--radius-sm); background: var(--surface); color: var(--fg-2); box-shadow: var(--shadow-sm); opacity: 0; transition: background var(--motion-fast), color var(--motion-fast), opacity var(--motion-fast); }
+.routine-row-action:hover { background: var(--surface-warm); color: var(--fg); }
+.routine-row:hover .routine-row-action, .routine-row-action:focus-visible, .routine-row:has(.routine-row-open:focus-visible) .routine-row-action { opacity: 1; }
+.routine-row:active { transform: translateY(1px); }
 .routine-state-mark { display: block; width: 8px; height: 8px; flex: none; border-radius: 50%; background: var(--muted); }
 .routine-state-mark.enabled { background: var(--success); box-shadow: 0 0 0 3px color-mix(in oklab, var(--success) 12%, transparent); }
 .routine-state-mark.paused { background: var(--warn); box-shadow: 0 0 0 3px color-mix(in oklab, var(--warn) 12%, transparent); }
+.routine-row-main { display: flex; min-width: 0; flex-direction: column; gap: var(--space-3); }
+.routine-row-name { overflow: hidden; color: var(--fg); font-size: var(--text-md); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.routine-row-meta { overflow: hidden; color: var(--muted); font: var(--text-2xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.routine-meta-separator { padding-inline: var(--space-4); color: var(--border-soft); }
+.routine-row-next { display: flex; min-width: 0; flex-direction: column; gap: var(--space-2); text-align: end; }
+.routine-row-next-label { color: var(--muted); font-size: var(--text-2xs); letter-spacing: .04em; text-transform: uppercase; }
+.routine-row-state { overflow: hidden; color: var(--fg-2); font-size: var(--text-xs); font-variant-numeric: tabular-nums; text-overflow: ellipsis; white-space: nowrap; }
+.routine-row-state.failed, .routine-fact strong.failed { color: var(--danger); }
+.routine-row-chevron { color: var(--muted); }
 .panel-empty { display: flex; min-height: 300px; flex-direction: column; align-items: center; justify-content: center; padding: 36px var(--space-8); text-align: center; }
 .panel-empty-mark { display: grid; width: 52px; height: 52px; place-items: center; margin-bottom: var(--space-8); border-radius: var(--radius-xl); background: var(--surface-warm); color: var(--accent); }
 .panel-empty h3 { color: var(--fg); font-size: var(--text-md); font-weight: 600; }
@@ -1223,19 +1219,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .routine-section-subtitle { margin-top: var(--space-2); color: var(--muted); font-size: var(--text-xs); }
 /* What the routines said last, drawn as one list under them: the front page's
    answer to "what have they been up to lately". */
-/* What the routines said last, drawn as a timeline beside them: the front page's answer to
-   "what have they been up to lately". */
-.routine-feed { min-width: 0; }
-.routine-feed .routine-section-head { margin-bottom: var(--space-5); }
-.routine-feed-list { position: relative; display: flex; flex-direction: column; gap: var(--space-2); }
-.routine-feed-list::before { content: ''; position: absolute; top: var(--space-7); bottom: var(--space-7); inset-inline-start: 5px; width: 2px; border-radius: var(--radius-pill); background: var(--surface); }
-.routine-feed-row { position: relative; display: flex; width: 100%; flex-direction: column; gap: var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-5) var(--space-6) var(--space-5) var(--space-9); text-align: start; transition: background var(--motion-fast); }
-.routine-feed-row::before { content: ''; position: absolute; top: var(--space-7); inset-inline-start: 1px; width: 10px; height: 10px; border-radius: 50%; background: var(--border); box-shadow: 0 0 0 3px var(--bg); }
-.routine-feed-row:first-child::before { background: var(--success); }
-.routine-feed-row:hover { background: var(--surface); }
-.routine-feed-head { display: flex; flex-direction: column; gap: var(--space-1); }
-.routine-feed-head strong { overflow: hidden; color: var(--fg); font-size: var(--text-sm); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
-.routine-feed-when { color: var(--muted); font: var(--text-2xs) var(--font-mono); }
+.routine-feed { margin-top: 30px; }
+.routine-feed-list { display: flex; flex-direction: column; gap: var(--space-2); }
+.routine-feed-row { display: flex; width: 100%; flex-direction: column; gap: var(--space-2); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-6) var(--space-7); text-align: start; transition: background var(--motion-fast); }
+.routine-feed-row:hover { background: var(--surface-warm); }
+.routine-feed-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-6); }
+.routine-feed-head strong { color: var(--fg); font-size: var(--text-sm); font-weight: 500; }
+.routine-feed-when { flex: none; color: var(--muted); font: var(--text-2xs) var(--font-mono); }
 .routine-feed-text { display: -webkit-box; overflow: hidden; color: var(--fg-2); font-size: var(--text-xs); line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .routine-runs-count { display: grid; min-width: 28px; height: 28px; place-items: center; border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--fg-2); font: var(--text-2xs) var(--font-mono); }
 .routine-runs-layout { display: grid; grid-template-columns: minmax(220px, 280px) minmax(0, 1fr); gap: var(--space-7); align-items: start; }
@@ -1286,6 +1276,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 @media (max-width: 520px) {
   .panel-count { padding: 0; }
+  .routine-row { min-height: 66px; padding-inline: var(--space-6); }
   .routine-overview-data { grid-template-columns: minmax(0, 1fr); }
   .routine-actions { width: 100%; }
   .routine-actions .button { flex: 1; }
@@ -1405,9 +1396,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
      own bar instead of a solid block. The box itself stays opaque (`.composer-box`). */
   .composer-shell { background: transparent; padding: 10px 18px max(6px, env(safe-area-inset-bottom)); }
   .chat-view .notice { width: min(780px, calc(100% - 36px)); }
-  /* The screens that carry a page header start under the floating controls, not behind
-     the menu pill: the bar's own height plus a step of air. */
-  .settings-inner { padding: calc(var(--phone-top) + var(--control-md) + var(--space-6)) 20px 0; }
+  .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 48px) 20px 0; }
   /* Settings is a list first and a section second: one fills the screen, the arrow in
      its head leads back to the list, and the drawer's menu button stands down. */
   .main.in-settings .mobile-menu { display: none; }
@@ -1443,7 +1432,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 @media (max-width: 620px) {
   .suggestion-grid { grid-template-columns: 1fr; gap: var(--space-5); margin-top: var(--space-9); }
   .suggestion { min-height: 62px; }
-  .settings-inner { padding: calc(var(--phone-top) + var(--control-md) + var(--space-6)) 16px 0; }
+  .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 48px) 16px 0; }
   .settings-layout .settings-inner { padding-inline: 16px; }
   .settings-index { padding-inline: 16px; }
   .form-grid { grid-template-columns: 1fr; }
@@ -1608,13 +1597,23 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 /* Task lists: the lists as a panel, and one list's own page a level in — drawn
    with the same panel, rows and empty state as every other workspace view. */
-/* The create row is a filled bar over the cards; the page's own action raises it. */
-.tasklist-new { display: flex; align-items: center; gap: var(--space-4); width: min(520px, 100%); }
-.tasklist-create { margin-bottom: var(--space-7); }
+.tasklist-list { display: flex; flex-direction: column; gap: var(--space-3); }
+.tasklist-card { display: grid; grid-template-columns: minmax(0, 1fr) auto 16px; align-items: center; gap: var(--space-7); width: 100%; min-height: 68px; border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-6) var(--space-7); color: inherit; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
+.tasklist-card:hover { background: var(--surface-warm); }
+.tasklist-card:active { transform: translateY(1px); }
+.tasklist-card-main { display: flex; min-width: 0; flex-direction: column; gap: var(--space-3); }
+.tasklist-card-name { overflow: hidden; color: var(--fg); font-size: var(--text-md); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
+.tasklist-card-meta { overflow: hidden; color: var(--muted); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.tasklist-card-count { display: flex; align-items: baseline; gap: var(--space-3); color: var(--muted); font-size: var(--text-2xs); white-space: nowrap; }
+.tasklist-open { color: var(--fg-2); font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
+.tasklist-card-chevron { color: var(--muted); }
+.tasklist-footer { display: flex; margin-top: var(--space-8); }
+.tasklist-new { display: flex; align-items: center; gap: var(--space-4); width: min(430px, 100%); }
 /* The one field both the create row and the add-task row wear. */
 .tasklist-input { width: 100%; min-width: 0; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-5) var(--space-6); color: var(--fg); font-size: var(--text-sm); transition: box-shadow var(--motion-fast); }
 .tasklist-input:focus { outline: 0; box-shadow: var(--focus-ring); }
 .tasklist-input::placeholder { color: var(--muted); }
+.panel-empty .tasklist-new { width: min(470px, 100%); }
 .tasklist-actions { display: flex; flex: none; flex-wrap: wrap; gap: var(--space-4); }
 .tasklist-rename { display: flex; align-items: flex-end; gap: var(--space-5); margin-bottom: var(--space-8); }
 .tasklist-rename .field { flex: 1; max-width: 420px; }
@@ -1636,7 +1635,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tasklist-row:hover .tasklist-row-remove, .tasklist-row-remove:focus-visible { opacity: 1; }
 .tasklist-row-remove:hover { background: color-mix(in oklab, var(--danger) 10%, var(--surface)); color: var(--danger); }
 @media (max-width: 620px) {
-  .tasklist-new { width: 100%; }
+  .tasklist-footer, .tasklist-new { width: 100%; }
+  .tasklist-card { padding-inline: var(--space-6); }
   .tasklist-actions { width: 100%; }
   .tasklist-actions .button { flex: 1; }
   .tasklist-rename { align-items: stretch; flex-direction: column; }
@@ -1645,57 +1645,47 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 
 /* Work: the folders a session can work in, and the sessions that ran in one. */
-/* The pages that are lists keep a reading width, so a row is read across rather than
-   stretched to the window; the page's own action line carries the count and the control
-   that adds to it, on the line that says what the page holds. */
-.dashboard .settings-inner { width: min(1200px, 100%); }
-/* On a wide screen the page's own bar names it, over the cards that fill the page. The
-   cards are the only surface drawn: filled, with no frame around them. */
-@media (min-width: 901px) {
-  /* The page's own bar names it; the app bar above would be an empty white strip over
-     it. It stays when the sidebar is folded, because its control is the way back. */
-  .app-shell:not(.sidebar-collapsed) .main.in-dashboard .topbar { display: none; }
-  .dashboard .settings-inner { padding: 0; }
-  .dashboard .settings-panel-stack { padding: 0; }
-  .dashboard .panel-body { padding: var(--space-4) var(--space-10) var(--space-10); }
-  .dashboard .page-header { position: sticky; z-index: 2; top: 0; margin: 0; background: var(--bg); padding: var(--space-9) var(--space-10) var(--space-7); }
-  .dashboard .settings-section { margin-bottom: 0; }
-}
-/* Every dashboard's bar is as tall as its control, so the title does not move between
-   the pages that carry an action and the ones that do not. The rule itself is declared
-   with the page header it sizes, at the end of this file. */
-/* The dashboards: what a project or a list holds, shown before it is opened. A card is a
-   filled surface and says what is in it — the sessions of a project, the next tasks of a
-   list — so opening one is a choice, not a guess. */
-.project-grid, .task-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); align-items: start; gap: var(--space-6); }
-.project-card { display: flex; flex-direction: column; gap: var(--space-3); border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-4); }
-.project-card-head { display: flex; align-items: center; gap: var(--space-6); width: 100%; border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-5) var(--space-5); color: inherit; text-align: start; transition: background var(--motion-fast); }
-.project-card-head:hover { background: var(--border-soft); }
-.project-card-mark { display: grid; width: 44px; height: 44px; flex: none; place-items: center; border-radius: var(--radius-md); background: var(--surface-raised); color: var(--fg-2); }
-.project-card-text { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: var(--space-1); }
-.project-card-name { overflow: hidden; color: var(--fg); font-size: var(--text-md); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.work-list { display: flex; flex-direction: column; gap: var(--space-5); }
+/* A project is one card: the header opens its page, the chevron at the edge folds the
+   sessions, and the body shares the header's surface so the two read as one object rather
+   than a filled tile beside a filled row. */
+.work-project { display: flex; flex-direction: column; border-radius: var(--radius-lg); background: var(--surface); transition: background var(--motion-fast); }
+.work-project:has(.work-project-head:hover) { background: var(--surface-warm); }
+.work-project-head { display: flex; align-items: stretch; }
+.work-twist { display: grid; flex: none; width: 48px; place-items: center; border: 0; border-radius: 0 var(--radius-lg) var(--radius-lg) 0; background: transparent; padding: 0; color: var(--muted); transition: color var(--motion-fast); }
+.work-twist:hover { color: var(--fg); }
+.work-twist-mark { transition: transform var(--motion-fast) var(--ease-standard); }
+.work-twist[aria-expanded="true"] .work-twist-mark { transform: rotate(90deg); }
+/* The body folds by animating the grid row it sits in from zero to its own height — the
+   same fold the reasoning panel keeps. The clip is released once open, so a row's menu can
+   lift past the body; the clip itself carries no padding, which would be a floor the row
+   could not shrink past. */
+.work-project-sessions { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows var(--motion-base) var(--ease-standard), opacity var(--motion-base) var(--ease-standard); }
+.work-project-sessions.open { grid-template-rows: 1fr; opacity: 1; }
+.work-project-clip { overflow: hidden; min-height: 0; }
+.work-project-sessions.open.settled .work-project-clip { overflow: visible; }
+.work-project-body { display: flex; flex-direction: column; padding: var(--space-2); }
+/* Inside the card the row's own fill is the card's own: the hover is the warmer tone, and
+   the row's menu still lifts above the card. The rows sit closer than in the drawer, which
+   has a whole sidebar to fill. */
+.work-project-sessions .session-item { margin: 0; }
+.work-project-sessions .session-item .session-row { padding-top: var(--space-3); padding-bottom: var(--space-3); }
+.work-project-sessions .session-item:hover, .work-project-sessions .session-item.menu-open { background: var(--surface-warm); }
+.work-project-sessions .session-item.active { background: var(--surface-raised); }
+/* The rest of a project's sessions: a row in the body, not a second card. */
+.work-all { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: var(--control-md); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-3) var(--space-5); color: var(--muted); font-size: var(--text-sm); font-weight: 500; text-align: start; transition: background var(--motion-fast), color var(--motion-fast); }
+.work-all:hover { background: var(--surface-warm); color: var(--fg); }
+.work-card { display: grid; flex: 1 1 auto; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: var(--space-7); min-width: 0; min-height: 56px; border: 0; border-radius: var(--radius-lg) 0 0 var(--radius-lg); background: transparent; padding: var(--space-4) var(--space-4) var(--space-4) var(--space-7); color: inherit; text-align: start; }
+.work-card:active { transform: translateY(1px); }
+.work-card-mark { display: grid; place-items: center; color: var(--muted); }
+.work-card-main { display: flex; min-width: 0; flex-direction: column; gap: var(--space-3); }
+.work-card-name { overflow: hidden; color: var(--fg); font-size: var(--text-md); font-weight: 550; text-overflow: ellipsis; white-space: nowrap; }
 /* A folder is a path, so it is drawn as one — the face the code blocks wear. */
-.project-card-path { overflow: hidden; color: var(--muted); font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.project-card.gone .project-card-path { color: var(--warn); }
-.project-card-sessions { display: flex; flex-direction: column; gap: var(--space-1); }
-.project-card .session-item:hover, .project-card .session-item.menu-open { background: var(--surface-raised); }
-.project-card-empty { padding: var(--space-2) var(--space-6) var(--space-5); color: var(--muted); font-size: var(--text-xs); }
-.project-card-all { align-self: flex-start; margin: 0 0 var(--space-2) var(--space-3); border: 0; border-radius: var(--radius-sm); background: transparent; padding: var(--space-3) var(--space-5); color: var(--muted); font-size: var(--text-xs); font-weight: 500; transition: background var(--motion-fast), color var(--motion-fast); }
-.project-card-all:hover { background: var(--surface-raised); color: var(--fg-2); }
-.task-tile { display: flex; flex-direction: column; gap: var(--space-6); border: 0; border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-8); color: inherit; text-align: start; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
-.task-tile:hover { background: var(--border-soft); }
-.task-tile:active { transform: translateY(1px); }
-.task-tile-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-5); }
-.task-tile-name { overflow: hidden; color: var(--fg); font-size: var(--text-md); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.task-tile-count { flex: none; border-radius: var(--radius-pill); background: var(--surface-raised); padding: var(--space-1) var(--space-5); color: var(--fg-2); font-size: var(--text-2xs); font-weight: 600; font-variant-numeric: tabular-nums; }
-.task-tile-items { display: flex; flex-direction: column; gap: var(--space-3); }
-.task-tile-item { position: relative; overflow: hidden; padding-inline-start: var(--space-8); color: var(--fg-2); font-size: var(--text-sm); text-overflow: ellipsis; white-space: nowrap; }
-.task-tile-item::before { content: ''; position: absolute; top: 50%; inset-inline-start: 1px; width: 9px; height: 9px; margin-top: -4.5px; border-radius: var(--radius-pill); background: var(--muted); opacity: .5; }
-.task-tile-more { padding-inline-start: var(--space-8); color: var(--muted); font-size: var(--text-xs); }
-.task-tile-foot { display: flex; flex-direction: column; gap: var(--space-4); margin-top: auto; color: var(--muted); font-size: var(--text-xs); }
-.task-tile-bar { display: block; height: 4px; overflow: hidden; border-radius: var(--radius-pill); background: var(--surface-raised); }
-.task-tile-fill { display: block; height: 100%; border-radius: inherit; background: var(--success); }
-.work-head-actions { display: flex; align-items: center; gap: var(--space-6); }
+.work-card-meta { overflow: hidden; color: var(--muted); font: var(--text-xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.work-card-meta.gone { color: var(--warn); }
+.work-card-count { display: flex; align-items: center; gap: var(--space-3); color: var(--muted); font-size: var(--text-2xs); white-space: nowrap; }
+.work-open { color: var(--fg-2); font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
+.work-footer { display: flex; margin-top: var(--space-8); }
 .work-new { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); width: min(560px, 100%); }
 .work-input { min-width: 0; flex: 1 1 240px; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-5) var(--space-6); color: var(--fg); font: var(--text-sm) var(--font-mono); transition: box-shadow var(--motion-fast); }
 .work-input-name { flex: 0 1 180px; font-family: var(--font-body); }
@@ -1718,12 +1708,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .work-start-note { color: var(--muted); font-size: var(--text-xs); }
 .work-sessions { display: flex; flex-direction: column; }
 @media (max-width: 620px) {
-  .work-new { width: 100%; }
+  .work-new, .work-footer { width: 100%; }
   .work-input, .work-input-name { flex: 1 1 100%; }
   .work-actions { width: 100%; }
   .work-actions .button { flex: 1; }
   .work-rename { align-items: stretch; flex-direction: column; }
   .work-rename .field { max-width: none; }
+  .work-card { padding-inline: var(--space-6); }
+  .work-twist { width: 40px; }
 }
 
 /* The changes a project's folder holds, read from its own repository: one row per
@@ -2070,11 +2062,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    among, so its scoped rules never read as descending from their own base. */
 .page-header { padding-bottom: var(--space-7); }
 .page-header-back { margin-bottom: var(--space-6); }
-.page-header-main { display: flex; align-items: center; justify-content: space-between; gap: var(--space-9); }
-/* Every dashboard's bar is as tall as its control, so the title does not move between
-   the pages that carry an action and the ones that do not. Declared after the bar it
-   sizes, so the scoped rule never reads as descending from its own base. */
-.dashboard .page-header-main { min-height: var(--control-lg); }
+.page-header-main { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-9); }
 .page-header-text { min-width: 0; flex: 1; }
 .page-header-title { margin: 0; color: var(--fg); font-size: var(--text-xl); font-weight: 620; letter-spacing: -.01em; overflow-wrap: anywhere; }
 /* The state mark a routine's own page leads its title with, inline before the name. */
