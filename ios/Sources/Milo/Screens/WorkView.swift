@@ -44,7 +44,8 @@ struct WorkView: View {
                         root: true,
                         onRemoved: { self.opening = nil },
                         onChat: onChat,
-                        onSessions: onSessions
+                        onSessions: onSessions,
+                        onSwitch: { self.opening = $0 }
                     )
                     .id(opening)
                 }
@@ -63,7 +64,8 @@ struct WorkView: View {
                             root: false,
                             onRemoved: { path.removeAll { $0 == projectId } },
                             onChat: onChat,
-                            onSessions: onSessions
+                            onSessions: onSessions,
+                            onSwitch: { path = [$0] }
                         )
                     }
                 }
@@ -586,6 +588,9 @@ private struct ProjectDetail: View {
     let onChat: (Bool) -> Void
     /// Opening the sessions from the leading place of a page that is the whole of Work.
     let onSessions: () -> Void
+    /// Opening another project's page in this one's place — the title's own selector, so a
+    /// folder can be changed without going back to the index first.
+    let onSwitch: (String) -> Void
 
     @Environment(AppModel.self) private var model
     @State private var renaming = false
@@ -625,6 +630,59 @@ private struct ProjectDetail: View {
         model.sessions.filter { $0.project == projectId }.sorted { $0.updatedAt > $1.updatedAt }
     }
 
+    /// What ran here: the rows, or the line that says there is nothing yet and how a
+    /// session begins.
+    private var sessionsSection: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            Text("Sessions")
+                .font(MiloTheme.Text.title)
+                .foregroundStyle(MiloTheme.foreground)
+
+            if sessions.isEmpty {
+                Text("No sessions yet. Say something below to start one.")
+                    .font(MiloTheme.Text.small)
+                    .foregroundStyle(MiloTheme.muted)
+            } else {
+                VStack(spacing: MiloTheme.Space.two) {
+                    ForEach(sessions) { session in
+                        SessionRow(session: session, renaming: $renamingSession, onOpen: { open(session.id) })
+                    }
+                }
+            }
+        }
+    }
+
+    /// Saying the first thing is what starts the session: there is no button to press
+    /// first, and no separate screen to be sent to — the words begin the work. Offered
+    /// only where the folder can be worked in: a field that swallowed what was said into
+    /// a project that cannot run would be a control promising what it cannot do, and the
+    /// page above already says why.
+    private var composer: some View {
+        Composer(
+            draft: $draft,
+            quote: .constant(nil),
+            drafts: $drafts,
+            editing: .constant(nil),
+            focused: $composing,
+            menu: $menu,
+            send: { intent in start(saying: intent) },
+            // The same composer a work session carries, told which of the two it is
+            // and which folder the words will start a session in.
+            work: true,
+            role: .start,
+            project: project?.name,
+            startPlan: $planStart,
+            onModel: openModelPicker
+        )
+        // How tall the composer came out, so the `+`'s panel stands over the field
+        // rather than through it — the chat's own arrangement.
+        .onGeometryChange(for: CGFloat.self) { proxy in
+            proxy.size.height
+        } action: { _, height in
+            composerHeight = height
+        }
+    }
+
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: MiloTheme.Space.six) {
@@ -641,23 +699,7 @@ private struct ProjectDetail: View {
                         MiloErrorPill(text: error)
                     }
 
-                    VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-                        Text("Sessions")
-                            .font(MiloTheme.Text.title)
-                            .foregroundStyle(MiloTheme.foreground)
-
-                        if sessions.isEmpty {
-                            Text("No sessions yet. Say something below to start one.")
-                                .font(MiloTheme.Text.small)
-                                .foregroundStyle(MiloTheme.muted)
-                        } else {
-                            VStack(spacing: MiloTheme.Space.two) {
-                                ForEach(sessions) { session in
-                                    SessionRow(session: session, renaming: $renamingSession, onOpen: { open(session.id) })
-                                }
-                            }
-                        }
-                    }
+                    sessionsSection
 
                     // A folder that is gone has nothing to read, and the bar already says why.
                     if project.error == nil {
@@ -683,6 +725,11 @@ private struct ProjectDetail: View {
             .frame(maxWidth: .infinity)
         }
         .background(MiloTheme.background)
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            if project?.error == nil {
+                composer
+            }
+        }
         // The bar the stack already draws, carrying what it does not draw itself: the project
         // named with its folder, and the project's own actions. Pushed over the index, the way
         // back is the stack's own — the control it puts at the leading place, and the swipe from
@@ -696,22 +743,40 @@ private struct ProjectDetail: View {
         .toolbar {
             if root {
                 ToolbarItem(placement: .topBarLeading) {
-                    SessionsButton(action: onSessions)
+                    // The bar draws the glass: a control wearing its own under it is two
+                    // capsules for one button.
+                    SessionsButton(action: onSessions, inToolbar: true)
                 }
             }
             ToolbarItem(placement: .principal) {
-                // The project, named where a title goes: with the mark it wears and at the
-                // platform's own title weight, and said before anything has been written into it
-                // — which folder the work happens in is a fact of the project, not of its words.
-                HStack(spacing: MiloTheme.Space.two) {
-                    Image(systemName: ProjectMark.symbol(project?.icon))
-                        .font(.system(size: 13, weight: .semibold))
-                    Text(project?.name ?? projectId)
-                        .font(.headline)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                // The project, named where a title goes — and the selector for another: the
+                // name opens the folders this install holds, so changing which one a page is
+                // of does not send the person back to the index first.
+                Menu {
+                    ForEach(model.projects) { candidate in
+                        Button {
+                            if candidate.id != projectId { onSwitch(candidate.id) }
+                        } label: {
+                            Label(candidate.name, systemImage: ProjectMark.symbol(candidate.icon))
+                        }
+                    }
+                } label: {
+                    HStack(spacing: MiloTheme.Space.two) {
+                        Image(systemName: ProjectMark.symbol(project?.icon))
+                            .font(.system(size: 13, weight: .semibold))
+                        Text(project?.name ?? projectId)
+                            .font(.headline)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if model.projects.count > 1 {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(MiloTheme.muted)
+                        }
+                    }
+                    .foregroundStyle(project?.error == nil ? MiloTheme.foreground : MiloTheme.danger)
                 }
-                .foregroundStyle(project?.error == nil ? MiloTheme.foreground : MiloTheme.danger)
+                .disabled(model.projects.count < 2)
             }
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
@@ -735,38 +800,6 @@ private struct ProjectDetail: View {
                 .tint(MiloTheme.foreground)
                 .accessibilityLabel("Project actions")
                 .disabled(project == nil)
-            }
-        }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            // Saying the first thing is what starts the session: there is no button to press
-            // first, and no separate screen to be sent to — the words begin the work. Offered
-            // only where the folder can be worked in: a field that swallowed what was said into
-            // a project that cannot run would be a control promising what it cannot do, and the
-            // page above already says why.
-            if project?.error == nil {
-                Composer(
-                    draft: $draft,
-                    quote: .constant(nil),
-                    drafts: $drafts,
-                    editing: .constant(nil),
-                    focused: $composing,
-                    menu: $menu,
-                    send: { intent in start(saying: intent) },
-                    // The same composer a work session carries, told which of the two it is
-                    // and which folder the words will start a session in.
-                    work: true,
-                    role: .start,
-                    project: project?.name,
-                    startPlan: $planStart,
-                    onModel: openModelPicker
-                )
-                // How tall the composer came out, so the `+`'s panel stands over the field
-                // rather than through it — the chat's own arrangement.
-                .onGeometryChange(for: CGFloat.self) { proxy in
-                    proxy.size.height
-                } action: { _, height in
-                    composerHeight = height
-                }
             }
         }
         // The panel the `+` raised, and the layer that puts it away: a tap anywhere but the
@@ -1837,7 +1870,7 @@ private struct FolderPicker: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
                 }
-                ToolbarItem(placement: .primaryAction) {
+                ToolbarItem(placement: .topBarTrailing) {
                     Button {
                         folderDraft = ""
                         naming = true
@@ -1847,7 +1880,8 @@ private struct FolderPicker: View {
                     .accessibilityLabel("New folder")
                     .disabled(listing == nil || busy)
                 }
-                ToolbarItem(placement: .confirmationAction) {
+                ToolbarSpacer(.fixed, placement: .topBarTrailing)
+                ToolbarItem(placement: .topBarTrailing) {
                     Button("Use this folder") {
                         guard let path = listing?.path else { return }
                         onChoose(path)

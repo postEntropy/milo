@@ -198,19 +198,31 @@ struct SessionPeek: View {
  */
 struct SessionsButton: View {
     let action: () -> Void
+    /// Whether the platform's own bar already draws the control's surface. A toolbar item
+    /// sits inside the bar's glass, and a glass of its own under that is two capsules for
+    /// one button — so there the mark is drawn bare and the bar's material is what it wears.
+    var inToolbar = false
 
     var body: some View {
-        Button(action: action) {
-            Image(systemName: "line.3.horizontal")
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(MiloTheme.foreground)
-                .frame(width: 30, height: 30)
+        if inToolbar {
+            Button(action: action) { mark }
+                .tint(MiloTheme.foreground)
+                .accessibilityLabel("Sessions")
+        } else {
+            Button(action: action) { mark }
+                .buttonStyle(.glass)
+                .buttonBorderShape(.circle)
+                .controlSize(.regular)
+                .tint(MiloTheme.foreground)
+                .accessibilityLabel("Sessions")
         }
-        .buttonStyle(.glass)
-        .buttonBorderShape(.circle)
-        .controlSize(.regular)
-        .tint(MiloTheme.foreground)
-        .accessibilityLabel("Sessions")
+    }
+
+    private var mark: some View {
+        Image(systemName: "line.3.horizontal")
+            .font(.system(size: 20, weight: .semibold))
+            .foregroundStyle(MiloTheme.foreground)
+            .frame(width: 30, height: 30)
     }
 }
 
