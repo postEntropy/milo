@@ -6,13 +6,17 @@ import SwiftUI
  size of its own, so a new screen cannot invent a look the others do not have.
  */
 enum MiloTheme {
-    // Surfaces. The platform's own backgrounds for now, so the app reads as native;
-    // the warm palette the browser uses can return by changing these four lines.
+    // Surfaces. The platform's own backgrounds, so the app reads as native; the one tone the
+    // browser also draws on is spelled out below, and the rest can follow the same way.
     // The accent is a pointer, and everything the person presses is a filled
     // surface rather than an outline.
     static let background = Color(.systemBackground)
     static let surface = Color(.secondarySystemBackground)
-    static let surfaceWarm = Color(.tertiarySystemFill)
+    /// The ground code is read on — a fenced block, a tool's output, a diff of one. The
+    /// browser's own `--surface-warm`, because those boxes are read on both surfaces: a
+    /// translucent system fill is not a ground at all, it takes the tone of whatever stands
+    /// behind it.
+    static let surfaceWarm = Color.milo(light: 0xF2F2F4, dark: 0x161617)
     static let surfaceRaised = Color(.tertiarySystemBackground)
 
     /// What the travelling chat casts on the sessions behind it, at the seam where the
@@ -93,9 +97,11 @@ enum MiloTheme {
         static let base = Font.subheadline
         static let body = Font.body
         static let title = Font.title2.weight(.semibold)
-        /// The answer's code, a step under the body size: monospace sits larger at the same
-        /// one, so this is what reads level with the prose it sits between.
-        static let mono = Font.system(.subheadline, design: .monospaced)
+        /// The code every surface draws — a fenced block in a reply, a diff's line, a tool's
+        /// output, a file read back. Two steps under the body: monospace sets wider than the
+        /// reading face at the same size, and the box it is drawn in is the narrowest one on
+        /// the screen, so this is the step that reads level with the prose around it.
+        static let mono = Font.system(.footnote, design: .monospaced)
     }
 }
 
