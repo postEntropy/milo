@@ -126,6 +126,11 @@ struct ChatView: View {
     /// a plain reference, so a scroll that moves them does not re-render the screen.
     @State private var boxes = ScrollBoxes()
     @FocusState private var composing: Bool
+    /// Whether a fresh session is being opened. The words on screen until the daemon answers
+    /// are the session being left, so the bar's controls for that session — the new-session
+    /// and actions capsule — stand down in the tap's own frame rather than arriving with it
+    /// and disappearing a moment later, once the thread is cleared.
+    @State private var starting = false
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -387,6 +392,7 @@ struct ChatView: View {
             onClose: closeDrawer,
             onNewSession: startSessionFromDrawer,
             onNewProject: addProjectFromDrawer,
+            onNewWorkSession: startWorkSessionFromDrawer,
             onSettings: openSettingsFromDrawer,
             onRoutines: openRoutines,
             onTasks: openTasks,
@@ -603,10 +609,42 @@ struct ChatView: View {
         tasks = false
         workSelected = false
         work = false
+        // The drawer leaves in the tap's own update, as the Work side's control does, so the
+        // card is already coming back when the field takes the cursor.
+        drawer = false
         composing = true
+        starting = true
         Task { @MainActor in
-            drawer = false
             await model.newSession()
+            starting = false
+            composing = true
+        }
+    }
+
+    /// A work session from the drawer: the project was chosen in its own menu, and the chat
+    /// that opens works there — the same move the project's page makes, with the cursor
+    /// waiting in the field.
+    private func startWorkSessionFromDrawer(_ project: String) {
+        routinesSelected = false
+        routines = false
+        tasksSelected = false
+        tasks = false
+        workSelected = false
+        work = false
+        // The tap is the whole move: the drawer leaves and the card comes back over the chat
+        // in the same update, with the cursor already asked for — the keyboard rises with
+        // the card. Closing the drawer from a Task left a frame of the Work page standing
+        // under a keyboard that was on its way, and the page was pushed up before it went.
+        drawer = false
+        composing = true
+        starting = true
+        Task { @MainActor in
+            await model.startWorkSession(project: project)
+            starting = false
+            // A session is a new thread and a new id under the same field. Asking again
+            // once it has landed is what keeps the keyboard from folding and reopening
+            // under the words as they swap.
+            composing = true
         }
     }
 
@@ -1164,31 +1202,38 @@ struct ChatView: View {
                 // same control over its own top, so the way back to the sessions is one
                 // press away on either screen — see `SessionsButton`.
                 SessionsButton(action: openDrawer)
+                    // The bar's two ends are what share the room, and they share it equally,
+                    // so the name between them lands on the screen's own middle rather than
+                    // on the middle of the gap the controls leave — the right end holds two
+                    // controls and the left one, and that difference was the tilt.
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                 // Where this session works, said on a session that has not written anything yet
                 // too: which folder the work happens in is a fact of the session, not of its
                 // words. A project whose folder has gone says so rather than reading as workable.
                 if let project = model.sessionProject {
-                    HStack(spacing: MiloTheme.Space.two) {
-                        Image(systemName: ProjectMark.symbol(project.icon))
-                            .font(.system(size: 13, weight: .semibold))
-                        Text(project.name)
-                            .font(.headline)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+                    // Where the session works is also the way into that place: the name opens
+                    // the project's own page, the way it does in the browser, so the folder's
+                    // sessions, files and rules are one press from the chat working in it.
+                    Button { openPage(.work, project: project.id) } label: {
+                        HStack(spacing: MiloTheme.Space.two) {
+                            Image(systemName: ProjectMark.symbol(project.icon))
+                                .font(.system(size: 13, weight: .semibold))
+                            Text(project.name)
+                                .font(.headline)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .foregroundStyle(project.error == nil ? MiloTheme.foreground : MiloTheme.danger)
+                        .contentShape(Rectangle())
                     }
-                    .foregroundStyle(project.error == nil ? MiloTheme.foreground : MiloTheme.danger)
-                    // Everything the controls leave, and nothing more: the row itself is
-                    // what truncates the name, so there is no guessed share of the screen
-                    // and no padding standing in for a measured width.
-                    .frame(maxWidth: .infinity)
+                    .buttonStyle(.plain)
+                    // Its own width first, so the name keeps its room and the two ends give
+                    // way; only a name wider than the bar itself is truncated.
+                    .layoutPriority(1)
                     .accessibilityElement(children: .combine)
                     .accessibilityLabel(project.error == nil ? "Project: \(project.name)" : "Project: \(project.name), \(project.error ?? "")")
-                    // Read, not pressed: the controls beside it are what the bar is for, and
-                    // the name is not a control.
-                    .allowsHitTesting(false)
-                } else {
-                    Spacer(minLength: MiloTheme.Space.two)
+                    .accessibilityHint("Opens the project's page")
                 }
 
                 // Starting a new session and acting on this one: one surface holding both,
@@ -1197,59 +1242,76 @@ struct ChatView: View {
                 // by side are two surfaces however close they sit; the capsule is one, and
                 // each half keeps the size the platform's own control would have had —
                 // its 30pt glyph box with the house's 8pt around it. Both are offered only
-                // where there is a session to leave.
-                if !model.messages.isEmpty {
-                    HStack(spacing: 0) {
-                        Button {
-                            // Inside the tap that asked for it, before the session moves:
-                            // the cursor is in the field the press just opened, so the next
-                            // thing said is typed rather than looked for. The browser's own
-                            // new session takes focus the same way.
-                            composing = true
-                            Task { await model.newSession() }
-                        } label: {
-                            topGlyph("square.and.pencil")
-                                .frame(width: 46, height: 46)
-                        }
-                        .accessibilityLabel("New session")
+                // where there is a session to leave — and not while the next one is being
+                // opened, when the words below still belong to the session being left.
+                HStack(spacing: MiloTheme.Space.three) {
+                    if !model.messages.isEmpty, !starting {
+                        HStack(spacing: 0) {
+                            Button {
+                                // Inside the tap that asked for it, before the session moves:
+                                // the cursor is in the field the press just opened, so the next
+                                // thing said is typed rather than looked for. The browser's own
+                                // new session takes focus the same way. It starts in the world
+                                // the session in front works in — the same project from a work
+                                // session, because a chat cannot be where the next one belongs.
+                                composing = true
+                                starting = true
+                                Task { @MainActor in
+                                    if let project = model.sessionProject {
+                                        await model.startWorkSession(project: project.id)
+                                    } else {
+                                        await model.newSession()
+                                    }
+                                    starting = false
+                                    composing = true
+                                }
+                            } label: {
+                                topGlyph("square.and.pencil")
+                                    .frame(width: 46, height: 46)
+                            }
+                            .accessibilityLabel("New session")
 
-                        Menu {
-                            sessionActions(
-                                onRename: { renaming = model.sessionId },
-                                onExport: { Task { await model.export(model.sessionId) } },
-                                onCopy: { model.copyId(model.sessionId) },
-                                onClear: { Task { await model.clear() } },
-                                onDelete: { Task { await model.delete(model.sessionId) } }
-                            )
-                        } label: {
-                            topGlyph("ellipsis")
-                                .frame(width: 46, height: 46)
+                            Menu {
+                                sessionActions(
+                                    onRename: { renaming = model.sessionId },
+                                    onExport: { Task { await model.export(model.sessionId) } },
+                                    onCopy: { model.copyId(model.sessionId) },
+                                    onClear: { Task { await model.clear() } },
+                                    onDelete: { Task { await model.delete(model.sessionId) } }
+                                )
+                            } label: {
+                                topGlyph("ellipsis")
+                                    .frame(width: 46, height: 46)
+                            }
+                            .accessibilityLabel("Session actions")
                         }
-                        .accessibilityLabel("Session actions")
+                        .foregroundStyle(MiloTheme.foreground)
+                        .buttonStyle(PressableStyle())
+                        .glassEffect(.regular.interactive(), in: Capsule())
                     }
-                    .foregroundStyle(MiloTheme.foreground)
-                    .buttonStyle(PressableStyle())
-                    .glassEffect(.regular.interactive(), in: Capsule())
-                }
 
-                // The panel's own way back, offered only where there is something on it: a
-                // control that opens an empty pane is one that promises what it cannot do. The
-                // browser's topbar control, for the browser's own reason — and at the bar's
-                // trailing end, the side the panel itself comes in from, so the control sits
-                // where the thing it opens does.
-                if hasPanel {
-                    Button { model.panelOpen.toggle() } label: {
-                        Image(systemName: "sidebar.right")
-                            .font(.system(size: 19, weight: .semibold))
-                            .foregroundStyle(MiloTheme.foreground)
-                            .frame(width: 30, height: 30)
+                    // The panel's own way back, offered only where there is something on it: a
+                    // control that opens an empty pane is one that promises what it cannot do.
+                    // The browser's topbar control, for the browser's own reason — and at the
+                    // bar's trailing end, the side the panel itself comes in from, so the
+                    // control sits where the thing it opens does.
+                    if hasPanel {
+                        Button { model.panelOpen.toggle() } label: {
+                            Image(systemName: "sidebar.right")
+                                .font(.system(size: 19, weight: .semibold))
+                                .foregroundStyle(MiloTheme.foreground)
+                                .frame(width: 30, height: 30)
+                        }
+                        .buttonStyle(.glass)
+                        .buttonBorderShape(.circle)
+                        .controlSize(.regular)
+                        .tint(MiloTheme.foreground)
+                        .accessibilityLabel(model.panelOpen ? "Hide the panel" : "Show the panel")
                     }
-                    .buttonStyle(.glass)
-                    .buttonBorderShape(.circle)
-                    .controlSize(.regular)
-                    .tint(MiloTheme.foreground)
-                    .accessibilityLabel(model.panelOpen ? "Hide the panel" : "Show the panel")
                 }
+                // The other end of the same share: the leading control and this group give
+                // way by the same amount, which is what keeps the name on the middle.
+                .frame(maxWidth: .infinity, alignment: .trailing)
             }
             .frame(minHeight: 46)
             // The name gives way as the controls appear, and comes back as they go.

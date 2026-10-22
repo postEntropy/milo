@@ -15,6 +15,9 @@ struct SessionsDrawer: View {
     let onClose: () -> Void
     let onNewSession: () -> Void
     let onNewProject: () -> Void
+    /// A new session in a project, chosen in the Work side's own menu: a work session is the
+    /// ordinary chat working there, and it is started from here rather than from a page.
+    let onNewWorkSession: (String) -> Void
     let onSettings: () -> Void
     let onRoutines: () -> Void
     let onTasks: () -> Void
@@ -39,6 +42,9 @@ struct SessionsDrawer: View {
     /// to move while the drawer is open; chosen here rather than by the card because looking
     /// through the other list is not yet opening anything.
     @State private var workList = false
+    /// The footer's glass, named so the controls that stay keep their skin while the ones
+    /// that change melt into place — one material, not two that blink at each other.
+    @Namespace private var footerGlass
 
     var body: some View {
         HStack(spacing: 0) {
@@ -149,37 +155,85 @@ struct SessionsDrawer: View {
     private static let controlSpan: CGFloat = 44
     private static let controlsClearance = controlSpan + MiloTheme.Space.four + MiloTheme.Space.three
 
-    /// Starting a session and setting one up, at the drawer's own end. The label follows the
-    /// list: a chat starts from here, and a project does not — Work starts a session on a
-    /// project's page, so the way in from this side is adding the folder it would work in.
+    /// Starting a session and setting one up, at the drawer's own end. On the Chat side the
+    /// one act is a chat. On Work both live here: a new session, which asks which project
+    /// first — a work session works in one, and the menu is where it is chosen, with no
+    /// caret to spend the row's room on — and adding the folder, as a mark-only control
+    /// because its name is said on the page the press opens.
     /// New session states what it does in words — a disc with a mark on it would leave the
     /// mark to be read — and wears the accent as the glass's tint, in the tone the composer
     /// spends on the way to send; the way into the settings keeps the plain glass of a
     /// control that only goes somewhere, and the gear says that much on its own.
     private var controls: some View {
-        HStack(spacing: MiloTheme.Space.three) {
-            Button { workList ? onNewProject() : onNewSession() } label: {
-                HStack(spacing: MiloTheme.Space.two) {
-                    Image(systemName: workList ? "folder.badge.plus" : "square.and.pencil")
-                        .font(.system(size: 16, weight: .semibold))
-                    Text(workList ? "New project" : "New session")
-                        .font(MiloTheme.Text.base)
-                }
-                .foregroundStyle(MiloTheme.accentOn)
-                .padding(.horizontal, MiloTheme.Space.five)
-                .frame(height: Self.controlSpan)
-                .contentShape(Capsule())
-            }
-            .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
+        // One glass surface per control, held in the drawer's container, so switching sides
+        // morphs the strip rather than replacing it: the session keeps its capsule and the
+        // folder's skin melts out beside it, the way the platform's own glass rearranges.
+        GlassEffectContainer(spacing: MiloTheme.Space.three) {
+            HStack(spacing: MiloTheme.Space.three) {
+                if workList {
+                    if !startableProjects.isEmpty {
+                        Menu {
+                            ForEach(startableProjects) { project in
+                                Button {
+                                    onNewWorkSession(project.id)
+                                } label: {
+                                    Label(project.name, systemImage: ProjectMark.symbol(project.icon))
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: MiloTheme.Space.two) {
+                                Image(systemName: "plus")
+                                    .font(.system(size: 16, weight: .semibold))
+                                Text("New session")
+                                    .font(MiloTheme.Text.base)
+                            }
+                            .foregroundStyle(MiloTheme.accentOn)
+                            .padding(.horizontal, MiloTheme.Space.five)
+                            .frame(height: Self.controlSpan)
+                            .contentShape(Capsule())
+                        }
+                        .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
+                        .glassEffectID("new-session", in: footerGlass)
+                        .accessibilityLabel("New session in a project")
+                    }
 
-            Button { onSettings() } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(MiloTheme.foreground)
-                    .frame(width: Self.controlSpan, height: Self.controlSpan)
+                    Button { onNewProject() } label: {
+                        Image(systemName: "folder.badge.plus")
+                            .font(.system(size: 19, weight: .semibold))
+                            .foregroundStyle(MiloTheme.foreground)
+                            .frame(width: Self.controlSpan, height: Self.controlSpan)
+                    }
+                    .glassEffect(.regular.interactive(), in: Circle())
+                    .glassEffectID("new-project", in: footerGlass)
+                    .accessibilityLabel("New project")
+                } else {
+                    Button { onNewSession() } label: {
+                        HStack(spacing: MiloTheme.Space.two) {
+                            Image(systemName: "square.and.pencil")
+                                .font(.system(size: 16, weight: .semibold))
+                            Text("New session")
+                                .font(MiloTheme.Text.base)
+                        }
+                        .foregroundStyle(MiloTheme.accentOn)
+                        .padding(.horizontal, MiloTheme.Space.five)
+                        .frame(height: Self.controlSpan)
+                        .contentShape(Capsule())
+                    }
+                    .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
+                    .glassEffectID("new-session", in: footerGlass)
+                }
+
+                Button { onSettings() } label: {
+                    Image(systemName: "gearshape")
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(MiloTheme.foreground)
+                        .frame(width: Self.controlSpan, height: Self.controlSpan)
+                }
+                .glassEffect(.regular.interactive(), in: Circle())
+                .glassEffectID("settings", in: footerGlass)
+                .accessibilityLabel("Settings")
             }
-            .glassEffect(.regular.interactive(), in: Circle())
-            .accessibilityLabel("Settings")
+            .animation(.smooth(duration: 0.3), value: workList)
         }
         .padding(.trailing, MiloTheme.Space.four)
         .padding(.bottom, MiloTheme.Space.four)
@@ -241,6 +295,12 @@ struct SessionsDrawer: View {
     private var filtered: [SessionSummary] {
         guard searched else { return chats }
         return chats.filter { sessionMatches($0, query: text) }
+    }
+
+    /// The projects a session can start in: a folder that is gone is read on its page, and
+    /// is not offered here as a place to work.
+    private var startableProjects: [Project] {
+        model.projects.filter { $0.error == nil }
     }
 
     /// Whether there is anything for the search to narrow: nothing to find is no magnifier.
