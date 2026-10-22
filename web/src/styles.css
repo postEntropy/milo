@@ -249,7 +249,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-mode { display: flex; gap: var(--space-1); min-width: 0; margin: var(--space-6) var(--space-7) 0; border: 0; border-radius: var(--radius-pill); background: var(--surface); padding: var(--space-1); }
 .session-mode button { flex: 1; min-height: var(--control-sm); border: 0; border-radius: var(--radius-pill); background: transparent; padding: 0 var(--space-5); color: var(--muted); font-size: var(--text-xs); font-weight: 600; transition: background var(--motion-fast), color var(--motion-fast); }
 .session-mode button:hover { color: var(--fg-2); }
-.session-mode button.on { background: var(--surface-raised); color: var(--fg); }
+/* The chosen half is lifted off the track, not merely tinted into it: in the light theme
+   the two fills are a single step apart, and the shadow is what tells them apart. */
+.session-mode button.on { background: var(--surface-raised); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
 /* The Work side: a project's own name over the sessions it holds. The heading is a
    control that opens the project's page — a heading, not a card, because the list is
    one column and the mark already says which folder the rows work in. */
@@ -433,11 +435,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .app-shell.panel-open { grid-template-columns: 286px minmax(0, 1fr) var(--panel-width); }
   .app-shell.panel-open.sidebar-collapsed { grid-template-columns: 0 minmax(0, 1fr) var(--panel-width); }
 }
-.topbar-title { position: absolute; left: 50%; transform: translateX(-50%); text-align: center; max-width: min(520px, 60vw); pointer-events: none; }
+.topbar-title { position: absolute; left: 50%; transform: translateX(-50%); padding-top: var(--space-2); text-align: center; max-width: min(520px, 60vw); pointer-events: none; }
 .topbar-title h1 { overflow: hidden; font-size: var(--text-md); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
 /* The project's name over the session's: a control, so it takes a filled hover rather
    than reading as part of the title. The title itself stays see-through to the thread. */
-.topbar-project { display: inline-flex; align-items: center; gap: var(--space-2); max-width: 100%; margin-top: 1px; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 1px var(--space-3); color: var(--muted); font-size: var(--text-xs); font-family: inherit; pointer-events: auto; transition: background var(--motion-fast), color var(--motion-fast); }
+.topbar-project { display: inline-flex; align-items: center; gap: var(--space-2); max-width: 100%; margin-top: 1px; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 1px var(--space-3); color: var(--fg-2); font-size: var(--text-sm); font-family: inherit; pointer-events: auto; transition: background var(--motion-fast), color var(--motion-fast); }
 .topbar-project:hover, .topbar-project:focus-visible { background: var(--surface); color: var(--fg-2); }
 .topbar-project.gone { color: var(--danger); }
 .topbar-project span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
