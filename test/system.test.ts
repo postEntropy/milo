@@ -155,6 +155,21 @@ describe('buildSystemPrompt', () => {
     expect(DEFAULT_SYSTEM_PROMPT).toMatch(/one look, not an instrument/i)
   })
 
+  it('does not poll a background job it is told about when it ends', () => {
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/told when a job ends/i)
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/do not poll it/i)
+  })
+
+  it('prefers the dedicated tool to a shell command that does the same', () => {
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/dedicated tool over a shell command/i)
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/decorative separators/i)
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/independent calls go together/i)
+  })
+
+  it("treats a file it did not make as someone else's work", () => {
+    expect(DEFAULT_SYSTEM_PROMPT).toMatch(/someone else's work/i)
+  })
+
   it('names a private scratch space, kept out of the project', () => {
     const prompt = buildSystemPrompt({
       base: 'BASE',
@@ -291,6 +306,27 @@ describe('buildSystemPrompt', () => {
     expect(prompt).toContain('## Working in this project')
     expect(prompt).toContain('Read before you write')
     expect(prompt).toContain("run the project's own tests")
+  })
+
+  it('says the cause, resolves what varies, and keeps comments and tests honest', () => {
+    const prompt = buildSystemPrompt({
+      base: 'BASE',
+      cwd: '/home/me/milo',
+      provider: 'p',
+      model: 'm',
+      tools: [],
+      memories: [],
+      project: {
+        ok: true,
+        project: { id: 'calm-otter-7', name: 'milo', path: '/home/me/milo', createdAt: 0 },
+      },
+    })
+
+    expect(prompt).toMatch(/say what is wrong and why/i)
+    expect(prompt).toMatch(/read from where they enter/i)
+    expect(prompt).toMatch(/at the boundary that owns it/i)
+    expect(prompt).toMatch(/no narrative/i)
+    expect(prompt).toMatch(/never delete or loosen a test/i)
   })
 
   it('tells a planning turn to propose, and not to change anything', () => {
