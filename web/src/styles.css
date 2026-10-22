@@ -6,6 +6,10 @@
   /* One step above the plain surface: the controls that should stand off a warm
      panel, e.g. the sidebar's own action row. */
   --surface-raised: #FFFFFF;
+  /* The track a segmented control sits in. A fill of its own because the light theme has
+     none to borrow: the panel it stands on is `--surface-warm` and the step above that is
+     `--surface`, so a track drawn with either disappears into what it is drawn on. */
+  --track: #DDDDE2;
   --fg: #1C1C1E;
   --fg-2: #3A3A3C;
   --muted: #5A5A61;
@@ -123,6 +127,9 @@
   --surface: #1C1C1E;
   --surface-warm: #161617;
   --surface-raised: #2C2C2E;
+  /* The same role, already at the step this theme needs: it stands off `--surface-warm`
+     and still leaves `--surface-raised` room to read as the half in front. */
+  --track: #1C1C1E;
   --fg: #F2F2F3;
   --fg-2: #D1D1D6;
   --muted: #8E8E93;
@@ -246,11 +253,11 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    not a page beside Routines any more, it is the other half of this list, so the control
    that picks it belongs to the list and says whose it is. Filled like every control:
    a track, and the half in front raised inside it. */
-.session-mode { display: flex; gap: var(--space-1); min-width: 0; margin: var(--space-6) var(--space-7) 0; border: 0; border-radius: var(--radius-pill); background: var(--surface); padding: var(--space-1); }
+.session-mode { display: flex; gap: var(--space-1); min-width: 0; margin: var(--space-6) var(--space-7) 0; border: 0; border-radius: var(--radius-pill); background: var(--track); padding: var(--space-1); }
 .session-mode button { flex: 1; min-height: var(--control-sm); border: 0; border-radius: var(--radius-pill); background: transparent; padding: 0 var(--space-5); color: var(--muted); font-size: var(--text-xs); font-weight: 600; transition: background var(--motion-fast), color var(--motion-fast); }
 .session-mode button:hover { color: var(--fg-2); }
-/* The chosen half is lifted off the track, not merely tinted into it: in the light theme
-   the two fills are a single step apart, and the shadow is what tells them apart. */
+/* The chosen half is lifted off the track, not merely tinted into it: the track is what
+   gives the half in front something to stand off, and the shadow is what lifts it. */
 .session-mode button.on { background: var(--surface-raised); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
 /* The Work side: a project's own name over the sessions it holds. The heading is a
    control that opens the project's page — a heading, not a card, because the list is
