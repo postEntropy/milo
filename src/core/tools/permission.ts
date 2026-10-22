@@ -7,6 +7,7 @@ import {
   scanWriteTarget,
 } from './rules.js'
 import path from 'node:path'
+import { fileChange } from '../change.js'
 import { patchTargets } from './apply-patch.js'
 import { matchingRule, type RuleBook } from './rule-file.js'
 import { effectiveSegment, parseShell } from './shell-parse.js'
@@ -407,7 +408,8 @@ export function summarizeToolCall(args: unknown, tool?: string): string {
     if (typeof record.patch === 'string') {
       const files = patchTargets(record.patch)
       const named = files.length > 0 ? `Files: ${files.join(', ')}\n` : ''
-      return `Apply a patch\n${named}${preview(record.patch)}`
+      const counts = patchCounts(record.patch)
+      return `Apply a patch\n${named}${counts ? `${counts}\n` : ''}${preview(record.patch)}`
     }
     // Acting on one mail message: what is done, and to which one — a prompt that
     // does not say what it will touch is not a decision.
@@ -461,13 +463,35 @@ function writePreview(record: Record<string, unknown>): string | null {
     return `${target}\nNew content:\n${preview(record.content)}`
   }
   if (typeof record.old_string === 'string' && typeof record.new_string === 'string') {
-    return [
-      target,
-      `- ${preview(record.old_string)}`,
-      `+ ${preview(record.new_string)}`,
-    ].join('\n')
+    // The change itself, not the two arguments side by side: a snippet that shares
+    // most of its lines with the one replacing it reads as a rewrite when it is one
+    // edited line, and approving it means seeing which.
+    const change = fileChange(target, record.old_string, record.new_string)
+    const lines = change.lines.slice(0, PROMPT_DIFF_LINES).map((line) => {
+      const mark = line.kind === 'add' ? '+' : line.kind === 'remove' ? '-' : ' '
+      return `${mark} ${line.text}`
+    })
+    if (change.lines.length > PROMPT_DIFF_LINES) lines.push('…')
+    return [target, ...lines].join('\n')
   }
   return null
+}
+
+/** How much of a change a prompt shows: it sits under a question, not in a page. */
+const PROMPT_DIFF_LINES = 20
+
+/** The `+3 −1` a patch would come to, read from its own lines. */
+function patchCounts(patch: string): string {
+  let additions = 0
+  let deletions = 0
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('***')) continue
+    if (line.startsWith('+')) additions += 1
+    else if (line.startsWith('-')) deletions += 1
+  }
+  return [additions > 0 ? `+${additions}` : '', deletions > 0 ? `−${deletions}` : '']
+    .filter(Boolean)
+    .join(' ')
 }
 
 function preview(text: string): string {
