@@ -4,7 +4,8 @@ import { formatTokens } from '../lib/format.js'
 import { formatWhen, formatSeconds } from '../../../src/core/sessions/format.ts'
 import type { ActionRow, FrameAttachment, SessionCardItem, ThinkingDisplay, ToolMark, TranscriptMessage, TranscriptPart } from '@protocol'
 import { proseOf } from '@protocol'
-import { toolBrand, toolLabel, toolResultPreview } from '../../../src/gateways/tool-line.ts'
+import { toolBrand, toolLabel, toolResultPreview, changeTotals } from '../../../src/gateways/tool-line.ts'
+import type { FileChange } from '../../../src/core/change.ts'
 import { toolRows } from './tool-runs.js'
 import type { TodoItem, TodoStatus } from '../../../src/core/todos.ts'
 import { toolIconName } from '../ui/tool-icons.js'
@@ -78,6 +79,7 @@ function ToolLine({ tool }: { tool: ToolMark }) {
   // which is the honest reading rather than a guess at where the value starts.
   const name = toolLabel(tool.name, false)
   const value = tool.text.startsWith(name) ? tool.text.slice(name.length).trim() : ''
+  const totals = changeTotals(tool.change)
 
   return (
     <div className="tool-call">
@@ -86,6 +88,15 @@ function ToolLine({ tool }: { tool: ToolMark }) {
           <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />{' '}
           <span className="tool-name">{value ? name : tool.text}</span>
           {value && <span className="tool-value">{value}</span>}
+          {/* How much moved, in the same two tones the Work screen counts a folder's
+              changes with: the number is the call's footprint, and it is read before the
+              result is opened. */}
+          {(totals.additions > 0 || totals.deletions > 0) && (
+            <span className="tool-change-count">
+              {totals.additions > 0 && <span className="plus">+{totals.additions}</span>}
+              {totals.deletions > 0 && <span className="minus">−{totals.deletions}</span>}
+            </span>
+          )}
           {tool.state === 'failed' && <span className="tool-failed">failed</span>}
         </code>
         <button
@@ -99,7 +110,56 @@ function ToolLine({ tool }: { tool: ToolMark }) {
           {copied === 'failed' && <span className="message-tool-label">Copy failed</span>}
         </button>
       </div>
-      {tool.result && <ToolResult text={tool.result} />}
+      {/* A call that wrote shows what it wrote, in the lines themselves; the tool's
+          own sentence about it is the preview that stays in Copy raw. */}
+      {tool.change && tool.change.length > 0 ? (
+        <ToolChange files={tool.change} />
+      ) : (
+        tool.result && <ToolResult text={tool.result} />
+      )}
+    </div>
+  )
+}
+
+/**
+ * The lines a call changed, folded under it the way its result is. What a call wrote is
+ * the thing the person came to check — the numbers on the line say how much, and this is
+ * which lines. Green and red are the diff's own marking, the one place colour is data.
+ */
+function ToolChange({ files }: { files: FileChange[] }) {
+  const [open, setOpen] = useState(false)
+  const count = files.length === 1 ? '1 file changed' : `${files.length} files changed`
+  return (
+    <div className={`tool-result tool-change${open ? ' open' : ''}`}>
+      <button
+        className="tool-result-head"
+        type="button"
+        aria-expanded={open}
+        title={open ? 'Hide the change' : 'Show the change'}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Icon name="chevron" size={12} />
+        <span className="tool-result-preview">{count}</span>
+      </button>
+      {open && <div className="tool-change-body">
+        {files.map((file) => <div className="tool-change-file" key={file.path}>
+          {files.length > 1 && <div className="tool-change-path" title={file.path}>
+            {file.path}{file.created ? ' (new)' : file.deleted ? ' (deleted)' : ''}
+          </div>}
+          <div className="tool-change-lines">
+            {file.lines.map((line) => <div
+              className={`tool-change-line ${line.kind}`}
+              key={`${line.kind}:${line.old ?? ''}:${line.new ?? ''}`}
+            >
+              <span className="tool-change-num">{line.old ?? ''}</span>
+              <span className="tool-change-num">{line.new ?? ''}</span>
+              <span className="tool-change-mark">{line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : ' '}</span>
+              <span className="tool-change-text">{line.text === '' ? ' ' : line.text}</span>
+            </div>)}
+            {file.truncated && <div className="tool-change-more">…</div>}
+          </div>
+        </div>)}
+      </div>}
     </div>
   )
 }

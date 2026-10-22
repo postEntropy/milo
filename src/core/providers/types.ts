@@ -1,3 +1,5 @@
+import type { FileChange } from '../change.js'
+
 export type Role = 'system' | 'user' | 'assistant' | 'tool'
 
 export interface TextPart {
@@ -68,6 +70,12 @@ export interface ToolResultPart {
   isError?: boolean
   /** Pictures to show the model with this result. The wires inline them from disk. */
   images?: ImageRef[]
+  /**
+   * What the call changed in the files. Kept with the result so a session read
+   * back from disk draws the same change the live turn did; the wires send
+   * `content` to the model and ignore this.
+   */
+  change?: FileChange[]
 }
 
 /**

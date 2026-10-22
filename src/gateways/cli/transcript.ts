@@ -31,7 +31,7 @@ export interface Line {
 export type Item =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string }
-  | { kind: 'tool'; name: string; detail: string; ok: boolean }
+  | { kind: 'tool'; name: string; detail: string; ok: boolean; counts?: string }
   | { kind: 'error'; text: string }
   | { kind: 'info'; text: string }
   /**
@@ -116,7 +116,12 @@ export function buildLines(items: Item[], width: number): Line[] {
         // worth showing — no JSON dump, and nothing when there is nothing
         // (`/tools name`).
         const name = toolDisplayName(item.name)
-        const call = item.detail ? `${name} ${item.detail}` : name
+        // How much the call moved, in the same two tones the chat and browser count a
+        // write with. The terminal has no colour pair per segment, so the numbers ride
+        // the muted line they belong to.
+        const call = [item.detail ? `${name} ${item.detail}` : name, item.counts]
+          .filter(Boolean)
+          .join(' ')
         const head = item.ok ? toolIcon(item.name) : '✗'
         for (const text of wrapText(`${head} ${call}`, width)) {
           push(text, {

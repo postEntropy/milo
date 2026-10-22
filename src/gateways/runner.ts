@@ -7,7 +7,7 @@ import type { ChatSurface } from './surface.js'
 import type { AudioPart, ImagePart } from '../core/providers/types.js'
 import { prepareIncoming, type IncomingFile } from '../core/media.js'
 import { compactReply } from './commands.js'
-import { shellCommand, showsToolCall, toolLabel, toolLine } from './tool-line.js'
+import { changeCounts, shellCommand, showsToolCall, toolLabel, toolLine } from './tool-line.js'
 
 export interface RunTurnOptions {
   session: Session
@@ -224,12 +224,19 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
           }
           break
         }
-        case 'tool-end':
+        case 'tool-end': {
           // A failure is always reported: hiding it is worse than the noise.
           if (event.isError) {
             await appendLine(`❌ ${toolLabel(event.name, true)} failed`, 'tool')
+            break
           }
+          // A chat client has one line per call and no fold to open, so how much moved
+          // is said under the line rather than on it: the same counts the browser and
+          // the phone wear, at the same level — `name` asked for less than this.
+          const counts = display.tools === 'full' && showsToolCall(event.name) ? changeCounts(event.change) : ''
+          if (counts) await appendLine(counts, 'tool')
           break
+        }
         // The plan, drawn whole each time it changes. It is not a tool line, so
         // the display level does not hide it — the person watching a long turn
         // wants to see it whatever the tool lines are set to.

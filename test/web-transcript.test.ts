@@ -252,6 +252,24 @@ describe('transcriptOf — the second copy, without the tool output', () => {
     expect(message?.rawNoOutput).not.toContain('ok')
   })
 
+  it('reads a write back with the lines it changed, at the level that draws them', () => {
+    const change = [{
+      path: 'a.ts',
+      additions: 1,
+      deletions: 1,
+      lines: [{ kind: 'add' as const, text: 'const b = 3', new: 2 }],
+    }]
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'edit' }] },
+      { role: 'assistant', content: [{ type: 'tool-call', id: 'c1', name: 'edit_file', args: { path: 'a.ts' } }] },
+      { role: 'tool', content: [{ type: 'tool-result', id: 'c1', name: 'edit_file', content: 'Edited a.ts', change }] },
+    ]
+
+    expect(toolParts(messages)[0]).toMatchObject({ tool: { change } })
+    // `name` asked for the line alone, so the change is withheld with the result.
+    expect(toolParts(messages, 'name')[0]).not.toMatchObject({ tool: { change } })
+  })
+
   it('leaves the no-output copy off when it would read as the whole one', () => {
     const messages: Message[] = [
       { role: 'user', content: [{ type: 'text', text: 'look' }] },

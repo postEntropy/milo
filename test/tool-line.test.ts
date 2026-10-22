@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isExternalTool, toolBrand, toolDisplayName, toolDraw, toolIcon, toolLine, toolResult, toolResultPreview, toolText } from '../src/gateways/tool-line.js'
+import { changeCounts, isExternalTool, toolBrand, toolDisplayName, toolDraw, toolIcon, toolLine, toolResult, toolResultPreview, toolText } from '../src/gateways/tool-line.js'
 
 describe('toolLine', () => {
   it('shows a shell command like any other tool, with the command beside it', () => {
@@ -207,5 +207,15 @@ describe('a tool from an external server', () => {
 
   it('splits at the delimiter even when the tool’s own name carries underscores', () => {
     expect(toolDisplayName('mcp__srv__a__b')).toBe('srv: a__b')
+  })
+
+  it('counts a change in one line, and says nothing when nothing moved', () => {
+    const file = (additions: number, deletions: number) => ({ path: 'a.ts', additions, deletions, lines: [] })
+    expect(changeCounts([file(3, 1)])).toBe('+3 −1')
+    expect(changeCounts([file(0, 2)])).toBe('−2')
+    expect(changeCounts([file(4, 0)])).toBe('+4')
+    expect(changeCounts([file(0, 0)])).toBe('')
+    expect(changeCounts(undefined)).toBe('')
+    expect(changeCounts([file(1, 1), file(2, 3)])).toBe('+3 −4')
   })
 })

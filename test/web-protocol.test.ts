@@ -74,6 +74,25 @@ describe('web protocol', () => {
     ])
   })
 
+  it('carries a change at the level that draws it, and withholds it below', () => {
+    const change = [{ path: 'a.ts', additions: 1, deletions: 1, lines: [] }]
+    output.length = 0
+    displayEvent(
+      { type: 'tool-end', id: '1', name: 'edit_file', result: 'Edited a.ts', isError: false, change },
+      'turn',
+      { tools: 'full', thinking: 'expanded' },
+      send as never,
+    )
+    displayEvent(
+      { type: 'tool-end', id: '2', name: 'edit_file', result: 'Edited a.ts', isError: false, change },
+      'turn',
+      { tools: 'name', thinking: 'expanded' },
+      send as never,
+    )
+    expect(output[0]).toMatchObject({ event: { type: 'tool-end', change } })
+    expect(output[1]).toMatchObject({ event: { type: 'tool-end', change: undefined } })
+  })
+
   it('keeps failures visible when tool lines are hidden', () => {
     output.length = 0
     displayEvent({ type: 'tool-start', id: '1', name: 'write_file', args: { path: 'a.txt' } }, 'turn', { tools: 'off', thinking: 'expanded' }, send as never)

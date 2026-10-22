@@ -1,3 +1,4 @@
+import type { FileChange } from '../../core/change.js'
 import type { OutgoingFile } from '../../core/outgoing.js'
 import { genUiFromArgs } from '../../core/genui.js'
 import { GenUiFence } from '../../core/genui-fence.js'
@@ -40,11 +41,17 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
   // call, so every outcome is gathered before anything is drawn: a line that cannot
   // say it failed is a line that lies — and the result is kept with it for the detail
   // under the line.
-  const outcomes = new Map<string, { failed: boolean; result: string }>()
+  const outcomes = new Map<string, { failed: boolean; result: string; change?: FileChange[] }>()
   for (const message of messages) {
     if (message.role !== 'tool') continue
     for (const part of message.content) {
-      if (part.type === 'tool-result') outcomes.set(part.id, { failed: part.isError === true, result: part.content })
+      if (part.type === 'tool-result') {
+        outcomes.set(part.id, {
+          failed: part.isError === true,
+          result: part.content,
+          ...(part.change && part.change.length > 0 ? { change: part.change } : {}),
+        })
+      }
     }
   }
 
@@ -53,11 +60,16 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
    * result is offered only at `full`: below it the line is the name alone, and a detail
    * under a name the person asked to keep short is the level not being honoured.
    */
-  const endingOf = (id: string): { state?: ToolState; result?: string } => {
+  const endingOf = (id: string): { state?: ToolState; result?: string; change?: FileChange[] } => {
     const outcome = outcomes.get(id)
     if (!outcome) return {}
     const result = level === 'full' ? toolResult(outcome.result) : ''
-    return { state: outcome.failed ? 'failed' : 'done', ...(result ? { result } : {}) }
+    const change = level === 'full' ? outcome.change : undefined
+    return {
+      state: outcome.failed ? 'failed' : 'done',
+      ...(result ? { result } : {}),
+      ...(change ? { change } : {}),
+    }
   }
 
   /**

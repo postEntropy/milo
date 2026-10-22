@@ -665,7 +665,7 @@ struct ToolRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
-            if let result = tool.result, !result.isEmpty {
+            if hasDetail {
                 Button {
                     withAnimation(.easeInOut(duration: 0.22)) { showingResult.toggle() }
                 } label: {
@@ -674,9 +674,12 @@ struct ToolRow: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressableStyle())
-                .accessibilityLabel(showingResult ? "Hide the tool result" : "Show the tool result")
+                .accessibilityLabel(showingResult ? detailHiddenLabel : detailLabel)
 
-                if showingResult { resultBody(result) }
+                if showingResult {
+                    if let change = tool.change, !change.isEmpty { changeBody(change) }
+                    else if let result = tool.result { resultBody(result) }
+                }
             } else {
                 line
             }
@@ -715,11 +718,72 @@ struct ToolRow: View {
                         .lineLimit(1)
                         .truncationMode(.middle)
                 }
+                // How much the call moved, in the same two tones the Work screen counts a
+                // folder's changes with: read on the line, before the fold is opened.
+                if totals.additions > 0 || totals.deletions > 0 {
+                    HStack(spacing: MiloTheme.Space.one) {
+                        if totals.additions > 0 {
+                            Text("+\(totals.additions)").foregroundStyle(MiloTheme.success)
+                        }
+                        if totals.deletions > 0 {
+                            Text("−\(totals.deletions)").foregroundStyle(MiloTheme.danger)
+                        }
+                    }
+                    .font(MiloTheme.Text.meta.monospacedDigit())
+                }
             }
             if failed {
                 Text("failed").font(MiloTheme.Text.meta).foregroundStyle(MiloTheme.danger)
             }
         }
+    }
+
+    /// The lines the call changed, once it is pressed: marked the way the Work screen marks
+    /// a folder's changes — added green, removed red, both numbers in the gutter — so what
+    /// the call did is read here rather than inferred from the sentence it returned.
+    private func changeBody(_ files: [FileChange]) -> some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                ForEach(Array(files.enumerated()), id: \.offset) { _, file in
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                        if files.count > 1 {
+                            Text(file.path + (file.created == true ? " (new)" : file.deleted == true ? " (deleted)" : ""))
+                                .font(MiloTheme.Text.meta)
+                                .foregroundStyle(MiloTheme.muted)
+                        }
+                        ForEach(Array(file.lines.enumerated()), id: \.offset) { _, line in
+                            HStack(spacing: MiloTheme.Space.two) {
+                                Text(line.old.map(String.init) ?? "")
+                                    .frame(width: 26, alignment: .trailing)
+                                    .foregroundStyle(MiloTheme.muted)
+                                Text(line.new.map(String.init) ?? "")
+                                    .frame(width: 26, alignment: .trailing)
+                                    .foregroundStyle(MiloTheme.muted)
+                                Text(line.kind == "add" ? "+" : line.kind == "remove" ? "−" : " ")
+                                    .foregroundStyle(line.kind == "add"
+                                        ? MiloTheme.success
+                                        : line.kind == "remove" ? MiloTheme.danger : MiloTheme.muted)
+                                Text(line.text.isEmpty ? " " : line.text)
+                                    .foregroundStyle(MiloTheme.foreground2)
+                            }
+                            .font(MiloTheme.Text.mono)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(line.kind == "add"
+                                ? MiloTheme.success.opacity(0.18)
+                                : line.kind == "remove" ? MiloTheme.danger.opacity(0.15) : Color.clear)
+                        }
+                        if file.truncated == true {
+                            Text("…").font(MiloTheme.Text.mono).foregroundStyle(MiloTheme.muted)
+                        }
+                    }
+                }
+            }
+            .padding(MiloTheme.Space.three)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+        .marksScrollBox()
+        .padding(.leading, 22)
     }
 
     /// What the call came back with, whole, once the call is pressed: set past the mark's
@@ -737,6 +801,32 @@ struct ToolRow: View {
         .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
         .marksScrollBox()
         .padding(.leading, 22)
+    }
+
+    /// Whether there is anything under the call to open: the lines it changed, or what it
+    /// came back with. A call that wrote draws the change, because the sentence the tool
+    /// returned about it says less than the lines do.
+    private var hasDetail: Bool {
+        if let change = tool.change, !change.isEmpty { return true }
+        return !(tool.result?.isEmpty ?? true)
+    }
+
+    private var detailLabel: String {
+        tool.change?.isEmpty == false ? "Show the change" : "Show the tool result"
+    }
+
+    private var detailHiddenLabel: String {
+        tool.change?.isEmpty == false ? "Hide the change" : "Hide the tool result"
+    }
+
+    private var totals: (additions: Int, deletions: Int) {
+        var additions = 0
+        var deletions = 0
+        for file in tool.change ?? [] {
+            additions += file.additions
+            deletions += file.deletions
+        }
+        return (additions, deletions)
     }
 
     /// The whole line, for the sweep to travel along: the name and its value in one

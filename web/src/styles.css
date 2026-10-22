@@ -619,6 +619,27 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tool-result-preview { overflow: hidden; flex: 1; min-width: 0; white-space: nowrap; text-overflow: ellipsis; }
 .tool-result-body { margin: var(--space-3) 0 0; overflow: auto; max-height: 320px; border-radius: var(--radius-md); background: var(--surface-warm); padding: var(--space-4) var(--space-5); color: var(--fg-2); font: 400 var(--text-xs)/1.6 var(--font-mono); white-space: pre; }
 
+/* ── what a call changed ──────────────────────────────────────────────────────
+   The lines themselves, under the call that wrote them, marked the way the Work
+   screen marks a folder's changes: green for what arrived, red for what left, both
+   gutters for finding the line in the file. It hangs on the result's indent and
+   opens the same way, so a call is read once and then looked into. */
+.tool-change-count { display: flex; flex: none; gap: var(--space-2); font-variant-numeric: tabular-nums; }
+.tool-change-count .plus { color: var(--success); }
+.tool-change-count .minus { color: var(--danger); }
+.tool-change-body { margin-top: var(--space-3); overflow: auto; max-height: 320px; border-radius: var(--radius-md); background: var(--surface-warm); padding: var(--space-4) var(--space-5); }
+.tool-change-file + .tool-change-file { margin-top: var(--space-5); }
+.tool-change-path { margin-bottom: var(--space-2); overflow: hidden; color: var(--muted); font: 500 var(--text-2xs) var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.tool-change-line { display: grid; grid-template-columns: 3.5ch 3.5ch 1.5ch minmax(0, 1fr); gap: var(--space-4); color: var(--fg-2); font: 400 var(--text-xs)/1.6 var(--font-mono); }
+.tool-change-line.add { background: color-mix(in oklab, var(--success) 20%, transparent); }
+.tool-change-line.remove { background: color-mix(in oklab, var(--danger) 17%, transparent); }
+.tool-change-num { color: var(--muted); text-align: end; }
+.tool-change-mark { color: var(--muted); }
+.tool-change-line.add .tool-change-mark { color: var(--success); }
+.tool-change-line.remove .tool-change-mark { color: var(--danger); }
+.tool-change-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.tool-change-more { color: var(--muted); font: var(--text-xs) var(--font-mono); }
+
 /* ── a run of calls, drawn as one sequence ────────────────────────────────────
    Calls made one after another are steps of one thing, so a thread joins their dots.
    The thread is the one line in the product that is allowed: without it the dots would

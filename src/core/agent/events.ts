@@ -1,3 +1,4 @@
+import type { FileChange } from '../change.js'
 import type { GenUiRender } from '../genui.js'
 import type { PanelRequest } from '../panel.js'
 import type { TodoItem } from '../todos.js'
@@ -7,7 +8,19 @@ export type AgentEvent =
   | { type: 'text-delta'; delta: string }
   | { type: 'reasoning-delta'; delta: string }
   | { type: 'tool-start'; id: string; name: string; args: unknown }
-  | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean }
+  | {
+      type: 'tool-end'
+      id: string
+      name: string
+      result: string
+      isError: boolean
+      /**
+       * What the call changed, when it wrote a file. Display state the tool alone
+       * knows — it is turned into the surface's own change and never into the
+       * transcript sent back to the model, which gets `result` and nothing else.
+       */
+      change?: FileChange[]
+    }
   /**
    * The plan the turn is keeping changed. A surface draws the whole list from
    * this; it is never part of the transcript sent back to the model, because the

@@ -1,5 +1,6 @@
 import { readFile, stat } from 'node:fs/promises'
 import { z } from 'zod'
+import { changeReported, fileChange } from '../change.js'
 import { errorMessage } from '../../util/errors.js'
 import { writeFileAtomic } from '../../util/fs.js'
 import type { Tool } from './types.js'
@@ -76,10 +77,18 @@ export const editFileTool: Tool<EditFileArgs> = {
       return { content: `Failed to write ${shown}: ${errorMessage(error)}`, isError: true }
     }
 
+    const change = fileChange(shown, content, updated)
+    const reported = changeReported(change) ? { change: [change] } : {}
     if (args.replace_all) {
-      return { content: `Edited ${shown} — replaced ${occurrences} occurrence(s).` }
+      return {
+        content: `Edited ${shown} — replaced ${occurrences} occurrence(s).`,
+        ...reported,
+      }
     }
     const line = content.slice(0, content.indexOf(args.old_string)).split('\n').length
-    return { content: `Edited ${shown} — replaced 1 occurrence at line ${line}.` }
+    return {
+      content: `Edited ${shown} — replaced 1 occurrence at line ${line}.`,
+      ...reported,
+    }
   },
 }

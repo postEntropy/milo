@@ -396,6 +396,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
           name: call.name,
           result: result.content,
           isError: Boolean(result.isError),
+          ...(result.change && result.change.length > 0 ? { change: result.change } : {}),
         }
         // Said whether or not the call reported a failure: a command that exits nonzero
         // has usually written some of what it was doing, and a screen left showing the
@@ -431,6 +432,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
               content: result.content,
               isError: result.isError,
               ...(images.length > 0 ? { images } : {}),
+              ...(result.change && result.change.length > 0 ? { change: result.change } : {}),
             },
           ],
         })

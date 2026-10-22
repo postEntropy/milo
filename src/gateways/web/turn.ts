@@ -30,7 +30,8 @@ export function displayEvent(event: AgentEvent, turnId: string, display: Display
     // all. Empty rather than absent, because the event's own shape carries a string — the
     // surfaces read an empty result as "draw nothing".
     const result = display.tools === 'full' ? toolResult(event.result) : ''
-    send({ type: 'event', turnId, event: { ...event, result } })
+    const change = display.tools === 'full' ? event.change : undefined
+    send({ type: 'event', turnId, event: { ...event, result, change } })
     return
   }
   // A thought always rides, whatever the display: `collapsed` draws it folded, and

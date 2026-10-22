@@ -3,6 +3,7 @@ import type { Idea } from '../../core/ideas.js'
 import type { PanelRequest } from '../../core/panel.js'
 import type { ProjectView } from '../../core/projects.js'
 import type { TodoItem } from '../../core/todos.js'
+import type { FileChange } from '../../core/change.js'
 import type { VerificationResult } from '../../core/verification.js'
 import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
 import type { CommandEntry } from '../command-catalog.js'
@@ -66,7 +67,7 @@ export type AgentEvent =
   | { type: 'text-delta'; delta: string }
   | { type: 'reasoning-delta'; delta: string }
   | { type: 'tool-start'; id: string; name: string; args: unknown; text?: string }
-  | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean }
+  | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean; change?: FileChange[] }
   | { type: 'todo'; items: TodoItem[] }
   | { type: 'panel'; request: PanelRequest }
   | { type: 'ui'; render: GenUiRender; draft?: boolean }
@@ -288,6 +289,12 @@ export interface ToolMark {
    * result that was only whitespace); the whole of it stays in the turn's raw copy.
    */
   result?: string
+  /**
+   * What the call changed in the files, for the detail under its line: the same
+   * gate as `result` — a level below `full` asked for less than this. Absent
+   * where the call wrote nothing.
+   */
+  change?: FileChange[]
 }
 
 /** One piece of a turn as the page draws it, in the order it happened. */

@@ -43,6 +43,7 @@ describe('apply_patch', () => {
     expect(result.isError).toBeUndefined()
     expect(readFileSync(path.join(cwd, 'a.txt'), 'utf8')).toBe('one\nTWO\nthree\n')
     expect(result.content).toContain('a.txt: 1 hunk(s) applied')
+    expect(result.change?.[0]).toMatchObject({ path: 'a.txt', additions: 1, deletions: 1 })
   })
 
   it('applies hunks to the same file in order', async () => {

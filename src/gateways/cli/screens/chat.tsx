@@ -39,7 +39,8 @@ import {
 import { isCtrlC, isSteerKey } from '../keys.js'
 import { readInputHistory, saveInputHistory } from '../input-history.js'
 import { theme, type ThemeColor } from '../theme.js'
-import { showsToolCall, toolDetail, toolDisplayName } from '../../tool-line.js'
+import { changeCounts, showsToolCall, toolDetail, toolDisplayName } from '../../tool-line.js'
+import type { FileChange } from '../../../core/change.js'
 import { buildLines, padToBottom, visibleWindow, type Item, type Line } from '../transcript.js'
 import { useElapsed } from '../use-elapsed.js'
 import { useTerminalSize } from '../use-terminal-size.js'
@@ -658,7 +659,7 @@ export function ChatScreen({
             setToolName(name)
             setPhase('tool')
           },
-          onToolEnd: (name, isError) => {
+          onToolEnd: (name, isError, change) => {
             // A failure is always shown, even with tools off.
             if ((display.tools !== 'off' && showsToolCall(name)) || isError) {
               push({
@@ -666,6 +667,7 @@ export function ChatScreen({
                 name,
                 detail: display.tools === 'name' ? '' : toolDetail(toolArgsRef.current),
                 ok: !isError,
+                counts: display.tools === 'full' ? changeCounts(change) : '',
               })
             }
             setToolName('')
@@ -1094,7 +1096,7 @@ interface EventHandlers {
   onText: (delta: string) => void
   onReasoning: (delta: string) => void
   onToolStart: (name: string, args: unknown) => void
-  onToolEnd: (name: string, isError: boolean) => void
+  onToolEnd: (name: string, isError: boolean, change?: FileChange[]) => void
   /** The plan the model is keeping, in full, each time it changes. */
   onTodo: (items: TodoItem[]) => void
   /** The project's checks, after a turn that wrote. */
@@ -1128,7 +1130,7 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
       handlers.onToolStart(event.name, event.args)
       break
     case 'tool-end':
-      handlers.onToolEnd(event.name, event.isError)
+      handlers.onToolEnd(event.name, event.isError, event.change)
       break
     case 'todo':
       handlers.onTodo(event.items)

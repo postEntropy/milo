@@ -119,6 +119,31 @@ struct ToolMark: Decodable, Hashable {
     /// sends it empty. Capped on the server, so what is folded and what is opened are one
     /// reading; the whole of it is in the turn's raw copy.
     var result: String?
+    /// What the call changed in the files, for the lines under the call. The server
+    /// computes it where the write happens, so a `replace_all` knows every place it
+    /// landed; a level below `full` withholds it with the result.
+    var change: [FileChange]?
+}
+
+/// One line of a change: the number it had, the number it has, and whether it arrived,
+/// left, or stayed as context.
+struct ChangeLine: Decodable, Hashable {
+    let kind: String
+    let text: String
+    let old: Int?
+    let new: Int?
+}
+
+/// What one call did to one file, with the counts the line wears and the lines the fold
+/// opens onto. `truncated` means the body was cut; the counts still count it whole.
+struct FileChange: Decodable, Hashable {
+    let path: String
+    let additions: Int
+    let deletions: Int
+    let created: Bool?
+    let deleted: Bool?
+    let lines: [ChangeLine]
+    let truncated: Bool?
 }
 
 struct FrameAttachment: Decodable, Identifiable, Hashable {
@@ -325,7 +350,7 @@ enum AgentEvent: Decodable {
     case textDelta(String)
     case reasoningDelta(String)
     case toolStart(id: String, name: String, text: String?)
-    case toolEnd(id: String, name: String, isError: Bool, result: String?)
+    case toolEnd(id: String, name: String, isError: Bool, result: String?, change: [FileChange]?)
     case todo([TodoItem])
     /// The project's checks after a turn that wrote. The words are the core's, so
     /// the phone says what the browser and the terminal say.
@@ -350,7 +375,7 @@ enum AgentEvent: Decodable {
     case other
 
     private enum CodingKeys: String, CodingKey {
-        case type, delta, id, name, isError, items, message, render, draft, text, finishReason, result, ok
+        case type, delta, id, name, isError, items, message, render, draft, text, finishReason, result, ok, change
         case inputTokens, outputTokens, ms, added, removed, compacted
         case folded, tokens, summarized
     }
@@ -377,7 +402,8 @@ enum AgentEvent: Decodable {
                 id: read(.id, ""),
                 name: read(.name, ""),
                 isError: read(.isError, false),
-                result: readText(.result)
+                result: readText(.result),
+                change: (try? container.decodeIfPresent([FileChange].self, forKey: .change)) ?? nil
             )
         case "todo": self = .todo(read(.items, []))
         case "verification": self = .verification(text: readText(.text) ?? "", ok: read(.ok, false))

@@ -2102,7 +2102,7 @@ final class AppModel {
                 message.waiting = false
                 message.parts.append(.tool(ToolMark(name: name, text: text ?? name, state: "running")))
             }
-        case .toolEnd(_, let name, let isError, let result):
+        case .toolEnd(_, let name, let isError, let result, let change):
             mutateLast { parts in
                 let index = parts.lastIndex { part in
                     if case .tool(let tool) = part { return tool.state == "running" && tool.name == name }
@@ -2113,6 +2113,7 @@ final class AppModel {
                 // Empty below `full`, where the server withholds it: an empty result draws
                 // nothing, so only a real one is kept.
                 if let result, !result.isEmpty { tool.result = result }
+                if let change, !change.isEmpty { tool.change = change }
                 parts[index] = .tool(tool)
             }
             // The result is in, so the model is thinking again about what to do with it:

@@ -30,6 +30,7 @@ describe('write_file', () => {
     expect(result.isError).toBeFalsy()
     expect(result.content).toContain('Created src/deep/a.ts')
     expect(result.content).toContain('1 line(s)')
+    expect(result.change?.[0]).toMatchObject({ path: 'src/deep/a.ts', additions: 1, deletions: 0, created: true })
     expect(read(root, 'src/deep/a.ts')).toBe('const a = 1\n')
   })
 
@@ -70,6 +71,17 @@ describe('write_file', () => {
 
     expect(result.content).toContain('Created a.txt')
     expect(read(root, 'a.txt')).toBe('x')
+  })
+
+  it('reports no change when the file already held the same text', async () => {
+    const { root } = build({ 'a.txt': 'same\n' })
+
+    const result = await writeFileTool.execute({ path: 'a.txt', content: 'same\n' }, ctxFor(root))
+
+    expect(result.isError).toBeFalsy()
+    // A surface that says "1 file changed" over an empty fold says something that
+    // did not happen.
+    expect(result.change).toBeUndefined()
   })
 
   it('refuses a directory target', async () => {

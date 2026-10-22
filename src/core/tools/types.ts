@@ -1,4 +1,5 @@
 import type { z } from 'zod'
+import type { FileChange } from '../change.js'
 import type { JobManager } from '../jobs/index.js'
 import type { MemoryInput, MemoryItem, MemoryScope } from '../memory/types.js'
 import type { OutgoingFile } from '../outgoing.js'
@@ -160,6 +161,12 @@ export interface ToolResult {
    */
   blocked?: boolean
   images?: ToolImage[]
+  /**
+   * What this call changed in the files, when it wrote something. Display state,
+   * like `todos`: the tool knows the file before and after, and no surface can
+   * recover that from the arguments. It never goes back to the model.
+   */
+  change?: FileChange[]
   /**
    * A plan the turn is keeping, when the tool is one that sets one. Not written
    * into the transcript by the loop — it is display state, turned into an event

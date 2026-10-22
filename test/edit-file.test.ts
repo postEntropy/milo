@@ -29,6 +29,33 @@ describe('edit_file', () => {
     expect(read(root, 'a.ts')).toBe('const a = 1\nconst b = 3\n')
   })
 
+  it('hands the surface the lines it changed', async () => {
+    const { root } = build({ 'a.ts': 'const a = 1\nconst b = 2\n' })
+
+    const result = await editFileTool.execute(
+      { path: 'a.ts', old_string: 'const b = 2', new_string: 'const b = 3' },
+      ctxFor(root),
+    )
+
+    expect(result.change).toEqual([expect.objectContaining({ path: 'a.ts', additions: 1, deletions: 1 })])
+    expect(result.change?.[0]?.lines).toEqual([
+      { kind: 'context', text: 'const a = 1', old: 1, new: 1 },
+      { kind: 'remove', text: 'const b = 2', old: 2 },
+      { kind: 'add', text: 'const b = 3', new: 2 },
+    ])
+  })
+
+  it('counts every place a replace_all landed', async () => {
+    const { root } = build({ 'a.ts': 'old\nx\nold\n' })
+
+    const result = await editFileTool.execute(
+      { path: 'a.ts', old_string: 'old', new_string: 'new', replace_all: true },
+      ctxFor(root),
+    )
+
+    expect(result.change?.[0]).toMatchObject({ additions: 2, deletions: 2 })
+  })
+
   it('reports the line the replacement landed on', async () => {
     const { root } = build({ 'a.ts': 'one\ntwo\nTARGET\nfour\n' })
 

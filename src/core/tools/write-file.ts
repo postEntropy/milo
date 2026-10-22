@@ -1,6 +1,7 @@
-import { mkdir, stat } from 'node:fs/promises'
+import { mkdir, readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
+import { changeReported, fileChange } from '../change.js'
 import { errorMessage } from '../../util/errors.js'
 import { writeFileAtomic } from '../../util/fs.js'
 import type { Tool } from './types.js'
@@ -30,13 +31,23 @@ export const writeFileTool: Tool<WriteFileArgs> = {
         return { content: `${args.path} is a directory, not a file.`, isError: true }
       }
 
+      // Read for the change only: what a replaced file held is exactly what the
+      // surface has to show going away. A file that cannot be read is still
+      // written, and then says nothing about what it held.
+      const before = existing ? await readFile(target, 'utf8').catch(() => undefined) : null
+
       await mkdir(path.dirname(target), { recursive: true })
       await writeFileAtomic(target, args.content)
 
       const verb = existing ? 'Replaced' : 'Created'
       const size = Buffer.byteLength(args.content, 'utf8')
+      const shown = displayPath(ctx.cwd, target)
+      const change = before === null || typeof before === 'string'
+        ? fileChange(shown, before, args.content)
+        : null
       return {
-        content: `${verb} ${displayPath(ctx.cwd, target)} — ${countLines(args.content)} line(s), ${size} bytes.`,
+        content: `${verb} ${shown} — ${countLines(args.content)} line(s), ${size} bytes.`,
+        ...(change && changeReported(change) ? { change: [change] } : {}),
       }
     } catch (error) {
       return { content: `Failed to write ${args.path}: ${errorMessage(error)}`, isError: true }

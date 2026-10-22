@@ -630,6 +630,7 @@ export default function App() {
           // The result rides the same part, for the detail under the line; the server
           // sends it empty below the `full` level, so an empty one draws nothing.
           const result = event.result ? { result: event.result } : {}
+          const change = event.change && event.change.length > 0 ? { change: event.change } : {}
           let running = -1
           for (let index = message.parts.length - 1; index >= 0; index -= 1) {
             const part = message.parts[index]
@@ -640,10 +641,10 @@ export default function App() {
             // failure worth saying, unless it is a tool that is not one any more.
             // Nothing goes wrong in silence.
             ? event.isError && drawsToolFailure(event.name)
-              ? [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name), state: 'failed', ...result } }]
+              ? [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name), state: 'failed', ...result, ...change } }]
               : message.parts
             : message.parts.map((part, index): TranscriptPart => index === running && part.kind === 'tool'
-              ? { ...part, tool: { ...part.tool, state: event.isError ? 'failed' : 'done', ...result } }
+              ? { ...part, tool: { ...part.tool, state: event.isError ? 'failed' : 'done', ...result, ...change } }
               : part)
           return { ...message, parts, waitingSince: Date.now() }
         }

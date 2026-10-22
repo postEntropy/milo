@@ -1,6 +1,7 @@
 import { mkdir, readFile, stat, unlink } from 'node:fs/promises'
 import path from 'node:path'
 import { z } from 'zod'
+import { changeReported, fileChange, type FileChange } from '../change.js'
 import { errorMessage } from '../../util/errors.js'
 import { writeFileAtomic } from '../../util/fs.js'
 import type { Tool } from './types.js'
@@ -213,7 +214,11 @@ export const applyPatchTool: Tool<ApplyPatchArgs> = {
         if (existing.isDirectory()) {
           return { content: `The patch was not applied: ${shown} is a directory.`, isError: true }
         }
-        prepared.push({ kind: 'delete', target, shown })
+        // Read for the change only: the deletion itself needs the name, not the
+        // contents. A file that cannot be read is still deleted, and then says
+        // nothing about what it held.
+        const content = await readFile(target, 'utf8').catch(() => undefined)
+        prepared.push({ kind: 'delete', target, shown, ...(content !== undefined ? { before: content } : {}) })
         continue
       }
 
@@ -227,15 +232,27 @@ export const applyPatchTool: Tool<ApplyPatchArgs> = {
       if (!applied.ok) {
         return { content: `The patch was not applied: ${shown}: ${applied.error}`, isError: true }
       }
-      prepared.push({ kind: 'update', target, shown, content: applied.content, hunks: operation.hunks.length })
+      prepared.push({
+        kind: 'update',
+        target,
+        shown,
+        content: applied.content,
+        before: content,
+        hunks: operation.hunks.length,
+      })
     }
 
     const report: string[] = []
+    const changes: FileChange[] = []
     for (const item of prepared) {
       try {
         if (item.kind === 'delete') {
           await unlink(item.target)
           report.push(`- ${item.shown}: deleted`)
+          if (item.before !== undefined) {
+            const change = fileChange(item.shown, item.before, null)
+            if (changeReported(change)) changes.push(change)
+          }
           continue
         }
         await mkdir(path.dirname(item.target), { recursive: true })
@@ -245,6 +262,8 @@ export const applyPatchTool: Tool<ApplyPatchArgs> = {
             ? `- ${item.shown}: added, ${countLines(item.content!)} line(s)`
             : `- ${item.shown}: ${item.hunks} hunk(s) applied`,
         )
+        const change = fileChange(item.shown, item.kind === 'add' ? null : item.before, item.content!)
+        if (changeReported(change)) changes.push(change)
       } catch (error) {
         // A write that fails halfway leaves the files already written; say which
         // one failed rather than reporting the patch as a whole.
@@ -255,14 +274,17 @@ export const applyPatchTool: Tool<ApplyPatchArgs> = {
       }
     }
 
-    return { content: `Patch applied:\n${report.join('\n')}` }
+    return {
+      content: `Patch applied:\n${report.join('\n')}`,
+      ...(changes.length > 0 ? { change: changes } : {}),
+    }
   },
 }
 
 type Prepared =
-  | { kind: 'update'; target: string; shown: string; content: string; hunks: number }
+  | { kind: 'update'; target: string; shown: string; content: string; before: string; hunks: number }
   | { kind: 'add'; target: string; shown: string; content: string }
-  | { kind: 'delete'; target: string; shown: string }
+  | { kind: 'delete'; target: string; shown: string; before?: string }
 
 /**
  * Applies the hunks to one file. Context and removed lines are matched as a

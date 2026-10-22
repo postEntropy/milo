@@ -1,3 +1,5 @@
+import type { FileChange } from '../core/change.js'
+
 /**
  * How a tool call is written into a message.
  *
@@ -223,6 +225,31 @@ const GIST_LIMIT = 120
  *  turn's raw copy that holds the whole, and a line drawn from a wall of output helps
  *  nobody. */
 const RESULT_LIMIT = 4000
+
+/**
+ * The `+3 −1` a text surface puts beside a call that wrote.
+ *
+ * Summed across the files here rather than in each surface: the browser and the
+ * phone draw the paper's own pieces, and the chat clients and the terminal only
+ * have this one string. Empty where nothing moved, which a surface draws as
+ * nothing at all.
+ */
+export function changeTotals(change: FileChange[] | undefined): { additions: number; deletions: number } {
+  const totals = { additions: 0, deletions: 0 }
+  for (const file of change ?? []) {
+    totals.additions += file.additions
+    totals.deletions += file.deletions
+  }
+  return totals
+}
+
+/** The same sum as one string, for the surfaces that only draw text. */
+export function changeCounts(change: FileChange[] | undefined): string {
+  const { additions, deletions } = changeTotals(change)
+  return [additions > 0 ? `+${additions}` : '', deletions > 0 ? `−${deletions}` : '']
+    .filter(Boolean)
+    .join(' ')
+}
 
 /**
  * What a tool came back with, for the detail under its call.
