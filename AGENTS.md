@@ -80,8 +80,14 @@ form of the author's own taste notes, which live outside the repo in
   sizes. It fails on purpose when a new string, button or raw literal breaks one — fix the
   code, not the check.
 - Test names are sentences about behaviour: `it('pages the list five at a time')`.
-- Before calling anything done:
-  `npm test`, `npm run typecheck`, `npm --prefix web run typecheck`, `npm run lint`.
+- Before calling anything done, the check follows what changed — and a screen is checked
+  by looking at it, not by the compiler:
+  | Changed | Check |
+  | --- | --- |
+  | `src/`, `test/` | `npm test`, `npm run typecheck`, `npm run lint` |
+  | `web/` | `npm --prefix web run typecheck`, and the screen in the browser |
+  | `ios/` | `xtool dev build`, and the screen on the device |
+  | `docs/`, `AGENTS.md` | none, and no code check is claimed for it |
 
 ## iOS
 
