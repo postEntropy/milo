@@ -16,7 +16,9 @@ const schema = z.object({
   background: z
     .boolean()
     .optional()
-    .describe('Run in the background and return a job id instead of waiting. For a long command; no timeout.'),
+    .describe(
+      'Run in the background and return a job id instead of waiting. For a long command; no timeout, and you are told when it ends.',
+    ),
   notify: z
     .enum(['auto', 'always', 'never'])
     .optional()
@@ -60,7 +62,7 @@ export const shellTool: Tool<ShellArgs> = {
   name: 'shell_command',
   description:
     'Run a shell command and return its combined stdout/stderr and exit code. Requires user confirmation. ' +
-    'A command that walks a large tree (`du`, `find` over a whole disk) can outlast the default and be killed at the timeout — bound it with `timeout`, raise `timeoutMs`, or set `background` for a long command: it returns a job id at once and keeps running.',
+    'A command that walks a large tree (`du`, `find` over a whole disk) can outlast the default and be killed at the timeout — bound it with `timeout`, raise `timeoutMs`, or set `background` for a long command: it returns a job id at once and keeps running. A background job tells you when it ends — do not poll it; `job_status` is for output you need now, not for waiting.',
   schema,
   readOnly: false,
   async execute(args, ctx): Promise<ToolResult> {
