@@ -9,6 +9,9 @@
   /* The sidebar's own actions (new session, search, new project): a step above the raised
      surface so they stand off its gradient instead of sinking into it. */
   --action-fill: #FFFFFF;
+  /* The cool wash at the head of the sidebar, fading into its own surface. A neutral, not
+     the accent: the accent points, it does not paint. */
+  --sidebar-tint: #E9EEF8;
   /* The track a segmented control sits in. A fill of its own because the light theme has
      none to borrow: the panel it stands on is `--surface-warm` and the step above that is
      `--surface`, so a track drawn with either disappears into what it is drawn on. */
@@ -131,6 +134,7 @@
   --surface-warm: #1B1B1C;
   --surface-raised: #2C2C2E;
   --action-fill: #38383C;
+  --sidebar-tint: #283142;
   /* The same role, already at the step this theme needs: it stands off `--surface-warm`
      and still leaves `--surface-raised` room to read as the half in front. */
   --track: #232324;
@@ -200,7 +204,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    colour — the app's own background, handed over as a paint. The installed app needs
    nothing either: `apple-mobile-web-app-status-bar-style` in the markup is what makes
    its bar translucent over the page. */
-.sidebar { grid-column: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: linear-gradient(180deg, color-mix(in oklab, var(--accent-wash) 85%, var(--surface-warm)), var(--surface-warm) 70%); }
+.sidebar { grid-column: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: linear-gradient(180deg, var(--sidebar-tint), var(--surface-warm) 70%); }
 .sidebar-chat-nav { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .brand-row { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-8) var(--space-8) var(--space-7); }
 .brand-mark { display: block; width: 30px; height: 30px; flex: none; object-fit: contain; }
@@ -257,12 +261,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    not a page beside Routines any more, it is the other half of this list, so the control
    that picks it belongs to the list and says whose it is. Filled like every control:
    a track, and the half in front raised inside it. */
-.session-mode { display: flex; gap: var(--space-1); min-width: 0; margin: var(--space-6) var(--space-7) 0; border: 0; border-radius: var(--radius-pill); background: var(--track); padding: var(--space-1); }
-.session-mode button { flex: 1; min-height: var(--control-sm); border: 0; border-radius: var(--radius-pill); background: transparent; padding: 0 var(--space-5); color: var(--muted); font-size: var(--text-xs); font-weight: 600; transition: background var(--motion-fast), color var(--motion-fast); }
-.session-mode button:hover { color: var(--fg-2); }
+.session-mode { display: flex; gap: var(--space-1); min-width: 0; margin: var(--space-4) var(--space-7) var(--space-2); border: 0; border-radius: var(--radius-pill); background: var(--track); padding: var(--space-2); }
+.session-mode button { flex: 1; min-height: var(--control-sm); border: 0; border-radius: var(--radius-pill); background: transparent; padding: 0 var(--space-5); color: var(--muted); font-size: var(--text-sm); font-weight: 600; transition: background var(--motion-fast), color var(--motion-fast); }
+.session-mode button:hover { color: var(--fg); }
 /* The chosen half is lifted off the track, not merely tinted into it: the track is what
    gives the half in front something to stand off, and the shadow is what lifts it. */
-.session-mode button.on { background: var(--surface-raised); color: var(--fg); box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
+.session-mode button.on { background: var(--action-fill); color: var(--fg); box-shadow: var(--shadow-sm); }
 /* The Work side: a project's own name over the sessions it holds. The heading is a
    control that opens the project's page — a heading, not a card, because the list is
    one column and the mark already says which folder the rows work in. */
@@ -291,7 +295,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    white and a hairline shadow say which session the chat belongs to. */
 .session-item.active { background: var(--surface-raised); }
 .session-row { display: flex; align-items: center; gap: var(--space-5); flex: 1; min-width: 0; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-4) var(--space-3) var(--space-4) var(--space-5); color: var(--fg-2); text-align: start; }
-.session-item.active .session-row { color: var(--fg); font-weight: 500; }
+.session-item.active .session-title { font-weight: 600; }
 /* The row's focus is the row's, not the button's: the ring wraps the whole card — the
    `⋯` column with it — instead of the half the button inside happens to fill.
    `:focus-visible` and not `:focus-within`, so a mouse click that opens the session and
@@ -300,7 +304,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-row:focus-visible { outline: 0; }
 .session-content { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--space-2); }
 .session-title, .session-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-title { font-size: var(--text-xs); line-height: 1.35; }
+.session-title { color: var(--fg); font-size: var(--text-sm); font-weight: 500; line-height: 1.35; }
 .session-preview { color: var(--muted); font-size: var(--text-2xs); line-height: 1.35; }
 /* A session running now, said with the accent the way the accent already points: one
    dot at the row's own edge, no words and no second label. It breathes while it runs,
