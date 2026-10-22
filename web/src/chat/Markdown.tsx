@@ -14,13 +14,28 @@ marked.setOptions({ breaks: true, gfm: true })
 marked.use({
   renderer: {
     code({ text, lang }: Tokens.Code): string {
+      const code = trimFenceEdges(text)
       // A fence with nothing in it is dropped below rather than drawn as an empty box, and it
       // is handed over in the same shape so that rule keeps holding.
-      if (text.trim() === '') return '<pre><code></code></pre>\n'
-      return `<pre><code>${codeHtml(text, lang?.trim().split(/\s+/)[0])}</code></pre>\n`
+      if (code === '') return '<pre><code></code></pre>\n'
+      return `<pre><code>${codeHtml(code, lang?.trim().split(/\s+/)[0])}</code></pre>\n`
     },
   },
 })
+
+/**
+ * The edges of a fence are not content: a blank line the model left at either end would be
+ * drawn as a row of nothing under the code, since the block carries its own padding. The
+ * phone's own parser drops the same edges (`Support/Prose.swift`).
+ */
+function trimFenceEdges(text: string): string {
+  const lines = text.split('\n')
+  let start = 0
+  let end = lines.length
+  while (start < end && lines[start]!.trim() === '') start += 1
+  while (end > start && lines[end - 1]!.trim() === '') end -= 1
+  return lines.slice(start, end).join('\n')
+}
 
 /**
  * The answer as it renders in the browser. Parsed from Markdown and sanitized

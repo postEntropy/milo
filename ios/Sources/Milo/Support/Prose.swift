@@ -253,6 +253,21 @@ struct Prose: View {
             paragraph = []
         }
 
+        func endCode() {
+            // The edges of a fence are not content: a blank line the model left at either end
+            // is drawn as a row of nothing under the code. The browser's renderer drops the
+            // same ones, and a body left blank all through is no block at all on either.
+            var body = code
+            while let first = body.first, first.trimmingCharacters(in: .whitespaces).isEmpty { body.removeFirst() }
+            while let last = body.last, last.trimmingCharacters(in: .whitespaces).isEmpty { body.removeLast() }
+            if !body.isEmpty {
+                blocks.append(.code(language: language, text: body.joined(separator: "\n")))
+            }
+            code = []
+            language = nil
+            fenced = false
+        }
+
         var index = 0
         while index < lines.count {
             let line = lines[index]
@@ -260,10 +275,7 @@ struct Prose: View {
             // A fence opens or closes a block of code; nothing inside it is read.
             if line.hasPrefix("```") {
                 if fenced {
-                    blocks.append(.code(language: language, text: code.joined(separator: "\n")))
-                    code = []
-                    language = nil
-                    fenced = false
+                    endCode()
                 } else {
                     endParagraph()
                     // The fence's first word, the way the browser reads it off marked's own tag:
@@ -365,9 +377,7 @@ struct Prose: View {
 
         // An unterminated fence is what a code block looks like while it streams, so it
         // is drawn as code rather than left as prose with a stray fence in it.
-        if fenced || !code.isEmpty {
-            blocks.append(.code(language: language, text: code.joined(separator: "\n")))
-        }
+        if fenced || !code.isEmpty { endCode() }
         endParagraph()
         return blocks
     }
@@ -550,7 +560,8 @@ extension View {
 ///
 /// The browser draws no copy control here, because a pointer can drag a selection across
 /// its box. On a phone the box is what the finger drags to scroll, so copying is a control
-/// of its own — in the corner of the box, on the platform's glass, over the code.
+/// of its own — and it holds the block's own gutter, beside the code rather than over it,
+/// because a control a finger aims at must not sit on the words it would copy.
 struct CodeBlock: View {
     /// What the fence's tag named, for the colouring to read.
     let language: String?
@@ -558,18 +569,36 @@ struct CodeBlock: View {
     @State private var copied = false
 
     var body: some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            Text(coloured(code, language: language))
-                .font(MiloTheme.Text.mono)
-                .foregroundStyle(MiloTheme.foreground)
-                .textSelection(.enabled)
-                .padding(.horizontal, MiloTheme.Space.three)
-                .padding(.vertical, MiloTheme.Space.three)
+        HStack(alignment: .top, spacing: 0) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                Text(coloured(code, language: language))
+                    .font(MiloTheme.Text.mono)
+                    .foregroundStyle(MiloTheme.foreground)
+                    .textSelection(.enabled)
+                    .padding(.horizontal, MiloTheme.Space.three)
+                    .padding(.vertical, MiloTheme.Space.three)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            // A sideways scroll view is greedy: offered more height than the code needs it takes
+            // it, and the block grows a row of empty ground under its last line. This pins it to
+            // the height of the code itself.
+            .fixedSize(horizontal: false, vertical: true)
+
+            copyControl
+                .padding(.top, MiloTheme.Space.two)
+                .padding(.trailing, MiloTheme.Space.two)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
-        .overlay(alignment: .topTrailing) { copyControl }
+        // The hairline the browser draws around the same block: content chrome, not a control.
+        .overlay(
+            RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
+                .stroke(MiloTheme.borderSoft, lineWidth: 1)
+        )
         .marksScrollBox()
+        // The tap that says the words are on the clipboard. It fires on the copy itself and not
+        // again when the checkmark lets go two seconds later, which a bare flag would do.
+        .sensoryFeedback(.success, trigger: copied, condition: { _, copied in copied })
     }
 
     private var copyControl: some View {
@@ -589,6 +618,5 @@ struct CodeBlock: View {
         }
         .glassEffect(.regular.interactive(), in: Circle())
         .accessibilityLabel(copied ? "Copied" : "Copy the code")
-        .padding(MiloTheme.Space.two)
     }
 }
