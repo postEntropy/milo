@@ -26,6 +26,8 @@
     "bench:genui": "tsx scripts/bench-genui.ts",
     "bench:browser": "tsx scripts/bench-browser.ts",
     "bench:memory": "tsx scripts/bench-memory.ts",
+    "bench:prompt": "tsx scripts/bench-prompt.ts",
+    "bench:known": "tsx scripts/bench-known.ts",
     "eval:memory": "tsx scripts/eval-memory.ts",
     "eval:mem0": "tsx scripts/eval-mem0.ts",
     "check:browser": "tsx scripts/check-browser.ts"

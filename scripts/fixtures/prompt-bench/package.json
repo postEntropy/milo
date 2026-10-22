@@ -1,0 +1,8 @@
+{
+  "name": "bar-fixture",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test checks/bar.check.mjs"
+  }
+}
