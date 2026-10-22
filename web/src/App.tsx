@@ -20,8 +20,7 @@ import { settingsSectionFromPath } from './settings/sections.js'
 import { Panel } from './panel/Panel.js'
 import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, ThinkingDisplay, TranscriptPart } from '@protocol'
 import { drawsToolFailure, toolText } from '../../src/gateways/tool-line.ts'
-import { describeCompaction, describeRebase } from '../../src/core/sessions/format.ts'
-import { SessionRow, sessionLabel } from './sessions/SessionRow.js'
+import { SessionRow } from './sessions/SessionRow.js'
 import type { SessionSummary } from './sessions/types.js'
 import { chatSessions, isWorkSession } from './sessions/scopes.js'
 import { WorkList } from './sessions/WorkList.js'
@@ -661,18 +660,16 @@ export default function App() {
           const part: TranscriptPart = { kind: 'ui', render: event.render, ...(event.draft ? { draft: true } : {}) }
           return { ...message, parts: withWidget(message.parts, part) }
         }
-        if (event.type === 'waiting') return { ...message, status: 'Waiting for this session to free up…' }
-        if (event.type === 'waited') return { ...message, status: `Session freed after ${formatMs(event.ms)}.` }
-        if (event.type === 'compacting') return { ...message, status: 'Tidying the context…' }
-        // What the fold came to, in the words every other surface uses for it: the
-        // turns, the tokens they were worth, and whether a summary replaced them.
-        if (event.type === 'compacted') return { ...message, status: describeCompaction(event) }
-        if (event.type === 'rebased') return { ...message, status: `Session updated by another surface (${describeRebase(event)}).` }
-        if (event.type === 'steer') return { ...message, status: 'Correction received by Milo.' }
-        if (event.type === 'error') return { ...message, parts: settled(message.parts), status: `Error: ${event.message}` }
-        if (event.type === 'aborted') return { ...message, parts: settled(message.parts), status: 'Stopped · the partial reply was kept.' }
-        if (event.type === 'done' && event.finishReason === 'length') return { ...message, status: 'The reply hit the output limit.' }
+        // The words are the daemon's: `says` is what the turn's row shows about the step,
+        // written in one place and not once per surface. A step with nothing to say about
+        // the row — a finished turn, a tool line — leaves the line that is already there.
+        if (event.type === 'error' || event.type === 'aborted') {
+          // A call left marked running never heard back from, whether the turn failed or was
+          // stopped: it stops saying it is underway, and the row says why.
+          return { ...message, parts: settled(message.parts), ...(frame.says ? { status: frame.says } : {}) }
+        }
         if (event.type === 'usage') return { ...message, tokens: { input: event.inputTokens, output: event.outputTokens } }
+        if (frame.says) return { ...message, status: frame.says }
         return message
       }))
       return
@@ -681,7 +678,7 @@ export default function App() {
     if (frame.type === 'permission-result') { setPendingPermission((current) => current?.id === frame.id ? null : current); return }
     if (frame.type === 'turn-end') {
       setMessages((current) => current.map((message) => message.id === frame.id
-        ? { ...message, parts: settled(message.parts), waitingSince: undefined, ...(frame.raw ? { raw: frame.raw } : {}), ...(frame.rawNoOutput ? { rawNoOutput: frame.rawNoOutput } : {}), ...(frame.status === 'stopped' ? { status: 'Stopped · the partial reply was kept.' } : {}) }
+        ? { ...message, parts: settled(message.parts), waitingSince: undefined, ...(frame.raw ? { raw: frame.raw } : {}), ...(frame.rawNoOutput ? { rawNoOutput: frame.rawNoOutput } : {}), ...(frame.says ? { status: frame.says } : {}) }
         : message))
       setPendingPermission(null)
       setTurnEnds((current) => current + 1)
@@ -1274,6 +1271,28 @@ export default function App() {
     <aside className="sidebar" aria-label="Main navigation">
       <div className="sidebar-chat-nav">
         <div className="brand-row"><img className="brand-mark" src={miloAvatar} alt="" /><span className="brand-name" translate="no">Milo</span><button className="sidebar-toggle" type="button" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><Icon name="panel-left" size={17} /></button></div>
+        {/* The sidebar's one action row, under the brand: start a session, or find one.
+            The search folds behind its icon until asked for, taking the row whole. */}
+        <div className="sidebar-actions">
+          <div className={`sidebar-search ${searchOpen ? 'open' : ''}`}>
+            <Icon name="search" size={16} />
+            <input ref={searchRef} aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} />
+            <button className="sidebar-search-close" type="button" aria-label="Close search" onClick={closeSearch}><Icon name="x" size={15} /></button>
+          </div>
+          {mode === 'work' ? <>
+            {!searchOpen && startableProjects.length > 0 && <Select
+              value=""
+              choices={startableProjects.map((project) => ({ value: project.id, label: project.name }))}
+              onChange={(project) => void startWorkSession(project)}
+              label="New session in a project"
+              icon="plus"
+              triggerLabel="New session"
+              note="No projects yet"
+            />}
+            <button className={`sidebar-new-project ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New project" aria-label="New project" onClick={() => { setWorkProject(null); setView('work'); setPickProject(true); setSidebarOpen(false) }}><Icon name="folder-plus" size={18} /></button>
+          </> : <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /><span className="new-chat-label">New session</span></button>}
+          <button className="sidebar-search-toggle" type="button" title="Search sessions" aria-label="Search sessions" aria-expanded={searchOpen} onClick={() => setSearchOpen((open) => !open)}><Icon name="search" size={18} /></button>
+        </div>
         <div className="sidebar-pad">
           <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={18} /><span>Routines</span></button>
           <button className={`sidebar-tab ${view === 'tasks' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'tasks' ? 'chat' : 'tasks'); setSidebarOpen(false) }}><Icon name="list-check" size={18} /><span>Task lists</span></button>
@@ -1315,29 +1334,8 @@ export default function App() {
             />}
           </nav>
         </div>
-        {/* The sidebar's one action row, at its foot: start a session, find one, and
-            the way to Settings. The list above it keeps every other line of height.
-            The search folds behind its icon until asked for, taking the row whole. */}
-        <div className="sidebar-actions">
-          <div className={`sidebar-search ${searchOpen ? 'open' : ''}`}>
-            <Icon name="search" size={16} />
-            <input ref={searchRef} aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} />
-            <button className="sidebar-search-close" type="button" aria-label="Close search" onClick={closeSearch}><Icon name="x" size={15} /></button>
-          </div>
-          {mode === 'work' ? <>
-            {!searchOpen && startableProjects.length > 0 && <Select
-              value=""
-              choices={startableProjects.map((project) => ({ value: project.id, label: project.name }))}
-              onChange={(project) => void startWorkSession(project)}
-              label="New session in a project"
-              icon="plus"
-              triggerLabel="New session"
-              note="No projects yet"
-            />}
-            <button className={`sidebar-new-project ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New project" aria-label="New project" onClick={() => { setWorkProject(null); setView('work'); setPickProject(true); setSidebarOpen(false) }}><Icon name="folder-plus" size={18} /></button>
-          </> : <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /><span className="new-chat-label">New session</span></button>}
-          <button className="sidebar-search-toggle" type="button" title="Search sessions" aria-label="Search sessions" aria-expanded={searchOpen} onClick={() => setSearchOpen((open) => !open)}><Icon name="search" size={18} /></button>
-          <button className={`sidebar-settings-toggle ${view === 'settings' ? 'active' : ''}`} type="button" title="Settings" aria-label="Settings" onClick={() => { if (view === 'settings') { leaveSettings(); return } setSettingsSection(null); setView('settings'); setSidebarOpen(false) }}><Icon name="settings" size={18} /></button>
+        <div className="sidebar-foot">
+          <button className={`sidebar-tab ${view === 'settings' ? 'active' : ''}`} type="button" onClick={() => { if (view === 'settings') { leaveSettings(); return } setSettingsSection(null); setView('settings'); setSidebarOpen(false) }}><Icon name="settings" size={18} /><span>Settings</span></button>
         </div>
       </div>
     </aside>
@@ -1365,7 +1363,7 @@ export default function App() {
           >
             <Icon name={projectMark(project.icon)} size={12} /> <span>{project.name}</span>
           </button>}
-          <h1>{currentSession ? sessionLabel(currentSession) : 'New session'}</h1>
+          <h1>{currentSession ? currentSession.label : 'New session'}</h1>
         </>}</div>
         <div className="topbar-actions">
           {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelVisible(!panelOpen)}><Icon name="panel-right" size={18} /></button>}
@@ -1416,10 +1414,6 @@ export default function App() {
     </main>
     {view === 'chat' && panelOpen && panel && panel.tabs.length > 0 && <Panel view={panel} onClose={() => setPanelVisible(false)} onInput={panelInput} onActivateTab={activateTab} onCloseTab={closeTab} />}
   </div>
-}
-
-function formatMs(ms: number): string {
-  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`
 }
 
 /**

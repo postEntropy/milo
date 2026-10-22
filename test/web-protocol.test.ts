@@ -10,6 +10,12 @@ describe('web protocol', () => {
     expect(parseClientFrame({ type: 'hello', version: PROTOCOL_VERSION, chatId: 'e76b3fc7-f93d-4ee2-a1d8-1cc6e7e7ab92' })?.type).toBe('hello')
     expect(parseClientFrame({ type: 'send', text: 'hello', intent: 'steer' })?.type).toBe('send')
     expect(parseClientFrame({ type: 'send', text: 'hello', intent: 'invented' })).toBeNull()
+    // Every control the type declares is a control the parser takes. `always` — the
+    // button every surface draws — was refused here while the type promised it, so the
+    // prompt it answered stayed pending until it expired.
+    expect(parseClientFrame({ type: 'control', action: 'allow' })?.type).toBe('control')
+    expect(parseClientFrame({ type: 'control', action: 'always' })?.type).toBe('control')
+    expect(parseClientFrame({ type: 'control', action: 'deny' })?.type).toBe('control')
     expect(parseClientFrame({ type: 'control', action: 'delete' })).toBeNull()
     expect(parseClientFrame(null)).toBeNull()
   })

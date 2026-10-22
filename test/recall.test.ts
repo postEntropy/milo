@@ -8,7 +8,9 @@ import type { SessionSummary } from '../src/core/sessions/types.js'
 import { recallTool } from '../src/core/tools/recall.js'
 
 function session(id: string, updatedAt: number, extra: Partial<SessionSummary> = {}): SessionSummary {
-  return { id, createdAt: updatedAt, updatedAt, messageCount: 2, preview: '', ...extra }
+  // The name a row would show, by the rule the daemon composes it with.
+  const label = extra.title ?? extra.preview ?? extra.recap ?? 'New session'
+  return { id, createdAt: updatedAt, updatedAt, messageCount: 2, preview: '', label, ...extra }
 }
 
 describe('rankSessions', () => {

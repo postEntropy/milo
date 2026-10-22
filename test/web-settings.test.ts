@@ -1146,8 +1146,8 @@ describe('the Work screen’s projects', () => {
     const older = await addProject(settings, folder('older'), 'Older')
     const newer = await addProject(settings, folder('newer'), 'Newer')
     vi.spyOn(runtime, 'listSessions').mockResolvedValue([
-      { id: 'calm-otter-1', createdAt: 1, updatedAt: 10, messageCount: 1, preview: '', project: older },
-      { id: 'calm-otter-2', createdAt: 2, updatedAt: 20, messageCount: 1, preview: '', project: newer },
+      { id: 'calm-otter-1', label: 'New session', createdAt: 1, updatedAt: 10, messageCount: 1, preview: '', project: older },
+      { id: 'calm-otter-2', label: 'New session', createdAt: 2, updatedAt: 20, messageCount: 1, preview: '', project: newer },
     ])
 
     const listed = (await settings.handle('projects')) as Array<{ id: string }>

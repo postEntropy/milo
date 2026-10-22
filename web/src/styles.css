@@ -6,6 +6,9 @@
   /* One step above the plain surface: the controls that should stand off a warm
      panel, e.g. the sidebar's own action row. */
   --surface-raised: #FFFFFF;
+  /* The sidebar's own actions (new session, search, new project): a step above the raised
+     surface so they stand off its gradient instead of sinking into it. */
+  --action-fill: #FFFFFF;
   /* The track a segmented control sits in. A fill of its own because the light theme has
      none to borrow: the panel it stands on is `--surface-warm` and the step above that is
      `--surface`, so a track drawn with either disappears into what it is drawn on. */
@@ -123,13 +126,14 @@
   /* A card lifts off the page with its shadow in the light theme; on a dark page the
      shadow is invisible, so the whole lift is carried by the fill and the four steps
      are wider than the light theme's — 1.2:1 where the light one sits at 1.1:1. */
-  --bg: #0F0F10;
-  --surface: #1C1C1E;
-  --surface-warm: #161617;
+  --bg: #151517;
+  --surface: #232324;
+  --surface-warm: #1B1B1C;
   --surface-raised: #2C2C2E;
+  --action-fill: #38383C;
   /* The same role, already at the step this theme needs: it stands off `--surface-warm`
      and still leaves `--surface-raised` room to read as the half in front. */
-  --track: #1C1C1E;
+  --track: #232324;
   --fg: #F2F2F3;
   --fg-2: #D1D1D6;
   --muted: #8E8E93;
@@ -196,7 +200,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    colour — the app's own background, handed over as a paint. The installed app needs
    nothing either: `apple-mobile-web-app-status-bar-style` in the markup is what makes
    its bar translucent over the page. */
-.sidebar { grid-column: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--surface-warm); }
+.sidebar { grid-column: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: linear-gradient(180deg, color-mix(in oklab, var(--accent-wash) 85%, var(--surface-warm)), var(--surface-warm) 70%); }
 .sidebar-chat-nav { display: flex; flex-direction: column; flex: 1; min-height: 0; }
 .brand-row { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-8) var(--space-8) var(--space-7); }
 .brand-mark { display: block; width: 30px; height: 30px; flex: none; object-fit: contain; }
@@ -213,17 +217,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    the end of the tab's own row, tinted off the text colour so it reads on the warm
    sidebar and on the lighter fill its tab takes when hovered or active. */
 .sidebar-badge { flex: none; margin-inline-start: auto; border-radius: var(--radius-pill); background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px var(--space-4); color: var(--fg); font: var(--text-2xs) var(--font-mono); font-variant-numeric: tabular-nums; animation: fade-in var(--motion-base) var(--ease-standard) backwards; }
-.sidebar-actions { display: flex; align-items: center; gap: var(--space-4); padding: var(--space-4) var(--space-7) var(--space-7); }
+.sidebar-actions { display: flex; align-items: center; gap: var(--space-4); padding: 0 var(--space-7) var(--space-5); }
+.sidebar-foot { flex: none; padding: var(--space-4) var(--space-7) var(--space-7); }
 /* The two rows the sidebar is for — the way into a session, and the sessions themselves
    below — take the sidebar's own small step rather than the base UI size: both are one
    line to scan in a column, and at the base size the column read heavier than the
    content it indexes. */
-.new-chat { display: flex; width: auto; flex: 1; min-height: var(--control-md); align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--surface-raised); padding: 0 var(--space-7); color: var(--fg-2); font-size: var(--text-xs); font-weight: 500; transition: background var(--motion-fast); }
+.new-chat { display: flex; width: auto; flex: 1; min-height: var(--control-md); align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--action-fill); padding: 0 var(--space-7); color: var(--fg); font-size: var(--text-sm); font-weight: 500; box-shadow: var(--shadow-sm); transition: background var(--motion-fast); }
 .new-chat:hover { background: var(--border-soft); }
 .new-chat.is-hidden { display: none; }
 /* The Work side's other act: the folder is added from its mark, beside the session that
    asks which project it works in. One row, two different things. */
-.sidebar-new-project { display: flex; width: var(--control-md); min-height: var(--control-md); flex: none; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-md); background: var(--surface-raised); color: var(--fg-2); transition: background var(--motion-fast); }
+.sidebar-new-project { display: flex; width: var(--control-md); min-height: var(--control-md); flex: none; align-items: center; justify-content: center; border: 0; border-radius: var(--radius-md); background: var(--action-fill); color: var(--fg); box-shadow: var(--shadow-sm); transition: background var(--motion-fast); }
 .sidebar-new-project:hover { background: var(--border-soft); }
 .sidebar-new-project.is-hidden { display: none; }
 /* The search folds behind the magnifier at the end of the row at every width, so the
@@ -238,9 +243,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-search input:focus { outline: 0; border-color: var(--accent); box-shadow: var(--focus-ring); }
 .sidebar-search-close { position: absolute; inset-inline-end: 6px; display: grid; width: var(--control-sm); height: var(--control-sm); place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
 .sidebar-search-close:hover { background: var(--border-soft); color: var(--fg); }
-.sidebar-search-toggle, .sidebar-settings-toggle { display: grid; width: var(--control-md); height: var(--control-md); flex: none; place-items: center; border: 0; border-radius: var(--radius-sm); background: var(--surface-raised); color: var(--fg-2); transition: background var(--motion-fast), color var(--motion-fast); }
-.sidebar-search-toggle:hover, .sidebar-settings-toggle:hover { background: var(--border-soft); }
-.sidebar-settings-toggle.active { background: var(--border-soft); color: var(--fg); }
+.sidebar-search-toggle { display: grid; width: var(--control-md); height: var(--control-md); flex: none; place-items: center; border: 0; border-radius: var(--radius-md); background: var(--action-fill); color: var(--fg); box-shadow: var(--shadow-sm); transition: background var(--motion-fast), color var(--motion-fast); }
+.sidebar-search-toggle:hover { background: var(--border-soft); }
 /* Open, the field carries its own magnifier and an ×; the icon that opened it stands
    down, so the row never shows the same glyph twice. Last, and so the one rule that
    outranks the toggle it hides. */
@@ -459,19 +463,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .thread-inner { width: min(940px, 100%); margin: 0 auto; padding: var(--space-3) 0 var(--space-8); }
 .empty-state { display: flex; min-height: min(70vh, 720px); flex-direction: column; align-items: center; justify-content: center; padding: 42px var(--space-8) 56px; text-align: center; }
 .empty-state h1 { max-width: 16ch; margin: 0; font-family: var(--font-body); font-size: var(--text-display); font-weight: 600; letter-spacing: -.03em; line-height: 1.14; }
-/* A card wraps its own text rather than widening the row: a title or a detail
-   that is one unbroken word — a path, a URL, a session's auto-title — would
-   otherwise set the card's minimum width and push it past the screen on a phone.
-   `min-width: 0` lets the grid item and its text box shrink below their content,
-   and `overflow-wrap: anywhere` is what lets the long word break at all. */
-.suggestion-grid { display: grid; width: min(660px, 100%); grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-6); margin-top: 32px; }
-.suggestion { display: flex; min-width: 0; min-height: 70px; align-items: center; gap: var(--space-6); border: 0; border-radius: var(--radius-xl); background: var(--surface); padding: var(--space-7) var(--space-7); box-shadow: var(--shadow-sm); text-align: start; transition: box-shadow var(--motion-fast), transform var(--motion-fast); }
-.suggestion:hover { transform: translateY(-1px); box-shadow: var(--shadow); }
-.suggestion > svg:first-child { flex: none; color: var(--fg-2); }
-.suggestion-grid .suggestion > span { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--space-2); }
-.suggestion strong { font-size: var(--text-sm); font-weight: 500; line-height: 1.35; overflow-wrap: anywhere; }
-.suggestion small { color: var(--muted); font-size: var(--text-2xs); line-height: 1.35; overflow-wrap: anywhere; }
-.suggestion-arrow { flex: none; color: var(--muted); }
+/* A chip wraps its own text rather than widening the row: a title that is one unbroken
+   word — a path, a URL, a session's auto-title — would otherwise push it past the screen
+   on a phone. `min-width: 0` lets it shrink below its content, and `overflow-wrap: anywhere`
+   is what lets the long word break at all. The detail is the tooltip's, not the chip's. */
+.suggestion-grid { display: flex; width: min(640px, 100%); flex-wrap: wrap; justify-content: center; gap: var(--space-4); margin-top: var(--space-10); }
+.suggestion { display: inline-flex; min-width: 0; max-width: 100%; min-height: var(--control-md); align-items: center; gap: var(--space-4); border: 0; border-radius: var(--radius-pill); background: var(--surface); padding: var(--space-3) var(--space-7) var(--space-3) var(--space-6); color: var(--fg-2); font-size: var(--text-sm); font-weight: 500; line-height: 1.35; text-align: start; overflow-wrap: anywhere; transition: background var(--motion-fast), color var(--motion-fast); }
+.suggestion:hover { background: var(--border-soft); color: var(--fg); }
+.suggestion > svg { flex: none; color: var(--muted); }
 .message { display: flex; max-width: 940px; gap: var(--space-7); margin: 0 auto; padding: var(--space-6) 0; }
 /* The person's own message is a bubble with its controls beneath it. On a pointer
    they hang out of the flow, in the gap between messages, shown on hover — so the
@@ -811,7 +810,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    stands where the row's own control stands, and the list asks which project the session
    works in. Its value is never a choice — picking one starts the session and closes. */
 .sidebar-actions > .select { flex: 1; min-width: 0; }
-.sidebar-actions .select .select-trigger { min-height: var(--control-md); justify-content: center; gap: var(--space-4); background: var(--surface-raised); padding: 0 var(--space-6); color: var(--fg-2); font-size: var(--text-xs); font-weight: 500; }
+.sidebar-actions .select .select-trigger { min-height: var(--control-md); justify-content: center; gap: var(--space-4); background: var(--action-fill); padding: 0 var(--space-6); color: var(--fg); box-shadow: var(--shadow-sm); font-size: var(--text-sm); font-weight: 500; }
 .sidebar-actions .select .select-trigger:hover { background: var(--border-soft); }
 .sidebar-actions .select-value { flex: none; }
 /* Overflow is visible so a control nested in the head can open its own menu past
@@ -870,7 +869,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* The Work side's New session sits at the sidebar's foot, so its list opens over the
    sessions rather than below the screen. Declared after the menus it shares a shape
    with, so the sidebar's own position wins over the generic one. */
-.sidebar-actions > .select .select-menu { top: auto; bottom: calc(100% + 6px); transform-origin: bottom; }
+.sidebar-actions > .select .select-menu { top: calc(100% + 6px); bottom: auto; transform-origin: top; }
 /* The phone folds the two pills into one menu: the effort is a row of segments at
    the foot of the panel, filled like every other control the person presses. */
 .composer-effort-seg { display: flex; gap: var(--space-2); }
@@ -1437,8 +1436,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .sidebar-search input { font-size: var(--text-md); }
 }
 @media (max-width: 620px) {
-  .suggestion-grid { grid-template-columns: 1fr; gap: var(--space-5); margin-top: var(--space-9); }
-  .suggestion { min-height: 62px; }
+  .suggestion-grid { margin-top: var(--space-9); }
   .settings-inner { padding: calc(max(8px, env(safe-area-inset-top)) + 48px) 16px 0; }
   .settings-layout .settings-inner { padding-inline: 16px; }
   .settings-index { padding-inline: 16px; }

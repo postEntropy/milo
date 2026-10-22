@@ -9,6 +9,7 @@ import { FileSessionStore } from '../src/core/sessions/file-store.js'
 import { MemorySessionSeen } from '../src/core/sessions/seen.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
 import { readProjectInstructions } from '../src/core/agent/instructions.js'
+import { DEFAULT_SESSIONS } from '../src/core/config/schema.js'
 
 class StubProvider implements Provider {
   readonly id = 'stub'
@@ -292,6 +293,28 @@ describe('AgentRuntime recaps', () => {
 
     const list = await runtime.listSessions()
     expect(list.find((entry) => entry.id === first.id)?.recap).toBeUndefined()
+  })
+
+  it('names a session by what the list knows, which is more than the store has', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-rt-'))
+    // No naming call, so nothing but the list's own rule can name it.
+    const runtime = new AgentRuntime({
+      ...runtimeOptions(dir),
+      sessions: { ...DEFAULT_SESSIONS, generateTitles: false },
+    })
+
+    // Opened with a file and no words: no title and no preview, so the recap the install
+    // wrote for it is the only thing left to call it by.
+    const session = await runtime.getSession(cli)
+    await drain(session.send('', {
+      images: [{ type: 'image', mimeType: 'image/png', path: '/tmp/shot.png', name: 'shot.png' }],
+    }))
+    await runtime.newSession(cli)
+    await runtime.flush()
+
+    const entry = (await runtime.listSessions()).find((item) => item.id === session.id)
+    expect(entry?.preview).toBe('')
+    expect(entry?.label).toBe('ok')
   })
 
   it('does not redo a recap that is still fresh', async () => {

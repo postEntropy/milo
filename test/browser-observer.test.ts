@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DESCRIBE_SOURCE,
+  OBSERVER_SOURCE,
   formatElement,
   formatSnapshot,
   isPageGoneError,
@@ -77,6 +79,11 @@ describe('formatSnapshot', () => {
   it('says when the list was cut, so a missing element is not read as absent', () => {
     const text = formatSnapshot(mergeObservations([frame({ more: true })]))
     expect(text).toContain('only the first 1 elements are shown')
+    // The list is built from the whole document, not from the window, so a hint
+    // to scroll promised a remedy that could not work: a session spent its steps
+    // scrolling and pressing Tab at a page whose list the sentence said was short.
+    expect(text).toContain('scrolling adds nothing')
+    expect(text).not.toContain('scroll or use mode')
   })
 
   it('names a frame it could not read, rather than going quiet about it', () => {
@@ -128,6 +135,14 @@ describe('mergeObservations', () => {
 })
 
 describe('the expressions sent to the page', () => {
+  it('bakes every placeholder into both functions, so neither dies in the page', () => {
+    // A token that survives into the page is a `ReferenceError` in a script
+    // nobody can see, and the only symptom is a page with an element missing
+    // from its list — or no list at all.
+    expect(OBSERVER_SOURCE).not.toMatch(/__[A-Z_]+__/)
+    expect(DESCRIBE_SOURCE).not.toMatch(/__[A-Z_]+__/)
+  })
+
   it('passes the frame, the starting ref number and the observation it belongs to', () => {
     const expression = observeExpression('main', 20, 'nonce-1')
     expect(expression).toContain('"main"')

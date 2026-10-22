@@ -1585,7 +1585,7 @@ describe('the verification gate', () => {
 
     const events: AgentEvent[] = []
     for await (const event of session.send('go')) events.push(event)
-    return { events, verified }
+    return { events, verified, saved: await store.load(record.id) }
   }
 
   it('runs the checks after a turn that wrote, and says what they answered', async () => {
@@ -1597,6 +1597,15 @@ describe('the verification gate', () => {
     )
     expect(gate?.ok).toBe(true)
     expect(gate?.text).toContain('Checks passed — test.')
+  })
+
+  it('keeps what the checks answered on the turn they verified', async () => {
+    const { saved } = await runGate({ project: true })
+
+    // Not only streamed: the card is state kept on the answer, so a session read back
+    // from disk draws it again instead of losing the one thing that said the work held.
+    const answer = saved?.messages.findLast((message) => message.role === 'assistant')
+    expect(answer?.verification).toEqual({ ok: true, text: expect.stringContaining('Checks passed — test.') })
   })
 
   it('does not run them after a turn that only read', async () => {

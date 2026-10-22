@@ -22,7 +22,12 @@ import { findChrome } from '../src/core/browser/chrome.js'
 import { BROWSER_ACTIONS, type BrowserAction } from '../src/core/browser/tools.js'
 import type { RawElement } from '../src/core/browser/observer.js'
 
-const PAGE = `<!doctype html><html><head><title>Acoes</title><style>body{height:3000px}</style></head><body>
+const PAGE = `<!doctype html><html><head><title>Acoes</title><style>body{height:3000px}
+/* The confirm control of a framework page, copied from the one that cost a
+   session 60 steps: a bare div, a cursor the sheet sets to default, and the
+   listener added by script. The markup says nothing about it being pressable. */
+.btn-submit{background:#f80;width:200px;height:40px;line-height:40px;text-align:center;cursor:default}
+</style></head><body>
 <h1>Acoes</h1>
 <p id="out">nada</p>
 <input id="text" type="text" placeholder="texto">
@@ -35,6 +40,7 @@ const PAGE = `<!doctype html><html><head><title>Acoes</title><style>body{height:
 <button id="dbl" type="button">Duplo</button>
 <div id="hoverMe" role="button" tabindex="0">Passe o mouse</div>
 <form id="form"><input id="field" type="text" placeholder="campo"><button type="submit">Enviar</button></form>
+<div id="confirm" class="btn-submit">Confirmar descadastro</div>
 <script>
   // The marker is what the check reads: it can only come from these writes,
   // never from a stray word elsewhere in the page.
@@ -48,6 +54,7 @@ const PAGE = `<!doctype html><html><head><title>Acoes</title><style>body{height:
   document.getElementById('sel').addEventListener('change', (e) => out('select:' + e.target.value))
   document.getElementById('file').addEventListener('change', (e) => out('file:' + (e.target.files[0]?.name ?? 'none')))
   document.getElementById('form').addEventListener('submit', (e) => { e.preventDefault(); out('submit') })
+  document.getElementById('confirm').addEventListener('click', () => out('pressed'))
   window.addEventListener('scroll', () => out('scrolled:' + Math.round(window.scrollY)))
 </script>
 </body></html>`
@@ -116,6 +123,12 @@ function checksFor(file: string): Check[] {
       what: 'press Enter, which submits the form',
       expect: 'submit',
       run: (s, e) => s.act({ action: 'press', ref: on(e, 'campo'), key: 'Enter' }, AbortSignal.timeout(10_000)),
+    },
+    {
+      action: 'click',
+      what: 'click a div the page made pressable',
+      expect: 'pressed',
+      run: (s, e) => s.act({ action: 'click', ref: on(e, 'Confirmar descadastro') }, AbortSignal.timeout(10_000)),
     },
     {
       action: 'double_click',

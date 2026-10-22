@@ -34,7 +34,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     let project: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, createdAt, updatedAt, messageCount, preview, recap, running, unread, project
+        case id, title, createdAt, updatedAt, messageCount, preview, label, recap, running, unread, project
     }
 
     /// Read leniently, and only `id` as the one thing it cannot do without: a row
@@ -49,18 +49,17 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         unread = try container.decodeIfPresent(Bool.self, forKey: .unread)
         project = try container.decodeIfPresent(String.self, forKey: .project)
         preview = try container.decodeIfPresent(String.self, forKey: .preview) ?? ""
+        label = try container.decodeIfPresent(String.self, forKey: .label) ?? ""
         messageCount = try container.decodeIfPresent(Int.self, forKey: .messageCount) ?? 0
         createdAt = try container.decodeIfPresent(Double.self, forKey: .createdAt) ?? 0
         updatedAt = try container.decodeIfPresent(Double.self, forKey: .updatedAt) ?? 0
     }
 
-    /// What the row says: the name it was given, or the words it opened with.
-    var label: String {
-        let named = (title ?? "").trimmingCharacters(in: .whitespaces)
-        if !named.isEmpty { return named }
-        let opening = preview.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
-        return opening.isEmpty ? "Empty session" : String(opening.prefix(70))
-    }
+    /// What the row is called, composed by the daemon: the name it was given, the words it
+    /// opened with, what it was found to be about, or one word for a session nothing was
+    /// said in. Composed there rather than here because the phone's own copy dropped the
+    /// recap and fell back on a different word, so one session read under two names.
+    let label: String
 
     /// The row as it reads from the phone's own copy of the list: that copy describes the
     /// session when the daemon last answered, so the mark saying a turn holds it right now

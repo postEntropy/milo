@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { humanSize, shortenPath } from '../src/util/format.js'
-import { formatSessionList, quotedLead, sessionLabel, summarizeRecap } from '../src/core/sessions/index.js'
+import { formatTokens, humanSize, shortenPath } from '../src/util/format.js'
+import { formatSessionList, quotedLead, sessionLabel, sessionRowLabel, statusText, summarizeRecap } from '../src/core/sessions/index.js'
 
 describe('humanSize', () => {
   it('says a size as a person reads it', () => {
@@ -74,6 +74,56 @@ describe('sessionLabel', () => {
   })
 })
 
+describe('sessionRowLabel', () => {
+  it('carries on through the recap to one word for a session nothing was said in', () => {
+    expect(sessionRowLabel({ title: 'Folding transcripts', preview: 'how do I fold?' })).toBe('Folding transcripts')
+    expect(sessionRowLabel({ preview: 'how do I fold?' })).toBe('how do I fold?')
+    // The words can be missing while what the session was about is not — the phone's own
+    // copy of this rule had no recap in it, so the same session read under two names.
+    expect(sessionRowLabel({ recap: '- styled the settings screen' })).toBe('- styled the settings screen')
+    expect(sessionRowLabel({})).toBe('New session')
+  })
+})
+
+describe('formatTokens', () => {
+  it('keeps a tenth below ten thousand and drops it above, where it is noise', () => {
+    expect(formatTokens(812)).toBe('812')
+    expect(formatTokens(8300)).toBe('8.3k')
+    expect(formatTokens(22100)).toBe('22k')
+    expect(formatTokens(22000)).toBe('22k')
+    // A count that reads `220k` must not be followed by `1000k`.
+    expect(formatTokens(1250000)).toBe('1.3M')
+  })
+})
+
+describe('statusText', () => {
+  it('says where a turn is, in the words the row shows', () => {
+    expect(statusText({ type: 'waiting' })).toBe('Waiting for this session to free up…')
+    expect(statusText({ type: 'waited', ms: 3400 })).toBe('Session freed after 3.4s.')
+    expect(statusText({ type: 'compacting' })).toBe('Tidying the context…')
+    // The correction's own words are the event's `text`; the row says what happened to it.
+    expect(statusText({ type: 'steer', text: 'no, b.txt' })).toBe('Correction received by Milo.')
+    expect(statusText({ type: 'aborted' })).toBe('Stopped · the partial reply was kept.')
+    expect(statusText({ type: 'error', message: 'provider exploded' })).toBe('Error: provider exploded')
+  })
+
+  it('says what a fold came to, and what another surface left behind', () => {
+    expect(statusText({ type: 'compacted', ms: 1200, folded: 3, tokens: 900, summarized: true }))
+      .toBe('🗜 Compacted: 3 turns (~900 tokens) folded into the summary in 1.2s.')
+    expect(statusText({ type: 'rebased', added: 2, removed: 1, compacted: false }))
+      .toBe('Session updated by another surface (2 new messages and 1 message dropped elsewhere).')
+  })
+
+  it('says nothing where there is nothing to say', () => {
+    // A finished turn is not news, so a row with nothing to report keeps the line it is
+    // on — and a step that draws its own thing says nothing about the row either.
+    expect(statusText({ type: 'done', finishReason: 'stop' })).toBeUndefined()
+    expect(statusText({ type: 'text-delta', delta: 'hi' })).toBeUndefined()
+    // A capped answer otherwise reads as a complete one.
+    expect(statusText({ type: 'done', finishReason: 'length' })).toBe('The reply hit the output limit.')
+  })
+})
+
 describe('formatSessionList', () => {
   it('formats empty session list', () => {
     expect(formatSessionList([])).toBe('Sessions\n\nNothing saved yet. /new starts one.')
@@ -90,6 +140,7 @@ describe('formatSessionList', () => {
       updatedAt: 0,
       messageCount: 1,
       preview: 'how do I fold a transcript?',
+      label: 'how do I fold a transcript?',
     }])
 
     expect(list).toContain('calm-otter-7 — how do I fold a transcript?')
@@ -105,6 +156,7 @@ describe('formatSessionList', () => {
       updatedAt: 0,
       messageCount: 2,
       preview: 'how do I fold a transcript?',
+      label: 'Folding transcripts',
     }])
 
     expect(list).toContain('calm-otter-7 — Folding transcripts')
@@ -119,6 +171,7 @@ describe('formatSessionList', () => {
       updatedAt: 0,
       messageCount: 2,
       preview: 'how do I fold a transcript?',
+      label: 'Folding transcripts',
       recap: '- What the session was about\n- more',
     }])
 
@@ -128,7 +181,7 @@ describe('formatSessionList', () => {
 
   it('leaves the bare id for a session nothing was said in', () => {
     const list = formatSessionList([
-      { id: 'empty-otter-1', createdAt: 0, updatedAt: 0, messageCount: 0, preview: '' },
+      { id: 'empty-otter-1', createdAt: 0, updatedAt: 0, messageCount: 0, preview: '', label: 'New session' },
     ])
 
     expect(list).toContain('empty-otter-1')
@@ -142,6 +195,7 @@ describe('formatSessionList', () => {
       updatedAt: 0,
       messageCount: 1,
       preview: `msg ${i + 1}`,
+      label: `msg ${i + 1}`,
     }))
 
     const p1 = formatSessionList(sessions, { page: 1 })

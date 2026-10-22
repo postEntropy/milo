@@ -4,7 +4,9 @@ import { sessionsTool } from '../src/core/tools/index.js'
 import type { SessionAdmin } from '../src/core/tools/types.js'
 
 function summary(id: string, extra: Partial<SessionSummary> = {}): SessionSummary {
-  return { id, createdAt: 1, updatedAt: 1, messageCount: 2, preview: '', ...extra }
+  // The name a row would show, by the rule the daemon composes it with.
+  const label = extra.title ?? extra.preview ?? extra.recap ?? 'New session'
+  return { id, createdAt: 1, updatedAt: 1, messageCount: 2, preview: '', label, ...extra }
 }
 
 /** A store holding two sessions, recording what was actually removed. */

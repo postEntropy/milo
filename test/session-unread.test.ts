@@ -168,6 +168,7 @@ describe('session unread marks', () => {
     const summary = {
       id: 'calm-otter-7',
       title: 'Deploys',
+      label: 'Deploys',
       createdAt: 1,
       updatedAt: 2,
       messageCount: 2,

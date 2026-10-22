@@ -27,6 +27,7 @@ import {
   type PermissionResult,
 } from '../../../core/tools/permission.js'
 import { errorMessage } from '../../../util/errors.js'
+import { formatTokens } from '../../../util/format.js'
 import { buildSessionsList } from '../../actions.js'
 import {
   compactReply,
@@ -1168,15 +1169,6 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
     default:
       break
   }
-}
-
-function formatTokens(value: number): string {
-  if (value < 1000) return String(value)
-  const thousands = value / 1000
-  // A tenth is worth showing at 8.3k; at 22.0k it is noise. Rounding to one
-  // decimal first is what drops the trailing zero.
-  const rounded = thousands < 10 ? Math.round(thousands * 10) / 10 : Math.round(thousands)
-  return `${rounded}k`
 }
 
 /** `1 turn`, `2 turns` — "1 turns" is the kind of thing that makes a block look unfinished. */

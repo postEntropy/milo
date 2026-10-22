@@ -5,7 +5,7 @@ import Foundation
  `src/gateways/web/protocol.ts`; the server refuses any other number aloud, so a
  drift between the two is a refusal rather than a mis-drawn chat.
  */
-let miloProtocolVersion = 10
+let miloProtocolVersion = 11
 
 // MARK: - What the app sends
 
@@ -480,10 +480,10 @@ struct Ready: Decodable {
 enum ServerFrame: Decodable {
     case ready(Ready)
     case turnStart(id: String, text: String)
-    case event(turnId: String, event: AgentEvent)
+    case event(turnId: String, event: AgentEvent, says: String?)
     case permission(id: String, request: PermissionRequest, expiresAt: Double)
     case permissionResult(id: String, allowed: Bool)
-    case turnEnd(id: String, status: String, raw: String?, rawNoOutput: String?)
+    case turnEnd(id: String, status: String, raw: String?, rawNoOutput: String?, says: String?)
     case commandResult(CommandResult)
     case state(busy: Bool, queued: Int)
     /// The session's planning turn went on or off, for every screen watching it.
@@ -504,7 +504,7 @@ enum ServerFrame: Decodable {
     case unknown
 
     private enum CodingKeys: String, CodingKey {
-        case type, id, text, turnId, event, request, expiresAt, allowed, status, raw, rawNoOutput
+        case type, id, text, turnId, event, request, expiresAt, allowed, status, raw, rawNoOutput, says
         case busy, queued, plan, jobs, items, message, panel
     }
 
@@ -520,7 +520,11 @@ enum ServerFrame: Decodable {
         case "event":
             self = .event(
                 turnId: try container.decode(String.self, forKey: .turnId),
-                event: try container.decode(AgentEvent.self, forKey: .event)
+                event: try container.decode(AgentEvent.self, forKey: .event),
+                // What the turn's row says about this step, in the daemon's words: the
+                // phone cannot import the function that writes it, so it reads it here
+                // rather than keeping a copy that drifts.
+                says: try container.decodeIfPresent(String.self, forKey: .says)
             )
         case "permission":
             self = .permission(
@@ -538,7 +542,8 @@ enum ServerFrame: Decodable {
                 id: try container.decode(String.self, forKey: .id),
                 status: try container.decode(String.self, forKey: .status),
                 raw: try container.decodeIfPresent(String.self, forKey: .raw),
-                rawNoOutput: try container.decodeIfPresent(String.self, forKey: .rawNoOutput)
+                rawNoOutput: try container.decodeIfPresent(String.self, forKey: .rawNoOutput),
+                says: try container.decodeIfPresent(String.self, forKey: .says)
             )
         case "command-result": self = .commandResult(try CommandResult(from: decoder))
         case "state":

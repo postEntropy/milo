@@ -48,6 +48,20 @@ export function closeParagraph(text: string): string {
 }
 
 /**
+ * A token count, short enough for a line in the interface: `812`, `8.3k`, `22k`, `1.2M`.
+ *
+ * A tenth is worth showing at 8.3k and is noise at 22k, which is where the two surfaces
+ * disagreed — the terminal dropped it above ten thousand and the browser kept it. The
+ * million is the browser's: a count that reads `220k` must not be followed by `1000k`.
+ */
+export function formatTokens(count: number): string {
+  if (count < 1000) return String(count)
+  if (count >= 1_000_000) return `${Math.round(count / 100_000) / 10}M`
+  const thousands = count / 1000
+  return `${thousands < 10 ? Math.round(thousands * 10) / 10 : Math.round(thousands)}k`
+}
+
+/**
  * A duration as a person reads it: `8s`, `2m 10s`, `1h 3m`. Shared by every
  * place a wait or a running job is shown, so the same span cannot read two ways
  * on two surfaces.

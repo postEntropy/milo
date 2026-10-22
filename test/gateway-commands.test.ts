@@ -409,6 +409,7 @@ describe('handleCommand', () => {
       updatedAt: 0,
       messageCount: 2,
       preview: 'hi',
+      label: 'hi',
     }
     const result = await handleCommand('/sessions', { listSessions: async () => [session] })
     expect(result.reply).toContain('calm-otter-7')
@@ -424,6 +425,7 @@ describe('handleCommand', () => {
           updatedAt: 0,
           messageCount: 2,
           preview: 'hi',
+          label: 'my project',
         },
       ],
     })
@@ -440,6 +442,7 @@ describe('handleCommand', () => {
       updatedAt: 0,
       messageCount: 5,
       preview: 'initial prompt',
+      label: 'initial prompt',
       recap: [
         '- Discussed setting up a bot deployment pipeline.',
         '- Decided to use docker-compose.',
@@ -458,6 +461,7 @@ describe('handleCommand', () => {
   it('paginates the session list with 5 sessions per page', async () => {
     const sessions = Array.from({ length: 12 }, (_, i) => ({
       id: `session-${i + 1}`,
+      label: `hello ${i + 1}`,
       createdAt: i * 1000,
       updatedAt: i * 1000,
       messageCount: 2,
@@ -495,6 +499,7 @@ describe('handleCommand', () => {
   it('reports error on invalid page argument for /sessions', async () => {
     const sessions = Array.from({ length: 12 }, (_, i) => ({
       id: `session-${i + 1}`,
+      label: `hello ${i + 1}`,
       createdAt: i * 1000,
       updatedAt: i * 1000,
       messageCount: 2,

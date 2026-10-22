@@ -15,8 +15,8 @@ import { TurnQueue } from '../turns.js'
 import { rawTurn } from '../raw.js'
 import { COMMAND_CATALOG } from '../command-catalog.js'
 import type { ClientFrame, FrameAttachment, JobView, PanelInput, PanelKind, PanelState, PanelTab, PanelView, PermissionRequest, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
-import { PERMISSION_TIMEOUT_MS, PLAN_APPROVAL } from './protocol.js'
-import { displayEvent } from './turn.js'
+import { PERMISSION_TIMEOUT_MS, PLAN_APPROVAL, PROTOCOL_VERSION } from './protocol.js'
+import { displayEvent, withWords } from './turn.js'
 import { panelsOf, transcriptOf } from './transcript.js'
 import type { PanelFacts } from '../../core/agent/system.js'
 import type { ClientKind } from '../../core/client.js'
@@ -240,7 +240,9 @@ export class WebHub {
     const project = placement ? placedProject(placement) : undefined
     client.send({
       type: 'ready',
-      version: 1,
+      // The number the handshake was checked against, not a copy of it: a client that
+      // trusts this field was being told `1` while the server spoke `10`.
+      version: PROTOCOL_VERSION,
       sessionId: chat.session.id,
       ...(project ? { project } : {}),
       // A late client is handed the history up to and including the running turn's own
@@ -1243,9 +1245,13 @@ export class WebHub {
    * held them is what split one answer into two rows.
    */
   private emitTurn(sessionId: string, frame: ServerFrame): void {
-    this.live.get(sessionId)?.frames.push(frame)
+    // The row's sentence rides here, where every turn frame passes: the daemon's own words,
+    // so a surface that cannot import them — the phone — draws what the browser draws. It is
+    // on the kept frame too, so a client that arrives late replays it with the step.
+    const outgoing = withWords(frame)
+    this.live.get(sessionId)?.frames.push(outgoing)
     for (const chat of this.chatsOf(sessionId)) {
-      for (const client of chat.clients) client.send(frame)
+      for (const client of chat.clients) client.send(outgoing)
     }
   }
 

@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { proseOf, type ServerFrame } from '../src/gateways/web/protocol.js'
+import { PROTOCOL_VERSION, proseOf, type ServerFrame } from '../src/gateways/web/protocol.js'
 import type { ProjectLookup } from '../src/core/projects.js'
 
 
@@ -68,6 +68,14 @@ describe('opening a past session in the web', () => {
 })
 
 describe('the web handshake', () => {
+  it('says the protocol it speaks, not a number of its own', async () => {
+    // The ready frame carried a hard-coded `1` while the server spoke 10, so a client
+    // that trusted the field was reading a skew that could never close.
+    const frames: ServerFrame[] = []
+    await new WebHub(build()).connect({ send: (frame) => frames.push(frame) }, PAST_CONVERSATION)
+    expect(readyOf(frames)?.version).toBe(PROTOCOL_VERSION)
+  })
+
   it('names the provider it runs on, and keeps the id when it is not a known preset', async () => {
     const known = new WebHub(build('commandcode'))
     const frames: ServerFrame[] = []

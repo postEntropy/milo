@@ -111,6 +111,14 @@ export interface Message {
    * state, like `at`, so the wires ignore it.
    */
   thoughtMs?: number
+  /**
+   * What the project's own checks answered after this turn, when the gate ran. Set on
+   * the message the turn's answer landed on and kept for the same reason `at` is: the
+   * card the live turn drew is drawn again when the session is read back, instead of an
+   * opened conversation losing the one thing that said whether the work held. Display
+   * state, like `at`, so the wires ignore it.
+   */
+  verification?: { ok: boolean; text: string }
 }
 
 export interface ToolSpec {

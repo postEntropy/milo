@@ -7,6 +7,8 @@ import { CdpConnection } from './cdp.js'
 import { attachUrl, findChrome, launchChrome } from './chrome.js'
 import { keyStroke } from './keys.js'
 import {
+  DESCRIBE_SOURCE,
+  PRESS_LISTENERS,
   isPageGoneError,
   mergeObservations,
   observeExpression,
@@ -49,6 +51,12 @@ const VIEWPORT = { width: 1280, height: 800 }
 const SCREENCAST_QUALITY = 60
 
 export type Wait = 'load' | 'domcontentloaded' | 'networkidle'
+
+/** A listener as the debugger reports it: its kind, and the node it sits on. */
+interface CdpEventListener {
+  type: string
+  backendNodeId?: number
+}
 
 export type ActRequest =
   | { action: 'click' | 'double_click'; ref: string }
@@ -297,6 +305,15 @@ export class BrowserSession {
           this.elements.set(element.ref, element)
         }
         base += value.elements.length
+
+        // Then what the markup does not name but a press does reach.
+        const unnamed = await this.pressableWithoutMarkup(realm, base, signal)
+        for (const element of unnamed) {
+          value.elements.push(element)
+          this.refs.set(element.ref, { nonce: this.nonce, sessionId: realm.sessionId, contextId: realm.contextId })
+          this.elements.set(element.ref, element)
+        }
+        base += unnamed.length
         frames.push(value)
       } catch (error) {
         unread.push(`${label}: ${errorMessage(error)}`)
@@ -305,6 +322,101 @@ export class BrowserSession {
 
     this.refCounter = base
     return mergeObservations(frames, unread)
+  }
+
+  /**
+   * The nodes a click of ours reaches that the markup never named.
+   *
+   * A page built by a framework presses its confirm button with a listener on a
+   * plain `<div>`: no `<button>`, no role, no tabindex, no `onclick` attribute,
+   * so the selector matches nothing and the list reports a page with no control
+   * to press while the button sits on it. Chrome knows which nodes carry a
+   * listener, so it is asked rather than guessed at from a class name or a
+   * cursor — a page whose sheet sets `cursor: default` on everything, as the one
+   * that cost a session 60 steps does, shows nothing either way.
+   *
+   * Best-effort, and quiet about failing: the list the markup gives is complete
+   * for what it claims, and this only adds to it. A page that cannot be asked is
+   * not a page nobody could read.
+   */
+  private async pressableWithoutMarkup(
+    realm: { sessionId: string; contextId: number },
+    base: number,
+    signal: AbortSignal,
+  ): Promise<RawElement[]> {
+    try {
+      // The debugger answers only about a document the DOM domain was asked for,
+      // and it is asked again per look: a navigation makes the old ids
+      // meaningless rather than merely stale.
+      await this.send('DOM.getDocument', { depth: 1 }, realm.sessionId, SNAPSHOT_TIMEOUT_MS, signal)
+      const body = await this.send<{ result?: { objectId?: string } }>(
+        'Runtime.evaluate',
+        { expression: 'document.body', contextId: realm.contextId },
+        realm.sessionId,
+        SNAPSHOT_TIMEOUT_MS,
+        signal,
+      )
+      const objectId = body.result?.objectId
+      if (!objectId) return []
+
+      const listeners = await this.send<{ listeners: CdpEventListener[] }>(
+        'DOMDebugger.getEventListeners',
+        { objectId, depth: -1, pierce: true },
+        realm.sessionId,
+        SNAPSHOT_TIMEOUT_MS,
+        signal,
+      )
+      const nodes = [
+        ...new Set(
+          listeners.listeners
+            .filter((listener) => (PRESS_LISTENERS as readonly string[]).includes(listener.type))
+            .map((listener) => listener.backendNodeId)
+            .filter((id): id is number => typeof id === 'number'),
+        ),
+      ]
+      if (nodes.length === 0) return []
+
+      const pushed = await this.send<{ nodeIds: number[] }>(
+        'DOM.pushNodesByBackendIdsToFrontend',
+        { backendNodeIds: nodes },
+        realm.sessionId,
+        SNAPSHOT_TIMEOUT_MS,
+        signal,
+      )
+      const handles: { objectId: string }[] = []
+      for (const nodeId of pushed.nodeIds) {
+        const resolved = await this.send<{ object?: { objectId?: string } }>(
+          'DOM.resolveNode',
+          { nodeId },
+          realm.sessionId,
+          SNAPSHOT_TIMEOUT_MS,
+          signal,
+        )
+        if (resolved.object?.objectId) handles.push({ objectId: resolved.object.objectId })
+      }
+      if (handles.length === 0) return []
+
+      const described = await this.send<{ result?: { value?: RawElement[] } }>(
+        'Runtime.callFunctionOn',
+        {
+          functionDeclaration: DESCRIBE_SOURCE,
+          // The realm is named rather than taken from a receiver node: the
+          // frames of one page each have their own, and a node handed to the
+          // wrong one would describe nothing.
+          executionContextId: realm.contextId,
+          arguments: [{ value: this.nonce }, { value: base }, ...handles],
+          returnByValue: true,
+        },
+        realm.sessionId,
+        SNAPSHOT_TIMEOUT_MS,
+        signal,
+      )
+      const value = described.result?.value
+      return Array.isArray(value) ? value : []
+    } catch (error) {
+      logDebug(`browser: the listener pass found nothing: ${errorMessage(error)}`)
+      return []
+    }
   }
 
   /** What the element behind a ref is, from the look that minted it. */

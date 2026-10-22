@@ -69,6 +69,24 @@ describe('transcriptOf — a turn keeps the order it happened in', () => {
     expect(of(messages).at(-1)?.thoughtMs).toBe(3200)
   })
 
+  it('draws the checks again on a reload, under the answer they verified', () => {
+    const messages: Message[] = [
+      { role: 'user', content: [{ type: 'text', text: 'fix it' }] },
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: 'Done.' }],
+        verification: { ok: false, text: 'Checks failed — test.\n\n$ npm test\nboom' },
+      },
+    ]
+
+    // The gate's card is state kept on the turn, not a live-only event — so reopening
+    // a conversation draws the same block the turn drew instead of losing it.
+    expect(of(messages).at(-1)?.parts).toEqual([
+      { kind: 'text', text: 'Done.' },
+      { kind: 'verification', ok: false, text: 'Checks failed — test.\n\n$ npm test\nboom' },
+    ])
+  })
+
   it('leaves no tool line for a tool that draws its own thing', () => {
     const messages: Message[] = [
       {

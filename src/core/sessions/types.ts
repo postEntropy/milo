@@ -1,5 +1,6 @@
 import type { MemoryScope } from '../memory/types.js'
 import type { Message } from '../providers/types.js'
+import { sessionRowLabel } from './format.js'
 
 /**
  * A session is the conversation itself — a named entity that outlives the
@@ -46,6 +47,12 @@ export interface SessionSummary {
   updatedAt: number
   messageCount: number
   preview: string
+  /**
+   * What a row is called, composed once by the daemon (`sessionRowLabel`): the name, the
+   * words it opened with, what it was found to be about, or one word for a session nothing
+   * was said in. Sent rather than derived because two clients derived it and disagreed.
+   */
+  label: string
   recap?: string
   /** The address the session was created under; see `SessionRecord.scope`. */
   scope?: MemoryScope
@@ -267,13 +274,17 @@ export function previewOf(messages: Message[], limit = 80): string {
 }
 
 export function toSummary(record: SessionRecord): SessionSummary {
+  const preview = previewOf(record.messages)
   return {
     id: record.id,
     title: record.title,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
     messageCount: countMessages(record.messages),
-    preview: previewOf(record.messages),
+    preview,
+    // A recap is kept in a store of its own, so it is not here to fall back on: the list
+    // that adds one says the label again with it. Same rule, one function.
+    label: sessionRowLabel({ title: record.title, preview }),
     scope: record.scope,
     project: record.project,
   }

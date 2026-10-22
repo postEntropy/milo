@@ -135,6 +135,13 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
         }
       }
 
+      // What the project's own checks answered after the turn, at the end of the answer
+      // they verified — the place the live turn drew it. Read from the message the gate
+      // kept it on, so a reopened conversation does not lose the card.
+      if (message.verification) {
+        parts.push({ kind: 'verification', ok: message.verification.ok, text: message.verification.text })
+      }
+
       if (!currentAssistant) {
         currentAssistant = {
           role: 'assistant',

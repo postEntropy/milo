@@ -94,6 +94,7 @@ describe('buildSessionsList', () => {
   const dummySessions: SessionSummary[] = Array.from({ length: 12 }, (_, i) => ({
     id: `sess-${i + 1}`,
     title: `Session ${i + 1}`,
+    label: `Session ${i + 1}`,
     createdAt: now - (i + 1) * 60000,
     updatedAt: now - i * 60000,
     messageCount: (i + 1) * 2,

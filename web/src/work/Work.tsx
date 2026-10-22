@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
-import { formatBytes, message } from '../lib/format.js'
+import { message } from '../lib/format.js'
 import { languageOf } from '../../../src/core/highlight.ts'
+import { humanSize } from '../../../src/util/format.ts'
 import type { ProjectView } from '../../../src/core/projects.ts'
 import {
   DEFAULT_PROJECT_ICON,
@@ -965,7 +966,7 @@ function TreeNode({ node, openRel, onOpen }: {
     <span className="work-tree-twist" />
     <Icon className="work-tree-mark" name="file" size={15} />
     <span className="work-tree-name">{node.name}</span>
-    <span className="work-tree-size">{formatBytes(node.size ?? 0)}</span>
+    <span className="work-tree-size">{humanSize(node.size ?? 0)}</span>
   </button>
 }
 
@@ -1005,7 +1006,7 @@ function FileView({ project, node, onClose }: { project: string; node: WorkNode;
   return <section className="work-file">
     <header className="work-file-head">
       <span className="work-file-name"><Path value={node.rel} /></span>
-      <span className="work-file-meta">{first === undefined ? '' : first.total === 0 ? 'Empty' : `${first.total} lines · ${formatBytes(first.size)}`}</span>
+      <span className="work-file-meta">{first === undefined ? '' : first.total === 0 ? 'Empty' : `${first.total} lines · ${humanSize(first.size)}`}</span>
       <button className="icon-button" type="button" aria-label="Close the file" onClick={onClose}><Icon name="x" size={16} /></button>
     </header>
     {error

@@ -69,6 +69,11 @@ struct MessageRow: View {
     /// — it is the line above the answer, and the whole of it behind that press — so a
     /// call either side of it is still one piece of work, and a chain of four does not
     /// come out as two with two strangers.
+    ///
+    /// The browser differs here on purpose, and this is not the copy drifting: it draws the
+    /// thought in the flow, so a thought between two calls ends the run there
+    /// (`web/src/chat/tool-runs.ts`). Same rule, over two drawings that put the thought in
+    /// different places.
     private var drawn: [Drawn] {
         var out: [Drawn] = []
         for part in message.parts {

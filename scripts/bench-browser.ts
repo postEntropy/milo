@@ -24,7 +24,12 @@ import { findChrome } from '../src/core/browser/chrome.js'
 import { dropOldSnapshots, estimateTokens } from '../src/core/sessions/compact.js'
 import type { Message } from '../src/core/providers/types.js'
 
-const PAGE = `<!doctype html><html><head><title>Bench</title></head><body>
+const PAGE = `<!doctype html><html><head><title>Bench</title><style>
+/* A framework's confirm control: a bare div, a cursor the sheet sets to default,
+   and the listener added by script — the markup says nothing about it being
+   pressable, so nothing but the listener pass can find it. */
+.btn-submit{display:block;width:120px;height:32px;line-height:32px;text-align:center;background:#f80;cursor:default}
+</style></head><body>
 <h1>Bench page</h1>
 <p>${'Some prose so the page has a body worth reading. '.repeat(20)}</p>
 <form>
@@ -33,6 +38,10 @@ const PAGE = `<!doctype html><html><head><title>Bench</title></head><body>
   <button id="go" type="submit">Go</button>
 </form>
 <ul>${Array.from({ length: 40 }, (_, index) => `<li><a href="/item/${index}">Item ${index}</a></li>`).join('')}</ul>
+<div id="confirm" class="btn-submit">Confirm</div>
+<script>
+  document.getElementById('confirm').addEventListener('click', function () { document.title = 'confirmed' })
+</script>
 </body></html>`
 
 interface Sample {
@@ -97,6 +106,10 @@ async function main(): Promise<void> {
       ).observation
     }
 
+    // The fixture carries the shape the listener pass exists for. If it stops
+    // coming back, the numbers below are measuring a page that tests nothing.
+    const pressable = observation.elements.some((element) => element.name === 'Confirm')
+
     // A ref only means anything for the look that handed it out, so every action
     // takes its target from the observation in hand — the discipline the model
     // follows too.
@@ -155,7 +168,7 @@ async function main(): Promise<void> {
       refused = true
     }
 
-    report(coldMs, refused)
+    report(coldMs, refused, pressable)
   } finally {
     await session.close()
     server.close()
@@ -170,7 +183,7 @@ function snapshotMessage(observation: Parameters<typeof formatSnapshot>[0]): Mes
   }
 }
 
-function report(coldMs: number, refusedStaleRef: boolean): void {
+function report(coldMs: number, refusedStaleRef: boolean, sawPressable: boolean): void {
   const ms = (values: number[]) => [...values].sort((a, b) => a - b)
 
   console.log('\nbrowser toolset — local cost per call (no model in the loop)')
@@ -232,6 +245,10 @@ function report(coldMs: number, refusedStaleRef: boolean): void {
     bounded.toLocaleString(),
   )
   console.log('  per look          ~%s tokens of page, against a model round trip of seconds', perSnapshot)
+  console.log(
+    '  pressable div     %s',
+    sawPressable ? 'seen, as [clickable]' : 'MISSED — the fixture no longer exercises the listener pass',
+  )
   console.log('  stale ref         %s', refusedStaleRef ? 'refused, as it must be' : 'ACCEPTED — investigate')
 }
 

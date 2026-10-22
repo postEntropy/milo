@@ -30,11 +30,28 @@ r5   link      "Item 0"
 r6   combobox  "Choose Small"
 r7   button    "Go"
 r8   textbox   "Password"             [required]  <password field — Milo does not fill this>
-(… 34 more — use mode "text" to see more of the page)
+r9   div       "Confirmar descadastro"  [clickable]
+(… 34 more — this list is built from the whole page, so scrolling adds nothing to it; mode "text" reads the page's words, and mode "shot" shows the page itself)
 ```
 
 Not the HTML and not a screenshot: a role, a name and a state per element is enough for "click r7" to be
 a complete instruction, and a screenshot carries no element identity.
+
+**The list holds two kinds of entry.** What the **markup names** — a link with an `href`, a button, an
+input, anything with a role or a tabindex — and, marked `[clickable]`, what **Chrome knows is pressable**
+and the markup never said. A page built by a framework confirms with a listener on a plain `<div>`: no
+`<button>`, no role, no tabindex, no `onclick` attribute, and a sheet that sets `cursor: default` on it,
+so nothing in the markup marks the control and the list used to report a page with nothing to press while
+its confirm button sat on it — a session spent 60 of its 75 steps that way. Those entries come from
+`DOMDebugger.getEventListeners`, Chrome's own account of which nodes carry a listener our click would
+reach, and only for a node with words of its own: a container holding a **delegated** listener carries the
+whole page's text, and listing the app's root as pressable would be noise wearing a control's name. The
+pass costs one walk per look (~4ms on a small page) and fails quietly — the list the markup gives is
+complete for what it claims, and this only adds to it. What stays invisible: a listener delegated to a
+container (**React 17+ and jQuery** attach at the root, so the evidence is the root's, not the button's),
+a control wired only to a **touch** event, which a mouse click would never trigger, and an image-only
+button with no text. On such a page a picture (`mode: "shot"`) shows what a press cannot, and the step
+belongs to the person.
 
 A picture has to be asked for by name, and there are **two** because they are two different acts:
 

@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
-import { formatBytes, formatWhen, message, splitNames } from '../lib/format.js'
+import { formatWhen, message, splitNames } from '../lib/format.js'
 import { CLASSIFIER_LABELS, EFFORT_LABELS, PERMISSION_LABELS, SEARCH_LABELS, skillOriginLabel } from '../lib/labels.js'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
+import { humanSize } from '../../../src/util/format.ts'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
@@ -573,7 +574,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
           </div>
 
           <h3 className="section-label" style={{ paddingInline: 0 }}>Notes</h3>
-          {data.memoryStats && <p className="panel-note">{data.memoryStats.facts} fact{data.memoryStats.facts === 1 ? '' : 's'} · {formatBytes(data.memoryStats.bytes)} · {data.memoryStats.location}</p>}
+          {data.memoryStats && <p className="panel-note">{data.memoryStats.facts} fact{data.memoryStats.facts === 1 ? '' : 's'} · {humanSize(data.memoryStats.bytes)} · {data.memoryStats.location}</p>}
           {notes === null ? <p className="list-empty">Reading…</p>
             : notes.length === 0 ? <p className="list-empty">Nothing is remembered yet.</p>
             : notes.map((note) => <div className="entry-row" key={note.id}><div><div className="secret-name">{note.text}</div><div className="secret-state">{formatWhen(note.createdAt)} · {note.id.slice(0, 8)}</div></div><button className="button danger" type="button" onClick={() => void forgetNote(note.id)}>Forget</button></div>)}
@@ -661,7 +662,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
             <button className="button" type="button" onClick={() => { update(['browser', 'chromePath'], browser.path); setNotice({ text: 'Browser chosen — Save changes to keep it.', error: false }) }}>Use</button>
           </div>))}
           {profiles && (profiles.length === 0 ? <p className="list-empty">No profile found to copy.</p> : profiles.map((profile) => <div className="entry-row" key={profile.dir}>
-            <div><div className="secret-name">{profile.name}</div><div className="secret-state">{profile.dir} · {formatBytes(profile.bytes)}</div></div>
+            <div><div className="secret-name">{profile.name}</div><div className="secret-state">{profile.dir} · {humanSize(profile.bytes)}</div></div>
             <button className="button" type="button" disabled={saving} onClick={() => void startJob('profile-copy', { id: profile.id, dir: profile.dir })}>Copy and use</button>
           </div>))}
           <p className="panel-note">Copying a profile carries the sign-in from the browser you use, so Milo then acts as you on those sites. Close that browser first — a profile in use cannot be copied.</p>

@@ -1935,13 +1935,13 @@ final class AppModel {
             withAnimation(SettlesIn.motion) {
                 messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil, waiting: true))
             }
-        case .event(_, let event):
-            apply(event)
+        case .event(_, let event, let says):
+            apply(event, says: says)
         case .permission(let id, let request, let expiresAt):
             pending = (id, request, expiresAt)
         case .permissionResult(let id, _):
             if pending?.id == id { pending = nil }
-        case .turnEnd(_, let status, let raw, let rawNoOutput):
+        case .turnEnd(_, let status, let raw, let rawNoOutput, let says):
             busy = false
             // A plan turn has something to approve only when it actually put words on
             // the screen: a turn that ended in tool calls alone proposed nothing.
@@ -1974,7 +1974,7 @@ final class AppModel {
                 messages[index].parts = AppModel.settled(messages[index].parts)
                 if let raw { messages[index].raw = raw }
                 if let rawNoOutput { messages[index].rawNoOutput = rawNoOutput }
-                if status == "stopped" { messages[index].status = "Stopped · the partial reply was kept." }
+                if let says { messages[index].status = says }
                 saidWhy = messages[index].status != nil
                 answered = messages[index].prose
             }
@@ -2081,7 +2081,7 @@ final class AppModel {
         }
     }
 
-    private func apply(_ event: AgentEvent) {
+    private func apply(_ event: AgentEvent, says: String?) {
         // Every event is a step, whether or not it draws anything: what keeps the system's
         // hold on the turn is that the work is moving, not what moved.
         continuedTurn.advance()
@@ -2138,32 +2138,15 @@ final class AppModel {
             mutateLast { parts in AppModel.place(widget: widget, draft: draft, in: &parts) }
         case .usage(let input, let output):
             mutatingLast { $0.tokens = (input, output) }
-        case .waiting:
-            mutatingLast { $0.status = "Waiting for this session to free up…" }
-        case .waited(let ms):
-            mutatingLast { $0.status = "Session freed after \(AppModel.formatMs(ms))." }
-        case .compacting:
-            mutatingLast { $0.status = "Tidying the context…" }
-        case .compacted(let ms, let folded, let tokens, let summarized):
-            mutatingLast {
-                $0.status = AppModel.describeCompaction(
-                    folded: folded,
-                    tokens: tokens,
-                    ms: ms,
-                    summarized: summarized
-                )
-            }
-        case .rebased(let added, let removed, let compacted):
-            mutatingLast {
-                $0.status = "Session updated by another surface (\(AppModel.describeRebase(added: added, removed: removed, compacted: compacted)))."
-            }
-        case .steer:
-            mutatingLast { $0.status = "Correction received by Milo." }
-        case .done(let finishReason):
-            if finishReason == "length" { mutatingLast { $0.status = "The reply hit the output limit." } }
+        // The words a turn's own row shows are the daemon's, arriving with the frame: the
+        // phone wrote them itself until its copy of them drifted from the browser's, and a
+        // sentence written twice is a sentence that drifts. A step with nothing to say about
+        // the row leaves the line that is already there.
+        case .waiting, .waited, .compacting, .compacted, .rebased, .steer, .done:
+            if let says { mutatingLast { $0.status = says } }
         case .aborted:
             mutatingLast {
-                $0.status = "Stopped · the partial reply was kept."
+                if let says { $0.status = says }
                 $0.parts = AppModel.settled($0.parts)
             }
         case .error(let message):
@@ -2171,7 +2154,7 @@ final class AppModel {
             // lives for nine seconds and leaves a blank bubble is a failure that looks
             // like nothing happened. The daemon writes the same words down, so a
             // reopened conversation still says it.
-            mutatingLast { $0.status = "Error: \(message)" }
+            if let says { mutatingLast { $0.status = says } }
             note = Note(message)
         case .other:
             break
@@ -2253,32 +2236,6 @@ final class AppModel {
         }
     }
 
-    /// A duration as the terminal says it: seconds to one decimal, or milliseconds.
-    private static func formatMs(_ ms: Int) -> String {
-        ms >= 1000 ? String(format: "%.1f s", Double(ms) / 1000) : "\(ms) ms"
-    }
-
-    /// What a fold came to, in the words the other surfaces use for it. Mirrors
-    /// `describeCompaction` in `src/core/sessions/format.ts`, which the CLI, the bots
-    /// and the browser draw from: the phone cannot import it, so the sentence is kept
-    /// here beside `describeRebase` rather than made up again. The duration is this
-    /// screen's own spelling of a span (`formatMs`), as `waited` already is.
-    private static func describeCompaction(folded: Int, tokens: Int, ms: Int, summarized: Bool) -> String {
-        let turns = "\(folded) turn\(folded == 1 ? "" : "s")"
-        let took = formatMs(ms)
-        return summarized
-            ? "🗜 Compacted: \(turns) (~\(tokens) tokens) folded into the summary in \(took)."
-            : "🗜 Compacted: \(turns) (~\(tokens) tokens) dropped — the summary call failed, so nothing was written in their place. In \(took)."
-    }
-
-    /// What another holder of this session left in it, in one clause.
-    private static func describeRebase(added: Int, removed: Int, compacted: Bool) -> String {
-        var says: [String] = []
-        if added > 0 { says.append("\(added) new message\(added == 1 ? "" : "s")") }
-        if removed > 0 { says.append("\(removed) message\(removed == 1 ? "" : "s") dropped elsewhere") }
-        if compacted { says.append("the earlier turns are summarized") }
-        return says.joined(separator: " and ")
-    }
 }
 
 extension AppModel.Message {

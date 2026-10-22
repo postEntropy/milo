@@ -36,5 +36,7 @@ export {
   formatWhen,
   quotedLead,
   sessionLabel,
+  sessionRowLabel,
+  statusText,
   summarizeRecap,
 } from './format.js'

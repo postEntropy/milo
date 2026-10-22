@@ -1,3 +1,4 @@
+import type { AgentEvent } from '../agent/events.js'
 import type { SessionStats, SessionSummary } from './types.js'
 
 export const DEFAULT_PAGE_SIZE = 5
@@ -44,6 +45,44 @@ export function describeCompaction(fold: {
     : `🗜 Compacted: ${turns} (~${fold.tokens} tokens) dropped — the summary call failed, so nothing was written in their place. In ${took}.`
 }
 
+/**
+ * Where a turn is, in the words a surface that reads prose shows — the browser and the
+ * phone. Said here, once: both drew these sentences from their own copies, and the
+ * phone's had already drifted from the browser's with nothing holding the two together.
+ *
+ * The terminal and the chat bots do not read this. They say the same facts in their own
+ * register — `⏳ another Milo is using this session` — which is a different sentence for a
+ * different medium, and they take their ingredients from the functions above.
+ *
+ * `undefined` where there is nothing to say: a turn that finished normally is not news,
+ * and a caller that reads one clears the line it was on.
+ */
+export function statusText(event: AgentEvent): string | undefined {
+  switch (event.type) {
+    case 'waiting':
+      return 'Waiting for this session to free up…'
+    case 'waited':
+      return `Session freed after ${formatSeconds(event.ms / 1000)}.`
+    case 'compacting':
+      return 'Tidying the context…'
+    case 'compacted':
+      return describeCompaction(event)
+    case 'rebased':
+      return `Session updated by another surface (${describeRebase(event)}).`
+    case 'steer':
+      return 'Correction received by Milo.'
+    case 'aborted':
+      return 'Stopped · the partial reply was kept.'
+    case 'done':
+      // A capped answer otherwise reads as a complete one.
+      return event.finishReason === 'length' ? 'The reply hit the output limit.' : undefined
+    case 'error':
+      return `Error: ${event.message}`
+    default:
+      return undefined
+  }
+}
+
 export interface SessionListStyle {
   /** Render for a surface that understands Markdown (Telegram, Discord). */
   markdown?: boolean
@@ -85,6 +124,19 @@ export function formatSeconds(seconds: number): string {
  */
 export function sessionLabel(session: { title?: string; preview?: string }): string {
   return session.title || session.preview || ''
+}
+
+/**
+ * What a session's row is called: the name it was given, the words it opened with, what it
+ * was found to be about, or one word for a session nothing was said in yet.
+ *
+ * The daemon composes it, once, because the browser and the phone each did: the phone's copy
+ * dropped the recap and fell back on a different word, so the same session read under two
+ * names. The listing keeps `sessionLabel` — it draws the recap as the body below and would
+ * otherwise say the same thing twice.
+ */
+export function sessionRowLabel(session: { title?: string; preview?: string; recap?: string }): string {
+  return sessionLabel(session) || session.recap || 'New session'
 }
 
 export function formatSessionList(

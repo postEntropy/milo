@@ -2,12 +2,6 @@ export function splitNames(value: string): string[] {
   return value.split(',').map((item) => item.trim()).filter(Boolean)
 }
 
-export function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-}
-
 /** Absolute for a next run, relative for a past one. */
 export function formatWhen(timestamp: number, absolute = false): string {
   if (absolute) return new Date(timestamp).toLocaleString()
@@ -37,11 +31,4 @@ export function formatIn(timestamp: number): string {
 
 export function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
-}
-
-/** A token count, short enough for a line in the interface. */
-export function formatTokens(count: number): string {
-  if (count >= 1_000_000) return `${Math.round(count / 100_000) / 10}M`
-  if (count >= 1_000) return `${Math.round(count / 100) / 10}k`
-  return `${count}`
 }

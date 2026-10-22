@@ -1,7 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useCopy, type CopyState } from '../lib/clipboard.js'
-import { formatTokens } from '../lib/format.js'
 import { formatWhen, formatSeconds } from '../../../src/core/sessions/format.ts'
+import { formatTokens, humanSize } from '../../../src/util/format.ts'
 import type { ActionRow, FrameAttachment, SessionCardItem, ThinkingDisplay, ToolMark, TranscriptMessage, TranscriptPart } from '@protocol'
 import { proseOf } from '@protocol'
 import { toolBrand, toolLabel, toolResultPreview, changeTotals } from '../../../src/gateways/tool-line.ts'
@@ -47,16 +47,10 @@ function Attachments({ items }: { items: FrameAttachment[] }) {
   return <>
     <div className="attachments">{items.map((item) => item.image
       ? <button className="attachment-image" key={item.id} type="button" title={`Open ${item.name}`} onClick={() => setOpen(item)}><img src={attachmentUrl(item.id)} alt={item.name} loading="lazy" /></button>
-      : <a className="attachment-file" key={item.id} href={attachmentUrl(item.id)} download={item.name}><Icon name="file" size={16} /><span className="attachment-name">{item.name}</span><small className="attachment-size">{formatBytes(item.size)}</small></a>,
+      : <a className="attachment-file" key={item.id} href={attachmentUrl(item.id)} download={item.name}><Icon name="file" size={16} /><span className="attachment-name">{item.name}</span><small className="attachment-size">{humanSize(item.size)}</small></a>,
     )}</div>
     {open && <ImageViewer src={attachmentUrl(open.id)} name={open.name} onClose={close} />}
   </>
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`
-  return `${Math.round((bytes / (1024 * 1024)) * 10) / 10} MB`
 }
 
 /**
@@ -332,7 +326,7 @@ export function MessageList({
   if (messages.length === 0) return (
     <section className="empty-state" aria-labelledby="welcome-title">
       <h1 id="welcome-title">How can I help today?</h1>
-      {/* Remounted when the ideas take over from the standing four, so the cards
+      {/* Remounted when the ideas take over from the standing four, so the chips
           fade in rather than the set jumping in place. */}
       <div className="suggestion-grid" key={hasIdeas ? 'ideas' : 'standing'}>
         {(suggestions ?? defaultSuggestions).map((item) => (
@@ -340,11 +334,11 @@ export function MessageList({
             className="suggestion"
             key={item.title}
             type="button"
+            title={item.detail}
             onClick={() => (item.action ? onAction?.(item.action) : onPrompt?.(item.prompt ?? ''))}
           >
-            <Icon name={item.icon} size={19} />
-            <span><strong>{item.title}</strong><small>{item.detail}</small></span>
-            <Icon className="suggestion-arrow" name="chevron" size={16} />
+            <Icon name={item.icon} size={16} />
+            <span>{item.title}</span>
           </button>
         ))}
       </div>

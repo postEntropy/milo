@@ -28,6 +28,7 @@ import {
   type SessionSeen,
   type SessionStore,
   type SessionSummary,
+  sessionRowLabel,
   withRecaps,
 } from './sessions/index.js'
 import { errorMessage } from '../util/errors.js'
@@ -354,6 +355,9 @@ export class AgentRuntime {
       const running = await this.store.busy(session.id)
       return {
         ...session,
+        // The name a row shows, said again now the recap is here: the store's own summary
+        // had none to fall back on. One rule, composed where its inputs are.
+        label: sessionRowLabel(session),
         ...(running ? { running: true } : {}),
         ...(unread ? { unread: true } : {}),
       }

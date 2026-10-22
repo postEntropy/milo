@@ -8,7 +8,7 @@ function project(id: string, name = id): ProjectView {
 }
 
 function session(id: string, overrides: Partial<SessionSummary> = {}): SessionSummary {
-  return { id, preview: id, messageCount: 2, updatedAt: 0, ...overrides }
+  return { id, label: id, preview: id, messageCount: 2, updatedAt: 0, ...overrides }
 }
 
 describe('a session belongs to the list its project does', () => {

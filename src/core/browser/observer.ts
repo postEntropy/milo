@@ -48,22 +48,17 @@ export interface RawObservation {
 }
 
 /**
- * The function Chrome runs, as source.
+ * What one element is, as the page sees it — the half both page functions need.
  *
- * A function and not a snippet because it is called once per frame with the
- * frame's own label and the ref number it should start from — refs have to be
- * unique across every frame of the page, and each frame has its own global
- * object to hang the element registry on.
+ * Spliced into each of them when they are built, rather than shared at runtime:
+ * one is evaluated per frame and the other is called once per node the debugger
+ * names, and a helper fetched over the wire would be a third call into the page.
+ * One copy of the words, in both.
  */
-const OBSERVER = String.raw`
-function (frame, base, nonce) {
-  var seen = 0
-  var found = []
-  var registry = {}
-  var SELECTOR = 'a[href],button,input,select,textarea,summary,[role],[contenteditable=""],[contenteditable="true"],[onclick],[tabindex]:not([tabindex="-1"])'
-  var MAX_ELEMENTS = __MAX_ELEMENTS__
-  var MAX_VISITED = 8000
-  var NAME_LIMIT = __NAME_LIMIT__
+const ELEMENT_HELPERS = String.raw`
+  function flatten(text) {
+    return (text || '').replace(/\s+/g, ' ').trim()
+  }
 
   function visible(el) {
     if (el.hidden) return false
@@ -167,6 +162,36 @@ function (frame, base, nonce) {
     return bits.join(', ')
   }
 
+  /**
+   * An element's name as the list draws it: one line, cut where a link's text
+   * could be a paragraph. Shared with the function that describes a node the
+   * markup never named, so both lists spell an element the same way.
+   */
+  function labelOf(el, role) {
+    var name = flatten(nameOf(el, role))
+    return name.length > NAME_LIMIT ? name.slice(0, NAME_LIMIT - 1) + '…' : name
+  }
+`
+
+/**
+ * The function Chrome runs for a whole page, as source.
+ *
+ * A function and not a snippet because it is called once per frame with the
+ * frame's own label and the ref number it should start from — refs have to be
+ * unique across every frame of the page, and each frame has its own global
+ * object to hang the element registry on.
+ */
+const OBSERVER = String.raw`
+function (frame, base, nonce) {
+  var seen = 0
+  var found = []
+  var registry = {}
+  var SELECTOR = 'a[href],button,input,select,textarea,summary,[role],[contenteditable=""],[contenteditable="true"],[onclick],[tabindex]:not([tabindex="-1"])'
+  var MAX_ELEMENTS = __MAX_ELEMENTS__
+  var MAX_VISITED = 8000
+  var NAME_LIMIT = __NAME_LIMIT__
+__ELEMENT_HELPERS__
+
   function walk(root, label) {
     var all
     try { all = root.querySelectorAll('*') } catch (e) { return }
@@ -178,7 +203,7 @@ function (frame, base, nonce) {
       try { matches = el.matches(SELECTOR) } catch (e) { matches = false }
       if (matches && visible(el)) {
         var role = roleOf(el)
-        if (role !== 'hidden') found.push({ el: el, role: role, name: nameOf(el, role), state: stateOf(el, role), sensitive: sensitiveOf(el) })
+        if (role !== 'hidden') found.push({ el: el, role: role, state: stateOf(el, role), sensitive: sensitiveOf(el) })
       }
       if (el.shadowRoot) walk(el.shadowRoot, label)
     }
@@ -192,9 +217,7 @@ function (frame, base, nonce) {
     // Keyed by the observation it belongs to: a ref from an earlier look must not
     // resolve to whatever element happens to sit at that number now.
     registry[nonce + ':' + ref] = found[i].el
-    var name = found[i].name.replace(/\s+/g, ' ').trim()
-    if (name.length > NAME_LIMIT) name = name.slice(0, NAME_LIMIT - 1) + '…'
-    elements.push({ ref: ref, role: found[i].role, name: name, state: found[i].state, sensitive: found[i].sensitive })
+    elements.push({ ref: ref, role: found[i].role, name: labelOf(found[i].el, found[i].role), state: found[i].state, sensitive: found[i].sensitive })
   }
   globalThis.__miloRefs = registry
 
@@ -217,20 +240,92 @@ function (frame, base, nonce) {
 `
 
 /**
- * The function source, with this module's constants baked in.
+ * The function Chrome runs for a node the markup never named.
+ *
+ * Chrome is asked which nodes carry a listener a click would reach
+ * (`DOMDebugger.getEventListeners`), and this describes what it names: a `<div>`
+ * with a handler is a control to the person and matches nothing in the selector
+ * above, so without this the list reports a page with nothing to press while its
+ * confirm button sits on it. Only a node with words of its own is taken — a
+ * container holding a delegated listener carries the whole page's text, and
+ * listing the app's root as pressable would be noise wearing a control's name.
+ */
+const DESCRIBE = `
+function (nonce, base) {
+  var nodes = Array.prototype.slice.call(arguments, 2)
+  var registry = globalThis.__miloRefs || {}
+  var described = []
+  var NAME_LIMIT = __NAME_LIMIT__
+__ELEMENT_HELPERS__
+
+  function alreadyListed(el) {
+    for (var key in registry) if (registry[key] === el) return true
+    return false
+  }
+
+  for (var i = 0; i < nodes.length; i++) {
+    var el = nodes[i]
+    if (!el || el.nodeType !== 1) continue
+    // The markup already handed this one out: a <button> has a listener too.
+    if (alreadyListed(el)) continue
+    if (!visible(el)) continue
+    var text = flatten(el.textContent)
+    if (!text || text.length > NAME_LIMIT) continue
+    var role = roleOf(el)
+    if (role === 'hidden') continue
+    var ref = 'r' + (base + described.length + 1)
+    registry[nonce + ':' + ref] = el
+    var state = stateOf(el, role)
+    described.push({
+      ref: ref,
+      role: role,
+      name: labelOf(el, role),
+      state: state ? state + ', clickable' : 'clickable',
+      sensitive: sensitiveOf(el)
+    })
+  }
+  globalThis.__miloRefs = registry
+  return described
+}
+`
+
+/**
+ * A function source with this module's constants baked in.
  *
  * Every occurrence, not the first: a placeholder that survives into the page
  * becomes a `ReferenceError` in a script nobody can see, and the only symptom is
  * a page reported as unreadable. A token appearing twice is the normal case — the
  * text limit is used once to cut and once to decide whether it was cut.
  */
-export const OBSERVER_SOURCE = (
-  [
-    ['__MAX_ELEMENTS__', MAX_ELEMENTS],
-    ['__NAME_LIMIT__', NAME_LIMIT],
-    ['__TEXT_LIMIT__', TEXT_LIMIT],
-  ] as const
-).reduce((source, [token, value]) => source.replaceAll(token, String(value)), OBSERVER)
+function baked(source: string): string {
+  return (
+    [
+      ['__ELEMENT_HELPERS__', ELEMENT_HELPERS],
+      ['__MAX_ELEMENTS__', MAX_ELEMENTS],
+      ['__NAME_LIMIT__', NAME_LIMIT],
+      ['__TEXT_LIMIT__', TEXT_LIMIT],
+    ] as const
+  ).reduce((whole, [token, value]) => whole.replaceAll(token, String(value)), source)
+}
+
+export const OBSERVER_SOURCE = baked(OBSERVER)
+
+/**
+ * The declaration to evaluate for the nodes a look adds beyond the markup's own,
+ * as `Runtime.callFunctionOn` takes it: the nonce and the ref number to start
+ * from, then the nodes themselves.
+ */
+export const DESCRIBE_SOURCE = baked(DESCRIBE)
+
+/**
+ * The listeners a press we send can actually reach.
+ *
+ * Our click is a mouse click at the element's own point, so a control wired to
+ * `click`, `mousedown`, `mouseup` or the pointer events is one we can drive, and
+ * one wired only to a touch event is one we cannot — listing it would promise a
+ * press that would never land.
+ */
+export const PRESS_LISTENERS = ['click', 'mousedown', 'mouseup', 'pointerdown', 'pointerup'] as const
 
 /** The expression to evaluate in one frame's realm. */
 export function observeExpression(frame: string, base: number, nonce: string): string {
@@ -321,7 +416,7 @@ export function formatSnapshot(observation: Observation): string {
 
   if (observation.more) {
     lines.push(
-      `(only the first ${observation.elements.length} elements are shown — scroll or use mode "text" to see more of the page)`,
+      `(only the first ${observation.elements.length} elements are shown — this list is built from the whole page, so scrolling adds nothing to it; mode "text" reads the page's words, and mode "shot" shows the page itself)`,
     )
   }
   if (observation.unread.length > 0) {

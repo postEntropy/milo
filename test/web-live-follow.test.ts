@@ -12,7 +12,7 @@ const { WebHub } = await import('../src/gateways/web/hub.js')
 const { WebSettings } = await import('../src/gateways/web/settings.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { DefaultPermissionPolicy } = await import('../src/core/tools/permission.js')
-const { PLAN_APPROVAL } = await import('../src/gateways/web/protocol.js')
+const { parseClientFrame, PLAN_APPROVAL } = await import('../src/gateways/web/protocol.js')
 
 /** The desktop tab and the phone: two conversations a person may have open at once. */
 const DESKTOP = '11111111-2222-3333-4444-555555555555'
@@ -98,6 +98,26 @@ class AskingProvider implements Provider {
   }
 }
 
+/**
+ * Asks for the same call at the start of every turn, so an "Always" answer can be seen
+ * to stick: the turn after it runs the call with no prompt at all.
+ */
+class RepeatingAskingProvider implements Provider {
+  readonly id = 'asks-again'
+  private step = 0
+
+  async *stream(_request: ChatRequest): AsyncGenerator<StreamEvent> {
+    this.step += 1
+    if (this.step % 2 === 1) {
+      yield { type: 'tool-call', id: `c${this.step}`, name: 'shell_command', args: { command: 'ls' } }
+      yield { type: 'done', finishReason: 'tool_calls' }
+      return
+    }
+    yield { type: 'text', delta: 'it ran' }
+    yield { type: 'done', finishReason: 'stop' }
+  }
+}
+
 /** A tool that is not read-only, so a turn has to ask before it runs one. */
 const askingRegistry = {
   specs: () => [],
@@ -138,6 +158,8 @@ interface Frame {
   activeTurn?: { id: string }
   id?: string
   allowed?: boolean
+  remember?: boolean
+  says?: string
   plan?: boolean
   text?: string
   messages?: Array<{ parts: Array<{ kind: string; text?: string }> }>
@@ -286,6 +308,36 @@ describe('a turn on a session open in two conversations', () => {
     expect(await waitFor(() => desktop.some((frame) => frame.type === 'turn-end'))).toBe(true)
   })
 
+  it('carries the turn’s own words on the frame, so no surface writes them again', async () => {
+    // The phone cannot import the function that writes these sentences, so the sentence
+    // travels. Both surfaces drew the same words from their own copies, and the copies had
+    // already drifted: the browser spelled a span `3.4 s` where the core spells it `3.4s`.
+    const provider = new HeldProvider()
+    const { hub, desktop, phone, at, phoneClient } = await twoScreens(provider)
+
+    hub.handle(at, { type: 'send', text: 'go' }, DESKTOP)
+    await provider.reached()
+    hub.handle(phoneClient, { type: 'send', text: 'use b.txt instead', intent: 'steer' }, PHONE)
+
+    const steered = expect.objectContaining({
+      type: 'event',
+      event: expect.objectContaining({ type: 'steer' }),
+      says: 'Correction received by Milo.',
+    })
+    expect(desktop).toContainEqual(steered)
+    expect(phone).toContainEqual(steered)
+
+    // A stopped turn is the other half of it: the words for the state the frame carries,
+    // written in the same single place.
+    hub.handle(phoneClient, { type: 'control', action: 'stop' }, PHONE)
+    expect(await waitFor(() => desktop.some((frame) => frame.type === 'turn-end' && frame.status === 'stopped'))).toBe(true)
+    expect(desktop).toContainEqual(expect.objectContaining({
+      type: 'turn-end',
+      status: 'stopped',
+      says: 'Stopped · the partial reply was kept.',
+    }))
+  })
+
   it('turns the session into a plan on both screens, and approves it into a turn', async () => {
     const provider = new HeldProvider()
     const { hub, desktop, phone, at } = await twoScreens(provider)
@@ -345,6 +397,35 @@ describe('a turn on a session open in two conversations', () => {
     expect(await waitFor(() => phone.some((frame) => frame.type === 'permission-result'))).toBe(true)
     expect(phone.find((frame) => frame.type === 'permission-result')?.allowed).toBe(true)
     expect(await waitFor(() => desktop.some((frame) => frame.type === 'turn-end'))).toBe(true)
+  })
+
+  it('remembers an Always answer, so the same call is not asked again', async () => {
+    const provider = new RepeatingAskingProvider()
+    const { hub, desktop, at } = await twoScreens(provider, {
+      permissionPolicy: new DefaultPermissionPolicy(),
+      registry: askingRegistry,
+    })
+
+    hub.handle(at, { type: 'send', text: 'run it' }, DESKTOP)
+    expect(await waitFor(() => desktop.some((frame) => frame.type === 'permission'))).toBe(true)
+    const asked = desktop.find((frame) => frame.type === 'permission')
+
+    // The frame the button sends, taken through the parser the way the socket takes it
+    // (`src/gateways/web/http.ts`). It was refused there, so the answer never reached the
+    // turn and the prompt stayed pending until it expired.
+    const control = parseClientFrame({ type: 'control', action: 'always', id: asked?.id ?? '' })
+    expect(control).not.toBeNull()
+    hub.handle(at, control!, DESKTOP)
+    expect(await waitFor(() => desktop.some((frame) => frame.type === 'permission-result'))).toBe(true)
+    expect(desktop.find((frame) => frame.type === 'permission-result')?.remember).toBe(true)
+    expect(await waitFor(() => desktop.some((frame) => frame.type === 'turn-end'))).toBe(true)
+
+    // The same call, in the next turn: the answer already given covers it, so the
+    // question does not come back.
+    const askedSoFar = desktop.filter((frame) => frame.type === 'permission').length
+    hub.handle(at, { type: 'send', text: 'run it again' }, DESKTOP)
+    expect(await waitFor(() => desktop.filter((frame) => frame.type === 'turn-end').length === 2)).toBe(true)
+    expect(desktop.filter((frame) => frame.type === 'permission').length).toBe(askedSoFar)
   })
 
   it('shows a file the turn sent, and a finished job’s notice, on every screen of the session', async () => {

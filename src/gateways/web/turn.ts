@@ -1,8 +1,27 @@
+import { statusText } from '../../core/sessions/format.js'
 import { toolDraw, toolResult } from '../tool-line.js'
 import type { DisplayConfig } from '../../core/config/schema.js'
 import type { AgentEvent, ServerFrame } from './protocol.js'
 
 export type SendFrame = (frame: ServerFrame) => void
+
+/**
+ * The sentence a frame carries for the turn's own row, in the daemon's words: the browser
+ * and the phone both read it here instead of writing the sentence each for itself. The
+ * phone cannot import `statusText` at all, and a sentence written twice is a sentence that
+ * drifts — which is what the phone's copy had already done. The tool line's `text` travels
+ * for the same reason.
+ *
+ * A stopped turn is the other half: the frame says the state, and the sentence for that
+ * state is the aborted one, written in the one place that writes it.
+ */
+export function withWords(frame: ServerFrame): ServerFrame {
+  if (frame.type !== 'event' && frame.type !== 'turn-end') return frame
+  const said = frame.type === 'event'
+    ? statusText(frame.event)
+    : (frame.status === 'stopped' ? statusText({ type: 'aborted' }) : undefined)
+  return said ? { ...frame, says: said } : frame
+}
 
 export function displayEvent(event: AgentEvent, turnId: string, display: DisplayConfig, send: SendFrame): void {
   if (event.type === 'tool-start') {

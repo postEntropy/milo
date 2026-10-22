@@ -7,6 +7,8 @@
 export type SessionSummary = {
   id: string
   title?: string
+  /** What the row is called, composed by the daemon; see `sessionRowLabel`. */
+  label: string
   preview: string
   messageCount: number
   updatedAt: number

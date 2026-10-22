@@ -1,13 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
-import { sessionLabel as sharedSessionLabel } from '../../../src/core/sessions/format.ts'
 import { formatWhen } from '../lib/format.js'
 import { Icon } from '../ui/Icons.js'
 import type { SessionSummary } from './types.js'
-
-/** What a session is called on screen: its message, never the generated id. */
-export function sessionLabel(session: SessionSummary): string {
-  return sharedSessionLabel(session) || session.recap || 'New session'
-}
 
 /** What a row says under the name: how much has been said, and when. */
 export function sessionMeta(session: SessionSummary): string {
@@ -108,7 +102,7 @@ export function SessionRow({
       ) : (
         <button className="session-row" type="button" onClick={onClick}>
           <span className="session-content">
-            <span className="session-title">{sessionLabel(session)}</span>
+            <span className="session-title">{session.label}</span>
             <span className="session-preview">{sessionMeta(session)}</span>
           </span>
         </button>

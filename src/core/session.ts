@@ -1036,12 +1036,14 @@ export class Session {
               }
             : { checks: 0 }),
         })
-        yield {
-          type: 'verification',
-          result,
-          text: verificationText(result),
-          ok: result.kind === 'checks' ? result.ok : result.kind === 'none',
-        }
+        const text = verificationText(result)
+        const ok = result.kind === 'checks' ? result.ok : result.kind === 'none'
+        // Kept on the message the answer landed on — the last one this turn left — so a
+        // session read back draws the card the live turn drew. The event is not the only
+        // carrier: without this, reopening a conversation loses what the checks said.
+        const landed = this.messages.findLast((message, index) => index >= firstNew && message.role === 'assistant')
+        if (landed) landed.verification = { ok, text }
+        yield { type: 'verification', result, text, ok }
       }
     } catch (error) {
       // A stop is not a failure: reporting `AbortError` to the user turns their

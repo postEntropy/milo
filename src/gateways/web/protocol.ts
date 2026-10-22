@@ -8,7 +8,11 @@ import type { VerificationResult } from '../../core/verification.js'
 import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
 import type { CommandEntry } from '../command-catalog.js'
 
-// 10: the gateway's chat is `chatId`, not `conversationId`, in the handshake and in a
+// 11: the turn's own row is drawn from the daemon's words — `says` on an `event` frame and
+// on a `turn-end` — rather than from a sentence each client wrote for itself. A page from
+// 10 writes its own, so it neither needs nor reads the field; the bump is what keeps a page
+// that reads it from pairing with a daemon that does not send it and drawing no status at
+// all. 10: the gateway's chat is `chatId`, not `conversationId`, in the handshake and in a
 // routine's target. A page from 9 would name a field this daemon no longer reads, and
 // a routine made from it would lose the chat it delivers to — so it is refused as a
 // skew instead. 9: a `ui` event carries `draft` while the block is still being written,
@@ -17,7 +21,7 @@ import type { CommandEntry } from '../command-catalog.js'
 // is what the version is for. 8 made the handshake's `genui` a flag again: there is
 // one way a turn draws, so a page naming a transport named something that no longer
 // exists.
-export const PROTOCOL_VERSION = 10
+export const PROTOCOL_VERSION = 11
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
@@ -116,13 +120,20 @@ export interface SessionCardItem {
   summary: string
 }
 
+/**
+ * Every control a screen may send, declared once: the frame's own type reads it and
+ * so does the parser. Two spellings of one vocabulary is how `always` — the button
+ * every surface draws — came to be refused by the parser while the type promised it.
+ */
+const CONTROL_ACTIONS = ['stop', 'allow', 'always', 'deny', 'plan', 'approve-plan'] as const
+
 export type ClientFrame =
   | { type: 'hello'; version: number; chatId: string; genui?: boolean; client?: ClientKind }
   | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[] }
   | {
       type: 'control'
       /** `always`: allow, and for this session do not ask again about the same act. */
-      action: 'stop' | 'allow' | 'always' | 'deny' | 'plan' | 'approve-plan'
+      action: (typeof CONTROL_ACTIONS)[number]
       id?: string
       plan?: boolean
     }
@@ -233,10 +244,17 @@ export type ServerFrame =
   /** The session's planning turn went on or off, for every screen watching it. */
   | { type: 'plan'; plan: boolean }
   | { type: 'turn-start'; id: string; text: string }
-  | { type: 'event'; turnId: string; event: AgentEvent }
+  /**
+   * A step of the turn. `says` is what the turn's own row shows about the step, in the
+   * daemon's words (`statusText` in `src/core/sessions/format.ts`): a surface that cannot
+   * import that reads the sentence here rather than writing it again, the way the tool
+   * line's `text` is read. Absent where the step says nothing about the row.
+   */
+  | { type: 'event'; turnId: string; event: AgentEvent; says?: string }
   | { type: 'permission'; id: string; request: PermissionRequest; expiresAt: number }
   | { type: 'permission-result'; id: string; allowed: boolean; remember?: boolean }
-  | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error'; raw?: string; rawNoOutput?: string }
+  /** `says` says a stopped turn the same way an event does; see the `event` frame. */
+  | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error'; raw?: string; rawNoOutput?: string; says?: string }
   | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; attachments?: FrameAttachment[]; actions?: ActionRow[]; messageId?: string; cards?: SessionCardItem[] }
   | { type: 'state'; busy: boolean; queued: number }
   /** A routine ran somewhere in this install: re-read whatever shows the history. */
@@ -363,7 +381,7 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
       return typeof frame.plan === 'boolean' ? (frame as ClientFrame) : null
     }
     if (frame.action === 'approve-plan') return frame as ClientFrame
-    if (['stop', 'allow', 'deny'].includes(String(frame.action))) return frame as ClientFrame
+    if ((CONTROL_ACTIONS as readonly string[]).includes(String(frame.action))) return frame as ClientFrame
   }
   if (frame.type === 'job-kill' && typeof frame.id === 'string' && frame.id !== '') {
     return frame as ClientFrame
