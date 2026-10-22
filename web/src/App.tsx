@@ -1320,7 +1320,7 @@ export default function App() {
       </div>
     </aside>
 
-    <main className={`main ${view === 'settings' ? 'in-settings' : ''}`}>
+    <main className={`main${view === 'settings' ? ' in-settings' : ''}${view === 'work' || view === 'routines' || view === 'tasks' ? ' in-dashboard' : ''}`}>
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
         <button className="sidebar-expand" type="button" aria-label="Show sidebar" title="Show sidebar" onClick={() => setSidebarCollapsed(false)}><Icon name="panel-left" size={17} /></button>

@@ -172,8 +172,8 @@ export function Routines({ chatId, chat, tick }: { chatId: string; chat: Routine
 }
 
 /** The main area's frame, so every state of this view sits in the same place. */
-function Shell({ head, notice, onDismiss, children }: { head?: ReactNode; notice?: Notice | null; onDismiss?(): void; children: ReactNode }) {
-  return <main className="settings-workspace">
+function Shell({ head, notice, onDismiss, children, className = '' }: { head?: ReactNode; notice?: Notice | null; onDismiss?(): void; children: ReactNode; className?: string }) {
+  return <main className={`settings-workspace ${className}`}>
     <div className="settings-inner">
       <div className="settings-panel-stack">
         <section className="settings-section">
@@ -227,17 +227,18 @@ function RoutineList({
     return () => { live = false }
   }, [tick, routines])
   return <Shell
+    className="dashboard"
     notice={notice}
     onDismiss={onDismiss}
     head={<PageHeader
       title="Routines"
-      description="Scheduled work, with each run kept here to read back."
       action={routines && routines.length > 0 ? <>
         <div className="panel-count"><strong>{enabled}</strong><span>active</span><span className="panel-count-divider" /><strong>{routines.length}</strong><span>total</span></div>
         <button className="button primary" type="button" onClick={onCompose}><Icon name="plus" size={15} /> New routine</button>
       </> : undefined}
     />}
   >
+    <div className="routine-dashboard">
     {routines === null ? notice?.error
       ? <div className="panel-state"><p>Could not read routines.</p><button className="button" type="button" onClick={onRetry}>Try again</button></div>
       : <SkeletonList rows={4} label="Reading routines…" />
@@ -248,30 +249,27 @@ function RoutineList({
         <button className="button primary" type="button" onClick={onCompose}><Icon name="plus" size={15} /> New routine</button>
       </div>
       : <div className="routine-list">
-        {routines.map((routine) => <div className="routine-row" key={routine.id}>
-          <span className={`routine-state-mark ${routine.enabled ? 'enabled' : 'paused'}`} aria-hidden="true" />
-          <button type="button" className="routine-row-open" onClick={() => onSelect(routine.id)}>
-            <span className="routine-row-main">
-              <span className="routine-row-name">{routine.name ?? routine.prompt}</span>
-              <span className="routine-row-meta">{routine.whenLabel}<span className="routine-meta-separator">·</span>{routine.targetLabel}</span>
+        {routines.map((routine) => <div className="routine-tile" key={routine.id}>
+          <button type="button" className="routine-tile-open" onClick={() => onSelect(routine.id)}>
+            <span className={`routine-state-mark ${routine.enabled ? 'enabled' : 'paused'}`} aria-hidden="true" />
+            <span className="routine-tile-main">
+              <span className="routine-tile-name">{routine.name ?? routine.prompt}</span>
+              <span className="routine-tile-when"><Icon name="clock" size={13} />{routine.whenLabel}</span>
             </span>
-            <span className="routine-row-next">
-              <span className="routine-row-next-label">{stateLabel(routine)}</span>
-              <span className={`routine-row-state${routine.lastResult === 'error' ? ' failed' : ''}`}>
-                {stateWord(routine)}
-              </span>
+            <span className="routine-tile-status">
+              <span className="routine-tile-label">{stateLabel(routine)}</span>
+              <span className={`routine-tile-state${routine.lastResult === 'error' ? ' failed' : ''}`}>{stateWord(routine)}</span>
             </span>
           </button>
-          <span className="routine-row-actions">
+          <span className="routine-tile-actions">
             <button className="routine-row-action" type="button" title="Run now" aria-label={`Run ${routine.name ?? routine.prompt} now`} onClick={() => onRun(routine.id)}><Icon name="play" size={13} /></button>
             <button className="routine-row-action" type="button" title={routine.enabled ? 'Pause' : 'Resume'} aria-label={routine.enabled ? `Pause ${routine.name ?? routine.prompt}` : `Resume ${routine.name ?? routine.prompt}`} onClick={() => onToggle(routine.id, !routine.enabled)}><Icon name={routine.enabled ? 'pause' : 'play'} size={13} /></button>
           </span>
-          <Icon className="routine-row-chevron" name="chevron" size={16} />
         </div>)}
       </div>}
     {feed.length > 0 && <section className="routine-feed" aria-labelledby="routine-feed-title">
       <div className="routine-section-head">
-        <div><h3 id="routine-feed-title">Recent outputs</h3><p className="routine-section-subtitle">The latest runs across every routine, newest first.</p></div>
+        <h3 id="routine-feed-title">Recent outputs</h3>
       </div>
       <div className="routine-feed-list">
         {feed.map((entry) => <button className="routine-feed-row" key={entry.runId} type="button" onClick={() => onOpen(entry.id, entry.runId)}>
@@ -280,6 +278,7 @@ function RoutineList({
         </button>)}
       </div>
     </section>}
+    </div>
   </Shell>
 }
 

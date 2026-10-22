@@ -24,12 +24,12 @@ are the ordinary ones, with the folder they run in changed.
   running or unread session always among them — and **All N sessions** opens the page for
   the rest. A project with no sessions is only its own row.
 - The Work screen itself has two levels: the projects, and one project's own page.
-- The index draws each project as a disclosure. Expanded by default, it holds the project's
-  newest sessions, three of them plus anything running or unread; the chevron at the card's
-  edge folds them; the card itself opens the page, and the sessions sit in the card's own
-  body rather than in rows of their own, opening and folding with a short animation. What was
-  folded stays folded on that client, web and phone alike. A project with no sessions has
-  nothing to fold: it stays shut and carries no chevron, and its count says zero.
+- The web index draws each project as a **card** in a grid: its head — mark, name and folder,
+  with the running or unread mark when the project holds either — opens the page, and under it
+  sit the project's newest sessions (three, with any running or unread one always among them)
+  as the drawer's own rows with the drawer's own actions. **All N sessions** opens the page for
+  the rest; a project with no sessions says so. A project whose folder is gone says so in place
+  of its path instead of looking workable. Cards sit two to the row where the window has room.
 - On the phone the switch sits in the drawer and opens on the world of the session in front.
   Choosing a side moves the card behind the drawer to where that world begins, while the list
   stays in front: swiping the drawer away lands where the switch said it would. Rows open
@@ -108,7 +108,7 @@ are the ordinary ones, with the folder they run in changed.
 - A session carries one mark at its row's edge, never two: it **breathes** while a turn
   runs there and stands **still** when the session moved after the person last looked at it.
   Running outranks unread. The project's card wears the same mark when any of its sessions
-  is running or unread, because its rows may be folded shut.
+  is running or unread: what is happening in the folder is never hidden behind a count.
 - The unread mark is counted from a watermark the install keeps in
   `~/.milo/session-seen.json`, one moment per session — not from the transcript, which
   cannot say when the person read it. Opening or resuming a session is a look, and so is
