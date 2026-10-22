@@ -62,7 +62,11 @@
     },
     {
       "name": "rust",
-      "language": "plain"
+      "language": "rust"
+    },
+    {
+      "name": "src/main.rs",
+      "language": "rust"
     },
     {
       "name": ".svelte",
@@ -457,8 +461,121 @@
       ]
     },
     {
-      "name": "a language we do not know: strings and numbers only",
+      "name": "rust: a pub fn, a lifetime and a comment",
       "language": "rust",
+      "code": "pub fn read<'a>(path: &'a str) -> usize {\n    let n = 42; // bytes in it\n    n\n}",
+      "runs": [
+        {
+          "role": "keyword",
+          "text": "pub"
+        },
+        {
+          "role": "plain",
+          "text": " "
+        },
+        {
+          "role": "keyword",
+          "text": "fn"
+        },
+        {
+          "role": "plain",
+          "text": " read<'a>(path: &'a str) -> usize {\n    "
+        },
+        {
+          "role": "keyword",
+          "text": "let"
+        },
+        {
+          "role": "plain",
+          "text": " n = "
+        },
+        {
+          "role": "number",
+          "text": "42"
+        },
+        {
+          "role": "plain",
+          "text": "; "
+        },
+        {
+          "role": "comment",
+          "text": "// bytes in it"
+        },
+        {
+          "role": "plain",
+          "text": "\n    n\n}"
+        }
+      ]
+    },
+    {
+      "name": "rust: a string is a string, a lifetime is not",
+      "language": "rust",
+      "code": "let s = \"it's fine\"; fn f<'a>(x: &'a str) {}",
+      "runs": [
+        {
+          "role": "keyword",
+          "text": "let"
+        },
+        {
+          "role": "plain",
+          "text": " s = "
+        },
+        {
+          "role": "string",
+          "text": "\"it's fine\""
+        },
+        {
+          "role": "plain",
+          "text": "; "
+        },
+        {
+          "role": "keyword",
+          "text": "fn"
+        },
+        {
+          "role": "plain",
+          "text": " f<'a>(x: &'a str) {}"
+        }
+      ]
+    },
+    {
+      "name": "swift: an apostrophe is not a string either",
+      "language": "swift",
+      "code": "let s = \"don't\"; let n = 1",
+      "runs": [
+        {
+          "role": "keyword",
+          "text": "let"
+        },
+        {
+          "role": "plain",
+          "text": " s = "
+        },
+        {
+          "role": "string",
+          "text": "\"don't\""
+        },
+        {
+          "role": "plain",
+          "text": "; "
+        },
+        {
+          "role": "keyword",
+          "text": "let"
+        },
+        {
+          "role": "plain",
+          "text": " n = "
+        },
+        {
+          "role": "number",
+          "text": "1"
+        }
+      ]
+    },
+    {
+      "name": "a language we do not know: strings and numbers only",
+      "language": "haskell",
       "code": "fn main() { let n = 1; let s = \"x\"; }",
       "runs": [
         {

@@ -22,6 +22,7 @@ export type CodeLanguage =
   | 'ts'
   | 'js'
   | 'swift'
+  | 'rust'
   | 'python'
   | 'shell'
   | 'css'
@@ -37,6 +38,7 @@ const FAMILY: Record<CodeLanguage, Family> = {
   ts: 'slash',
   js: 'slash',
   swift: 'slash',
+  rust: 'slash',
   css: 'slash',
   json: 'none',
   yaml: 'hash',
@@ -44,6 +46,26 @@ const FAMILY: Record<CodeLanguage, Family> = {
   shell: 'hash',
   ruby: 'hash',
   plain: 'none',
+}
+
+/**
+ * The marks a string opens with, per language. Rust and Swift have no `'` quote at all — a `'`
+ * there opens a lifetime or a character — and JSON has none either, so reading one as a quote
+ * would colour half a line that is not a string. A backtick is JavaScript's template, written
+ * to span lines.
+ */
+const QUOTES: Record<CodeLanguage, string[]> = {
+  ts: ['"', "'", '`'],
+  js: ['"', "'", '`'],
+  swift: ['"'],
+  rust: ['"'],
+  python: ['"', "'"],
+  shell: ['"', "'"],
+  css: ['"', "'"],
+  json: ['"'],
+  yaml: ['"', "'"],
+  ruby: ['"', "'"],
+  plain: ['"', "'"],
 }
 
 /**
@@ -192,6 +214,44 @@ const OWN_KEYWORDS: Record<CodeLanguage, string[]> = {
     'where',
     'while',
   ],
+  rust: [
+    'as',
+    'async',
+    'await',
+    'break',
+    'const',
+    'continue',
+    'crate',
+    'dyn',
+    'else',
+    'enum',
+    'extern',
+    'fn',
+    'for',
+    'if',
+    'impl',
+    'in',
+    'let',
+    'loop',
+    'match',
+    'mod',
+    'move',
+    'mut',
+    'pub',
+    'ref',
+    'return',
+    'self',
+    'Self',
+    'static',
+    'struct',
+    'super',
+    'trait',
+    'type',
+    'unsafe',
+    'use',
+    'where',
+    'while',
+  ],
   python: [
     'and',
     'as',
@@ -298,7 +358,7 @@ const KEYWORDS = new Map<CodeLanguage, Set<string>>(
 /**
  * A fence's tag, or a file's own name, to one of the languages above.
  *
- * A hint we do not know — a `rust` fence, a `.hbs` file — is `plain` rather than a guess, since
+ * A hint we do not know — a `haskell` fence, a `.hbs` file — is `plain` rather than a guess, since
  * colouring by the wrong rules is worse than not colouring. A *missing* hint is the exception:
  * a fence the model opened without a tag is most often TypeScript or JavaScript, which is what
  * `ts` is here, and the one thing that loses is a `#` comment that is not a comment.
@@ -326,6 +386,8 @@ const ALIASES: Record<string, CodeLanguage> = {
   cjs: 'js',
   javascript: 'js',
   swift: 'swift',
+  rust: 'rust',
+  rs: 'rust',
   py: 'python',
   python: 'python',
   sh: 'shell',
@@ -359,6 +421,7 @@ const ALIASES: Record<string, CodeLanguage> = {
 export function highlight(code: string, language?: string): CodeRun[] {
   const lang = languageOf(language)
   const family = FAMILY[lang]
+  const quotes = QUOTES[lang]
   const keywords = KEYWORDS.get(lang) ?? new Set<string>()
   const runs: CodeRun[] = []
 
@@ -409,7 +472,7 @@ export function highlight(code: string, language?: string): CodeRun[] {
     // A quoted string ends at its own closing quote on the same line: a lone apostrophe in a
     // sentence is not a string, and one left open would otherwise swallow the rest of a file.
     // A backtick (JavaScript's template) is the exception, because it is written to span lines.
-    if (char === '"' || char === "'" || char === '`') {
+    if (quotes.includes(char)) {
       const end = stringEnd(code, i, char, char === '`')
       if (end === -1) {
         push('plain', char)

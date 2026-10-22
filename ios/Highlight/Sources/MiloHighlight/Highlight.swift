@@ -43,6 +43,7 @@ public enum CodeLanguage: String, Sendable {
     case ts
     case js
     case swift
+    case rust
     case python
     case shell
     case css
@@ -60,6 +61,7 @@ public enum CodeLanguage: String, Sendable {
 public func highlight(_ code: String, language: String? = nil) -> [CodeRun] {
     let lang = languageOf(language)
     let family = FAMILY[lang] ?? .none
+    let quotes = QUOTES[lang] ?? ["\"", "'"]
     let keywords = KEYWORDS[lang] ?? []
     let characters = Array(code)
     var runs: [CodeRun] = []
@@ -105,7 +107,7 @@ public func highlight(_ code: String, language: String? = nil) -> [CodeRun] {
         // A quoted string ends at its own closing quote on the same line: a lone apostrophe in
         // a sentence is not a string, and one left open would otherwise swallow the rest of a
         // file. A backtick (JavaScript's template) is the exception, written to span lines.
-        if character == "\"" || character == "'" || character == "`" {
+        if quotes.contains(character) {
             if let end = stringEnd(characters, index, character, across: character == "`") {
                 push(&runs, .string, characters[index..<end])
                 index = end
@@ -141,7 +143,7 @@ public func highlight(_ code: String, language: String? = nil) -> [CodeRun] {
 /**
  A fence's tag, or a file's own name, read as one of the languages above.
 
- A hint we do not know — a `rust` fence, a `.hbs` file — is `plain` rather than a guess, since
+ A hint we do not know — a `haskell` fence, a `.hbs` file — is `plain` rather than a guess, since
  colouring by the wrong rules is worse than not colouring. A *missing* hint is the exception: a
  fence opened without a tag is most often TypeScript or JavaScript, which is what `ts` is here,
  and the one thing that loses is a `#` comment that is not a comment.
@@ -169,6 +171,7 @@ private let FAMILY: [CodeLanguage: Family] = [
     .ts: .slash,
     .js: .slash,
     .swift: .slash,
+    .rust: .slash,
     .css: .slash,
     .json: .none,
     .plain: .none,
@@ -176,6 +179,26 @@ private let FAMILY: [CodeLanguage: Family] = [
     .shell: .hash,
     .yaml: .hash,
     .ruby: .hash,
+]
+
+/**
+ The marks a string opens with, per language. Rust and Swift have no `'` quote at all — a `'`
+ there opens a lifetime or a character — and JSON has none either, so reading one as a quote
+ would colour half a line that is not a string. A backtick is JavaScript's template, written to
+ span lines.
+ */
+private let QUOTES: [CodeLanguage: Set<Character>] = [
+    .ts: ["\"", "'", "`"],
+    .js: ["\"", "'", "`"],
+    .swift: ["\""],
+    .rust: ["\""],
+    .python: ["\"", "'"],
+    .shell: ["\"", "'"],
+    .css: ["\"", "'"],
+    .json: ["\""],
+    .yaml: ["\"", "'"],
+    .ruby: ["\"", "'"],
+    .plain: ["\"", "'"],
 ]
 
 /**
@@ -204,6 +227,12 @@ private let OWN_KEYWORDS: [CodeLanguage: Set<String>] = [
         "open", "override", "private", "protocol", "public", "repeat", "return", "self", "some",
         "static", "struct", "switch", "throw", "throws", "try", "typealias", "var", "weak",
         "where", "while",
+    ],
+    .rust: [
+        "as", "async", "await", "break", "const", "continue", "crate", "dyn", "else", "enum",
+        "extern", "fn", "for", "if", "impl", "in", "let", "loop", "match", "mod", "move", "mut",
+        "pub", "ref", "return", "self", "Self", "static", "struct", "super", "trait", "type",
+        "unsafe", "use", "where", "while",
     ],
     .python: [
         "and", "as", "assert", "async", "await", "break", "class", "continue", "def", "del",
@@ -250,6 +279,8 @@ private let ALIASES: [String: CodeLanguage] = [
     "cjs": .js,
     "javascript": .js,
     "swift": .swift,
+    "rust": .rust,
+    "rs": .rust,
     "py": .python,
     "python": .python,
     "sh": .shell,
