@@ -28,6 +28,7 @@ import { WorkList } from './sessions/WorkList.js'
 import type { ProjectView } from '../../src/core/projects.ts'
 import { Icon } from './ui/Icons.js'
 import { Notice, useAutoDismiss, type Report } from './ui/Notice.js'
+import { Select } from './ui/Select.js'
 import { miloAvatar } from './ui/milo.js'
 import { projectMark } from './work/marks.js'
 
@@ -798,6 +799,16 @@ export default function App() {
     }
   }, [socket, fail, setView])
 
+  /**
+   * A new session in the world the session in front works in: a chat from a chat, and the
+   * same project from a work session. A work session cannot become a chat, so starting one
+   * inside a project and landing in a plain chat would drop the folder it was chosen for.
+   */
+  const newSessionHere = useCallback((): Promise<boolean> => {
+    const project = sessions.find((session) => session.id === sessionId)?.project
+    return project ? startWorkSession(project) : newChat()
+  }, [sessions, sessionId, startWorkSession, newChat])
+
   // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-render triggers, not closure values — the list has already grown by the time this runs, and the scroll follows the rendered height
   useEffect(() => {
     const container = threadScroller()
@@ -886,12 +897,12 @@ export default function App() {
       if (event.key === 'Escape') setSidebarOpen(false)
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
-        void newChat()
+        void newSessionHere()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [newChat])
+  }, [newSessionHere])
 
   /**
    * The drawer's own gestures, one for each direction: a rightward swipe that
@@ -1001,6 +1012,8 @@ export default function App() {
   }, [socket, fail, setView])
 
   const currentSession = sessions.find((session) => session.id === sessionId)
+  /** The projects a session can start in: a folder that is gone is read on its page. */
+  const startableProjects = (projects ?? []).filter((project) => project.error === undefined)
   /**
    * Which half of the session list is in front: the Work screen itself, or a session
    * working in a project. Every other screen keeps the mode of the session behind it. The
@@ -1311,9 +1324,18 @@ export default function App() {
             <input ref={searchRef} aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} />
             <button className="sidebar-search-close" type="button" aria-label="Close search" onClick={closeSearch}><Icon name="x" size={15} /></button>
           </div>
-          {mode === 'work'
-            ? <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New project" aria-label="New project" onClick={() => { setWorkProject(null); setView('work'); setPickProject(true); setSidebarOpen(false) }}><Icon name="plus" size={18} /><span className="new-chat-label">New project</span></button>
-            : <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /><span className="new-chat-label">New session</span></button>}
+          {mode === 'work' ? <>
+            {!searchOpen && startableProjects.length > 0 && <Select
+              value=""
+              choices={startableProjects.map((project) => ({ value: project.id, label: project.name }))}
+              onChange={(project) => void startWorkSession(project)}
+              label="New session in a project"
+              icon="plus"
+              triggerLabel="New session"
+              note="No projects yet"
+            />}
+            <button className={`sidebar-new-project ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New project" aria-label="New project" onClick={() => { setWorkProject(null); setView('work'); setPickProject(true); setSidebarOpen(false) }}><Icon name="folder-plus" size={18} /></button>
+          </> : <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /><span className="new-chat-label">New session</span></button>}
           <button className="sidebar-search-toggle" type="button" title="Search sessions" aria-label="Search sessions" aria-expanded={searchOpen} onClick={() => setSearchOpen((open) => !open)}><Icon name="search" size={18} /></button>
           <button className={`sidebar-settings-toggle ${view === 'settings' ? 'active' : ''}`} type="button" title="Settings" aria-label="Settings" onClick={() => { if (view === 'settings') { leaveSettings(); return } setSettingsSection(null); setView('settings'); setSidebarOpen(false) }}><Icon name="settings" size={18} /></button>
         </div>
@@ -1347,7 +1369,7 @@ export default function App() {
         </>}</div>
         <div className="topbar-actions">
           {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelVisible(!panelOpen)}><Icon name="panel-right" size={18} /></button>}
-          {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /></button>}
+          {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newSessionHere()}><Icon name="plus" size={18} /></button>}
           {view === 'chat' && connection.state !== 'online' && <span className={`connection-status ${connection.state}`} title={connection.reason}><span />{connection.state === 'refused' ? 'Disconnected' : connection.state === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
         </div>
       </header>

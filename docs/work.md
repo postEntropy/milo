@@ -46,9 +46,13 @@ are the ordinary ones, with the folder they run in changed.
   there is no index under it, because the index was never opened. Its way out is the sessions
   it was come from, and the bar carries that way in its leading place. A project pushed from
   the index is a level of that screen and keeps the platform's back to the list.
-- **New session** is always a chat: the composer's own control, the topbar's `+`. A session in
-  a project starts from that project's page, and in the drawer's Work list the primary control
-  is **New project**, which raises the folder picker on the index.
+- **New session** starts in the world the session in front works in: a chat from a chat, and
+  a session in the same project from a work session — the topbar's `+`, ⌘K and the composer's
+  control all follow it, because a chat cannot be where the next session belongs.
+- In the drawer's Work side both acts are there: **New session** opens the list's projects and
+  starts in the one chosen; **New project** sits beside it as a mark-only control and raises
+  the folder picker on the index. A project's own page still starts a session in it — the
+  composer there is the same act.
 
 ## The project's page
 

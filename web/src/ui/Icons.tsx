@@ -40,6 +40,7 @@ const paths = {
   play: <><path d="M7 4.5v15l13-7.5Z" /></>,
   pause: <><rect x="7" y="5" width="3.5" height="14" rx="1" /><rect x="13.5" y="5" width="3.5" height="14" rx="1" /></>,
   folder: <><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /></>,
+  'folder-plus': <><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M12 11v5M9.5 13.5h5" /></>,
   'file-plus': <><path d="M6 3h8l4 4v14H6zM14 3v4h4" /><path d="M12 12v5M9.5 14.5h5" /></>,
   files: <><path d="M9 3h6l4 4v12H9zM15 3v4h4" /><path d="M5 7v14h9" /></>,
   link: <><path d="M10 13a4 4 0 0 0 5.6 0l3-3a4 4 0 0 0-5.6-5.6l-1.5 1.5" /><path d="M14 11a4 4 0 0 0-5.6 0l-3 3a4 4 0 0 0 5.6 5.6l1.5-1.5" /></>,
