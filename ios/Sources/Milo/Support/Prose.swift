@@ -552,41 +552,41 @@ extension View {
     func marksScrollBox() -> some View { modifier(ScrollBoxMark()) }
 }
 
-/// A fenced block: monospaced on its own surface, scrolling sideways rather than
-/// wrapping, because a wrapped line of code stops being the line that was written —
-/// and coloured, out of the roles the shared lexer reads (`Support/CodeText.swift`).
-/// No language label is drawn and the tag is never shown: the browser draws none
-/// either, and the two surfaces say the same things about the same data.
+/// A fenced block: a head that says what the fence called itself with the control that copies
+/// the code, and the code under it — monospaced on its own surface, scrolling sideways rather
+/// than wrapping, because a wrapped line of code stops being the line that was written, and
+/// coloured out of the roles the shared lexer reads (`Support/CodeText.swift`).
 ///
-/// The browser draws no copy control here, because a pointer can drag a selection across
-/// its box. On a phone the box is what the finger drags to scroll, so copying is a control
-/// of its own — and it holds the block's own gutter, beside the code rather than over it,
-/// because a control a finger aims at must not sit on the words it would copy.
+/// The head earns its height by saying the one thing the code cannot say about itself, and it
+/// is where the control lives: a control a finger aims at must not sit on the words it would
+/// copy. A fence opened without a tag gets no label — the language we would have to guess at is
+/// not what the model wrote. The browser draws no head yet, so the tag is the phone's own, and
+/// it draws no copy control either, because a pointer can drag a selection across the box where
+/// a finger has to drag it sideways.
 struct CodeBlock: View {
-    /// What the fence's tag named, for the colouring to read.
+    /// What the fence's tag named, as it named it — read for the colouring, and said in the head.
     let language: String?
     let code: String
     @State private var copied = false
 
     var body: some View {
-        HStack(alignment: .top, spacing: 0) {
+        VStack(alignment: .leading, spacing: 0) {
+            head
+
             ScrollView(.horizontal, showsIndicators: false) {
                 Text(coloured(code, language: language))
                     .font(MiloTheme.Text.mono)
                     .foregroundStyle(MiloTheme.foreground)
                     .textSelection(.enabled)
                     .padding(.horizontal, MiloTheme.Space.three)
-                    .padding(.vertical, MiloTheme.Space.three)
+                    .padding(.top, MiloTheme.Space.one)
+                    .padding(.bottom, MiloTheme.Space.three)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
             // A sideways scroll view is greedy: offered more height than the code needs it takes
             // it, and the block grows a row of empty ground under its last line. This pins it to
             // the height of the code itself.
             .fixedSize(horizontal: false, vertical: true)
-
-            copyControl
-                .padding(.top, MiloTheme.Space.two)
-                .padding(.trailing, MiloTheme.Space.two)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
@@ -599,6 +599,25 @@ struct CodeBlock: View {
         // The tap that says the words are on the clipboard. It fires on the copy itself and not
         // again when the checkmark lets go two seconds later, which a bare flag would do.
         .sensoryFeedback(.success, trigger: copied, condition: { _, copied in copied })
+    }
+
+    /// The block's own bar: what the fence named, at the leading edge, and the control that
+    /// copies it at the trailing one. No rule under it — the code below is the same surface,
+    /// and a line there would be a border between two halves of one thing.
+    private var head: some View {
+        HStack(spacing: 0) {
+            if let language {
+                Text(language)
+                    .font(MiloTheme.Text.meta)
+                    .foregroundStyle(MiloTheme.muted)
+            }
+            Spacer(minLength: 0)
+            copyControl
+        }
+        .padding(.top, MiloTheme.Space.two)
+        .padding(.bottom, MiloTheme.Space.one)
+        .padding(.leading, MiloTheme.Space.three)
+        .padding(.trailing, MiloTheme.Space.two)
     }
 
     private var copyControl: some View {
