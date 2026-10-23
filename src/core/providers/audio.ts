@@ -1,19 +1,18 @@
 import { normalizeModels, type ListModelsOptions, type ModelInfo } from './models.js'
 
-export interface VisionProvider extends Omit<ListModelsOptions, 'signal'> {
+export interface AudioProvider extends Omit<ListModelsOptions, 'signal'> {
   id: string
 }
 
-export type VisionSupport = true | false | undefined
+/** What a catalog said about a model's input: it takes it, it does not, or nobody said. */
+export type ModalitySupport = true | false | undefined
 
 const OPENROUTER_MODEL = 'https://openrouter.ai/api/v1/models'
 const LOOKUP_TIMEOUT_MS = 1_000
 const KNOWN_TTL_MS = 6 * 60 * 60 * 1000
 const UNKNOWN_TTL_MS = 5 * 60 * 1000
-const visionCache = new Map<string, { value: VisionSupport; expiresAt: number }>()
-const pendingLookups = new Map<string, Promise<VisionSupport>>()
-const audioCache = new Map<string, { value: VisionSupport; expiresAt: number }>()
-const pendingAudioLookups = new Map<string, Promise<VisionSupport>>()
+const audioCache = new Map<string, { value: ModalitySupport; expiresAt: number }>()
+const pendingAudioLookups = new Map<string, Promise<ModalitySupport>>()
 
 const AUTHORS: Record<string, string> = {
   anthropic: 'anthropic',
@@ -26,24 +25,8 @@ const AUTHORS: Record<string, string> = {
   mistral: 'mistralai',
 }
 
-/** Use explicit model metadata when a provider publishes it; unknown stays unknown. */
-export async function lookupVisionSupport(provider: VisionProvider, model: string): Promise<VisionSupport> {
-  const key = `${provider.baseURL.replace(/\/+$/, '')}\n${model.trim().toLowerCase()}`
-  const cached = visionCache.get(key)
-  if (cached && cached.expiresAt > Date.now()) return cached.value
-  const pending = pendingLookups.get(key)
-  if (pending) return pending
-
-  const lookup = resolveVisionSupport(provider, model).then((value) => {
-    visionCache.set(key, { value, expiresAt: Date.now() + (value === undefined ? UNKNOWN_TTL_MS : KNOWN_TTL_MS) })
-    return value
-  }).finally(() => pendingLookups.delete(key))
-  pendingLookups.set(key, lookup)
-  return lookup
-}
-
-/** Audio support, like vision, is trusted only when a provider catalog says so. */
-export async function lookupAudioSupport(provider: VisionProvider, model: string): Promise<VisionSupport> {
+/** Audio support is trusted only when a provider catalog says so. */
+export async function lookupAudioSupport(provider: AudioProvider, model: string): Promise<ModalitySupport> {
   const key = `${provider.baseURL.replace(/\/+$/, '')}\n${model.trim().toLowerCase()}`
   const cached = audioCache.get(key)
   if (cached && cached.expiresAt > Date.now()) return cached.value
@@ -57,7 +40,7 @@ export async function lookupAudioSupport(provider: VisionProvider, model: string
   return lookup
 }
 
-async function resolveAudioSupport(provider: VisionProvider, model: string): Promise<VisionSupport> {
+async function resolveAudioSupport(provider: AudioProvider, model: string): Promise<ModalitySupport> {
   const base = provider.baseURL.replace(/\/+$/, '')
   const isOpenRouter = /(^|\/)openrouter\.ai\/api\/v1$/i.test(base)
   if (isOpenRouter) return (await lookupOpenRouter(provider.id, model))?.inputModalities?.includes('audio')
@@ -67,21 +50,7 @@ async function resolveAudioSupport(provider: VisionProvider, model: string): Pro
   return models?.inputModalities?.includes('audio') ?? publicInfo?.inputModalities?.includes('audio')
 }
 
-async function resolveVisionSupport(provider: VisionProvider, model: string): Promise<VisionSupport> {
-  const base = provider.baseURL.replace(/\/+$/, '')
-  const isOpenRouter = /(^|\/)openrouter\.ai\/api\/v1$/i.test(base)
-  if (isOpenRouter) return (await lookupOpenRouter(provider.id, model))?.vision
-  const providerLookup = lookupProvider(provider, model)
-  const publicLookup = lookupOpenRouter(provider.id, model)
-  const [direct, publicInfo] = await Promise.all([providerLookup, publicLookup])
-  return direct ?? publicInfo?.vision
-}
-
-async function lookupProvider(provider: VisionProvider, model: string): Promise<VisionSupport> {
-  return (await lookupProviderModels(provider, model))?.vision
-}
-
-async function lookupProviderModels(provider: VisionProvider, model: string): Promise<ModelInfo | undefined> {
+async function lookupProviderModels(provider: AudioProvider, model: string): Promise<ModelInfo | undefined> {
   const controller = new AbortController()
   const timeout = setTimeout(() => controller.abort(), LOOKUP_TIMEOUT_MS)
   try {

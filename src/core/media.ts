@@ -8,7 +8,9 @@ import { ensurePrivateDir, PRIVATE_FILE_MODE } from '../util/fs.js'
 import { loadConfig, readAuth, readConfig } from './config/load.js'
 import { saveIncomingImage } from './images.js'
 import type { AudioPart, ImagePart } from './providers/types.js'
-import { lookupAudioSupport, lookupVisionSupport } from './providers/vision.js'
+import { lookupAudioSupport } from './providers/audio.js'
+import { lookupModelProfile } from './providers/profile.js'
+import { listModels } from './providers/models.js'
 
 const execFile = promisify(execFileCallback)
 const MEDIA_DIR = path.join(MILO_HOME, 'incoming')
@@ -44,8 +46,24 @@ export async function prepareIncoming(files: IncomingFile[], options: PrepareInc
     await writeFile(stored, file.data, { mode: PRIVATE_FILE_MODE })
     if (file.mimeType.startsWith('image/')) {
       const visionModel = config?.media?.vision ?? options.model ?? config?.model
+      // Whether a model reads a picture is a fact about the model, and the profile
+      // is where that fact lives — the person's own word, then the provider's
+      // catalog, then the public one, cached between runs. Asking the catalog a
+      // second way here is how the answer on disk and the answer in this check
+      // drift apart, and it once meant refusing a picture for a model Milo had
+      // already recorded as reading them.
       const visionSupport = loaded && visionModel
-        ? await lookupVisionSupport(loaded.provider, visionModel)
+        ? (await lookupModelProfile(visionModel, {
+            override: config?.models?.[visionModel],
+            fetchProvider: () =>
+              listModels({
+                baseURL: loaded.provider.baseURL,
+                apiKey: loaded.provider.apiKey,
+                wire: loaded.provider.wire,
+                headers: loaded.provider.headers,
+                signal: AbortSignal.timeout(4_000),
+              }),
+          })).vision
         : undefined
       const explicitlySelected = Boolean(config?.media?.vision)
       if (visionSupport === false || (visionSupport === undefined && !explicitlySelected)) {
@@ -61,9 +79,17 @@ export async function prepareIncoming(files: IncomingFile[], options: PrepareInc
         prepared.images.push(await saveIncomingImage({ mimeType: file.mimeType, data: file.data, name: safeName }))
       } else {
         const converted = path.join(MEDIA_DIR, `${randomUUID()}.jpg`)
-        await execFile('ffmpeg', ['-v', 'error', '-i', stored, '-frames:v', '1', converted], { timeout: 10_000, maxBuffer: 1_000_000 })
-        prepared.images.push(await saveIncomingImage({ mimeType: 'image/jpeg', data: await readFile(converted), name: safeName }))
-        await unlink(converted).catch(() => undefined)
+        try {
+          await execFile('ffmpeg', ['-v', 'error', '-i', stored, '-frames:v', '1', converted], { timeout: 10_000, maxBuffer: 1_000_000 })
+          prepared.images.push(await saveIncomingImage({ mimeType: 'image/jpeg', data: await readFile(converted), name: safeName }))
+        } catch {
+          // A format this machine's ffmpeg cannot open — a heic from a phone, as a
+          // rule. Said plainly, because a turn that loses the picture in silence
+          // reads as a model that looked and saw nothing.
+          prepared.text.push(`${safeName} was attached, but it could not be converted to a picture. Send it as a png or a jpeg.`)
+        } finally {
+          await unlink(converted).catch(() => undefined)
+        }
       }
       await unlink(stored).catch(() => undefined)
       continue

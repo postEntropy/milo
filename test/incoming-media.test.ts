@@ -1,22 +1,24 @@
-import { mkdtempSync, readFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 const oldHome = process.env.MILO_HOME
 const oldGroqKey = process.env.GROQ_API_KEY
-process.env.MILO_HOME = mkdtempSync(path.join(tmpdir(), 'milo-incoming-'))
+const home = mkdtempSync(path.join(tmpdir(), 'milo-incoming-'))
+process.env.MILO_HOME = home
 delete process.env.GROQ_API_KEY
 const { prepareIncoming } = await import('../src/core/media.js')
 const { ConfigSchema } = await import('../src/core/config/schema.js')
 const { saveConfig } = await import('../src/core/config/load.js')
 
-function configure(options: { model: string; vision?: string }): void {
+function configure(options: { model: string; vision?: string; models?: Record<string, { vision?: boolean }> }): void {
   saveConfig(ConfigSchema.parse({
     provider: 'vision-test',
     model: options.model,
     providers: { 'vision-test': { baseURL: 'http://127.0.0.1:43210/v1', keyless: true } },
     media: options.vision ? { vision: options.vision } : undefined,
+    models: options.models ?? {},
   }))
 }
 
@@ -90,5 +92,47 @@ describe('incoming media', () => {
 
     expect(result.images).toHaveLength(0)
     expect(result.text[0]).toContain('could not confirm')
+  })
+
+  it('keeps the picture when the model profile already records that it reads them', async () => {
+    // The fact was learned on an earlier run and sits in models.json; a catalog
+    // that cannot be reached must not turn it back into "unknown".
+    writeFileSync(path.join(home, 'models.json'), JSON.stringify({
+      'cached-vision': { profile: { id: 'cached-vision', vision: true }, at: Date.now() },
+    }))
+    configure({ model: 'cached-vision' })
+    const fetchMock = vi.fn(async () => new Response('{}', { status: 404 }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await prepareIncoming([
+      { name: 'photo.png', mimeType: 'image/png', data: Buffer.from('image bytes') },
+    ])
+
+    expect(result.images).toHaveLength(1)
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('takes the vision fact written for the model in the config', async () => {
+    configure({ model: 'override-vision', models: { 'override-vision': { vision: true } } })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })))
+
+    const result = await prepareIncoming([
+      { name: 'photo.png', mimeType: 'image/png', data: Buffer.from('image bytes') },
+    ])
+
+    expect(result.images).toHaveLength(1)
+  })
+
+  it('says a picture it could not convert was not sent, rather than dropping it in silence', async () => {
+    configure({ model: 'heic-model', models: { 'heic-model': { vision: true } } })
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 404 })))
+
+    const result = await prepareIncoming([
+      { name: 'photo.heic', mimeType: 'image/heic', data: Buffer.from('not a picture') },
+    ])
+
+    expect(result.images).toHaveLength(0)
+    expect(result.text[0]).toContain('could not be converted')
+    expect(result.text[0]).toContain('png or a jpeg')
   })
 })
