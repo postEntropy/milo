@@ -1,15 +1,24 @@
-import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { api } from '../lib/api.js'
 import { message } from '../lib/format.js'
 import { formatWhen } from '../../../src/core/time.js'
+import { usePhone } from '../lib/phone.js'
 import { Field } from '../ui/Form.js'
-import { Icon } from '../ui/Icons.js'
+import { Icon, type IconName } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { PageHeader } from '../ui/PageHeader.js'
 import { SkeletonList } from '../ui/Skeleton.js'
+import { Panel, SplitWorkspace } from '../ui/Workspace.js'
 
 type TaskItem = { id: string; content: string; completed: boolean; createdAt: number }
 type TaskList = { id: string; name: string; createdAt: number; items: TaskItem[] }
+
+/** Starter list names offered on the empty state for one-click creation. */
+const TASK_LIST_STARTERS: ReadonlyArray<{ icon: IconName; title: string; detail: string }> = [
+  { icon: 'spark', title: 'Today', detail: 'Create a list for today’s priorities' },
+  { icon: 'folder', title: 'Project backlog', detail: 'Create a list for upcoming project work' },
+  { icon: 'light', title: 'Reading & ideas', detail: 'Create a list for links, notes and ideas' },
+]
 
 /**
  * The task lists surface, drawn like its sibling workspace: the lists as a panel,
@@ -26,6 +35,7 @@ export function TaskLists({ tick }: { tick: number }) {
   /** Why the lists could not be read, held apart from the transient notice so a
       failed read keeps its own sentence and its way to try again. */
   const [loadError, setLoadError] = useState<string | null>(null)
+  const phone = usePhone()
 
   /** Bumped per read, so a slower earlier answer cannot overwrite a newer one. */
   const loadSeq = useRef(0)
@@ -55,7 +65,15 @@ export function TaskLists({ tick }: { tick: number }) {
     try {
       const result = await api<{ result: string; lists: TaskList[] }>('task-list-action', body)
       setLists(result.lists)
-      setSelectedId((current) => (current && result.lists.some((list) => list.id === current) ? current : null))
+      if (body.action === 'create') {
+        // The one that was not there before is the one this call made, whatever
+        // else already shares its name.
+        const known = new Set((lists ?? []).map((list) => list.id))
+        const created = result.lists.find((list) => !known.has(list.id))
+        if (created) setSelectedId(created.id)
+      } else {
+        setSelectedId((current) => (current && result.lists.some((list) => list.id === current) ? current : null))
+      }
       setNotice({ text: result.result, error: false })
       return true
     } catch (error) {
@@ -64,7 +82,7 @@ export function TaskLists({ tick }: { tick: number }) {
     } finally {
       setSaving(false)
     }
-  }, [])
+  }, [lists])
 
   const selected = lists?.find((list) => list.id === selectedId) ?? null
   const openCount = useMemo(
@@ -72,43 +90,63 @@ export function TaskLists({ tick }: { tick: number }) {
     [lists],
   )
 
-  if (selected) return <TaskListDetail
-    key={selected.id}
-    list={selected}
-    notice={notice}
-    saving={saving}
-    onDismiss={() => setNotice(null)}
-    onBack={() => setSelectedId(null)}
-    onAct={act}
-  />
-  return <TaskListIndex
-    lists={lists}
-    openCount={openCount}
-    notice={notice}
-    loadError={loadError}
-    saving={saving}
-    onDismiss={() => setNotice(null)}
-    onSelect={setSelectedId}
-    onCreate={(name) => void act({ action: 'create', name })}
-    onRetry={() => { setLoadError(null); void refresh() }}
-  />
-}
+  if (phone || lists === null || lists.length === 0) {
+    if (selected) return <TaskListDetail
+      key={selected.id}
+      list={selected}
+      notice={notice}
+      saving={saving}
+      onDismiss={() => setNotice(null)}
+      onBack={() => setSelectedId(null)}
+      onAct={act}
+    />
+    return <TaskListIndex
+      lists={lists}
+      openCount={openCount}
+      notice={notice}
+      loadError={loadError}
+      saving={saving}
+      onDismiss={() => setNotice(null)}
+      onSelect={setSelectedId}
+      onCreate={(name) => void act({ action: 'create', name })}
+      onRetry={() => { setLoadError(null); void refresh() }}
+    />
+  }
 
-/** The workspace frame, so both levels of this view sit in the same place. */
-function Shell({ head, notice, onDismiss, children }: { head: ReactNode; notice: Notice | null; onDismiss(): void; children: ReactNode }) {
-  return <main className="settings-workspace">
-    <div className="settings-inner">
-      <div className="settings-panel-stack">
-        <section className="settings-section">
-          {head}
-          <Notice notice={notice} onDismiss={onDismiss} />
-          <div className="panel-body">
-            {children}
-          </div>
-        </section>
-      </div>
+  const activeList = selected ?? lists[0]!
+
+  const rail = <>
+    <PageHeader
+      title="Task lists"
+      description="Keep the things you and Milo are working on, together across sessions."
+      action={<div className="panel-count"><strong>{openCount}</strong><span>open</span></div>}
+    />
+    <div className="tasklist-list">
+      {lists.map((list) => <TaskListRow
+        key={list.id}
+        list={list}
+        active={list.id === activeList.id}
+        onClick={() => setSelectedId(list.id)}
+      />)}
     </div>
-  </main>
+    <div className="tasklist-footer">
+      <TaskListCreate saving={saving} onCreate={(name) => void act({ action: 'create', name })} />
+    </div>
+  </>
+
+  return <SplitWorkspace label="Task lists" rail={rail}>
+    <Notice notice={notice} onDismiss={() => setNotice(null)} />
+    <TaskListDetail
+      key={activeList.id}
+      list={activeList}
+      notice={notice}
+      saving={saving}
+      onDismiss={() => setNotice(null)}
+      onBack={() => setSelectedId(null)}
+      onAct={act}
+      inSplit
+    />
+  </SplitWorkspace>
 }
 
 function TaskListIndex({
@@ -134,7 +172,7 @@ function TaskListIndex({
   onCreate(name: string): void
   onRetry(): void
 }) {
-  return <Shell
+  return <Panel
     notice={notice}
     onDismiss={onDismiss}
     head={<PageHeader
@@ -153,6 +191,19 @@ function TaskListIndex({
           <h3>No task lists yet</h3>
           <p className="panel-empty-copy">Create a list for a project, an idea, or anything else you want Milo to keep track of with you.</p>
           <TaskListCreate saving={saving} onCreate={onCreate} />
+          <div className="suggestion-grid empty-starters">
+            {TASK_LIST_STARTERS.map((starter) => <button
+              key={starter.title}
+              type="button"
+              className="suggestion"
+              title={starter.detail}
+              disabled={saving}
+              onClick={() => onCreate(starter.title)}
+            >
+              <Icon name={starter.icon} size={16} />
+              <span>{starter.title}</span>
+            </button>)}
+          </div>
         </div>
         : <div className="tasklist-list">
           {lists.map((list) => <TaskListRow key={list.id} list={list} onClick={() => onSelect(list.id)} />)}
@@ -160,15 +211,15 @@ function TaskListIndex({
     {lists && lists.length > 0 && <div className="tasklist-footer">
       <TaskListCreate saving={saving} onCreate={onCreate} />
     </div>}
-  </Shell>
+  </Panel>
 }
 
 /** One list as the index draws it: its name, what it holds, and how much is left. */
-function TaskListRow({ list, onClick }: { list: TaskList; onClick(): void }) {
+function TaskListRow({ list, active, onClick }: { list: TaskList; active?: boolean; onClick(): void }) {
   const total = list.items.length
   const open = list.items.filter((item) => !item.completed).length
   const activity = list.items.reduce((latest, item) => Math.max(latest, item.createdAt), list.createdAt)
-  return <button className="tasklist-card" type="button" onClick={onClick}>
+  return <button className={`tasklist-card${active ? ' active' : ''}`} type="button" aria-current={active ? 'true' : undefined} onClick={onClick}>
     <span className="tasklist-card-main">
       <span className="tasklist-card-name">{list.name}</span>
       <span className="tasklist-card-meta">{total === 0 ? 'No tasks yet' : `${total} ${total === 1 ? 'task' : 'tasks'} · last added ${formatWhen(activity)}`}</span>
@@ -201,6 +252,7 @@ function TaskListDetail({
   onDismiss,
   onBack,
   onAct,
+  inSplit,
 }: {
   list: TaskList
   notice: Notice | null
@@ -208,6 +260,7 @@ function TaskListDetail({
   onDismiss(): void
   onBack(): void
   onAct(body: Record<string, unknown>): Promise<boolean>
+  inSplit?: boolean
 }) {
   const [newTask, setNewTask] = useState('')
   const [renaming, setRenaming] = useState(false)
@@ -234,11 +287,12 @@ function TaskListDetail({
     if (window.confirm(`Delete “${list.name}” and its tasks?`)) void onAct({ action: 'delete', name: list.name })
   }
 
-  return <Shell
+  return <Panel
+    inSplit={inSplit}
     notice={notice}
     onDismiss={onDismiss}
     head={<PageHeader
-      back={<button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Task lists</span></button>}
+      back={!inSplit ? <button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Task lists</span></button> : undefined}
       title={list.name}
       description={list.items.length === 0 ? 'No tasks yet' : `${todo.length} open · ${completed.length} completed`}
       action={<div className="tasklist-actions">
@@ -259,7 +313,7 @@ function TaskListDetail({
       <button className="button primary" type="submit" disabled={saving || !newTask.trim()}><Icon name="plus" size={15} /> Add task</button>
     </form>
     {list.items.length === 0
-      ? <p className="list-empty">This list is ready when you are. Add a task above, or ask Milo to remember one for you.</p>
+      ? <div className="routine-runs-empty"><Icon name="list-check" size={18} /><span>This list is ready when you are. Add a task above, or ask Milo to remember one for you.</span></div>
       : <div className="tasklist-groups">
         {todo.length > 0 && <section className="tasklist-group">
           <h3 className="section-label">To do <span>{todo.length}</span></h3>
@@ -276,7 +330,7 @@ function TaskListDetail({
           {completed.map((item) => <TaskRow key={item.id} item={item} saving={saving} onRemove={() => void onAct({ action: 'remove', name: list.name, itemId: item.id })} />)}
         </section>}
       </div>}
-  </Shell>
+  </Panel>
 }
 
 /** One task: the box that closes it, its own words, and the way to drop it. */

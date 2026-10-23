@@ -1,15 +1,17 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PermissionRequest, SendTarget, ThinkingDisplay, TranscriptMessage } from '@protocol'
 import { api } from '../lib/api.js'
 import type { ConnectionState } from '../lib/connection.js'
 import { message } from '../lib/format.js'
 import { formatIn, formatWhen } from '../../../src/core/time.js'
+import { usePhone } from '../lib/phone.js'
 import { Field } from '../ui/Form.js'
-import { Icon } from '../ui/Icons.js'
+import { Icon, type IconName } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { PageHeader } from '../ui/PageHeader.js'
 import { Select } from '../ui/Select.js'
 import { SkeletonList } from '../ui/Skeleton.js'
+import { Panel, SplitWorkspace } from '../ui/Workspace.js'
 import { MessageList, type ChatMessage } from '../chat/MessageList.js'
 import { Permissions } from '../chat/Permissions.js'
 
@@ -80,6 +82,28 @@ const GATEWAYS = [
   ['none', 'Routines screen only'],
 ] as const
 
+/** Starter schedules offered on the empty state and above a blank creation prompt. */
+const ROUTINE_STARTERS: ReadonlyArray<{ icon: IconName; title: string; detail: string; prompt: string }> = [
+  {
+    icon: 'mail',
+    title: 'Morning inbox brief',
+    detail: 'Summarize unread mail every weekday morning',
+    prompt: 'Every weekday at 8am, check my inbox and summarize anything that needs a reply.',
+  },
+  {
+    icon: 'branch',
+    title: 'Daily repo digest',
+    detail: 'Check what changed in the repository each evening',
+    prompt: 'Every weekday at 6pm, look at the repo and summarize what moved today.',
+  },
+  {
+    icon: 'list-check',
+    title: 'Weekly open tasks',
+    detail: 'Review open task lists every Monday morning',
+    prompt: 'Every Monday at 9am, go through my task lists and shape a plan for the week.',
+  },
+]
+
 /**
  * The routines surface: the list, one routine's own page — what it does, whether
  * it is on, and the runs it has produced — or the one field that makes a new one,
@@ -89,12 +113,15 @@ const GATEWAYS = [
  */
 export function Routines({ chatId, chat, tick }: { chatId: string; chat: RoutinesChat; tick: number }) {
   const [routines, setRoutines] = useState<RoutineSummary[] | null>(null)
+  const [feed, setFeed] = useState<FeedEntry[]>([])
   const [routineId, setRoutineId] = useState<string | null>(null)
   /** The run a timeline row asked for, opened when its routine's page mounts. */
   const [openedRun, setOpenedRun] = useState<string | null>(null)
   const [composing, setComposing] = useState(false)
+  const [initialAsk, setInitialAsk] = useState('')
   const [notice, setNotice] = useState<Notice | null>(null)
   useAutoDismiss(notice, setNotice)
+  const phone = usePhone()
 
   /** Bumped per read, so a slower earlier answer cannot overwrite a newer one. */
   const loadSeq = useRef(0)
@@ -111,6 +138,17 @@ export function Routines({ chatId, chat, tick }: { chatId: string; chat: Routine
   }, [])
 
   useEffect(() => { void refresh() }, [refresh])
+
+  // What the routines said last, as one list: the front page's answer to "what
+  // have they been up to", re-read whenever one of them runs.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the tick is the trigger, not a value read here
+  useEffect(() => {
+    let live = true
+    void api<FeedEntry[]>('routine-feed')
+      .then((entries) => { if (live) setFeed(entries) })
+      .catch(() => { if (live) setFeed([]) })
+    return () => { live = false }
+  }, [tick, routines])
 
   /** Run one now, straight from the list, without opening it. */
   const runNow = useCallback(async (id: string): Promise<void> => {
@@ -142,58 +180,177 @@ export function Routines({ chatId, chat, tick }: { chatId: string; chat: Routine
   /** Back to the list, from a routine's page or from the field that makes one. */
   function close(): void {
     setComposing(false)
+    setInitialAsk('')
     setRoutineId(null)
     setOpenedRun(null)
   }
 
-  if (composing) return <NewRoutine chatId={chatId} chat={chat} onBack={close} />
-  const routine = routines?.find((entry) => entry.id === routineId)
-  if (routine) return <RoutineDetail
-    key={routine.id}
-    routine={routine}
-    chat={chat}
-    tick={tick}
-    initialRun={openedRun ?? undefined}
-    onBack={close}
-    onChanged={() => void refresh()}
-  />
-  return <RoutineList
-    routines={routines}
-    notice={notice}
-    onDismiss={() => setNotice(null)}
-    tick={tick}
-    onSelect={setRoutineId}
-    onOpen={(id, runId) => { setOpenedRun(runId); setRoutineId(id) }}
-    onCompose={() => { setNotice(null); setComposing(true) }}
-    onRetry={() => { setNotice(null); void refresh() }}
-    onRun={runNow}
-    onToggle={toggle}
-  />
-  
+  function openCompose(seed = ''): void {
+    setNotice(null)
+    setInitialAsk(seed)
+    setComposing(true)
+  }
+
+  const enabled = routines?.filter((entry) => entry.enabled).length ?? 0
+  const selected = routines?.find((entry) => entry.id === routineId)
+
+  // On a phone, or before there are routines to split beside a detail pane, the
+  // screen is a single column that pushes one level in.
+  if (phone || routines === null || (routines.length === 0 && !composing)) {
+    if (composing) return <NewRoutine key={initialAsk} chatId={chatId} chat={chat} initialAsk={initialAsk} onBack={close} />
+    if (selected) return <RoutineDetail
+      key={selected.id}
+      routine={selected}
+      chat={chat}
+      tick={tick}
+      initialRun={openedRun ?? undefined}
+      onBack={close}
+      onChanged={() => void refresh()}
+    />
+    return <RoutineList
+      routines={routines}
+      feed={feed}
+      notice={notice}
+      onDismiss={() => setNotice(null)}
+      onSelect={(id) => { setOpenedRun(null); setRoutineId(id) }}
+      onOpen={(id, runId) => { setOpenedRun(runId); setRoutineId(id) }}
+      onCompose={openCompose}
+      onRetry={() => { setNotice(null); void refresh() }}
+      onRun={runNow}
+      onToggle={toggle}
+    />
+  }
+
+  // On a wide screen with routines, the list stays on the left and the detail —
+  // the selected routine, the creation prompt, or the recent runs feed — sits
+  // beside it. When no run history exists yet and nothing is picked, the first
+  // routine opens automatically so the detail pane never sits empty.
+  const activeRoutine = !composing ? (selected ?? (feed.length === 0 ? routines[0] : undefined)) : undefined
+
+  const rail = <>
+    <PageHeader
+      title="Routines"
+      description="Scheduled work, with each run kept here to read back."
+      action={<button className="button primary" type="button" onClick={() => openCompose()}><Icon name="plus" size={15} /> New</button>}
+    />
+    {routines.length > 0 && <div className="workspace-rail-meta">
+      <div className="panel-count"><strong>{enabled}</strong><span>active</span><span className="panel-count-divider" /><strong>{routines.length}</strong><span>total</span></div>
+      {feed.length > 0 && (activeRoutine !== undefined || composing) && <button className="workspace-rail-link" type="button" onClick={close}>Recent outputs</button>}
+    </div>}
+    <RoutineCards
+      routines={routines}
+      activeId={activeRoutine?.id ?? null}
+      onSelect={(id) => {
+        setComposing(false)
+        setOpenedRun(null)
+        setRoutineId(id)
+      }}
+      onRun={runNow}
+      onToggle={toggle}
+    />
+  </>
+
+  return <SplitWorkspace label="Routines" rail={rail}>
+    <Notice notice={notice} onDismiss={() => setNotice(null)} />
+    {composing ? <NewRoutine
+      key={initialAsk}
+      chatId={chatId}
+      chat={chat}
+      initialAsk={initialAsk}
+      onBack={close}
+      inSplit
+    /> : activeRoutine ? <RoutineDetail
+      key={activeRoutine.id}
+      routine={activeRoutine}
+      chat={chat}
+      tick={tick}
+      initialRun={openedRun ?? undefined}
+      onChanged={() => void refresh()}
+      inSplit
+    /> : <RoutineFeedSection
+      feed={feed}
+      onOpen={(id, runId) => { setComposing(false); setOpenedRun(runId); setRoutineId(id) }}
+      inSplit
+    />}
+  </SplitWorkspace>
 }
 
-/** The main area's frame, so every state of this view sits in the same place. */
-function Shell({ head, notice, onDismiss, children }: { head?: ReactNode; notice?: Notice | null; onDismiss?(): void; children: ReactNode }) {
-  return <main className="settings-workspace">
-    <div className="settings-inner">
-      <div className="settings-panel-stack">
-        <section className="settings-section">
-          {head}
-          <Notice notice={notice ?? null} onDismiss={onDismiss ?? ((): void => {})} />
-          <div className="panel-body">
-            {children}
-          </div>
-        </section>
-      </div>
+function RoutineCards({
+  routines,
+  activeId,
+  onSelect,
+  onRun,
+  onToggle,
+}: {
+  routines: RoutineSummary[]
+  activeId: string | null
+  onSelect(id: string): void
+  onRun(id: string): void
+  onToggle(id: string, enabled: boolean): void
+}) {
+  return <div className="routine-list">
+    {routines.map((routine) => <div className={`routine-row${routine.id === activeId ? ' active' : ''}`} key={routine.id}>
+      <span className={`routine-state-mark ${routine.enabled ? 'enabled' : 'paused'}`} aria-hidden="true" />
+      <button type="button" className="routine-row-open" aria-current={routine.id === activeId ? 'true' : undefined} onClick={() => onSelect(routine.id)}>
+        <span className="routine-row-main">
+          <span className="routine-row-name">{routine.name ?? routine.prompt}</span>
+          <span className="routine-row-meta">{routine.whenLabel}<span className="routine-meta-separator">·</span>{routine.targetLabel}</span>
+        </span>
+        <span className="routine-row-next">
+          <span className="routine-row-next-label">{stateLabel(routine)}</span>
+          <span className={`routine-row-state${routine.lastResult === 'error' ? ' failed' : ''}`}>
+            {stateWord(routine)}
+          </span>
+        </span>
+      </button>
+      <span className="routine-row-actions">
+        <button className="routine-row-action" type="button" title="Run now" aria-label={`Run ${routine.name ?? routine.prompt} now`} onClick={() => onRun(routine.id)}><Icon name="play" size={13} /></button>
+        <button className="routine-row-action" type="button" title={routine.enabled ? 'Pause' : 'Resume'} aria-label={routine.enabled ? `Pause ${routine.name ?? routine.prompt}` : `Resume ${routine.name ?? routine.prompt}`} onClick={() => onToggle(routine.id, !routine.enabled)}><Icon name={routine.enabled ? 'pause' : 'play'} size={13} /></button>
+      </span>
+      <Icon className="routine-row-chevron" name="chevron" size={16} />
+    </div>)}
+  </div>
+}
+
+function RoutineFeedSection({
+  feed,
+  onOpen,
+  inSplit,
+}: {
+  feed: FeedEntry[]
+  onOpen(id: string, runId: string): void
+  inSplit?: boolean
+}) {
+  const list = <div className="routine-feed-list">
+    {feed.map((entry) => <button className="routine-feed-row" key={entry.runId} type="button" onClick={() => onOpen(entry.id, entry.runId)}>
+      <span className="routine-feed-head"><strong>{entry.routine}</strong><span className="routine-feed-when">{formatWhen(entry.at, 'absolute')}</span></span>
+      <span className="routine-feed-text">{entry.answer || 'No words — the run sent a file.'}</span>
+    </button>)}
+  </div>
+  if (inSplit) {
+    return <Panel
+      inSplit
+      head={<PageHeader
+        title="Recent outputs"
+        description="The latest runs across every routine, newest first."
+      />}
+    >
+      {list}
+    </Panel>
+  }
+  return <section className="routine-feed" aria-labelledby="routine-feed-title">
+    <div className="routine-section-head">
+      <div><h3 id="routine-feed-title">Recent outputs</h3><p className="routine-section-subtitle">The latest runs across every routine, newest first.</p></div>
     </div>
-  </main>
+    {list}
+  </section>
 }
 
 function RoutineList({
   routines,
+  feed,
   notice,
   onDismiss,
-  tick,
   onSelect,
   onOpen,
   onCompose,
@@ -203,31 +360,19 @@ function RoutineList({
 }: {
   /** Null until the list has been read once: "none" and "not yet" are not the same. */
   routines: RoutineSummary[] | null
+  feed: FeedEntry[]
   notice: Notice | null
   onDismiss(): void
-  tick: number
   onSelect(id: string): void
   /** Open one routine on one of its runs, which is what a timeline row points at. */
   onOpen(id: string, runId: string): void
-  onCompose(): void
+  onCompose(seed?: string): void
   onRetry(): void
   onRun(id: string): void
   onToggle(id: string, enabled: boolean): void
 }) {
   const enabled = routines?.filter((routine) => routine.enabled).length ?? 0
-  const [feed, setFeed] = useState<FeedEntry[]>([])
-
-  // What the routines said last, as one list: the front page's answer to "what
-  // have they been up to", re-read whenever one of them runs.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the tick is the trigger, not a value read here
-  useEffect(() => {
-    let live = true
-    void api<FeedEntry[]>('routine-feed')
-      .then((entries) => { if (live) setFeed(entries) })
-      .catch(() => { if (live) setFeed([]) })
-    return () => { live = false }
-  }, [tick, routines])
-  return <Shell
+  return <Panel
     notice={notice}
     onDismiss={onDismiss}
     head={<PageHeader
@@ -235,7 +380,7 @@ function RoutineList({
       description="Scheduled work, with each run kept here to read back."
       action={routines && routines.length > 0 ? <>
         <div className="panel-count"><strong>{enabled}</strong><span>active</span><span className="panel-count-divider" /><strong>{routines.length}</strong><span>total</span></div>
-        <button className="button primary" type="button" onClick={onCompose}><Icon name="plus" size={15} /> New routine</button>
+        <button className="button primary" type="button" onClick={() => onCompose()}><Icon name="plus" size={15} /> New routine</button>
       </> : undefined}
     />}
   >
@@ -245,43 +390,24 @@ function RoutineList({
       : routines.length === 0 ? <div className="panel-empty">
         <span className="panel-empty-mark"><Icon name="repeat" size={22} /></span>
         <h3>No routines yet</h3>
-        <p className="panel-empty-copy">Describe a task and when to run it. Milo will work out the schedule.</p>
-        <button className="button primary" type="button" onClick={onCompose}><Icon name="plus" size={15} /> New routine</button>
+        <p className="panel-empty-copy">Describe a recurring task in plain words — Milo sets the schedule and keeps each run here.</p>
+        <button className="button primary" type="button" onClick={() => onCompose()}><Icon name="plus" size={15} /> New routine</button>
+        <div className="suggestion-grid empty-starters">
+          {ROUTINE_STARTERS.map((starter) => <button
+            key={starter.title}
+            type="button"
+            className="suggestion"
+            title={starter.detail}
+            onClick={() => onCompose(starter.prompt)}
+          >
+            <Icon name={starter.icon} size={16} />
+            <span>{starter.title}</span>
+          </button>)}
+        </div>
       </div>
-      : <div className="routine-list">
-        {routines.map((routine) => <div className="routine-row" key={routine.id}>
-          <span className={`routine-state-mark ${routine.enabled ? 'enabled' : 'paused'}`} aria-hidden="true" />
-          <button type="button" className="routine-row-open" onClick={() => onSelect(routine.id)}>
-            <span className="routine-row-main">
-              <span className="routine-row-name">{routine.name ?? routine.prompt}</span>
-              <span className="routine-row-meta">{routine.whenLabel}<span className="routine-meta-separator">·</span>{routine.targetLabel}</span>
-            </span>
-            <span className="routine-row-next">
-              <span className="routine-row-next-label">{stateLabel(routine)}</span>
-              <span className={`routine-row-state${routine.lastResult === 'error' ? ' failed' : ''}`}>
-                {stateWord(routine)}
-              </span>
-            </span>
-          </button>
-          <span className="routine-row-actions">
-            <button className="routine-row-action" type="button" title="Run now" aria-label={`Run ${routine.name ?? routine.prompt} now`} onClick={() => onRun(routine.id)}><Icon name="play" size={13} /></button>
-            <button className="routine-row-action" type="button" title={routine.enabled ? 'Pause' : 'Resume'} aria-label={routine.enabled ? `Pause ${routine.name ?? routine.prompt}` : `Resume ${routine.name ?? routine.prompt}`} onClick={() => onToggle(routine.id, !routine.enabled)}><Icon name={routine.enabled ? 'pause' : 'play'} size={13} /></button>
-          </span>
-          <Icon className="routine-row-chevron" name="chevron" size={16} />
-        </div>)}
-      </div>}
-    {feed.length > 0 && <section className="routine-feed" aria-labelledby="routine-feed-title">
-      <div className="routine-section-head">
-        <div><h3 id="routine-feed-title">Recent outputs</h3><p className="routine-section-subtitle">The latest runs across every routine, newest first.</p></div>
-      </div>
-      <div className="routine-feed-list">
-        {feed.map((entry) => <button className="routine-feed-row" key={entry.runId} type="button" onClick={() => onOpen(entry.id, entry.runId)}>
-          <span className="routine-feed-head"><strong>{entry.routine}</strong><span className="routine-feed-when">{formatWhen(entry.at, 'absolute')}</span></span>
-          <span className="routine-feed-text">{entry.answer || 'No words — the run sent a file.'}</span>
-        </button>)}
-      </div>
-    </section>}
-  </Shell>
+      : <RoutineCards routines={routines} activeId={null} onSelect={onSelect} onRun={onRun} onToggle={onToggle} />}
+    {feed.length > 0 && <RoutineFeedSection feed={feed} onOpen={onOpen} />}
+  </Panel>
 }
 
 function RoutineDetail({
@@ -291,14 +417,16 @@ function RoutineDetail({
   initialRun,
   onBack,
   onChanged,
+  inSplit,
 }: {
   routine: RoutineSummary
   chat: RoutinesChat
   tick: number
   /** A run to open on arrival, when the front page's timeline named one. */
   initialRun?: string
-  onBack(): void
+  onBack?(): void
   onChanged(): void
+  inSplit?: boolean
 }) {
   const [runs, setRuns] = useState<RunEntry[] | null>(null)
   const [total, setTotal] = useState(0)
@@ -408,7 +536,7 @@ function RoutineDetail({
     if (!window.confirm(`Remove the routine “${routine.name ?? routine.prompt}”?`)) return
     try {
       await api('routine-remove', { id: routine.id })
-      onBack()
+      onBack?.()
       onChanged()
     } catch (error) {
       setNotice({ text: message(error), error: true })
@@ -420,11 +548,12 @@ function RoutineDetail({
     : 'Paused'
   const selectedRun = runs?.find((entry) => entry.id === openRun)
 
-  return <Shell
+  return <Panel
+    inSplit={inSplit}
     notice={notice}
     onDismiss={() => setNotice(null)}
     head={<PageHeader
-      back={<button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Routines</span></button>}
+      back={!inSplit && onBack ? <button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Routines</span></button> : undefined}
       title={<><span className={`routine-state-mark ${routine.enabled ? 'enabled' : 'paused'}`} aria-hidden="true" />{routine.name ?? routine.prompt}</>}
       description={routine.name ? routine.prompt : undefined}
     />}
@@ -478,11 +607,11 @@ function RoutineDetail({
           </div>
         </div>}
     </section>
-  </Shell>
+  </Panel>
 }
 
-function NewRoutine({ chatId, chat, onBack }: { chatId: string; chat: RoutinesChat; onBack(): void }) {
-  const [ask, setAsk] = useState('')
+function NewRoutine({ chatId, chat, initialAsk = '', onBack, inSplit }: { chatId: string; chat: RoutinesChat; initialAsk?: string; onBack(): void; inSplit?: boolean }) {
+  const [ask, setAsk] = useState(initialAsk)
   const [gateway, setGateway] = useState<SendTarget['gateway']>('web')
   const [target, setTarget] = useState(chatId)
   /** Where the creation turn starts in the chat's transcript; null until asked. */
@@ -506,8 +635,8 @@ function NewRoutine({ chatId, chat, onBack }: { chatId: string; chat: RoutinesCh
   /** What has been asked here and answered here: nothing until the first ask. */
   const thread = createdFrom === null ? [] : chat.messages.slice(createdFrom)
 
-  return <Shell head={<PageHeader
-    back={<button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Routines</span></button>}
+  return <Panel inSplit={inSplit} head={<PageHeader
+    back={!inSplit ? <button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Routines</span></button> : undefined}
     title="New routine"
     description="Describe the task and schedule. Milo will turn your request into a routine."
   />}>
@@ -515,6 +644,18 @@ function NewRoutine({ chatId, chat, onBack }: { chatId: string; chat: RoutinesCh
       <Field className="full" label="What should Milo do, and when?">
         <textarea value={ask} onChange={(event) => setAsk(event.target.value)} rows={3} placeholder="Every weekday at 8, look at the repo and tell me what moved." />
       </Field>
+      {createdFrom === null && <div className="suggestion-grid routine-starters">
+        {ROUTINE_STARTERS.map((starter) => <button
+          key={starter.title}
+          type="button"
+          className="suggestion"
+          title={starter.detail}
+          onClick={() => setAsk(starter.prompt)}
+        >
+          <Icon name={starter.icon} size={16} />
+          <span>{starter.title}</span>
+        </button>)}
+      </div>}
       <div className="routine-destination">
         <div className="routine-form-heading"><Icon name="globe" size={15} /><span>Delivery destination</span></div>
         <div className="form-grid">
@@ -533,6 +674,7 @@ function NewRoutine({ chatId, chat, onBack }: { chatId: string; chat: RoutinesCh
       </div>
       <div className="ask-actions">
         <button className="button primary" type="button" disabled={!ask.trim() || chat.busy || chat.connection !== 'online'} onClick={create}>{chat.busy ? 'Milo is on it…' : 'Create routine'}</button>
+        {inSplit && <button className="button" type="button" onClick={onBack}>Cancel</button>}
         {chat.connection !== 'online' && <span className={`connection-status ${chat.connection}`}><span />{chat.connection === 'refused' ? 'Disconnected' : chat.connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
       </div>
     </div>
@@ -543,5 +685,5 @@ function NewRoutine({ chatId, chat, onBack }: { chatId: string; chat: RoutinesCh
         <Permissions request={chat.pendingPermission.request} expiresAt={chat.pendingPermission.expiresAt} onDecision={(action) => chat.decide(action)} />
       </article>}
     </div>}
-  </Shell>
+  </Panel>
 }
