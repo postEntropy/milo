@@ -16,7 +16,7 @@ import type { TodoItem } from '../todos.js'
  */
 export type RememberFn = (items: MemoryInput[]) => Promise<void>
 
-/** The same, for looking a past conversation back up by what it was about. */
+/** The same, for looking a past session back up by what it was about. */
 export type RecallFn = (query: string, opts?: { limit?: number }) => Promise<SessionSummary[]>
 
 /**
@@ -35,7 +35,7 @@ export interface MemoryAdmin {
 /**
  * How a session hands a tool the install's own sessions: read the list, and drop
  * one. `current` is the id of the session this turn is running in, so a tool can
- * refuse to delete the conversation it is answering in — that veto belongs to the
+ * refuse to delete the session it is answering in — that veto belongs to the
  * caller, not to the store, which deletes whatever it is asked for.
  */
 export interface SessionAdmin {
@@ -108,7 +108,7 @@ export interface ToolContext {
   /** Absent on a context that cannot delegate (a subagent's own, a bare test one). */
   task?: TaskFn
   /**
-   * The address this turn is speaking to: the conversation it came from, or the
+   * The address this turn is speaking to: the session it came from, or the
    * destination the surface pinned for it. It is where a routine created here
    * delivers by default — and its gateway tells the tool whether there is anyone
    * to deliver to at all.
@@ -133,7 +133,7 @@ export interface ToolContext {
   sendFile?: SendFileFn
   /**
    * The background jobs of this process, for a turn that may leave a command
-   * running behind the conversation. Absent on a context with no manager behind
+   * running behind the session. Absent on a context with no manager behind
    * it — a subagent's own, a bare test one — so `shell_command` with `background`
    * falls back to running in the foreground and says so.
    */

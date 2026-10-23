@@ -1912,7 +1912,7 @@ export function SettingsScreen({
             <Box marginTop={1}>
               <Text color={theme.warning}>
                 Milo will then be signed in as you on every site that profile is, in every
-                conversation it serves. The copy is private and stays on this machine.
+                every session it serves. The copy is private and stays on this machine.
               </Text>
             </Box>
             <Box marginTop={1} flexDirection="column">

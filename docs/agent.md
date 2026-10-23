@@ -26,7 +26,8 @@ apply, because they carry live state and behaviour the persona cannot know.
   sit above every project's and apply in every session. A standing instruction the person
   states for the future ("from now on, keep answers short") is written into that file by
   the `instructions` tool, under `## Preferences`, so it is carried from the next turn on
-  instead of being recalled like a note. A fact stays with `remember`.
+  instead of being recalled like a note. `scope: "project"` writes to the current project's
+  `AGENTS.md`; without it, the install file is used. A fact stays with `remember`.
 - **The folder's rules** — the project's `AGENTS.md`, or `CLAUDE.md` when that is the one
   it carries, read per turn by `src/core/agent/instructions.ts`. They are instructions to
   follow, and they land after the code manual, so the folder has the more specific word on

@@ -32,7 +32,7 @@ const DEFAULT_LIMIT = 20
 export const searchHistoryTool: Tool<SearchHistoryArgs> = {
   name: 'search_history',
   description:
-    'Search your own past conversations: what was asked, what you answered, and which tools ran, across sessions and days. Use it when the user refers to something from an earlier conversation, or when you need to know what you already tried. Pass `session` to stay inside one conversation — `recall` tells you which one. It reads the log on this machine — the raw files are `~/.milo/history/*.jsonl` — in plain text; it does not search the web.',
+    'Search your own past sessions: what was asked, what you answered, and which tools ran, across sessions and days. Use it when the user refers to something from an earlier session, or when you need to know what you already tried. Pass `session` to stay inside one session — `recall` tells you which one. It reads the log on this machine — the raw files are `~/.milo/history/*.jsonl` — in plain text; it does not search the web.',
   schema,
   readOnly: true,
   async execute(args) {

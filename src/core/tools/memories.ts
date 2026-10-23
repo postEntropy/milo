@@ -36,7 +36,7 @@ export type MemoriesArgs = z.infer<typeof schema>
 export const memoriesTool: Tool<MemoriesArgs> = {
   name: 'memories',
   description:
-    'The notes Milo keeps about the person across conversations — the same store `/memory` shows them. Reach for it to answer "what do you remember about me", to check what is already known before asking, and to drop a note the person no longer wants: list them, then forget the ones worth dropping (wrong, out of date, or the person asked). The list is paged — when the page points at a next offset, read on with it to reach the older notes. Forgetting asks before it happens and cannot be undone. A note is something the person said about themselves; `recall` looks up a past conversation by what it was about, which is a different thing.',
+    'The notes Milo keeps about the person across sessions — the same store `/memory` shows them. Reach for it to answer "what do you remember about me", to check what is already known before asking, and to drop a note the person no longer wants: list them, then forget the ones worth dropping (wrong, out of date, or the person asked). The list is paged — when the page points at a next offset, read on with it to reach the older notes. Forgetting asks before it happens and cannot be undone. A note is something the person said about themselves; `recall` looks up a past session by what it was about, which is a different thing.',
   schema,
   readOnly: false,
   // Listing is a read the person would not want to approve; forgetting is not. The

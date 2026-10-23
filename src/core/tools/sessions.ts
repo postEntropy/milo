@@ -21,7 +21,7 @@ export type SessionsArgs = z.infer<typeof schema>
 export const sessionsTool: Tool<SessionsArgs> = {
   name: 'sessions',
   description:
-    'The conversations saved on this machine — the same list `/sessions` shows the person. Reach for it to get a session id back, to answer "what was I working on", or to clean up: list them, then remove the ones worth dropping (a leftover nothing was ever said in, one the person is done with). Removing asks before it happens and cannot be undone, and it will not remove the session you are in. It reads this machine\'s own sessions; it is not the web and not another install. `recall` finds one by what it was about; this lists them all and prunes.',
+    'The sessions saved on this machine — the same list `/sessions` shows the person. Reach for it to get a session id back, to answer "what was I working on", or to clean up: list them, then remove the ones worth dropping (a leftover nothing was ever said in, one the person is done with). Removing asks before it happens and cannot be undone, and it will not remove the session you are in. It reads this machine\'s own sessions; it is not the web and not another install. `recall` finds one by what it was about; this lists them all and prunes.',
   schema,
   readOnly: false,
   // Listing is a read the person would not want to approve; removing is not. The

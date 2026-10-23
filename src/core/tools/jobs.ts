@@ -4,7 +4,7 @@ import type { Tool, ToolResult } from './types.js'
 
 /**
  * Whether a job belongs to the turn asking about it. A job is the session's that
- * started it, so a turn in another conversation is not told about it — the strip
+ * started it, so a turn in another session is not told about it — the strip
  * draws the same rule.
  */
 function isMine(job: JobInfo, sessionId?: string): boolean {

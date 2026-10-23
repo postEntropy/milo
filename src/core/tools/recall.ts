@@ -6,7 +6,7 @@ import type { Tool } from './types.js'
 const schema = z.object({
   query: z
     .string()
-    .describe('Words that describe the earlier conversation: a topic, a file, a problem, a name.'),
+    .describe('Words that describe the earlier session: a topic, a file, a problem, a name.'),
   limit: z
     .number()
     .int()
@@ -21,7 +21,7 @@ export type RecallArgs = z.infer<typeof schema>
 export const recallTool: Tool<RecallArgs> = {
   name: 'recall',
   description:
-    'Find an earlier conversation again: which session it was, when it happened and what it was about, in a few bullets. Use it when the user reaches for something from before — "that thing we did last week", "the session where we changed auth" — and you want the conversation back, not a quote. It ranks the saved sessions by how well they match your words, so describe the topic rather than quoting it. It tells you which session: `search_history` with `session` gives the exact turns inside it, and `/resume <id>` opens it again. It reads this machine\'s own sessions; it does not search the web.',
+    'Find an earlier session again: which one it was, when it happened and what it was about, in a few bullets. Use it when the user reaches for something from before — "that thing we did last week", "the session where we changed auth" — and you want the session back, not a quote. It ranks saved sessions by how well they match your words, so describe the topic rather than quoting it. It tells you which session: `search_history` with `session` gives the exact turns inside it, and `/resume <id>` opens it again. It reads this machine\'s own sessions; it does not search the web.',
   schema,
   readOnly: true,
   async execute(args, ctx) {

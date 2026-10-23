@@ -29,7 +29,7 @@ export const instructionsTool: Tool<InstructionsArgs> = {
   name: 'instructions',
   description:
     'Write, list or remove a standing rule: an instruction the person wants Milo to follow in every turn of every session from now on. It is saved in ' +
-    `${INSTRUCTIONS_FILE} — the file the prompt reads each turn — so it is carried, not recalled, and it outlives this conversation. ` +
+    `${INSTRUCTIONS_FILE} — the file the prompt reads each turn — so it is carried, not recalled, and it outlives this session. ` +
     'Save only what the person stated as a rule for the future: "from now on", "always", "never", "remember to", or an answer to whether to save it. ' +
     'Never turn your own inference about what they would like into a rule, and never save a fact about the world, the task at hand, or something true only today: a fact is `remember`, which is recalled when it is relevant instead of carried every turn. ' +
     'A rule is one line in their own terms ("keep answers to a few lines"), not a paragraph. ' +
