@@ -295,7 +295,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    white and a hairline shadow say which session the chat belongs to. */
 .session-item.active { background: var(--surface-raised); }
 .session-row { display: flex; align-items: center; gap: var(--space-5); flex: 1; min-width: 0; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-4) var(--space-3) var(--space-4) var(--space-5); color: var(--fg-2); text-align: start; }
-.session-item.active .session-title { font-weight: 600; }
 /* The row's focus is the row's, not the button's: the ring wraps the whole card — the
    `⋯` column with it — instead of the half the button inside happens to fill.
    `:focus-visible` and not `:focus-within`, so a mouse click that opens the session and
@@ -306,6 +305,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-title, .session-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-title { color: var(--fg); font-size: var(--text-sm); font-weight: 500; line-height: 1.35; }
 .session-preview { color: var(--muted); font-size: var(--text-2xs); line-height: 1.35; }
+.session-item.active .session-title { font-weight: 600; }
 /* A session running now, said with the accent the way the accent already points: one
    dot at the row's own edge, no words and no second label. It breathes while it runs,
    and the reduced-motion rule above holds it still. */
@@ -331,7 +331,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* A list that could not be read keeps its own way to try again, under the words: the
    line and the control are the whole of that state, so nothing is raised over a chat
    the failure does not touch. */
-.list-empty .button { margin-top: var(--space-5); }
 /* In the sidebar the empty line sits where a row would — left, at the rows' own width —
    rather than floating centred in the space the list is about to fill. */
 .session-list > .list-empty { padding: var(--space-4) var(--space-5); font-size: var(--text-xs); text-align: start; }
@@ -474,15 +473,13 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .suggestion-grid { display: flex; width: min(640px, 100%); flex-wrap: wrap; justify-content: center; gap: var(--space-4); margin-top: var(--space-10); }
 .suggestion { display: inline-flex; min-width: 0; max-width: 100%; min-height: var(--control-md); align-items: center; gap: var(--space-4); border: 0; border-radius: var(--radius-pill); background: var(--surface); padding: var(--space-3) var(--space-7) var(--space-3) var(--space-6); color: var(--fg-2); font-size: var(--text-sm); font-weight: 500; line-height: 1.35; text-align: start; overflow-wrap: anywhere; transition: background var(--motion-fast), color var(--motion-fast); }
 .suggestion:hover { background: var(--border-soft); color: var(--fg); }
-.suggestion > svg { flex: none; color: var(--muted); }
+.suggestion-grid .suggestion > svg { flex: none; color: var(--muted); }
 .message { display: flex; max-width: 940px; gap: var(--space-7); margin: 0 auto; padding: var(--space-6) 0; }
 /* The person's own message is a bubble with its controls beneath it. On a pointer
    they hang out of the flow, in the gap between messages, shown on hover — so the
    bubble keeps no room for them and nothing shifts when they appear. */
 .message.user { position: relative; flex-direction: column; align-items: flex-end; gap: var(--space-1); }
 .message-below { display: flex; align-items: center; }
-.message-below .message-toolbar { margin-top: 0; }
-.message-below .message-tool-btn { min-height: var(--control-sm); }
 @media (hover: hover) {
   .message-below { position: absolute; inset-inline-end: 0; inset-block-start: calc(100% - 13px); opacity: 0; transition: opacity var(--motion-fast); }
   .message.user:hover .message-below, .message-below:focus-within { opacity: 1; }
@@ -685,6 +682,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-tool-btn { display: inline-flex; min-height: var(--control-md); align-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0 var(--space-3); color: var(--muted); font-size: var(--text-xs); transition: background var(--motion-fast), color var(--motion-fast); }
 .message-tool-btn:hover, .message-tool-btn:focus-visible { background: var(--surface-warm); color: var(--fg); }
 .message-tool-btn:disabled { color: var(--muted); cursor: not-allowed; }
+.message-below .message-toolbar { margin-top: 0; }
+.message-below .message-tool-btn { min-height: var(--control-sm); }
 .message-tool-label { font-size: var(--text-2xs); font-weight: 500; }
 .message-tool-btn .message-tool-label { max-width: 0; margin-inline-start: 0; overflow: hidden; opacity: 0; white-space: nowrap; transition: max-width var(--motion-slow) var(--ease-standard), margin-inline-start var(--motion-slow) var(--ease-standard), opacity var(--motion-base); }
 .message-tool-btn:hover .message-tool-label, .message-tool-btn:focus-visible .message-tool-label, .message-tool-btn.failed .message-tool-label { max-width: 160px; margin-inline-start: var(--space-3); opacity: 1; }
@@ -763,7 +762,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* The chat's notice lines up with the composer it sits above — the same column,
    not a wider bar — and reads from the top, so a wrapped path does not centre its
    close button against two lines of text. */
-.chat-view .notice { align-items: flex-start; width: min(780px, calc(100% - 56px)); margin: 0 auto var(--space-5); }
 
 .composer-shell { width: 100%; background: var(--bg); padding: 6px 28px max(8px, env(safe-area-inset-bottom)); }
 /* The dock holds the composer and, floating just over it, the way back to the end
@@ -855,8 +853,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 /* The composer's own menus open upwards: they sit at the foot of the screen. */
 .composer-model-wrap .select-menu, .composer-effort-wrap .select-menu { top: auto; bottom: calc(100% + 8px); inset-inline: 0 auto; width: min(360px, calc(100vw - 36px)); }
 .composer-model-wrap .select-option-label { min-width: 0; flex: 1 1 auto; }
-.composer-model-wrap .select-trigger .model-details { display: none; }
-.composer-model-wrap .select-option .size-badge { order: -1; }
 /* Where the menu carries the two panes instead of a list, it takes the width they
    need — the providers as a rail, the models beside them — and lets the panes
    scroll inside it rather than grow it. Below the app's phone width the composer
@@ -1075,6 +1071,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    by every list that shows one, so the badge cannot drift between them. */
 .size-badge { flex: none; border-radius: var(--radius-xs); background: color-mix(in oklab, var(--fg) 7%, transparent); padding: 2px var(--space-3); color: var(--muted); font: var(--text-2xs) var(--font-mono); font-variant-numeric: tabular-nums; }
 .model-details { display: inline-flex; flex: none; align-items: center; gap: var(--space-2); }
+.composer-model-wrap .select-trigger .model-details { display: none; }
+.composer-model-wrap .select-option .size-badge { order: -1; }
 .model-modalities { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--muted); }
 .model-modality { display: inline-flex; width: 20px; height: 20px; flex: none; align-items: center; justify-content: center; border-radius: var(--radius-xs); background: color-mix(in oklab, var(--fg) 7%, transparent); color: var(--muted); }
 .model-modality svg.icon { color: currentColor; }
@@ -1118,6 +1116,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .settings-save { position: sticky; z-index: 4; bottom: var(--space-7); display: flex; align-items: center; justify-content: flex-end; gap: var(--space-6); max-width: 1180px; margin: var(--space-8) 0 var(--space-7); border-radius: var(--radius-lg); background: var(--surface-raised); box-shadow: var(--shadow-menu); padding: var(--space-5) var(--space-6); animation: fade-in var(--motion-base) var(--ease-standard); }
 .save-actions { display: flex; gap: var(--space-5); }
 .button { display: inline-flex; flex: none; min-height: var(--control-lg); align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--surface-warm); padding: var(--space-4) var(--space-7); color: var(--fg-2); font-size: var(--text-sm); font-weight: 500; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
+.list-empty .button { margin-top: var(--space-5); }
 .button:hover { background: var(--border-soft); }
 .button:active { transform: translateY(1px); }
 .button:disabled { transform: none; }
@@ -1131,6 +1130,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .notice.error { border-color: color-mix(in oklab, var(--danger) 30%, var(--border)); background: color-mix(in oklab, var(--danger) 7%, var(--surface)); color: var(--danger); }
 .notice.success { border-color: color-mix(in oklab, var(--success) 30%, var(--border)); background: color-mix(in oklab, var(--success) 7%, var(--surface)); color: var(--success); }
 .restart-notice { border-color: color-mix(in oklab, var(--warn) 30%, var(--border)); background: color-mix(in oklab, var(--warn) 7%, var(--surface)); color: var(--fg-2); }
+.chat-view .notice { align-items: flex-start; width: min(780px, calc(100% - 56px)); margin: 0 auto var(--space-5); }
 
 /* The `/` palette, the same popup shape as the model menu above the box. */
 .command-menu { position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 0; right: 0; display: flex; max-height: 320px; flex-direction: column; gap: var(--space-1); overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); padding: var(--space-3); }
@@ -1374,7 +1374,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .topbar { position: fixed; z-index: 6; inset-inline: 0; top: var(--app-top, 0); min-height: 0; background: none; padding: var(--phone-top) 12px 8px; pointer-events: none; }
   .topbar > *, .topbar-actions > * { pointer-events: auto; }
   .topbar-actions { margin-inline-start: auto; }
-  .topbar-action { display: none; }
   /* The name gives way to the pills rather than sliding under them, and it is
      clipped rather than wrapped, so the bar stays one line — and stays see-through
      to the thread below it. */
@@ -1697,12 +1696,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .work-card-count { display: flex; align-items: center; gap: var(--space-3); color: var(--muted); font-size: var(--text-2xs); white-space: nowrap; }
 .work-open { color: var(--fg-2); font-size: var(--text-sm); font-weight: 600; font-variant-numeric: tabular-nums; }
 .work-footer { display: flex; margin-top: var(--space-8); }
-.work-new { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-4); width: min(560px, 100%); }
-.work-input { min-width: 0; flex: 1 1 240px; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-5) var(--space-6); color: var(--fg); font: var(--text-sm) var(--font-mono); transition: box-shadow var(--motion-fast); }
-.work-input-name { flex: 0 1 180px; font-family: var(--font-body); }
-.work-input:focus { outline: 0; box-shadow: var(--focus-ring); }
-.work-input::placeholder { color: var(--muted); }
-.panel-empty .work-new { justify-content: center; width: min(560px, 100%); }
 .work-actions { display: flex; flex: none; flex-wrap: wrap; gap: var(--space-4); }
 .work-title { display: inline-flex; align-items: center; gap: var(--space-4); }
 .work-title-mark { display: inline-flex; flex: none; color: var(--muted); }
@@ -1719,8 +1712,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .work-start-note { color: var(--muted); font-size: var(--text-xs); }
 .work-sessions { display: flex; flex-direction: column; }
 @media (max-width: 620px) {
-  .work-new, .work-footer { width: 100%; }
-  .work-input, .work-input-name { flex: 1 1 100%; }
+  .work-footer { width: 100%; }
   .work-actions { width: 100%; }
   .work-actions .button { flex: 1; }
   .work-rename { align-items: stretch; flex-direction: column; }
@@ -1863,9 +1855,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .mail-controls { display: flex; align-items: center; gap: var(--space-5); margin-bottom: var(--space-7); }
 .mail-search { position: relative; display: flex; flex: 1; min-width: 0; align-items: center; }
 .mail-search svg.icon { position: absolute; inset-inline-start: 11px; color: var(--muted); pointer-events: none; }
-.mail-search input { width: 100%; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-5) var(--space-6) var(--space-5) 34px; color: var(--fg); font-size: var(--text-sm); }
-.mail-search input::placeholder { color: var(--muted); }
-.mail-search input:focus { outline: 0; box-shadow: var(--focus-ring); }
+.mail-controls .mail-search input { width: 100%; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-5) var(--space-6) var(--space-5) 34px; color: var(--fg); font-size: var(--text-sm); }
+.mail-controls .mail-search input::placeholder { color: var(--muted); }
+.mail-controls .mail-search input:focus { outline: 0; box-shadow: var(--focus-ring); }
 /* A track with the chosen filter filled in — contiguous and neutral, so it never
    reads as one of the coloured label chips below. */
 .mail-filters { display: flex; flex: none; gap: var(--space-2); margin: 0; border: 0; min-inline-size: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-2); }
