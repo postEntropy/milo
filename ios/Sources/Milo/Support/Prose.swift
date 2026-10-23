@@ -31,7 +31,7 @@ struct Prose: View {
     @State private var parsed = Parse()
 
     var body: some View {
-        let blocks = parsed.blocks(for: text, tone: color, parse: parse)
+        let blocks = parsed.blocks(for: text, parse: parse)
         VStack(alignment: .leading, spacing: MiloTheme.Space.four) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 draw(block)
@@ -40,17 +40,15 @@ struct Prose: View {
     }
 
     /// Holds the blocks read off one text, and reads again only when that text — or the
-    /// tone its links are painted in — is not the one it already read.
+    /// text itself changes.
     private final class Parse {
         private var text: String?
-        private var tone: Color?
         private var read: [Block] = []
 
-        func blocks(for text: String, tone: Color, parse: (String) -> [Block]) -> [Block] {
-            if self.text == text, self.tone == tone { return read }
+        func blocks(for text: String, parse: (String) -> [Block]) -> [Block] {
+            if self.text == text { return read }
             let blocks = parse(text)
             self.text = text
-            self.tone = tone
             self.read = blocks
             return blocks
         }
@@ -239,8 +237,7 @@ struct Prose: View {
     private enum Block {
         case paragraph(String)
         case heading(level: Int, text: String)
-        /// A fenced block: what the fence's tag named, and the code itself. The tag is read for
-        /// the colouring and never drawn — the browser draws no label either.
+        /// A fenced block: what the fence's tag named, and the code itself.
         case code(language: String?, text: String)
         case list([ListItem])
         case quote(String)
@@ -269,8 +266,7 @@ struct Prose: View {
         var paragraph: [String] = []
         var code: [String] = []
         var fenced = false
-        /// What the fence that opened named, for the colouring to read. Read from the line and
-        /// never drawn: the browser draws no label either.
+        /// What the fence that opened named, for the colour and its header.
         var language: String?
 
         func endParagraph() {

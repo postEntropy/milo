@@ -9,7 +9,7 @@ import { findHardcodedRadius, findHardcodedType, findOutlinedControls, findPortu
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
 
 /** Where the person reads the product: the terminal and chat surfaces, and the web UI. */
-const COPY_SURFACES = ['src/gateways', 'web/src']
+const COPY_SURFACES = ['src/gateways', 'web/src', 'ios/Sources/Milo']
 // `src/core` is deliberately out of scope: it holds domain data that is Portuguese on
 // purpose — the lexical memory's stopword list, for one — not copy anyone reads.
 
@@ -21,7 +21,7 @@ function report(hits: Hit[]): string[] {
 }
 
 const copyFiles = COPY_SURFACES.flatMap((dir) =>
-  sourceFiles(path.join(repoRoot, dir), ['.ts', '.tsx', '.css']),
+  sourceFiles(path.join(repoRoot, dir), ['.ts', '.tsx', '.css', '.swift']),
 )
 const cssFiles = sourceFiles(path.join(repoRoot, 'web/src'), ['.css'])
 
@@ -37,6 +37,7 @@ describe('user-facing copy is English', () => {
     expect(where.length).toBeGreaterThan(20)
     expect(where).toContain('src/gateways/actions.ts')
     expect(where).toContain('web/src/chat/MessageList.tsx')
+    expect(where).toContain('ios/Sources/Milo/Support/ToolIcons.swift')
   })
 
   it('catches Portuguese inside a string, and English that looks like it', () => {

@@ -253,6 +253,7 @@ private struct WorkIndex: View {
                                                 SessionRow(
                                                     session: session,
                                                     renaming: $renamingSession,
+                                                    style: .work,
                                                     onOpen: { open(session.id) }
                                                 )
                                             }
@@ -645,7 +646,7 @@ private struct ProjectDetail: View {
             } else {
                 VStack(spacing: MiloTheme.Space.two) {
                     ForEach(sessions) { session in
-                        SessionRow(session: session, renaming: $renamingSession, onOpen: { open(session.id) })
+                        SessionRow(session: session, renaming: $renamingSession, style: .work, onOpen: { open(session.id) })
                     }
                 }
             }
@@ -936,48 +937,6 @@ private struct ProjectDetail: View {
             model.send(words, intent: intent, drafts: files)
             onChat(false)
         }
-    }
-}
-
-/// One session of a project: what it is about, when it last moved, and whether it is running.
-/// A tap opens it, a hold lifts it into its card — and, as in the drawer, this is not a
-/// `Button`: a `ButtonStyle` takes the press for its own animation and the platform's long
-/// press never reaches the row.
-private struct SessionRow: View {
-    let session: SessionSummary
-    /// The session being renamed, named by the row's own press: the alert is presented once,
-    /// up on the page, and this only says which one.
-    @Binding var renaming: String?
-    let onOpen: () -> Void
-
-    var body: some View {
-        HStack(spacing: MiloTheme.Space.three) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(session.label)
-                    .font(MiloTheme.Text.base)
-                    .foregroundStyle(MiloTheme.foreground)
-                    .lineLimit(1)
-                // How much was said, and when — the drawer's own second line, so a project's
-                // list and the drawer say the same thing about the same session.
-                Text(session.meta)
-                    .font(MiloTheme.Text.meta.monospacedDigit())
-                    .foregroundStyle(MiloTheme.muted)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: MiloTheme.Space.two)
-            // A session running now, or one that moved and has not been read: the same
-            // one mark the drawer puts at a row's edge.
-            SessionMark(running: session.running, unread: session.unread)
-        }
-        .padding(.horizontal, MiloTheme.Space.four)
-        .padding(.vertical, MiloTheme.Space.two)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onOpen)
-        // A row that opens a session reads as a control, the way the button it used to be
-        // did: a tap is not the only way to answer one.
-        .accessibilityAddTraits(.isButton)
-        .sessionMenu(session, renaming: $renaming)
     }
 }
 

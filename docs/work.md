@@ -145,7 +145,7 @@ are the ordinary ones, with the folder they run in changed.
 | Which side a session is on | `web/src/sessions/scopes.ts`, `ios/Sources/Milo/Support/WorkSessions.swift` |
 | Work side of the web list | `web/src/sessions/WorkList.tsx`, `web/src/work/sessions.ts` |
 | Work screen | `web/src/work/Work.tsx`, `web/src/App.tsx` (`/work`) |
-| A session row | `web/src/sessions/SessionRow.tsx`, `ios/Sources/Milo/Screens/WorkView.swift` |
+| A session row | `web/src/sessions/SessionRow.tsx`, `ios/Sources/Milo/Support/SessionControls.swift` (`SessionRow`) |
 | Phone screen | `ios/Sources/Milo/Screens/WorkView.swift`, `ios/Sources/Milo/Screens/SessionsDrawer.swift` |
 | CLI | `src/bin/projects.ts` |
 | A session's project | `src/core/runtime.ts` (`adopt`), `src/core/sessions/` |

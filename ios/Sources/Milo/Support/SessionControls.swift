@@ -1,5 +1,51 @@
 import SwiftUI
 
+enum SessionRowStyle {
+    case work
+    case drawer(current: Bool)
+}
+
+struct SessionRow: View {
+    let session: SessionSummary
+    @Binding var renaming: String?
+    let style: SessionRowStyle
+    let onOpen: () -> Void
+
+    var body: some View {
+        HStack(spacing: MiloTheme.Space.three) {
+            VStack(alignment: .leading, spacing: 1) {
+                Text(session.label)
+                    .font(MiloTheme.Text.base)
+                    .foregroundStyle(MiloTheme.foreground)
+                    .lineLimit(1)
+                Text(session.meta)
+                    .font(MiloTheme.Text.meta.monospacedDigit())
+                    .foregroundStyle(MiloTheme.muted)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: MiloTheme.Space.two)
+            SessionMark(running: session.running, unread: session.unread)
+        }
+        .padding(.horizontal, horizontalPadding)
+        .padding(.vertical, MiloTheme.Space.two)
+        .background {
+            if case .drawer(let current) = style, current {
+                RoundedRectangle(cornerRadius: MiloTheme.Radius.md).fill(MiloTheme.surfaceRaised)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+        .onTapGesture(perform: onOpen)
+        .accessibilityAddTraits(.isButton)
+        .sessionMenu(session, renaming: $renaming)
+    }
+
+    private var horizontalPadding: CGFloat {
+        if case .drawer = style { return MiloTheme.Space.three }
+        return MiloTheme.Space.four
+    }
+}
+
 extension SessionSummary {
     /// What a row says under the name: how much has been said and when — the browser's
     /// own `sessionMeta`, on the phone. A session nobody has spoken in yet has no count

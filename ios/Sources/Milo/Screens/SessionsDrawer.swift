@@ -505,37 +505,11 @@ struct SessionsDrawer: View {
     /// `ButtonStyle` takes the press for its own animation, and the platform's long press
     /// then never reaches the row, so nothing is ever raised.
     private func row(_ session: SessionSummary, opening: @escaping () -> Void) -> some View {
-        let current = session.id == model.sessionId
-        return HStack(spacing: MiloTheme.Space.two) {
-            VStack(alignment: .leading, spacing: 1) {
-                Text(session.label)
-                    .font(MiloTheme.Text.base)
-                    .foregroundStyle(MiloTheme.foreground)
-                    .lineLimit(1)
-                // How much was said, and when — the browser's own second line on a
-                // session's row, so a list of names is not all the drawer says.
-                Text(session.meta)
-                    .font(MiloTheme.Text.meta.monospacedDigit())
-                    .foregroundStyle(MiloTheme.muted)
-                    .lineLimit(1)
-            }
-            Spacer(minLength: MiloTheme.Space.two)
-            // One mark at the row's edge, never two: it breathes while a turn is
-            // running there, and stands still when the session moved after it was last
-            // looked at.
-            SessionMark(running: session.running, unread: session.unread)
-        }
-        .padding(.horizontal, MiloTheme.Space.three)
-        .padding(.vertical, MiloTheme.Space.two)
-        .background(
-            current ? MiloTheme.surfaceRaised : .clear,
-            in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
+        SessionRow(
+            session: session,
+            renaming: $renaming,
+            style: .drawer(current: session.id == model.sessionId),
+            onOpen: opening
         )
-        .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
-        .onTapGesture(perform: opening)
-        // A row that opens a session reads as a control, the way the button it used to be
-        // did: a tap is not the only way to answer one.
-        .accessibilityAddTraits(.isButton)
-        .sessionMenu(session, renaming: $renaming)
     }
 }
