@@ -64,6 +64,9 @@ cut always lands on a user turn, so a tool call is never separated from its resu
 fails, the turns are dropped anyway — and every surface says which happened: the fold is named while it
 runs and reports what it came to, the turns folded and the tokens they were worth, whether it was the
 automatic pass or `/compact` asked for by hand. `/stats` carries the total the session has summarized away.
+Near the limit, Milo prepares the next summary after answering, during the gap before the next turn. It
+uses that summary only if the transcript, model and prompt budget still match; otherwise it summarizes
+the current transcript before sending the next request.
 
 ```yaml
 sessions:

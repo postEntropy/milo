@@ -490,7 +490,7 @@ describe('Session compaction', () => {
 
     expect(provider.systems.some((system) => system.includes('compress a conversation'))).toBe(true)
 
-    const system = provider.systems.at(-1)!
+    const system = provider.systems.find((value) => value.includes('## Earlier in this conversation'))!
     expect(system).toContain('## Earlier in this conversation')
     expect(system).toContain('OLD_TURNS_SUMMARY')
 

@@ -72,6 +72,20 @@ const VERIFICATION_WRITES = new Set([
   'git_commit',
 ])
 
+interface PreparedCompaction {
+  provider: Provider
+  model: string
+  ceiling: number
+  fixed: number
+  previous?: string
+  cut: number
+  prefix: Message[]
+  startedAt: number
+  done: boolean
+  finishedAt?: number
+  summary: Promise<string | null>
+}
+
 function asSurface(gateway: string): SurfaceKind | undefined {
   return (SURFACES as string[]).includes(gateway) ? (gateway as SurfaceKind) : undefined
 }
@@ -83,6 +97,17 @@ function asSurface(gateway: string): SurfaceKind | undefined {
  */
 function surfaceOf(gateway: string, client?: ClientKind): SurfaceKind | undefined {
   return client ?? asSurface(gateway)
+}
+
+/** Let a stopped turn leave a background compaction wait without cancelling its cached summary. */
+function awaitPreparedSummary(summary: Promise<string | null>, signal?: AbortSignal): Promise<string | null> {
+  if (!signal) return summary
+  if (signal.aborted) return Promise.reject(signal.reason ?? new Error('the turn was stopped'))
+  return new Promise((resolve, reject) => {
+    const onAbort = () => reject(signal.reason ?? new Error('the turn was stopped'))
+    signal.addEventListener('abort', onAbort, { once: true })
+    summary.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort))
+  })
 }
 
 /** Whether a surface can draw a generated interface: the browser and the phone. */
@@ -335,6 +360,8 @@ export class Session {
    * system prompt and the tool schemas — which the transcript count omits.
    */
   private lastFixedTokens: number | undefined
+  /** A summary prepared between turns, ready before a full context forces a wait. */
+  private preparedCompaction: PreparedCompaction | undefined
   /** The ceiling the transcript is measured against, once the window is known. */
   private ceiling: number | undefined
   /** The lookup in flight: a turn waits on it only if it has not finished. */
@@ -760,7 +787,10 @@ export class Session {
     // leaving them out of the count let the request go over budget. The fold
     // reports itself too — it says the wait is a fold before buying the summary,
     // and what it came to once it has one.
-    yield* this.compactIfNeeded(prompt, signal)
+    const incoming: Message[] = opts?.notice
+      ? []
+      : [{ role: 'user', content: [{ type: 'text', text: input }, ...(opts?.images ?? []), ...(opts?.audio ?? [])] }]
+    yield* this.compactIfNeeded(prompt, signal, provider, model, incoming)
 
     const systemPrompt = buildSystemPrompt({
       ...prompt,
@@ -1115,6 +1145,17 @@ export class Session {
     if (this.shouldBeNamed(errored)) {
       this.inBackground(this.nameFromOpeningTurn())
     }
+
+    if (!errored && !abort.aborted) {
+      // Summarizing after the answer avoids competing with its provider request.
+      // If the person sends another turn immediately, that turn can wait on this
+      // prepared result; otherwise the provider latency happens between turns.
+      const alreadyRunning = [...this.background]
+      this.inBackground((async () => {
+        await Promise.all(alreadyRunning)
+        await this.prepareCompaction(provider, model)
+      })())
+    }
   }
 
   /** Whether this finished turn is the one that names the session. */
@@ -1203,6 +1244,7 @@ export class Session {
    */
   private adoptLatest(latest: SessionRecord): { added: number; removed: number; compacted: boolean } | null {
     if (latest.version === this.baseVersion) return null
+    this.preparedCompaction = undefined
     const before = this.messages.length
     // Compared before `summary` is replaced: a summary that was not there, or
     // reads differently, is the other Milo having summarized the older turns.
@@ -1229,6 +1271,7 @@ export class Session {
     // is what makes this the session as it actually stands.
     const lease = await this.store.acquire(this.id)
     try {
+      this.preparedCompaction = undefined
       if (lease.latest) this.adoptLatest(lease.latest)
       this.messages.length = 0
       this.summary = undefined
@@ -1386,6 +1429,7 @@ export class Session {
       reason,
     })
     if (!config?.compaction) return nothing('compaction is off in this install')
+    this.preparedCompaction = undefined
 
     // The window is a fact about the model, not about this session: wait for the
     // lookup only if it has not finished already.
@@ -1465,6 +1509,9 @@ export class Session {
   private async *compactIfNeeded(
     prompt: Omit<SystemPromptInput, 'summary'>,
     signal?: AbortSignal,
+    provider: Provider = this.options.provider,
+    model: string = this.options.model,
+    incoming: Message[] = [],
   ): AsyncGenerator<Extract<AgentEvent, { type: 'compacting' | 'compacted' }>, void> {
     const config = this.options.sessions
     if (!config?.compaction) return
@@ -1490,7 +1537,33 @@ export class Session {
     const fixed =
       estimateText(buildSystemPrompt({ ...prompt, summary: this.summary, browser: this.browserFacts(), mcp: this.mcpFacts(), google: this.options.google ?? null })) +
       estimateTools(prompt.tools)
-    if (estimateTokens(this.messages) + fixed <= ceiling) return
+    const incomingTokens = estimateTokens(incoming)
+    if (estimateTokens(this.messages) + fixed + incomingTokens <= ceiling) return
+
+    const prepared = this.preparedCompaction
+    if (
+      prepared &&
+      this.canUsePreparedCompaction(prepared, provider, model, ceiling, fixed) &&
+      estimateTokens(this.messages.slice(prepared.cut)) + fixed + incomingTokens <= ceiling
+    ) {
+      this.preparedCompaction = undefined
+      if (!prepared.done) yield { type: 'compacting' }
+      const summary = await awaitPreparedSummary(prepared.summary, signal)
+      const dropped = this.messages.slice(0, prepared.cut)
+      if (summary) this.summary = summary
+      const tokens = estimateTokens(dropped)
+      this.record.droppedTokens = (this.record.droppedTokens ?? 0) + tokens
+      this.messages.splice(0, prepared.cut)
+      yield {
+        type: 'compacted',
+        ms: Math.max(0, (prepared.finishedAt ?? Date.now()) - prepared.startedAt),
+        folded: countTurns(dropped),
+        tokens,
+        summarized: summary !== null,
+      }
+      return
+    }
+    if (prepared) this.preparedCompaction = undefined
 
     // The floor is a preference, not a promise: when the turns it protects are
     // themselves bigger than the ceiling, the cut recuses past them, and 0 comes
@@ -1498,7 +1571,7 @@ export class Session {
     // cannot help there, so none is bought.
     const cut = planCutUnderBudget(this.messages, {
       keepTurns: config.keepTurns,
-      budget: ceiling,
+      budget: ceiling - incomingTokens,
       fixed,
     })
     if (cut <= 0) {
@@ -1516,8 +1589,8 @@ export class Session {
     let summary: string | null = null
     try {
       summary = await summarize({
-        provider: this.options.provider,
-        model: this.options.model,
+        provider,
+        model,
         previous: this.summary,
         dropped,
         signal,
@@ -1547,5 +1620,69 @@ export class Session {
       tokens,
       summarized: summary !== null,
     }
+  }
+
+  /** Start the next summary during the gap after an answer, before it is needed. */
+  private async prepareCompaction(provider: Provider, model: string): Promise<void> {
+    const config = this.options.sessions
+    const ceiling = this.ceiling ?? config?.maxInputTokens
+    const fixed = this.lastFixedTokens
+    if (!config?.compaction || ceiling === undefined || fixed === undefined || this.preparedCompaction) return
+    if (estimateTokens(this.messages) + fixed < ceiling * 0.6) return
+
+    const cut = planCutUnderBudget(this.messages, {
+      // Reserve room for the next user turn so the prepared fold can be applied
+      // before that turn is appended to the transcript.
+      keepTurns: Math.max(1, config.keepTurns - 1),
+      budget: ceiling,
+      fixed,
+    })
+    if (cut <= 0) return
+
+    const prepared: PreparedCompaction = {
+      provider,
+      model,
+      ceiling,
+      fixed,
+      previous: this.summary,
+      cut,
+      prefix: this.messages.slice(0, cut),
+      startedAt: Date.now(),
+      done: false,
+      summary: Promise.resolve(null),
+    }
+    this.preparedCompaction = prepared
+    prepared.summary = summarize({
+      provider,
+      model,
+      previous: prepared.previous,
+      dropped: prepared.prefix,
+    }).catch((error) => {
+      logWarn(`could not prepare compaction for session ${this.id}: ${errorMessage(error)}`)
+      return null
+    }).then((summary) => {
+      prepared.done = true
+      prepared.finishedAt = Date.now()
+      return summary
+    })
+    await prepared.summary
+  }
+
+  private canUsePreparedCompaction(
+    prepared: PreparedCompaction,
+    provider: Provider,
+    model: string,
+    ceiling: number,
+    fixed: number,
+  ): boolean {
+    if (
+      prepared.provider !== provider ||
+      prepared.model !== model ||
+      prepared.ceiling !== ceiling ||
+      prepared.fixed !== fixed ||
+      prepared.previous !== this.summary ||
+      prepared.cut > this.messages.length
+    ) return false
+    return prepared.prefix.every((message, index) => this.messages[index] === message)
   }
 }
