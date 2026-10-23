@@ -332,7 +332,7 @@ describe('milo routines', () => {
     expect(readRoutines()[0]!.allow).toEqual(['write_file'])
   })
 
-  it('says when a granted name is not a tool it knows', async () => {
+  it('rejects an unknown granted name and lists the valid tools', async () => {
     const result = await runWith(
       async () => true,
       'add',
@@ -347,8 +347,21 @@ describe('milo routines', () => {
       'teleport',
     )
 
-    expect(result.code).toBe(0)
+    expect(result.code).toBe(1)
     expect(result.errors.join('\n')).toContain('Not a tool I know: teleport')
+    expect(result.errors.join('\n')).toContain('gmail_modify')
+    expect(readRoutines()).toEqual([])
+  })
+
+  it('accepts the mail tools that routines may be granted', async () => {
+    const result = await runWith(
+      async () => true,
+      'add', 'sort newsletter', '--every', '1d', '--gateway', 'none',
+      '--allow', 'gmail_modify,mail_labels',
+    )
+
+    expect(result.code).toBe(0)
+    expect(readRoutines()[0]!.allow).toEqual(['gmail_modify', 'mail_labels'])
   })
 
   it('lists the grants a routine carries', async () => {

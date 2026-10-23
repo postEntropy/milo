@@ -39,13 +39,14 @@ export interface RoutineIo {
  */
 const GRANTABLE = new Set([
   ...builtinTools.map((tool) => tool.name),
-  'send_file',
   'web_search',
   'read_skill',
   'browser_open',
   'browser_snapshot',
   'browser_screenshot',
   'browser_act',
+  'gmail_modify',
+  'mail_labels',
 ])
 
 const USAGE = [
@@ -246,7 +247,9 @@ async function add(argv: string[], context: Required<RoutineIo>): Promise<number
   if (flags.allow?.length) {
     const unknown = flags.allow.filter((name) => !GRANTABLE.has(name))
     if (unknown.length > 0) {
-      context.err(`Not a tool I know: ${unknown.join(', ')} — the grant will do nothing.`)
+      context.err(`Not a tool I know: ${unknown.join(', ')}. Valid tools: ${[...GRANTABLE].sort().join(', ')}.`)
+      context.err(USAGE)
+      return 1
     }
     // A standing grant is the whole reason this command can be dangerous: said
     // out loud, and confirmed, because nobody will be there when it runs.
