@@ -48,7 +48,7 @@ import { browserChromeDir, browserProfilesDir, embedEngineDir, memoryDir, skills
 import { mcpFacts } from '../../core/mcp/servers.js'
 import { toolDisplayName } from '../tool-line.js'
 import { modelNote, shortModel } from '../model-label.js'
-import { EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from './protocol.js'
+import { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from './protocol.js'
 import {
   ConfigSchema,
   DEFAULT_LOCAL_EMBED_MODEL,
@@ -526,6 +526,7 @@ export class WebSettings {
         thinkingLevels: THINKING_LEVELS,
         efforts: EFFORT_LEVELS,
         searchProviders: SEARCH_PROVIDERS,
+        classifierBackends: CLASSIFIER_BACKENDS,
       },
     }
   }

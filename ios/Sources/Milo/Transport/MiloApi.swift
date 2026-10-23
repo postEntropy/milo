@@ -318,6 +318,16 @@ enum MiloApi {
         _ = try await call("save-config", ["config": patch], account: account, as: Ack.self)
     }
 
+    /// One key, stored on the machine that runs Milo. The phone never keeps it: what
+    /// comes back is only whether a value is set, and its mask.
+    static func saveSecret(_ account: Account, group: String, id: String, value: String) async throws {
+        _ = try await call("save-secret", ["group": group, "id": id, "value": value], account: account, as: Ack.self)
+    }
+
+    static func removeSecret(_ account: Account, group: String, id: String) async throws {
+        _ = try await call("remove-secret", ["group": group, "id": id], account: account, as: Ack.self)
+    }
+
     /// The settings screen's one read: the config on disk, and what the runtime
     /// is actually running, which is not always the same thing.
     static func overview(_ account: Account) async throws -> SettingsOverview {
@@ -485,6 +495,54 @@ enum MiloApi {
 }
 
 struct SettingsOverview: Decodable {
+    /// Whether one key is stored on the install, and the mask the daemon draws for it.
+    /// Never the key itself.
+    struct SecretState: Decodable, Equatable {
+        let set: Bool
+        let masked: String?
+
+        private enum CodingKeys: String, CodingKey { case set, masked }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            set = try container.decodeIfPresent(Bool.self, forKey: .set) ?? false
+            masked = try container.decodeIfPresent(String.self, forKey: .masked)
+        }
+    }
+
+    /// The install's keys, grouped as the screen lists them. Audio is the Groq key the
+    /// transcription model reads; the daemon files it under the providers.
+    struct Auth: Decodable, Equatable {
+        let providers: [String: SecretState]
+        let audio: [String: SecretState]
+        let search: [String: SecretState]
+        let gateways: [String: SecretState]
+
+        private enum CodingKeys: String, CodingKey { case providers, audio, search, gateways }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            providers = try container.decodeIfPresent([String: SecretState].self, forKey: .providers) ?? [:]
+            audio = try container.decodeIfPresent([String: SecretState].self, forKey: .audio) ?? [:]
+            search = try container.decodeIfPresent([String: SecretState].self, forKey: .search) ?? [:]
+            gateways = try container.decodeIfPresent([String: SecretState].self, forKey: .gateways) ?? [:]
+        }
+    }
+
+    /// A provider the install can be pointed at, with the name its key is listed under.
+    struct Preset: Decodable, Identifiable, Hashable {
+        let id: String
+        let name: String
+
+        private enum CodingKeys: String, CodingKey { case id, name }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            id = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
+            name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        }
+    }
+
     struct Display: Decodable {
         let tools: String?
         let thinking: String?
@@ -493,6 +551,41 @@ struct SettingsOverview: Decodable {
 
     struct Permissions: Decodable {
         let mode: String?
+        let allow: [String]?
+        let deny: [String]?
+        let jevThreshold: Double?
+        let jevTimeoutMs: Int?
+    }
+
+    /// The decision model a review is asked of. Applied on the next start.
+    struct Classifier: Decodable {
+        let backend: String?
+        let model: String?
+        let url: String?
+    }
+
+    /// One optional chat channel: whether it runs, and who may talk to it.
+    struct Gateway: Decodable {
+        let enabled: Bool?
+        let allowlist: [String]?
+    }
+
+    struct Web: Decodable {
+        let enabled: Bool?
+        let host: String?
+        let port: Int?
+    }
+
+    /// How the transcript is kept between turns.
+    struct Sessions: Decodable {
+        let compactAt: Double?
+        let contextWindow: Int?
+        let maxInputTokens: Int?
+        let keepTurns: Int?
+        let compaction: Bool?
+        let maxSessions: Int?
+        let generateTitles: Bool?
+        let titleModel: String?
     }
 
     struct Embedding: Decodable, Equatable {
@@ -528,10 +621,14 @@ struct SettingsOverview: Decodable {
         let reasoningEffort: String?
         let display: Display?
         let permissions: Permissions?
+        let classifier: Classifier?
         let memory: Memory?
         let search: Search?
         let google: GoogleConfig?
         let browser: Browser?
+        let gateways: [String: Gateway]?
+        let web: Web?
+        let sessions: Sessions?
     }
 
     /// What the runtime holds now. Set when a chat command or another surface
@@ -543,6 +640,8 @@ struct SettingsOverview: Decodable {
     }
 
     let config: Config?
+    let auth: Auth?
+    let presets: [Preset]?
     let live: Live?
     let skills: [InstalledSkill]?
     let memoryStats: MemoryStats?
@@ -561,6 +660,7 @@ struct SettingsOverview: Decodable {
         let thinkingLevels: [String]?
         let efforts: [String]?
         let searchProviders: [String]?
+        let classifierBackends: [String]?
     }
 }
 

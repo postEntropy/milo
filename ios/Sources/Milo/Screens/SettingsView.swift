@@ -49,13 +49,11 @@ struct SettingsView: View {
                 }
 
                 Section {
-                    Picker("Mode", selection: permission) {
-                        ForEach(model.permissionModes, id: \.self) { value in
-                            Text(SettingsWording.of(value)).tag(value)
-                        }
+                    NavigationLink {
+                        PermissionsSettingsView()
+                    } label: {
+                        LabeledContent("Permissions", value: SettingsWording.of(model.permissionMode))
                     }
-                } header: {
-                    Text("Permissions")
                 } footer: {
                     // Said once, and only where it matters: with this on, nothing
                     // waits for the person.
@@ -115,7 +113,7 @@ struct SettingsView: View {
                     }
                 }
 
-                Section("Skills") {
+                Section {
                     NavigationLink {
                         SkillsSettingsView()
                     } label: {
@@ -123,6 +121,38 @@ struct SettingsView: View {
                             "Skills",
                             value: model.installedSkills.isEmpty ? "None" : "\(model.installedSkills.count)"
                         )
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        ApiKeysSettingsView()
+                    } label: {
+                        LabeledContent("API keys", value: apiKeysSummary)
+                    }
+                }
+
+                Section {
+                    NavigationLink {
+                        GatewaysSettingsView()
+                    } label: {
+                        LabeledContent("Gateways", value: gatewaysSummary)
+                    }
+                    NavigationLink {
+                        WebSettingsView()
+                    } label: {
+                        LabeledContent(
+                            "Web",
+                            value: model.web.enabled ? "\(model.web.host):\(model.web.port)" : "Off"
+                        )
+                    }
+                }
+
+                Section("Sessions") {
+                    NavigationLink {
+                        SessionsSettingsView()
+                    } label: {
+                        LabeledContent("Transcript", value: transcriptSummary)
                     }
                 }
 
@@ -198,6 +228,26 @@ struct SettingsView: View {
         return count == 0 ? "None" : "\(count)"
     }
 
+    private var apiKeysSummary: String {
+        let offered = KeyGroup.allCases.flatMap { $0.ids(presets: model.presets, auth: model.auth) }
+        let set = KeyGroup.allCases.reduce(0) { count, group in
+            count + group.ids(presets: model.presets, auth: model.auth)
+                .filter { group.state(model.auth, id: $0)?.set == true }
+                .count
+        }
+        return set == 0 ? "None set" : "\(set) of \(offered.count) set"
+    }
+
+    private var gatewaysSummary: String {
+        let running = ["telegram", "discord"].filter { model.gateways[$0]?.enabled == true }
+        return running.isEmpty ? "Off" : running.map(SettingsWording.of).joined(separator: ", ")
+    }
+
+    private var transcriptSummary: String {
+        let percent = Int((model.transcript.compactAt * 100).rounded())
+        return "Compact at \(percent)% · \(model.transcript.maxSessions) kept"
+    }
+
     /*
      Each control writes as it is set, and the local value is only taken once the
      daemon has agreed — a control that reads as moved when the write failed would
@@ -207,13 +257,6 @@ struct SettingsView: View {
         Binding(
             get: { model.effort },
             set: { value in Task { await model.setEffort(value) } }
-        )
-    }
-
-    private var permission: Binding<String> {
-        Binding(
-            get: { model.permissionMode },
-            set: { value in Task { await model.setPermissionMode(value) } }
         )
     }
 
@@ -907,6 +950,675 @@ private struct SkillsSettingsView: View {
     }
 }
 
+// MARK: - Permissions
+
+private struct PermissionsSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var allowText = ""
+    @State private var denyText = ""
+    @State private var classifierModel = ""
+    @State private var classifierUrl = ""
+    @FocusState private var field: Field?
+
+    private enum Field: Hashable { case allow, deny, model, url }
+
+    var body: some View {
+        List {
+            Section {
+                Picker("Mode", selection: mode) {
+                    ForEach(model.permissionModes, id: \.self) { value in
+                        Text(SettingsWording.of(value)).tag(value)
+                    }
+                }
+            } footer: {
+                Text(model.permissionMode == "yolo"
+                    ? "Nothing asks before it runs."
+                    : "A tool that can change something waits for you.")
+            }
+
+            Section {
+                HStack {
+                    Text("Always allowed")
+                    Spacer()
+                    TextField("None", text: $allowText)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($field, equals: .allow)
+                        .onSubmit { field = nil }
+                }
+                HStack {
+                    Text("Blocked")
+                    Spacer()
+                    TextField("None", text: $denyText)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($field, equals: .deny)
+                        .onSubmit { field = nil }
+                }
+            } footer: {
+                // Both lists in one line, said once: commas, and which one wins.
+                Text("Comma-separated tool names. An allowed tool is never asked about; a blocked one never runs — unless the mode is YOLO.")
+            }
+
+            Section {
+                Stepper(value: threshold, in: 0...1, step: 0.05) {
+                    LabeledContent("Threshold", value: String(format: "%.2f", model.permissions.jevThreshold))
+                }
+            } header: {
+                Text("Reviewer")
+            } footer: {
+                Text("Danger score the reviewer tolerates: below it the tool runs, at or above it asks.")
+            }
+
+            Section {
+                Picker("Backend", selection: backend) {
+                    ForEach(model.classifierBackends, id: \.self) { value in
+                        Text(SettingsWording.classifierBackend(value)).tag(value)
+                    }
+                }
+                HStack {
+                    Text("Model")
+                    Spacer()
+                    TextField("Backend default", text: $classifierModel)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($field, equals: .model)
+                        .onSubmit { field = nil }
+                }
+                HStack {
+                    Text("URL")
+                    Spacer()
+                    TextField("Backend default", text: $classifierUrl)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($field, equals: .url)
+                        .onSubmit { field = nil }
+                }
+            } footer: {
+                Text("The decision model a review is asked of. Applies on the next start.")
+            }
+
+            SettingsErrorSection()
+        }
+        .navigationTitle("Permissions")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { field = nil }
+            }
+        }
+        .onAppear { syncFields() }
+        .onChange(of: model.permissions) { _, _ in if field == nil { syncFields() } }
+        .onChange(of: model.classifier) { _, _ in if field == nil { syncFields() } }
+        .onChange(of: field) { _, next in if next == nil { commitFields() } }
+        .onDisappear { commitFields() }
+    }
+
+    private var mode: Binding<String> {
+        Binding(
+            get: { model.permissions.mode },
+            set: { value in Task { await model.setPermissions { $0.mode = value } } }
+        )
+    }
+
+    private var backend: Binding<String> {
+        Binding(
+            get: { model.classifier.backend },
+            set: { value in Task { await model.setClassifier { $0.backend = value } } }
+        )
+    }
+
+    /// Kept on the reviewer's own fifth, so a gesture never lands on 0.3500000000000001.
+    private var threshold: Binding<Double> {
+        Binding(
+            get: { model.permissions.jevThreshold },
+            set: { value in
+                let stepped = min(1, max(0, (value * 20).rounded() / 20))
+                Task { await model.setPermissions { $0.jevThreshold = stepped } }
+            }
+        )
+    }
+
+    private func syncFields() {
+        allowText = model.permissions.allow.joined(separator: ", ")
+        denyText = model.permissions.deny.joined(separator: ", ")
+        classifierModel = model.classifier.model ?? ""
+        classifierUrl = model.classifier.url ?? ""
+    }
+
+    private func commitFields() {
+        let allow = splitNames(allowText)
+        let deny = splitNames(denyText)
+        let nextModel = trimmedOrNil(classifierModel)
+        let nextUrl = trimmedOrNil(classifierUrl)
+        Task {
+            if allow != model.permissions.allow || deny != model.permissions.deny {
+                await model.setPermissions { next in
+                    next.allow = allow
+                    next.deny = deny
+                }
+            }
+            if nextModel != model.classifier.model || nextUrl != model.classifier.url {
+                await model.setClassifier { next in
+                    next.model = nextModel
+                    next.url = nextUrl
+                }
+            }
+            await MainActor.run { if field == nil { syncFields() } }
+        }
+    }
+}
+
+// MARK: - API keys
+
+/**
+ The four groups the keys screen lists, and the ids each one holds — the browser's own
+ grouping, so a key sits under the same heading on both surfaces.
+ */
+private enum KeyGroup: String, CaseIterable {
+    case providers, audio, search, gateways
+
+    var title: String {
+        switch self {
+        case .providers: return "Providers"
+        case .audio: return "Audio"
+        case .search: return "Web search"
+        case .gateways: return "Gateways"
+        }
+    }
+
+    var footer: String {
+        switch self {
+        case .providers: return "Keys are stored on the machine that runs Milo. This screen only reads whether one is set."
+        case .audio: return "Groq's Whisper key, used for audio transcription."
+        case .search: return "The key for each search service."
+        case .gateways: return "The bot token for each channel; whether a channel runs is under Gateways."
+        }
+    }
+
+    func ids(presets: [SettingsOverview.Preset], auth: SettingsOverview.Auth?) -> [String] {
+        switch self {
+        case .providers:
+            var ids = presets.map(\.id).filter { !$0.isEmpty && $0 != "groq" }
+            for id in auth.map({ Array($0.providers.keys) }) ?? [] where id != "groq" && !ids.contains(id) {
+                ids.append(id)
+            }
+            return ids
+        case .audio: return ["groq"]
+        case .search: return ["tavily", "exa", "parallel"]
+        case .gateways: return ["telegram", "discord"]
+        }
+    }
+
+    func state(_ auth: SettingsOverview.Auth?, id: String) -> SettingsOverview.SecretState? {
+        switch self {
+        case .providers: return auth?.providers[id]
+        case .audio: return auth?.audio[id]
+        case .search: return auth?.search[id]
+        case .gateways: return auth?.gateways[id]
+        }
+    }
+}
+
+private struct ApiKeysSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var editing: String?
+    @State private var draft = ""
+    @State private var busy = false
+    @FocusState private var typing: Bool
+
+    var body: some View {
+        List {
+            ForEach(KeyGroup.allCases, id: \.self) { group in
+                Section {
+                    let ids = ordered(group)
+                    if ids.isEmpty {
+                        Text("No provider to list yet.")
+                            .foregroundStyle(MiloTheme.muted)
+                    } else {
+                        ForEach(ids, id: \.self) { id in
+                            row(group: group, id: id)
+                        }
+                    }
+                } header: {
+                    Text(group.title)
+                } footer: {
+                    Text(group.footer)
+                }
+            }
+            SettingsErrorSection()
+        }
+        .navigationTitle("API keys")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                // The keyboard goes away; what was typed stays, so Save is still the one
+                // thing that writes it.
+                Button("Done") { typing = false }
+            }
+        }
+    }
+
+    /// Configured keys first, as the browser lists them, and the rest in the order the
+    /// daemon offered — a list that reorders only when a key is actually added.
+    private func ordered(_ group: KeyGroup) -> [String] {
+        let ids = group.ids(presets: model.presets, auth: model.auth)
+        let configured = ids.filter { group.state(model.auth, id: $0)?.set == true }
+        return configured + ids.filter { group.state(model.auth, id: $0)?.set != true }
+    }
+
+    private func name(group: KeyGroup, id: String) -> String {
+        guard group == .providers else { return SettingsWording.of(id) }
+        return model.presets.first { $0.id == id }?.name ?? id
+    }
+
+    @ViewBuilder
+    private func row(group: KeyGroup, id: String) -> some View {
+        let state = group.state(model.auth, id: id)
+        let configured = state?.set == true
+        let slot = "\(group.rawValue):\(id)"
+        let open = editing == slot
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(name(group: group, id: id))
+                        .font(MiloTheme.Text.body)
+                    Text(configured ? (state?.masked ?? "Set") : "Not set")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+                Spacer()
+                Button(open ? "Cancel" : configured ? "Replace" : "Add key") {
+                    if open {
+                        closeEditor()
+                    } else {
+                        editing = slot
+                        draft = ""
+                        typing = true
+                    }
+                }
+                .font(MiloTheme.Text.small)
+                .buttonStyle(.borderless)
+                if configured && !open {
+                    Button("Remove", role: .destructive) {
+                        busy = true
+                        Task {
+                            await model.removeSecret(group: group.rawValue, id: id)
+                            busy = false
+                        }
+                    }
+                    .font(MiloTheme.Text.small)
+                    .buttonStyle(.borderless)
+                    .disabled(busy)
+                }
+            }
+            if open {
+                SecureField("API key", text: $draft)
+                    .textContentType(.password)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .focused($typing)
+                HStack {
+                    Spacer()
+                    Button("Save") {
+                        busy = true
+                        Task {
+                            let saved = await model.saveSecret(group: group.rawValue, id: id, value: draft)
+                            busy = false
+                            if saved { closeEditor() }
+                        }
+                    }
+                    .font(MiloTheme.Text.small)
+                    .buttonStyle(.borderless)
+                    .disabled(busy || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+            }
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func closeEditor() {
+        editing = nil
+        draft = ""
+        typing = false
+    }
+}
+
+// MARK: - Gateways
+
+private struct GatewaysSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var drafts: [String: String] = [:]
+    @FocusState private var focused: String?
+
+    private let names = ["telegram", "discord"]
+
+    var body: some View {
+        List {
+            ForEach(names, id: \.self) { name in
+                Section {
+                    Toggle("Enable \(SettingsWording.of(name))", isOn: enabled(name))
+                    HStack {
+                        Text("Allowed people")
+                        Spacer()
+                        TextField("Anyone", text: text(name))
+                            .multilineTextAlignment(.trailing)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                            .focused($focused, equals: name)
+                            .onSubmit {
+                                focused = nil
+                                commit(name)
+                            }
+                    }
+                } footer: {
+                    Text("Leave empty to allow anyone who finds the bot.")
+                }
+            }
+            SettingsErrorSection()
+        }
+        .navigationTitle("Gateways")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { focused = nil }
+            }
+        }
+        .onAppear { for name in names { sync(name) } }
+        .onChange(of: focused) { _, next in
+            // The field that lost focus writes what it holds, then reads the daemon's own
+            // answer back — a refused list returns the stored one instead of a list that
+            // was never kept on screen.
+            guard next == nil else { return }
+            for name in names { commit(name) }
+        }
+        .onChange(of: model.gateways) { _, _ in
+            guard focused == nil else { return }
+            for name in names { sync(name) }
+        }
+        .onDisappear {
+            for name in names { commit(name) }
+        }
+    }
+
+    private func enabled(_ name: String) -> Binding<Bool> {
+        Binding(
+            get: { model.gateways[name]?.enabled ?? false },
+            set: { on in
+                // Whatever is in the field goes with it, so a list typed just before the
+                // switch is not left to be written by a later commit over the top of it.
+                let list = drafts[name].map(splitNames) ?? (model.gateways[name]?.allowlist ?? [])
+                Task { await model.setGateway(name, enabled: on, allowlist: list) }
+            }
+        )
+    }
+
+    private func text(_ name: String) -> Binding<String> {
+        Binding(
+            get: { drafts[name] ?? "" },
+            set: { drafts[name] = $0 }
+        )
+    }
+
+    private func sync(_ name: String) {
+        drafts[name] = (model.gateways[name]?.allowlist ?? []).joined(separator: ", ")
+    }
+
+    private func commit(_ name: String) {
+        let next = splitNames(drafts[name] ?? "")
+        let current = model.gateways[name] ?? AppModel.GatewaySettings()
+        guard next != current.allowlist else { return }
+        Task {
+            let written = await model.setGateway(name, enabled: current.enabled, allowlist: next)
+            await MainActor.run {
+                if !written || focused != name { sync(name) }
+            }
+        }
+    }
+}
+
+// MARK: - Web
+
+private struct WebSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var host = ""
+    @State private var port = ""
+    @FocusState private var field: Field?
+
+    private enum Field: Hashable { case host, port }
+
+    var body: some View {
+        List {
+            Section {
+                Toggle("Serve it with milo serve", isOn: enabled)
+            }
+
+            Section {
+                HStack {
+                    Text("Bind address")
+                    Spacer()
+                    TextField("127.0.0.1", text: $host)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($field, equals: .host)
+                        .onSubmit { field = nil }
+                }
+                HStack {
+                    Text("Port")
+                    Spacer()
+                    TextField("7717", text: $port)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .focused($field, equals: .port)
+                }
+            } header: {
+                Text("Address")
+            } footer: {
+                Text("Read when milo serve starts. Anything but loopback is reachable from the network — the token is then the only thing between a stranger and this install.")
+            }
+
+            SettingsErrorSection()
+        }
+        .navigationTitle("Web")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { field = nil }
+            }
+        }
+        .onAppear { sync() }
+        .onChange(of: model.web) { _, _ in if field == nil { sync() } }
+        .onChange(of: field) { _, next in if next == nil { commit() } }
+        .onDisappear { commit() }
+    }
+
+    private var enabled: Binding<Bool> {
+        Binding(
+            get: { model.web.enabled },
+            set: { value in Task { await model.setWebEnabled(value) } }
+        )
+    }
+
+    private func sync() {
+        host = model.web.host
+        port = String(model.web.port)
+    }
+
+    /// The two fields are committed in order, and the screen then reads the daemon's own
+    /// answer back: a blank address or a port outside the range comes back refused, and
+    /// the field shows what is really configured rather than what was typed.
+    private func commit() {
+        let nextHost = host.trimmingCharacters(in: .whitespacesAndNewlines)
+        let nextPort = Int(port.trimmingCharacters(in: .whitespacesAndNewlines))
+        let hostChanged = nextHost != model.web.host
+        let portChanged = nextPort != nil && nextPort != model.web.port
+        guard hostChanged || portChanged else {
+            if field == nil { sync() }
+            return
+        }
+        Task {
+            if hostChanged { await model.setWebHost(nextHost) }
+            if let nextPort, portChanged { await model.setWebPort(nextPort) }
+            await MainActor.run { if field == nil { sync() } }
+        }
+    }
+}
+
+// MARK: - Sessions
+
+private struct SessionsSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var sessionsText = ""
+    @State private var budgetText = ""
+    @State private var windowText = ""
+    @State private var titleModelText = ""
+    @FocusState private var field: Field?
+
+    private enum Field: Hashable { case sessions, budget, window, titleModel }
+
+    var body: some View {
+        List {
+            Section {
+                Stepper(
+                    "Compact at \(Int((model.transcript.compactAt * 100).rounded()))% of the context",
+                    value: compactPercent,
+                    in: 1...95,
+                    step: 5
+                )
+                Stepper("Turns kept verbatim: \(model.transcript.keepTurns)", value: keepTurns, in: 1...50)
+                Toggle("Compact long sessions automatically", isOn: compaction)
+            } header: {
+                Text("Compaction")
+            } footer: {
+                Text("The share of the model's window that triggers a fold. Turns older than the ones kept are summarized.")
+            }
+
+            Section {
+                Toggle("Name each session from its first turn", isOn: generateTitles)
+                HStack {
+                    Text("Model that writes the names")
+                    Spacer()
+                    TextField("Its own model", text: $titleModelText)
+                        .multilineTextAlignment(.trailing)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .focused($field, equals: .titleModel)
+                        .onSubmit { field = nil }
+                }
+            } header: {
+                Text("Names")
+            } footer: {
+                Text("One short call after the first turn. Empty uses the session's own model.")
+            }
+
+            Section {
+                numberRow("Sessions kept", text: $sessionsText, field: .sessions)
+                numberRow("Fallback budget (tokens)", text: $budgetText, field: .budget)
+                numberRow("Context window (tokens)", text: $windowText, field: .window)
+            } header: {
+                Text("Storage")
+            } footer: {
+                Text("How many sessions stay on disk. The fallback budget is used only when the model's window is unknown; the context window overrides the catalog for a model it does not know.")
+            }
+
+            SettingsErrorSection()
+        }
+        .navigationTitle("Sessions")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbar {
+            ToolbarItemGroup(placement: .keyboard) {
+                Spacer()
+                Button("Done") { field = nil }
+            }
+        }
+        .onAppear { syncFields() }
+        .onChange(of: model.transcript) { _, _ in if field == nil { syncFields() } }
+        .onChange(of: field) { _, next in if next == nil { commitFields() } }
+        .onDisappear { commitFields() }
+    }
+
+    private func numberRow(_ label: String, text: Binding<String>, field value: Field) -> some View {
+        HStack {
+            Text(label)
+            Spacer()
+            TextField("", text: text)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .focused($field, equals: value)
+        }
+    }
+
+    private var compactPercent: Binding<Int> {
+        Binding(
+            get: { Int((model.transcript.compactAt * 100).rounded()) },
+            set: { value in
+                let percent = min(95, max(1, value))
+                Task { await model.setTranscript { $0.compactAt = Double(percent) / 100 } }
+            }
+        )
+    }
+
+    private var keepTurns: Binding<Int> {
+        Binding(
+            get: { model.transcript.keepTurns },
+            set: { value in Task { await model.setTranscript { $0.keepTurns = max(1, value) } } }
+        )
+    }
+
+    private var compaction: Binding<Bool> {
+        Binding(
+            get: { model.transcript.compaction },
+            set: { value in Task { await model.setTranscript { $0.compaction = value } } }
+        )
+    }
+
+    private var generateTitles: Binding<Bool> {
+        Binding(
+            get: { model.transcript.generateTitles },
+            set: { value in Task { await model.setTranscript { $0.generateTitles = value } } }
+        )
+    }
+
+    private func syncFields() {
+        sessionsText = String(model.transcript.maxSessions)
+        budgetText = String(model.transcript.maxInputTokens)
+        windowText = model.transcript.contextWindow.map(String.init) ?? ""
+        titleModelText = model.transcript.titleModel ?? ""
+    }
+
+    /// A number that does not parse is left as it was: the field then reads the stored
+    /// value back, which is the daemon's answer rather than a silent write of something
+    /// nobody typed.
+    private func commitFields() {
+        let maxSessions = Int(sessionsText.trimmingCharacters(in: .whitespacesAndNewlines))
+        let budget = Int(budgetText.trimmingCharacters(in: .whitespacesAndNewlines))
+        let window = trimmedOrNil(windowText)
+        let titleModel = trimmedOrNil(titleModelText)
+        Task {
+            await model.setTranscript { next in
+                if let maxSessions, maxSessions >= 1 { next.maxSessions = maxSessions }
+                if let budget, budget >= 1024 { next.maxInputTokens = budget }
+                if window == nil {
+                    next.contextWindow = nil
+                } else if let parsed = Int(window ?? ""), parsed >= 1024 {
+                    next.contextWindow = parsed
+                }
+                next.titleModel = titleModel
+            }
+            await MainActor.run { if field == nil { syncFields() } }
+        }
+    }
+}
+
 // MARK: - Shared sections
 
 private struct SetupJobSection: View {
@@ -954,6 +1666,19 @@ private struct SettingsErrorSection: View {
     }
 }
 
+/** A comma-separated field as the list it stands for: trimmed, with blanks dropped. */
+private func splitNames(_ text: String) -> [String] {
+    text.split(separator: ",")
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .filter { !$0.isEmpty }
+}
+
+/** A field that is allowed to be empty, where empty means "the daemon's own default". */
+private func trimmedOrNil(_ text: String) -> String? {
+    let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+}
+
 /**
  How a bare token reads as a control. The daemon sends the *values* it accepts —
  the set a client may offer — and the words are this surface's. A token this app
@@ -966,6 +1691,17 @@ enum SettingsWording {
         case "yolo": return "YOLO"
         case "name": return "Name only"
         default: return value.prefix(1).uppercased() + String(value.dropFirst())
+        }
+    }
+
+    static func classifierBackend(_ value: String) -> String {
+        switch value {
+        case "commandcode": return "Hosted"
+        case "openai": return "OpenAI"
+        case "openrouter": return "OpenRouter"
+        case "ollaya": return "Ollaya"
+        case "custom": return "Custom"
+        default: return of(value)
         }
     }
 

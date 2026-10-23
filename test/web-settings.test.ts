@@ -33,6 +33,7 @@ const { mcpFile } = await import('../src/core/config/paths.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { saveAuth, readConfig } = await import('../src/core/config/load.js')
 const { fileHistory } = await import('../src/core/history.js')
+const { CLASSIFIER_BACKENDS } = await import('../src/gateways/web/protocol.js')
 
 const CHAT = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 
@@ -227,6 +228,13 @@ describe('web Settings secret handling', () => {
     const overview = await settings.handle('overview') as { live: { model: string; effort: string } }
     expect(overview.live.model).toBe('test-model')
     expect(overview.live.effort).toBe('medium')
+  })
+
+  it('offers the classifier backends the daemon accepts', async () => {
+    writeConfig()
+    const settings = new WebSettings(build({}), home)
+    const overview = await settings.handle('overview') as { options: { classifierBackends: string[] } }
+    expect(overview.options.classifierBackends).toEqual([...CLASSIFIER_BACKENDS])
   })
 })
 

@@ -1428,6 +1428,49 @@ final class AppModel {
         }
     }
 
+    // MARK: - Settings values
+
+    /// One chat channel as the screen edits it: whether it runs, and who may talk to it.
+    struct GatewaySettings: Equatable {
+        var enabled = false
+        var allowlist: [String] = []
+    }
+
+    /// Where the browser chat listens. Read by `milo serve` when it starts.
+    struct WebSettings: Equatable {
+        var enabled = true
+        var host = "127.0.0.1"
+        var port = 7717
+    }
+
+    /// How the transcript is kept. The defaults are the schema's own.
+    struct SessionsSettings: Equatable {
+        var compactAt = 0.7
+        var contextWindow: Int?
+        var maxInputTokens = 12000
+        var keepTurns = 8
+        var compaction = true
+        var maxSessions = 50
+        var generateTitles = true
+        var titleModel: String?
+    }
+
+    /// The policy that applies to every tool that can cause an effect. The reviewer's
+    /// threshold belongs to `auto`; the lists outrank a config rule.
+    struct PermissionsSettings: Equatable {
+        var mode = "ask"
+        var allow: [String] = []
+        var deny: [String] = []
+        var jevThreshold = 0.35
+    }
+
+    /// The decision model a review is asked of. Applied on the next start.
+    struct ClassifierSettings: Equatable {
+        var backend = "commandcode"
+        var model: String?
+        var url: String?
+    }
+
     // MARK: - Settings
 
     private(set) var settingsLoading = false
@@ -1437,6 +1480,16 @@ final class AppModel {
     private(set) var toolDisplay = "full"
     private(set) var thinking = "expanded"
     private(set) var genui = true
+
+    // Keys, and the edges of the install
+    private(set) var auth: SettingsOverview.Auth?
+    private(set) var presets: [SettingsOverview.Preset] = []
+    private(set) var gateways: [String: GatewaySettings] = [:]
+    private(set) var web = WebSettings()
+    private(set) var transcript = SessionsSettings()
+    private(set) var permissions = PermissionsSettings()
+    private(set) var classifier = ClassifierSettings()
+    private(set) var classifierBackends: [String] = []
 
     // Memory
     private(set) var memoryRecallLimit: Int?
@@ -1494,6 +1547,52 @@ final class AppModel {
             thinking = overview.config?.display?.thinking ?? "expanded"
             genui = overview.config?.display?.genui ?? true
 
+            auth = overview.auth
+            presets = overview.presets ?? []
+
+            // Only the channels the screen offers, so a name the daemon does not carry
+            // reads as off rather than as a row that vanished.
+            let configured = overview.config?.gateways ?? [:]
+            gateways = ["telegram", "discord"].reduce(into: [:]) { out, name in
+                let entry = configured[name]
+                out[name] = GatewaySettings(enabled: entry?.enabled ?? false, allowlist: entry?.allowlist ?? [])
+            }
+
+            let web = overview.config?.web
+            self.web = WebSettings(
+                enabled: web?.enabled ?? true,
+                host: web?.host ?? "127.0.0.1",
+                port: web?.port ?? 7717
+            )
+
+            let sessions = overview.config?.sessions
+            self.transcript = SessionsSettings(
+                compactAt: sessions?.compactAt ?? 0.7,
+                contextWindow: sessions?.contextWindow,
+                maxInputTokens: sessions?.maxInputTokens ?? 12000,
+                keepTurns: sessions?.keepTurns ?? 8,
+                compaction: sessions?.compaction ?? true,
+                maxSessions: sessions?.maxSessions ?? 50,
+                generateTitles: sessions?.generateTitles ?? true,
+                titleModel: sessions?.titleModel
+            )
+
+            let policy = overview.config?.permissions
+            permissions = PermissionsSettings(
+                mode: overview.live?.permissionMode ?? policy?.mode ?? "ask",
+                allow: policy?.allow ?? [],
+                deny: policy?.deny ?? [],
+                jevThreshold: policy?.jevThreshold ?? 0.35
+            )
+
+            let classifier = overview.config?.classifier
+            self.classifier = ClassifierSettings(
+                backend: classifier?.backend ?? "commandcode",
+                model: classifier?.model,
+                url: classifier?.url
+            )
+            classifierBackends = overview.options?.classifierBackends ?? [self.classifier.backend]
+
             memoryRecallLimit = overview.config?.memory?.recallLimit
             memoryDerive = overview.config?.memory?.derive ?? true
             memoryEmbedding = overview.config?.memory?.embedding
@@ -1527,12 +1626,6 @@ final class AppModel {
         if await write({ try await MiloApi.setEffort($0, effort: value) }) { effort = value }
     }
 
-    func setPermissionMode(_ value: String) async {
-        guard await write({ try await MiloApi.saveConfig($0, ["permissions": ["mode": value]]) })
-        else { return }
-        permissionMode = value
-    }
-
     func setToolDisplay(_ value: String) async {
         guard await write({ try await MiloApi.saveConfig($0, ["display": ["tools": value]]) })
         else { return }
@@ -1549,6 +1642,109 @@ final class AppModel {
         guard await write({ try await MiloApi.saveConfig($0, ["display": ["genui": value]]) })
         else { return }
         genui = value
+    }
+
+    // MARK: - Keys and the edges of the install
+
+    /// Stores one key on the machine that runs Milo, then reads the overview back so the
+    /// mask on screen is the daemon's own rather than a copy this app made up.
+    func saveSecret(group: String, id: String, value: String) async -> Bool {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return false }
+        guard await write({ try await MiloApi.saveSecret($0, group: group, id: id, value: trimmed) })
+        else { return false }
+        await loadSettings()
+        return true
+    }
+
+    func removeSecret(group: String, id: String) async {
+        guard await write({ try await MiloApi.removeSecret($0, group: group, id: id) }) else { return }
+        await loadSettings()
+    }
+
+    @discardableResult
+    func setGateway(_ name: String, enabled: Bool, allowlist: [String]) async -> Bool {
+        let current = gateways[name] ?? GatewaySettings()
+        let next = GatewaySettings(enabled: enabled, allowlist: allowlist)
+        var section: [String: Any] = [:]
+        if next.enabled != current.enabled { section["enabled"] = next.enabled }
+        if next.allowlist != current.allowlist { section["allowlist"] = next.allowlist }
+        guard !section.isEmpty else { return true }
+        guard await write({ try await MiloApi.saveConfig($0, ["gateways": [name: section]]) }) else { return false }
+        gateways[name] = next
+        return true
+    }
+
+    func setWebEnabled(_ value: Bool) async {
+        guard value != web.enabled else { return }
+        guard await write({ try await MiloApi.saveConfig($0, ["web": ["enabled": value]]) }) else { return }
+        web.enabled = value
+    }
+
+    func setWebHost(_ value: String) async {
+        let host = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard host != web.host else { return }
+        guard await write({ try await MiloApi.saveConfig($0, ["web": ["host": host]]) }) else { return }
+        web.host = host
+    }
+
+    func setWebPort(_ value: Int) async {
+        guard value != web.port else { return }
+        guard await write({ try await MiloApi.saveConfig($0, ["web": ["port": value]]) }) else { return }
+        web.port = value
+    }
+
+    /// A change to how the transcript is kept. Only the fields that moved travel, so a
+    /// second control writing before this one has landed cannot overwrite it with a
+    /// stale copy of the section.
+    func setTranscript(_ change: (inout SessionsSettings) -> Void) async {
+        let current = transcript
+        var next = current
+        change(&next)
+        var section: [String: Any] = [:]
+        if next.compactAt != current.compactAt { section["compactAt"] = next.compactAt }
+        if next.contextWindow != current.contextWindow { section["contextWindow"] = next.contextWindow.map { $0 as Any } ?? NSNull() }
+        if next.maxInputTokens != current.maxInputTokens { section["maxInputTokens"] = next.maxInputTokens }
+        if next.keepTurns != current.keepTurns { section["keepTurns"] = next.keepTurns }
+        if next.compaction != current.compaction { section["compaction"] = next.compaction }
+        if next.maxSessions != current.maxSessions { section["maxSessions"] = next.maxSessions }
+        if next.generateTitles != current.generateTitles { section["generateTitles"] = next.generateTitles }
+        if next.titleModel != current.titleModel { section["titleModel"] = next.titleModel.map { $0 as Any } ?? NSNull() }
+        guard !section.isEmpty else { return }
+        guard await write({ try await MiloApi.saveConfig($0, ["sessions": section]) }) else { return }
+        transcript = next
+    }
+
+    /// The policy over every tool. The mode travels as its own field, and the mirror only
+    /// moves once the daemon has taken the change.
+    func setPermissions(_ change: (inout PermissionsSettings) -> Void) async {
+        let current = permissions
+        var next = current
+        change(&next)
+        var section: [String: Any] = [:]
+        if next.mode != current.mode { section["mode"] = next.mode }
+        if next.allow != current.allow { section["allow"] = next.allow }
+        if next.deny != current.deny { section["deny"] = next.deny }
+        if next.jevThreshold != current.jevThreshold { section["jevThreshold"] = next.jevThreshold }
+        guard !section.isEmpty else { return }
+        guard await write({ try await MiloApi.saveConfig($0, ["permissions": section]) }) else { return }
+        permissions = next
+        permissionMode = next.mode
+    }
+
+    /// The decision model a review is asked of. An empty field clears the key, so the
+    /// backend's own default applies again.
+    func setClassifier(_ change: (inout ClassifierSettings) -> Void) async {
+        let current = classifier
+        var next = current
+        change(&next)
+        var section: [String: Any] = [:]
+        if next.backend != current.backend { section["backend"] = next.backend }
+        if next.model != current.model { section["model"] = next.model.map { $0 as Any } ?? NSNull() }
+        if next.url != current.url { section["url"] = next.url.map { $0 as Any } ?? NSNull() }
+        guard !section.isEmpty else { return }
+        guard await write({ try await MiloApi.saveConfig($0, ["classifier": section]) }) else { return }
+        classifier = next
     }
 
     func setMemoryRecallLimit(_ value: Int?) async {
