@@ -2,7 +2,7 @@ import { stat } from 'node:fs/promises'
 import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
 import type { Tool } from './types.js'
-import { compileFilePattern, resolveToolPath, walk } from './walk.js'
+import { compileFilePattern, resolveScopedPath, walk } from './walk.js'
 
 const schema = z.object({
   pattern: z
@@ -27,7 +27,9 @@ export const globTool: Tool<GlobArgs> = {
   readOnly: true,
   concurrent: true,
   async execute(args, ctx) {
-    const root = resolveToolPath(ctx.cwd, args.path)
+    const scoped = resolveScopedPath(ctx.cwd, args.path, ctx.confineTo)
+    if (!scoped.ok) return { content: scoped.error, isError: true }
+    const root = scoped.path
     const label = args.path?.trim() || root
 
     let matcher: RegExp

@@ -1,6 +1,7 @@
 import type { Dirent, Stats } from 'node:fs'
 import { readdir, stat } from 'node:fs/promises'
 import { homedir } from 'node:os'
+import { realpathSync } from 'node:fs'
 import path from 'node:path'
 import { errorMessage } from '../../util/errors.js'
 
@@ -147,10 +148,32 @@ export function resolveToolPath(cwd: string, target: string | undefined): string
 /** Where a write may go, or why it may not. */
 export type WritePath = { ok: true; path: string } | { ok: false; error: string }
 
+/** A target, refused when a project session reaches outside its folder. */
+export type ScopedPath = { ok: true; path: string } | { ok: false; error: string }
+
+/** Resolve links before applying a project's boundary; a lexical `..` check alone misses symlinks. */
+export function resolveScopedPath(cwd: string, target: string | undefined, confineTo?: string): ScopedPath {
+  const resolved = resolveToolPath(cwd, target)
+  const actual = canonicalToolPath(cwd, target)
+  if (!confineTo) return { ok: true, path: actual }
+
+  const root = canonicalExisting(confineTo)
+  if (isInsideFolder(actual, root)) return { ok: true, path: actual }
+  return {
+    ok: false,
+    error: `"${target ?? resolved}" is outside the project's folder (${root}). Access outside it is not allowed.`,
+  }
+}
+
+/** Resolve a path and existing symlinks without applying a project boundary. */
+export function canonicalToolPath(cwd: string, target: string | undefined): string {
+  return canonicalOrNearest(resolveToolPath(cwd, target))
+}
+
 /**
  * The path a write would land on, refused when it leaves the folder the turn is
- * confined to. Reads are deliberately not confined: looking at a system file or a
- * neighbouring project is useful, and changing one is what needs the boundary.
+ * confined to. Resolving the existing path and its parent links first keeps a
+ * symlink from turning an in-folder name into an out-of-folder write.
  *
  * The check is on the resolved path, so `../` and an absolute path are held to
  * the same rule as a plain relative one.
@@ -160,12 +183,34 @@ export function resolveWritePath(
   target: string | undefined,
   confineTo?: string,
 ): WritePath {
-  const resolved = resolveToolPath(cwd, target)
-  if (!confineTo) return { ok: true, path: resolved }
-  if (isInsideFolder(resolved, confineTo)) return { ok: true, path: resolved }
-  return {
-    ok: false,
-    error: `"${target ?? resolved}" is outside the project's folder (${confineTo}). Writing outside it is not allowed.`,
+  const result = resolveScopedPath(cwd, target, confineTo)
+  if (!result.ok) {
+    return { ok: false, error: result.error.replace('Access outside it', 'Writing outside it') }
+  }
+  return result
+}
+
+/** Canonicalize missing write targets through their nearest existing ancestor. */
+function canonicalOrNearest(target: string): string {
+  let cursor = path.resolve(target)
+  const tail: string[] = []
+  while (true) {
+    try {
+      return path.resolve(realpathSync(cursor), ...tail.reverse())
+    } catch {
+      const parent = path.dirname(cursor)
+      if (parent === cursor) return path.resolve(target)
+      tail.push(path.basename(cursor))
+      cursor = parent
+    }
+  }
+}
+
+function canonicalExisting(target: string): string {
+  try {
+    return realpathSync(target)
+  } catch {
+    return path.resolve(target)
   }
 }
 

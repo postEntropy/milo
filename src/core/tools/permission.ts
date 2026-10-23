@@ -12,7 +12,7 @@ import { patchTargets } from './apply-patch.js'
 import { matchingRule, type RuleBook } from './rule-file.js'
 import { effectiveSegment, parseShell } from './shell-parse.js'
 import type { Tool } from './types.js'
-import { resolveToolPath } from './walk.js'
+import { canonicalToolPath } from './walk.js'
 
 export type PermissionDecision = 'allow' | 'ask' | 'deny'
 export type PermissionMode = 'ask' | 'auto' | 'yolo'
@@ -245,14 +245,14 @@ export function approvalKey(tool: string, args: unknown, cwd: string): string | 
 
   if (tool === 'write_file' || tool === 'edit_file') {
     if (typeof record.path !== 'string' || !record.path.trim()) return null
-    return `dir:${path.dirname(resolveToolPath(cwd, record.path))}`
+    return `dir:${path.dirname(canonicalToolPath(cwd, record.path))}`
   }
 
   if (tool === 'format') {
     // The formatter's subject exactly: a folder and a file in it are different
     // questions, and approving one should not approve the other.
     const subject = typeof record.path === 'string' && record.path.trim()
-      ? resolveToolPath(cwd, record.path)
+      ? canonicalToolPath(cwd, record.path)
       : cwd
     return `format:${subject}`
   }
@@ -260,7 +260,7 @@ export function approvalKey(tool: string, args: unknown, cwd: string): string | 
   if (tool === 'apply_patch') {
     if (typeof record.patch !== 'string') return null
     const dirs = [
-      ...new Set(patchTargets(record.patch).map((target) => path.dirname(resolveToolPath(cwd, target)))),
+      ...new Set(patchTargets(record.patch).map((target) => path.dirname(canonicalToolPath(cwd, target)))),
     ].sort()
     return dirs.length > 0 ? `dirs:${dirs.join(',')}` : null
   }

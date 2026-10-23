@@ -2,7 +2,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { patchTargets } from './apply-patch.js'
 import { effectiveSegment, parseShell } from './shell-parse.js'
-import { resolveToolPath } from './walk.js'
+import { canonicalToolPath } from './walk.js'
 
 export interface RuleHit {
   rule: string
@@ -134,15 +134,17 @@ export function extractCommandText(args: unknown): string | null {
 
 /**
  * Free text a call would type into whatever is in front of it — the screen, a
- * form field. Keyed on the shape of the arguments, like `extractCommandText`:
- * a call that types is a call that carries `text`, whichever tool it is. The
+ * form field. Keyed on the browser action shape rather than a generic `text` field:
+ * instructions and other tools also carry ordinary prose. The
  * same patterns the shell is held to apply, because `curl … | sh` typed into a
  * terminal window runs exactly as it would from the shell tool.
  */
 export function extractTypedText(args: unknown): string | null {
   if (args && typeof args === 'object') {
     const record = args as Record<string, unknown>
-    if (typeof record.text === 'string' && record.text.trim()) return record.text
+    if (record.action === 'type' && typeof record.text === 'string' && record.text.trim()) {
+      return record.text
+    }
   }
   return null
 }
@@ -200,14 +202,14 @@ export function scanWriteTarget(args: unknown, cwd: string): RuleHit | null {
   const patch = extractPatchText(args)
   if (patch) {
     for (const target of patchTargets(patch)) {
-      const hit = protectedPath(resolveToolPath(cwd, target))
+      const hit = protectedPath(canonicalToolPath(cwd, target))
       if (hit) return hit
     }
     return null
   }
   const target = extractWriteTarget(args)
   if (!target) return null
-  return protectedPath(resolveToolPath(cwd, target))
+  return protectedPath(canonicalToolPath(cwd, target))
 }
 
 /**
@@ -236,7 +238,7 @@ export function scanCommandTargets(command: string, cwd: string): RuleHit | null
 
 function scanTargets(command: string, cwd: string): RuleHit | null {
   for (const target of commandWriteTargets(command)) {
-    const hit = protectedPath(resolveToolPath(cwd, target))
+    const hit = protectedPath(canonicalToolPath(cwd, target))
     if (hit) return hit
   }
   return null

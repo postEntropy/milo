@@ -1,6 +1,6 @@
 import { statSync } from 'node:fs'
 import { z } from 'zod'
-import { displayPath, resolveToolPath } from './walk.js'
+import { displayPath, resolveScopedPath } from './walk.js'
 import type { Tool } from './types.js'
 
 const schema = z.object({
@@ -63,7 +63,9 @@ export const panelTool: Tool<PanelArgs> = {
         isError: true,
       }
     }
-    const target = resolveToolPath(ctx.cwd, args.path)
+    const scoped = resolveScopedPath(ctx.cwd, args.path, ctx.confineTo)
+    if (!scoped.ok) return { content: scoped.error, isError: true }
+    const target = scoped.path
     const stats = statSync(target, { throwIfNoEntry: false })
     if (!stats) {
       return { content: `No such file: ${displayPath(ctx.cwd, target)}`, isError: true }

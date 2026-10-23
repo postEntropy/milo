@@ -3,7 +3,7 @@ import path from 'node:path'
 import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
 import type { Tool } from './types.js'
-import { compileFilePattern, resolveToolPath, toPosix, walk } from './walk.js'
+import { compileFilePattern, resolveScopedPath, toPosix, walk } from './walk.js'
 
 const schema = z.object({
   pattern: z.string().describe('JavaScript regular expression, matched within a single line.'),
@@ -62,7 +62,9 @@ export const grepTool: Tool<GrepArgs> = {
       }
     }
 
-    const target = resolveToolPath(ctx.cwd, args.path)
+    const scoped = resolveScopedPath(ctx.cwd, args.path, ctx.confineTo)
+    if (!scoped.ok) return { content: scoped.error, isError: true }
+    const target = scoped.path
     const info = await stat(target).catch(() => null)
     if (!info) return { content: `No such file or directory: ${label}`, isError: true }
 

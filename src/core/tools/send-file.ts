@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
 import type { Tool } from './types.js'
-import { resolveToolPath } from './walk.js'
+import { resolveScopedPath } from './walk.js'
 
 const schema = z.object({
   path: z.string().describe('The file to send, relative to the working directory (or absolute).'),
@@ -22,8 +22,10 @@ export const sendFileTool: Tool<SendFileArgs> = {
         isError: true,
       }
     }
+    const scoped = resolveScopedPath(ctx.cwd, args.path, ctx.confineTo)
+    if (!scoped.ok) return { content: scoped.error, isError: true }
     try {
-      const file = await ctx.sendFile({ path: resolveToolPath(ctx.cwd, args.path), caption: args.caption })
+      const file = await ctx.sendFile({ path: scoped.path, caption: args.caption })
       return { content: `Sent ${file.name} to the chat.` }
     } catch (error) {
       return { content: `Could not send ${args.path}: ${errorMessage(error)}`, isError: true }

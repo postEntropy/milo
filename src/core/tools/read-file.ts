@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
 import type { Tool } from './types.js'
-import { displayPath, resolveToolPath } from './walk.js'
+import { displayPath, resolveScopedPath } from './walk.js'
 
 const schema = z.object({
   path: z.string().describe('File path, relative to the working directory (or absolute).'),
@@ -89,7 +89,9 @@ export const readFileTool: Tool<ReadFileArgs> = {
   readOnly: true,
   concurrent: true,
   async execute(args, ctx) {
-    const target = resolveToolPath(ctx.cwd, args.path)
+    const scoped = resolveScopedPath(ctx.cwd, args.path, ctx.confineTo)
+    if (!scoped.ok) return { content: scoped.error, isError: true }
+    const target = scoped.path
     const shown = displayPath(ctx.cwd, target)
 
     try {

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { homedir, tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { applyPatchTool } from '../src/core/tools/apply-patch.js'
@@ -91,26 +91,30 @@ describe('a project confines writes to its folder', () => {
     expect(existsSync(path.join(outside, 'bad.txt'))).toBe(false)
   })
 
-  it('still reads outside it', async () => {
+  it('refuses to read outside it', async () => {
     const { project, outside } = folders()
     writeFileSync(path.join(outside, 'readme.txt'), 'can read\n')
 
     const result = await readFileTool.execute({ path: path.join(outside, 'readme.txt') }, context(project))
 
-    expect(result.isError).toBeUndefined()
-    expect(result.content).toContain('can read')
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain("outside the project's folder")
   })
 })
 
 describe('the shell sandbox', () => {
-  it('keeps the machine read-only, the workspace writable and the network off', () => {
-    expect(sandboxArgs('ls', '/work/project/sub', '/work/project')).toEqual([
-      '--ro-bind', '/', '/',
-      '--bind', '/work/project', '/work/project',
-      '--dev', '/dev',
-      '--proc', '/proc',
-      '--unshare-net',
-      '--die-with-parent',
+  it('keeps the workspace writable while isolating host state and process access', () => {
+    const args = sandboxArgs('ls', '/work/project/sub', '/work/project')
+
+    expect(args).toContain('--ro-bind')
+    expect(args).toContain('--unshare-net')
+    expect(args).toContain('--unshare-pid')
+    expect(args).toContain('--tmpfs')
+    expect(args).toContain(path.dirname(homedir()))
+    expect(args).toContain('/var')
+    expect(args).toContain('--bind')
+    expect(args).toContain('/work/project')
+    expect(args.slice(-6)).toEqual([
       '--chdir', '/work/project/sub',
       '--', '/bin/sh', '-c', 'ls',
     ])

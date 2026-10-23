@@ -5,7 +5,7 @@ import { z } from 'zod'
 import { errorMessage } from '../../util/errors.js'
 import { humanSize } from '../../util/format.js'
 import type { Tool } from './types.js'
-import { DEFAULT_IGNORES, resolveToolPath } from './walk.js'
+import { DEFAULT_IGNORES, resolveScopedPath } from './walk.js'
 
 const schema = z.object({
   path: z
@@ -32,7 +32,9 @@ export const listDirTool: Tool<ListDirArgs> = {
   readOnly: true,
   concurrent: true,
   async execute(args, ctx) {
-    const target = resolveToolPath(ctx.cwd, args.path)
+    const scoped = resolveScopedPath(ctx.cwd, args.path, ctx.confineTo)
+    if (!scoped.ok) return { content: scoped.error, isError: true }
+    const target = scoped.path
     const label = args.path?.trim() || target
 
     let dirents: Dirent[]

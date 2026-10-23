@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { approvalKey, DefaultPermissionPolicy, summarizeToolCall, withApprovals, withGrants, withPlan } from '../src/core/tools/permission.js'
+import { approvalKey, barredByRules, DefaultPermissionPolicy, summarizeToolCall, withApprovals, withGrants, withPlan } from '../src/core/tools/permission.js'
 import type { DangerReviewer } from '../src/core/tools/permission.js'
 import type { RuleBook } from '../src/core/tools/rule-file.js'
 import type { Tool } from '../src/core/tools/types.js'
@@ -43,6 +43,16 @@ const throwingReviewer: DangerReviewer = {
     throw new Error('network down')
   },
 }
+
+describe('typed browser text rules', () => {
+  it('does not treat a standing rule as text typed into the browser', () => {
+    expect(barredByRules({ action: 'add', text: 'Never run reboot without asking' }, process.cwd())).toBe(false)
+  })
+
+  it('still blocks dangerous text typed into the browser', () => {
+    expect(barredByRules({ action: 'type', text: 'reboot' }, process.cwd())).toBe(true)
+  })
+})
 
 describe('DefaultPermissionPolicy — ask mode', () => {
   it('allows read-only tools and asks for the rest', async () => {
