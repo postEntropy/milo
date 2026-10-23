@@ -63,13 +63,38 @@ struct SelectableText: UIViewRepresentable {
         // ask for on one line, which is what the browser's own table cells do.
         let width = proposal.width ?? uiView.sizeThatFits(room).width
         guard width.isFinite, width > 0 else { return nil }
-        return CGSize(width: width, height: uiView.sizeThatFits(CGSize(width: width, height: room.height)).height)
+        // Laying these words out is the whole cost of this block, and one commit asks for
+        // it more than once. The answer is the one already paid for while the view still
+        // holds the words it was measured on, at the same width.
+        let coordinator = context.coordinator
+        if let measured = coordinator.measured,
+           abs(measured.width - width) < 0.5,
+           uiView.textStorage.isEqual(to: measured.text) {
+            return CGSize(width: width, height: measured.height)
+        }
+        let height = uiView.sizeThatFits(CGSize(width: width, height: room.height)).height
+        coordinator.measured = Measured(
+            text: NSAttributedString(attributedString: uiView.textStorage),
+            width: width,
+            height: height
+        )
+        return CGSize(width: width, height: height)
+    }
+
+    /// A height measured for one width, beside the words it was measured on: the text view
+    /// is what answers, and it answers for whatever it holds now.
+    struct Measured {
+        let text: NSAttributedString
+        let width: CGFloat
+        let height: CGFloat
     }
 
     func makeCoordinator() -> Coordinator { Coordinator(onQuote: onQuote) }
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var onQuote: (String) -> Void
+        /// The last height measured, and the words and width it was measured for.
+        var measured: Measured?
 
         init(onQuote: @escaping (String) -> Void) { self.onQuote = onQuote }
 

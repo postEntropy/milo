@@ -24,11 +24,35 @@ struct Prose: View {
     /// offer; where it is not, by `Text` — the branch the person's own bubble keeps.
     var onQuote: ((String) -> Void)? = nil
 
+    /// The parse kept between updates. `SwiftUI` runs this body again for every row of the
+    /// thread whenever a token lands, and reading the whole markdown again each time is
+    /// what made a long answer cost more the longer it got: the parse is the same text
+    /// until the text itself changes.
+    @State private var parsed = Parse()
+
     var body: some View {
+        let blocks = parsed.blocks(for: text, tone: color, parse: parse)
         VStack(alignment: .leading, spacing: MiloTheme.Space.four) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 draw(block)
             }
+        }
+    }
+
+    /// Holds the blocks read off one text, and reads again only when that text — or the
+    /// tone its links are painted in — is not the one it already read.
+    private final class Parse {
+        private var text: String?
+        private var tone: Color?
+        private var read: [Block] = []
+
+        func blocks(for text: String, tone: Color, parse: (String) -> [Block]) -> [Block] {
+            if self.text == text, self.tone == tone { return read }
+            let blocks = parse(text)
+            self.text = text
+            self.tone = tone
+            self.read = blocks
+            return blocks
         }
     }
 
@@ -237,7 +261,9 @@ struct Prose: View {
         var checked: Bool? = nil
     }
 
-    private var blocks: [Block] {
+    /// One text read as blocks: what the body walks. Kept out of the property it used to be
+    /// so the cache above can hand back what it already read.
+    private func parse(_ text: String) -> [Block] {
         let lines = text.components(separatedBy: "\n")
         var blocks: [Block] = []
         var paragraph: [String] = []
@@ -559,15 +585,18 @@ extension View {
 ///
 /// The head earns its height by saying the one thing the code cannot say about itself, and it
 /// is where the control lives: a control a finger aims at must not sit on the words it would
-/// copy. A fence opened without a tag gets no label — the language we would have to guess at is
-/// not what the model wrote. The browser draws no head yet, so the tag is the phone's own, and
-/// it draws no copy control either, because a pointer can drag a selection across the box where
-/// a finger has to drag it sideways.
+/// copy. A fence opened without a tag is plain text, and says so — the language is never
+/// guessed, since one we made up is not what the model wrote. The browser draws no head yet, so
+/// the tag is the phone's own, and it draws no copy control either, because a pointer can drag a
+/// selection across the box where a finger has to drag it sideways.
 struct CodeBlock: View {
     /// What the fence's tag named, as it named it — read for the colouring, and said in the head.
     let language: String?
     let code: String
     @State private var copied = false
+
+    /// What the head says the block is: the tag the fence wrote, or the fact that it wrote none.
+    private var name: String { language ?? "Plain text" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -606,11 +635,9 @@ struct CodeBlock: View {
     /// and a line there would be a border between two halves of one thing.
     private var head: some View {
         HStack(spacing: 0) {
-            if let language {
-                Text(language)
-                    .font(MiloTheme.Text.meta)
-                    .foregroundStyle(MiloTheme.muted)
-            }
+            Text(name)
+                .font(MiloTheme.Text.meta)
+                .foregroundStyle(MiloTheme.muted)
             Spacer(minLength: 0)
             copyControl
         }

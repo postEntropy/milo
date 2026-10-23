@@ -47,9 +47,16 @@ struct StreamingText: View {
     /// The words with each block's span marked, so the layout keeps a boundary where a block
     /// begins and the renderer can draw the block apart from what is already written.
     @State private var blocked: AttributedString?
+    /// A reply keeps arriving after the person leaves the screen — that is what the phone's
+    /// notice is for — but nothing is being looked at, so the clock that fades it in has no
+    /// one to fade for. Left running it is a redraw of the whole answer sixty times a second
+    /// in the background, which is where the app was when the watchdog took it.
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: arrivals.isEmpty)) { timeline in
+        TimelineView(
+            .animation(minimumInterval: 1.0 / 60.0, paused: arrivals.isEmpty || scenePhase != .active)
+        ) { timeline in
             Text(blocked ?? attributed)
                 .font(font)
                 .lineSpacing(MiloTheme.leading)
@@ -57,10 +64,8 @@ struct StreamingText: View {
                 .textRenderer(StreamingTextRenderer(arrivals: arrivals, now: timeline.date))
         }
         .onChange(of: attributed) { before, after in
-            let was = String(before.characters)
-            let is_ = String(after.characters)
             let now = Date()
-            let head = Self.shared(was, is_)
+            let head = Self.shared(before, after)
             arrivals = Self.arriving(arrivals, head: head, now: now)
             blocked = Self.marking(after, arrivals: arrivals)
         }
@@ -114,10 +119,12 @@ struct StreamingText: View {
     }
 
     /// How much of the words the update kept: the head the two texts share, counted in
-    /// characters, which is where the characters the stream introduced begin.
-    private static func shared(_ before: String, _ after: String) -> Int {
+    /// characters, which is where the characters the stream introduced begin. Read off the
+    /// attributed text itself — turning both into strings first, as this did, spent two
+    /// copies of the whole answer on every token just to compare it.
+    private static func shared(_ before: AttributedString, _ after: AttributedString) -> Int {
         var shared = 0
-        for (was, is_) in zip(before, after) {
+        for (was, is_) in zip(before.characters, after.characters) {
             if was != is_ { break }
             shared += 1
         }
