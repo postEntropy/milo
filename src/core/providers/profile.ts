@@ -94,6 +94,12 @@ const CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000
 interface CacheEntry {
   profile: ModelProfile
   at: number
+  /**
+   * The most this route said it accepts as output, learned from a refusal. Kept
+   * beside the catalog's answer rather than written into it: a stale cache is read
+   * from the catalogs again, and the server's own word has to outlive that.
+   */
+  learnedMaxOutput?: number
 }
 
 type Cache = Record<string, CacheEntry>
@@ -149,7 +155,7 @@ export async function lookupModelProfile(
     // The person's own word is applied on top of every read rather than baked
     // into the cache: editing `config.models` must land on the next turn, not
     // after the cached answer goes stale a week later.
-    return applyOverride(cached.profile, options.override)
+    return applyOverride(learnedCeiling(cached.profile, cached.learnedMaxOutput), options.override)
   }
 
   const [provider, catalog] = await Promise.all([
@@ -162,9 +168,45 @@ export async function lookupModelProfile(
   // What the catalogs said is what is cached; the override is layered on after.
   const profile = mergeModelProfile(model, { provider: info, openRouter: entry })
 
-  cache[model] = { profile, at: now() }
+  const learned = cached?.learnedMaxOutput
+  cache[model] = { profile, at: now(), ...(learned !== undefined ? { learnedMaxOutput: learned } : {}) }
   await writeCache(file, cache)
-  return applyOverride(profile, options.override)
+  return applyOverride(learnedCeiling(profile, learned), options.override)
+}
+
+/**
+ * Keeps a ceiling a route named in a refusal, so the run after it asks with that
+ * number instead of spending a request to learn the same thing again. Nothing is
+ * written when the route repeats a limit already kept.
+ */
+export async function rememberOutputCap(
+  model: string,
+  cap: number,
+  options: { file?: string } = {},
+): Promise<void> {
+  const file = options.file ?? modelProfileFile()
+  const cache = readCache(file)
+  const entry = cache[model]
+  if (entry?.learnedMaxOutput === cap) return
+  cache[model] = {
+    profile: entry?.profile ?? { id: model },
+    // A model nothing has been read for stays stale, so the catalogs are still
+    // asked; only the learned ceiling is added to their answer.
+    at: entry?.at ?? 0,
+    learnedMaxOutput: cap,
+  }
+  await writeCache(file, cache)
+}
+
+/**
+ * The catalog's ceiling and the route's own, whichever is lower. A refusal states
+ * a maximum the route accepts, not a suggestion, so it can lower the catalog's
+ * number but never raise it.
+ */
+function learnedCeiling(profile: ModelProfile, learned?: number): ModelProfile {
+  if (learned === undefined) return profile
+  const maxOutput = profile.maxOutput === undefined ? learned : Math.min(profile.maxOutput, learned)
+  return { ...profile, maxOutput }
 }
 
 /** The person's own facts over whatever the catalogs answered. */

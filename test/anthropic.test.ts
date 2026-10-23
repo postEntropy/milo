@@ -249,10 +249,19 @@ describe('AnthropicProvider', () => {
       }),
     )
 
-    const provider = new AnthropicProvider({ id: 'test', baseURL: 'https://a.test/v1' })
+    const learned: number[] = []
+    const provider = new AnthropicProvider({
+      id: 'test',
+      baseURL: 'https://a.test/v1',
+      onOutputCap: (cap) => {
+        learned.push(cap)
+      },
+    })
     await collect(provider)
     expect(sent[0]?.max_tokens).toBe(4096)
     expect(sent[1]?.max_tokens).toBe(2048)
+    // Whoever built the wire is told, so the limit can outlive this process.
+    expect(learned).toEqual([2048])
 
     await collect(provider)
     expect(sent[2]?.max_tokens).toBe(2048)

@@ -20,7 +20,7 @@ import type { Provider } from './providers/types.js'
 import { placeProject } from './projects.js'
 import { readOwnInstructions, readProjectInstructions } from './agent/instructions.js'
 import { fileTraces, TracedProvider, type TraceWriter } from './traces.js'
-import { lookupModelProfile } from './providers/profile.js'
+import { lookupModelProfile, rememberOutputCap } from './providers/profile.js'
 import { listModels } from './providers/models.js'
 import { AgentRuntime } from './runtime.js'
 import { FileRecapStore, FileSessionStore, pruneSessions } from './sessions/index.js'
@@ -187,12 +187,17 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
       })
   }
 
+  // A ceiling a route named in a refusal is written where the profile lookup reads
+  // it, so the run after this one asks with that number instead of learning it again.
+  const learnOutputCap = (model: string) => (cap: number): Promise<void> =>
+    rememberOutputCap(model, cap)
+
   runtime = new AgentRuntime({
-    provider: traced(createProvider(loaded.provider, loaded.model)),
+    provider: traced(createProvider(loaded.provider, loaded.model, { onOutputCap: learnOutputCap(loaded.model) })),
     // One entry, and the model it is on: `auto` picks its wire from the model
     // id, so a model switched later resolves a provider of its own instead of
     // keeping the wire of the one it replaced.
-    providerFor: (model) => traced(createProvider(activeProvider, model)),
+    providerFor: (model) => traced(createProvider(activeProvider, model, { onOutputCap: learnOutputCap(model) })),
     providerSwitch: {
       use: (id) => {
         const next = resolveActive(id)

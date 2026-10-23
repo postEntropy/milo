@@ -21,6 +21,8 @@ export interface OpenAIProviderOptions {
   baseURL: string
   apiKey?: string
   headers?: Record<string, string>
+  /** Told the ceiling a refusal named, so the run after it need not learn it again. */
+  onOutputCap?: (tokens: number) => void | Promise<void>
 }
 
 interface PendingToolCall {
@@ -53,12 +55,14 @@ export class OpenAIProvider implements Provider {
    * that holds for every request after the one that taught it.
    */
   private maxTokensCap?: number
+  private readonly onOutputCap?: (tokens: number) => void | Promise<void>
 
   constructor(options: OpenAIProviderOptions) {
     this.id = options.id
     this.baseURL = options.baseURL.replace(/\/+$/, '')
     this.apiKey = options.apiKey
     this.headers = options.headers ?? {}
+    this.onOutputCap = options.onOutputCap
   }
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
@@ -102,6 +106,7 @@ export class OpenAIProvider implements Provider {
       const cap = response.status === 400 ? outputTokenCap(failure.detail) : undefined
       if (cap === undefined) throw new Error(failure.message)
       this.maxTokensCap = cap
+      await this.onOutputCap?.(cap)
       logWarn(
         `provider ${this.id} refused max_tokens=${String(body.max_tokens)} and accepts at most ${cap}; asking again with that`,
       )

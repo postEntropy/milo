@@ -6,6 +6,7 @@ import {
   catalogEntry,
   lookupModelProfile,
   mergeModelProfile,
+  rememberOutputCap,
 } from '../src/core/providers/profile.js'
 
 /** Shaped like the OpenRouter catalog: one entry per model, window included. */
@@ -155,5 +156,46 @@ describe('lookupModelProfile', () => {
     })
 
     expect(profile).toMatchObject({ context: 4096, maxOutput: 64, reasoning: false })
+  })
+})
+
+describe('rememberOutputCap', () => {
+  /** The provider's own catalog declaring a ceiling the route refuses — the shape seen by hand. */
+  const lying = {
+    data: [{ id: 'deepseek/deepseek-v4.1-flash', context_length: 1048576, max_completion_tokens: 943_718 }],
+  }
+  const model = 'deepseek/deepseek-v4.1-flash'
+  const day = 24 * 60 * 60 * 1000
+
+  it('keeps the ceiling a route named, across a catalog read that still says otherwise', async () => {
+    const file = cacheFile()
+    const fetchCatalog = async () => lying
+
+    expect((await lookupModelProfile(model, { file, fetchCatalog, now: () => 0 })).maxOutput).toBe(943_718)
+    await rememberOutputCap(model, 393_216, { file })
+
+    // A week later the catalogs are asked again, and claim the larger number again.
+    const profile = await lookupModelProfile(model, { file, fetchCatalog, now: () => 8 * day })
+    expect(profile.maxOutput).toBe(393_216)
+  })
+
+  it('never raises a ceiling a catalog states lower', async () => {
+    const file = cacheFile()
+    await rememberOutputCap(model, 393_216, { file })
+
+    // This catalog says 8192 for the same model: the smaller number is the real one.
+    expect((await lookupModelProfile(model, { file, fetchCatalog: async () => catalog })).maxOutput).toBe(8192)
+  })
+
+  it("still lets the person's own ceiling win", async () => {
+    const file = cacheFile()
+    await rememberOutputCap(model, 393_216, { file })
+
+    const profile = await lookupModelProfile(model, {
+      file,
+      fetchCatalog: async () => catalog,
+      override: { maxOutput: 64 },
+    })
+    expect(profile.maxOutput).toBe(64)
   })
 })

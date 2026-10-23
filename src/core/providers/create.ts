@@ -12,12 +12,25 @@ export interface ProviderInit {
   headers?: Record<string, string>
 }
 
+/**
+ * What a wire reports to whoever built it. A provider is made for one model and
+ * knows nothing about where the install keeps what it learns.
+ */
+export interface ProviderHooks {
+  /**
+   * The most this route said it accepts as output, learned from a refusal. Awaited
+   * before the request is asked again, so the limit is on disk even if this is a
+   * one-shot run whose process ends with the turn.
+   */
+  onOutputCap?: (tokens: number) => void | Promise<void>
+}
+
 export function resolveWire(wire: Wire | undefined, model: string): 'openai' | 'anthropic' {
   if (wire === 'openai' || wire === 'anthropic') return wire
   return /^claude/i.test(model) ? 'anthropic' : 'openai'
 }
 
-export function createProvider(init: ProviderInit, model: string): Provider {
+export function createProvider(init: ProviderInit, model: string, hooks?: ProviderHooks): Provider {
   const apiKey = init.apiKey === false ? undefined : init.apiKey
   const wire = resolveWire(init.wire, model)
 
@@ -27,6 +40,7 @@ export function createProvider(init: ProviderInit, model: string): Provider {
       baseURL: init.baseURL,
       apiKey,
       headers: init.headers,
+      onOutputCap: hooks?.onOutputCap,
     })
   }
 
@@ -35,5 +49,6 @@ export function createProvider(init: ProviderInit, model: string): Provider {
     baseURL: init.baseURL,
     apiKey,
     headers: init.headers,
+    onOutputCap: hooks?.onOutputCap,
   })
 }

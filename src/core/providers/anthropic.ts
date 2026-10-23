@@ -21,6 +21,8 @@ export interface AnthropicProviderOptions {
   baseURL: string
   apiKey?: string
   headers?: Record<string, string>
+  /** Told the ceiling a refusal named, so the run after it need not learn it again. */
+  onOutputCap?: (tokens: number) => void | Promise<void>
 }
 
 interface Block {
@@ -64,12 +66,14 @@ export class AnthropicProvider implements Provider {
   private readonly headers: Record<string, string>
   /** The most this route said it accepts as `max_tokens`, learned from a refusal. */
   private maxTokensCap?: number
+  private readonly onOutputCap?: (tokens: number) => void | Promise<void>
 
   constructor(options: AnthropicProviderOptions) {
     this.id = options.id
     this.baseURL = options.baseURL.replace(/\/+$/, '')
     this.apiKey = options.apiKey
     this.headers = options.headers ?? {}
+    this.onOutputCap = options.onOutputCap
   }
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
@@ -146,6 +150,7 @@ export class AnthropicProvider implements Provider {
       const cap = response.status === 400 ? outputTokenCap(failure.detail) : undefined
       if (cap === undefined) throw new Error(failure.message)
       this.maxTokensCap = cap
+      await this.onOutputCap?.(cap)
       logWarn(
         `provider ${this.id} refused max_tokens and accepts at most ${cap}; asking again with that`,
       )

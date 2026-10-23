@@ -221,7 +221,14 @@ describe('OpenAIProvider', () => {
       }),
     )
 
-    const provider = new OpenAIProvider({ id: 'test', baseURL: 'https://example.test/v1' })
+    const learned: number[] = []
+    const provider = new OpenAIProvider({
+      id: 'test',
+      baseURL: 'https://example.test/v1',
+      onOutputCap: (cap) => {
+        learned.push(cap)
+      },
+    })
     const events = await collect(provider, 943_718)
     const text = events
       .filter((event): event is { type: 'text'; delta: string } => event.type === 'text')
@@ -231,6 +238,8 @@ describe('OpenAIProvider', () => {
     expect(text).toBe('ok')
     expect(sent[0]?.max_tokens).toBe(943_718)
     expect(sent[1]?.max_tokens).toBe(393_216)
+    // Whoever built the wire is told, so the limit can outlive this process.
+    expect(learned).toEqual([393_216])
 
     // The turn after it is not refused first: the client starts at the learned limit.
     await collect(provider, 943_718)
