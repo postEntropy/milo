@@ -6,7 +6,6 @@ import {
   catalogEntry,
   lookupModelProfile,
   mergeModelProfile,
-  windowFrom,
 } from '../src/core/providers/profile.js'
 
 /** Shaped like the OpenRouter catalog: one entry per model, window included. */
@@ -34,13 +33,13 @@ describe('catalogEntry', () => {
   it('accepts the id without its provider prefix', () => {
     // The same model is spelled with and without the vendor, depending on who
     // is asking.
-    expect(windowFrom(catalog, 'deepseek-v4.1-flash')).toBe(1048576)
-    expect(windowFrom(catalog, 'claude-y')).toBe(200000)
+    expect(catalogEntry(catalog, 'deepseek-v4.1-flash')?.context).toBe(1048576)
+    expect(catalogEntry(catalog, 'claude-y')?.context).toBe(200000)
   })
 
   it('reads the field each catalog spells its own way', () => {
-    expect(windowFrom(catalog, 'openai/gpt-x')).toBe(128000)
-    expect(windowFrom(catalog, 'anthropic/claude-y')).toBe(200000)
+    expect(catalogEntry(catalog, 'openai/gpt-x')?.context).toBe(128000)
+    expect(catalogEntry(catalog, 'anthropic/claude-y')?.context).toBe(200000)
   })
 
   it('reads the output ceiling, the inputs and whether it reasons', () => {
@@ -50,10 +49,10 @@ describe('catalogEntry', () => {
   })
 
   it('returns nothing when there is no entry for it', () => {
-    expect(windowFrom(catalog, 'no-window-model')).toBeNull()
-    expect(windowFrom(catalog, 'nope')).toBeNull()
-    expect(windowFrom({}, 'anything')).toBeNull()
-    expect(windowFrom(null, 'anything')).toBeNull()
+    expect(catalogEntry(catalog, 'no-window-model')?.context).toBeUndefined()
+    expect(catalogEntry(catalog, 'nope')).toBeUndefined()
+    expect(catalogEntry({}, 'anything')).toBeUndefined()
+    expect(catalogEntry(null, 'anything')).toBeUndefined()
   })
 })
 

@@ -8,7 +8,6 @@ import { ensurePrivateDir, PRIVATE_FILE_MODE } from '../util/fs.js'
 import { loadConfig, readAuth, readConfig } from './config/load.js'
 import { saveIncomingImage } from './images.js'
 import type { AudioPart, ImagePart } from './providers/types.js'
-import { lookupAudioSupport } from './providers/audio.js'
 import { lookupModelProfile } from './providers/profile.js'
 import { listModels } from './providers/models.js'
 
@@ -39,6 +38,20 @@ export async function prepareIncoming(files: IncomingFile[], options: PrepareInc
   const prepared: PreparedMedia = { images: [], audio: [], text: [] }
   const loaded = loadConfig()
   const config = loaded?.config ?? readConfig()
+  const profileOf = (model: string | undefined) =>
+    loaded && model
+      ? lookupModelProfile(model, {
+          override: config?.models?.[model],
+          fetchProvider: () =>
+            listModels({
+              baseURL: loaded.provider.baseURL,
+              apiKey: loaded.provider.apiKey,
+              wire: loaded.provider.wire,
+              headers: loaded.provider.headers,
+              signal: AbortSignal.timeout(4_000),
+            }),
+        })
+      : undefined
   for (const file of files) {
     const safeName = path.basename(file.name).replace(/[\r\n]/g, '_') || 'attachment'
     const ext = path.extname(safeName).slice(0, 12)
@@ -52,19 +65,7 @@ export async function prepareIncoming(files: IncomingFile[], options: PrepareInc
       // second way here is how the answer on disk and the answer in this check
       // drift apart, and it once meant refusing a picture for a model Milo had
       // already recorded as reading them.
-      const visionSupport = loaded && visionModel
-        ? (await lookupModelProfile(visionModel, {
-            override: config?.models?.[visionModel],
-            fetchProvider: () =>
-              listModels({
-                baseURL: loaded.provider.baseURL,
-                apiKey: loaded.provider.apiKey,
-                wire: loaded.provider.wire,
-                headers: loaded.provider.headers,
-                signal: AbortSignal.timeout(4_000),
-              }),
-          })).vision
-        : undefined
+      const visionSupport = (await profileOf(visionModel))?.vision
       const explicitlySelected = Boolean(config?.media?.vision)
       if (visionSupport === false || (visionSupport === undefined && !explicitlySelected)) {
         const reason = visionSupport === false
@@ -124,9 +125,10 @@ export async function prepareIncoming(files: IncomingFile[], options: PrepareInc
       continue
     }
     if (file.mimeType.startsWith('audio/')) {
-      const audioSupport = loaded && options.model && loaded.provider.wire !== 'anthropic'
-        ? await lookupAudioSupport(loaded.provider, options.model)
-        : undefined
+      const audioSupport =
+        loaded && loaded.provider.wire !== 'anthropic'
+          ? (await profileOf(options.model ?? config?.model))?.audio
+          : undefined
       if (audioSupport === true) {
         const mimeType = file.mimeType === 'audio/mpeg' || file.mimeType === 'audio/wav' || file.mimeType === 'audio/x-wav'
           ? file.mimeType

@@ -240,11 +240,6 @@ export function catalogEntry(catalog: unknown, model: string): CatalogEntry | un
   return undefined
 }
 
-/** The window alone, kept for the callers that only ask how much a model holds. */
-export function windowFrom(catalog: unknown, model: string): number | null {
-  return catalogEntry(catalog, model)?.context ?? null
-}
-
 function catalogEntries(catalog: unknown): { id: string; [key: string]: unknown }[] {
   const raw = Array.isArray(catalog)
     ? catalog
