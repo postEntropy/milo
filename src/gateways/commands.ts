@@ -650,6 +650,9 @@ export async function handleCommand(
         return { handled: true, reply: 'Memory is not available on this surface.' }
       }
       const asked = argument.trim()
+      if (asked && !/^forget\b/i.test(asked)) {
+        return { handled: true, reply: 'Usage: /memory [forget <id>]. Run /memory to list notes.' }
+      }
       if (/^forget\b/i.test(asked)) {
         const id = asked.replace(/^forget\b/i, '').trim()
         if (!id) {

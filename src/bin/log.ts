@@ -103,7 +103,7 @@ function status(out: LogIo['out']): number {
 
 /** How many events of each kind, in a fixed order so the report reads the same every time. */
 function tally(events: TraceEvent[]): [string, number][] {
-  const order = ['turn', 'model.request', 'tool.call', 'classifier.request']
+  const order = ['turn', 'model.request', 'tool.call', 'classifier.request', 'verification']
   const counts = new Map<string, number>()
   for (const event of events) counts.set(event.event, (counts.get(event.event) ?? 0) + 1)
   return order

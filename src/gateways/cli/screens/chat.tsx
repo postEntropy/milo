@@ -19,6 +19,7 @@ import type { ImagePart } from '../../../core/providers/types.js'
 import { describeRebase, formatSeconds, type SessionStats } from '../../../core/sessions/index.js'
 import { formatWhen } from '../../../core/time.js'
 import { formatSkillList } from '../../../core/skills/index.js'
+import { projectNames } from '../../../core/projects.js'
 import type { TodoItem } from '../../../core/todos.js'
 import {
   PERMISSION_LABELS,
@@ -445,7 +446,9 @@ export function ChatScreen({
         break
       }
       case 'sessions': {
-        const outcome = buildSessionsList(await runtime.listSessions(), argument)
+        const outcome = buildSessionsList(await runtime.listSessions(), argument, undefined, {
+          projectNames: projectNames(),
+        })
         push({ kind: 'info', text: outcome.ok ? outcome.result.reply : outcome.error })
         break
       }
@@ -455,6 +458,10 @@ export function ChatScreen({
       case 'memory': {
         const session = await runtime.getSession(scope)
         const asked = argument.trim()
+        if (asked && !/^forget\b/i.test(asked)) {
+          push({ kind: 'info', text: 'Usage: /memory [forget <id>]. Run /memory to list notes.' })
+          break
+        }
         if (/^forget\b/i.test(asked)) {
           const id = asked.replace(/^forget\b/i, '').trim()
           if (!id) {
