@@ -118,6 +118,9 @@ export class JobManager {
       child = spawn('/bin/sh', ['-c', input.command], {
         cwd: input.cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
+        // A job is a command, not just its shell. Give it a process group so
+        // stopping the job also stops the tools it started (npm, servers, etc.).
+        detached: true,
       })
     } catch (error) {
       this.jobs.delete(id)
@@ -181,7 +184,7 @@ export class JobManager {
    */
   kill(id: string, sessionId?: string): boolean {
     const job = this.jobs.get(id)
-    if (!job || job.state !== 'running') return false
+    if (job?.state !== 'running') return false
     if (sessionId !== undefined && job.sessionId !== sessionId) return false
     job.killing = true
     this.terminate(job)
@@ -267,15 +270,28 @@ export class JobManager {
 
   private terminate(job: JobRecord): void {
     const child = job.child
-    if (!child || child.exitCode !== null) {
+    if (!child) {
       this.settle(job, 'killed', undefined)
       return
     }
-    child.kill('SIGTERM')
+    this.signalGroup(child, 'SIGTERM')
     const force = setTimeout(() => {
-      if (job.state === 'running') child.kill('SIGKILL')
+      if (job.killing) this.signalGroup(child, 'SIGKILL')
     }, 5_000)
     force.unref?.()
+  }
+
+  private signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+    if (child.pid === undefined) return
+    try {
+      // `detached` makes the child's pid its process group id on the supported
+      // Unix hosts. A negative pid signals the whole group, not only /bin/sh.
+      process.kill(-child.pid, signal)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') {
+        logWarn(`could not send ${signal} to job process group ${child.pid}: ${errorMessage(error)}`)
+      }
+    }
   }
 
   private notify(job: JobRecord): void {
