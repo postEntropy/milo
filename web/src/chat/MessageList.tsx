@@ -348,32 +348,28 @@ export function MessageList({
 
   let currentTurn = 0
   const messageTurns = new Map<string, number>()
+  const visibleMessages: ChatMessage[] = []
+  let lastAssistant: ChatMessage | undefined
+  let lastUser: ChatMessage | undefined
+  let runningId: string | undefined
   for (const m of messages) {
     if (m.role === 'user') currentTurn++
     messageTurns.set(m.id, currentTurn)
+    if (hasContent(m)) visibleMessages.push(m)
+    if (m.role === 'assistant' && proseOf(m) && m.waitingSince === undefined) lastAssistant = m
+    if (m.role === 'user') lastUser = m
+    if (busy && m.role === 'assistant') runningId = m.id
   }
 
   // What a regenerate would redo: the last answer, with the words that asked for
   // it. Offered only when nothing is running — a turn in flight is not redone.
-  let lastAssistant: ChatMessage | undefined
-  let lastUser: ChatMessage | undefined
-  for (const message of messages) {
-    if (message.role === 'assistant' && proseOf(message) && message.waitingSince === undefined) lastAssistant = message
-    if (message.role === 'user') lastUser = message
-  }
   const regen = !busy && lastAssistant && lastUser
     ? { id: lastAssistant.id, prompt: proseOf(lastUser), upToTurn: (messageTurns.get(lastUser.id) ?? 1) - 1 }
     : undefined
 
-  // The turn in flight is the last thing said, so while one runs its own row is the one
-  // that has not finished: the controls that act on a finished answer — copy, fork,
-  // regenerate — wait for it instead of standing under words still being written.
-  let runningId: string | undefined
-  if (busy) for (const message of messages) if (message.role === 'assistant') runningId = message.id
-
   return <>
     <div className={`thread-inner${messages[0]?.loaded ? ' is-opened' : ''}`} aria-live="polite" aria-relevant="additions text">
-      {messages.filter((m) => hasContent(m)).map((message) => (
+      {visibleMessages.map((message) => (
         <MessageRow
           key={message.id}
           message={message}
