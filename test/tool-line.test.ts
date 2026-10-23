@@ -31,7 +31,16 @@ describe('toolLine', () => {
       '🗃 sessions remove merry-badger-52',
     )
     expect(toolLine('routine', { action: 'remove', id: 'calm-otter-7' })).toBe(
-      '🔧 routine remove calm-otter-7',
+      '⏱️ routine remove calm-otter-7',
+    )
+  })
+
+  it('shows the rule and list name beside their actions', () => {
+    expect(toolLine('instructions', { action: 'add', text: 'Never run reboot without asking.' })).toBe(
+      '📜 instructions add Never run reboot without asking.',
+    )
+    expect(toolLine('task_lists', { action: 'create', name: 'Release plan' })).toBe(
+      '☑️ task_lists create Release plan',
     )
   })
 

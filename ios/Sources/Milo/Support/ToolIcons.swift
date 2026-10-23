@@ -29,6 +29,15 @@ enum ToolIcons {
         "sessions": "archivebox",
         "web_search": "globe",
         "read_skill": "note.text",
+        "view_image": "eye",
+        "instructions": "note.text",
+        "memories": "cylinder",
+        "routine": "repeat",
+        "task_lists": "checklist",
+        "job_status": "clock",
+        "job_kill": "stop.fill",
+        "git": "point.3.connected.trianglepath.dotted",
+        "git_commit": "point.3.connected.trianglepath.dotted",
         "task": "sparkles",
         // The browser's own mark for this is a bare prompt; SF's `terminal` is a wide
         // window, which reads as a different tool at the size the row draws. This is the

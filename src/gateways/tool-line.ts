@@ -50,6 +50,13 @@ const TOOLS: Record<string, { icon: string; brand?: ToolBrand }> = {
   search_history: { icon: '🕘' },
   web_search: { icon: '🌐' },
   read_skill: { icon: '📘' },
+  view_image: { icon: '🖼️' },
+  instructions: { icon: '📜' },
+  memories: { icon: '🧠' },
+  routine: { icon: '⏱️' },
+  task_lists: { icon: '☑️' },
+  job_status: { icon: '📊' },
+  job_kill: { icon: '🛑' },
   task: { icon: '🤖' },
   todo: { icon: '🗒' },
   shell_command: { icon: '⚡' },
@@ -308,7 +315,7 @@ export function toolDetail(args: unknown): string {
   // alone would otherwise answer for it and lose the verb.
   if (typeof record.action === 'string' && record.action.trim()) {
     const action = record.action.trim()
-    const target = [record.path, record.id].find(
+    const target = [record.path, record.id, record.name, record.text].find(
       (value) => typeof value === 'string' && value.trim() !== '',
     )
     return `${action}${typeof target === 'string' ? ` ${target.trim()}` : ''}`
