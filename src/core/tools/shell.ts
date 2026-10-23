@@ -1,5 +1,7 @@
 import { exec, execFile } from 'node:child_process'
+import { homedir } from 'node:os'
 import path from 'node:path'
+import { existsSync } from 'node:fs'
 import { z } from 'zod'
 import type { Tool, ToolResult } from './types.js'
 import { clipMiddle } from './output.js'
@@ -46,16 +48,105 @@ const ROUTINE_GATEWAY = 'routine'
  * running a command — the arguments are the policy.
  */
 export function sandboxArgs(command: string, cwd: string, workspace: string): string[] {
-  return [
+  const home = path.resolve(homedir())
+  // Hide sibling user folders too; in a normal Linux layout that is /home.
+  // For /root, masking the parent would cover the whole filesystem, so mask only it.
+  const homeRoot = path.dirname(home) === path.parse(home).root ? home : path.dirname(home)
+  const runtime = path.dirname(process.execPath)
+  const hostStateRoots = ['/var', '/run'].filter((directory) => existsSync(directory))
+  const maskedRoots = [homeRoot, ...hostStateRoots].filter(
+    (directory) => path.resolve(directory) !== path.resolve(workspace) && path.resolve(directory) !== path.resolve(runtime),
+  )
+  const projectHiddenRoot = maskedRoots.find((root) => strictlyInside(workspace, root))
+  const runtimeHiddenRoot = maskedRoots.find((root) => strictlyInside(runtime, root))
+  const projectIsHidden = projectHiddenRoot !== undefined
+  const runtimeIsHidden = runtimeHiddenRoot !== undefined && !inside(runtime, workspace)
+  const projectMount = '/tmp/milo-sandbox/project'
+  const runtimeMount = '/tmp/milo-sandbox/runtime'
+  const args = [
     '--ro-bind', '/', '/',
-    '--bind', workspace, workspace,
+    '--tmpfs', '/tmp',
+    '--chmod', '1777', '/tmp',
+    '--dir', '/tmp/milo-sandbox',
+  ]
+  if (projectIsHidden) {
+    args.push('--dir', projectMount, '--bind', workspace, projectMount)
+  } else {
+    args.push('--bind', workspace, workspace)
+  }
+  if (runtimeIsHidden) {
+    args.push('--dir', runtimeMount, '--ro-bind', runtime, runtimeMount)
+  }
+  // These contain host state or service sockets, not build inputs. A project
+  // command gets private scratch space instead of the machine's databases.
+  for (const directory of maskedRoots) args.push('--tmpfs', directory)
+  if (maskedRoots.some((directory) => path.resolve(directory) === '/var')) {
+    args.push('--dir', '/var/tmp', '--chmod', '1777', '/var/tmp')
+  }
+  // Keep ordinary runtime configuration available under /etc, but hide common
+  // credential and private-key stores even when they are readable by this user.
+  for (const directory of [
+    '/etc/ssh',
+    '/etc/NetworkManager/system-connections',
+    '/etc/docker',
+    '/etc/kubernetes',
+    '/etc/wireguard',
+    '/etc/letsencrypt',
+    '/etc/ssl/private',
+    '/etc/credstore',
+    '/etc/credstore.encrypted',
+  ]) {
+    if (existsSync(directory)) args.push('--tmpfs', directory)
+  }
+  if (projectIsHidden) {
+    addMaskedParents(args, projectHiddenRoot!, workspace)
+    args.push('--symlink', projectMount, workspace)
+  }
+  if (runtimeIsHidden) {
+    addMaskedParents(args, runtimeHiddenRoot!, runtime)
+    args.push('--symlink', runtimeMount, runtime)
+  }
+  args.push(
     '--dev', '/dev',
     '--proc', '/proc',
+    '--unshare-pid',
     '--unshare-net',
     '--die-with-parent',
     '--chdir', cwd,
     '--', '/bin/sh', '-c', command,
-  ]
+  )
+  return args
+}
+
+/** Creates destinations hidden by the home tmpfs before binding an allowed path back. */
+function addMaskedParents(args: string[], root: string, target: string): void {
+  const absolute = path.resolve(target)
+  const relative = path.relative(root, absolute)
+  if (relative === '' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return
+  let current = root
+  for (const part of path.dirname(relative).split(path.sep).filter(Boolean)) {
+    current = path.join(current, part)
+    args.push('--dir', current)
+  }
+}
+
+function strictlyInside(target: string, root: string): boolean {
+  const relative = path.relative(path.resolve(root), path.resolve(target))
+  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)
+}
+
+function inside(target: string, root: string): boolean {
+  return path.resolve(target) === path.resolve(root) || strictlyInside(target, root)
+}
+
+function sandboxPath(workspace: string): string {
+  return [
+    path.join(workspace, 'node_modules', '.bin'),
+    path.dirname(process.execPath),
+    '/usr/local/bin',
+    '/usr/bin',
+    '/bin',
+  ].filter((entry) => existsSync(entry)).join(path.delimiter)
 }
 
 export const shellTool: Tool<ShellArgs> = {
@@ -144,7 +235,19 @@ export const shellTool: Tool<ShellArgs> = {
         execFile(
           'bwrap',
           sandboxArgs(args.command, cwd, workspace),
-          { cwd, timeout, maxBuffer: MAX_BUFFER, signal: ctx.signal },
+          {
+            cwd,
+            timeout,
+            maxBuffer: MAX_BUFFER,
+            signal: ctx.signal,
+            env: {
+              PATH: sandboxPath(workspace),
+              HOME: '/tmp',
+              TMPDIR: '/tmp',
+              LANG: process.env.LANG ?? 'C.UTF-8',
+              TERM: process.env.TERM ?? 'dumb',
+            },
+          },
           (error, stdout, stderr) => done(resolve, error, stdout, stderr),
         )
         return

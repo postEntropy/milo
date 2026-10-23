@@ -19,7 +19,7 @@ export const CONFIG_NOTES: Record<string, string> = {
   models:
     'Per-model facts that outrank the catalogs: context, maxOutput, vision, audio, reasoning and compactionAt, keyed by model id.',
   sandbox:
-    'How shell_command is contained: off, or workspace (bwrap: project writable, machine read-only, no network).',
+    'How shell_command is contained: off, or workspace (bwrap: project writable, home and host state hidden, system runtime read-only, no network).',
   verification: "The project's own checks, run after a turn that changed files.",
   'verification.enabled':
     'true runs the discovered test/typecheck/lint commands at the end of a writing turn. Off by default.',

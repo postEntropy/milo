@@ -391,9 +391,9 @@ export const DEFAULT_JOBS: JobsConfig = { max: 8 }
 
 /**
  * How `shell_command` is contained. `workspace` runs every command in `bwrap`:
- * the project's folder writable, the rest of the machine read only, and the
- * network off. Linux only, and off by default — a switch measured before it
- * becomes the way everyone runs.
+ * the project's folder writable, the home and host state hidden, system runtime
+ * files read only, and the network off. Linux only, and off by default — a switch
+ * measured before it becomes the way everyone runs.
  */
 export const SandboxSchema = z.enum(['off', 'workspace'])
 export type SandboxMode = z.infer<typeof SandboxSchema>
