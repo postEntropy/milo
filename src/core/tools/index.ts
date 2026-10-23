@@ -34,6 +34,7 @@ import { createReadSkillTool } from './read-skill.js'
 import { taskTool } from './task.js'
 import { todoTool } from './todo.js'
 import { taskListsTool } from './task-lists.js'
+import { viewImageTool } from './view-image.js'
 import type { Tool } from './types.js'
 import { createWebSearchTool } from './web-search.js'
 import { writeFileTool } from './write-file.js'
@@ -43,6 +44,7 @@ export * from './permission.js'
 export * from './rules.js'
 export { ToolRegistry } from './registry.js'
 export { readFileTool } from './read-file.js'
+export { viewImageTool } from './view-image.js'
 export { listDirTool } from './list-dir.js'
 export { globTool } from './glob.js'
 export { grepTool } from './grep.js'
@@ -71,6 +73,7 @@ export type { ClassifierQuestion, ClassifierAnswers, ClassifierOptions } from '.
 
 export const builtinTools = [
   readFileTool,
+  viewImageTool,
   listDirTool,
   globTool,
   grepTool,
