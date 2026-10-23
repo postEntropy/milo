@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { formatWhen } from '../sessions/index.js'
+import { formatWhen } from '../time.js'
 import { DEFAULT_LIST_LIMIT, shortId } from '../memory/index.js'
 import type { MemoryAdmin, Tool, ToolResult } from './types.js'
 

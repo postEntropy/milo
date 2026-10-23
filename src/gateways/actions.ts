@@ -1,10 +1,10 @@
 import {
   DEFAULT_PAGE_SIZE,
   formatSessionList,
-  formatWhen,
   summarizeRecap,
   type SessionSummary,
 } from '../core/sessions/index.js'
+import { formatWhen } from '../core/time.js'
 import type {
   ActionButton,
   ActionRow,

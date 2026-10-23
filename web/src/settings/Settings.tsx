@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
-import { formatWhen, message, splitNames } from '../lib/format.js'
+import { message, splitNames } from '../lib/format.js'
+import { formatWhen } from '../../../src/core/time.js'
 import { CLASSIFIER_LABELS, EFFORT_LABELS, PERMISSION_LABELS, SEARCH_LABELS, skillOriginLabel } from '../lib/labels.js'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { humanSize } from '../../../src/util/format.ts'

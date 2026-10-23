@@ -16,7 +16,8 @@ import {
 import type { AgentRuntime } from '../../../core/runtime.js'
 import { prepareIncoming } from '../../../core/media.js'
 import type { ImagePart } from '../../../core/providers/types.js'
-import { describeRebase, formatSeconds, formatWhen, type SessionStats } from '../../../core/sessions/index.js'
+import { describeRebase, formatSeconds, type SessionStats } from '../../../core/sessions/index.js'
+import { formatWhen } from '../../../core/time.js'
 import { formatSkillList } from '../../../core/skills/index.js'
 import type { TodoItem } from '../../../core/todos.js'
 import {

@@ -33,7 +33,6 @@ export {
   formatSeconds,
   formatSessionList,
   formatStats,
-  formatWhen,
   quotedLead,
   sessionLabel,
   sessionRowLabel,

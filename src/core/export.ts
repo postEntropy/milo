@@ -4,7 +4,7 @@ import { exportsDir } from './config/paths.js'
 import { readSession, type HistoryEntry } from './history.js'
 import { humanSize, plural } from '../util/format.js'
 import { block } from '../util/markdown.js'
-import { formatWhen } from './sessions/format.js'
+import { formatStamp } from './time.js'
 
 /**
  * Taking a session out of Milo, as a file.
@@ -104,10 +104,10 @@ export function renderExportMarkdown(meta: ExportMeta, entries: HistoryEntry[]):
     `- **Session** \`${meta.id}\``,
     ...(scopes.length > 0 ? [`- **Scope** ${scopes.map((scope) => `\`${scope}\``).join(', ')}`] : []),
     ...(entries.length > 0
-      ? [`- **First event** ${formatWhen(Date.parse(entries[0]!.at))}`, `- **Last event** ${formatWhen(Date.parse(entries[entries.length - 1]!.at))}`]
+      ? [`- **First event** ${formatStamp(Date.parse(entries[0]!.at))}`, `- **Last event** ${formatStamp(Date.parse(entries[entries.length - 1]!.at))}`]
       : []),
     `- **Held** ${plural(messages, 'message')} · ${plural(toolCalls, 'tool call')}`,
-    `- **Exported** ${formatWhen(meta.exportedAt)}`,
+    `- **Exported** ${formatStamp(meta.exportedAt)}`,
     '',
     'This is the history log, which is the complete record: every message, every tool call with its',
     'arguments and its full result, and the reasoning. A session\'s own transcript is compacted as it',

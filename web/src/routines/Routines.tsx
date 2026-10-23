@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { PermissionRequest, SendTarget, ThinkingDisplay, TranscriptMessage } from '@protocol'
 import { api } from '../lib/api.js'
 import type { ConnectionState } from '../lib/connection.js'
-import { formatIn, formatWhen, message } from '../lib/format.js'
+import { message } from '../lib/format.js'
+import { formatIn, formatWhen } from '../../../src/core/time.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
@@ -275,7 +276,7 @@ function RoutineList({
       </div>
       <div className="routine-feed-list">
         {feed.map((entry) => <button className="routine-feed-row" key={entry.runId} type="button" onClick={() => onOpen(entry.id, entry.runId)}>
-          <span className="routine-feed-head"><strong>{entry.routine}</strong><span className="routine-feed-when">{formatWhen(entry.at, true)}</span></span>
+          <span className="routine-feed-head"><strong>{entry.routine}</strong><span className="routine-feed-when">{formatWhen(entry.at, 'absolute')}</span></span>
           <span className="routine-feed-text">{entry.answer || 'No words — the run sent a file.'}</span>
         </button>)}
       </div>
@@ -415,7 +416,7 @@ function RoutineDetail({
   }
 
   const next = routine.enabled
-    ? routine.nextRunAt ? formatWhen(routine.nextRunAt, true) : 'Enabled'
+    ? routine.nextRunAt ? formatWhen(routine.nextRunAt, 'absolute') : 'Enabled'
     : 'Paused'
   const selectedRun = runs?.find((entry) => entry.id === openRun)
 
@@ -460,7 +461,7 @@ function RoutineDetail({
               onClick={() => setOpenRun(entry.id)}
             >
               <span className="run-row-marker" aria-hidden="true" />
-              <span className="run-row-copy"><strong>{index === 0 ? 'Latest run' : `Run ${total - index}`}</strong><span className="run-when">{formatWhen(entry.at, true)}</span></span>
+              <span className="run-row-copy"><strong>{index === 0 ? 'Latest run' : `Run ${total - index}`}</strong><span className="run-when">{formatWhen(entry.at, 'absolute')}</span></span>
               <Icon className="run-row-chevron" name="chevron" size={15} />
             </button>)}
             {/* The last thing in the list is the ask for more: scrolled into view,
@@ -468,7 +469,7 @@ function RoutineDetail({
             {runs.length < total && <span ref={sentinelRef} className="run-list-sentinel" aria-hidden="true" />}
           </div>
           <div className="run-output" aria-live="polite">
-            <div className="run-output-head"><span>{selectedRun ? formatWhen(selectedRun.at, true) : 'Select a run'}</span>{selectedRun && <span>Run output</span>}</div>
+            <div className="run-output-head"><span>{selectedRun ? formatWhen(selectedRun.at, 'absolute') : 'Select a run'}</span>{selectedRun && <span>Run output</span>}</div>
             {runError ? <div className="panel-state"><p>Could not read this run: {runError}</p></div>
               : run === null ? <p className="list-empty">Reading run…</p>
               : run.length > 0

@@ -68,7 +68,7 @@ import {
 import { resolveSource, type ResolvedSkill } from '../../../core/skills/sources.js'
 import { googleToolNames, googleWriteToolNames } from '../../../core/tools/index.js'
 import type { PermissionMode } from '../../../core/tools/permission.js'
-import { formatWhen } from '../../../core/sessions/index.js'
+import { formatWhen } from '../../../core/time.js'
 import { humanSize, plural, shortenPath } from '../../../util/format.js'
 import { resolveToolPath } from '../../../core/tools/walk.js'
 import { errorMessage } from '../../../util/errors.js'

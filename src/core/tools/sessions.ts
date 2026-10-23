@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { formatWhen } from '../sessions/index.js'
+import { formatWhen } from '../time.js'
 import type { SessionSummary } from '../sessions/types.js'
 import type { SessionAdmin, Tool } from './types.js'
 

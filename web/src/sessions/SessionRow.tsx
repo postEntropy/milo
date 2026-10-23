@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { formatWhen } from '../lib/format.js'
+import { formatWhen } from '../../../src/core/time.js'
 import { Icon } from '../ui/Icons.js'
 import type { SessionSummary } from './types.js'
 

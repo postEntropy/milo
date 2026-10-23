@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
-import { formatWhen, message } from '../lib/format.js'
+import { message } from '../lib/format.js'
+import { formatWhen } from '../../../src/core/time.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'

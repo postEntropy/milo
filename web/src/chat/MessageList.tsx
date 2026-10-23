@@ -1,6 +1,7 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useCopy, type CopyState } from '../lib/clipboard.js'
-import { formatWhen, formatSeconds } from '../../../src/core/sessions/format.ts'
+import { formatSeconds } from '../../../src/core/sessions/format.ts'
+import { formatWhen } from '../../../src/core/time.js'
 import { formatTokens, humanSize } from '../../../src/util/format.ts'
 import type { ActionRow, FrameAttachment, SessionCardItem, ThinkingDisplay, ToolMark, TranscriptMessage, TranscriptPart } from '@protocol'
 import { proseOf } from '@protocol'

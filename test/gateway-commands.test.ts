@@ -104,9 +104,9 @@ describe('/memory', () => {
     expect(result.reply).toContain('Renato prefere bullet points')
     expect(result.reply).toContain('aaaa1111')
     expect(result.reply).not.toContain('aaaa1111-2222')
-    // When it was said, so a stale note is tellable from a fresh one. The day
-    // itself is left out: which one it lands on depends on the machine's zone.
-    expect(result.reply).toMatch(/2026-07-\d{2}/)
+    // When it was said, so a stale note is tellable from a fresh one — day-first,
+    // as every surface writes a date. Which day it lands on depends on the zone.
+    expect(result.reply).toMatch(/\d{2}\/07\/2026/)
   })
 
   it('says so plainly when nothing was kept', async () => {

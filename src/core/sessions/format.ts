@@ -1,4 +1,5 @@
 import type { AgentEvent } from '../agent/events.js'
+import { formatWhen } from '../time.js'
 import type { SessionStats, SessionSummary } from './types.js'
 
 export const DEFAULT_PAGE_SIZE = 5
@@ -96,15 +97,6 @@ export interface SessionListStyle {
    * out rather than showing the id it is kept by.
    */
   projectName?: (id: string) => string | undefined
-}
-
-export function formatWhen(timestamp: number): string {
-  const date = new Date(timestamp)
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return (
-    `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
-    `${pad(date.getHours())}:${pad(date.getMinutes())}`
-  )
 }
 
 /**
