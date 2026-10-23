@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, readdirSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
 import lockfile, { type LockOptions } from 'proper-lockfile'
 import { ensurePrivateDir, writePrivateFile } from '../../util/fs.js'
@@ -89,6 +89,8 @@ export class FileSessionStore implements SessionStore {
    * in it leaves nothing behind; until then it lives here and is served by id.
    */
   private readonly pending = new Map<string, SessionRecord>()
+  /** Reuse list rows until a session file changes; the stored transcript is much larger. */
+  private readonly summaries = new Map<string, { fingerprint: string; summary: SessionSummary }>()
 
   constructor(options: FileSessionStoreOptions) {
     this.dir = options.dir
@@ -158,6 +160,7 @@ export class FileSessionStore implements SessionStore {
           throw new SessionConflictError(record.id, expectedVersion, actual)
         }
         await writePrivateFile(file, `${JSON.stringify({ ...record, version: expectedVersion + 1 }, null, 2)}\n`)
+        this.cacheSummary(record.id, file, toSummary({ ...record, version: expectedVersion + 1 }))
         // Materialized: from here the record is the file's, and a load reads it
         // from disk rather than from the in-memory copy.
         this.pending.delete(record.id)
@@ -282,8 +285,19 @@ export class FileSessionStore implements SessionStore {
       if (!entry.endsWith(RECORD_SUFFIX)) continue
       const id = entry.slice(0, -RECORD_SUFFIX.length)
       if (!isValidSessionId(id)) continue
+      const file = this.fileFor(id)
+      const fingerprint = this.fingerprint(file)
+      const cached = fingerprint ? this.summaries.get(id) : undefined
+      if (cached && cached.fingerprint === fingerprint) {
+        summaries.push(cached.summary)
+        continue
+      }
       const record = await this.load(id)
-      if (record) summaries.push(toSummary(record))
+      if (record) {
+        const summary = toSummary(record)
+        summaries.push(summary)
+        if (fingerprint) this.summaries.set(id, { fingerprint, summary })
+      }
     }
     return summaries.sort((a, b) => b.updatedAt - a.updatedAt)
   }
@@ -319,12 +333,27 @@ export class FileSessionStore implements SessionStore {
       try {
         this.pending.delete(id)
         rmSync(file, { force: true })
+        this.summaries.delete(id)
       } finally {
         await release()
       }
     } finally {
       unlock()
     }
+  }
+
+  private fingerprint(file: string): string | null {
+    try {
+      const info = statSync(file, { bigint: true })
+      return `${info.size}:${info.mtimeNs}:${info.ctimeNs}`
+    } catch {
+      return null
+    }
+  }
+
+  private cacheSummary(id: string, file: string, summary: SessionSummary): void {
+    const fingerprint = this.fingerprint(file)
+    if (fingerprint) this.summaries.set(id, { fingerprint, summary })
   }
 
   async fork(sourceId: string, options?: { upToTurn?: number; title?: string; scope?: MemoryScope }): Promise<SessionRecord | null> {
