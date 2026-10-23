@@ -1,7 +1,9 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
+import { mkdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { errorMessage } from '../../util/errors.js'
 import { humanSize } from '../../util/format.js'
+import { writeFileAtomic } from '../../util/fs.js'
 import { MILO_HOME } from '../config/paths.js'
 import type { ProjectPlacement } from '../projects.js'
 
@@ -158,3 +160,206 @@ Read the folder before you write. Get the truth from what is actually there — 
 Keep it short and specific to this project: what someone joining it would need and could not guess from the file names alone. Commands first, then the structure and the conventions that are not obvious from the outside.
 
 If an \`${INSTRUCTIONS_FILE}\` is already there, improve it where it stands: keep what is still true, correct what is not, add what is missing, and say in your reply what you changed. Do not rewrite it from scratch, and do not pad it.`
+
+/**
+ * The heading the rules a turn writes for itself sit under.
+ *
+ * The file is the person's: it may hold anything, under any headings. So the tool
+ * that writes keeps to one section it can find again — a rule it cannot find is a
+ * rule it cannot take back — and everything else in the file is left as it was.
+ */
+export const PREFERENCES_HEADING = '## Preferences'
+
+/**
+ * How long one written rule may be.
+ *
+ * A rule is carried by every request of every session, before anything was asked.
+ * A paragraph would be paid for every turn and read as noise by the turn it was
+ * meant to steer, so it is refused rather than saved and regretted.
+ */
+export const MAX_RULE_LENGTH = 240
+
+/** What writing one rule came to. */
+export type RuleAdd =
+  | { kind: 'written'; text: string }
+  /** The file already says it, so nothing was written. */
+  | { kind: 'present'; text: string }
+  | { kind: 'refused'; error: string }
+
+/** What dropping one came to. */
+export type RuleRemove =
+  | { kind: 'written'; text: string }
+  /** Nothing in the file says this, so nothing was dropped. */
+  | { kind: 'absent'; text: string }
+  | { kind: 'refused'; error: string }
+
+/**
+ * Where a rule goes: this install's own `AGENTS.md`, or the project's — the same two
+ * files the prompt is read from, so a rule written now is carried from the next turn
+ * without anything else having to be told about it.
+ *
+ * Undefined for a project scope in a session that has none: there is no project file
+ * to write, and the install's is the one that answers.
+ */
+export function instructionsPath(
+  scope: 'install' | 'project',
+  projectRoot?: string,
+  home: string = MILO_HOME,
+): string | undefined {
+  if (scope === 'install') return path.join(home, INSTRUCTIONS_FILE)
+  return projectRoot ? path.join(projectRoot, INSTRUCTIONS_FILE) : undefined
+}
+
+/** The rules written under the heading, in the order the file reads them. */
+export function writtenRules(text: string): string[] {
+  const lines = text.split('\n')
+  const section = sectionOf(lines)
+  if (!section) return []
+  return lines
+    .slice(section.start + 1, section.end)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith('- '))
+    .map((line) => line.slice(2).trim())
+    .filter(Boolean)
+}
+
+/** The same, read off a file. No file is no rules, not a failure. */
+export async function readWrittenRules(file: string): Promise<string[]> {
+  const text = await readText(file)
+  return text === null ? [] : writtenRules(text)
+}
+
+/**
+ * Adds one rule under the heading, making the heading when the file has none.
+ *
+ * The same rule twice is not written twice: the person said it once, and a prompt
+ * that repeats it pays for it on every turn. A rule is a single line, and a file
+ * past what the prompt carries is refused — an `AGENTS.md` over that bound is
+ * dropped whole, which would cost every other rule for this one.
+ */
+export async function addRule(file: string, raw: string): Promise<RuleAdd> {
+  const text = oneLine(raw)
+  if (text === null) {
+    return { kind: 'refused', error: 'A rule is one line: this one is empty or carries a line break.' }
+  }
+  if (text.length > MAX_RULE_LENGTH) {
+    return {
+      kind: 'refused',
+      error: `A rule is at most ${MAX_RULE_LENGTH} characters; this one is ${text.length}. Say the part that matters.`,
+    }
+  }
+
+  const existing = (await readText(file)) ?? ''
+  if (writtenRules(existing).includes(text)) return { kind: 'present', text }
+
+  const next = `${placing(existing, `- ${text}`)}\n`
+  if (Buffer.byteLength(next, 'utf8') > MAX_INSTRUCTIONS_BYTES) {
+    return {
+      kind: 'refused',
+      error: `${INSTRUCTIONS_FILE} would pass the ${humanSize(MAX_INSTRUCTIONS_BYTES)} the prompt carries, which drops every rule in it. Remove one first.`,
+    }
+  }
+  await mkdir(path.dirname(file), { recursive: true })
+  await writeFileAtomic(file, next)
+  return { kind: 'written', text }
+}
+
+/**
+ * Drops the one rule the file carries as this text.
+ *
+ * The heading goes with the last rule it held: a section over nothing is a heading
+ * that teaches the next turn to look for rules that are not there.
+ */
+export async function removeRule(file: string, raw: string): Promise<RuleRemove> {
+  const text = oneLine(raw)
+  if (text === null) {
+    return { kind: 'refused', error: 'A rule is one line: this one is empty or carries a line break.' }
+  }
+
+  const existing = await readText(file)
+  if (existing === null) return { kind: 'absent', text }
+
+  const lines = existing.split('\n')
+  const section = sectionOf(lines)
+  if (!section) return { kind: 'absent', text }
+
+  const at = lines.findIndex(
+    (line, index) => index > section.start && index < section.end && line.trim() === `- ${text}`,
+  )
+  if (at < 0) return { kind: 'absent', text }
+
+  lines.splice(at, 1)
+  await writeFileAtomic(file, withoutEmptySection(lines))
+  return { kind: 'written', text }
+}
+
+/**
+ * The rule as the file carries it: trimmed, without the bullet the model may have
+ * written itself. Null when it is not one line — a rule is a line, so a paragraph
+ * is refused rather than flattened into one nobody wrote.
+ */
+function oneLine(raw: string): string | null {
+  const trimmed = raw.trim()
+  if (trimmed === '' || /[\r\n]/.test(trimmed)) return null
+  const text = trimmed.startsWith('- ') ? trimmed.slice(2).trim() : trimmed
+  return text === '' ? null : text
+}
+
+/** The heading's lines: where it starts, and where the next heading takes over. */
+function sectionOf(lines: string[]): { start: number; end: number } | null {
+  const start = lines.findIndex((line) => line.trim() === PREFERENCES_HEADING)
+  if (start < 0) return null
+  const next = lines.findIndex((line, index) => index > start && /^#{1,6}\s/.test(line.trim()))
+  return { start, end: next < 0 ? lines.length : next }
+}
+
+/**
+ * The file with one bullet added under the heading.
+ *
+ * The bullet joins the section's last line, not the blank lines between it and
+ * whatever heading comes next, and it is followed by exactly one blank line when
+ * something follows it. A file with no heading of its own gets one at the end, so
+ * nothing the person wrote is ever written through.
+ */
+function placing(existing: string, bullet: string): string {
+  const body = existing.replace(/\s+$/, '')
+  if (body === '') return `${PREFERENCES_HEADING}\n${bullet}`
+
+  const lines = body.split('\n')
+  const section = sectionOf(lines)
+  if (!section) return `${body}\n\n${PREFERENCES_HEADING}\n${bullet}`
+
+  let at = section.end
+  while (at > section.start + 1 && (lines[at - 1] ?? '').trim() === '') at -= 1
+  const head = lines.slice(0, at)
+  const rest = lines.slice(section.end)
+  return [...head, bullet, ...(rest.length > 0 ? ['', ...rest] : [])].join('\n')
+}
+
+/** The file without its heading, once the last rule it held is gone. */
+function withoutEmptySection(lines: string[]): string {
+  const section = sectionOf(lines)
+  if (section !== null) {
+    const holdsNothing = lines
+      .slice(section.start + 1, section.end)
+      .every((line) => line.trim() === '')
+    if (holdsNothing) {
+      const head = lines.slice(0, section.start)
+      while (head.length > 0 && (head[head.length - 1] ?? '').trim() === '') head.pop()
+      const rest = lines.slice(section.end)
+      lines = [...head, ...(head.length > 0 && rest.length > 0 ? ['', ...rest] : rest)]
+    }
+  }
+  const text = lines.join('\n').replace(/\s+$/, '')
+  return text === '' ? '' : `${text}\n`
+}
+
+/** A file's text, or null when it is not there. Every other failure is the caller's. */
+async function readText(file: string): Promise<string | null> {
+  try {
+    return await readFile(file, 'utf8')
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+}

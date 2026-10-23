@@ -23,7 +23,10 @@ apply, because they carry live state and behaviour the persona cannot know.
   without a project is not doing code, and carrying the manual into every chat would only
   spend tokens.
 - **The install's rules** — `~/.milo/AGENTS.md`, read per turn by the same reader. They
-  sit above every project's and apply in every session.
+  sit above every project's and apply in every session. A standing instruction the person
+  states for the future ("from now on, keep answers short") is written into that file by
+  the `instructions` tool, under `## Preferences`, so it is carried from the next turn on
+  instead of being recalled like a note. A fact stays with `remember`.
 - **The folder's rules** — the project's `AGENTS.md`, or `CLAUDE.md` when that is the one
   it carries, read per turn by `src/core/agent/instructions.ts`. They are instructions to
   follow, and they land after the code manual, so the folder has the more specific word on
@@ -66,6 +69,7 @@ An order in either is an instruction to follow, never a promotion over the perso
 | Plan section | `src/core/agent/system.ts` (`PLAN_SECTION`) |
 | Code manual | `src/core/agent/system.ts` (`PROJECT_CODE_SECTION`) |
 | Project and install rules | `src/core/agent/instructions.ts` |
+| Writing a rule into them | `src/core/tools/instructions.ts` (the `instructions` tool) |
 | Model profile | `src/core/providers/profile.ts`, `~/.milo/models.json` |
 | Verification gate | `src/core/verification.ts` |
 | Assembly order | `src/core/agent/system.ts` (`buildSystemPrompt`) |

@@ -34,6 +34,7 @@ import { createReadSkillTool } from './read-skill.js'
 import { taskTool } from './task.js'
 import { todoTool } from './todo.js'
 import { taskListsTool } from './task-lists.js'
+import { instructionsTool } from './instructions.js'
 import { viewImageTool } from './view-image.js'
 import type { Tool } from './types.js'
 import { createWebSearchTool } from './web-search.js'
@@ -56,6 +57,7 @@ export { applyPatchTool, parsePatch, patchTargets } from './apply-patch.js'
 export { formatTool, detectFormatter, formatCommand } from './format.js'
 export { rememberTool } from './remember.js'
 export { memoriesTool } from './memories.js'
+export { instructionsTool } from './instructions.js'
 export { recallTool } from './recall.js'
 export { sessionsTool } from './sessions.js'
 export { panelTool } from './panel.js'
@@ -86,6 +88,7 @@ export const builtinTools = [
   formatTool,
   rememberTool,
   memoriesTool,
+  instructionsTool,
   recallTool,
   sessionsTool,
   searchHistoryTool,

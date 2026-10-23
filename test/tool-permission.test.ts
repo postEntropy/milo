@@ -62,6 +62,7 @@ describe('tool permission gating', () => {
 
     expect(readOnly).toEqual({
       read_file: true,
+      view_image: true,
       list_dir: true,
       glob: true,
       grep: true,
@@ -74,6 +75,7 @@ describe('tool permission gating', () => {
       format: false,
       memories: false,
       remember: false,
+      instructions: false,
       recall: true,
       sessions: false,
       search_history: true,

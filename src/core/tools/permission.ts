@@ -422,6 +422,14 @@ export function summarizeToolCall(args: unknown, tool?: string): string {
       }
       return `${verb[record.op] ?? record.op} message ${record.id}`
     }
+    // A rule, and where it lands: the prompt carries it from the next turn on, in
+    // every session of that scope — so the rule itself is what is being approved.
+    if (tool === 'instructions' && typeof record.text === 'string' && record.text.trim()) {
+      const where = record.scope === 'project' ? "this project's AGENTS.md" : '~/.milo/AGENTS.md'
+      return record.action === 'remove'
+        ? `Remove the rule from ${where}: ${record.text.trim()}`
+        : `Write into ${where}, carried by every turn from now on: ${record.text.trim()}`
+    }
     // Changing or dropping a routine: the id is what it acts on, and a standing
     // grant is still the half that has to be seen before it is approved. The same
     // shape says a session is being dropped — both carry `action: "remove"` and an
