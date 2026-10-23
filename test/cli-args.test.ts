@@ -13,6 +13,7 @@ describe('parseArgs', () => {
       noWeb: false,
       json: false,
       allow: [],
+      unknownFlags: [],
     })
   })
 
@@ -26,6 +27,12 @@ describe('parseArgs', () => {
   it('does not mistake a flag for the command', () => {
     expect(parseArgs(['--help']).command).toBe('chat')
     expect(parseArgs(['-v']).version).toBe(true)
+  })
+
+  it('keeps unknown flags so dispatch can explain the valid options', () => {
+    const args = parseArgs(['--banana'])
+    expect(args.unknownFlags).toEqual(['--banana'])
+    expect(validateArgs(args)).toContain('Valid options:')
   })
 
   it('reads the flags that take a value', () => {

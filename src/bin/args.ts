@@ -25,6 +25,7 @@ export interface Args {
   json: boolean
   /** `milo run --allow tool,…`: tools this unattended run may use without asking. */
   allow: string[]
+  unknownFlags: string[]
   /** The bare words after the command — for `milo run`, the prompt. */
   prompt?: string
 }
@@ -43,6 +44,7 @@ export function parseArgs(argv: string[]): Args {
     noWeb: false,
     json: false,
     allow: [],
+    unknownFlags: [],
   }
   const commandAt = argv[0] && !argv[0].startsWith('-') ? 0 : -1
   if (commandAt === 0) args.command = argv[0]!
@@ -68,7 +70,8 @@ export function parseArgs(argv: string[]): Args {
     else if (flag === '--allow') {
       const value = argv[++i]
       if (value) args.allow.push(...value.split(',').map((name) => name.trim()).filter(Boolean))
-    } else if (!flag.startsWith('-')) words.push(flag)
+    } else if (flag.startsWith('-')) args.unknownFlags.push(flag)
+    else words.push(flag)
   }
 
   if (words.length > 0) args.prompt = words.join(' ')

@@ -21,6 +21,10 @@ export type Command =
 
 /** What the command line asks for, or the message to say instead of running. */
 export function validateArgs(args: Args): string | null {
+  if (args.unknownFlags.length > 0) {
+    const valid = '--version (-v), --help (-h), --yolo, --no-web, --json, --web-port, --mode, --provider, --model (-m), --resume, --continue (-c), --project, --cwd, --session, --allow'
+    return `Unknown option "${args.unknownFlags[0]}". Valid options: ${valid}.`
+  }
   if (args.mode && !['ask', 'auto', 'yolo'].includes(args.mode)) {
     return `Invalid --mode "${args.mode}". Use ask, auto or yolo.`
   }
