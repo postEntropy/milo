@@ -10,7 +10,7 @@
 | `task_lists` | — | Named task lists kept across every session and surface; only touches Milo's own state, so it never asks. |
 | `git` | yes | Read a repository: `status`, `diff`, `log`, `show` and `blame`. |
 | `git_commit` | no | Stage files (or every tracked change) and commit them; asks for confirmation. |
-| `fetch_url` | yes | One http(s) URL, served back as text; a long page comes back in pages. |
+| `fetch_url` | yes | One public http(s) URL, served back as text; local and private addresses are refused. Long pages come back in pages. |
 | `write_file` | no | Creates or replaces a file; asks for confirmation. |
 | `edit_file` | no | Exact string replacement; asks for confirmation. |
 | `apply_patch` | no | Changes several files in one call, as one approval; every file and hunk is checked before anything is written. |

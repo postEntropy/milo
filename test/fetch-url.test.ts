@@ -5,13 +5,23 @@ import path from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolContext } from '../src/core/tools/types.js'
 
+vi.mock('node:dns', () => ({
+  lookup: (_hostname: string, _options: unknown, callback: (error: Error | null, addresses: { address: string; family: number }[]) => void) =>
+    callback(null, [{ address: '93.184.216.34', family: 4 }]),
+}))
+
 // The store pages are kept in is Milo's own, so it is pointed at a scratch home
 // for the run instead of the real one — set before the module reads it, which is
 // why the import below is dynamic.
 const home = mkdtempSync(path.join(os.tmpdir(), 'milo-fetch-'))
 process.env.MILO_HOME = home
 
-const { clearPageCache, fetchUrlTool } = await import('../src/core/tools/fetch-url.js')
+let fetchUrlTool: (typeof import('../src/core/tools/fetch-url.js'))['fetchUrlTool']
+async function reloadFetchUrlTool(): Promise<void> {
+  vi.resetModules()
+  fetchUrlTool = (await import('../src/core/tools/fetch-url.js')).fetchUrlTool
+}
+await reloadFetchUrlTool()
 const { prunePages } = await import('../src/core/fetched.js')
 const { fetchedDir } = await import('../src/core/config/paths.js')
 
@@ -33,8 +43,8 @@ const stubFetch = (
 ) => vi.stubGlobal('fetch', vi.fn(async () => respond(body, init)))
 
 afterEach(() => vi.unstubAllGlobals())
-beforeEach(() => {
-  clearPageCache()
+beforeEach(async () => {
+  await reloadFetchUrlTool()
   // The store on disk is shared across tests otherwise: wipe it between them.
   rmSync(fetchedDir(), { recursive: true, force: true })
 })
@@ -68,6 +78,24 @@ describe('fetch_url', () => {
 
     expect(result.isError).toBe(true)
     expect(result.content).toContain('only http and https')
+  })
+
+  it('refuses loopback and private IP addresses before fetching', async () => {
+    const fetchMock = vi.fn()
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchUrlTool.execute({ url: 'http://127.0.0.1/admin' }, ctx)
+
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('private or reserved network addresses')
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it('refuses credentials embedded in a URL', async () => {
+    const result = await fetchUrlTool.execute({ url: 'https://user:secret@example.test/' }, ctx)
+
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('embedded usernames or passwords')
   })
 
   it('says so when the URL does not parse', async () => {
@@ -220,7 +248,7 @@ describe('fetch_url page cache', () => {
       ctx,
     )
     // As if the process had restarted: the memory cache is empty, the file is not.
-    clearPageCache()
+    await reloadFetchUrlTool()
     const second = await fetchUrlTool.execute(
       { url: 'https://example.test/kept', limit: 30_000, offset: 30_000 },
       ctx,
@@ -238,7 +266,7 @@ describe('fetch_url page cache', () => {
     vi.stubGlobal('fetch', fetchMock)
 
     await fetchUrlTool.execute({ url: 'https://example.test/gone' }, ctx)
-    clearPageCache()
+    await reloadFetchUrlTool()
     prunePages(0) // nothing is kept: the file is gone too
     await fetchUrlTool.execute({ url: 'https://example.test/gone', offset: 5 }, ctx)
 
@@ -266,10 +294,10 @@ describe('fetch_url over a real connection', () => {
     await new Promise<void>((resolve) => server.close(() => resolve()))
   })
 
-  it('fetches what the server really sent and converts it', async () => {
+  it('refuses a private address before opening a connection', async () => {
     const result = await fetchUrlTool.execute({ url: `${base}/page` }, ctx)
 
-    expect(result.isError).toBeUndefined()
-    expect(result.content).toBe('Local\nserved for real')
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('private or reserved network addresses')
   })
 })
