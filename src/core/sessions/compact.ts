@@ -339,6 +339,8 @@ export interface SummarizeOptions {
 }
 
 const DEFAULT_TIMEOUT_MS = 20_000
+/** A recap is deliberately short; a low ceiling keeps the fold from generating a second answer. */
+const SUMMARY_MAX_TOKENS = 512
 
 const SUMMARY_SYSTEM = `You compress a conversation so it can continue with less context.
 Write a dense summary of the transcript the user provides:
@@ -435,6 +437,7 @@ async function call(
       model: options.model,
       system: options.system,
       messages: options.messages,
+      maxTokens: SUMMARY_MAX_TOKENS,
       reasoningEffort: options.reasoningEffort,
       signal: controller.signal,
       trace: { purpose: options.purpose ?? 'compaction' },
