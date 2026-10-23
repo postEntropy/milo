@@ -160,16 +160,6 @@ function serialize(projects: Project[]): string {
   return `${JSON.stringify(projects, null, 2)}\n`
 }
 
-/** Replaces the whole list, under the lock and through a rename, like every write here. */
-export async function writeProjects(projects: Project[]): Promise<void> {
-  const release = await lockProjects()
-  try {
-    await writePrivateFile(projectsFile(), serialize(projects))
-  } finally {
-    await release()
-  }
-}
-
 export function findProject(id: string): Project | undefined {
   return readProjects().find((project) => project.id === id)
 }

@@ -433,16 +433,6 @@ function serialize(routines: Routine[]): string {
   return `${JSON.stringify(routines, null, 2)}\n`
 }
 
-/** Replaces the whole list, under the lock and through a rename, like every write here. */
-export async function writeRoutines(routines: Routine[]): Promise<void> {
-  const release = await lockRoutines()
-  try {
-    await writePrivateFile(routinesFile(), serialize(routines))
-  } finally {
-    await release()
-  }
-}
-
 export function findRoutine(id: string): Routine | undefined {
   return readRoutines().find((routine) => routine.id === id)
 }

@@ -334,8 +334,6 @@ export const genUiSchema = z
     }
   })
 
-export type GenUiArgs = z.infer<typeof genUiSchema>
-
 /** How many nodes a tree holds, and how deep it goes. */
 function measure(node: GenUiNode, depth = 1): { nodes: number; depth: number } {
   if (node.kind !== 'box') return { nodes: 1, depth }
@@ -465,73 +463,6 @@ function scanJson(text: string): JsonScan {
     at += 1
   }
   return { opens, openString: inString, cut, cutOpens }
-}
-
-/**
- * The widget as plain text: what goes back to the model as the tool's result, and
- * the form a surface that cannot draw one would fall back to. Derived values are
- * shown as the formula that produces them, since only the surface holds the
- * inputs the formula reads.
- */
-export function genUiMarkdown(render: GenUiRender): string {
-  const lines: string[] = []
-  if (render.title) lines.push(`## ${render.title}`, '')
-  writeNode(render.tree, 0, lines)
-  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()
-}
-
-function writeNode(node: GenUiNode, indent: number, lines: string[]): void {
-  const pad = '  '.repeat(indent)
-  if (node.kind === 'box') {
-    for (const child of node.children) {
-      writeNode(child, indent, lines)
-      lines.push('')
-    }
-    return
-  }
-  if (node.kind === 'title') {
-    lines.push(`${pad}### ${node.text}`)
-    return
-  }
-  if (node.kind === 'text') {
-    lines.push(`${pad}${node.text}`)
-    return
-  }
-  if (node.kind === 'stat') {
-    lines.push(`${pad}**${node.label}:** ${node.prefix ?? ''}(${node.formula})${node.suffix ?? ''}`)
-    return
-  }
-  if (node.kind === 'list') {
-    for (const item of node.items) lines.push(`${pad}- ${item}`)
-    return
-  }
-  if (node.kind === 'steps') {
-    if (node.title) lines.push(`${pad}**${node.title}**`, '')
-    node.entries.forEach((entry, index) => {
-      lines.push(`${pad}${index + 1}. **${entry.title}**${entry.detail ? ` — ${entry.detail}` : ''}`)
-    })
-    return
-  }
-  if (node.kind === 'facts') {
-    if (node.title) lines.push(`${pad}**${node.title}**`, '')
-    for (const entry of node.entries) lines.push(`${pad}- **${entry.label}:** ${entry.value}`)
-    return
-  }
-  if (node.kind === 'table') {
-    lines.push(`${pad}| ${node.columns.join(' | ')} |`)
-    lines.push(`${pad}| ${node.columns.map(() => '---').join(' | ')} |`)
-    for (const row of node.rows) lines.push(`${pad}| ${node.columns.map((_, index) => row[index] ?? '').join(' | ')} |`)
-    return
-  }
-  if (node.kind === 'button') {
-    lines.push(`${pad}[${node.label}]`)
-    return
-  }
-  // The inputs: their label and the value they start at, which is all a text form
-  // can say about a control the person is meant to move.
-  if (node.kind === 'checkbox') lines.push(`${pad}- ${node.label}: ${node.value ? 'yes' : 'no'}`)
-  else if (node.kind === 'select') lines.push(`${pad}- ${node.label}: ${node.value}`)
-  else lines.push(`${pad}- ${node.label}: ${node.prefix ?? ''}${node.value}${node.suffix ?? ''}`)
 }
 
 /**

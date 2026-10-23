@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import lockfile from 'proper-lockfile'
@@ -32,9 +32,14 @@ const {
   setEnabled,
   upcomingRuns,
   updateRoutine,
-  writeRoutines,
 } = await import('../src/core/routines.js')
 const { routinesFile } = await import('../src/core/config/paths.js')
+
+/** Seed the on-disk store directly; production writes go through the routine operations. */
+async function seedRoutines(routines: Routine[]): Promise<void> {
+  mkdirSync(path.dirname(routinesFile()), { recursive: true })
+  writeFileSync(routinesFile(), `${JSON.stringify(routines, null, 2)}\n`)
+}
 
 const every = (minutes: number) => ({ kind: 'every' as const, minutes })
 const at = (time: string, days?: number[]) => ({ kind: 'at' as const, time, days })
@@ -268,7 +273,7 @@ describe('the store', () => {
   })
 
   it('round-trips what it writes', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const added = await addRoutine(routine())
     expect(added.id).toMatch(/^[a-z]+-[a-z]+-\d+$/)
     expect(added.createdAt).toBeGreaterThan(0)
@@ -378,7 +383,7 @@ describe('the store', () => {
   })
 
   it('removes, enables and disables by id', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const added = await addRoutine(routine())
 
     expect(await removeRoutine('nobody-here-1')).toBe(false)
@@ -392,7 +397,7 @@ describe('the store', () => {
   })
 
   it('keeps a ceiling, counts the runs, and drops a count that is not one', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const added = await addRoutine(routine({ limit: 3 }))
     expect(readRoutines()[0]!.limit).toBe(3)
 
@@ -407,7 +412,7 @@ describe('the store', () => {
   })
 
   it('stops the routine itself on the run that uses the ceiling up', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const added = await addRoutine(routine({ limit: 2 }))
 
     await markRun(added.id, 'ok', 1_000)
@@ -418,7 +423,7 @@ describe('the store', () => {
   })
 
   it('takes a ceiling off with a zero, the way an empty grant is no grant', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const added = await addRoutine(routine({ limit: 5 }))
     await markRun(added.id, 'ok', 1_000)
 
@@ -430,7 +435,7 @@ describe('the store', () => {
   })
 
   it('starts a ceiling put on a routine that has been repeating for ages at zero', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const added = await addRoutine(routine())
 
     await markRun(added.id, 'ok', 1_000)
@@ -446,7 +451,7 @@ describe('the store', () => {
   })
 
   it('starts a spent routine counting over when it is switched on, and leaves a paused one alone', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const spent = await addRoutine(routine({ limit: 1 }))
     await markRun(spent.id, 'ok', 1_000)
     expect(findRoutine(spent.id)!.enabled).toBe(false)
@@ -463,7 +468,7 @@ describe('the store', () => {
   })
 
   it('starts the count over when a spent routine is given a new ceiling, and keeps it mid-stretch', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const spent = await addRoutine(routine({ limit: 1 }))
     await markRun(spent.id, 'ok', 1_000)
 
@@ -478,7 +483,7 @@ describe('the store', () => {
   })
 
   it('changes a routine in place, keeping its id and creation time', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const added = await addRoutine(routine({ name: 'briefing' }))
 
     const updated = await updateRoutine(added.id, {
@@ -497,7 +502,7 @@ describe('the store', () => {
   })
 
   it('renames, clears the grants, and says nothing about an id it does not have', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const added = await addRoutine({ ...routine(), allow: ['shell_command'] })
 
     expect((await updateRoutine(added.id, { name: '  the briefing  ' }))?.name).toBe('the briefing')
@@ -507,14 +512,14 @@ describe('the store', () => {
   })
 
   it('falls back to the prompt for a name cleared to nothing', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const added = await addRoutine(routine({ name: 'briefing' }))
 
     expect((await updateRoutine(added.id, { name: '   ' }))?.name).toBe('Look at the repo')
   })
 
   it('writes down the run so a restart can tell', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const added = await addRoutine(routine())
 
     await markRun(added.id, 'error', 1_700_000_000_000)
@@ -522,7 +527,7 @@ describe('the store', () => {
   })
 
   it('keeps the grants a routine carries, and copes with a file without them', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const added = await addRoutine({ ...routine(), allow: ['shell_command'] })
     expect(findRoutine(added.id)?.allow).toEqual(['shell_command'])
 
@@ -536,7 +541,7 @@ describe('the store', () => {
   })
 
   it('refuses to grow past its ceiling', async () => {
-    await writeRoutines(
+    await seedRoutines(
       Array.from({ length: MAX_ROUTINES }, (_value, index) => ({
         ...routine(),
         id: `routine-${index}-1`,
@@ -555,7 +560,7 @@ describe('the store', () => {
   })
 
   it('writes a file a person can read', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     await addRoutine(routine({ name: 'briefing' }))
     const raw = readFileSync(routinesFile(), 'utf8')
     expect(raw.endsWith('\n')).toBe(true)
@@ -563,7 +568,7 @@ describe('the store', () => {
   })
 
   it('names a routine from its prompt, on a word boundary, as a name reads', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const added = await addRoutine(
       routine({ prompt: 'look at the repo and tell me what moved since yesterday' }),
     )
@@ -577,14 +582,14 @@ describe('the store', () => {
   })
 
   it('keeps the name it was given rather than deriving one', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     expect((await addRoutine(routine({ name: '  daily briefing  ' }))).name).toBe('daily briefing')
   })
 
   // Two writers in different processes each rewrite the whole list from the copy
   // they read, so the lock is what keeps the slower one from erasing the other.
   it('waits for the lock another process is holding', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const release = await lockfile.lock(routinesFile(), { realpath: false, stale: 10_000 })
     let added = false
     const adding = addRoutine(routine()).then(() => {
@@ -600,7 +605,7 @@ describe('the store', () => {
   })
 
   it('lands its change on top of one written while it waited', async () => {
-    await writeRoutines([])
+    await seedRoutines([])
     const release = await lockfile.lock(routinesFile(), { realpath: false, stale: 10_000 })
     const adding = addRoutine(routine({ prompt: 'from the assistant' }))
 
@@ -739,7 +744,7 @@ describe('RoutineScheduler', () => {
   })
 
   it('fires a due routine and delivers what it answered', async () => {
-    await writeRoutines([sample()])
+    await seedRoutines([sample()])
     const h = harness()
     h.scheduler.start()
 
@@ -756,7 +761,7 @@ describe('RoutineScheduler', () => {
   })
 
   it('stops itself once it has run as many times as it was allowed', async () => {
-    await writeRoutines([sample({ when: every(1), limit: 2 })])
+    await seedRoutines([sample({ when: every(1), limit: 2 })])
     const h = harness()
     h.scheduler.start()
 
@@ -778,7 +783,7 @@ describe('RoutineScheduler', () => {
 
   it('does not make up a routine it slept through', async () => {
     // 07:00 has already passed when the daemon comes up at 07:59.
-    await writeRoutines([sample({ when: at('07:00') })])
+    await seedRoutines([sample({ when: at('07:00') })])
     const h = harness()
     h.scheduler.start()
 
@@ -793,7 +798,7 @@ describe('RoutineScheduler', () => {
   it('does not fire a burst of the occurrences it slept through', async () => {
     // Every minute, and the machine then sleeps for ten: the timer that was armed
     // fires once, late, with ten occurrences behind it.
-    await writeRoutines([sample({ when: every(1) })])
+    await seedRoutines([sample({ when: every(1) })])
     const h = harness()
     h.scheduler.start()
 
@@ -809,7 +814,7 @@ describe('RoutineScheduler', () => {
   })
 
   it('runs an interval routine once per occurrence, never twice for one', async () => {
-    await writeRoutines([sample({ when: every(1) })])
+    await seedRoutines([sample({ when: every(1) })])
     const h = harness()
     h.scheduler.start()
 
@@ -828,7 +833,7 @@ describe('RoutineScheduler', () => {
   })
 
   it('leaves a disabled routine alone', async () => {
-    await writeRoutines([sample({ when: every(1), enabled: false })])
+    await seedRoutines([sample({ when: every(1), enabled: false })])
     const h = harness()
     h.scheduler.start()
 
@@ -844,7 +849,7 @@ describe('RoutineScheduler', () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve
     })
-    await writeRoutines([sample({ when: every(1) })])
+    await seedRoutines([sample({ when: every(1) })])
     const h = harness({ gate })
     h.scheduler.start()
 
@@ -866,7 +871,7 @@ describe('RoutineScheduler', () => {
   })
 
   it('says when a routine failed, and marks the run', async () => {
-    await writeRoutines([sample({ when: every(1) })])
+    await seedRoutines([sample({ when: every(1) })])
     const h = harness({ fail: 'boom' })
     h.scheduler.start()
 
@@ -881,7 +886,7 @@ describe('RoutineScheduler', () => {
   })
 
   it('posts nothing when the routine answered nothing', async () => {
-    await writeRoutines([sample({ when: every(1) })])
+    await seedRoutines([sample({ when: every(1) })])
     const h = harness({ answer: '' })
     h.scheduler.start()
 
@@ -893,7 +898,7 @@ describe('RoutineScheduler', () => {
   })
 
   it("carries the routine's grants into the run, which is the only place they apply", async () => {
-    await writeRoutines([sample({ when: every(1), allow: ['shell_command'] })])
+    await seedRoutines([sample({ when: every(1), allow: ['shell_command'] })])
     const h = harness()
     h.scheduler.start()
 
@@ -908,7 +913,7 @@ describe('RoutineScheduler', () => {
   })
 
   it("tells the run which chat it may send files to, the routine's own target", async () => {
-    await writeRoutines([sample({ when: every(1), target: { gateway: 'discord', chatId: '987' } })])
+    await seedRoutines([sample({ when: every(1), target: { gateway: 'discord', chatId: '987' } })])
     const h = harness()
     h.scheduler.start()
 
@@ -920,7 +925,7 @@ describe('RoutineScheduler', () => {
   })
 
   it('delivers a file even when the run answered nothing', async () => {
-    await writeRoutines([sample({ when: every(1) })])
+    await seedRoutines([sample({ when: every(1) })])
     const shot: OutgoingFile = { path: '/tmp/shot.png', name: 'shot.png', mimeType: 'image/png' }
     const h = harness({ answer: '', files: [shot] })
     h.scheduler.start()
@@ -933,7 +938,7 @@ describe('RoutineScheduler', () => {
   })
 
   it('stops firing once stopped', async () => {
-    await writeRoutines([sample({ when: every(1) })])
+    await seedRoutines([sample({ when: every(1) })])
     const h = harness()
     h.scheduler.start()
     h.scheduler.stop()

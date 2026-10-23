@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { GENUI_SECTION, genUiFromArgs, genUiFromPartial, genUiMarkdown, genUiSchema } from '../src/core/genui.js'
+import { GENUI_SECTION, genUiFromArgs, genUiFromPartial, genUiSchema } from '../src/core/genui.js'
 
 describe('the generated interface schema', () => {
   it('accepts a widget built from the catalog', () => {
@@ -94,45 +94,6 @@ describe('reading a widget back out of a tool call', () => {
   it('keeps a heading, trimmed, and leaves it out when it is blank', () => {
     expect(genUiFromArgs({ title: '  Plan  ', tree: { kind: 'title', text: 'hi' } })?.title).toBe('Plan')
     expect(genUiFromArgs({ title: '   ', tree: { kind: 'title', text: 'hi' } })).toEqual({ tree: { kind: 'title', text: 'hi' } })
-  })
-})
-
-describe('a widget as text', () => {
-  it('renders a table and a derived number, so the model reads back what it asked to show', () => {
-    const markdown = genUiMarkdown({
-      title: 'Team plan',
-      tree: {
-        kind: 'box',
-        children: [
-          { kind: 'table', columns: ['Guests', 'Lamb'], rows: [['4', '3-4 lb']] },
-          { kind: 'stat', label: 'Total', formula: 'seats * 29', suffix: '/mo' },
-        ],
-      },
-    })
-    expect(markdown).toContain('## Team plan')
-    expect(markdown).toContain('| Guests | Lamb |')
-    expect(markdown).toContain('| 4 | 3-4 lb |')
-    expect(markdown).toContain('**Total:** (seats * 29)/mo')
-  })
-
-  it('says what an input starts at', () => {
-    const markdown = genUiMarkdown({ tree: { kind: 'slider', id: 'seats', label: 'Seats', min: 1, max: 50, value: 8, suffix: ' seats' } })
-    expect(markdown).toBe('- Seats: 8 seats')
-  })
-
-  it('numbers a procedure, and lists the facts as label and value', () => {
-    const markdown = genUiMarkdown({
-      tree: {
-        kind: 'box',
-        children: [
-          { kind: 'facts', entries: [{ label: 'Eat at', value: '5:00 pm' }] },
-          { kind: 'steps', entries: [{ title: 'Prep ahead', detail: 'The night before.' }, { title: 'Serve' }] },
-        ],
-      },
-    })
-    expect(markdown).toContain('- **Eat at:** 5:00 pm')
-    expect(markdown).toContain('1. **Prep ahead** — The night before.')
-    expect(markdown).toContain('2. **Serve**')
   })
 })
 

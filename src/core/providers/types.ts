@@ -198,17 +198,6 @@ export interface Provider {
   stream(req: ChatRequest): AsyncIterable<StreamEvent>
 }
 
-export function textMessage(role: Role, text: string): Message {
-  return { role, content: [{ type: 'text', text }] }
-}
-
-export function textOf(message: Message): string {
-  return message.content
-    .filter((part): part is TextPart => part.type === 'text')
-    .map((part) => part.text)
-    .join('')
-}
-
 export function parseToolArgs(raw: string): unknown {
   const trimmed = raw.trim()
   if (!trimmed) return {}

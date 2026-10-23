@@ -1,5 +1,4 @@
 import type { OutgoingMessage } from '../core/outgoing.js'
-import type { AgentRuntime } from '../core/runtime.js'
 
 export type GatewayId = 'cli' | 'telegram' | 'discord' | 'web'
 
@@ -14,8 +13,4 @@ export interface Gateway {
    * place a timer can speak into.
    */
   deliver?(chatId: string, message: OutgoingMessage): Promise<void>
-}
-
-export interface GatewayRuntimeOptions {
-  runtime: AgentRuntime
 }

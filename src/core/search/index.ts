@@ -1,7 +1,7 @@
 import { ExaSearchProvider } from './exa.js'
 import { ParallelSearchProvider } from './parallel.js'
 import { TavilySearchProvider } from './tavily.js'
-import { DEFAULT_SEARCH_KEY_ENV, type SearchConfig, type SearchProvider } from './types.js'
+import type { SearchConfig, SearchProvider } from './types.js'
 
 export * from './types.js'
 
@@ -24,8 +24,4 @@ export function createSearchProvider(
     default:
       return null
   }
-}
-
-export function searchKeyEnv(config: SearchConfig): string {
-  return config.keyEnv ?? DEFAULT_SEARCH_KEY_ENV[config.provider]
 }
