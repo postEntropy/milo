@@ -91,6 +91,70 @@
       "expected": null
     }
   ],
+  "chart": [
+    {
+      "name": "starts at zero and rounds the ceiling to a readable step",
+      "series": [[420, 310, 290, 220]],
+      "min": 0,
+      "max": 500
+    },
+    {
+      "name": "keeps a ceiling that is already a whole power of ten",
+      "series": [[100]],
+      "min": 0,
+      "max": 100
+    },
+    {
+      "name": "rounds a fraction up to the next whole step",
+      "series": [[0.4, 0.9]],
+      "min": 0,
+      "max": 1
+    },
+    {
+      "name": "gives a mixed series the same room below zero as above it",
+      "series": [[-30, 45]],
+      "min": -50,
+      "max": 50
+    },
+    {
+      "name": "reads every series into one range",
+      "series": [[1, 2], [3, 4]],
+      "min": 0,
+      "max": 5
+    },
+    {
+      "name": "keeps a series of nothing at zero with room to draw",
+      "series": [[0, 0]],
+      "min": 0,
+      "max": 1
+    },
+    {
+      "name": "rounds a negative-only series down and leaves the top at zero",
+      "series": [[-3, -7]],
+      "min": -10,
+      "max": 0
+    },
+    {
+      "name": "has a range with nothing to read",
+      "series": [[]],
+      "min": 0,
+      "max": 1
+    },
+    {
+      "name": "leaves a line its own range with air around it",
+      "series": [[380, 410, 455]],
+      "zero": false,
+      "min": 374,
+      "max": 461
+    },
+    {
+      "name": "gives a flat line room above and below when it does not start at zero",
+      "series": [[5, 5]],
+      "zero": false,
+      "min": 4.5,
+      "max": 5.5
+    }
+  ],
   "template": [
     {
       "name": "fills {id} from the current values",

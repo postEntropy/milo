@@ -149,6 +149,31 @@ class StoredToolCallProvider implements Provider {
   }
 }
 
+/**
+ * A model that draws the shape v2 added: a series, a target and a state mark. It is
+ * the same transport as every other block — what changes is that the tree carries the
+ * new nodes through the wire and back out of the stored turn.
+ */
+class DashboardProvider implements Provider {
+  readonly id = 'dashboard'
+
+  async *stream(_request: ChatRequest): AsyncGenerator<StreamEvent> {
+    const tree = {
+      tree: {
+        kind: 'box',
+        direction: 'column',
+        children: [
+          { kind: 'chart', type: 'bar', labels: ['North', 'South'], series: [{ label: 'Revenue', values: [420, 310] }] },
+          { kind: 'progress', label: 'To target', formula: '86', max: 100, suffix: '%' },
+          { kind: 'badge', label: 'Draft numbers', tone: 'warn' },
+        ],
+      },
+    }
+    yield { type: 'text', delta: `Here is Q3.\n\n\`\`\`genui\n${JSON.stringify(tree)}\n\`\`\`\n` }
+    yield { type: 'done', finishReason: 'stop' }
+  }
+}
+
 function widget(label: string, id: string): Record<string, unknown> {
   return { tree: { kind: 'box', children: [{ kind: 'slider', id, label, min: 1, max: 10, value: 2 }] } }
 }
@@ -351,6 +376,21 @@ describe('a generated interface on the web chat', () => {
     const drawn = parts.find((part) => part.kind === 'ui')
     expect(drawn?.kind === 'ui' && drawn.render.title).toBe('Team plan')
     expect(parts.some((part) => part.kind === 'tool')).toBe(false)
+  })
+
+  it('carries a dashboard through the wire and back out of the stored turn', async () => {
+    const runtime = build(new DashboardProvider())
+    const frames = await turn(new WebHub(runtime, home), true)
+    expect(drawnFrames(frames)).toHaveLength(1)
+
+    const parts = await reopen(runtime, true)
+    const drawn = parts.find((part) => part.kind === 'ui')
+    const tree = drawn?.kind === 'ui' ? drawn.render.tree : undefined
+    expect(tree?.kind === 'box' ? tree.children.map((child) => child.kind) : []).toEqual([
+      'chart',
+      'progress',
+      'badge',
+    ])
   })
 })
 

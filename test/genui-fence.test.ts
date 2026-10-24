@@ -120,6 +120,20 @@ describe('drawing a widget while it is still being written', () => {
     expect(parts.filter((part) => part.kind === 'ui')).toHaveLength(1)
   })
 
+  it('fills a chart in as its series arrives, and finishes with one chart', () => {
+    const parts = drafting([
+      '```genui\n{"tree":{"kind":"chart","type":"bar","labels":["North","South"],"series":[{"values":[420',
+      ',310]}]}}',
+      '\n```\n',
+    ])
+    expect(parts.map((part) => part.kind)).toEqual(['ui-draft', 'ui'])
+    const draft = parts[0]
+    const values = draft?.kind === 'ui-draft' && draft.render.tree.kind === 'chart'
+      ? draft.render.tree.series[0]?.values
+      : null
+    expect(values).toEqual([420, 310])
+  })
+
   it('does not send a tree twice, and not more often than the screen could show it', () => {
     const fence = new GenUiFence({ drafts: true, draftEveryMs: 100 })
     expect(fence.push('```genui\n{"title":"Team plan","tree":{"kind":"list","items":["eight', 0)).toHaveLength(1)

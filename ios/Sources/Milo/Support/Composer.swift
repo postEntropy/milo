@@ -558,7 +558,7 @@ struct JobStrip: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
-        .marksScrollBox()
+        .marksSidewaysDrag()
     }
 
     /// The command on one line: the browser's own `oneLine` clips at eighty characters, so

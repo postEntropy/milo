@@ -212,3 +212,138 @@ private func isDigit(_ char: Character) -> Bool {
 private func isLetter(_ char: Character) -> Bool {
     (char >= "a" && char <= "z") || (char >= "A" && char <= "Z")
 }
+
+// MARK: - The range a chart is drawn on
+
+/** The range every series is scaled to: always including zero, and rounded out. */
+public struct ChartBounds: Equatable, Sendable {
+    public let min: Double
+    public let max: Double
+
+    public init(min: Double, max: Double) {
+        self.min = min
+        self.max = max
+    }
+}
+
+/**
+ The range a chart is drawn on, the Swift reading of `chart-bounds.ts`.
+
+ A bar chart starts at zero; a line or a sparkline takes the series' own range with an
+ eighth of it as air on either side, because a run rate of $380k–$455k on a zero-based
+ axis is a flat line at the top. The two surfaces are held to the same cases on disk.
+ */
+public func chartBounds(_ series: [[Double]], zero: Bool = true) -> ChartBounds {
+    let values = series.flatMap { $0 }.filter { $0.isFinite }
+    guard let low = values.min(), let high = values.max() else {
+        return ChartBounds(min: 0, max: 1)
+    }
+    if !zero {
+        let span = high - low
+        let pad = span == 0 ? (abs(high) > 0 ? abs(high) * 0.1 : 1) : span * 0.08
+        return ChartBounds(min: low - pad, max: high + pad)
+    }
+    let max = high > 0 ? niceCeiling(high) : 0
+    let min = low < 0 ? -niceCeiling(-low) : 0
+    return max == min ? ChartBounds(min: min, max: min + 1) : ChartBounds(min: min, max: max)
+}
+
+private func niceCeiling(_ value: Double) -> Double {
+    guard value > 0 else { return 1 }
+    let step = pow(10, floor(log10(value)))
+    let units = value / step
+    let nice: Double = units <= 1 ? 1 : units <= 2 ? 2 : units <= 5 ? 5 : 10
+    return nice * step
+}
+
+// MARK: - The inline marks a string may carry
+
+/// One piece of a string the person reads, and the mark it wears.
+public struct InlineRun: Equatable, Sendable {
+    public enum Style: Equatable, Sendable {
+        case plain, bold, italic, code
+    }
+
+    public let text: String
+    public let style: Style
+
+    public init(text: String, style: Style) {
+        self.text = text
+        self.style = style
+    }
+}
+
+/**
+ The three inline marks the teaching allows — `**bold**`, `*italic*` and `` `code` `` —
+ read into runs, the Swift reading of `Inline.tsx`.
+
+ It is a small scanner rather than Foundation's markdown reader: the browser's rule is
+ the one shape both surfaces must agree on, and a mark that never closes stays the
+ characters that wrote it. The view colours the runs; nothing here knows a font.
+ */
+public func inlineRuns(_ text: String) -> [InlineRun] {
+    let chars = Array(text)
+    var runs: [InlineRun] = []
+    var plain = ""
+    var at = 0
+
+    func flush() {
+        if !plain.isEmpty {
+            runs.append(InlineRun(text: plain, style: .plain))
+            plain = ""
+        }
+    }
+
+    while at < chars.count {
+        if at + 1 < chars.count, chars[at] == "*", chars[at + 1] == "*" {
+            if let end = closing(chars, from: at + 2, mark: "*", doubled: true) {
+                flush()
+                runs.append(InlineRun(text: String(chars[(at + 2)..<end]), style: .bold))
+                at = end + 2
+                continue
+            }
+        }
+        if chars[at] == "*" {
+            if let end = closing(chars, from: at + 1, mark: "*", doubled: false) {
+                flush()
+                runs.append(InlineRun(text: String(chars[(at + 1)..<end]), style: .italic))
+                at = end + 1
+                continue
+            }
+        }
+        if chars[at] == "`" {
+            if let end = closing(chars, from: at + 1, mark: "`", doubled: false) {
+                flush()
+                runs.append(InlineRun(text: String(chars[(at + 1)..<end]), style: .code))
+                at = end + 1
+                continue
+            }
+        }
+        plain.append(chars[at])
+        at += 1
+    }
+    flush()
+    return runs
+}
+
+/**
+ Where the mark closes: the next one, as long as the run between them is not empty and
+ carries no mark of its own — the same `[^*]+` / `[^`]+` the browser's pattern uses.
+ */
+private func closing(_ chars: [Character], from: Int, mark: Character, doubled: Bool) -> Int? {
+    var at = from
+    while at < chars.count {
+        if chars[at] == mark {
+            if doubled {
+                guard at + 1 < chars.count, chars[at + 1] == mark else {
+                    at += 1
+                    continue
+                }
+            }
+            return at > from ? at : nil
+        }
+        if mark != "`", chars[at] == "*" { return nil }
+        at += 1
+    }
+    return nil
+}

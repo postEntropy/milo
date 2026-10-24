@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { chartBounds } from '../web/src/chat/genui/chart-bounds.js'
 import { evaluateFormula, formatNumber, interpolate } from '../web/src/chat/genui/evaluate.js'
 
 /**
@@ -22,7 +23,14 @@ interface TemplateCase {
   values: Record<string, number | string | boolean>
   expected: string
 }
-const fixtures: { formula: FormulaCase[]; template: TemplateCase[] } = JSON.parse(
+interface ChartCase {
+  name: string
+  series: number[][]
+  zero?: boolean
+  min: number
+  max: number
+}
+const fixtures: { formula: FormulaCase[]; template: TemplateCase[]; chart: ChartCase[] } = JSON.parse(
   readFileSync(new URL('./fixtures/genui-evaluate.json', import.meta.url), 'utf8'),
 )
 
@@ -38,6 +46,14 @@ describe('a widget template', () => {
   for (const testCase of fixtures.template) {
     it(testCase.name, () => {
       expect(interpolate(testCase.text, testCase.values)).toBe(testCase.expected)
+    })
+  }
+})
+
+describe('the range a chart is drawn on', () => {
+  for (const testCase of fixtures.chart) {
+    it(testCase.name, () => {
+      expect(chartBounds(testCase.series, testCase.zero ?? true)).toEqual({ min: testCase.min, max: testCase.max })
     })
   }
 })

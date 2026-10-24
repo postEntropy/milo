@@ -2007,7 +2007,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 /* The generated interface: the catalog the model draws from, in the app's own
    tokens. Controls are filled, never outlined. */
-.genui { display: flex; flex-direction: column; gap: var(--space-6); margin: var(--space-1) 0 var(--space-5); }
+.genui { display: flex; flex-direction: column; gap: var(--space-6); margin: var(--space-1) 0 var(--space-5); container: genui / inline-size; }
 .genui-title { font-family: var(--font-body); font-weight: 600; letter-spacing: -.01em; line-height: 1.2; }
 .genui-size-sm { font-size: var(--text-md); }
 .genui-size-md { font-size: var(--text-lg); }
@@ -2029,9 +2029,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .genui-stat-value { font-size: var(--text-xl); font-weight: 600; letter-spacing: -.02em; }
 .genui-stat-label { color: var(--muted); font-size: var(--text-xs); }
 .genui-grid { width: 100%; border-collapse: collapse; font-size: var(--text-md); }
-.genui-grid th, .genui-grid td { padding: var(--space-4) var(--space-5); text-align: start; }
+.genui-grid th, .genui-grid td { padding: var(--space-4) var(--space-5); text-align: start; overflow-wrap: anywhere; }
 .genui-grid th { color: var(--muted); font-size: var(--text-xs); font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
 .genui-grid tr + tr td { border-top: 1px solid var(--border-soft); }
+.genui-grid .genui-cell-end { text-align: end; font-variant-numeric: tabular-nums; }
 .genui-list { display: flex; flex-direction: column; gap: var(--space-3); margin: 0; padding-inline-start: var(--space-8); font-size: var(--text-md); }
 .genui-steps { display: flex; flex-direction: column; gap: var(--space-5); }
 .genui-steps-title, .genui-facts-title { color: var(--muted); font-size: var(--text-xs); font-weight: 600; letter-spacing: .03em; text-transform: uppercase; }
@@ -2048,7 +2049,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .genui-fact-value { margin: 0; font-size: var(--text-md); font-weight: 600; font-variant-numeric: tabular-nums; }
 .genui-field { display: flex; flex-direction: column; gap: var(--space-3); }
 .genui-field-inline { flex-direction: row; align-items: center; }
-.genui-field-row { display: flex; align-items: center; gap: var(--space-5); }
+.genui-field-row { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-5); }
 .genui-field-label { color: var(--fg-2); font-size: var(--text-sm); }
 .genui-field-value { min-width: 64px; color: var(--fg); font-variant-numeric: tabular-nums; font-size: var(--text-sm); }
 .genui-slider { flex: 1; min-width: 0; accent-color: var(--accent); }
@@ -2057,6 +2058,124 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .genui-check { width: 18px; height: 18px; flex: none; accent-color: var(--accent); }
 .genui-action { align-self: flex-start; border: 0; border-radius: var(--radius-md); background: var(--accent); padding: var(--space-5) var(--space-7); color: var(--accent-on); font: inherit; font-size: var(--text-sm); font-weight: 500; transition: filter var(--motion-fast); }
 .genui-action:hover { filter: brightness(1.06); }
+.genui-action-neutral { background: var(--surface-warm); color: var(--fg); }
+.genui-action-danger { background: var(--danger); color: var(--accent-on); }
+.genui-align-start { align-items: flex-start; }
+.genui-align-center { align-items: center; }
+.genui-align-end { align-items: flex-end; }
+.genui-align-stretch { align-items: stretch; }
+.genui-wrap { flex-wrap: wrap; }
+
+/* Text the person reads: the three inline marks the teaching allows. */
+.genui-inline-code { border-radius: var(--radius-xs); background: var(--surface-warm); padding: 1px var(--space-2); font-family: var(--font-mono); font-size: .92em; }
+.genui-divider { height: 1px; border: 0; margin: 0; background: var(--border-soft); }
+.genui-stat-delta { font-size: var(--text-2xs); font-weight: 600; font-variant-numeric: tabular-nums; }
+.genui-step-when { margin-inline-start: auto; color: var(--muted); font: var(--text-2xs) var(--font-mono); white-space: nowrap; }
+
+/* State marks: a word in a tone, never a painted surface. */
+.genui-ink-good, .genui-ink-ok { color: var(--success); }
+.genui-ink-bad, .genui-ink-danger { color: var(--danger); }
+.genui-ink-warn { color: var(--warning); }
+.genui-ink-neutral { color: var(--muted); }
+.genui-badge { display: inline-flex; align-self: flex-start; align-items: center; gap: var(--space-2); border-radius: var(--radius-pill); background: var(--surface); padding: var(--space-1) var(--space-4); color: var(--fg-2); font-size: var(--text-2xs); font-weight: 600; letter-spacing: .02em; }
+.genui-badge.genui-tone-ok { background: color-mix(in oklab, var(--success) 14%, var(--surface)); color: var(--success); }
+.genui-badge.genui-tone-warn { background: color-mix(in oklab, var(--warning) 16%, var(--surface)); color: var(--warning); }
+.genui-badge.genui-tone-danger { background: color-mix(in oklab, var(--danger) 14%, var(--surface)); color: var(--danger); }
+
+/* One thing not to miss: a filled note, the tone carried by its mark. */
+.genui-callout { display: flex; align-items: flex-start; gap: var(--space-4); border-radius: var(--radius-lg); background: var(--surface-warm); padding: var(--space-5) var(--space-6); }
+.genui-callout-mark { display: grid; width: 18px; height: 18px; flex: none; place-items: center; border-radius: var(--radius-pill); background: var(--surface); color: var(--muted); font-size: var(--text-2xs); font-weight: 700; line-height: 1; }
+.genui-callout.genui-tone-info .genui-callout-mark { color: var(--secondary); }
+.genui-callout.genui-tone-ok .genui-callout-mark { color: var(--success); }
+.genui-callout.genui-tone-warn .genui-callout-mark { color: var(--warning); }
+.genui-callout.genui-tone-danger .genui-callout-mark { color: var(--danger); }
+.genui-callout-body { display: flex; min-width: 0; flex-direction: column; gap: var(--space-1); }
+.genui-callout-title { color: var(--fg); font-size: var(--text-sm); font-weight: 600; }
+.genui-callout-text { color: var(--fg-2); font-size: var(--text-sm); line-height: 1.5; }
+
+/* A series drawn as a shape, with the nearest point read by dragging across it. */
+.genui-chart { display: flex; min-width: 0; flex-direction: column; gap: var(--space-2); }
+.genui-chart-read { display: flex; min-height: 18px; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-5); color: var(--muted); font-size: var(--text-2xs); }
+.genui-chart-pair { display: inline-flex; align-items: center; gap: var(--space-2); }
+.genui-chart-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; }
+.genui-chart-label { color: var(--fg); font-weight: 600; }
+.genui-chart-number { color: var(--fg); font-variant-numeric: tabular-nums; font-weight: 600; }
+.genui-chart-svg { display: block; max-width: 100%; touch-action: pan-y; }
+.genui-chart-grid { stroke: var(--border-soft); stroke-width: 1; }
+.genui-chart-base { stroke: var(--border); stroke-width: 1; }
+.genui-chart-tick, .genui-chart-x { fill: var(--muted); font-family: var(--font-mono); font-size: var(--text-2xs); }
+.genui-chart-line { stroke-dasharray: 1; stroke-dashoffset: 1; animation: genui-draw var(--motion-slow) var(--ease-standard) forwards; }
+.genui-chart-area { fill-opacity: .14; opacity: 0; animation: genui-fade var(--motion-slow) var(--ease-standard) forwards; }
+.genui-chart-bar { transform-box: fill-box; transform-origin: bottom; animation: genui-grow var(--motion-slow) var(--ease-standard) backwards; }
+.genui-chart-mark line { stroke: var(--fg); stroke-width: 1; opacity: .28; }
+.genui-chart-mark circle { stroke: var(--surface); stroke-width: 2; }
+.genui-sparkline { display: block; overflow: visible; }
+
+/* One figure against a target. */
+.genui-progress { display: flex; flex-direction: column; gap: var(--space-3); }
+.genui-progress-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); font-size: var(--text-sm); }
+.genui-progress-label { color: var(--fg-2); }
+.genui-progress-value { color: var(--fg); font-variant-numeric: tabular-nums; font-weight: 600; }
+.genui-progress-track { height: 8px; overflow: hidden; border-radius: var(--radius-pill); background: var(--track); }
+.genui-progress-fill { width: 0; height: 100%; border-radius: inherit; background: var(--accent); animation: genui-fill var(--motion-slow) var(--ease-standard) forwards; transition: width var(--motion-slow) var(--ease-standard); }
+.genui-progress-ok .genui-progress-fill { background: var(--success); }
+.genui-progress-warn .genui-progress-fill { background: var(--warning); }
+.genui-progress-danger .genui-progress-fill { background: var(--danger); }
+.genui-progress-neutral .genui-progress-fill { background: var(--fg-2); }
+
+/* Parts read one at a time: a filled segmented control, never a scrolling row. */
+.genui-tabs { display: flex; flex-direction: column; gap: var(--space-5); }
+.genui-tablist { display: flex; align-self: flex-start; flex-wrap: wrap; gap: var(--space-1); border-radius: var(--radius-pill); background: var(--track); padding: var(--space-1); }
+.genui-tab { border: 0; border-radius: var(--radius-pill); background: transparent; padding: var(--space-3) var(--space-5); color: var(--muted); font: inherit; font-size: var(--text-xs); font-weight: 600; white-space: nowrap; transition: background var(--motion-base), color var(--motion-base); }
+.genui-tab.on { background: var(--surface); color: var(--fg); box-shadow: var(--shadow-sm); }
+.genui-tabpanel { display: flex; flex-direction: column; gap: var(--space-5); animation: genui-panel var(--motion-base) var(--ease-standard); }
+
+/* Sections folded under their own titles. */
+.genui-accordion { display: flex; flex-direction: column; }
+.genui-accordion-item + .genui-accordion-item { box-shadow: inset 0 1px 0 var(--border-soft); }
+.genui-accordion-head { display: flex; width: 100%; align-items: center; justify-content: space-between; gap: var(--space-5); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-4) var(--space-2); color: var(--fg); font: inherit; font-size: var(--text-sm); font-weight: 600; text-align: start; transition: background var(--motion-fast); }
+.genui-accordion-head:hover { background: var(--surface-warm); }
+.genui-accordion-body { display: grid; grid-template-rows: 0fr; transition: grid-template-rows var(--motion-base) var(--ease-standard); }
+.genui-accordion-item.open .genui-accordion-body { grid-template-rows: 1fr; }
+.genui-accordion-inner { display: flex; min-height: 0; flex-direction: column; gap: var(--space-5); overflow: hidden; }
+.genui-accordion-item.open .genui-accordion-inner { padding: var(--space-2) var(--space-2) var(--space-5); }
+
+/* Chips that hold several choices. */
+.genui-chips-field { border: 0; margin: 0; padding: 0; }
+.genui-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.genui-chip { border: 0; border-radius: var(--radius-pill); background: var(--surface); padding: var(--space-3) var(--space-5); color: var(--fg-2); font: inherit; font-size: var(--text-xs); font-weight: 500; transition: background var(--motion-fast), color var(--motion-fast); }
+.genui-chip.on { background: var(--accent); color: var(--accent-on); }
+
+.genui-date { min-height: var(--control-md); border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); padding: var(--space-3) var(--space-4); color: var(--fg); font: inherit; font-size: var(--text-sm); }
+.genui-code { margin: 0; overflow-wrap: anywhere; border-radius: var(--radius-lg); background: var(--surface-warm); padding: var(--space-5) var(--space-6); font-family: var(--font-mono); font-size: var(--text-sm); line-height: 1.55; white-space: pre-wrap; }
+
+/* A narrow widget stacks its table instead of scrolling sideways: every row
+   becomes the column's name and its cell, which is what a phone can read. */
+@container genui (max-width: 520px) {
+  .genui-grid thead { display: none; }
+  .genui-grid, .genui-grid tbody { display: block; }
+  .genui-grid tr { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-4) 0; }
+  .genui-grid tr + tr { box-shadow: inset 0 1px 0 var(--border-soft); }
+  .genui-grid td { display: flex; justify-content: space-between; gap: var(--space-5); padding: 0; overflow-wrap: anywhere; }
+  .genui-grid td::before { content: attr(data-label); color: var(--muted); font-size: var(--text-2xs); }
+  .genui-grid td.genui-cell-end { text-align: start; }
+}
+
+@keyframes genui-draw { to { stroke-dashoffset: 0; } }
+@keyframes genui-fade { to { opacity: 1; } }
+@keyframes genui-grow { from { transform: scaleY(0); opacity: .4; } to { transform: scaleY(1); opacity: 1; } }
+@keyframes genui-fill { to { width: var(--genui-fill); } }
+@keyframes genui-panel { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .genui-chart-line, .genui-chart-area, .genui-chart-bar, .genui-progress-fill,
+  .genui-tabpanel, .genui-tab, .genui-chip, .genui-accordion-head, .genui-action { animation: none; transition: none; }
+  .genui-chart-line { stroke-dashoffset: 0; }
+  .genui-chart-area { opacity: 1; }
+  .genui-chart-bar { opacity: 1; transform: none; }
+  .genui-progress-fill { width: var(--genui-fill); }
+  .genui-accordion-body, .genui-accordion-item.open .genui-accordion-body { transition: none; }
+}
 
 /* One heading for every full-screen view: the title on the left, its description
    beneath it, and the page's own action at the right end of the title line. Shared

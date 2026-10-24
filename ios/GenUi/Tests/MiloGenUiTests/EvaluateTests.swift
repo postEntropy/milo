@@ -20,6 +20,34 @@ final class EvaluateTests: XCTestCase {
         }
     }
 
+    func testTheSharedChartFixturesHold() throws {
+        for testCase in try Fixtures.load().chart {
+            XCTAssertEqual(
+                chartBounds(testCase.series, zero: testCase.zero ?? true),
+                ChartBounds(min: testCase.min, max: testCase.max),
+                testCase.name
+            )
+        }
+    }
+
+    func testTheInlineMarksAreReadAsRuns() {
+        XCTAssertEqual(
+            inlineRuns("a **bold** word, an *italic* one and `code`"),
+            [
+                InlineRun(text: "a ", style: .plain),
+                InlineRun(text: "bold", style: .bold),
+                InlineRun(text: " word, an ", style: .plain),
+                InlineRun(text: "italic", style: .italic),
+                InlineRun(text: " one and ", style: .plain),
+                InlineRun(text: "code", style: .code),
+            ]
+        )
+    }
+
+    func testAnUnclosedMarkStaysTheCharactersThatWroteIt() {
+        XCTAssertEqual(inlineRuns("2 * 3"), [InlineRun(text: "2 * 3", style: .plain)])
+    }
+
     func testANumberKeepsAWholeNumberWholeAndTheRestAtThePlacesAskedFor() {
         XCTAssertEqual(formatNumber(232), "232")
         XCTAssertEqual(formatNumber(12.345, decimals: 0), "12")
@@ -44,9 +72,18 @@ private struct TemplateCase: Decodable {
     let expected: String
 }
 
+private struct ChartCase: Decodable {
+    let name: String
+    let series: [[Double]]
+    let zero: Bool?
+    let min: Double
+    let max: Double
+}
+
 private struct Fixtures: Decodable {
     let formula: [FormulaCase]
     let template: [TemplateCase]
+    let chart: [ChartCase]
 
     /// The one file both languages read, found from this source's own path so the
     /// package does not carry a second copy of it.

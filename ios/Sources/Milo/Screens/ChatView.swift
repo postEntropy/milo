@@ -1,18 +1,18 @@
 import SwiftUI
 
-/// The frames, in the window's own space, of every box in the thread that scrolls sideways
-/// on its own — a code block, a table. A drag that begins inside one belongs to the box,
-/// not to the sessions drawer.
-struct ScrollBoxKey: PreferenceKey {
+/// The frames, in the window's own space, of every part of the thread that owns a sideways
+/// drag of its own — a code block, a table, a slider, a chart's scrub. A drag that begins
+/// inside one belongs to it, not to the sessions drawer.
+struct SidewaysDragKey: PreferenceKey {
     static var defaultValue: [CGRect] { [] }
     static func reduce(value: inout [CGRect], nextValue: () -> [CGRect]) {
         value.append(contentsOf: nextValue())
     }
 }
 
-/// Where those frames are kept: a plain reference, so a scroll that moves the boxes writes
-/// them without re-rendering the screen, which reads them only when a drag has ended.
-final class ScrollBoxes {
+/// Where those frames are kept: a plain reference, so a scroll that moves them writes them
+/// without re-rendering the screen, which reads them only when a drag has ended.
+final class SidewaysDrags {
     var frames: [CGRect] = []
 }
 
@@ -121,10 +121,10 @@ struct ChatView: View {
     /// scroll waits on — and whether that scroll has been made.
     @State private var sent: UUID?
     @State private var placed = true
-    /// The boxes in the thread that scroll sideways on their own — a code block, a table.
+    /// The parts of the thread that own a sideways drag — a code block, a table, a slider.
     /// Their frames ride up as a preference so a drag can be told where it began; held in
     /// a plain reference, so a scroll that moves them does not re-render the screen.
-    @State private var boxes = ScrollBoxes()
+    @State private var sideways = SidewaysDrags()
     @FocusState private var composing: Bool
     /// Whether a fresh session is being opened. The words on screen until the daemon answers
     /// are the session being left, so the bar's controls for that session — the new-session
@@ -303,7 +303,7 @@ struct ChatView: View {
                     Task { @MainActor in held = nil }
                 }
         )
-        .onPreferenceChange(ScrollBoxKey.self) { boxes.frames = $0 }
+        .onPreferenceChange(SidewaysDragKey.self) { sideways.frames = $0 }
         // The screen's own share, which is what the panel's width is a fraction of: measured
         // rather than assumed, so the same screen reads right whichever phone or tablet it is.
         .onGeometryChange(for: CGFloat.self) { proxy in
@@ -537,12 +537,12 @@ struct ChatView: View {
 
     /// Whether a sideways drag belongs to the card rather than to the thread: toward an edge
     /// that has something to show — the sessions on the right, the panel on the left — and from
-    /// outside any box that scrolls sideways of its own. A lid already up is the one the drag
-    /// answers, whichever way the hand goes; from rest, a routine's, task list's or project's
-    /// own page keeps the sessions out of it — a page is left to the platform's own edge swipe
-    /// for the way back, and a drag in the middle of one answers nothing.
+    /// outside anything that owns a sideways drag of its own. A lid already up is the one the
+    /// drag answers, whichever way the hand goes; from rest, a routine's, task list's or
+    /// project's own page keeps the sessions out of it — a page is left to the platform's own
+    /// edge swipe for the way back, and a drag in the middle of one answers nothing.
     private func claims(_ across: CGFloat, from start: CGPoint) -> Bool {
-        guard !boxes.frames.contains(where: { $0.contains(start) }) else { return false }
+        guard !sideways.frames.contains(where: { $0.contains(start) }) else { return false }
         if drawer || panelShown { return true }
         return across > 0 ? !((routines && routinePage) || (tasks && taskPage) || (work && workPage)) : hasPanel
     }

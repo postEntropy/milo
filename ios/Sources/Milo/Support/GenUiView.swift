@@ -1,5 +1,6 @@
-import SwiftUI
+import Foundation
 import MiloGenUi
+import SwiftUI
 
 /// A widget a turn drew, in this surface's own components. The server sends a tree of
 /// primitives and not code, which is what lets the phone draw it natively instead of
@@ -9,6 +10,9 @@ import MiloGenUi
 /// `stat` reads from it — so moving a slider updates the numbers beside it without a
 /// call to anyone. A `button` is the only way out of the widget: pressing it asks the
 /// conversation to send, which is the single door back to the model.
+///
+/// Nothing here scrolls sideways. A table that would not fit stacks its rows; a row of
+/// tabs wraps; the chart takes the width it is given and reads its points by drag.
 struct GenUiView: View {
     let widget: GenUi
     let onSend: (String) -> Void
@@ -17,6 +21,7 @@ struct GenUiView: View {
     /// What is typed into a `number` field, before it parses — so a half-typed value
     /// does not have to be a number for the field to hold it.
     @State private var typing: [String: String] = [:]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(widget: GenUi, onSend: @escaping (String) -> Void) {
         self.widget = widget
@@ -27,7 +32,7 @@ struct GenUiView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
             if let title = widget.title {
-                Text(title)
+                GenUiInline(text: title, values: values)
                     .font(.headline)
                     .foregroundStyle(MiloTheme.foreground)
             }
@@ -46,32 +51,34 @@ struct GenUiView: View {
         case .unknown:
             return AnyView(EmptyView())
         case .title(let text, let size):
-            return AnyView(Text(text).font(heading(size)).foregroundStyle(MiloTheme.foreground))
+            return AnyView(GenUiInline(text: text, values: values).font(heading(size)).foregroundStyle(MiloTheme.foreground))
         case .text(let text):
-            // Interpolated as the browser does it: a `{id}` shows the value its input
-            // carries at this moment.
-            return AnyView(Text(interpolate(text, values)).font(.body).foregroundStyle(MiloTheme.foreground))
-        case .box(let direction, let gap, let padding, let children):
-            return AnyView(box(direction: direction, gap: gap, padding: padding, children: children))
+            return AnyView(GenUiInline(text: text, values: values).font(.body).foregroundStyle(MiloTheme.foreground))
+        case .divider:
+            return AnyView(Rectangle().fill(MiloTheme.borderSoft).frame(height: 1))
+        case .callout(let callout):
+            return AnyView(calloutView(callout))
+        case .badge(let badge):
+            return AnyView(badgeView(badge))
+        case .chart(let chart):
+            // The chart reads a drag across itself; that drag is the chart's, not the drawer's.
+            return AnyView(GenUiChartView(chart: chart).marksSidewaysDrag())
+        case .box(let direction, let gap, let padding, let align, let wrap, let children):
+            return AnyView(box(direction: direction, gap: gap, padding: padding, align: align, wrap: wrap, children: children))
         case .list(let items):
-            return AnyView(
-                VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
-                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
-                        HStack(alignment: .firstTextBaseline, spacing: MiloTheme.Space.two) {
-                            Text("•").foregroundStyle(MiloTheme.muted)
-                            Text(interpolate(item, values)).font(.body).foregroundStyle(MiloTheme.foreground)
-                        }
-                    }
-                }
-            )
+            return AnyView(list(items))
         case .steps(let title, let entries):
             return AnyView(steps(title: title, entries: entries))
         case .facts(let title, let entries):
             return AnyView(facts(title: title, entries: entries))
-        case .table(let columns, let rows):
-            return AnyView(table(columns: columns, rows: rows))
+        case .code(let code):
+            return AnyView(codeView(code))
+        case .table(let columns, let rows, let align):
+            return AnyView(table(columns: columns, rows: rows, align: align))
         case .stat(let stat):
             return AnyView(statView(stat))
+        case .progress(let progress):
+            return AnyView(progressView(progress))
         case .slider(let field):
             return AnyView(sliderView(field))
         case .number(let field):
@@ -80,6 +87,34 @@ struct GenUiView: View {
             return AnyView(checkboxView(field))
         case .select(let field):
             return AnyView(selectView(field))
+        case .multiselect(let field):
+            return AnyView(
+                GenUiMultiSelectView(
+                    id: field.id,
+                    label: field.label,
+                    options: field.options,
+                    initial: field.values,
+                    set: { values[$0] = $1 }
+                )
+            )
+        case .date(let field):
+            return AnyView(dateView(field))
+        case .dateRange(let field):
+            return AnyView(
+                GenUiDateRangeView(
+                    id: field.id,
+                    label: field.label,
+                    from: field.from,
+                    to: field.to,
+                    minDay: field.min,
+                    maxDay: field.max,
+                    set: { values[$0] = $1 }
+                )
+            )
+        case .tabs(let tabs):
+            return AnyView(GenUiTabsView(tabs: tabs.tabs, render: { self.node($0) }))
+        case .accordion(let accordion):
+            return AnyView(GenUiAccordionView(items: accordion.items, render: { self.node($0) }))
         case .button(let button):
             return AnyView(actionView(button))
         }
@@ -87,19 +122,52 @@ struct GenUiView: View {
 
     /// A row or a column, on the catalog's own 4px steps — the same scale the rest of
     /// the interface is built on, so a generated box lines up with everything else.
-    private func box(direction: String?, gap: Int?, padding: Int?, children: [GenUiNode]) -> AnyView {
+    /// A row that may wrap uses a flow instead of an `HStack`, which is what keeps a
+    /// strip of stats on the screen instead of off its edge.
+    private func box(direction: String?, gap: Int?, padding: Int?, align: String?, wrap: Bool, children: [GenUiNode]) -> AnyView {
         let spacing = MiloTheme.Space.one * CGFloat(step(gap))
-        let layout = direction == "row"
-            ? AnyLayout(HStackLayout(alignment: .top, spacing: spacing))
-            : AnyLayout(VStackLayout(alignment: .leading, spacing: spacing))
-        return AnyView(
-            layout {
-                ForEach(Array(children.enumerated()), id: \.offset) { _, child in
-                    node(child)
+        let content: AnyView
+        if direction == "row" && wrap {
+            content = AnyView(
+                GenUiFlow(spacing: spacing) {
+                    ForEach(Array(children.enumerated()), id: \.offset) { _, child in
+                        node(child)
+                    }
+                }
+            )
+        } else if direction == "row" {
+            let alignment: VerticalAlignment = align == "center" ? .center : align == "end" ? .bottom : .top
+            content = AnyView(
+                HStack(alignment: alignment, spacing: spacing) {
+                    ForEach(Array(children.enumerated()), id: \.offset) { _, child in
+                        node(child)
+                    }
+                }
+            )
+        } else {
+            let leading: HorizontalAlignment = align == "center" ? .center : align == "end" ? .trailing : .leading
+            content = AnyView(
+                VStack(alignment: leading, spacing: spacing) {
+                    ForEach(Array(children.enumerated()), id: \.offset) { _, child in
+                        node(child)
+                    }
+                }
+            )
+        }
+        return AnyView(content.padding(MiloTheme.Space.one * CGFloat(step(padding ?? 0))))
+    }
+
+    private func list(_ items: [String]) -> some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                HStack(alignment: .firstTextBaseline, spacing: MiloTheme.Space.two) {
+                    Text("•").foregroundStyle(MiloTheme.muted)
+                    GenUiInline(text: item, values: values)
+                        .font(.body)
+                        .foregroundStyle(MiloTheme.foreground)
                 }
             }
-            .padding(MiloTheme.Space.one * CGFloat(step(padding ?? 0)))
-        )
+        }
     }
 
     private func steps(title: String?, entries: [GenUiNode.Step]) -> some View {
@@ -114,14 +182,20 @@ struct GenUiView: View {
                         .foregroundStyle(MiloTheme.muted)
                         .frame(width: 16, alignment: .trailing)
                     VStack(alignment: .leading, spacing: 2) {
-                        Text(entry.title)
+                        GenUiInline(text: entry.title, values: values)
                             .font(.body)
                             .foregroundStyle(MiloTheme.foreground)
                         if let detail = entry.detail {
-                            Text(detail)
+                            GenUiInline(text: detail, values: values)
                                 .font(MiloTheme.Text.small)
                                 .foregroundStyle(MiloTheme.muted)
                         }
+                    }
+                    if let when = entry.when {
+                        Spacer(minLength: MiloTheme.Space.two)
+                        Text(when)
+                            .font(MiloTheme.Text.meta.monospacedDigit())
+                            .foregroundStyle(MiloTheme.muted)
                     }
                 }
             }
@@ -135,43 +209,136 @@ struct GenUiView: View {
             }
             ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
                 HStack(alignment: .firstTextBaseline, spacing: MiloTheme.Space.three) {
-                    Text(entry.label)
+                    GenUiInline(text: entry.label, values: values)
                         .font(MiloTheme.Text.small)
                         .foregroundStyle(MiloTheme.muted)
                     Spacer(minLength: MiloTheme.Space.three)
-                    Text(entry.value)
+                    GenUiInline(text: entry.value, values: values)
                         .font(MiloTheme.Text.base.weight(.semibold))
-                        .foregroundStyle(MiloTheme.foreground)
+                        .foregroundStyle(entry.tone.map(tone) ?? MiloTheme.foreground)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
         }
     }
 
-    /// A table is wider than a phone, so it scrolls sideways rather than squeezing its
-    /// columns into a column of their own.
-    private func table(columns: [String], rows: [[String]]) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            Grid(alignment: .leading, horizontalSpacing: MiloTheme.Space.five, verticalSpacing: MiloTheme.Space.two) {
-                GridRow {
-                    ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
-                        Text(column)
-                            .font(MiloTheme.Text.small.weight(.semibold))
-                            .foregroundStyle(MiloTheme.muted)
-                    }
+    /// A table is as wide as the column it was given. It never asks for a sideways
+    /// scroll: three short columns fit as a grid, and anything wider (or with a cell
+    /// that needs a line) becomes a stack of rows, each with its column's name.
+    private func table(columns: [String], rows: [[String]], align: [String]) -> some View {
+        let stacked = columns.count > 3 || rows.contains { $0.contains { $0.count > 24 } }
+        return Group {
+            if stacked {
+                stackedTable(columns: columns, rows: rows)
+            } else {
+                gridTable(columns: columns, rows: rows, align: align)
+            }
+        }
+    }
+
+    private func gridTable(columns: [String], rows: [[String]], align: [String]) -> some View {
+        Grid(alignment: .leading, horizontalSpacing: MiloTheme.Space.four, verticalSpacing: MiloTheme.Space.two) {
+            GridRow {
+                ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
+                    Text(column)
+                        .font(MiloTheme.Text.small.weight(.semibold))
+                        .foregroundStyle(MiloTheme.muted)
+                        .lineLimit(1)
                 }
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                    GridRow {
-                        ForEach(Array(row.enumerated()), id: \.offset) { _, cell in
-                            Text(cell)
-                                .font(MiloTheme.Text.base)
-                                .foregroundStyle(MiloTheme.foreground)
-                        }
+            }
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                GridRow {
+                    ForEach(Array(row.enumerated()), id: \.offset) { index, cell in
+                        let end = endsAligned(align, index, cell)
+                        GenUiInline(text: cell, values: values)
+                            .font(MiloTheme.Text.base)
+                            .foregroundStyle(MiloTheme.foreground)
+                            .multilineTextAlignment(end ? .trailing : .leading)
+                            .frame(maxWidth: .infinity, alignment: end ? .trailing : .leading)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                 }
             }
-            .padding(.vertical, MiloTheme.Space.one)
         }
-        .marksScrollBox()
+    }
+
+    private func stackedTable(columns: [String], rows: [[String]]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { rowIndex, row in
+                VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                    if let first = row.first, !first.isEmpty {
+                        GenUiInline(text: first, values: values)
+                            .font(MiloTheme.Text.base.weight(.semibold))
+                            .foregroundStyle(MiloTheme.foreground)
+                    }
+                    ForEach(Array(columns.enumerated()), id: \.offset) { index, name in
+                        if index > 0 || row.first == nil {
+                            HStack(alignment: .firstTextBaseline, spacing: MiloTheme.Space.three) {
+                                if !name.isEmpty {
+                                    Text(name)
+                                        .font(MiloTheme.Text.small)
+                                        .foregroundStyle(MiloTheme.muted)
+                                }
+                                Spacer(minLength: MiloTheme.Space.three)
+                                GenUiInline(text: row.indices.contains(index) ? row[index] : "", values: values)
+                                    .font(MiloTheme.Text.base)
+                                    .foregroundStyle(MiloTheme.foreground)
+                                    .multilineTextAlignment(.trailing)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, MiloTheme.Space.three)
+                if rowIndex < rows.count - 1 {
+                    Rectangle().fill(MiloTheme.borderSoft).frame(height: 1)
+                }
+            }
+        }
+    }
+
+    private func calloutView(_ callout: GenUiNode.Callout) -> some View {
+        HStack(alignment: .top, spacing: MiloTheme.Space.three) {
+            Text(calloutMark(callout.tone))
+                .font(MiloTheme.Text.meta.weight(.bold))
+                .foregroundStyle(tone(callout.tone))
+                .frame(width: 18, height: 18)
+                .background(tone(callout.tone).opacity(0.14), in: Circle())
+            VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                if let title = callout.title {
+                    GenUiInline(text: title, values: values)
+                        .font(MiloTheme.Text.base.weight(.semibold))
+                        .foregroundStyle(MiloTheme.foreground)
+                }
+                GenUiInline(text: callout.text, values: values)
+                    .font(MiloTheme.Text.base)
+                    .foregroundStyle(MiloTheme.foreground2)
+            }
+        }
+        .padding(MiloTheme.Space.four)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+    }
+
+    private func badgeView(_ badge: GenUiNode.Badge) -> some View {
+        Text(badge.label)
+            .font(MiloTheme.Text.meta.weight(.semibold))
+            .foregroundStyle(tone(badge.tone))
+            .padding(.horizontal, MiloTheme.Space.three)
+            .padding(.vertical, MiloTheme.Space.one)
+            .background(tone(badge.tone).opacity(0.14), in: Capsule())
+    }
+
+    private func codeView(_ code: GenUiNode.Code) -> some View {
+        Text(coloured(code.text, language: code.language))
+            .font(MiloTheme.Text.mono)
+            .textSelection(.enabled)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(MiloTheme.Space.four)
+            .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
     }
 
     // MARK: - The controls
@@ -183,13 +350,57 @@ struct GenUiView: View {
         let shown = value.map {
             "\(stat.prefix ?? "")\(formatNumber($0, decimals: stat.decimals))\(stat.suffix ?? "")"
         } ?? "—"
+        let delta = stat.delta.flatMap { evaluateFormula($0, values) }
         return VStack(alignment: .leading, spacing: 2) {
             Text(shown)
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(MiloTheme.foreground)
+                .contentTransition(.numericText())
+                .animation(reduceMotion ? nil : SettlesIn.motion, value: shown)
             Text(stat.label)
                 .font(MiloTheme.Text.small)
                 .foregroundStyle(MiloTheme.muted)
+            if let delta {
+                Text("\(delta > 0 ? "+" : delta < 0 ? "−" : "")\(formatNumber(abs(delta)))\(stat.deltaSuffix ?? "")")
+                    .font(MiloTheme.Text.meta.weight(.semibold))
+                    .foregroundStyle(deltaTone(stat.deltaTone))
+                    .contentTransition(.numericText())
+                    .animation(reduceMotion ? nil : SettlesIn.motion, value: delta)
+            }
+            if let trend = stat.trend, trend.count > 1 {
+                GenUiSparkline(values: trend, tone: stat.deltaTone)
+            }
+        }
+    }
+
+    private func progressView(_ progress: GenUiNode.Progress) -> some View {
+        let value = evaluateFormula(progress.formula, values)
+        let maximum = progress.max ?? 100
+        let ratio = value.map { min(1, max(0, $0 / maximum)) } ?? 0
+        return VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            HStack {
+                if let label = progress.label {
+                    Text(label)
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.foreground2)
+                }
+                Spacer(minLength: MiloTheme.Space.two)
+                Text(value.map { "\(formatNumber($0))\(progress.suffix ?? "")" } ?? "—")
+                    .font(MiloTheme.Text.base.weight(.semibold))
+                    .foregroundStyle(MiloTheme.foreground)
+                    .monospacedDigit()
+                    .contentTransition(.numericText())
+            }
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(MiloTheme.surfaceWarm)
+                    Capsule()
+                        .fill(progressColor(progress.tone))
+                        .frame(width: geometry.size.width * ratio)
+                }
+            }
+            .frame(height: 8)
+            .animation(reduceMotion ? nil : SettlesIn.motion, value: ratio)
         }
     }
 
@@ -208,6 +419,8 @@ struct GenUiView: View {
             }
             Slider(value: numberBinding(field.id, fallback: field.value), in: field.min...upper, step: step)
                 .tint(MiloTheme.accent)
+                // Dragging the knob sideways must move the value, never the sessions drawer.
+                .marksSidewaysDrag()
         }
     }
 
@@ -240,6 +453,7 @@ struct GenUiView: View {
             Text(field.label).font(MiloTheme.Text.base).foregroundStyle(MiloTheme.foreground)
         }
         .tint(MiloTheme.accent)
+        .marksSidewaysDrag()
     }
 
     private func selectView(_ field: GenUiNode.Select) -> some View {
@@ -257,6 +471,21 @@ struct GenUiView: View {
         }
     }
 
+    private func dateView(_ field: GenUiNode.DateField) -> some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            Text(field.label).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.muted)
+            DatePicker(
+                "",
+                selection: dayBinding(field.id, fallback: field.value),
+                in: dayRange(field.min, field.max),
+                displayedComponents: .date
+            )
+            .labelsHidden()
+            .datePickerStyle(.compact)
+            .tint(MiloTheme.accent)
+        }
+    }
+
     /// The one door back to the model: the message is the model's own, with the state
     /// the person set filled in. The control hugs its label, as the browser draws it —
     /// a widget with a row of buttons must not read as a stack of full-width bars.
@@ -266,10 +495,10 @@ struct GenUiView: View {
         } label: {
             Text(button.label)
                 .font(MiloTheme.Text.base)
-                .foregroundStyle(MiloTheme.accentOn)
+                .foregroundStyle(button.tone == "neutral" ? MiloTheme.foreground : MiloTheme.accentOn)
                 .padding(.horizontal, MiloTheme.Space.five)
                 .frame(height: 44)
-                .background(MiloTheme.accent, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                .background(actionFill(button.tone), in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
         }
         .buttonStyle(PressableStyle())
     }
@@ -313,6 +542,24 @@ struct GenUiView: View {
         )
     }
 
+    private func textValue(_ id: String, _ fallback: String) -> String {
+        if case .text(let value)? = values[id] { return value }
+        return fallback
+    }
+
+    private func dayBinding(_ id: String, fallback: String) -> Binding<Date> {
+        Binding(
+            get: { parseDay(textValue(id, fallback)) ?? Date() },
+            set: { values[id] = .text(formatDay($0)) }
+        )
+    }
+
+    private func dayRange(_ from: String?, _ to: String?) -> ClosedRange<Date> {
+        let low = from.flatMap(parseDay) ?? Date.distantPast
+        let high = to.flatMap(parseDay) ?? Date.distantFuture
+        return low <= high ? low...high : low...low
+    }
+
     private func formatted(_ prefix: String?, _ value: Double, _ suffix: String?) -> String {
         "\(prefix ?? "")\(formatNumber(value))\(suffix ?? "")"
     }
@@ -332,8 +579,12 @@ struct GenUiView: View {
 
     private static func collect(_ node: GenUiNode, into values: inout GenUiValues) {
         switch node {
-        case .box(_, _, _, let children):
+        case .box(_, _, _, _, _, let children):
             for child in children { collect(child, into: &values) }
+        case .tabs(let tabs):
+            for tab in tabs.tabs { for child in tab.children { collect(child, into: &values) } }
+        case .accordion(let accordion):
+            for item in accordion.items { for child in item.children { collect(child, into: &values) } }
         case .slider(let field):
             values[field.id] = .number(field.value)
         case .number(let field):
@@ -342,6 +593,12 @@ struct GenUiView: View {
             values[field.id] = .flag(field.value ?? false)
         case .select(let field):
             values[field.id] = .text(field.value)
+        case .multiselect(let field):
+            values[field.id] = .text(field.values.joined(separator: ", "))
+        case .date(let field):
+            values[field.id] = .text(field.value)
+        case .dateRange(let field):
+            values[field.id] = .text("\(field.from) – \(field.to)")
         default:
             break
         }
@@ -362,4 +619,317 @@ struct GenUiView: View {
     private func step(_ value: Int?) -> Int {
         min(max(value ?? 0, 0), 4)
     }
+
+    // MARK: - Tones
+
+    private func tone(_ name: String?) -> Color {
+        switch name {
+        case "ok", "good": return MiloTheme.success
+        case "warn": return MiloTheme.warning
+        case "danger", "bad": return MiloTheme.danger
+        case "info": return MiloTheme.secondary
+        default: return MiloTheme.muted
+        }
+    }
+
+    private func deltaTone(_ name: String?) -> Color { tone(name) }
+
+    private func progressColor(_ name: String?) -> Color {
+        switch name {
+        case "ok": return MiloTheme.success
+        case "warn": return MiloTheme.warning
+        case "danger": return MiloTheme.danger
+        case "neutral": return MiloTheme.foreground2
+        default: return MiloTheme.accent
+        }
+    }
+
+    private func actionFill(_ name: String?) -> Color {
+        switch name {
+        case "neutral": return MiloTheme.surfaceWarm
+        case "danger": return MiloTheme.danger
+        default: return MiloTheme.accent
+        }
+    }
+
+    private func endsAligned(_ align: [String], _ index: Int, _ cell: String) -> Bool {
+        if align.indices.contains(index) { return align[index] == "end" }
+        let trimmed = cell.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return false }
+        return trimmed.range(of: #"^-?[$€£]?[\d.,]+\s*[%A-Za-z]{0,3}$"#, options: .regularExpression) != nil
+    }
+
+    private func calloutMark(_ name: String?) -> String {
+        switch name {
+        case "ok": return "✓"
+        case "warn", "danger": return "!"
+        default: return "i"
+        }
+    }
+}
+
+// MARK: - Pieces that carry state of their own
+
+/// Several choices, in chips that wrap instead of running off the edge.
+private struct GenUiMultiSelectView: View {
+    let id: String
+    let label: String
+    let options: [String]
+    let set: (String, GenUiValue) -> Void
+
+    @State private var chosen: [String]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(id: String, label: String, options: [String], initial: [String], set: @escaping (String, GenUiValue) -> Void) {
+        self.id = id
+        self.label = label
+        self.options = options
+        self.set = set
+        _chosen = State(initialValue: initial)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            Text(label).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.muted)
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 84), spacing: MiloTheme.Space.two)],
+                alignment: .leading,
+                spacing: MiloTheme.Space.two
+            ) {
+                ForEach(options, id: \.self) { option in
+                    let on = chosen.contains(option)
+                    Button { toggle(option) } label: {
+                        Text(option)
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(on ? MiloTheme.accentOn : MiloTheme.foreground2)
+                            .padding(.horizontal, MiloTheme.Space.four)
+                            .frame(maxWidth: .infinity, minHeight: 32)
+                            .background(on ? MiloTheme.accent : MiloTheme.surfaceWarm, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+        .animation(reduceMotion ? nil : SettlesIn.motion, value: chosen)
+    }
+
+    private func toggle(_ option: String) {
+        chosen = chosen.contains(option) ? chosen.filter { $0 != option } : chosen + [option]
+        set(id, .text(chosen.joined(separator: ", ")))
+    }
+}
+
+/// Parts read one at a time, under a row of labels that wraps rather than scrolls.
+private struct GenUiTabsView: View {
+    let tabs: [GenUiNode.Tab]
+    let render: (GenUiNode) -> AnyView
+
+    @State private var active = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.five) {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 84), spacing: MiloTheme.Space.two)],
+                alignment: .leading,
+                spacing: MiloTheme.Space.two
+            ) {
+                ForEach(Array(tabs.enumerated()), id: \.offset) { index, tab in
+                    let on = index == active
+                    Button { withAnimation(reduceMotion ? nil : SettlesIn.motion) { active = index } } label: {
+                        Text(tab.label)
+                            .font(MiloTheme.Text.small.weight(.semibold))
+                            .foregroundStyle(on ? MiloTheme.foreground : MiloTheme.muted)
+                            .padding(.horizontal, MiloTheme.Space.four)
+                            .frame(maxWidth: .infinity, minHeight: 32)
+                            .background(on ? MiloTheme.surfaceRaised : MiloTheme.surfaceWarm, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            VStack(alignment: .leading, spacing: MiloTheme.Space.five) {
+                ForEach(Array(tabs[active].children.enumerated()), id: \.offset) { _, child in
+                    render(child)
+                }
+            }
+            .id(active)
+            .transition(.opacity)
+            .animation(reduceMotion ? nil : SettlesIn.motion, value: active)
+        }
+    }
+}
+
+/// Sections folded under their own titles. The title row is the control — no chevron,
+/// no plus sign: the whole width is the affordance.
+private struct GenUiAccordionView: View {
+    let items: [GenUiNode.AccordionItem]
+    let render: (GenUiNode) -> AnyView
+
+    @State private var open: Set<Int>
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(items: [GenUiNode.AccordionItem], render: @escaping (GenUiNode) -> AnyView) {
+        self.items = items
+        self.render = render
+        let asked = items.indices.filter { items[$0].open == true }
+        _open = State(initialValue: Set(asked.isEmpty ? [0] : asked))
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(items.enumerated()), id: \.offset) { index, item in
+                VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                    Button {
+                        withAnimation(reduceMotion ? nil : SettlesIn.motion) { toggle(index) }
+                    } label: {
+                        Text(item.title)
+                            .font(MiloTheme.Text.base.weight(.semibold))
+                            .foregroundStyle(MiloTheme.foreground)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    if open.contains(index) {
+                        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                            ForEach(Array(item.children.enumerated()), id: \.offset) { _, child in
+                                render(child)
+                            }
+                        }
+                        .padding(.bottom, MiloTheme.Space.three)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                    }
+                }
+                .padding(.vertical, MiloTheme.Space.three)
+                if index < items.count - 1 {
+                    Rectangle().fill(MiloTheme.borderSoft).frame(height: 1)
+                }
+            }
+        }
+    }
+
+    private func toggle(_ index: Int) {
+        if open.contains(index) {
+            open.remove(index)
+        } else {
+            open.insert(index)
+        }
+    }
+}
+
+/// A span of days: two compact pickers beside each other, and stacked when the column
+/// is too narrow for both.
+private struct GenUiDateRangeView: View {
+    let id: String
+    let label: String
+    let minDay: String?
+    let maxDay: String?
+    let set: (String, GenUiValue) -> Void
+
+    @State private var start: Date
+    @State private var end: Date
+
+    init(id: String, label: String, from: String, to: String, minDay: String?, maxDay: String?, set: @escaping (String, GenUiValue) -> Void) {
+        self.id = id
+        self.label = label
+        self.minDay = minDay
+        self.maxDay = maxDay
+        self.set = set
+        _start = State(initialValue: parseDay(from) ?? Date())
+        _end = State(initialValue: parseDay(to) ?? Date())
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            Text(label).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.muted)
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: MiloTheme.Space.two) {
+                    picker($start)
+                    Text("–").foregroundStyle(MiloTheme.muted)
+                    picker($end)
+                }
+                VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                    picker($start)
+                    picker($end)
+                }
+            }
+        }
+        .onChange(of: start) { _, _ in write() }
+        .onChange(of: end) { _, _ in write() }
+    }
+
+    private func picker(_ value: Binding<Date>) -> some View {
+        DatePicker("", selection: value, in: range, displayedComponents: .date)
+            .labelsHidden()
+            .datePickerStyle(.compact)
+            .tint(MiloTheme.accent)
+    }
+
+    private var range: ClosedRange<Date> {
+        let low = minDay.flatMap(parseDay) ?? Date.distantPast
+        let high = maxDay.flatMap(parseDay) ?? Date.distantFuture
+        return low <= high ? low...high : low...low
+    }
+
+    private func write() {
+        set(id, .text("\(formatDay(start)) – \(formatDay(end))"))
+    }
+}
+
+/// A row that wraps its children onto the next line instead of running past the edge.
+private struct GenUiFlow: Layout {
+    let spacing: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        var x: CGFloat = 0
+        var y: CGFloat = 0
+        var line: CGFloat = 0
+        var widest: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > 0 && x + size.width > width {
+                x = 0
+                y += line + spacing
+                line = 0
+            }
+            x += size.width + spacing
+            line = max(line, size.height)
+            widest = max(widest, x - spacing)
+        }
+        return CGSize(width: proposal.width ?? widest, height: y + line)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var x = bounds.minX
+        var y = bounds.minY
+        var line: CGFloat = 0
+        for subview in subviews {
+            let size = subview.sizeThatFits(.unspecified)
+            if x > bounds.minX && x + size.width > bounds.maxX {
+                x = bounds.minX
+                y += line + spacing
+                line = 0
+            }
+            subview.place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+            x += size.width + spacing
+            line = max(line, size.height)
+        }
+    }
+}
+
+/// A day written `YYYY-MM-DD`, read on the machine's own calendar.
+private func parseDay(_ text: String) -> Date? {
+    let parts = text.split(separator: "-").compactMap { Int($0) }
+    guard parts.count == 3 else { return nil }
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = .current
+    return calendar.date(from: DateComponents(year: parts[0], month: parts[1], day: parts[2]))
+}
+
+/// A day back as `YYYY-MM-DD`, the one shape the catalog accepts.
+private func formatDay(_ date: Date) -> String {
+    var calendar = Calendar(identifier: .gregorian)
+    calendar.timeZone = .current
+    let parts = calendar.dateComponents([.year, .month, .day], from: date)
+    return String(format: "%04d-%02d-%02d", parts.year ?? 0, parts.month ?? 0, parts.day ?? 0)
 }

@@ -169,7 +169,7 @@ struct Prose: View {
             .padding(.vertical, MiloTheme.Space.one)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .marksScrollBox()
+        .marksSidewaysDrag()
     }
 
     /// A run of words, drawn the one way where this prose can be quoted and the other way
@@ -554,24 +554,24 @@ struct Prose: View {
     }
 }
 
-/// Marks a view as a box that scrolls sideways on its own, publishing its frame so a drag
-/// on the screen can be told whether it began inside one — the drag then belongs to the box.
-private struct ScrollBoxMark: ViewModifier {
+/// Marks a view as something that owns a sideways drag of its own, publishing its frame so
+/// a drag on the screen can be told whether it began inside it — the drag then belongs to it.
+private struct SidewaysDragMark: ViewModifier {
     func body(content: Content) -> some View {
         content.background {
             GeometryReader { geo in
-                Color.clear.preference(key: ScrollBoxKey.self, value: [geo.frame(in: .global)])
+                Color.clear.preference(key: SidewaysDragKey.self, value: [geo.frame(in: .global)])
             }
         }
     }
 }
 
 extension View {
-    /// Marks a view as a box that scrolls sideways on its own, so the screen-wide drag that
+    /// Marks a view as something that owns a sideways drag, so the screen-wide drag that
     /// opens the sessions drawer stands down where the finger began inside one. Every box
-    /// that scrolls sideways wears this — a code block, a table, a generated widget's table,
-    /// a tool's output — or the two scrolls fight over the same drag.
-    func marksScrollBox() -> some View { modifier(ScrollBoxMark()) }
+    /// that scrolls sideways and every control dragged sideways wears it — a code block, a
+    /// table, a slider, a chart's scrub — or the two drags fight over the same gesture.
+    func marksSidewaysDrag() -> some View { modifier(SidewaysDragMark()) }
 }
 
 /// A fenced block: a head that says what the fence called itself with the control that copies
@@ -620,7 +620,7 @@ struct CodeBlock: View {
             RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
                 .stroke(MiloTheme.borderSoft, lineWidth: 1)
         )
-        .marksScrollBox()
+        .marksSidewaysDrag()
         // The tap that says the words are on the clipboard. It fires on the copy itself and not
         // again when the checkmark lets go two seconds later, which a bare flag would do.
         .sensoryFeedback(.success, trigger: copied, condition: { _, copied in copied })

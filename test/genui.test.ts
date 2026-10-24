@@ -82,6 +82,99 @@ describe('the generated interface schema', () => {
     expect(table?.kind === 'table' && table.rows[0]?.[1]).toBe(cut)
     expect(list?.kind === 'list' && list.items[0]).toBe(cut)
   })
+
+  it('accepts the shapes a dashboard is made of', () => {
+    const result = genUiSchema.safeParse({
+      title: 'Q3 by region',
+      tree: {
+        kind: 'box',
+        direction: 'column',
+        gap: 3,
+        align: 'stretch',
+        children: [
+          { kind: 'facts', entries: [{ label: 'Status', value: 'Ahead', tone: 'ok' }] },
+          {
+            kind: 'chart',
+            type: 'bar',
+            labels: ['North', 'South'],
+            series: [{ label: 'Revenue', values: [420, 310] }],
+            prefix: '$',
+            suffix: 'k',
+          },
+          { kind: 'progress', label: 'To target', formula: '86', max: 100, suffix: '%', tone: 'ok' },
+          { kind: 'badge', label: 'Draft numbers', tone: 'warn' },
+          { kind: 'callout', tone: 'warn', title: 'Before you send', text: 'The figures are provisional.' },
+          { kind: 'divider' },
+          {
+            kind: 'stat',
+            label: 'Growth',
+            formula: 'seats * 2',
+            delta: '2',
+            deltaSuffix: '%',
+            deltaTone: 'good',
+            trend: [1, 2, 3],
+          },
+          { kind: 'table', columns: ['Region', 'Revenue'], rows: [['North', '$420k']], align: ['start', 'end'] },
+          { kind: 'code', language: 'ts', text: 'const total = regions.reduce(sum)' },
+        ],
+      },
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('accepts the inputs and the parts an answer is read one at a time', () => {
+    const result = genUiSchema.safeParse({
+      tree: {
+        kind: 'box',
+        children: [
+          {
+            kind: 'tabs',
+            tabs: [
+              {
+                label: 'Plan',
+                children: [
+                  { kind: 'multiselect', id: 'days', label: 'Days', options: ['Mon', 'Tue'], values: ['Mon'] },
+                ],
+              },
+              { label: 'Dates', children: [{ kind: 'date', id: 'day', label: 'Day', value: '2026-10-24' }] },
+            ],
+          },
+          {
+            kind: 'accordion',
+            items: [
+              { title: 'Budget', children: [{ kind: 'daterange', id: 'span', label: 'Span', from: '2026-10-01', to: '2026-10-07' }] },
+            ],
+          },
+        ],
+      },
+    })
+    expect(result.success).toBe(true)
+  })
+
+  it('refuses a chart whose series does not have one value per label', () => {
+    const result = genUiSchema.safeParse({
+      tree: {
+        kind: 'chart',
+        type: 'line',
+        labels: ['North', 'South'],
+        series: [{ values: [420] }],
+      },
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it('refuses a day that is not written YYYY-MM-DD', () => {
+    expect(genUiSchema.safeParse({ tree: { kind: 'date', id: 'day', label: 'Day', value: '24/10/2026' } }).success).toBe(false)
+    expect(genUiSchema.safeParse({ tree: { kind: 'daterange', id: 'span', label: 'Span', from: '2026-10-01', to: 'soon' } }).success).toBe(false)
+  })
+
+  it('refuses a single tab, an empty accordion, and a program that is a file', () => {
+    expect(
+      genUiSchema.safeParse({ tree: { kind: 'tabs', tabs: [{ label: 'Only', children: [{ kind: 'text', text: 'one' }] }] } }).success,
+    ).toBe(false)
+    expect(genUiSchema.safeParse({ tree: { kind: 'accordion', items: [] } }).success).toBe(false)
+    expect(genUiSchema.safeParse({ tree: { kind: 'code', text: 'x'.repeat(4001) } }).success).toBe(false)
+  })
 })
 
 describe('reading a widget back out of a tool call', () => {

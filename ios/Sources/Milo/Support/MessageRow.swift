@@ -787,7 +787,7 @@ struct ToolRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
-        .marksScrollBox()
+        .marksSidewaysDrag()
         .padding(.leading, 22)
     }
 
@@ -804,7 +804,7 @@ struct ToolRow: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
-        .marksScrollBox()
+        .marksSidewaysDrag()
         .padding(.leading, 22)
     }
 
