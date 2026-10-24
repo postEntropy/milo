@@ -100,8 +100,8 @@ function Node({
   if (node.kind === 'timeline') {
     const keys = uniqueKeys(node.entries.map((entry) => `${entry.when}:${entry.title}:${entry.detail ?? ''}`))
     return <ol className="genui-timeline">{node.entries.map((entry, index) => <li className={`genui-timeline-entry genui-tone-${entry.tone ?? 'neutral'}`} key={keys[index]}>
-      <span className="genui-timeline-when">{entry.when}</span><span className="genui-timeline-mark" aria-hidden="true" />
-      <span className="genui-timeline-body"><strong>{entry.title}</strong>{entry.detail && <span className="genui-timeline-detail">{entry.detail}</span>}</span>
+      <span className="genui-timeline-mark" aria-hidden="true" />
+      <span className="genui-timeline-body"><span className="genui-timeline-when">{entry.when}</span><strong>{entry.title}</strong>{entry.detail && <span className="genui-timeline-detail">{entry.detail}</span>}</span>
     </li>)}</ol>
   }
   if (node.kind === 'choice-cards') return <ChoiceCards node={node} values={values} set={set} />

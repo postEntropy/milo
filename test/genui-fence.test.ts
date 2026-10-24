@@ -166,6 +166,8 @@ describe('what a turn that draws is told', () => {
   it('carries the rules, the catalog and the fence', () => {
     for (const rule of [
       'The widget is built only from the catalog below',
+      'write every string in English even when the person asks in another language',
+      'never repeats a highlighted timeline event',
       'A `button` carries the message to send when it is pressed',
       'It is data, not code: there is no scripting',
     ]) {

@@ -208,16 +208,26 @@ struct GenUiView: View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
             ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
                 HStack(alignment: .top, spacing: MiloTheme.Space.three) {
-                    Text(entry.when).font(MiloTheme.Text.meta.monospacedDigit()).foregroundStyle(MiloTheme.muted).frame(minWidth: 66, alignment: .trailing)
-                    Circle().fill(tone(entry.tone)).frame(width: 8, height: 8).padding(.top, 5)
+                    Circle().fill(tone(entry.tone)).frame(width: 8, height: 8).padding(.top, 4)
                     VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                        Text(entry.when).font(MiloTheme.Text.meta.monospacedDigit()).foregroundStyle(MiloTheme.muted)
                         Text(entry.title).font(MiloTheme.Text.base.weight(.medium)).foregroundStyle(MiloTheme.foreground)
                         if let detail = entry.detail { Text(detail).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.muted) }
                     }
-                    Spacer(minLength: 0)
                 }
-                .overlay(alignment: .leading) {
-                    if index < entries.count - 1 { Rectangle().fill(MiloTheme.borderSoft).frame(width: 1).padding(.leading, 78).padding(.top, 14) }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .overlay(alignment: .topLeading) {
+                    if index < entries.count - 1 {
+                        GeometryReader { proxy in
+                            Path { path in
+                                path.move(to: CGPoint(x: 4, y: 8))
+                                path.addLine(to: CGPoint(x: 4, y: proxy.size.height + MiloTheme.Space.three + 4))
+                            }
+                            .stroke(MiloTheme.borderSoft, lineWidth: 1)
+                        }
+                        .frame(width: 8)
+                        .allowsHitTesting(false)
+                    }
                 }
             }
         }

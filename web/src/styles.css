@@ -2029,15 +2029,14 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .genui-section-title { margin: 0; color: var(--fg); font-size: var(--text-md); font-weight: 600; }
 .genui-section-description { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--text-sm); }
 .genui-timeline { display: flex; flex-direction: column; gap: var(--space-5); margin: 0; padding: 0; list-style: none; }
-.genui-timeline-entry { display: grid; grid-template-columns: minmax(72px, auto) 12px minmax(0, 1fr); align-items: start; gap: var(--space-3); }
+.genui-timeline-entry { position: relative; display: grid; grid-template-columns: 12px minmax(0, 1fr); align-items: start; gap: var(--space-3); }
 .genui-timeline-when { color: var(--muted); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
 .genui-timeline-mark { width: 9px; height: 9px; margin-top: 4px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 3px var(--surface); }
-.genui-timeline-entry:not(:last-child) .genui-timeline-mark { position: relative; }
-.genui-timeline-entry:not(:last-child) .genui-timeline-mark::after { position: absolute; top: 9px; left: 4px; width: 1px; height: calc(var(--space-5) + 8px); background: var(--border-soft); content: ''; }
+.genui-timeline-entry:not(:last-child)::after { position: absolute; top: 13px; bottom: calc(-1 * var(--space-5) - 4px); left: 4px; width: 1px; background: var(--border-soft); content: ''; }
 .genui-timeline-entry.genui-tone-ok .genui-timeline-mark { background: var(--success, var(--accent)); }
 .genui-timeline-entry.genui-tone-warn .genui-timeline-mark { background: var(--warning, var(--accent)); }
 .genui-timeline-entry.genui-tone-danger .genui-timeline-mark { background: var(--danger); }
-.genui-timeline-body { display: flex; flex-direction: column; gap: var(--space-1); color: var(--fg); font-size: var(--text-sm); }
+.genui-timeline-body { display: flex; min-width: 0; flex-direction: column; gap: var(--space-1); color: var(--fg); font-size: var(--text-sm); }
 .genui-timeline-detail { color: var(--muted); }
 .genui-choice-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 150px), 1fr)); gap: var(--space-3); }
 .genui-choice-card { display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: var(--space-2); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-5); color: var(--fg); font: inherit; text-align: start; }
