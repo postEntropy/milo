@@ -3,6 +3,24 @@ import { z } from 'zod'
 import { GENUI_SECTION, genUiFromArgs, genUiFromPartial, genUiSchema } from '../src/core/genui.js'
 
 describe('the generated interface schema', () => {
+  it('accepts forms, explained choices, timelines and named sections', () => {
+    const result = genUiSchema.safeParse({ tree: { kind: 'section', title: 'Plan', description: 'Choose and add context.', children: [
+      { kind: 'choice-cards', id: 'plan', label: 'Plan', options: [{ value: 'basic', title: 'Basic', detail: 'For a small team.' }, { value: 'pro', title: 'Pro' }], value: 'basic' },
+      { kind: 'timeline', entries: [{ when: 'Today', title: 'Draft created' }, { when: 'Tomorrow', title: 'Review', tone: 'warn' }] },
+      { kind: 'form', children: [{ kind: 'text-input', id: 'goal', label: 'Goal', multiline: true, required: true, maxLength: 240 }], submit: { label: 'Continue', send: 'Plan {plan}: {goal}' } },
+    ] } })
+    expect(result.success).toBe(true)
+  })
+
+  it('refuses duplicate choice values and a selected value outside the choices', () => {
+    expect(genUiSchema.safeParse({ tree: { kind: 'choice-cards', id: 'plan', label: 'Plan', options: [{ value: 'a', title: 'A' }, { value: 'a', title: 'Again' }] } }).success).toBe(false)
+    expect(genUiSchema.safeParse({ tree: { kind: 'choice-cards', id: 'plan', label: 'Plan', options: [{ value: 'a', title: 'A' }, { value: 'b', title: 'B' }], value: 'c' } }).success).toBe(false)
+  })
+
+  it('refuses nested forms so submit controls keep valid platform semantics', () => {
+    expect(genUiSchema.safeParse({ tree: { kind: 'form', children: [{ kind: 'form', children: [{ kind: 'text-input', id: 'name', label: 'Name' }], submit: { label: 'Inner', send: 'ok' } }], submit: { label: 'Outer', send: 'ok' } } }).success).toBe(false)
+  })
+
   it('accepts a widget built from the catalog', () => {
     const result = genUiSchema.safeParse({
       title: 'Team plan',
@@ -58,6 +76,23 @@ describe('the generated interface schema', () => {
     let tree: Record<string, unknown> = { kind: 'text', text: 'bottom' }
     for (let level = 0; level < 10; level += 1) tree = { kind: 'box', children: [tree] }
     expect(genUiSchema.safeParse({ tree }).success).toBe(false)
+  })
+
+  it('counts every node and level inside tabs and accordions', () => {
+    const wide = {
+      kind: 'tabs',
+      tabs: Array.from({ length: 6 }, (_, tab) => ({
+        label: `Tab ${tab}`,
+        children: Array.from({ length: 24 }, (_, row) => ({ kind: 'text', text: `Row ${row}` })),
+      })),
+    }
+    expect(genUiSchema.safeParse({ tree: wide }).success).toBe(false)
+
+    let deep: Record<string, unknown> = { kind: 'text', text: 'bottom' }
+    for (let level = 0; level < 8; level += 1) {
+      deep = { kind: 'accordion', items: [{ title: `Part ${level}`, children: [deep] }] }
+    }
+    expect(genUiSchema.safeParse({ tree: deep }).success).toBe(false)
   })
 
   it('cuts a cell or an item that runs long instead of refusing the whole widget', () => {
@@ -166,6 +201,23 @@ describe('the generated interface schema', () => {
   it('refuses a day that is not written YYYY-MM-DD', () => {
     expect(genUiSchema.safeParse({ tree: { kind: 'date', id: 'day', label: 'Day', value: '24/10/2026' } }).success).toBe(false)
     expect(genUiSchema.safeParse({ tree: { kind: 'daterange', id: 'span', label: 'Span', from: '2026-10-01', to: 'soon' } }).success).toBe(false)
+    expect(genUiSchema.safeParse({ tree: { kind: 'date', id: 'day', label: 'Day', value: '2026-02-30' } }).success).toBe(false)
+    expect(genUiSchema.safeParse({ tree: { kind: 'daterange', id: 'span', label: 'Span', from: '2026-10-08', to: '2026-10-07' } }).success).toBe(false)
+  })
+
+  it('keeps multiselect values within unique options and input ids unique across branches', () => {
+    expect(genUiSchema.safeParse({
+      tree: { kind: 'multiselect', id: 'days', label: 'Days', options: ['Mon', 'Tue'], values: ['Wed'] },
+    }).success).toBe(false)
+    expect(genUiSchema.safeParse({
+      tree: {
+        kind: 'tabs',
+        tabs: [
+          { label: 'One', children: [{ kind: 'checkbox', id: 'enabled', label: 'Enabled' }] },
+          { label: 'Two', children: [{ kind: 'accordion', items: [{ title: 'More', children: [{ kind: 'date', id: 'enabled', label: 'Day', value: '2026-10-24' }] }] }] },
+        ],
+      },
+    }).success).toBe(false)
   })
 
   it('refuses a single tab, an empty accordion, and a program that is a file', () => {
@@ -308,7 +360,7 @@ describe('the catalog a turn that draws is taught', () => {
     const wire = z.toJSONSchema(genUiSchema) as unknown as { $defs: Record<string, { anyOf: { properties: { kind: { const: string } } }[] }> }
     const [node] = Object.values(wire.$defs)
     const accepted = node.anyOf.map((member) => member.properties.kind.const)
-    const named = [...GENUI_SECTION.matchAll(/^- `([a-z]+)`:/gm)].map((match) => match[1])
+    const named = [...GENUI_SECTION.matchAll(/^- `([a-z-]+)`:/gm)].map((match) => match[1])
     // Both directions, in the same order. A kind the prose leaves out is one the
     // model cannot know it may write; one named that the schema refuses is a tree
     // it will write and have thrown away — which is the failure this stands over.

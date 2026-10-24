@@ -143,6 +143,9 @@ export function Chart({ node }: { node: GenUiChart }) {
         <text className="genui-chart-tick" x={left - 6} y={top + 4} textAnchor="end">
           {fmt(bounds.max)}
         </text>
+        <text className="genui-chart-tick" x={left - 6} y={top + plot / 2 + 4} textAnchor="end">
+          {fmt((bounds.min + bounds.max) / 2)}
+        </text>
         <text className="genui-chart-tick" x={left - 6} y={bottom} textAnchor="end">
           {fmt(bounds.min)}
         </text>

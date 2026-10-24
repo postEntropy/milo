@@ -1,7 +1,13 @@
 /**
  * The values of a widget's inputs, by input id.
  */
-export type GenUiValues = Record<string, number | string | boolean>
+export interface GenUiDateRangeValue {
+  from: string
+  to: string
+}
+
+export type GenUiInputValue = number | string | boolean | string[] | GenUiDateRangeValue
+export type GenUiValues = Record<string, GenUiInputValue>
 
 type Token =
   | { kind: 'number'; value: number }
@@ -43,7 +49,13 @@ export function interpolate(text: string, values: GenUiValues): string {
   return text.replace(/\{([A-Za-z][A-Za-z0-9_]{0,31})\}/g, (whole, name: string) => {
     const value = values[name]
     if (value === undefined) return whole
-    return typeof value === 'number' ? formatNumber(value) : String(value)
+    return typeof value === 'number'
+      ? formatNumber(value)
+      : Array.isArray(value)
+        ? value.join(', ')
+        : typeof value === 'object'
+          ? `${value.from} – ${value.to}`
+          : String(value)
   })
 }
 
@@ -143,7 +155,7 @@ function factor(cursor: Cursor, values: GenUiValues): number | null {
   return null
 }
 
-function numberValue(value: number | string | boolean | undefined): number | null {
+function numberValue(value: GenUiInputValue | undefined): number | null {
   if (typeof value === 'number') return Number.isFinite(value) ? value : null
   if (typeof value === 'boolean') return value ? 1 : 0
   return null

@@ -18,9 +18,13 @@ struct GenUiView: View {
     let onSend: (String) -> Void
 
     @State private var values: GenUiValues
+    /// Values the person has changed. Streaming drafts may update defaults, but never
+    /// overwrite a control after it has been touched.
+    @State private var touched: Set<String> = []
     /// What is typed into a `number` field, before it parses — so a half-typed value
     /// does not have to be a number for the field to hold it.
     @State private var typing: [String: String] = [:]
+    @State private var attemptedForms: Set<String> = []
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(widget: GenUi, onSend: @escaping (String) -> Void) {
@@ -30,7 +34,8 @@ struct GenUiView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+        let defaults = Self.initialValues(widget.tree)
+        return VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
             if let title = widget.title {
                 GenUiInline(text: title, values: values)
                     .font(.headline)
@@ -41,6 +46,11 @@ struct GenUiView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(MiloTheme.Space.four)
         .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .onChange(of: defaults) { _, next in
+            for (id, value) in next where !touched.contains(id) {
+                values[id] = value
+            }
+        }
     }
 
     /// The recursion is why this returns `AnyView`: a `some View` that reaches itself
@@ -65,6 +75,16 @@ struct GenUiView: View {
             return AnyView(GenUiChartView(chart: chart).marksSidewaysDrag())
         case .box(let direction, let gap, let padding, let align, let wrap, let children):
             return AnyView(box(direction: direction, gap: gap, padding: padding, align: align, wrap: wrap, children: children))
+        case .section(let title, let description, let children):
+            return AnyView(section(title: title, description: description, children: children))
+        case .timeline(let entries):
+            return AnyView(timeline(entries))
+        case .choiceCards(let field):
+            return AnyView(choiceCards(field))
+        case .textInput(let field):
+            return AnyView(textInput(field))
+        case .form(let children, let submit):
+            return AnyView(form(children: children, submit: submit))
         case .list(let items):
             return AnyView(list(items))
         case .steps(let title, let entries):
@@ -93,8 +113,8 @@ struct GenUiView: View {
                     id: field.id,
                     label: field.label,
                     options: field.options,
-                    initial: field.values,
-                    set: { values[$0] = $1 }
+                    selected: choiceValue(field.id, fallback: field.values),
+                    set: { setValue($1, for: $0) }
                 )
             )
         case .date(let field):
@@ -104,11 +124,11 @@ struct GenUiView: View {
                 GenUiDateRangeView(
                     id: field.id,
                     label: field.label,
-                    from: field.from,
-                    to: field.to,
                     minDay: field.min,
                     maxDay: field.max,
-                    set: { values[$0] = $1 }
+                    from: dateRangeValue(field.id, fallback: (field.from, field.to)).0,
+                    to: dateRangeValue(field.id, fallback: (field.from, field.to)).1,
+                    set: { setValue($1, for: $0) }
                 )
             )
         case .tabs(let tabs):
@@ -166,6 +186,112 @@ struct GenUiView: View {
                         .font(.body)
                         .foregroundStyle(MiloTheme.foreground)
                 }
+            }
+        }
+    }
+
+    private func section(title: String, description: String?, children: [GenUiNode]) -> some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                Text(title).font(.headline).foregroundStyle(MiloTheme.foreground)
+                if let description { Text(description).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.muted) }
+            }
+            ForEach(Array(children.enumerated()), id: \.offset) { _, child in node(child) }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(MiloTheme.Space.four)
+        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func timeline(_ entries: [GenUiNode.TimelineEntry]) -> some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            ForEach(Array(entries.enumerated()), id: \.offset) { index, entry in
+                HStack(alignment: .top, spacing: MiloTheme.Space.three) {
+                    Text(entry.when).font(MiloTheme.Text.meta.monospacedDigit()).foregroundStyle(MiloTheme.muted).frame(minWidth: 66, alignment: .trailing)
+                    Circle().fill(tone(entry.tone)).frame(width: 8, height: 8).padding(.top, 5)
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                        Text(entry.title).font(MiloTheme.Text.base.weight(.medium)).foregroundStyle(MiloTheme.foreground)
+                        if let detail = entry.detail { Text(detail).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.muted) }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .overlay(alignment: .leading) {
+                    if index < entries.count - 1 { Rectangle().fill(MiloTheme.borderSoft).frame(width: 1).padding(.leading, 78).padding(.top, 14) }
+                }
+            }
+        }
+    }
+
+    private func choiceCards(_ field: GenUiNode.ChoiceCards) -> some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            Text(field.label).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.muted)
+            ForEach(field.options, id: \.value) { option in
+                let selected = textValue(field.id, field.value ?? "") == option.value
+                Button { setValue(.text(option.value), for: field.id) } label: {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                        Text(option.title).font(MiloTheme.Text.base.weight(.medium)).foregroundStyle(MiloTheme.foreground)
+                        if let detail = option.detail { Text(detail).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.muted) }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(MiloTheme.Space.three)
+                    .background(selected ? MiloTheme.surfaceWarm : MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                }
+                .buttonStyle(PressableStyle())
+                .accessibilityAddTraits(selected ? .isSelected : [])
+            }
+        }
+    }
+
+    private func textInput(_ field: GenUiNode.TextInput) -> some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            HStack(spacing: MiloTheme.Space.one) {
+                Text(field.label).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.muted)
+                if field.required { Text("*").font(MiloTheme.Text.small).foregroundStyle(MiloTheme.danger) }
+            }
+            Group {
+                if field.multiline {
+                    TextField(field.placeholder ?? "", text: limitedTextBinding(field.id, fallback: field.value ?? "", maxLength: field.maxLength), axis: .vertical).lineLimit(3...6)
+                } else {
+                    TextField(field.placeholder ?? "", text: limitedTextBinding(field.id, fallback: field.value ?? "", maxLength: field.maxLength))
+                }
+            }
+            .font(MiloTheme.Text.base).foregroundStyle(MiloTheme.foreground)
+            .padding(.horizontal, MiloTheme.Space.three).padding(.vertical, MiloTheme.Space.two)
+            .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+            .overlay(RoundedRectangle(cornerRadius: MiloTheme.Radius.md).stroke(MiloTheme.borderSoft, lineWidth: 1))
+        }
+    }
+
+    private func form(children: [GenUiNode], submit: GenUiNode.FormSubmit) -> some View {
+        let key = submit.label + children.map { String(describing: $0) }.joined()
+        let missing = requiredInputs(children).filter { textValue($0.id, $0.value ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+        return VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            ForEach(Array(children.enumerated()), id: \.offset) { _, child in node(child) }
+            if attemptedForms.contains(key), !missing.isEmpty {
+                Text("Complete the required fields: \(missing.map(\.label).joined(separator: ", ")).")
+                    .font(MiloTheme.Text.small).foregroundStyle(MiloTheme.danger).accessibilityAddTraits(.isStaticText)
+            }
+            Button {
+                attemptedForms.insert(key)
+                guard missing.isEmpty else { return }
+                onSend(interpolate(submit.send, values))
+            } label: {
+                Text(submit.label).font(MiloTheme.Text.base.weight(.medium)).foregroundStyle(MiloTheme.accentOn)
+                    .padding(.horizontal, MiloTheme.Space.five).frame(height: 44)
+                    .background(MiloTheme.accent, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+            }.buttonStyle(PressableStyle())
+        }
+    }
+
+    private func requiredInputs(_ nodes: [GenUiNode]) -> [GenUiNode.TextInput] {
+        nodes.flatMap { child -> [GenUiNode.TextInput] in
+            switch child {
+            case .textInput(let field): return field.required ? [field] : []
+            case .box(_, _, _, _, _, let nested), .section(_, _, let nested), .form(let nested, _): return requiredInputs(nested)
+            case .tabs(let tabs): return tabs.tabs.flatMap { requiredInputs($0.children) }
+            case .accordion(let accordion): return accordion.items.flatMap { requiredInputs($0.children) }
+            default: return []
             }
         }
     }
@@ -514,7 +640,7 @@ struct GenUiView: View {
     private func numberBinding(_ id: String, fallback: Double) -> Binding<Double> {
         Binding(
             get: { currentNumber(id, fallback) },
-            set: { values[id] = .number($0) }
+            set: { setValue(.number($0), for: id) }
         )
     }
 
@@ -522,6 +648,7 @@ struct GenUiView: View {
         Binding(
             get: { typing[id] ?? formatNumber(currentNumber(id, fallback)) },
             set: { raw in
+                touched.insert(id)
                 typing[id] = raw
                 if let parsed = parseNumber(raw) { values[id] = .number(parsed) }
             }
@@ -531,14 +658,21 @@ struct GenUiView: View {
     private func textBinding(_ id: String, fallback: String) -> Binding<String> {
         Binding(
             get: { if case .text(let value)? = values[id] { return value }; return fallback },
-            set: { values[id] = .text($0) }
+            set: { setValue(.text($0), for: id) }
         )
+    }
+
+    private func limitedTextBinding(_ id: String, fallback: String, maxLength: Int?) -> Binding<String> {
+        Binding(get: { textValue(id, fallback) }, set: { raw in
+            let value = maxLength.map { String(raw.prefix($0)) } ?? raw
+            setValue(.text(value), for: id)
+        })
     }
 
     private func flagBinding(_ id: String, fallback: Bool?) -> Binding<Bool> {
         Binding(
             get: { if case .flag(let value)? = values[id] { return value }; return fallback ?? false },
-            set: { values[id] = .flag($0) }
+            set: { setValue(.flag($0), for: id) }
         )
     }
 
@@ -550,8 +684,23 @@ struct GenUiView: View {
     private func dayBinding(_ id: String, fallback: String) -> Binding<Date> {
         Binding(
             get: { parseDay(textValue(id, fallback)) ?? Date() },
-            set: { values[id] = .text(formatDay($0)) }
+            set: { setValue(.text(formatDay($0)), for: id) }
         )
+    }
+
+    private func choiceValue(_ id: String, fallback: [String]) -> [String] {
+        if case .choices(let selected)? = values[id] { return selected }
+        return fallback
+    }
+
+    private func dateRangeValue(_ id: String, fallback: (String, String)) -> (String, String) {
+        if case .dateRange(let from, let to)? = values[id] { return (from, to) }
+        return fallback
+    }
+
+    private func setValue(_ value: GenUiValue, for id: String) {
+        touched.insert(id)
+        values[id] = value
     }
 
     private func dayRange(_ from: String?, _ to: String?) -> ClosedRange<Date> {
@@ -581,6 +730,8 @@ struct GenUiView: View {
         switch node {
         case .box(_, _, _, _, _, let children):
             for child in children { collect(child, into: &values) }
+        case .section(_, _, let children), .form(let children, _):
+            for child in children { collect(child, into: &values) }
         case .tabs(let tabs):
             for tab in tabs.tabs { for child in tab.children { collect(child, into: &values) } }
         case .accordion(let accordion):
@@ -594,11 +745,15 @@ struct GenUiView: View {
         case .select(let field):
             values[field.id] = .text(field.value)
         case .multiselect(let field):
-            values[field.id] = .text(field.values.joined(separator: ", "))
+            values[field.id] = .choices(field.values)
         case .date(let field):
             values[field.id] = .text(field.value)
         case .dateRange(let field):
-            values[field.id] = .text("\(field.from) – \(field.to)")
+            values[field.id] = .dateRange(field.from, field.to)
+        case .textInput(let field):
+            values[field.id] = .text(field.value ?? "")
+        case .choiceCards(let field):
+            values[field.id] = .text(field.value ?? "")
         default:
             break
         }
@@ -675,18 +830,10 @@ private struct GenUiMultiSelectView: View {
     let id: String
     let label: String
     let options: [String]
+    let selected: [String]
     let set: (String, GenUiValue) -> Void
 
-    @State private var chosen: [String]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-    init(id: String, label: String, options: [String], initial: [String], set: @escaping (String, GenUiValue) -> Void) {
-        self.id = id
-        self.label = label
-        self.options = options
-        self.set = set
-        _chosen = State(initialValue: initial)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
@@ -697,7 +844,7 @@ private struct GenUiMultiSelectView: View {
                 spacing: MiloTheme.Space.two
             ) {
                 ForEach(options, id: \.self) { option in
-                    let on = chosen.contains(option)
+                    let on = selected.contains(option)
                     Button { toggle(option) } label: {
                         Text(option)
                             .font(MiloTheme.Text.small)
@@ -707,15 +854,16 @@ private struct GenUiMultiSelectView: View {
                             .background(on ? MiloTheme.accent : MiloTheme.surfaceWarm, in: Capsule())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
         }
-        .animation(reduceMotion ? nil : SettlesIn.motion, value: chosen)
+        .animation(reduceMotion ? nil : SettlesIn.motion, value: selected)
     }
 
     private func toggle(_ option: String) {
-        chosen = chosen.contains(option) ? chosen.filter { $0 != option } : chosen + [option]
-        set(id, .text(chosen.joined(separator: ", ")))
+        let next = selected.contains(option) ? selected.filter { $0 != option } : selected + [option]
+        set(id, .choices(next))
     }
 }
 
@@ -745,6 +893,7 @@ private struct GenUiTabsView: View {
                             .background(on ? MiloTheme.surfaceRaised : MiloTheme.surfaceWarm, in: Capsule())
                     }
                     .buttonStyle(.plain)
+                    .accessibilityAddTraits(on ? .isSelected : [])
                 }
             }
             VStack(alignment: .leading, spacing: MiloTheme.Space.five) {
@@ -823,42 +972,34 @@ private struct GenUiDateRangeView: View {
     let label: String
     let minDay: String?
     let maxDay: String?
+    let from: String
+    let to: String
     let set: (String, GenUiValue) -> Void
-
-    @State private var start: Date
-    @State private var end: Date
-
-    init(id: String, label: String, from: String, to: String, minDay: String?, maxDay: String?, set: @escaping (String, GenUiValue) -> Void) {
-        self.id = id
-        self.label = label
-        self.minDay = minDay
-        self.maxDay = maxDay
-        self.set = set
-        _start = State(initialValue: parseDay(from) ?? Date())
-        _end = State(initialValue: parseDay(to) ?? Date())
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
             Text(label).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.muted)
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: MiloTheme.Space.two) {
-                    picker($start)
+                    picker(true)
                     Text("–").foregroundStyle(MiloTheme.muted)
-                    picker($end)
+                    picker(false)
                 }
                 VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
-                    picker($start)
-                    picker($end)
+                    picker(true)
+                    picker(false)
                 }
             }
         }
-        .onChange(of: start) { _, _ in write() }
-        .onChange(of: end) { _, _ in write() }
     }
 
-    private func picker(_ value: Binding<Date>) -> some View {
-        DatePicker("", selection: value, in: range, displayedComponents: .date)
+    private func picker(_ isStart: Bool) -> some View {
+        let value = isStart ? from : to
+        let binding = Binding<Date>(
+            get: { parseDay(value) ?? Date() },
+            set: { set(id, .dateRange(isStart ? formatDay($0) : from, isStart ? to : formatDay($0))) }
+        )
+        return DatePicker("", selection: binding, in: range, displayedComponents: .date)
             .labelsHidden()
             .datePickerStyle(.compact)
             .tint(MiloTheme.accent)
@@ -870,9 +1011,6 @@ private struct GenUiDateRangeView: View {
         return low <= high ? low...high : low...low
     }
 
-    private func write() {
-        set(id, .text("\(formatDay(start)) – \(formatDay(end))"))
-    }
 }
 
 /// A row that wraps its children onto the next line instead of running past the edge.

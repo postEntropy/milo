@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import { chartBounds } from '../web/src/chat/genui/chart-bounds.js'
-import { evaluateFormula, formatNumber, interpolate } from '../web/src/chat/genui/evaluate.js'
+import { evaluateFormula, formatNumber, interpolate, type GenUiValues } from '../web/src/chat/genui/evaluate.js'
 
 /**
  * The cases both the browser and the phone evaluate.
@@ -14,13 +14,13 @@ import { evaluateFormula, formatNumber, interpolate } from '../web/src/chat/genu
 interface FormulaCase {
   name: string
   formula: string
-  values: Record<string, number | string | boolean>
+  values: GenUiValues
   expected: number | null
 }
 interface TemplateCase {
   name: string
   text: string
-  values: Record<string, number | string | boolean>
+  values: GenUiValues
   expected: string
 }
 interface ChartCase {

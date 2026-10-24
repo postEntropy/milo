@@ -30,6 +30,11 @@ extension GenUi {
 /// message, and half a widget is not worth a blank chat.
 enum GenUiNode: Decodable {
     indirect case box(direction: String?, gap: Int?, padding: Int?, align: String?, wrap: Bool, children: [GenUiNode])
+    indirect case section(title: String, description: String?, children: [GenUiNode])
+    case timeline([TimelineEntry])
+    case choiceCards(ChoiceCards)
+    case textInput(TextInput)
+    indirect case form(children: [GenUiNode], submit: FormSubmit)
     case title(text: String, size: String?)
     case text(String)
     case divider
@@ -63,6 +68,12 @@ enum GenUiNode: Decodable {
         let detail: String?
         let when: String?
     }
+
+    struct TimelineEntry: Decodable { let when: String; let title: String; let detail: String?; let tone: String? }
+    struct ChoiceOption: Decodable { let value: String; let title: String; let detail: String? }
+    struct ChoiceCards { let id: String; let label: String; let options: [ChoiceOption]; let value: String? }
+    struct TextInput { let id: String; let label: String; let value: String?; let placeholder: String?; let multiline: Bool; let required: Bool; let maxLength: Int? }
+    struct FormSubmit: Decodable { let label: String; let send: String }
 
     struct Fact: Decodable {
         let label: String
@@ -208,6 +219,7 @@ enum GenUiNode: Decodable {
         case kind, text, size, direction, gap, padding, align, wrap, children, title, entries, items, columns, rows
         case label, formula, prefix, suffix, decimals, id, min, max, step, value, options, send
         case type, labels, series, height, tone, delta, deltaSuffix, deltaTone, trend, language, values, from, to, tabs, open, when
+        case description, placeholder, multiline, required, maxLength, submit
     }
 
     init(from decoder: Decoder) throws {
@@ -231,6 +243,29 @@ enum GenUiNode: Decodable {
                 wrap: read(.wrap, false),
                 children: children
             )
+        case "section":
+            guard let title = readText(.title) else { self = .unknown; return }
+            self = .section(title: title, description: readText(.description), children: read(.children, []))
+        case "timeline":
+            let entries: [TimelineEntry] = read(.entries, [])
+            guard !entries.isEmpty else { self = .unknown; return }
+            self = .timeline(entries)
+        case "choice-cards":
+            guard let id = readText(.id), let label = readText(.label) else { self = .unknown; return }
+            let options: [ChoiceOption] = read(.options, [])
+            let value = readText(.value)
+            guard options.count >= 2, Set(options.map(\.value)).count == options.count,
+                  value.map({ selected in options.contains(where: { $0.value == selected }) }) ?? true
+            else { self = .unknown; return }
+            self = .choiceCards(ChoiceCards(id: id, label: label, options: options, value: value))
+        case "text-input":
+            guard let id = readText(.id), let label = readText(.label) else { self = .unknown; return }
+            self = .textInput(TextInput(id: id, label: label, value: readText(.value), placeholder: readText(.placeholder), multiline: read(.multiline, false), required: read(.required, false), maxLength: read(.maxLength, nil as Int?)))
+        case "form":
+            guard let submit = try? container.decode(FormSubmit.self, forKey: .submit) else { self = .unknown; return }
+            let children: [GenUiNode] = read(.children, [])
+            guard !children.isEmpty else { self = .unknown; return }
+            self = .form(children: children, submit: submit)
         case "title":
             self = .title(text: read(.text, ""), size: readText(.size))
         case "text":
@@ -377,8 +412,16 @@ enum GenUiNode: Decodable {
                 self = .unknown
                 return
             }
+            let options: [String] = read(.options, [])
+            let values: [String] = read(.values, [])
+            guard !options.isEmpty, Set(options).count == options.count,
+                  Set(values).count == values.count, values.allSatisfy(options.contains)
+            else {
+                self = .unknown
+                return
+            }
             self = .multiselect(
-                MultiSelect(id: id, label: label, options: read(.options, []), values: read(.values, []))
+                MultiSelect(id: id, label: label, options: options, values: values)
             )
         case "date":
             guard let id = readText(.id), let label = readText(.label),
@@ -387,8 +430,19 @@ enum GenUiNode: Decodable {
                 self = .unknown
                 return
             }
+            let min = readText(.min)
+            let max = readText(.max)
+            let boundsOrdered: Bool
+            if let min, let max { boundsOrdered = min <= max } else { boundsOrdered = true }
+            guard min.map(isoDay) ?? true, max.map(isoDay) ?? true,
+                  min.map({ $0 <= value }) ?? true, max.map({ value <= $0 }) ?? true,
+                  boundsOrdered
+            else {
+                self = .unknown
+                return
+            }
             self = .date(
-                DateField(id: id, label: label, value: value, min: readText(.min), max: readText(.max))
+                DateField(id: id, label: label, value: value, min: min, max: max)
             )
         case "daterange":
             guard let id = readText(.id), let label = readText(.label),
@@ -397,8 +451,20 @@ enum GenUiNode: Decodable {
                 self = .unknown
                 return
             }
+            let min = readText(.min)
+            let max = readText(.max)
+            let boundsOrdered: Bool
+            if let min, let max { boundsOrdered = min <= max } else { boundsOrdered = true }
+            guard min.map(isoDay) ?? true, max.map(isoDay) ?? true,
+                  from <= to, min.map({ $0 <= from }) ?? true,
+                  max.map({ to <= $0 }) ?? true,
+                  boundsOrdered
+            else {
+                self = .unknown
+                return
+            }
             self = .dateRange(
-                DateRange(id: id, label: label, from: from, to: to, min: readText(.min), max: readText(.max))
+                DateRange(id: id, label: label, from: from, to: to, min: min, max: max)
             )
         case "tabs":
             let tabs: [Tab] = read(.tabs, [])
@@ -432,5 +498,14 @@ enum GenUiNode: Decodable {
 private func isoDay(_ text: String) -> Bool {
     let parts = text.split(separator: "-", omittingEmptySubsequences: false)
     guard parts.count == 3, parts[0].count == 4, parts[1].count == 2, parts[2].count == 2 else { return false }
-    return parts.allSatisfy { part in part.allSatisfy { $0 >= "0" && $0 <= "9" } }
+    guard parts.allSatisfy({ part in part.allSatisfy { $0 >= "0" && $0 <= "9" } }),
+          let year = Int(parts[0]), let month = Int(parts[1]), let day = Int(parts[2]), year > 0
+    else { return false }
+    var calendar = Calendar(identifier: .gregorian)
+    guard let utc = TimeZone(secondsFromGMT: 0) else { return false }
+    calendar.timeZone = utc
+    let components = DateComponents(year: year, month: month, day: day)
+    guard let date = calendar.date(from: components) else { return false }
+    let roundTrip = calendar.dateComponents([.year, .month, .day], from: date)
+    return roundTrip.year == year && roundTrip.month == month && roundTrip.day == day
 }

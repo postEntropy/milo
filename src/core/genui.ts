@@ -41,6 +41,48 @@ export interface GenUiBox {
   children: GenUiNode[]
 }
 
+/** A named group that gives related controls and content a semantic boundary. */
+export interface GenUiSection {
+  kind: 'section'
+  title: string
+  description?: string
+  children: GenUiNode[]
+}
+
+/** A short history of dated events, distinct from instructions in `steps`. */
+export interface GenUiTimeline {
+  kind: 'timeline'
+  entries: { when: string; title: string; detail?: string; tone?: GenUiTone }[]
+}
+
+/** A single selection presented as filled cards. */
+export interface GenUiChoiceCards {
+  kind: 'choice-cards'
+  id: string
+  label: string
+  options: { value: string; title: string; detail?: string }[]
+  value?: string
+}
+
+/** A short text answer, optionally required when its containing form is sent. */
+export interface GenUiTextInput {
+  kind: 'text-input'
+  id: string
+  label: string
+  value?: string
+  placeholder?: string
+  multiline?: boolean
+  required?: boolean
+  maxLength?: number
+}
+
+/** A group of fields with one validated submit action. */
+export interface GenUiForm {
+  kind: 'form'
+  children: GenUiNode[]
+  submit: { label: string; send: string }
+}
+
 /** A heading. */
 export interface GenUiTitle {
   kind: 'title'
@@ -282,6 +324,11 @@ export interface GenUiCode {
 
 export type GenUiNode =
   | GenUiBox
+  | GenUiSection
+  | GenUiTimeline
+  | GenUiChoiceCards
+  | GenUiTextInput
+  | GenUiForm
   | GenUiTitle
   | GenUiText
   | GenUiDivider
@@ -376,7 +423,18 @@ const money = shown(12)
 const NUMBER_RE = /^-?(0|[1-9]\d*)(\.\d+)?([eE][+-]?\d+)?$/
 
 const toneSchema = z.enum(GENUI_TONES)
-const dateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'a date is written YYYY-MM-DD')
+const dateSchema = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'a date is written YYYY-MM-DD')
+  .refine(isCalendarDate, 'a date must exist on the calendar')
+
+function isCalendarDate(value: string): boolean {
+  const [year, month, day] = value.split('-').map(Number)
+  if (year === undefined || month === undefined || day === undefined || year < 1 || month < 1 || month > 12) return false
+  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31]
+  return day >= 1 && day <= (days[month - 1] ?? 0)
+}
 
 const genUiNodeSchema: z.ZodType<GenUiNode> = z.lazy(() =>
   z.union([
@@ -388,6 +446,16 @@ const genUiNodeSchema: z.ZodType<GenUiNode> = z.lazy(() =>
       align: z.enum(['start', 'center', 'end', 'stretch']).optional(),
       wrap: z.boolean().optional(),
       children: z.array(genUiNodeSchema).min(1).max(24),
+    }),
+    z.object({ kind: z.literal('section'), title: labelSchema, description: shown(240, 1).optional(), children: z.array(genUiNodeSchema).min(1).max(24) }),
+    z.object({ kind: z.literal('timeline'), entries: z.array(z.object({ when: shown(60, 1), title: shown(120, 1), detail: shown(240, 1).optional(), tone: toneSchema.optional() })).min(1).max(12) }),
+    z.object({ kind: z.literal('choice-cards'), id: idSchema, label: labelSchema, options: z.array(z.object({ value: shown(60, 1), title: labelSchema, detail: shown(160, 1).optional() })).min(2).max(6), value: shown(60).optional() }).superRefine((value, ctx) => {
+      if (new Set(value.options.map((option) => option.value)).size !== value.options.length) ctx.addIssue({ code: 'custom', path: ['options'], message: 'option values must be unique' })
+      if (value.value && !value.options.some((option) => option.value === value.value)) ctx.addIssue({ code: 'custom', path: ['value'], message: 'value must be one of the options' })
+    }),
+    z.object({ kind: z.literal('text-input'), id: idSchema, label: labelSchema, value: shown(1000).optional(), placeholder: shown(120).optional(), multiline: z.boolean().optional(), required: z.boolean().optional(), maxLength: z.number().int().min(1).max(1000).optional() }),
+    z.object({ kind: z.literal('form'), children: z.array(genUiNodeSchema).min(1).max(24), submit: z.object({ label: labelSchema, send: z.string().min(1).max(1000) }) }).superRefine((value, ctx) => {
+      if (value.children.some(containsForm)) ctx.addIssue({ code: 'custom', path: ['children'], message: 'forms cannot be nested' })
     }),
     z.object({ kind: z.literal('title'), text: labelSchema, size: z.enum(GENUI_TITLE_SIZES).optional() }),
     z.object({ kind: z.literal('text'), text: shown(600, 1) }),
@@ -519,30 +587,65 @@ const genUiNodeSchema: z.ZodType<GenUiNode> = z.lazy(() =>
       options: z.array(shown(60, 1)).min(1).max(12),
       value: shown(60),
     }),
-    z.object({
-      kind: z.literal('multiselect'),
-      id: idSchema,
-      label: labelSchema,
-      options: z.array(shown(60, 1)).min(1).max(12),
-      values: z.array(shown(60)).max(12).optional(),
-    }),
-    z.object({
-      kind: z.literal('date'),
-      id: idSchema,
-      label: labelSchema,
-      value: dateSchema,
-      min: dateSchema.optional(),
-      max: dateSchema.optional(),
-    }),
-    z.object({
-      kind: z.literal('daterange'),
-      id: idSchema,
-      label: labelSchema,
-      from: dateSchema,
-      to: dateSchema,
-      min: dateSchema.optional(),
-      max: dateSchema.optional(),
-    }),
+    z
+      .object({
+        kind: z.literal('multiselect'),
+        id: idSchema,
+        label: labelSchema,
+        options: z.array(shown(60, 1)).min(1).max(12),
+        values: z.array(shown(60)).max(12).optional(),
+      })
+      .superRefine((value, ctx) => {
+        if (new Set(value.options).size !== value.options.length) {
+          ctx.addIssue({ code: 'custom', path: ['options'], message: 'options must be unique' })
+        }
+        value.values?.forEach((item, index) => {
+          if (!value.options.includes(item)) {
+            ctx.addIssue({ code: 'custom', path: ['values', index], message: 'a selected value must be one of the options' })
+          }
+        })
+        if (value.values && new Set(value.values).size !== value.values.length) {
+          ctx.addIssue({ code: 'custom', path: ['values'], message: 'selected values must be unique' })
+        }
+      }),
+    z
+      .object({
+        kind: z.literal('date'),
+        id: idSchema,
+        label: labelSchema,
+        value: dateSchema,
+        min: dateSchema.optional(),
+        max: dateSchema.optional(),
+      })
+      .superRefine((value, ctx) => {
+        if (value.min && value.max && value.min > value.max) {
+          ctx.addIssue({ code: 'custom', path: ['max'], message: 'max must be on or after min' })
+        }
+        if ((value.min && value.value < value.min) || (value.max && value.value > value.max)) {
+          ctx.addIssue({ code: 'custom', path: ['value'], message: 'value must be within min and max' })
+        }
+      }),
+    z
+      .object({
+        kind: z.literal('daterange'),
+        id: idSchema,
+        label: labelSchema,
+        from: dateSchema,
+        to: dateSchema,
+        min: dateSchema.optional(),
+        max: dateSchema.optional(),
+      })
+      .superRefine((value, ctx) => {
+        if (value.from > value.to) {
+          ctx.addIssue({ code: 'custom', path: ['to'], message: 'to must be on or after from' })
+        }
+        if (value.min && value.max && value.min > value.max) {
+          ctx.addIssue({ code: 'custom', path: ['max'], message: 'max must be on or after min' })
+        }
+        if ((value.min && value.from < value.min) || (value.max && value.to > value.max)) {
+          ctx.addIssue({ code: 'custom', path: ['from'], message: 'range must be within min and max' })
+        }
+      }),
     z.object({
       kind: z.literal('tabs'),
       tabs: z
@@ -579,26 +682,60 @@ export const genUiSchema = z
     tree: genUiNodeSchema,
   })
   .superRefine((value, ctx) => {
-    const { nodes, depth } = measure(value.tree)
+    const { nodes, depth, inputIds } = measure(value.tree)
     if (nodes > MAX_NODES) {
       ctx.addIssue({ code: 'custom', message: `the tree has ${nodes} nodes; the most is ${MAX_NODES}` })
     }
     if (depth > MAX_DEPTH) {
       ctx.addIssue({ code: 'custom', message: `the tree is ${depth} levels deep; the most is ${MAX_DEPTH}` })
     }
+    const seen = new Set<string>()
+    for (const id of inputIds) {
+      if (seen.has(id)) ctx.addIssue({ code: 'custom', message: `input id "${id}" is used more than once` })
+      seen.add(id)
+    }
   })
 
 /** How many nodes a tree holds, and how deep it goes. */
-function measure(node: GenUiNode, depth = 1): { nodes: number; depth: number } {
-  if (node.kind !== 'box') return { nodes: 1, depth }
+function measure(node: GenUiNode, depth = 1): { nodes: number; depth: number; inputIds: string[] } {
   let nodes = 1
   let deepest = depth
-  for (const child of node.children) {
+  const inputIds = inputId(node) ? [inputId(node)!] : []
+  for (const child of childrenOf(node)) {
     const inner = measure(child, depth + 1)
     nodes += inner.nodes
     deepest = Math.max(deepest, inner.depth)
+    inputIds.push(...inner.inputIds)
   }
-  return { nodes, depth: deepest }
+  return { nodes, depth: deepest, inputIds }
+}
+
+function childrenOf(node: GenUiNode): GenUiNode[] {
+  if (node.kind === 'box' || node.kind === 'section' || node.kind === 'form') return node.children
+  if (node.kind === 'tabs') return node.tabs.flatMap((tab) => tab.children)
+  if (node.kind === 'accordion') return node.items.flatMap((item) => item.children)
+  return []
+}
+
+function containsForm(node: GenUiNode): boolean {
+  return node.kind === 'form' || childrenOf(node).some(containsForm)
+}
+
+function inputId(node: GenUiNode): string | undefined {
+  switch (node.kind) {
+    case 'slider':
+    case 'number':
+    case 'checkbox':
+    case 'select':
+    case 'multiselect':
+    case 'date':
+    case 'daterange':
+    case 'choice-cards':
+    case 'text-input':
+      return node.id
+    default:
+      return undefined
+  }
 }
 
 /**
@@ -731,7 +868,7 @@ const GENUI_RULES = [
   'How an answer is shown is part of writing it: prose carries the sentences, and an answer whose shape is the point is drawn rather than described. A procedure, a comparison, a schedule, a set of options, figures worth reading at a glance — the widget is how those arrive.',
   'It arrives on an ordinary question, unasked: steps to follow, two things side by side, a plan, a set of options, figures worth reading at a glance. A single fact, a greeting, a passing mention or a short explanation stays prose, and a widget is never drawn to decorate a sentence that was already the answer.',
   'Keep it to a glance rather than a page: a table of the few rows actually being compared, not every row you could write. What does not fit is prose — which is where that detail reads better anyway — and a widget nobody can take in at once is not doing the job it was drawn for.',
-  'The widget is built only from the catalog below: layout boxes, titles, text, dividers, a note (`callout`), status marks (`badge`), a chart, tables, lists, an ordered procedure (`steps`), label-and-value facts (`facts`), a snippet (`code`), a derived number (`stat`), one figure against a target (`progress`), the inputs (slider, number, checkbox, select, multiselect, date, daterange), folded or tabbed parts (`tabs`, `accordion`) and buttons.',
+  'The widget is built only from the catalog below: layout boxes, named sections, titles, text, dividers, a note (`callout`), status marks (`badge`), a chart, tables, lists, a timeline, an ordered procedure (`steps`), label-and-value facts (`facts`), a snippet (`code`), a derived number (`stat`), one figure against a target (`progress`), the inputs (slider, number, checkbox, select, multiselect, date, daterange, text-input, choice-cards), forms, folded or tabbed parts (`tabs`, `accordion`) and buttons.',
   'Each part has a job, and the plainest one that does it wins. A chart is for a series whose shape is the point; a handful of numbers stays `facts` or a `table`. A `stat` is one figure that moves with the inputs; `progress` is one figure against a target. A `badge` is a state in a word, never decoration. A `callout` is the one thing not to miss. `tabs` and `accordion` are for an answer read one part at a time — not for making a long answer fit. `code` is a snippet to copy.',
   'The inputs are for a calculation the person should be able to move. Every input has an `id`; a `stat` or a `progress` computes from those ids with a plain formula like `seats * 29`, and a `text` or a button message may show a value with `{id}`. A `date`, a `daterange` and a `multiselect` read as text, so `{id}` shows the days or the chosen words. The surface recomputes them as things move — no further call is made to you, so the arithmetic must be right when you write it.',
   'A `button` carries the message to send when it is pressed; `{id}` in it is filled with the value the person set, so build that message from the state. `tone` is "primary" for the one act that moves the answer on, "neutral" beside it, "danger" for a destructive one.',
@@ -837,6 +974,11 @@ export const GENUI_SECTION = [
   ...GENUI_RULES,
   'The nodes and their fields, exactly:',
   '- `box`: `direction` ("row" or "column"), `gap` and `padding` (1 to 4, on the 4px scale), `align` ("start", "center", "end" or "stretch"), `wrap`, and `children` — at most 24.',
+  '- `section`: `title`, optional `description`, and `children` — at most 24; use it to name a related group of content or fields.',
+  '- `timeline`: `entries` — `{when, title, detail?, tone?}`, at most 12; use it for dated events and history, not instructions.',
+  '- `choice-cards`: `id`, `label`, and `options` — 2 to 6 `{value, title, detail?}`; optionally `value`. Use when choices need a little explanation.',
+  '- `text-input`: `id`, `label`, and optionally `value`, `placeholder`, `multiline`, `required`, `maxLength` (1 to 1000). A required field is checked by its containing form.',
+  '- `form`: `children` — at most 24 — and `submit` (`{label, send}`). Required text inputs must be complete before `send` is sent; `{id}` in `send` inserts each input value.',
   '- `title`: `text`, and `size` ("sm", "md", "lg" or "xl").',
   '- `text`: `text` — a `{id}` in it shows that input\'s current value.',
   '- `divider`: no fields.',

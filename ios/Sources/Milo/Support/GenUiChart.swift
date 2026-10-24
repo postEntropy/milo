@@ -101,7 +101,7 @@ struct GenUiChartView: View {
                     AxisGridLine().foregroundStyle(MiloTheme.borderSoft)
                     AxisValueLabel {
                         if let number = value.as(Double.self) {
-                            Text(formatNumber(number, decimals: 0))
+                            Text(axisLabel(number))
                                 .font(MiloTheme.Text.meta)
                                 .foregroundStyle(MiloTheme.muted)
                         }
@@ -170,6 +170,8 @@ struct GenUiChartView: View {
     private func shown(_ value: Double) -> String {
         "\(chart.prefix ?? "")\(formatNumber(value, decimals: chart.decimals))\(chart.suffix ?? "")"
     }
+
+    private func axisLabel(_ value: Double) -> String { shown(value) }
 
     /// What a screen reader reads instead of the drawing.
     private var summary: String {

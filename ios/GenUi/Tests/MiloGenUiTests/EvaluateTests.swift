@@ -44,6 +44,13 @@ final class EvaluateTests: XCTestCase {
         )
     }
 
+    func testDateRangeInputsInterpolateAsOneRange() {
+        XCTAssertEqual(
+            interpolate("From {span}", ["span": .dateRange("2026-10-01", "2026-10-07")]),
+            "From 2026-10-01 – 2026-10-07"
+        )
+    }
+
     func testAnUnclosedMarkStaysTheCharactersThatWroteIt() {
         XCTAssertEqual(inlineRuns("2 * 3"), [InlineRun(text: "2 * 3", style: .plain)])
     }
@@ -103,6 +110,12 @@ private struct Fixtures: Decodable {
 /// same three a widget input holds.
 extension GenUiValue: Decodable {
     public init(from decoder: Decoder) throws {
+        if let range = try? decoder.container(keyedBy: DateRangeKeys.self),
+           let from = try? range.decode(String.self, forKey: .from),
+           let to = try? range.decode(String.self, forKey: .to) {
+            self = .dateRange(from, to)
+            return
+        }
         let container = try decoder.singleValueContainer()
         if let flag = try? container.decode(Bool.self) {
             self = .flag(flag)
@@ -112,6 +125,12 @@ extension GenUiValue: Decodable {
             self = .number(number)
             return
         }
+        if let choices = try? container.decode([String].self) {
+            self = .choices(choices)
+            return
+        }
         self = .text(try container.decode(String.self))
     }
 }
+
+private enum DateRangeKeys: String, CodingKey { case from, to }

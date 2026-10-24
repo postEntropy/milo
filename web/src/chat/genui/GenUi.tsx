@@ -1,19 +1,22 @@
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import type {
   GenUiAccordion,
   GenUiCode,
+  GenUiChoiceCards,
   GenUiDate,
   GenUiDateRange,
+  GenUiForm,
   GenUiMultiselect,
   GenUiNode,
   GenUiProgress,
   GenUiRender,
   GenUiStat,
   GenUiTabs,
+  GenUiTextInput,
 } from '../../../../src/core/genui.ts'
 import { Code } from '../../ui/Code.js'
 import { Chart, Sparkline } from './Chart.js'
-import { evaluateFormula, formatNumber, interpolate, type GenUiValues } from './evaluate.js'
+import { evaluateFormula, formatNumber, interpolate, type GenUiInputValue, type GenUiValues } from './evaluate.js'
 import { Inline } from './Inline.js'
 import { useCountUp } from './motion.js'
 
@@ -28,8 +31,11 @@ import { useCountUp } from './motion.js'
  */
 export function GenUi({ render, onSend }: { render: GenUiRender; onSend?(text: string): void }) {
   const [values, setValues] = useState<GenUiValues>(() => initialValues(render.tree))
-  const set = (id: string, value: number | string | boolean): void =>
+  const touched = useRef(new Set<string>())
+  const set = (id: string, value: GenUiInputValue): void => {
+    touched.current.add(id)
     setValues((current) => ({ ...current, [id]: value }))
+  }
 
   // A draft is the tree as far as it has been written, so an input can arrive after
   // the widget is already on screen. Its default joins the map then — without
@@ -40,7 +46,7 @@ export function GenUi({ render, onSend }: { render: GenUiRender; onSend?(text: s
       let filled = false
       const next = { ...current }
       for (const [id, value] of Object.entries(defaults)) {
-        if (!(id in next)) {
+        if (!touched.current.has(id) && !sameValue(next[id], value)) {
           next[id] = value
           filled = true
         }
@@ -69,7 +75,7 @@ function Node({
 }: {
   node: GenUiNode
   values: GenUiValues
-  set(id: string, value: number | string | boolean): void
+  set(id: string, value: GenUiInputValue): void
   onSend?(text: string): void
 }): ReactNode {
   if (node.kind === 'box') {
@@ -84,6 +90,23 @@ function Node({
       </div>
     )
   }
+  if (node.kind === 'section') {
+    const children = uniqueKeys(node.children.map(nodeKey))
+    return <section className="genui-section" aria-label={node.title}>
+      <div className="genui-section-heading"><h3 className="genui-section-title">{node.title}</h3>{node.description && <p className="genui-section-description">{node.description}</p>}</div>
+      {node.children.map((child, index) => <Node key={children[index]} node={child} values={values} set={set} onSend={onSend} />)}
+    </section>
+  }
+  if (node.kind === 'timeline') {
+    const keys = uniqueKeys(node.entries.map((entry) => `${entry.when}:${entry.title}:${entry.detail ?? ''}`))
+    return <ol className="genui-timeline">{node.entries.map((entry, index) => <li className={`genui-timeline-entry genui-tone-${entry.tone ?? 'neutral'}`} key={keys[index]}>
+      <span className="genui-timeline-when">{entry.when}</span><span className="genui-timeline-mark" aria-hidden="true" />
+      <span className="genui-timeline-body"><strong>{entry.title}</strong>{entry.detail && <span className="genui-timeline-detail">{entry.detail}</span>}</span>
+    </li>)}</ol>
+  }
+  if (node.kind === 'choice-cards') return <ChoiceCards node={node} values={values} set={set} />
+  if (node.kind === 'text-input') return <TextInput node={node} values={values} set={set} />
+  if (node.kind === 'form') return <FormView node={node} values={values} set={set} onSend={onSend} />
   if (node.kind === 'title') {
     return (
       <div className={`genui-title genui-size-${node.size ?? 'md'}`}>
@@ -254,9 +277,9 @@ function Node({
       </label>
     )
   }
-  if (node.kind === 'multiselect') return <MultiSelect node={node} set={set} />
+  if (node.kind === 'multiselect') return <MultiSelect node={node} values={values} set={set} />
   if (node.kind === 'date') return <DateField node={node} values={values} set={set} />
-  if (node.kind === 'daterange') return <DateRangeField node={node} set={set} />
+  if (node.kind === 'daterange') return <DateRangeField node={node} values={values} set={set} />
   if (node.kind === 'tabs') return <TabsView node={node} values={values} set={set} onSend={onSend} />
   return <AccordionView node={node} values={values} set={set} onSend={onSend} />
 }
@@ -305,19 +328,67 @@ function ProgressView({ node, values }: { node: GenUiProgress; values: GenUiValu
   )
 }
 
+function ChoiceCards({ node, values, set }: { node: GenUiChoiceCards; values: GenUiValues; set(id: string, value: GenUiInputValue): void }) {
+  const selected = String(values[node.id] ?? node.value ?? '')
+  return <fieldset className="genui-field genui-choice-field"><legend className="genui-field-label">{node.label}</legend><div className="genui-choice-cards">
+    {node.options.map((option) => <button key={option.value} type="button" aria-pressed={selected === option.value} className={`genui-choice-card${selected === option.value ? ' on' : ''}`} onClick={() => set(node.id, option.value)}>
+      <strong>{option.title}</strong>{option.detail && <span className="genui-choice-detail">{option.detail}</span>}
+    </button>)}
+  </div></fieldset>
+}
+
+function TextInput({ node, values, set }: { node: GenUiTextInput; values: GenUiValues; set(id: string, value: GenUiInputValue): void }) {
+  const id = `genui-${node.id}`
+  const value = typeof values[node.id] === 'string' ? String(values[node.id]) : node.value ?? ''
+  return <label className="genui-field" htmlFor={id}><span className="genui-field-label">{node.label}{node.required && <span aria-hidden="true"> *</span>}</span>
+    {node.multiline
+      ? <textarea id={id} className="genui-text-input" value={value} placeholder={node.placeholder} maxLength={node.maxLength} required={node.required} onChange={(event) => set(node.id, event.target.value)} />
+      : <input id={id} className="genui-text-input" type="text" value={value} placeholder={node.placeholder} maxLength={node.maxLength} required={node.required} onChange={(event) => set(node.id, event.target.value)} />}
+  </label>
+}
+
+function FormView({ node, values, set, onSend }: { node: GenUiForm; values: GenUiValues; set(id: string, value: GenUiInputValue): void; onSend?(text: string): void }) {
+  const [attempted, setAttempted] = useState(false)
+  const required = requiredTextInputs(node.children)
+  const missing = required.filter((field) => !String(values[field.id] ?? field.value ?? '').trim())
+  const keys = uniqueKeys(node.children.map(nodeKey))
+  return <form className="genui-form" noValidate onSubmit={(event) => {
+    event.preventDefault()
+    setAttempted(true)
+    if (missing.length) return
+    onSend?.(interpolate(node.submit.send, values))
+  }}>
+    {node.children.map((child, index) => <Node key={keys[index]} node={child} values={values} set={set} onSend={onSend} />)}
+    {attempted && missing.length > 0 && <p className="genui-form-error" role="alert">Complete the required fields: {missing.map((field) => field.label).join(', ')}.</p>}
+    <button className="genui-action genui-action-primary" type="submit">{node.submit.label}</button>
+  </form>
+}
+
+function requiredTextInputs(nodes: GenUiNode[]): GenUiTextInput[] {
+  return nodes.flatMap((node) => {
+    if (node.kind === 'text-input') return node.required ? [node] : []
+    if (node.kind === 'box' || node.kind === 'section' || node.kind === 'form') return requiredTextInputs(node.children)
+    if (node.kind === 'tabs') return node.tabs.flatMap((tab) => requiredTextInputs(tab.children))
+    if (node.kind === 'accordion') return node.items.flatMap((item) => requiredTextInputs(item.children))
+    return []
+  })
+}
+
 /** Chips that hold several choices; the message the model reads joins them with commas. */
 function MultiSelect({
   node,
+  values,
   set,
 }: {
   node: GenUiMultiselect
-  set(id: string, value: number | string | boolean): void
+  values: GenUiValues
+  set(id: string, value: GenUiInputValue): void
 }) {
-  const [chosen, setChosen] = useState<string[]>(() => node.values ?? [])
+  const stored = values[node.id]
+  const chosen = Array.isArray(stored) ? stored : node.values ?? []
   const toggle = (option: string): void => {
     const next = chosen.includes(option) ? chosen.filter((item) => item !== option) : [...chosen, option]
-    setChosen(next)
-    set(node.id, next.join(', '))
+    set(node.id, next)
   }
   return (
     <fieldset className="genui-field genui-chips-field">
@@ -349,7 +420,7 @@ function DateField({
 }: {
   node: GenUiDate
   values: GenUiValues
-  set(id: string, value: number | string | boolean): void
+  set(id: string, value: GenUiInputValue): void
 }) {
   const value = typeof values[node.id] === 'string' ? String(values[node.id]) : node.value
   return (
@@ -370,17 +441,19 @@ function DateField({
 /** Two days read as one span: `{id}` shows them as `from – to`. */
 function DateRangeField({
   node,
+  values,
   set,
 }: {
   node: GenUiDateRange
-  set(id: string, value: number | string | boolean): void
+  values: GenUiValues
+  set(id: string, value: GenUiInputValue): void
 }) {
-  const [from, setFrom] = useState(node.from)
-  const [to, setTo] = useState(node.to)
+  const stored = values[node.id]
+  const [from, to] = stored && typeof stored === 'object' && !Array.isArray(stored)
+    ? [stored.from, stored.to]
+    : [node.from, node.to]
   const write = (nextFrom: string, nextTo: string): void => {
-    setFrom(nextFrom)
-    setTo(nextTo)
-    set(node.id, `${nextFrom} – ${nextTo}`)
+    set(node.id, { from: nextFrom, to: nextTo })
   }
   return (
     <div className="genui-field">
@@ -403,9 +476,10 @@ function TabsView({
 }: {
   node: GenUiTabs
   values: GenUiValues
-  set(id: string, value: number | string | boolean): void
+  set(id: string, value: GenUiInputValue): void
   onSend?(text: string): void
 }) {
+  const id = useId()
   const [active, setActive] = useState(0)
   const tabKeys = uniqueKeys(node.tabs.map((tab) => tab.label))
   const tabs = node.tabs.map((tab, index) => ({ tab, index, key: tabKeys[index]! }))
@@ -414,21 +488,36 @@ function TabsView({
   const children = activeChildren.map((child, index) => ({ child, key: childKeys[index]! }))
   return (
     <div className="genui-tabs">
-      <div className="genui-tablist" role="tablist">
+      <div className="genui-tablist" role="tablist" aria-label="Widget sections">
         {tabs.map(({ tab, index, key }) => (
           <button
             key={key}
+            id={`${id}-tab-${index}`}
             className={`genui-tab${index === active ? ' on' : ''}`}
             type="button"
             role="tab"
             aria-selected={index === active}
+            aria-controls={`${id}-panel`}
+            tabIndex={index === active ? 0 : -1}
             onClick={() => setActive(index)}
+            onKeyDown={(event) => {
+              const next = event.key === 'ArrowRight' ? (index + 1) % tabs.length
+                : event.key === 'ArrowLeft' ? (index - 1 + tabs.length) % tabs.length
+                  : event.key === 'Home' ? 0
+                    : event.key === 'End' ? tabs.length - 1
+                      : null
+              if (next !== null) {
+                event.preventDefault()
+                setActive(next)
+                document.getElementById(`${id}-tab-${next}`)?.focus()
+              }
+            }}
           >
             {tab.label}
           </button>
         ))}
       </div>
-      <div className="genui-tabpanel" role="tabpanel" key={active}>
+      <div id={`${id}-panel`} className="genui-tabpanel" role="tabpanel" aria-labelledby={`${id}-tab-${active}`} key={active}>
         {children.map(({ child, key }) => (
           <Node key={key} node={child} values={values} set={set} onSend={onSend} />
         ))}
@@ -446,7 +535,7 @@ function AccordionView({
 }: {
   node: GenUiAccordion
   values: GenUiValues
-  set(id: string, value: number | string | boolean): void
+  set(id: string, value: GenUiInputValue): void
   onSend?(text: string): void
 }) {
   const [open, setOpen] = useState<number[]>(() => {
@@ -517,7 +606,7 @@ function initialValues(node: GenUiNode): GenUiValues {
 }
 
 function collect(node: GenUiNode, values: GenUiValues): void {
-  if (node.kind === 'box') {
+  if (node.kind === 'box' || node.kind === 'section' || node.kind === 'form') {
     for (const child of node.children) collect(child, values)
     return
   }
@@ -532,13 +621,25 @@ function collect(node: GenUiNode, values: GenUiValues): void {
   if (node.kind === 'slider' || node.kind === 'number') values[node.id] = node.value
   else if (node.kind === 'checkbox') values[node.id] = node.value ?? false
   else if (node.kind === 'select') values[node.id] = node.value
-  else if (node.kind === 'multiselect') values[node.id] = (node.values ?? []).join(', ')
+  else if (node.kind === 'multiselect') values[node.id] = node.values ?? []
   else if (node.kind === 'date') values[node.id] = node.value
-  else if (node.kind === 'daterange') values[node.id] = `${node.from} – ${node.to}`
+  else if (node.kind === 'daterange') values[node.id] = { from: node.from, to: node.to }
+  else if (node.kind === 'text-input') values[node.id] = node.value ?? ''
+  else if (node.kind === 'choice-cards') values[node.id] = node.value ?? ''
+}
+
+function sameValue(left: GenUiValues[string], right: GenUiValues[string]): boolean {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((value, index) => value === right[index])
+  }
+  if (left && typeof left === 'object' && right && typeof right === 'object') {
+    return !Array.isArray(left) && !Array.isArray(right) && left.from === right.from && left.to === right.to
+  }
+  return left === right
 }
 
 /** The number an input holds now, or the value it was given. */
-function numeric(value: number | string | boolean | undefined, fallback: number): number {
+function numeric(value: GenUiInputValue | undefined, fallback: number): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback
 }
 
@@ -551,6 +652,10 @@ function numeric(value: number | string | boolean | undefined, fallback: number)
 function nodeKey(node: GenUiNode): string {
   if (node.kind === 'title' || node.kind === 'text') return `${node.kind}:${node.text.slice(0, 40)}`
   if (node.kind === 'button') return `button:${node.label}`
+  if (node.kind === 'section') return `section:${node.title}`
+  if (node.kind === 'timeline') return `timeline:${node.entries.length}`
+  if (node.kind === 'form') return `form:${node.submit.label}`
+  if (node.kind === 'text-input' || node.kind === 'choice-cards') return `${node.kind}:${node.id}`
   if (node.kind === 'stat') return `stat:${node.label}`
   if (node.kind === 'progress') return `progress:${node.label ?? node.formula}`
   if (node.kind === 'table') return `table:${node.columns.join('/')}`

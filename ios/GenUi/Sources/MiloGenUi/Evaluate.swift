@@ -1,14 +1,16 @@
 import Foundation
 
 /**
- The value of a widget's input, by the id the model gave it. A `number` and a
- `slider` hold a number, a `select` a string, a `checkbox` a flag — and an id the
- model referenced but never declared is simply absent.
+ The value of a widget's input, by the id the model gave it. Numbers and sliders
+ hold numbers, a `select` a string, a `checkbox` a flag, a `multiselect` choices,
+ and a date range its two days — an id the model never declared is absent.
  */
 public enum GenUiValue: Equatable, Sendable {
     case number(Double)
     case text(String)
     case flag(Bool)
+    case choices([String])
+    case dateRange(String, String)
 }
 
 /** The values of a widget's inputs, by input id. */
@@ -81,6 +83,8 @@ private func shown(_ value: GenUiValue) -> String {
     case .number(let number): return formatNumber(number)
     case .flag(let flag): return flag ? "true" : "false"
     case .text(let text): return text
+    case .choices(let choices): return choices.joined(separator: ", ")
+    case .dateRange(let from, let to): return "\(from) – \(to)"
     }
 }
 
@@ -201,7 +205,7 @@ private func numberValue(_ value: GenUiValue?) -> Double? {
     switch value {
     case .number(let number): return number.isFinite ? number : nil
     case .flag(let flag): return flag ? 1 : 0
-    case .text, .none: return nil
+    case .text, .choices, .dateRange, .none: return nil
     }
 }
 

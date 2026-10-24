@@ -179,6 +179,18 @@
       "text": "size {size}",
       "values": { "size": "large" },
       "expected": "size large"
+    },
+    {
+      "name": "joins selected choices as words",
+      "text": "Days: {days}",
+      "values": { "days": ["Mon", "Wed"] },
+      "expected": "Days: Mon, Wed"
+    },
+    {
+      "name": "joins a date range with the same visible separator",
+      "text": "Dates: {span}",
+      "values": { "span": { "from": "2026-10-01", "to": "2026-10-07" } },
+      "expected": "Dates: 2026-10-01 – 2026-10-07"
     }
   ]
 }

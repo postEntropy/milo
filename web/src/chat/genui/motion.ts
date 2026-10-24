@@ -24,23 +24,26 @@ export function useReducedMotion(): boolean {
 export function useCountUp(value: number, ms = 420): number {
   const reduced = useReducedMotion()
   const [shown, setShown] = useState(value)
-  const from = useRef(value)
+  const current = useRef(value)
   const frame = useRef(0)
 
   useEffect(() => {
     if (reduced || !Number.isFinite(value)) {
-      from.current = value
+      current.current = value
       setShown(value)
       return
     }
-    const origin = from.current
+    // A new target may arrive before the previous animation finishes. Start from the
+    // last frame actually shown, not the stale origin of the cancelled animation.
+    const origin = current.current
     const started = performance.now()
     const step = (now: number): void => {
       const t = Math.min(1, (now - started) / ms)
       const eased = 1 - (1 - t) ** 3
-      setShown(origin + (value - origin) * eased)
+      const next = t === 1 ? value : origin + (value - origin) * eased
+      current.current = next
+      setShown(next)
       if (t < 1) frame.current = requestAnimationFrame(step)
-      else from.current = value
     }
     frame.current = requestAnimationFrame(step)
     return () => cancelAnimationFrame(frame.current)
