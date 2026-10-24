@@ -14,15 +14,10 @@ struct SettingsView: View {
     let account: Account
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
-    @State private var picker = false
-    /// Read and written straight through: the chain under a message reads the same key,
-    /// so a toggle here is a toggle there the moment it moves.
-    @AppStorage("tools-folded") private var foldedTools = false
-    /// The phone's own color scheme override (`system`, `light`, `dark`).
+    /// The phone's own color scheme override (`system`, `light`, `dark`). It lives here
+    /// because the whole sheet follows it; the Display page edits the same value through
+    /// a binding rather than reading the key a second time.
     @AppStorage("appearance") private var appearance = "system"
-    /// The same shape for the phone's own reply notice: the key is the notifier's, so the
-    /// switch that writes it and the reading that acts on it cannot come to disagree.
-    @AppStorage(PhoneNotifications.replySetting) private var notifyReply = false
 
     private var colorScheme: ColorScheme? {
         switch appearance {
@@ -35,137 +30,40 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                Section("Model") {
-                    Button { picker = true } label: {
-                        // The id in full: a settings screen is where the exact
-                        // name is information rather than noise.
-                        LabeledContent("Model", value: model.modelName.isEmpty ? "—" : model.modelName)
-                    }
-                    Picker("Reasoning", selection: effort) {
-                        ForEach(model.efforts, id: \.self) { value in
-                            Text(SettingsWording.of(value)).tag(value)
-                        }
-                    }
-                }
-
+                // The sections the browser lists, in its own order: one row per
+                // category, an icon and its name. The value each one holds is read on
+                // its own page, not previewed here.
                 Section {
-                    NavigationLink {
-                        PermissionsSettingsView()
-                    } label: {
-                        LabeledContent("Permissions", value: SettingsWording.of(model.permissionMode))
+                    category("Provider & model", icon: "cpu") {
+                        ProviderSettingsView()
                     }
-                } footer: {
-                    // Said once, and only where it matters: with this on, nothing
-                    // waits for the person.
-                    Text(model.permissionMode == "yolo"
-                        ? "Nothing asks before it runs."
-                        : "A tool that can change something waits for you.")
-                }
-
-                Section("Display") {
-                    Picker("Appearance", selection: $appearance) {
-                        Text("System").tag("system")
-                        Text("Light").tag("light")
-                        Text("Dark").tag("dark")
-                    }
-                    Picker("Tools", selection: tools) {
-                        ForEach(model.toolLevels, id: \.self) { value in
-                            Text(SettingsWording.of(value)).tag(value)
-                        }
-                    }
-                    Picker("Reasoning", selection: thinking) {
-                        ForEach(model.thinkingLevels, id: \.self) { value in
-                            Text(SettingsWording.of(value)).tag(value)
-                        }
-                    }
-                    Toggle("Tool calls folded", isOn: $foldedTools)
-                    Toggle("Interactive widgets (GenUI)", isOn: genui)
-                }
-
-                Section("Memory") {
-                    NavigationLink {
-                        MemorySettingsView()
-                    } label: {
-                        LabeledContent("Memory", value: memorySummary)
-                    }
-                }
-
-                Section("Tools") {
-                    Picker("Web search", selection: searchProvider) {
-                        ForEach(model.searchProviders, id: \.self) { value in
-                            Text(SettingsWording.searchProvider(value)).tag(value)
-                        }
-                    }
-                    NavigationLink {
-                        GoogleSettingsView()
-                    } label: {
-                        LabeledContent("Google", value: googleSummary)
-                    }
-                    NavigationLink {
-                        BrowserSettingsView()
-                    } label: {
-                        LabeledContent("Browser", value: model.browserEnabled ? "On" : "Off")
-                    }
-                    NavigationLink {
-                        McpSettingsView()
-                    } label: {
-                        LabeledContent("MCP servers", value: mcpSummary)
-                    }
-                }
-
-                Section {
-                    NavigationLink {
-                        SkillsSettingsView()
-                    } label: {
-                        LabeledContent(
-                            "Skills",
-                            value: model.installedSkills.isEmpty ? "None" : "\(model.installedSkills.count)"
-                        )
-                    }
-                }
-
-                Section {
-                    NavigationLink {
+                    category("API keys", icon: "key") {
                         ApiKeysSettingsView()
-                    } label: {
-                        LabeledContent("API keys", value: apiKeysSummary)
                     }
-                }
-
-                Section {
-                    NavigationLink {
+                    category("Memory", icon: "cylinder") {
+                        MemorySettingsView()
+                    }
+                    category("Gateways", icon: "server.rack") {
                         GatewaysSettingsView()
-                    } label: {
-                        LabeledContent("Gateways", value: gatewaysSummary)
                     }
-                    NavigationLink {
+                    category("Web", icon: "globe") {
                         WebSettingsView()
-                    } label: {
-                        LabeledContent(
-                            "Web",
-                            value: model.web.enabled ? "\(model.web.host):\(model.web.port)" : "Off"
-                        )
                     }
-                }
-
-                Section("Sessions") {
-                    NavigationLink {
+                    category("Tools", icon: "wrench.and.screwdriver") {
+                        ToolsSettingsView()
+                    }
+                    category("Permissions", icon: "shield") {
+                        PermissionsSettingsView()
+                    }
+                    category("Display", icon: "eye") {
+                        DisplaySettingsView(appearance: $appearance)
+                    }
+                    category("Skills", icon: "sparkles") {
+                        SkillsSettingsView()
+                    }
+                    category("Sessions", icon: "clock.arrow.circlepath") {
                         SessionsSettingsView()
-                    } label: {
-                        LabeledContent("Transcript", value: transcriptSummary)
                     }
-                }
-
-                Section {
-                    Toggle("Notify when Milo replies", isOn: $notifyReply)
-                } header: {
-                    Text("Notifications")
-                } footer: {
-                    // What the switch comes to, said once under it — including the one
-                    // thing that can stop it working, where the person looks for a reason.
-                    Text(notifyReply && model.notificationsAllowed == false
-                        ? "Notifications are off for Milo. Allow them in iOS Settings."
-                        : "A banner when an answer lands and the app is not on screen.")
                 }
 
                 Section("Daemon") {
@@ -173,13 +71,7 @@ struct SettingsView: View {
                     LabeledContent("State", value: model.connection.wording)
                 }
 
-                if let error = model.settingsError {
-                    Section {
-                        Text(error)
-                            .font(MiloTheme.Text.small)
-                            .foregroundStyle(MiloTheme.danger)
-                    }
-                }
+                SettingsErrorSection()
 
                 Section {
                     Button("Unpair this phone", role: .destructive) {
@@ -190,29 +82,112 @@ struct SettingsView: View {
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)
+            // The index carries no header on its first section, and the list reserves
+            // room for one either way — a blank band above the first row. Both of these
+            // are what that band is made of.
+            .contentMargins(.top, 0, for: .scrollContent)
+            .environment(\.defaultMinListHeaderHeight, 0)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Done") { dismiss() }
                 }
             }
             .task { await model.loadSettings() }
-            // Read without prompting, so a switch left on from an earlier run cannot read
-            // as a promise the phone is not allowed to keep.
-            .task { await model.readNotificationPermission() }
-            .onChange(of: notifyReply) { _, on in
-                // Turning it on is the moment to ask; the answer either way is what the
-                // footer under it reads.
-                guard on else { return }
-                Task { await model.askToNotify() }
-            }
-            .sheet(isPresented: $picker) { ModelPickerSheet() }
         }
         .preferredColorScheme(colorScheme)
     }
 
-    private var memorySummary: String {
-        guard let stats = model.memoryStats else { return "" }
-        return "\(stats.facts) fact\(stats.facts == 1 ? "" : "s")"
+    /// One category: its icon, its name, and the page behind it. Nothing about what is
+    /// set appears here — the value belongs on the page, once.
+    private func category<Destination: View>(
+        _ title: String,
+        icon: String,
+        @ViewBuilder destination: () -> Destination
+    ) -> some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    // The page's own ink, not the muted secondary: the icon is how a
+                    // category is recognised, and a caption weight read as a hairline.
+                    .font(MiloTheme.Text.body.weight(.semibold))
+                    .foregroundStyle(MiloTheme.foreground)
+                    .frame(width: 24, alignment: .center)
+                Text(title)
+            }
+        }
+    }
+}
+
+// MARK: - Provider & model
+
+private struct ProviderSettingsView: View {
+    @Environment(AppModel.self) private var model
+    @State private var picker = false
+
+    var body: some View {
+        List {
+            Section("Model") {
+                Button { picker = true } label: {
+                    // The id in full: a settings screen is where the exact name is
+                    // information rather than noise.
+                    LabeledContent("Model", value: model.modelName.isEmpty ? "—" : model.modelName)
+                }
+                Picker("Reasoning", selection: effort) {
+                    ForEach(model.efforts, id: \.self) { value in
+                        Text(SettingsWording.of(value)).tag(value)
+                    }
+                }
+            }
+            SettingsErrorSection()
+        }
+        .navigationTitle("Provider & model")
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $picker) { ModelPickerSheet() }
+    }
+
+    private var effort: Binding<String> {
+        Binding(
+            get: { model.effort },
+            set: { value in Task { await model.setEffort(value) } }
+        )
+    }
+}
+
+// MARK: - Tools
+
+private struct ToolsSettingsView: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        List {
+            Section {
+                Picker("Web search", selection: searchProvider) {
+                    ForEach(model.searchProviders, id: \.self) { value in
+                        Text(SettingsWording.searchProvider(value)).tag(value)
+                    }
+                }
+                NavigationLink {
+                    GoogleSettingsView()
+                } label: {
+                    LabeledContent("Google", value: googleSummary)
+                }
+                NavigationLink {
+                    BrowserSettingsView()
+                } label: {
+                    LabeledContent("Browser", value: model.browserEnabled ? "On" : "Off")
+                }
+                NavigationLink {
+                    McpSettingsView()
+                } label: {
+                    LabeledContent("MCP servers", value: mcpSummary)
+                }
+            }
+            SettingsErrorSection()
+        }
+        .navigationTitle("Tools")
+        .navigationBarTitleDisplayMode(.inline)
     }
 
     private var googleSummary: String {
@@ -228,36 +203,79 @@ struct SettingsView: View {
         return count == 0 ? "None" : "\(count)"
     }
 
-    private var apiKeysSummary: String {
-        let offered = KeyGroup.allCases.flatMap { $0.ids(presets: model.presets, auth: model.auth) }
-        let set = KeyGroup.allCases.reduce(0) { count, group in
-            count + group.ids(presets: model.presets, auth: model.auth)
-                .filter { group.state(model.auth, id: $0)?.set == true }
-                .count
-        }
-        return set == 0 ? "None set" : "\(set) of \(offered.count) set"
-    }
-
-    private var gatewaysSummary: String {
-        let running = ["telegram", "discord"].filter { model.gateways[$0]?.enabled == true }
-        return running.isEmpty ? "Off" : running.map(SettingsWording.of).joined(separator: ", ")
-    }
-
-    private var transcriptSummary: String {
-        let percent = Int((model.transcript.compactAt * 100).rounded())
-        return "Compact at \(percent)% · \(model.transcript.maxSessions) kept"
-    }
-
-    /*
-     Each control writes as it is set, and the local value is only taken once the
-     daemon has agreed — a control that reads as moved when the write failed would
-     be the screen lying.
-     */
-    private var effort: Binding<String> {
+    private var searchProvider: Binding<String> {
         Binding(
-            get: { model.effort },
-            set: { value in Task { await model.setEffort(value) } }
+            get: { model.searchProvider },
+            set: { value in Task { await model.setSearchProvider(value) } }
         )
+    }
+}
+
+// MARK: - Display
+
+private struct DisplaySettingsView: View {
+    @Environment(AppModel.self) private var model
+    /// Bound from the screen above, which applies it to the whole sheet.
+    @Binding var appearance: String
+    /// Read and written straight through: the chain under a message reads the same key,
+    /// so a toggle here is a toggle there the moment it moves.
+    @AppStorage("tools-folded") private var foldedTools = false
+    /// The same shape for the phone's own reply notice: the key is the notifier's, so the
+    /// switch that writes it and the reading that acts on it cannot come to disagree.
+    @AppStorage(PhoneNotifications.replySetting) private var notifyReply = false
+
+    var body: some View {
+        List {
+            Section {
+                Picker("Appearance", selection: $appearance) {
+                    Text("System theme").tag("system")
+                    Text("Light theme").tag("light")
+                    Text("Dark theme").tag("dark")
+                }
+            } footer: {
+                Text("Applies to this phone only.")
+            }
+
+            Section {
+                Picker("Tool detail", selection: tools) {
+                    ForEach(model.toolLevels, id: \.self) { value in
+                        Text(SettingsWording.of(value)).tag(value)
+                    }
+                }
+                Picker("Reasoning", selection: thinking) {
+                    ForEach(model.thinkingLevels, id: \.self) { value in
+                        Text(SettingsWording.of(value)).tag(value)
+                    }
+                }
+                Toggle("Tool calls folded", isOn: $foldedTools)
+                Toggle("Interactive widgets (GenUI)", isOn: genui)
+            }
+
+            Section {
+                Toggle("Notify when Milo replies", isOn: $notifyReply)
+            } header: {
+                Text("Notifications")
+            } footer: {
+                // What the switch comes to, said once under it — including the one
+                // thing that can stop it working, where the person looks for a reason.
+                Text(notifyReply && model.notificationsAllowed == false
+                    ? "Notifications are off for Milo. Allow them in iOS Settings."
+                    : "A banner when an answer lands and the app is not on screen.")
+            }
+
+            SettingsErrorSection()
+        }
+        .navigationTitle("Display")
+        .navigationBarTitleDisplayMode(.inline)
+        // Read without prompting, so a switch left on from an earlier run cannot read
+        // as a promise the phone is not allowed to keep.
+        .task { await model.readNotificationPermission() }
+        .onChange(of: notifyReply) { _, on in
+            // Turning it on is the moment to ask; the answer either way is what the
+            // footer under it reads.
+            guard on else { return }
+            Task { await model.askToNotify() }
+        }
     }
 
     private var tools: Binding<String> {
@@ -278,13 +296,6 @@ struct SettingsView: View {
         Binding(
             get: { model.genui },
             set: { value in Task { await model.setGenui(value) } }
-        )
-    }
-
-    private var searchProvider: Binding<String> {
-        Binding(
-            get: { model.searchProvider },
-            set: { value in Task { await model.setSearchProvider(value) } }
         )
     }
 }
