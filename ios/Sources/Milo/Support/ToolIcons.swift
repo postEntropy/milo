@@ -39,10 +39,9 @@ enum ToolIcons {
         "git": "point.3.connected.trianglepath.dotted",
         "git_commit": "point.3.connected.trianglepath.dotted",
         "task": "sparkles",
-        // The browser's own mark for this is a bare prompt; SF's `terminal` is a wide
-        // window, which reads as a different tool at the size the row draws. This is the
-        // square that says the same thing as its neighbours.
-        "shell_command": "apple.terminal",
+        // A code mark rather than Apple's colored Terminal app icon, which stands out
+        // against the monochrome symbols in the tool line.
+        "shell_command": "chevron.left.forwardslash.chevron.right",
         "browser_open": "safari",
         "browser_snapshot": "eye",
         "browser_screenshot": "camera",
