@@ -670,7 +670,7 @@ struct ToolRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
-            if hasDetail {
+            if canOpen {
                 Button {
                     withAnimation(.easeInOut(duration: 0.22)) { showingResult.toggle() }
                 } label: {
@@ -682,8 +682,17 @@ struct ToolRow: View {
                 .accessibilityLabel(showingResult ? detailHiddenLabel : detailLabel)
 
                 if showingResult {
-                    if let change = tool.change, !change.isEmpty { changeBody(change) }
-                    else if let result = tool.result { resultBody(result) }
+                    if let change = tool.change, !change.isEmpty {
+                        changeBody(change)
+                    } else if let result = tool.result, !result.isEmpty {
+                        resultBody(result)
+                    } else {
+                        Text(running ? "Tool is still running." : "No output is available.")
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                            .padding(.leading, 22)
+                            .accessibilityAddTraits(.isStaticText)
+                    }
                 }
             } else {
                 line
@@ -815,6 +824,10 @@ struct ToolRow: View {
         if let change = tool.change, !change.isEmpty { return true }
         return !(tool.result?.isEmpty ?? true)
     }
+
+    /// A running call can be opened before its result arrives; keep it open afterward
+    /// so the result replaces the running message in place.
+    private var canOpen: Bool { hasDetail || running || showingResult }
 
     private var detailLabel: String {
         tool.change?.isEmpty == false ? "Show the change" : "Show the tool result"

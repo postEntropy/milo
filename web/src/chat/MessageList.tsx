@@ -5,7 +5,7 @@ import { formatWhen } from '../../../src/core/time.js'
 import { formatTokens, humanSize } from '../../../src/util/format.ts'
 import type { ActionRow, FrameAttachment, SessionCardItem, ThinkingDisplay, ToolMark, TranscriptMessage, TranscriptPart } from '@protocol'
 import { proseOf } from '@protocol'
-import { toolBrand, toolLabel, toolResultPreview, changeTotals } from '../../../src/gateways/tool-line.ts'
+import { toolBrand, toolLabel, changeTotals } from '../../../src/gateways/tool-line.ts'
 import type { FileChange } from '../../../src/core/change.ts'
 import { toolRows } from './tool-runs.js'
 import type { TodoItem, TodoStatus } from '../../../src/core/todos.ts'
@@ -65,6 +65,7 @@ function Attachments({ items }: { items: FrameAttachment[] }) {
  * is not pushed aside into an empty column.
  */
 function ToolLine({ tool }: { tool: ToolMark }) {
+  const [open, setOpen] = useState(false)
   const { state: copied, copy } = useCopy(tool.text)
   const label = copyLabel(copied)
   const brand = toolBrand(tool.name)
@@ -75,25 +76,40 @@ function ToolLine({ tool }: { tool: ToolMark }) {
   const name = toolLabel(tool.name, false)
   const value = tool.text.startsWith(name) ? tool.text.slice(name.length).trim() : ''
   const totals = changeTotals(tool.change)
+  const change = tool.change && tool.change.length > 0 ? tool.change : null
+  const result = tool.result || null
+  const hasDetail = change !== null || result !== null
+  const canOpen = hasDetail || tool.state === 'running'
+  const line = (
+    <code>
+      <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />{' '}
+      <span className="tool-name">{value ? name : tool.text}</span>
+      {value && <span className="tool-value">{value}</span>}
+      {(totals.additions > 0 || totals.deletions > 0) && (
+        <span className="tool-change-count">
+          {totals.additions > 0 && <span className="plus">+{totals.additions}</span>}
+          {totals.deletions > 0 && <span className="minus">−{totals.deletions}</span>}
+        </span>
+      )}
+      {tool.state === 'failed' && <span className="tool-failed">failed</span>}
+    </code>
+  )
 
   return (
     <div className="tool-call">
       <div className={`tool-line${tool.state ? ` ${tool.state}` : ''}`}>
-        <code>
-          <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />{' '}
-          <span className="tool-name">{value ? name : tool.text}</span>
-          {value && <span className="tool-value">{value}</span>}
-          {/* How much moved, in the same two tones the Work screen counts a folder's
-              changes with: the number is the call's footprint, and it is read before the
-              result is opened. */}
-          {(totals.additions > 0 || totals.deletions > 0) && (
-            <span className="tool-change-count">
-              {totals.additions > 0 && <span className="plus">+{totals.additions}</span>}
-              {totals.deletions > 0 && <span className="minus">−{totals.deletions}</span>}
-            </span>
-          )}
-          {tool.state === 'failed' && <span className="tool-failed">failed</span>}
-        </code>
+        {canOpen ? (
+          <button
+            className="tool-line-toggle"
+            type="button"
+            aria-expanded={open}
+            aria-label={`${open ? 'Hide' : 'Show'} ${change ? 'the change' : 'the tool result'}`}
+            title={open ? (change ? 'Hide the change' : 'Hide tool result') : (change ? 'Show the change' : 'Show tool result')}
+            onClick={() => setOpen((current) => !current)}
+          >
+            {line}
+          </button>
+        ) : line}
         <button
           className={`tool-copy-btn${copied === 'failed' ? ' failed' : ''}`}
           type="button"
@@ -105,38 +121,22 @@ function ToolLine({ tool }: { tool: ToolMark }) {
           {copied === 'failed' && <span className="message-tool-label">Copy failed</span>}
         </button>
       </div>
-      {/* A call that wrote shows what it wrote, in the lines themselves; the tool's
-          own sentence about it is the preview that stays in Copy raw. */}
-      {tool.change && tool.change.length > 0 ? (
-        <ToolChange files={tool.change} />
-      ) : (
-        tool.result && <ToolResult text={tool.result} />
-      )}
+      {open && change && <ToolChange files={change} />}
+      {open && !change && result && <ToolResult text={result} />}
+      {open && !hasDetail && <div className="tool-result tool-running" role="status">{tool.state === 'running' ? 'Tool is still running.' : 'No output is available.'}</div>}
     </div>
   )
 }
 
 /**
- * The lines a call changed, folded under it the way its result is. What a call wrote is
- * the thing the person came to check — the numbers on the line say how much, and this is
+ * The lines a call changed, shown when its tool line opens. What a call wrote is the
+ * thing the person came to check — the numbers on the line say how much, and this is
  * which lines. Green and red are the diff's own marking, the one place colour is data.
  */
 function ToolChange({ files }: { files: FileChange[] }) {
-  const [open, setOpen] = useState(false)
-  const count = files.length === 1 ? '1 file changed' : `${files.length} files changed`
   return (
-    <div className={`tool-result tool-change${open ? ' open' : ''}`}>
-      <button
-        className="tool-result-head"
-        type="button"
-        aria-expanded={open}
-        title={open ? 'Hide the change' : 'Show the change'}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Icon name="chevron" size={12} />
-        <span className="tool-result-preview">{count}</span>
-      </button>
-      {open && <div className="tool-change-body">
+    <div className="tool-result tool-change">
+      <div className="tool-change-body">
         {files.map((file) => <div className="tool-change-file" key={file.path}>
           {files.length > 1 && <div className="tool-change-path" title={file.path}>
             {file.path}{file.created ? ' (new)' : file.deleted ? ' (deleted)' : ''}
@@ -154,33 +154,19 @@ function ToolChange({ files }: { files: FileChange[] }) {
             {file.truncated && <div className="tool-change-more">…</div>}
           </div>
         </div>)}
-      </div>}
+      </div>
     </div>
   )
 }
 
 /**
- * What the call came back with, under its own line. Folded to the first line: the answer
- * is the turn's words, and a result spread whole through the thread pushes them apart.
- * Opening it draws all of what the server sent — already capped there, so the whole record
- * lives in Copy raw and this is a reading of it.
+ * What the call came back with, shown only when its tool line opens. The server caps it,
+ * and the whole record also lives in Copy raw.
  */
 function ToolResult({ text }: { text: string }) {
-  const [open, setOpen] = useState(false)
-  const first = toolResultPreview(text)
   return (
-    <div className={`tool-result${open ? ' open' : ''}`}>
-      <button
-        className="tool-result-head"
-        type="button"
-        aria-expanded={open}
-        title={open ? 'Hide result' : 'Show result'}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Icon name="chevron" size={12} />
-        <span className="tool-result-preview">{first}</span>
-      </button>
-      {open && <pre className="tool-result-body">{text}</pre>}
+    <div className="tool-result">
+      <pre className="tool-result-body">{text}</pre>
     </div>
   )
 }
