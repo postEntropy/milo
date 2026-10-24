@@ -16,7 +16,9 @@ The store holds:
 Recall reads the question as an FTS5 `MATCH` (words OR-ed, diacritics folded), reads facts first and
 fills the rest of the reply with turns, so a durable note is not drowned by chatter. The same note saved
 twice is one row; a turn collapses to the newest telling, with the verbatim history left in the log.
-The `remember` tool is the deliberate half, and the end of a turn is read for facts as well.
+The `remember` tool is the deliberate half, and the end of a turn is read for facts as well. A derived
+fact has to stand on the person's own words — it carries a verbatim quote from their message, and a
+line that cannot quote them is dropped, so the answer is context for reading it, never the source.
 
 ## Recall by meaning, off by default
 

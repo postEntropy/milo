@@ -210,7 +210,7 @@ describe('reading a finished turn for facts', () => {
         // The extraction answers only when this test lets it, which is what makes
         // "the turn does not wait for it" observable rather than asserted.
         await held
-        yield { type: 'text', delta: 'O editor do Renato e o Neovim' }
+        yield { type: 'text', delta: 'O editor do Renato e o Neovim\tmeu editor e o Neovim' }
       },
     }
 

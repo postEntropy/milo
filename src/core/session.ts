@@ -1208,6 +1208,9 @@ export class Session {
       const facts = await deriveFacts({
         provider: this.options.provider,
         model: this.options.model,
+        // The fact has to stand on what the person said; the answer is only
+        // context for reading it.
+        person: input,
         messages: [
           { role: 'user', content: [{ type: 'text', text: input }] },
           { role: 'assistant', content: [{ type: 'text', text: answer }] },

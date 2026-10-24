@@ -473,13 +473,13 @@ describe('AgentRuntime close', () => {
         // The turn answers first; the extraction of what to keep from it is the
         // call after, and the one held open here.
         if (call > 1) await extractionGate
-        yield { type: 'text', delta: call > 1 ? 'Meu editor e o Neovim.' : 'ok' }
+        yield { type: 'text', delta: call > 1 ? 'Meu editor e o Neovim.\teu uso o Neovim' : 'ok' }
         yield { type: 'done', finishReason: 'stop' }
       },
     }
     const runtime = new AgentRuntime({ ...runtimeOptions(dir), provider, memory, derive: true })
     const session = await runtime.getSession(cli)
-    await drain(session.send('qual editor eu uso?'))
+    await drain(session.send('eu uso o Neovim, e você?'))
 
     let closed = false
     const closing = runtime.close().then(() => {

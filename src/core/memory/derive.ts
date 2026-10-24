@@ -19,7 +19,11 @@ const MAX_FACTS = 5
 
 const DERIVE_SYSTEM = `You read one exchange and write down what is worth remembering about the person, for a memory that is later recalled by keyword match.
 
-Answer with one fact per line — no numbering, no preamble. Each line is a short standalone sentence, in the language of the exchange, written the way the person would say it about themselves.
+Answer with one fact per line — no numbering, no preamble. Each line is the fact, a TAB, then the exact words from the person's message that say it: \`usa o Neovim\tmeu editor e o Neovim\`.
+
+A fact exists only because the person's own message says it. The assistant's answer is context for reading that message, never a source: a claim that appears only in the answer is not a fact about the person. A line whose second half is not a verbatim fragment of the person's message is discarded, so do not write it.
+
+Each fact is a short standalone sentence, in the language of the exchange, written the way the person would say it about themselves.
 
 Keep only a durable fact about the person or their setup: a preference, a convention, a decision, a name, a path, or how something of theirs works for good. It has to still be true next month, and it has to be about them.
 
@@ -37,6 +41,8 @@ When in doubt, leave it out — an empty answer beats noise. If nothing is worth
 export interface DeriveOptions {
   provider: Provider
   model: string
+  /** The person's own words: the only text a fact may stand on. */
+  person: string
   /** The exchange to read — the question and the answer. */
   messages: Message[]
   signal?: AbortSignal
@@ -60,7 +66,55 @@ export async function deriveFacts(options: DeriveOptions): Promise<string[]> {
     .split('\n')
     .map((line) => line.replace(/^\s*[-*•]\s*/, '').trim())
     .filter((line) => line.length > 0 && !/^none[.!]?$/i.test(line))
+    .map((line) => stoodOn(line, options.person))
+    .filter((fact): fact is string => fact !== null)
     .slice(0, MAX_FACTS)
+}
+
+const TAB = '\t'
+
+/**
+ * A line as the system asks for it — the fact, a tab, the person's words — and
+ * only its fact, when the words are really theirs.
+ *
+ * The prompt already forbids writing down what the assistant said, and a cheap
+ * model ignored it once: a fact invented out of the answer reached the store and
+ * was recalled as something the person had said. The rule is checked here
+ * instead of trusted, and a line that cannot point at the person's own message
+ * is dropped rather than saved.
+ */
+function stoodOn(line: string, person: string): string | null {
+  const at = line.indexOf(TAB)
+  if (at <= 0) return null
+  const fact = line.slice(0, at).trim()
+  const quote = unquote(line.slice(at + 1)).trim()
+  if (!fact || !quote) return null
+  return saidBy(person, quote) ? fact : null
+}
+
+/** The quote the way a model copies it: wrapped in quotes, as often as not. */
+function unquote(text: string): string {
+  return text.replace(/^["'“”‘’]+|["'“”‘’]+$/g, '')
+}
+
+/**
+ * Whether the person's message contains the quote, accents, case, punctuation
+ * and spacing aside — faithful enough to catch a misquote, strict enough that
+ * words the person never said cannot stand on it.
+ */
+function saidBy(person: string, quote: string): boolean {
+  const said = fold(person)
+  const held = fold(quote)
+  return held.length > 0 && said.includes(held)
+}
+
+function fold(text: string): string {
+  return text
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim()
 }
 
 /**
