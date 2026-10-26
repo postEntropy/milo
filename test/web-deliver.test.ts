@@ -9,6 +9,7 @@ const home = mkdtempSync(path.join(os.tmpdir(), 'milo-web-deliver-'))
 process.env.MILO_HOME = home
 
 const { WebHub } = await import('../src/gateways/web/hub.js')
+const { transcriptOf } = await import('../src/gateways/web/transcript.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { createToolRegistry } = await import('../src/core/tools/index.js')
 
@@ -107,17 +108,41 @@ describe('a routine delivering into a web chat', () => {
     const hub = new WebHub(runtime)
     const frames: ServerFrame[] = []
     const client = { send: (frame: ServerFrame) => frames.push(frame) }
+    const at = new Date(2026, 9, 25, 8, 0).getTime()
 
     await hub.connect(client, CHAT)
     frames.length = 0 // the handshake; only what follows is the delivery
-    await hub.deliver(CHAT, { text: 'daily briefing\n\nnothing moved' })
+    await hub.deliver(CHAT, { text: 'nothing moved', routine: { name: 'Daily briefing', at } })
 
+    // The name travels as the delivery's own mark, not as the first line of its
+    // text: the surface draws the head, and the answer is the answer.
     expect(frames).toContainEqual({
       type: 'command-result',
-      reply: 'daily briefing\n\nnothing moved',
-      markdown: 'daily briefing\n\nnothing moved',
+      reply: 'nothing moved',
+      markdown: 'nothing moved',
+      routine: { name: 'Daily briefing', at },
     })
-    expect(await transcript(runtime)).toContain('daily briefing\n\nnothing moved')
+    expect(await transcript(runtime)).toContain('nothing moved')
+  })
+
+  it('reads back as the same card, with its own row rather than the answer above it', async () => {
+    const runtime = build()
+    const hub = new WebHub(runtime)
+    const at = new Date(2026, 9, 25, 8, 0).getTime()
+    const session = await runtime.getSession({ gateway: 'web', chatId: CHAT })
+
+    // A turn's answer, then the delivery: it arrived on its own, so it must not be
+    // grouped into the turn that happened to be above it — the card is its own row.
+    await session.appendNotice('the answer the person asked for')
+    await hub.deliver(CHAT, { text: 'nothing moved', routine: { name: 'Daily briefing', at } })
+
+    const loaded = await runtime.getSession({ gateway: 'web', chatId: CHAT })
+    const read = transcriptOf(loaded.messages, (file) => ({
+      id: file.path, name: file.name, mimeType: file.mimeType, size: 0, image: false,
+    }))
+    expect(read).toHaveLength(2)
+    expect(read[1]?.routine).toEqual({ name: 'Daily briefing', at })
+    expect(read[1]?.parts).toEqual([{ kind: 'text', text: 'nothing moved' }])
   })
 
   it('delivers a file alongside the answer and serves it back by id', async () => {

@@ -1523,6 +1523,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .verification-card { border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-5) var(--space-6); color: var(--muted); font-size: var(--text-sm); }
 .verification-card.failed { color: var(--danger); }
 .verification-text { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+/* A routine's delivery: a filled card that signs itself — the routine's name, and
+   when it landed — so a message nobody in the chat asked for does not read as the
+   answer to what the person just said. Filled, like the plan and the gate; a block
+   is a surface, and the outline belongs to fields. */
+.routine-card { border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow-sm); padding: var(--space-6); }
+.routine-head { display: flex; align-items: baseline; gap: var(--space-4); margin-bottom: var(--space-5); }
+.routine-head svg.icon { flex: none; align-self: center; color: var(--muted); }
+.routine-name { color: var(--fg); font-size: var(--text-sm); font-weight: 600; }
+.routine-failed { color: var(--danger); font-size: var(--text-2xs); font-weight: 600; }
+.routine-time { margin-inline-start: auto; color: var(--muted); font-size: var(--text-2xs); font-variant-numeric: tabular-nums; }
+.routine-body { display: flex; flex-direction: column; gap: var(--space-5); }
 .todo-item.todo-in_progress .todo-mark { color: var(--accent); }
 .todo-item.todo-completed { color: var(--muted); }
 .todo-item.todo-completed .todo-mark { color: var(--success); }
@@ -1576,6 +1587,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message:not(.is-loaded),
 .message:not(.is-loaded) .tool-line,
 .message:not(.is-loaded) .todo-card,
+.message:not(.is-loaded) .routine-card,
 .message:not(.is-loaded) .reasoning,
 .message:not(.is-loaded) .wait-line,
 .approval,

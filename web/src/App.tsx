@@ -727,6 +727,8 @@ export default function App() {
           ...(frame.attachments?.length ? { attachments: frame.attachments } : {}),
           ...(frame.actions?.length ? { actions: frame.actions } : {}),
           ...(frame.cards?.length ? { cards: frame.cards } : {}),
+          // A routine's delivery is signed by the card, not drawn as an answer.
+          ...(frame.routine ? { routine: frame.routine } : {}),
         }])
       }
       void refreshSessions()

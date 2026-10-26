@@ -5,7 +5,7 @@ import Foundation
  `src/gateways/web/protocol.ts`; the server refuses any other number aloud, so a
  drift between the two is a refusal rather than a mis-drawn chat.
  */
-let miloProtocolVersion = 11
+let miloProtocolVersion = 12
 
 // MARK: - What the app sends
 
@@ -195,9 +195,23 @@ enum WirePart: Decodable {
     }
 }
 
+/// A message a routine delivered on its own, when this is one: the name it signs
+/// itself with and when it landed, so the chat draws a card instead of an answer
+/// nobody in the conversation asked for. The name is data here rather than the
+/// first line of the words, so the card never says it twice.
+struct RoutineDelivery: Decodable, Hashable {
+    let name: String
+    /// When it landed, in ms.
+    let at: Double
+    /// The run ended in a failure: the words are what went wrong.
+    let failed: Bool?
+}
+
 struct WireMessage: Decodable {
     let role: String
     let parts: [WirePart]
+    /// A routine's delivery, when this message is one.
+    let routine: RoutineDelivery?
     let attachments: [FrameAttachment]?
     let at: Double?
     /// How long the turn took to say anything, in ms — what the line over its thought
@@ -277,6 +291,9 @@ struct CommandResult: Decodable {
     /// Files delivered with the reply — a routine's answer, or a `send_file` — shown
     /// the way a message's own attachments are.
     let attachments: [FrameAttachment]?
+    /// The routine that delivered this reply, when one did: the chat signs it with
+    /// the name and the time it landed.
+    let routine: RoutineDelivery?
 }
 
 // MARK: - The panel beside the chat

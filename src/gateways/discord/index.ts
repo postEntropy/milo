@@ -4,7 +4,7 @@ import type { AgentRuntime } from '../../core/runtime.js'
 import type { PermissionRequest, PermissionResult } from '../../core/tools/permission.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
-import type { OutgoingFile, OutgoingMessage } from '../../core/outgoing.js'
+import { deliveryText, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
 import { readDisplay } from '../../core/config/load.js'
 import { denialMessage, isAllowed } from '../access.js'
 import {
@@ -414,7 +414,9 @@ export class DiscordGateway implements Gateway {
    */
   async deliver(chatId: string, message: OutgoingMessage): Promise<void> {
     const channel = await this.sendable(chatId)
-    const text = message.text ?? ''
+    // The routine's name above its answer, or the failure said plainly — the one
+    // reading a text surface has of a delivery, shared with every other one.
+    const text = deliveryText(message)
     const files = message.files ?? []
 
     if (files.length === 0) {

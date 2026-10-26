@@ -102,6 +102,28 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
       }
       continue
     }
+    if (message.role === 'assistant' && message.routine) {
+      // A routine's delivery stands on its own: it arrived with no turn behind it, so
+      // it is not a step of whatever was said above it, and the card that signs it is
+      // built from this message alone — a reload draws what the live frame drew. It
+      // has no raw copy either: it is one answer that was handed over, not a turn.
+      closeAssistant()
+      const parts: TranscriptPart[] = []
+      const routineFiles = message.content.flatMap((part) => part.type === 'file'
+        ? [register({ path: part.path, name: part.name, mimeType: part.mimeType })]
+        : [])
+      for (const part of message.content) {
+        if (part.type === 'text' && part.text) parts.push(...textParts(part.text))
+      }
+      transcript.push({
+        role: 'assistant',
+        parts,
+        routine: message.routine,
+        ...(routineFiles.length > 0 ? { attachments: routineFiles } : {}),
+        ...(message.at !== undefined ? { at: message.at } : {}),
+      })
+      continue
+    }
     if (message.role === 'assistant') {
       sources.push(message)
       const parts: TranscriptPart[] = []

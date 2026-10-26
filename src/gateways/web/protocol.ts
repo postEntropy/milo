@@ -1,5 +1,6 @@
 import type { GenUiRender } from '../../core/genui.js'
 import type { Idea } from '../../core/ideas.js'
+import type { RoutineDelivery } from '../../core/outgoing.js'
 import type { PanelRequest } from '../../core/panel.js'
 import type { ProjectView } from '../../core/projects.js'
 import type { TodoItem } from '../../core/todos.js'
@@ -8,6 +9,10 @@ import type { VerificationResult } from '../../core/verification.js'
 import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
 import type { CommandEntry } from '../command-catalog.js'
 
+// 12: a routine's delivery carries its own `routine` mark — the name and the instant
+// it landed — instead of leading its text with the name, and a message read back from
+// disk carries it too. A page from 11 would draw that delivery as a plain answer with
+// no signer at all, so it is refused as a skew.
 // 11: the turn's own row is drawn from the daemon's words — `says` on an `event` frame and
 // on a `turn-end` — rather than from a sentence each client wrote for itself. A page from
 // 10 writes its own, so it neither needs nor reads the field; the bump is what keeps a page
@@ -21,7 +26,7 @@ import type { CommandEntry } from '../command-catalog.js'
 // is what the version is for. 8 made the handshake's `genui` a flag again: there is
 // one way a turn draws, so a page naming a transport named something that no longer
 // exists.
-export const PROTOCOL_VERSION = 11
+export const PROTOCOL_VERSION = 12
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
@@ -255,7 +260,7 @@ export type ServerFrame =
   | { type: 'permission-result'; id: string; allowed: boolean; remember?: boolean }
   /** `says` says a stopped turn the same way an event does; see the `event` frame. */
   | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error'; raw?: string; rawNoOutput?: string; says?: string }
-  | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; attachments?: FrameAttachment[]; actions?: ActionRow[]; messageId?: string; cards?: SessionCardItem[] }
+  | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; attachments?: FrameAttachment[]; actions?: ActionRow[]; messageId?: string; cards?: SessionCardItem[]; routine?: RoutineDelivery }
   | { type: 'state'; busy: boolean; queued: number }
   /** A routine ran somewhere in this install: re-read whatever shows the history. */
   | { type: 'routines-changed' }
@@ -330,6 +335,12 @@ export interface TranscriptMessage {
   role: 'user' | 'assistant'
   /** The turn's pieces — prose, thinking, tool lines and the plan — in order. */
   parts: TranscriptPart[]
+  /**
+   * A message a routine delivered into this conversation, when this is one: its
+   * name and the instant it landed. The surface signs the message with it instead
+   * of drawing an answer nobody in the chat asked for.
+   */
+  routine?: RoutineDelivery
   /** Files delivered into this conversation, still on disk and served by id. */
   attachments?: FrameAttachment[]
   /** When the message was first said, for a surface that shows it. */

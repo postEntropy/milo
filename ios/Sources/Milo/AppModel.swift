@@ -50,6 +50,10 @@ final class AppModel {
         var actions: [ActionRow]? = nil
         /// The sessions a `/sessions` reply drew as cards, in place of its words.
         var cards: [SessionCardItem]? = nil
+        /// The routine that delivered this message, when one did: the row is drawn as
+        /// a card signed with the routine's name and the time it landed, not as an
+        /// answer to something the person said.
+        var routine: RoutineDelivery? = nil
     }
 
     private(set) var phase: Phase = .pairing
@@ -2058,7 +2062,9 @@ final class AppModel {
                         // later says how long it thought, the same line a live one drew.
                         thought: $0.thoughtMs.map { $0 / 1000 },
                         raw: $0.raw,
-                        rawNoOutput: $0.rawNoOutput
+                        rawNoOutput: $0.rawNoOutput,
+                        // A routine's delivery reads back as the card it arrived as.
+                        routine: $0.routine
                     )
                 }
                 // The words kept from the session being left give way to these ones as one
@@ -2202,6 +2208,7 @@ final class AppModel {
                 messages[index].attachments = result.attachments ?? []
                 messages[index].actions = result.actions
                 messages[index].cards = result.cards
+                messages[index].routine = result.routine
             } else {
                 messages.append(
                     Message(
@@ -2211,7 +2218,8 @@ final class AppModel {
                         streaming: false,
                         thought: nil,
                         actions: result.actions,
-                        cards: result.cards
+                        cards: result.cards,
+                        routine: result.routine
                     )
                 )
             }

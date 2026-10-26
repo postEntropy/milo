@@ -4,7 +4,7 @@ import path from 'node:path'
 import lockfile from 'proper-lockfile'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentRuntime } from '../src/core/runtime.js'
-import type { OutgoingFile } from '../src/core/outgoing.js'
+import type { OutgoingFile, RoutineDelivery } from '../src/core/outgoing.js'
 import type { Routine } from '../src/core/routines.js'
 
 // Point the install somewhere throwaway *before* the path module is loaded.
@@ -697,7 +697,7 @@ function fakeRuntime(options: FakeRun = {}): {
 
 function harness(options: FakeRun = {}) {
   const { runtime, prompts, sessions } = fakeRuntime(options)
-  const delivered: { id: string; text?: string; files?: OutgoingFile[] }[] = []
+  const delivered: { id: string; text?: string; files?: OutgoingFile[]; routine?: RoutineDelivery }[] = []
   const logs: string[] = []
   let clock = new Date(2026, 8, 25, 7, 59, 30)
   const scheduler = new RoutineScheduler({
@@ -752,9 +752,14 @@ describe('RoutineScheduler', () => {
     await h.advance(61_000)
 
     expect(h.prompts).toEqual(['look at the repo'])
-    // The name leads the message, so a chat with several routines can tell which
-    // one just spoke.
-    expect(h.delivered).toEqual([{ id: 'calm-otter-1', text: 'briefing\n\nok' }])
+    // The name travels as data, not as the first line of the answer: a surface that
+    // draws a head signs the delivery with it, and one that can only draw words puts
+    // it above the words — neither says it twice.
+    expect(h.delivered).toEqual([{
+      id: 'calm-otter-1',
+      text: 'ok',
+      routine: { name: 'briefing', at: new Date(2026, 8, 25, 8, 0, 30).getTime() },
+    }])
     expect(readRoutines()[0]).toMatchObject({ lastResult: 'ok' })
     expect(readRoutines()[0]!.lastRunAt).toBeGreaterThan(0)
     h.scheduler.stop()
@@ -878,8 +883,14 @@ describe('RoutineScheduler', () => {
     h.setClock(new Date(2026, 8, 25, 8, 0, 40))
     await h.advance(120_000)
 
-    expect(h.delivered[0]!.text).toContain('failed')
-    expect(h.delivered[0]!.text).toContain('boom')
+    // What went wrong is the text; the failure is the delivery's own state, which
+    // the surface draws in the card's head rather than in the answer.
+    expect(h.delivered[0]!.text).toBe('boom')
+    expect(h.delivered[0]!.routine).toEqual({
+      name: 'briefing',
+      at: new Date(2026, 8, 25, 8, 0, 40).getTime(),
+      failed: true,
+    })
     expect(readRoutines()[0]!.lastResult).toBe('error')
     expect(h.logs.some((line) => line.includes('failed'))).toBe(true)
     h.scheduler.stop()
@@ -933,7 +944,12 @@ describe('RoutineScheduler', () => {
     h.setClock(new Date(2026, 8, 25, 8, 0, 40))
     await h.advance(120_000)
 
-    expect(h.delivered).toEqual([{ id: 'calm-otter-1', files: [shot] }])
+    expect(h.delivered).toEqual([{
+      id: 'calm-otter-1',
+      files: [shot],
+      // A file with no answer still says which routine sent it.
+      routine: { name: 'briefing', at: new Date(2026, 8, 25, 8, 0, 40).getTime() },
+    }])
     h.scheduler.stop()
   })
 

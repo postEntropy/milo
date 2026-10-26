@@ -1,4 +1,5 @@
 import type { FileChange } from '../change.js'
+import type { RoutineDelivery } from '../outgoing.js'
 
 export type Role = 'system' | 'user' | 'assistant' | 'tool'
 
@@ -119,6 +120,13 @@ export interface Message {
    * state, like `at`, so the wires ignore it.
    */
   verification?: { ok: boolean; text: string }
+  /**
+   * A delivery a routine made into this conversation, when this message is one. It
+   * is what lets a session read back from disk draw the card the live delivery drew
+   * — signed with the routine's name and when it landed — instead of a plain answer
+   * nobody appears to have asked for. Display state, like `at`, so the wires ignore it.
+   */
+  routine?: RoutineDelivery
 }
 
 export interface ToolSpec {

@@ -523,6 +523,9 @@ struct ChatView: View {
         var asked: AppModel.Message?
         for message in model.messages {
             if message.isUser { asked = message; continue }
+            // A routine's delivery is nobody's turn: it is not what "ask this again"
+            // would redo, and it must not take the offer away from the answer above it.
+            if message.routine != nil { continue }
             if !message.streaming, !message.prose.isEmpty { answer = message }
         }
         guard let answer, let asked, let turn = turns[asked.id] else { return nil }

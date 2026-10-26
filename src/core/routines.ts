@@ -838,23 +838,23 @@ export class RoutineScheduler {
     // on the Routines screen, and there is no chat waiting to be posted into.
     if (routine.target.gateway === 'none') return
 
-    // The routine's name leads its message, so a chat with several of them can
-    // tell at a glance which one just spoke.
+    // The routine's name travels as data rather than as the first line of its answer:
+    // a surface that can draw a head signs the delivery with it, and one that can only
+    // draw words puts it above the words — neither says it twice, and a chat with
+    // several routines can still tell at a glance which one just spoke.
     const name = routine.name ?? routine.id
-    const text = result.failure
-      ? `⚠ routine "${name}" failed: ${result.failure}`
-      : result.answer
-        ? `${name}\n\n${result.answer}`
-        : ''
+    const failed = result.failure !== null
+    const text = result.failure ?? result.answer
     // Files go even when there is nothing to say: a routine whose whole job is a
     // picture has no answer to lead with. A failed turn sends no files with its
     // error — what it half-produced is not something to hand over.
-    const files = result.failure ? [] : result.files
+    const files = failed ? [] : result.files
     if (!text && files.length === 0) return
     try {
       await this.options.deliver(routine, {
         ...(text ? { text } : {}),
         ...(files.length > 0 ? { files } : {}),
+        routine: { name, at: this.now().getTime(), ...(failed ? { failed: true } : {}) },
       })
     } catch (error) {
       this.log(`could not deliver ${routine.id}: ${errorMessage(error)}`)

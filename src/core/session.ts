@@ -11,7 +11,7 @@ import { deriveFacts } from './memory/derive.js'
 import { scopeKey, DEFAULT_RECALL_LIMIT, type Memory, type MemoryInput, type MemoryItem, type MemoryScope } from './memory/index.js'
 import type { SkillSummary } from './skills/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
-import { describeOutgoing, type OutgoingFile } from './outgoing.js'
+import { describeOutgoing, type OutgoingFile, type RoutineDelivery } from './outgoing.js'
 import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEffort } from './providers/types.js'
 import type { ModelProfile } from './providers/profile.js'
 import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, SessionAdmin, ToolEffect, ToolRegistry } from './tools/index.js'
@@ -1305,13 +1305,15 @@ export class Session {
    * watching. Under the lease for the same reason every other write is: appending
    * from a stale copy would be refused, or would erase the turns written since.
    */
-  async appendNotice(text: string, files: OutgoingFile[] = []): Promise<void> {
+  async appendNotice(text: string, files: OutgoingFile[] = [], routine?: RoutineDelivery): Promise<void> {
     const lease = await this.store.acquire(this.id)
     try {
       if (lease.latest) this.adoptLatest(lease.latest)
       this.messages.push({
         role: 'assistant',
-        at: Date.now(),
+        // The delivery's own instant when it has one, so the live frame and the
+        // message read back from disk say the same time.
+        at: routine?.at ?? Date.now(),
         content: [
           { type: 'text', text },
           ...files.map((file) => ({
@@ -1321,6 +1323,7 @@ export class Session {
             mimeType: file.mimeType,
           })),
         ],
+        ...(routine ? { routine } : {}),
       })
       await this.persist()
     } finally {

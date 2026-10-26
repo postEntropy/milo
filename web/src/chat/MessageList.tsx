@@ -1,10 +1,11 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useCopy, type CopyState } from '../lib/clipboard.js'
 import { formatSeconds } from '../../../src/core/sessions/format.ts'
 import { formatWhen } from '../../../src/core/time.js'
 import { formatTokens, humanSize } from '../../../src/util/format.ts'
 import type { ActionRow, FrameAttachment, SessionCardItem, ThinkingDisplay, ToolMark, TranscriptMessage, TranscriptPart } from '@protocol'
 import { proseOf } from '@protocol'
+import type { RoutineDelivery } from '../../../src/core/outgoing.ts'
 import { toolBrand, toolLabel, changeTotals } from '../../../src/gateways/tool-line.ts'
 import type { FileChange } from '../../../src/core/change.ts'
 import { toolRows } from './tool-runs.js'
@@ -342,7 +343,7 @@ export function MessageList({
     if (m.role === 'user') currentTurn++
     messageTurns.set(m.id, currentTurn)
     if (hasContent(m)) visibleMessages.push(m)
-    if (m.role === 'assistant' && proseOf(m) && m.waitingSince === undefined) lastAssistant = m
+    if (m.role === 'assistant' && !m.routine && proseOf(m) && m.waitingSince === undefined) lastAssistant = m
     if (m.role === 'user') lastUser = m
     if (busy && m.role === 'assistant') runningId = m.id
   }
@@ -426,6 +427,24 @@ function QuoteButton({ onQuote }: { onQuote?(text: string): void }) {
 }
 
 /**
+ * A routine's delivery, in the chat it was sent to: a card, not an answer. Nobody in
+ * this conversation asked for it, so it signs itself with the routine's name and the
+ * time it landed, and what it answered sits under that head. Filled, like the plan
+ * and the verification cards — a block is a surface, not a border.
+ */
+function RoutineCard({ routine, children }: { routine: RoutineDelivery; children: ReactNode }) {
+  return <div className={`routine-card${routine.failed ? ' failed' : ''}`}>
+    <div className="routine-head">
+      <Icon name="repeat" size={14} />
+      <span className="routine-name">{routine.name}</span>
+      {routine.failed && <span className="routine-failed">failed</span>}
+      <span className="routine-time">{formatWhen(routine.at, 'absolute')}</span>
+    </div>
+    <div className="routine-body">{children}</div>
+  </div>
+}
+
+/**
  * One message. Memoized by the message object, which keeps its identity until a
  * token actually lands in it — so a streaming answer grows only its own row and
  * leaves every earlier one untouched, instead of reconciling the whole thread on
@@ -461,30 +480,35 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
   // settle-in time belongs to the turn's first thought, wherever the thread lands.
   const firstReasoning = keyed.find(({ part }) => part.kind === 'reasoning')?.key
   const prose = proseOf(message)
+  // What the message draws, wherever it is placed: a routine's delivery puts all of
+  // it inside the card that signs it, and every other message draws it as it is.
+  const body = <>
+    {message.cards && message.cards.length > 0 ? (
+      <SessionCards
+        cards={message.cards}
+        onSelect={(id) => onAction?.(`resume:${id}`, message.id)}
+      />
+    ) : (
+      toolRows(keyed).map((row) => {
+        if (row.kind === 'spine') return <ToolRun key={row.key} steps={row.steps} />
+        const { part, key } = row
+        if (part.kind === 'reasoning') {
+          // Every thought is on screen; the display only decides whether it
+          // arrives open or folded, both one press from the other.
+          return <Reasoning key={key} text={part.text} thoughtMs={key === firstReasoning ? message.thoughtMs : undefined} open={thinking === 'expanded'} />
+        }
+        if (part.kind === 'text') return <Markdown key={key} text={part.text} />
+        if (part.kind === 'tool') return <ToolLine key={key} tool={part.tool} />
+        if (part.kind === 'ui') return <GenUi key={key} render={part.render} onSend={onSend} />
+        if (part.kind === 'verification') return <Verification key={key} ok={part.ok} text={part.text} />
+        return <TodoList key={key} items={part.items} />
+      })
+    )}
+    {message.attachments && message.attachments.length > 0 && <Attachments items={message.attachments} />}
+  </>
   return <article className={`message ${message.role}${message.loaded ? ' is-loaded' : ''}`}>
     <div className="message-content">
-      {message.cards && message.cards.length > 0 ? (
-        <SessionCards
-          cards={message.cards}
-          onSelect={(id) => onAction?.(`resume:${id}`, message.id)}
-        />
-      ) : (
-        toolRows(keyed).map((row) => {
-          if (row.kind === 'spine') return <ToolRun key={row.key} steps={row.steps} />
-          const { part, key } = row
-          if (part.kind === 'reasoning') {
-            // Every thought is on screen; the display only decides whether it
-            // arrives open or folded, both one press from the other.
-            return <Reasoning key={key} text={part.text} thoughtMs={key === firstReasoning ? message.thoughtMs : undefined} open={thinking === 'expanded'} />
-          }
-          if (part.kind === 'text') return <Markdown key={key} text={part.text} />
-          if (part.kind === 'tool') return <ToolLine key={key} tool={part.tool} />
-          if (part.kind === 'ui') return <GenUi key={key} render={part.render} onSend={onSend} />
-          if (part.kind === 'verification') return <Verification key={key} ok={part.ok} text={part.text} />
-          return <TodoList key={key} items={part.items} />
-        })
-      )}
-      {message.attachments && message.attachments.length > 0 && <Attachments items={message.attachments} />}
+      {message.routine ? <RoutineCard routine={message.routine}>{body}</RoutineCard> : body}
       {message.actions && message.actions.length > 0 && (
         <div className="message-actions">
           {message.actions.map((row) => (
@@ -526,7 +550,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
           ))}
         </div>
       )}
-      {message.role === 'assistant' && prose && message.waitingSince === undefined && !running && (
+      {message.role === 'assistant' && prose && !message.routine && message.waitingSince === undefined && !running && (
         <div className="message-toolbar">
           <CopyButton text={prose} />
           {onRegenerate && regenPrompt !== undefined && (

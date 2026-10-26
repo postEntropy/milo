@@ -132,6 +132,30 @@ struct MessageRow: View {
             .contextMenu { menu }
         } else {
             VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                // A routine's delivery signs itself: the routine it came from and when
+                // it landed, over the answer. A message nobody in this chat asked for
+                // does not read as the reply to what the person just said.
+                if let routine = message.routine {
+                    HStack(spacing: MiloTheme.Space.two) {
+                        Image(systemName: "repeat")
+                            .font(.system(size: 12, weight: .semibold))
+                            .foregroundStyle(MiloTheme.muted)
+                        Text(routine.name)
+                            .font(MiloTheme.Text.small.weight(.semibold))
+                            .foregroundStyle(MiloTheme.foreground)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if routine.failed == true {
+                            Text("failed")
+                                .font(MiloTheme.Text.meta.weight(.semibold))
+                                .foregroundStyle(MiloTheme.danger)
+                        }
+                        Spacer(minLength: MiloTheme.Space.two)
+                        Text(RelativeTime.when(routine.at))
+                            .font(MiloTheme.Text.meta)
+                            .foregroundStyle(MiloTheme.muted)
+                    }
+                }
                 // The line is the handle to the thought: it stands when there is one to open,
                 // and not otherwise. A "Thought for Xs" that answers a press with nothing is a
                 // promise the turn cannot keep.
@@ -176,8 +200,9 @@ struct MessageRow: View {
                     }
                     // The controls the browser draws under an answer. A turn still being
                     // written has nothing to act on yet, and a message with no words has
-                    // nothing to copy.
-                    if !message.streaming, !message.prose.isEmpty {
+                    // nothing to copy. A routine's delivery is not a turn: there is
+                    // nothing here to quote, fork or ask again.
+                    if !message.streaming, !message.prose.isEmpty, message.routine == nil {
                         MessageToolbar(message: message, turn: turn, regenerate: regenerate, onQuote: onQuote, readOnly: readOnly)
                     }
                 }
@@ -187,6 +212,13 @@ struct MessageRow: View {
                     ActionRows(rows: actions, messageId: message.id.uuidString)
                 }
             }
+            // A routine's delivery is one filled block, the way the browser draws it —
+            // the plan and the gate wear the same surface, never an outline.
+            .padding(message.routine == nil ? 0 : MiloTheme.Space.four)
+            .background(
+                message.routine == nil ? Color.clear : MiloTheme.surface,
+                in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg)
+            )
             .frame(maxWidth: .infinity, alignment: .leading)
             // A piece of the answer appearing — a call, a to-do list, a widget — is what
             // animates here, told from the number of parts. Words growing inside a piece are

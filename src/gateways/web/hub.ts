@@ -539,7 +539,7 @@ export class WebHub {
     const files = message.files ?? []
     const text = message.text ?? ''
     const session = await this.runtime.getSession({ gateway: 'web', chatId })
-    await session.appendNotice(text, files)
+    await session.appendNotice(text, files, message.routine)
     const attachments = files.map((file) => this.register(file))
     // Said to every screen on the session, not only the chat it was addressed
     // to: the file is the session's own message, and a sibling watching it is owed the
@@ -550,6 +550,9 @@ export class WebHub {
       reply: text,
       markdown: text,
       ...(attachments.length > 0 ? { attachments } : {}),
+      // A routine's delivery signs itself on the surface that can draw a head; the
+      // transcript kept the same mark, so a reload shows the same card.
+      ...(message.routine ? { routine: message.routine } : {}),
     })
   }
 

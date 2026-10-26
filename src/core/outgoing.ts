@@ -18,6 +18,21 @@ export interface OutgoingFile {
 }
 
 /**
+ * A delivery a routine made on its own: not a turn anyone asked for in the chat it
+ * lands in. The name travels here rather than as the first line of the text, so a
+ * surface that can draw a head does not say it twice, and one that can only draw
+ * words still signs the answer — see `deliveryText`.
+ */
+export interface RoutineDelivery {
+  /** The routine's name, as it signs itself in the chat. */
+  name: string
+  /** When it landed, in ms — the instant the transcript keeps as the message's own. */
+  at: number
+  /** The run ended in a failure: the text is what went wrong, not an answer. */
+  failed?: boolean
+}
+
+/**
  * One thing a routine — or any turn with a chat behind it — hands to a surface
  * with no turn of its own. Text and files travel together so a caption and the
  * picture it describes arrive as one message.
@@ -25,6 +40,21 @@ export interface OutgoingFile {
 export interface OutgoingMessage {
   text?: string
   files?: OutgoingFile[]
+  /** Set when a routine made this delivery; absent on every other. */
+  routine?: RoutineDelivery
+}
+
+/**
+ * The words a surface that draws no head can send: the routine's name above its
+ * answer, or the failure said plainly. One function, so the gateways that can only
+ * render text cannot sign the same delivery differently.
+ */
+export function deliveryText(message: OutgoingMessage): string {
+  const text = message.text ?? ''
+  const routine = message.routine
+  if (!routine) return text
+  if (routine.failed) return `⚠ ${routine.name} failed${text ? `: ${text}` : ''}`
+  return text ? `${routine.name}\n\n${text}` : routine.name
 }
 
 /**
