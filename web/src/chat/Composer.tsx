@@ -2,7 +2,6 @@ import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRe
 import { api } from '../lib/api.js'
 import { isPhone, usePhone } from '../lib/phone.js'
 import { EFFORT_LABELS } from '../lib/labels.js'
-import { shortModel } from '../../../src/gateways/model-label.ts'
 import { formatDuration, formatTokens } from '../../../src/util/format.ts'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { quotedLead } from '../../../src/core/sessions/format.ts'
@@ -399,10 +398,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         />
         <div className="composer-toolbar">
           <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } fileDrafts.current.set(draftKey, next); return next }); event.target.value = '' }} />
-          <button className={`composer-pill attach-button${canPlan ? ' filled' : ''}`} type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={14} /></button>
+          <button className="composer-pill attach-button" type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={14} /></button>
           {canPlan && <button
             type="button"
-            className="composer-pill mode-pill"
+            className="composer-pill mode-pill icon-only"
             aria-pressed={plan}
             aria-label={plan ? 'Plan mode' : 'Build mode'}
             disabled={busy}
@@ -410,11 +409,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             onClick={() => onPlanChange(!plan)}
           >
             <Icon name={plan ? 'list-check' : 'code'} size={15} />
-            <span>{plan ? 'Plan' : 'Build'}</span>
           </button>}
           <div className="composer-model-wrap">
             <Select
-              className="composer-pill"
+              className="composer-pill icon-only"
               label={folded ? 'Model and reasoning effort' : `${providerName} models`}
               icon="spark"
               body={wide ? (close) => <ModelPicker
@@ -448,7 +446,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 >{EFFORT_LABELS[level]}</button>)}
               </div> : undefined}
               value={model}
-              triggerLabel={model ? shortModel(model) : 'Model'}
+              triggerLabel=""
               choices={(catalog ?? []).map((item) => ({
                 value: item.id, label: item.id, meta: <ModelDetails model={item} />,
               }))}

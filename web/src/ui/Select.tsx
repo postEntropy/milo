@@ -155,6 +155,7 @@ export function Select({
       ref={trigger}
       type="button"
       className={`select-trigger ${className}`}
+      aria-label={label}
       aria-haspopup={body ? 'dialog' : 'listbox'}
       aria-expanded={open}
       onClick={() => (open ? close() : expand())}

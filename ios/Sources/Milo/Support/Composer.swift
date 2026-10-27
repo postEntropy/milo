@@ -134,7 +134,7 @@ struct Composer: View {
             .padding(.vertical, MiloTheme.Space.one)
             .glassEffect(.regular.interactive(), in: RoundedRectangle(cornerRadius: 26))
             .padding(.horizontal, MiloTheme.margin)
-            .padding(.bottom, MiloTheme.Space.two)
+            .padding(.bottom, MiloTheme.Space.one)
             .padding(.top, MiloTheme.Space.one)
         }
     }
@@ -235,15 +235,8 @@ struct Composer: View {
             menu = menu == .actions ? nil : .actions
         } label: {
             Image(systemName: "plus")
-                .font(.system(size: Self.mark, weight: .semibold))
+                .font(.system(size: 20, weight: .semibold))
                 .foregroundStyle(work ? MiloTheme.foreground2 : MiloTheme.foreground)
-                // The fill is the pills' own height, not the finger's box: a disc taller
-                // than the controls beside it reads as a bigger control, whatever the
-                // glyph inside it measures.
-                .frame(width: 34, height: 34)
-                // Filled in a work session, where it sits beside the plan switch; a quiet
-                // control in an ordinary chat, where it is alone on the line.
-                .background(Circle().fill(work ? MiloTheme.surface : Color.clear))
                 .frame(width: 40, height: 40)
                 .contentShape(Rectangle())
         }
@@ -283,34 +276,23 @@ struct Composer: View {
     private var workRow: some View {
         HStack(spacing: MiloTheme.Space.one) {
             actionsButton
-            planPill
             modelPill
+            planPill
             Spacer(minLength: MiloTheme.Space.two)
             sendControl
         }
         .padding(.horizontal, MiloTheme.Space.two)
     }
 
-    /// What this message is written with, on the work session's own line. Filled like every
-    /// control here, so it reads as something to press — and it says what is chosen now,
-    /// rather than making a setting something to go looking for.
+    /// The model picker on the work session's own line. The icon names the control; the
+    /// selected model remains available to VoiceOver and in the picker itself.
     private var modelPill: some View {
         Button(action: onModel) {
-            HStack(spacing: MiloTheme.Space.two) {
-                Image(systemName: "cpu")
-                    .font(.system(size: Self.pillMark, weight: .semibold))
-                Text(model.modelLabel.isEmpty ? "Model" : model.modelLabel)
-                    .font(MiloTheme.Text.small)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(.system(size: 10, weight: .semibold))
-            }
-            .foregroundStyle(MiloTheme.foreground2)
-            .padding(.horizontal, MiloTheme.Space.four)
-            .padding(.vertical, MiloTheme.Space.two + 1)
-            .background(Capsule().fill(MiloTheme.surface))
-            .contentShape(Capsule())
+            Image(systemName: "cpu")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(MiloTheme.foreground2)
+                .frame(width: 40, height: 40)
+                .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle())
         .accessibilityLabel("Model")
@@ -325,7 +307,7 @@ struct Composer: View {
     }
 
     /// The shape of the turn: **Build** works in the folder, **Plan** reads and proposes.
-    /// Both are the same filled control; the mark and the word are what tell them apart.
+    /// The icon carries the state; the accessible label spells out the mode.
     private var planPill: some View {
         Button {
             if let startPlan { startPlan.wrappedValue.toggle() }
@@ -333,15 +315,14 @@ struct Composer: View {
         } label: {
             HStack(spacing: MiloTheme.Space.two) {
                 Image(systemName: planOn ? "list.bullet.rectangle" : "hammer")
-                    .font(.system(size: Self.pillMark, weight: .semibold))
+                    .font(.system(size: 17, weight: .semibold))
                 Text(planOn ? "Plan" : "Build")
                     .font(MiloTheme.Text.small)
             }
             .foregroundStyle(MiloTheme.foreground2)
-            .padding(.horizontal, MiloTheme.Space.four)
-            .padding(.vertical, MiloTheme.Space.two + 1)
-            .background(Capsule().fill(MiloTheme.surface))
-            .contentShape(Capsule())
+            .padding(.horizontal, MiloTheme.Space.two)
+            .frame(height: 40)
+            .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle())
         .disabled(startPlan == nil && model.busy)
