@@ -15,7 +15,7 @@ import { TurnQueue } from '../turns.js'
 import { rawTurn } from '../raw.js'
 import { COMMAND_CATALOG } from '../command-catalog.js'
 import type { ClientFrame, FrameAttachment, JobView, PanelInput, PanelKind, PanelState, PanelTab, PanelView, PermissionRequest, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
-import { PERMISSION_TIMEOUT_MS, PLAN_APPROVAL, PROTOCOL_VERSION } from './protocol.js'
+import { PERMISSION_TIMEOUT_MS, PLAN_APPROVAL, PROTOCOL_VERSION, transcriptChunks } from './protocol.js'
 import { displayEvent, withWords } from './turn.js'
 import { panelsOf, transcriptOf } from './transcript.js'
 import type { PanelFacts } from '../../core/agent/system.js'
@@ -238,6 +238,14 @@ export class WebHub {
     // which is the session that is about to work there.
     const placement = chat.session.project
     const project = placement ? placedProject(placement) : undefined
+    // A late client is handed the history up to and including the running turn's own
+    // user message. Everything after it is that turn's output, which the frames below
+    // replay — so the answer is drawn once, as one row, and not as the steps already
+    // written with the rest of it opening a second row beside them. A session long
+    // enough to outgrow one message is handed over in pieces; see `transcriptChunks`.
+    const [firstChunk = [], ...rest] = transcriptChunks(
+      this.transcript(chat.session, running ? running.from + 1 : undefined),
+    )
     client.send({
       type: 'ready',
       // The number the handshake was checked against, not a copy of it: a client that
@@ -245,11 +253,8 @@ export class WebHub {
       version: PROTOCOL_VERSION,
       sessionId: chat.session.id,
       ...(project ? { project } : {}),
-      // A late client is handed the history up to and including the running turn's own
-      // user message. Everything after it is that turn's output, which the frames below
-      // replay — so the answer is drawn once, as one row, and not as the steps already
-      // written with the rest of it opening a second row beside them.
-      messages: this.transcript(chat.session, running ? running.from + 1 : undefined),
+      messages: firstChunk,
+      ...(rest.length > 0 ? { continues: true } : {}),
       thinking: readDisplay().thinking,
       // Whether this session is proposing rather than working. A client that opens
       // mid-plan draws the switch on, and the catalog on the server already matches.
@@ -267,6 +272,11 @@ export class WebHub {
       commands: COMMAND_CATALOG,
       ...(running ? { activeTurn: { id: running.id, at: running.at } } : {}),
     })
+    // The rest of a long transcript, in the order it happened: the `ready` above opened
+    // the thread and these fill it, whole rows at a time. They go before the running
+    // turn's own frames so a surface that appends has the history under the turn rather
+    // than around it.
+    for (const chunk of rest) client.send({ type: 'history', messages: chunk })
     if (running) for (const frame of running.frames) client.send(frame)
     // A question the turn is still waiting on, sent again under the id it already
     // had: the deadline is the daemon's, so the countdown this client draws is the

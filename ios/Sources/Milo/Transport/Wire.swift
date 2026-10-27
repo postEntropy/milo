@@ -5,7 +5,7 @@ import Foundation
  `src/gateways/web/protocol.ts`; the server refuses any other number aloud, so a
  drift between the two is a refusal rather than a mis-drawn chat.
  */
-let miloProtocolVersion = 12
+let miloProtocolVersion = 13
 
 // MARK: - What the app sends
 
@@ -491,12 +491,19 @@ struct Ready: Decodable {
     let plan: Bool?
     /// What `/` offers, from the daemon's own catalog.
     let commands: [CommandEntry]?
+    /// Whether the rest of this session's transcript follows in `history` frames. The
+    /// daemon hands a long session over in pieces because this phone's websocket refuses
+    /// a message over 1 MiB; the rows arrive here in the order they happened.
+    let continues: Bool?
 }
 
 // MARK: - What the server sends
 
 enum ServerFrame: Decodable {
     case ready(Ready)
+    /// The rest of a session whose transcript did not fit in the `ready`, whole rows in
+    /// the order they happened.
+    case history([WireMessage])
     case turnStart(id: String, text: String)
     case event(turnId: String, event: AgentEvent, says: String?)
     case permission(id: String, request: PermissionRequest, expiresAt: Double)
@@ -523,13 +530,15 @@ enum ServerFrame: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case type, id, text, turnId, event, request, expiresAt, allowed, status, raw, rawNoOutput, says
-        case busy, queued, plan, jobs, items, message, panel
+        case busy, queued, plan, jobs, items, message, panel, messages
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .type) {
         case "ready": self = .ready(try Ready(from: decoder))
+        case "history":
+            self = .history(try container.decode([WireMessage].self, forKey: .messages))
         case "turn-start":
             self = .turnStart(
                 id: try container.decode(String.self, forKey: .id),

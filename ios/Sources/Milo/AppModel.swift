@@ -2048,6 +2048,27 @@ final class AppModel {
 
     // MARK: - Frames
 
+    /**
+     One row of a session's history, as this app draws it. Read in one place, because the
+     handshake and the `history` pieces a long session arrives in must draw the same row —
+     two readings would be two answers to the same question.
+     */
+    private func row(_ wire: WireMessage) -> Message {
+        Message(
+            isUser: wire.role == "user",
+            parts: wire.parts,
+            attachments: wire.attachments ?? [],
+            streaming: false,
+            // The turn's own wait, read back with the words: a session opened
+            // later says how long it thought, the same line a live one drew.
+            thought: wire.thoughtMs.map { $0 / 1000 },
+            raw: wire.raw,
+            rawNoOutput: wire.rawNoOutput,
+            // A routine's delivery reads back as the card it arrived as.
+            routine: wire.routine
+        )
+    }
+
     private func received(_ frame: ServerFrame) {
         if case .event(_, let event, _) = frame,
            UIApplication.shared.applicationState != .active,
@@ -2074,21 +2095,7 @@ final class AppModel {
             planProposed = false
             if !waitingForFirstSend, (!messages.isEmpty || !ready.messages.isEmpty) {
                 // The whole session, so a reconnect replaces rather than grows it.
-                messages = ready.messages.map {
-                    Message(
-                        isUser: $0.role == "user",
-                        parts: $0.parts,
-                        attachments: $0.attachments ?? [],
-                        streaming: false,
-                        // The turn's own wait, read back with the words: a session opened
-                        // later says how long it thought, the same line a live one drew.
-                        thought: $0.thoughtMs.map { $0 / 1000 },
-                        raw: $0.raw,
-                        rawNoOutput: $0.rawNoOutput,
-                        // A routine's delivery reads back as the card it arrived as.
-                        routine: $0.routine
-                    )
-                }
+                messages = ready.messages.map(row)
                 // The words kept from the session being left give way to these ones as one
                 // move: the screen cross-fades the two, so a session opened from the drawer
                 // lands rather than appearing whole under the card.
@@ -2152,6 +2159,16 @@ final class AppModel {
             // The routines are read at connect, so the reminders are scheduled from what
             // is actually there before the screen is ever opened.
             Task { await refreshRoutines() }
+        case .history(let chunk):
+            // The rest of a session too long for the handshake, whole rows in the order
+            // they happened — above a turn that is still running, so the turn keeps the end
+            // of the thread where it is being written.
+            let rows = chunk.map(row)
+            if let last = messages.last, last.waiting {
+                messages.insert(contentsOf: rows, at: messages.count - 1)
+            } else {
+                messages.append(contentsOf: rows)
+            }
         case .turnStart:
             busy = true
             began = false

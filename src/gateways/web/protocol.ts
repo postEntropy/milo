@@ -9,6 +9,12 @@ import type { VerificationResult } from '../../core/verification.js'
 import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
 import type { CommandEntry } from '../command-catalog.js'
 
+// 13: a session too large for one websocket message hands its transcript over in
+// pieces — the first in `ready`, the rest as `history` frames. The phone cannot take a
+// message over 1 MiB (`URLSessionWebSocketTask` closes the socket with "Message too
+// long"), so a session with a couple of large tool results never opened there at all.
+// A client from 12 knows none of these frames and would draw only the first chunk, so
+// it is refused rather than shown a session that is missing its middle.
 // 12: a routine's delivery carries its own `routine` mark — the name and the instant
 // it landed — instead of leading its text with the name, and a message read back from
 // disk carries it too. A page from 11 would draw that delivery as a plain answer with
@@ -26,7 +32,7 @@ import type { CommandEntry } from '../command-catalog.js'
 // is what the version is for. 8 made the handshake's `genui` a flag again: there is
 // one way a turn draws, so a page naming a transport named something that no longer
 // exists.
-export const PROTOCOL_VERSION = 12
+export const PROTOCOL_VERSION = 13
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
@@ -245,7 +251,14 @@ export interface ActiveTurn {
 }
 
 export type ServerFrame =
-  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn; project?: ProjectView; plan?: boolean; commands?: CommandEntry[] }
+  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; continues?: boolean; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn; project?: ProjectView; plan?: boolean; commands?: CommandEntry[] }
+  /**
+   * The rest of a transcript too large for the `ready` alone, in order, each one whole
+   * rows. A surface appends them to the thread the `ready` opened — before the running
+   * turn's own row when there is one, so the turn keeps its place at the end. The last
+   * one is the end of the replay.
+   */
+  | { type: 'history'; messages: TranscriptMessage[] }
   /** The session's planning turn went on or off, for every screen watching it. */
   | { type: 'plan'; plan: boolean }
   | { type: 'turn-start'; id: string; text: string }
@@ -370,6 +383,42 @@ export function proseOf(message: { parts: TranscriptPart[] }): string {
     .filter((part): part is { kind: 'text'; text: string } => part.kind === 'text')
     .map((part) => part.text)
     .join('\n\n')
+}
+
+/**
+ * How much of a session's history one websocket message may carry. The phone's
+ * `URLSessionWebSocketTask` refuses a message over 1 MiB — "Message too long" — and
+ * closes the socket, so a session with a couple of large tool results reconnected in
+ * a loop and never opened there. A chunk this size leaves room for the frame around
+ * it and stays a fraction of that ceiling.
+ */
+export const TRANSCRIPT_CHUNK_BYTES = 256 * 1024
+
+/**
+ * A transcript in pieces a websocket message can hold, whole rows at a time: a split
+ * inside a row would hand a surface half a tool result with nothing saying it was cut.
+ * A row larger than the budget goes alone rather than being divided — it cannot be
+ * made smaller here, and a surface that cannot take it is the one to say so.
+ */
+export function transcriptChunks(
+  messages: TranscriptMessage[],
+  budget = TRANSCRIPT_CHUNK_BYTES,
+): TranscriptMessage[][] {
+  const chunks: TranscriptMessage[][] = []
+  let chunk: TranscriptMessage[] = []
+  let size = 0
+  for (const message of messages) {
+    const length = JSON.stringify(message).length
+    if (chunk.length > 0 && size + length > budget) {
+      chunks.push(chunk)
+      chunk = []
+      size = 0
+    }
+    chunk.push(message)
+    size += length
+  }
+  if (chunk.length > 0) chunks.push(chunk)
+  return chunks
 }
 
 export function parseClientFrame(value: unknown): ClientFrame | null {

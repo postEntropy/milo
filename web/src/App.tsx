@@ -571,6 +571,24 @@ export default function App() {
       }
       return
     }
+    if (frame.type === 'history') {
+      // The rest of a session too long for the handshake: whole rows, in the order they
+      // happened. They go under the running turn's own row when the handshake opened one,
+      // so the turn stays at the end where it is being written.
+      setMessages((current) => {
+        const loaded = current.filter((message) => message.loaded).length
+        const rows: ChatMessage[] = frame.messages.map((message, offset) => ({
+          ...message,
+          id: `loaded-${loaded + offset}`,
+          loaded: true,
+        }))
+        const running = current.findIndex((message) => message.waitingSince !== undefined)
+        return running === -1 ? [...current, ...rows] : [...current.slice(0, running), ...rows, ...current.slice(running)]
+      })
+      // The plan's floor is a count of the thread, and this lengthened it.
+      setPlanSince((since) => since + frame.messages.length)
+      return
+    }
     if (frame.type === 'error') { setNotice({ text: frame.message, error: true }); return }
     // The switch belongs to the session, so a sibling tab moved it too. Turning it
     // off retires the proposal with it; turning it on waits for a turn to propose.
