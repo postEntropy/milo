@@ -116,14 +116,6 @@ struct ChatView: View {
         var sentTop: CGFloat?
         /// Whether the scroll the room was opened for has already been made.
         var placed = true
-        /// Whether the room stopped being sized for the send in hand. The room is content of
-        /// the scroll it is measured from, so a write of it that the box does not answer is a
-        /// measurement feeding itself: the words' own height comes back smaller while the room
-        /// only grows. Sizing it again asks the same thing of the main thread, and a screen
-        /// that keeps asking is one the system's watchdog takes away — a send did exactly
-        /// that: the main thread never returned to the run loop, and the app was killed in the
-        /// background. A box that does not answer is left with the room it has.
-        var stalled = false
     }
     /// Held in a plain reference, the way the sideways-drag frames are.
     @State private var book = ScrollBook()
@@ -917,9 +909,6 @@ struct ChatView: View {
     /// clearing the previous turn's measurement so the room waits for this row's own.
     private func armSend(_ id: UUID) {
         guard sent != id else { return }
-        // A send is a fresh measurement: whatever the box did with the last room says nothing
-        // about this one.
-        book.stalled = false
         // The first message in a session is already at the top of the thread; opening extra
         // room or calling scrollTo while the keyboard drops would only fight the scroll box.
         if model.messages.count == 1 {
@@ -1062,6 +1051,17 @@ struct ChatView: View {
                     // open beneath it, and so the room gives way to the reply as it grows and
                     // the thread's end stays where the words end.
                     Color.clear.frame(height: room).id(Self.threadEnd)
+                        // Where the room begins is the words' own height, whatever the room's
+                        // own is: a size taken with the room already subtracted comes back
+                        // answering the room it was just handed, which is the measurement
+                        // feeding itself that a send once died of. This one is the thread's,
+                        // and the room's height cannot move it.
+                        .onGeometryChange(for: CGFloat.self) { geometry in
+                            geometry.frame(in: .named(Self.threadSpace)).minY
+                        } action: { _, top in
+                            book.bare = top
+                            sizeRoom(proxy)
+                        }
                 }
                 .padding(.horizontal, MiloTheme.margin)
                 .padding(.top, MiloTheme.Space.four)
@@ -1107,19 +1107,15 @@ struct ChatView: View {
                 // nothing.
                 if atEnd, !book.moving, !model.messages.isEmpty { book.following = true }
             }
-            // What the thread measures with the room in it, and how tall its box is. The room
-            // is what the send's message needs under it to sit at the top: a boxful, less what
-            // the thread already takes above it — so the most the thread can be scrolled is
-            // exactly that message, and a thread that fits is left with no scroll at all.
+            // A content size that changed is the box having laid out what it was handed: the
+            // sizing is asked again, and a send whose room the box took is scrolled into the
+            // top that room was opened for. The words' own height is read off the thread below,
+            // never off this size — a height taken from the size less the room is the room
+            // answering itself, and a send that kept answering is one the system's watchdog
+            // takes away.
             .onScrollGeometryChange(for: CGSize.self) { geometry in
                 geometry.contentSize
-            } action: { _, size in
-                let bare = size.height - room
-                // The words only ever grow: a box whose own height came back smaller after a
-                // room was opened is a box that did not take it, and sizing it once more would
-                // be the geometry answering the state it was just handed — see `stalled`.
-                if bare < book.bare - 1 { book.stalled = true }
-                book.bare = bare
+            } action: { _, _ in
                 sizeRoom(proxy)
                 // A reply being written is carried along with the thread's end once it has
                 // filled the room opened for the send, so the newest line stays in view —
@@ -1173,12 +1169,17 @@ struct ChatView: View {
                 let id = words.id
                 if composing { composing = false }
                 armSend(id)
-                // In a long thread where the person was reading back, the new row lands below
-                // the visible window where a lazy stack will not measure it until the scroll
-                // brings it into view.
+                // A send is taken to the thread's end whatever the person was reading: the
+                // scroll is the thread's own end rather than the new row, so it is the same
+                // motion whether the room under it is open yet or not — and it is a motion,
+                // not a jump, because a thread left far above the send is still a place the
+                // person is being taken out of. The end also brings the row into reach, where
+                // the lazy stack lays it out and the room can be measured from it.
                 Task { @MainActor in
                     if sent == id, book.sentTop == nil {
-                        proxy.scrollTo(id, anchor: .bottom)
+                        withAnimation(.smooth(duration: 0.35)) {
+                            proxy.scrollTo(Self.threadEnd, anchor: .bottom)
+                        }
                     }
                 }
             }
@@ -1197,7 +1198,6 @@ struct ChatView: View {
                 // session's; the next thread measures its own before the room means anything.
                 book.bare = 0
                 book.sentTop = nil
-                book.stalled = false
                 sent = nil
                 book.placed = true
                 if room != 1 { room = 1 }
@@ -1287,12 +1287,6 @@ struct ChatView: View {
             if room != 1 { room = 1 }
             return
         }
-        // A box that did not take the room is not asked again; the send's own scroll still
-        // has its words to land on. See `ScrollBook.stalled`.
-        guard !book.stalled else {
-            book.placed = true
-            return
-        }
         guard let sentTop = book.sentTop, book.bare > sentTop, book.threadHeight > 0 else { return }
         // A boxful is the most the room can ask for: the thread under the sent words is at
         // least as tall as where they begin, so a boxful less that is the ceiling.
@@ -1307,7 +1301,12 @@ struct ChatView: View {
             withTransaction(still) { room = next }
         } else if !book.placed {
             book.placed = true
-            withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo(sent, anchor: .top) }
+            // The room under the words is already the height that puts them at the top, so the
+            // thread's end is where the send is taken — the same target the person was already
+            // being carried to, now that the room has been opened.
+            withAnimation(.smooth(duration: 0.35)) {
+                proxy.scrollTo(Self.threadEnd, anchor: .bottom)
+            }
         }
     }
 
