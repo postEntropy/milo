@@ -1119,19 +1119,18 @@ struct ChatView: View {
                 // one opens at, read off the scroll as usual, rather than carried over from
                 // the thread left behind.
                 book.following = false
-                // A session opened from a reply's notice lands on its end: the answer is what
-                // the person came to read, and the thread's top is the conversation's first
-                // turn. Every other open still starts where the thread hangs from — an empty
-                // id is the socket forgetting its session before the next one answers, and
-                // there is no thread to land on yet.
-                if model.openedFromNotice, !id.isEmpty {
-                    model.openedFromNotice = false
-                    // Landed one turn of the run loop later: the thread's rows come into
-                    // being with the very change this is answering, and a lazy stack cannot
-                    // be pointed at a row it has not drawn yet.
-                    Task { @MainActor in proxy.scrollTo(Self.threadEnd, anchor: .bottom) }
-                } else {
-                    proxy.scrollTo(Self.threadTop, anchor: .top)
+                // Every resumed session opens at its newest content, including one opened
+                // from a reply notice. Wait for the handshake's replay before pointing the
+                // lazy stack at the end; an empty session's end is its welcome.
+                model.openedFromNotice = false
+                Task { @MainActor in
+                    await Task.yield()
+                    guard model.sessionId == id else { return }
+                    if model.messages.isEmpty {
+                        proxy.scrollTo(Self.threadTop, anchor: .top)
+                    } else {
+                        proxy.scrollTo(Self.threadEnd, anchor: .bottom)
+                    }
                 }
             }
             .safeAreaInset(edge: .top, spacing: 0) {
