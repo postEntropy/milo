@@ -140,15 +140,19 @@ struct Prose: View {
 
     /// A table is wider than a phone, so it scrolls sideways rather than squeezing its
     /// columns into a column of their own — the shape the generated widgets use too.
+    ///
+    /// Its cells are words drawn by `Text`, not by the text view the rest of the prose
+    /// wears: a report with a table of ten rows is thirty small cells, and thirty
+    /// `UITextView`s inside one row is the whole cost of opening a session full of them.
+    /// A cell is read, not answered — the quote belongs to the prose around it.
     private func table(columns: [String], rows: [[String]]) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             Grid(alignment: .leading, horizontalSpacing: MiloTheme.Space.five, verticalSpacing: MiloTheme.Space.two) {
                 GridRow {
                     ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
-                        words(
+                        cell(
                             inline(column),
                             font: MiloTheme.Text.small.weight(.semibold),
-                            face: smallStrongFace,
                             tone: MiloTheme.muted
                         )
                     }
@@ -156,10 +160,9 @@ struct Prose: View {
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
                     GridRow {
                         ForEach(Array(columns.enumerated()), id: \.offset) { index, _ in
-                            words(
+                            cell(
                                 inline(index < row.count ? row[index] : ""),
                                 font: MiloTheme.Text.base,
-                                face: baseFace,
                                 tone: color
                             )
                         }
@@ -170,6 +173,22 @@ struct Prose: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .marksSidewaysDrag()
+    }
+
+    /// One cell's words. Still the streaming fade while the table is being written, and
+    /// the platform's own text once it has settled — the same words either way, without a
+    /// text view apiece.
+    @ViewBuilder
+    private func cell(_ attributed: AttributedString, font: Font, tone: Color) -> some View {
+        if isStreaming {
+            StreamingText(attributed: attributed, font: font, tone: tone)
+        } else {
+            Text(attributed)
+                .font(font)
+                .lineSpacing(MiloTheme.leading)
+                .foregroundStyle(tone)
+                .textSelection(.enabled)
+        }
     }
 
     /// A run of words, drawn the one way where this prose can be quoted and the other way
@@ -217,10 +236,9 @@ struct Prose: View {
     private var baseFace: UIFont { UIFont.preferredFont(forTextStyle: .subheadline) }
     private var headlineFace: UIFont { UIFont.preferredFont(forTextStyle: .headline) }
     private var titleFace: UIFont { Self.weighed(.title3, .semibold) }
-    private var smallStrongFace: UIFont { Self.weighed(.caption1, .semibold) }
 
-    /// A role's own size with the weight `UIFont.TextStyle` does not carry — the two
-    /// headings and the table's header, which the ladder sets semibold.
+    /// A role's own size with the weight `UIFont.TextStyle` does not carry — the heading
+    /// the ladder sets semibold.
     private static func weighed(_ style: UIFont.TextStyle, _ weight: UIFont.Weight) -> UIFont {
         UIFont.systemFont(ofSize: UIFont.preferredFont(forTextStyle: style).pointSize, weight: weight)
     }
