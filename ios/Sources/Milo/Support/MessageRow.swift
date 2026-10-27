@@ -139,7 +139,7 @@ struct MessageRow: View {
                 Spacer(minLength: 48)
                 VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
                     if !message.prose.isEmpty {
-                        Prose(text: message.prose, color: MiloTheme.accentOn)
+                        Prose(text: message.prose, color: MiloTheme.userBubbleText)
                     }
                     // Guarded like the assistant side: an empty `Attachments` is still a
                     // child, and the stack's spacing would show up as a chin under the text.

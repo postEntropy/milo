@@ -45,6 +45,9 @@ enum MiloTheme {
     static let accent = Color.milo(light: 0xC4541C, dark: 0xD9703A)
     /// On top of an accent fill — the send control and the primary button.
     static let accentOn = Color.milo(light: 0xFFFFFF, dark: 0xFFFFFF)
+    /// The words in the person's message: a warm tint that sits more gently on the
+    /// orange bubble than white, while staying light in both appearances.
+    static let userBubbleText = Color.milo(light: 0xFFE8D3, dark: 0xFFE8D3)
     static let secondary = Color.milo(light: 0x508080, dark: 0x6FA3A3)
     static let success = Color.milo(light: 0x587E20, dark: 0x7FA83F)
     /// The green a control is filled with, lighter than the `success` a status dot is read
