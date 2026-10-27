@@ -47,6 +47,16 @@ struct SelectableText: UIViewRepresentable {
             .foregroundColor: tone,
             .underlineStyle: NSUnderlineStyle.single.rawValue,
         ]
+        // The words this view already holds, read before drawing them again: a scroll, a
+        // row landing or any other change to the thread asks every text view on screen for
+        // its body, and turning the prose into a platform string run by run costs more the
+        // longer the answer is. The parse is only redone when the words — or the face and
+        // tone they were drawn in — are not the ones it was made from.
+        let coordinator = context.coordinator
+        if let painted = coordinator.painted, painted.text == attributed, painted.face == face, painted.tone == tone {
+            return
+        }
+        coordinator.painted = Painted(text: attributed, face: face, tone: tone)
         let drawn = SelectableText.drawn(attributed, face: face, tone: tone)
         // A streaming answer redraws the same string every frame, and drawing it again
         // would take the selection out from under a finger that is holding one.
@@ -89,12 +99,22 @@ struct SelectableText: UIViewRepresentable {
         let height: CGFloat
     }
 
+    /// The prose last turned into a platform string, and the face and tone it was drawn
+    /// with — the whole of what the view holding it depends on.
+    struct Painted {
+        let text: AttributedString
+        let face: UIFont
+        let tone: UIColor
+    }
+
     func makeCoordinator() -> Coordinator { Coordinator(onQuote: onQuote) }
 
     final class Coordinator: NSObject, UITextViewDelegate {
         var onQuote: (String) -> Void
         /// The last height measured, and the words and width it was measured for.
         var measured: Measured?
+        /// The words the view was last filled with; nil until it holds any.
+        var painted: Painted?
 
         init(onQuote: @escaping (String) -> Void) { self.onQuote = onQuote }
 
