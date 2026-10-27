@@ -2005,6 +2005,17 @@ final class AppModel {
      */
     private var backgroundHold: UIBackgroundTaskIdentifier = .invalid
 
+    /// Text deltas received while the app is off screen. The daemon keeps speaking, but
+    /// redrawing the whole observed thread for every piece of prose while nobody can see it
+    /// needlessly keeps SwiftUI's graph alive — especially the composer's glass controls.
+    /// Adjacent pieces of the same kind are joined and drawn together on the next meaningful
+    /// event or when the app comes back.
+    private struct PendingStreamDelta {
+        let reasoning: Bool
+        var text: String
+    }
+    private var pendingStreamDeltas: [PendingStreamDelta] = []
+
     /// The app left the screen.
     func enteredBackground() {
         guard notifications.replyNoticeOn, busy, !continuedTurn.holds, backgroundHold == .invalid
@@ -2020,6 +2031,7 @@ final class AppModel {
 
     /// The app is in front again: whatever the hold was kept for is on the screen now.
     func becameActive() {
+        flushPendingStreamDeltas()
         releaseBackgroundHold()
         // The system's own device is the *background*, and a person standing in the app is
         // exactly when it takes its task back. Letting go here means that happens on the
@@ -2037,6 +2049,12 @@ final class AppModel {
     // MARK: - Frames
 
     private func received(_ frame: ServerFrame) {
+        if case .event(_, let event, _) = frame,
+           UIApplication.shared.applicationState != .active,
+           deferStreamDelta(event) {
+            return
+        }
+        flushPendingStreamDeltas()
         switch frame {
         case .ready(let ready):
             let keptThread = threadKept
@@ -2270,6 +2288,43 @@ final class AppModel {
             if view != nil { panelOpen = true }
         case .unknown:
             break
+        }
+    }
+
+    /// Holds prose-only changes while the screen is away. State, tool and turn-boundary
+    /// frames still pass through immediately, flushing the words first so event order stays
+    /// exact. The daemon remains the source of truth if iOS suspends the app before a flush.
+    private func deferStreamDelta(_ event: AgentEvent) -> Bool {
+        let reasoning: Bool
+        let text: String
+        switch event {
+        case .textDelta(let delta):
+            reasoning = false
+            text = delta
+        case .reasoningDelta(let delta):
+            reasoning = true
+            text = delta
+        default:
+            return false
+        }
+
+        continuedTurn.advance()
+        if pendingStreamDeltas.last?.reasoning == reasoning {
+            pendingStreamDeltas[pendingStreamDeltas.count - 1].text += text
+        } else {
+            pendingStreamDeltas.append(PendingStreamDelta(reasoning: reasoning, text: text))
+        }
+        return true
+    }
+
+    /// Applies the accumulated prose in one main-actor turn, before the next non-text event
+    /// or as soon as the app becomes visible again.
+    private func flushPendingStreamDeltas() {
+        guard !pendingStreamDeltas.isEmpty else { return }
+        let pending = pendingStreamDeltas
+        pendingStreamDeltas.removeAll(keepingCapacity: true)
+        for delta in pending {
+            apply(delta.reasoning ? .reasoningDelta(delta.text) : .textDelta(delta.text), says: nil)
         }
     }
 
