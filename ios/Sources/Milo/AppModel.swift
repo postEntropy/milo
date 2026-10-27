@@ -826,6 +826,10 @@ final class AppModel {
 
     @discardableResult
     func resume(_ id: String) async -> Bool {
+        // The selected row can still be tapped while its drawer is open. If it is already
+        // this session, dismiss the drawer without rebinding the socket or replaying the
+        // whole transcript under the person's finger.
+        if id == sessionId { return true }
         guard let account else { return false }
         return await openFresh(account) { try await MiloApi.resumeSession($0, id: id) }
     }

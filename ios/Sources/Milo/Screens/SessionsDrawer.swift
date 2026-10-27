@@ -400,8 +400,10 @@ struct SessionsDrawer: View {
                 .padding(.bottom, MiloTheme.Space.one)
             ForEach(group.sessions) { session in
                 row(session) {
-                    onClose()
-                    Task { await model.resume(session.id) }
+                    Task {
+                        await model.resume(session.id)
+                        onClose()
+                    }
                 }
             }
         }

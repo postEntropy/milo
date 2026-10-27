@@ -683,9 +683,11 @@ struct ChatView: View {
     /// A session of a project is the ordinary chat, working there: the card leaves the Work
     /// page and the drawer, and the session opens behind it.
     private func openWorkSession(_ id: String) {
-        leaveWork(focusing: false)
-        Task { @MainActor in drawer = false }
-        Task { await model.resume(id) }
+        Task { @MainActor in
+            await model.resume(id)
+            leaveWork(focusing: false)
+            drawer = false
+        }
     }
 
     /// The drawer's switch, which moves the world without closing the drawer. The list it
