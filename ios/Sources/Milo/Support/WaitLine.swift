@@ -44,9 +44,18 @@ struct Glare: View {
     private static let period: Double = 1.9
     /// How much of the line the lit band covers, as a fraction of its width.
     private static let band: Double = 0.32
+    /// A band travelling this slowly needs no more than this many frames a second: the
+    /// display's own rate spends the main thread on the same words twice as often.
+    private static let interval: Double = 1.0 / 30.0
+    /// The sweep has nothing to say where nobody can see it. Left running, this clock is a
+    /// redraw of the line for as long as the turn waits — in the background, where the app
+    /// keeps working for the reply notice, that is a main thread the system's own watchdog
+    /// never gets back, and the streaming fade already had the app killed this way
+    /// (`StreamingText`); this clock is the same mistake, made without the pause.
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
-        TimelineView(.animation) { context in
+        TimelineView(.animation(minimumInterval: Self.interval, paused: scenePhase != .active)) { context in
             let cycle = context.date.timeIntervalSinceReferenceDate
                 .truncatingRemainder(dividingBy: Self.period) / Self.period
             // Travelling from just off one edge to just off the other, like the browser's
