@@ -97,11 +97,28 @@ struct ChatView: View {
     /// Whether the reply being written is carried along with the thread's end, so its newest
     /// line stays in view. On wherever the person has left the thread at its end — their own
     /// move takes it away, and coming back to the end gives it back.
-    @State private var following = true
-    /// Whether the person is the one moving the thread — a finger in it, or the glide a flick
-    /// left behind. It holds the following off until they have settled, so a reply is never
-    /// carried along under their hand.
-    @State private var moving = false
+    ///
+    /// It lives with the rest of the scroll's own bookkeeping below: a scroll writes these
+    /// dozens of times a second, and a screen that re-rendered for each of them is what made
+    /// a long session stutter under the thumb — every pass let a lazy stack re-activate the
+    /// rows it was unsure of, and re-building one of them costs the whole row.
+    private final class ScrollBook {
+        /// Whether the person is the one moving the thread — a finger in it, or the glide a
+        /// flick left behind. It holds the following off until they have settled, so a reply
+        /// is never carried along under their hand.
+        var moving = false
+        /// Whether the thread is followed to its end as the reply grows.
+        var following = true
+        /// The thread's own box, what the words in it take before the room is added, and
+        /// where the send's own message sits inside it: what the room is measured from.
+        var bare: CGFloat = 0
+        var threadHeight: CGFloat = 0
+        var sentTop: CGFloat?
+        /// Whether the scroll the room was opened for has already been made.
+        var placed = true
+    }
+    /// Held in a plain reference, the way the sideways-drag frames are.
+    @State private var book = ScrollBook()
     /// The room the thread keeps under its words: exactly what it takes for the message a send
     /// has just put in to sit at the top of the box, and not a point more, so the thread has
     /// nowhere to scroll but back to that message. It is only opened for a send — a thread
@@ -114,13 +131,9 @@ struct ChatView: View {
     /// the live viewport height even while the keyboard is up so the empty state always rests
     /// against the composer without flipping the scroll view's alignment anchor on send.
     @State private var boxHeight: CGFloat = 0
-    @State private var threadHeight: CGFloat = 0
-    @State private var bare: CGFloat = 0
-    @State private var sentTop: CGFloat?
     /// The message a send has just put in — the one the room is opened for, and the one the
     /// scroll waits on — and whether that scroll has been made.
     @State private var sent: UUID?
-    @State private var placed = true
     /// The parts of the thread that own a sideways drag — a code block, a table, a slider.
     /// Their frames ride up as a preference so a drag can be told where it began; held in
     /// a plain reference, so a scroll that moves them does not re-render the screen.
@@ -845,21 +858,21 @@ struct ChatView: View {
         // The first message in a session is already at the top of the thread; opening extra
         // room or calling scrollTo while the keyboard drops would only fight the scroll box.
         if model.messages.count == 1 {
-            bare = 0
+            book.bare = 0
             sent = nil
-            sentTop = nil
-            placed = true
+            book.sentTop = nil
+            book.placed = true
             if room != 1 { room = 1 }
-            following = true
+            book.following = true
             return
         }
         sent = id
-        sentTop = nil
-        placed = false
+        book.sentTop = nil
+        book.placed = false
         // A send is the thread's own end — the room below the words is opened for the
         // reply, and the reply is followed from there, whatever the person was doing
         // before the send.
-        following = true
+        book.following = true
     }
 
     /// What a panel says, per control that raises one. Every line carries the mark of what it
@@ -1012,7 +1025,7 @@ struct ChatView: View {
                 // to be carried to: the welcome sits against the composer on its own, and
                 // the empty moment a session passes through on its way to its replay arms
                 // nothing.
-                if atEnd, !moving, !model.messages.isEmpty { following = true }
+                if atEnd, !book.moving, !model.messages.isEmpty { book.following = true }
             }
             // What the thread measures with the room in it, and how tall its box is. The room
             // is what the send's message needs under it to sit at the top: a boxful, less what
@@ -1021,7 +1034,7 @@ struct ChatView: View {
             .onScrollGeometryChange(for: CGSize.self) { geometry in
                 geometry.contentSize
             } action: { _, size in
-                bare = size.height - room
+                book.bare = size.height - room
                 sizeRoom(proxy)
                 // A reply being written is carried along with the thread's end once it has
                 // filled the room opened for the send, so the newest line stays in view —
@@ -1029,7 +1042,7 @@ struct ChatView: View {
                 // thumb that took it away from there. `busy` rather than the last row's own
                 // flag: a steer puts the person's message after the answer being written,
                 // and the reply still grows where it began.
-                if following, model.busy, placed, room <= 1 {
+                if book.following, model.busy, book.placed, room <= 1 {
                     proxy.scrollTo(Self.threadEnd, anchor: .bottom)
                 }
             }
@@ -1043,8 +1056,8 @@ struct ChatView: View {
                 // message is landing on. If the box grows further as the keyboard finishes
                 // clearing, the room grows with it without re-triggering the scroll animation
                 // on every frame.
-                guard (!composing && placed) || height > threadHeight else { return }
-                threadHeight = height
+                guard (!composing && book.placed) || height > book.threadHeight else { return }
+                book.threadHeight = height
                 sizeRoom(proxy)
             }
             // The person's own move, read off the platform's phase rather than guessed at
@@ -1055,12 +1068,12 @@ struct ChatView: View {
             .onScrollPhaseChange { _, phase in
                 switch phase {
                 case .tracking, .interacting, .decelerating:
-                    moving = true
-                    following = false
-                    placed = true
+                    book.moving = true
+                    book.following = false
+                    book.placed = true
                 case .idle:
-                    moving = false
-                    following = atEnd
+                    book.moving = false
+                    book.following = atEnd
                 case .animating:
                     break
                 }
@@ -1079,7 +1092,7 @@ struct ChatView: View {
                 // the visible window where a lazy stack will not measure it until the scroll
                 // brings it into view.
                 Task { @MainActor in
-                    if sent == id, sentTop == nil {
+                    if sent == id, book.sentTop == nil {
                         proxy.scrollTo(id, anchor: .bottom)
                     }
                 }
@@ -1097,15 +1110,15 @@ struct ChatView: View {
                 }
                 // The room is measured off the last message, and the last message is the one
                 // session's; the next thread measures its own before the room means anything.
-                bare = 0
-                sentTop = nil
+                book.bare = 0
+                book.sentTop = nil
                 sent = nil
-                placed = true
+                book.placed = true
                 if room != 1 { room = 1 }
                 // A different thread: whether its reply is followed is left to the end this
                 // one opens at, read off the scroll as usual, rather than carried over from
                 // the thread left behind.
-                following = false
+                book.following = false
                 // A session opened from a reply's notice lands on its end: the answer is what
                 // the person came to read, and the thread's top is the conversation's first
                 // turn. Every other open still starts where the thread hangs from — an empty
@@ -1162,6 +1175,11 @@ struct ChatView: View {
     /// and shrinks as a control comes and goes is a bar that jumps under the finger.
     private func jumpToEnd(_ proxy: ScrollViewProxy) -> some View {
         Button {
+            // A jump is an explicit handoff back to the live end. A drag or its
+            // deceleration may have turned following off; let the tap take ownership
+            // before the scroll starts, so incoming reply growth cannot pull against it.
+            book.moving = false
+            book.following = true
             withAnimation(.smooth(duration: 0.3)) { proxy.scrollTo(Self.threadEnd, anchor: .bottom) }
         } label: {
             Image(systemName: "arrow.down")
@@ -1184,12 +1202,12 @@ struct ChatView: View {
             if room != 1 { room = 1 }
             return
         }
-        guard let sentTop, bare > sentTop, threadHeight > 0 else { return }
-        let next = max(1, sentTop + threadHeight - bare)
+        guard let sentTop = book.sentTop, book.bare > sentTop, book.threadHeight > 0 else { return }
+        let next = max(1, sentTop + book.threadHeight - book.bare)
         if abs(next - room) > 0.5 {
             room = next
-        } else if !placed {
-            placed = true
+        } else if !book.placed {
+            book.placed = true
             withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo(sent, anchor: .top) }
         }
     }
