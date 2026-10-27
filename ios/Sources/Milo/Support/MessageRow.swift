@@ -48,6 +48,14 @@ struct MessageRow: View {
     /// A message read back rather than spoken to — a routine's run. The controls that
     /// answer it (quote, ask again, fork) are left off, so a past run is read, not acted on.
     var readOnly = false
+    /// Which of the answer's pieces this row draws, when a settled turn is too long to be
+    /// one row — see `chunk`. Nil is the whole message, the way every other screen draws it.
+    var groups: Range<Int>? = nil
+    /// Whether this row carries the message's own head — what signs it, and its thinking —
+    /// and the foot a finished answer offers. The rows a long turn is cut into carry neither:
+    /// the first keeps the head, the last keeps the foot.
+    var head = true
+    var foot = true
     @Environment(AppModel.self) private var model
 
     /// The answer's thinking, when it thought at all. Read off the parts rather than the
@@ -74,7 +82,19 @@ struct MessageRow: View {
     /// thought in the flow, so a thought between two calls ends the run there
     /// (`web/src/chat/tool-runs.ts`). Same rule, over two drawings that put the thought in
     /// different places.
-    private var drawn: [Drawn] {
+    private var drawn: [Drawn] { Self.drawn(of: message) }
+
+    /// How many pieces an answer draws: one per run of consecutive calls and one per other
+    /// part. A settled turn longer than `chunk` is drawn as several rows of these pieces, so
+    /// a thread opens and scrolls without laying out the whole of every long answer at once.
+    static func pieceCount(of message: AppModel.Message) -> Int { drawn(of: message).count }
+
+    /// How many pieces one row may hold. Two of them are a screenful of prose: the rest of a
+    /// long turn is only built as it comes into reach, so entering the thread costs what is
+    /// on the screen rather than the whole of every answer.
+    static let chunk = 2
+
+    private static func drawn(of message: AppModel.Message) -> [Drawn] {
         var out: [Drawn] = []
         for part in message.parts {
             switch part {
@@ -91,6 +111,13 @@ struct MessageRow: View {
             }
         }
         return out
+    }
+
+    /// The pieces this row draws: the whole answer, or the stretch of it this row holds.
+    private var groupsToDraw: [(offset: Int, element: Drawn)] {
+        let all = Array(drawn.enumerated())
+        guard let groups else { return all }
+        return all.filter { groups.contains($0.offset) }
     }
 
     /// One part on its own, or the run of calls it belongs to.
@@ -135,7 +162,7 @@ struct MessageRow: View {
                 // A routine's delivery signs itself: the routine it came from and when
                 // it landed, over the answer. A message nobody in this chat asked for
                 // does not read as the reply to what the person just said.
-                if let routine = message.routine {
+                if head, let routine = message.routine {
                     HStack(spacing: MiloTheme.Space.two) {
                         Image(systemName: "repeat")
                             .font(.system(size: 12, weight: .semibold))
@@ -159,7 +186,7 @@ struct MessageRow: View {
                 // The line is the handle to the thought: it stands when there is one to open,
                 // and not otherwise. A "Thought for Xs" that answers a press with nothing is a
                 // promise the turn cannot keep.
-                if let reasoning {
+                if head, let reasoning {
                     Reasoning(text: reasoning, seconds: message.thought)
                 }
                 // A `/sessions` answer is its cards: the words the command replied with are
@@ -168,7 +195,7 @@ struct MessageRow: View {
                 if let cards = message.cards, !cards.isEmpty {
                     SessionCards(cards: cards)
                 } else {
-                    ForEach(Array(drawn.enumerated()), id: \.offset) { _, group in
+                    ForEach(groupsToDraw, id: \.offset) { _, group in
                         // What appears in an answer settles in as it lands — a call, a
                         // to-do list, a widget, the paragraph after a call — which is the
                         // browser's own entrance for those same pieces.
@@ -182,7 +209,7 @@ struct MessageRow: View {
                         }
                         .transition(SettlesIn())
                     }
-                    if !message.attachments.isEmpty {
+                    if foot, !message.attachments.isEmpty {
                         Attachments(items: message.attachments)
                     }
                     // The wait for the model's next output, wherever it falls: the line
@@ -190,10 +217,10 @@ struct MessageRow: View {
                     // words — so a turn thinking about a tool's result says so instead of
                     // going quiet. A widget being drawn is the work showing itself, which
                     // is why the browser leaves its own line off while one is.
-                    if message.waiting, !drawingADraft {
+                    if foot, message.waiting, !drawingADraft {
                         WaitLine()
                     }
-                    if let status = message.status {
+                    if foot, let status = message.status {
                         Text(status)
                             .font(MiloTheme.Text.small)
                             .foregroundStyle(MiloTheme.muted)
@@ -202,13 +229,13 @@ struct MessageRow: View {
                     // written has nothing to act on yet, and a message with no words has
                     // nothing to copy. A routine's delivery is not a turn: there is
                     // nothing here to quote, fork or ask again.
-                    if !message.streaming, !message.prose.isEmpty, message.routine == nil {
+                    if foot, !message.streaming, !message.prose.isEmpty, message.routine == nil {
                         MessageToolbar(message: message, turn: turn, regenerate: regenerate, onQuote: onQuote, readOnly: readOnly)
                     }
                 }
                 // The buttons a command drew, under its cards or its words: the pages of
                 // `/sessions`, and anything else the daemon offers there.
-                if let actions = message.actions, !actions.isEmpty {
+                if foot, let actions = message.actions, !actions.isEmpty {
                     ActionRows(rows: actions, messageId: message.id.uuidString)
                 }
             }

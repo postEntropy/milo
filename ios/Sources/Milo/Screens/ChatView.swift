@@ -527,6 +527,66 @@ struct ChatView: View {
         return turns
     }
 
+    /// A row of the thread: a whole message, or a stretch of a settled turn long enough that
+    /// drawing it as one row would lay out every piece of it the moment it came into reach.
+    /// `MessageRow.chunk` says how much one row holds; the first row of a turn keeps its head
+    /// and the last its foot, so the turn reads the way it did when it was a single row.
+    private struct ThreadPiece: Identifiable {
+        let message: AppModel.Message
+        let turn: Int
+        let groups: Range<Int>
+        let head: Bool
+        let foot: Bool
+
+        /// Where the scroll points: a message's own id on the row that opens it, so a send
+        /// still lands on its words, and an id of its own on the rows after it.
+        enum Anchor: Hashable {
+            case message(UUID)
+            case piece(String)
+        }
+
+        var anchor: Anchor { head ? .message(message.id) : .piece(id) }
+
+        /// The first piece the turn holds — stable while a turn grows, so a reply being
+        /// written keeps the row it is already in.
+        var id: String { "\(message.id.uuidString)-\(groups.lowerBound)" }
+    }
+
+    /// The thread as the lazy stack holds it. A live turn is never cut: its pieces arrive one
+    /// at a time into a row that is already there to take them.
+    private var pieces: [ThreadPiece] {
+        var out: [ThreadPiece] = []
+        var turn = 0
+        for message in model.messages {
+            if message.isUser { turn += 1 }
+            let count = MessageRow.pieceCount(of: message)
+            let whole = message.isUser
+                || message.routine != nil
+                || !(message.cards?.isEmpty ?? true)
+                || message.streaming
+                || count <= MessageRow.chunk
+            if whole {
+                out.append(ThreadPiece(message: message, turn: turn, groups: 0..<count, head: true, foot: true))
+                continue
+            }
+            var start = 0
+            while start < count {
+                let end = min(start + MessageRow.chunk, count)
+                out.append(
+                    ThreadPiece(
+                        message: message,
+                        turn: turn,
+                        groups: start..<end,
+                        head: start == 0,
+                        foot: end == count
+                    )
+                )
+                start = end
+            }
+        }
+        return out
+    }
+
     /// What asking again would redo: the last answer, with the words that asked for it
     /// and the turn before them. Offered only when nothing is running — a turn in
     /// flight is not asked again, the browser's own rule.
@@ -543,12 +603,6 @@ struct ChatView: View {
         }
         guard let answer, let asked, let turn = turns[asked.id] else { return nil }
         return (answer.id, asked.prose, turn - 1)
-    }
-
-    /// The offer, on the one message it belongs to.
-    private func regeneration(for message: AppModel.Message) -> (prompt: String, upToTurn: Int)? {
-        guard let offer = regenerate, offer.message == message.id else { return nil }
-        return (offer.prompt, offer.upToTurn)
     }
 
     /// Whether a sideways drag belongs to the card rather than to the thread: toward an edge
@@ -919,6 +973,10 @@ struct ChatView: View {
 
     private var chat: some View {
         ScrollViewReader { proxy in
+            // These are session-wide scans. Resolve them once for this view update;
+            // doing either lookup from each row made laying out N messages cost N².
+            let threadPieces = pieces
+            let regenerationOffer = regenerate
             ScrollView {
                 // The room sits outside the lazy stack so it is always in the scroll's
                 // content size: a lazy stack only measures what is near the viewport, which
@@ -946,17 +1004,28 @@ struct ChatView: View {
                                 .transition(.opacity)
                                 .id(Self.threadTop)
                         }
-                        LazyVStack(alignment: .leading, spacing: MiloTheme.Space.six) {
-                            ForEach(model.messages) { message in
-                                let isSent = message.id == sent
+                        LazyVStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                            ForEach(Array(threadPieces.enumerated()), id: \.element.id) { index, piece in
+                                let isSent = piece.head && piece.message.id == sent
                                 let space = Self.threadSpace
                                 MessageRow(
-                                    message: message,
-                                    turn: turns[message.id] ?? 1,
-                                    regenerate: regeneration(for: message),
+                                    message: piece.message,
+                                    turn: piece.turn,
+                                    regenerate: regenerationOffer.flatMap { offer in
+                                        offer.message == piece.message.id
+                                            ? (prompt: offer.prompt, upToTurn: offer.upToTurn)
+                                            : nil
+                                    },
                                     onQuote: quoteIt,
-                                    onEdit: editMessage
+                                    onEdit: editMessage,
+                                    groups: piece.groups,
+                                    head: piece.head,
+                                    foot: piece.foot
                                 )
+                                // The pieces of one turn sit a step apart, and a turn stands
+                                // a longer step from the one before it: the rhythm the rows
+                                // had when a turn was always one row.
+                                .padding(.top, index > 0 && piece.head ? MiloTheme.Space.three : 0)
                                 // A send is what draws this: the words rise into the thread, and
                                 // everything else that lands in it is simply there — see
                                 // `SettlesIn`.
@@ -964,12 +1033,12 @@ struct ChatView: View {
                                 // Named so a send can put these words at the top of the thread — and,
                                 // for the message the send just put in, told where it sits in the
                                 // thread, which is what the room under the words is measured from.
-                                .id(message.id)
+                                .id(piece.anchor)
                                 .onGeometryChange(for: CGFloat?.self) { geometry in
                                     isSent ? geometry.frame(in: .named(space)).minY : nil
                                 } action: { _, top in
                                     guard let top else { return }
-                                    sentTop = top
+                                    book.sentTop = top
                                     sizeRoom(proxy)
                                 }
                             }
