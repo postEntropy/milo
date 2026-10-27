@@ -104,7 +104,7 @@ describe('web protocol', () => {
     displayEvent({ type: 'tool-start', id: '1', name: 'write_file', args: { path: 'a.txt' } }, 'turn', { tools: 'off', thinking: 'expanded' }, send as never)
     displayEvent({ type: 'tool-end', id: '1', name: 'write_file', result: 'failed', isError: true }, 'turn', { tools: 'off', thinking: 'expanded' }, send as never)
     expect(output).toHaveLength(1)
-    expect(output[0]).toMatchObject({ event: { type: 'tool-end', name: 'write_file', isError: true } })
+    expect(output[0]).toMatchObject({ event: { type: 'tool-end', name: 'write_file', isError: true, drawFailure: true } })
   })
 
   it('lets a thought ride either way, so a folded one can still be opened', () => {

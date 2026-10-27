@@ -367,7 +367,7 @@ enum AgentEvent: Decodable {
     case textDelta(String)
     case reasoningDelta(String)
     case toolStart(id: String, name: String, text: String?)
-    case toolEnd(id: String, name: String, isError: Bool, result: String?, change: [FileChange]?)
+    case toolEnd(id: String, name: String, isError: Bool, drawFailure: Bool, result: String?, change: [FileChange]?)
     case todo([TodoItem])
     /// The project's checks after a turn that wrote. The words are the core's, so
     /// the phone says what the browser and the terminal say.
@@ -392,7 +392,7 @@ enum AgentEvent: Decodable {
     case other
 
     private enum CodingKeys: String, CodingKey {
-        case type, delta, id, name, isError, items, message, render, draft, text, finishReason, result, ok, change
+        case type, delta, id, name, isError, drawFailure, items, message, render, draft, text, finishReason, result, ok, change
         case inputTokens, outputTokens, ms, added, removed, compacted
         case folded, tokens, summarized
     }
@@ -419,6 +419,7 @@ enum AgentEvent: Decodable {
                 id: read(.id, ""),
                 name: read(.name, ""),
                 isError: read(.isError, false),
+                drawFailure: read(.drawFailure, false),
                 result: readText(.result),
                 change: (try? container.decodeIfPresent([FileChange].self, forKey: .change)) ?? nil
             )

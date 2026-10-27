@@ -2306,13 +2306,18 @@ final class AppModel {
                 message.waiting = false
                 message.parts.append(.tool(ToolMark(name: name, text: text ?? name, state: "running")))
             }
-        case .toolEnd(_, let name, let isError, let result, let change):
+        case .toolEnd(_, let name, let isError, let drawFailure, let result, let change):
             mutateLast { parts in
                 let index = parts.lastIndex { part in
                     if case .tool(let tool) = part { return tool.state == "running" && tool.name == name }
                     return false
                 }
-                guard let index, case .tool(var tool) = parts[index] else { return }
+                guard let index, case .tool(var tool) = parts[index] else {
+                    if isError && drawFailure {
+                        parts.append(.tool(ToolMark(name: name, text: name, state: "failed")))
+                    }
+                    return
+                }
                 tool.state = isError ? "failed" : "done"
                 // Empty below `full`, where the server withholds it: an empty result draws
                 // nothing, so only a real one is kept.

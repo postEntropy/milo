@@ -76,7 +76,7 @@ export type AgentEvent =
   | { type: 'text-delta'; delta: string }
   | { type: 'reasoning-delta'; delta: string }
   | { type: 'tool-start'; id: string; name: string; args: unknown; text?: string }
-  | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean; change?: FileChange[] }
+  | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean; drawFailure?: boolean; change?: FileChange[] }
   | { type: 'todo'; items: TodoItem[] }
   | { type: 'panel'; request: PanelRequest }
   | { type: 'ui'; render: GenUiRender; draft?: boolean }

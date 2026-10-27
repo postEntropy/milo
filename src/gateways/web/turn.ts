@@ -1,5 +1,5 @@
 import { statusText } from '../../core/sessions/format.js'
-import { toolDraw, toolResult } from '../tool-line.js'
+import { drawsToolFailure, toolDraw, toolResult } from '../tool-line.js'
 import type { DisplayConfig } from '../../core/config/schema.js'
 import type { AgentEvent, ServerFrame } from './protocol.js'
 
@@ -50,7 +50,7 @@ export function displayEvent(event: AgentEvent, turnId: string, display: Display
     // surfaces read an empty result as "draw nothing".
     const result = display.tools === 'full' ? toolResult(event.result) : ''
     const change = display.tools === 'full' ? event.change : undefined
-    send({ type: 'event', turnId, event: { ...event, result, change } })
+    send({ type: 'event', turnId, event: { ...event, result, change, drawFailure: drawsToolFailure(event.name) } })
     return
   }
   // A thought always rides, whatever the display: `collapsed` draws it folded, and

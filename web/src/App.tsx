@@ -640,7 +640,7 @@ export default function App() {
             // A call whose own line is not drawn — the plan, a widget — still has a
             // failure worth saying, unless it is a tool that is not one any more.
             // Nothing goes wrong in silence.
-            ? event.isError && drawsToolFailure(event.name)
+            ? event.isError && (event.drawFailure ?? drawsToolFailure(event.name))
               ? [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name), state: 'failed', ...result, ...change } }]
               : message.parts
             : message.parts.map((part, index): TranscriptPart => index === running && part.kind === 'tool'
