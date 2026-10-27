@@ -116,6 +116,14 @@ struct ChatView: View {
         var sentTop: CGFloat?
         /// Whether the scroll the room was opened for has already been made.
         var placed = true
+        /// Whether the room stopped being sized for the send in hand. The room is content of
+        /// the scroll it is measured from, so a write of it that the box does not answer is a
+        /// measurement feeding itself: the words' own height comes back smaller while the room
+        /// only grows. Sizing it again asks the same thing of the main thread, and a screen
+        /// that keeps asking is one the system's watchdog takes away — a send did exactly
+        /// that: the main thread never returned to the run loop, and the app was killed in the
+        /// background. A box that does not answer is left with the room it has.
+        var stalled = false
     }
     /// Held in a plain reference, the way the sideways-drag frames are.
     @State private var book = ScrollBook()
@@ -909,6 +917,9 @@ struct ChatView: View {
     /// clearing the previous turn's measurement so the room waits for this row's own.
     private func armSend(_ id: UUID) {
         guard sent != id else { return }
+        // A send is a fresh measurement: whatever the box did with the last room says nothing
+        // about this one.
+        book.stalled = false
         // The first message in a session is already at the top of the thread; opening extra
         // room or calling scrollTo while the keyboard drops would only fight the scroll box.
         if model.messages.count == 1 {
@@ -1103,7 +1114,12 @@ struct ChatView: View {
             .onScrollGeometryChange(for: CGSize.self) { geometry in
                 geometry.contentSize
             } action: { _, size in
-                book.bare = size.height - room
+                let bare = size.height - room
+                // The words only ever grow: a box whose own height came back smaller after a
+                // room was opened is a box that did not take it, and sizing it once more would
+                // be the geometry answering the state it was just handed — see `stalled`.
+                if bare < book.bare - 1 { book.stalled = true }
+                book.bare = bare
                 sizeRoom(proxy)
                 // A reply being written is carried along with the thread's end once it has
                 // filled the room opened for the send, so the newest line stays in view —
@@ -1181,6 +1197,7 @@ struct ChatView: View {
                 // session's; the next thread measures its own before the room means anything.
                 book.bare = 0
                 book.sentTop = nil
+                book.stalled = false
                 sent = nil
                 book.placed = true
                 if room != 1 { room = 1 }
@@ -1270,10 +1287,24 @@ struct ChatView: View {
             if room != 1 { room = 1 }
             return
         }
+        // A box that did not take the room is not asked again; the send's own scroll still
+        // has its words to land on. See `ScrollBook.stalled`.
+        guard !book.stalled else {
+            book.placed = true
+            return
+        }
         guard let sentTop = book.sentTop, book.bare > sentTop, book.threadHeight > 0 else { return }
-        let next = max(1, sentTop + book.threadHeight - book.bare)
+        // A boxful is the most the room can ask for: the thread under the sent words is at
+        // least as tall as where they begin, so a boxful less that is the ceiling.
+        let next = min(book.threadHeight, max(1, sentTop + book.threadHeight - book.bare))
         if abs(next - room) > 0.5 {
-            room = next
+            // A measurement is not a motion: the room is opened at once, so the words below
+            // it are laid out against the height it really has rather than at the end of an
+            // animation. An animated room is a box whose size lags the state that decides it,
+            // which is what makes a measurement of it answer the last one.
+            var still = Transaction()
+            still.disablesAnimations = true
+            withTransaction(still) { room = next }
         } else if !book.placed {
             book.placed = true
             withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo(sent, anchor: .top) }
