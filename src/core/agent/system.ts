@@ -331,10 +331,27 @@ function mcpLine(facts: McpFacts): string {
     const tools = plural(server.tools, 'tool')
     return server.error ? `${server.name} (${tools}, failed — ${server.error})` : `${server.name} (${tools})`
   })
+  const cua = facts.servers.some((server) => server.name === 'cua' && server.enabled)
+    ? [
+        '- CUA is the computer-use server for the desktop. Use its tools to inspect and operate apps; do not',
+        '  substitute shell commands, compositor commands, or non-CUA screenshot and input tools.',
+        '  Use `list_apps` entries with `kind: "desktop"`. If its output includes kernel threads or other',
+        '  system processes, treat the whole listing as malformed even if plausible app names also appear.',
+        '  Stop there; do not use shell, file-reading, process, or other tools to identify or launch an app.',
+        '- For a requested app, launch it with CUA and verify it with CUA window state before interacting.',
+        '  Target actions to that exact window, using a fresh state capture. After acting, read the state again',
+        '  and report success only when it confirms the requested result.',
+        '- If a launch is unconfirmed, make at most one read-only CUA check for its window. If CUA reports',
+        '  that the display is unavailable or the window is still absent, stop and explain the failure.',
+        '  Do not fall back to shell, Hyprland, `wtype`, or other ways of changing the person\'s screen or',
+        '  sending input.',
+      ]
+    : []
   return (
     `- External tool servers (MCP) right now: ${described.join(', ')}. Their tools arrive as ` +
     '`mcp__<server>__<tool>`; a server that is off or failed contributes none, which the tool catalog alone cannot ' +
-    `show. Written in \`${facts.file}\`; \`milo mcp\` lists, checks and toggles them.`
+    `show. Written in \`${facts.file}\`; \`milo mcp\` lists, checks and toggles them.` +
+    (cua.length > 0 ? `\n${cua.join('\n')}` : '')
   )
 }
 
