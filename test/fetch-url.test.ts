@@ -5,6 +5,14 @@ import path from 'node:path'
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolContext } from '../src/core/tools/types.js'
 
+vi.mock('undici', async (importOriginal) => {
+  const undici = await importOriginal<typeof import('undici')>()
+  return {
+    ...undici,
+    fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args),
+  }
+})
+
 vi.mock('node:dns', () => ({
   lookup: (_hostname: string, _options: unknown, callback: (error: Error | null, addresses: { address: string; family: number }[]) => void) =>
     callback(null, [{ address: '93.184.216.34', family: 4 }]),

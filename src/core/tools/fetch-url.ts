@@ -1,7 +1,7 @@
 import { lookup } from 'node:dns'
 import { isIP, type LookupFunction } from 'node:net'
 import { z } from 'zod'
-import { Agent } from 'undici'
+import { Agent, fetch } from 'undici'
 import { errorMessage } from '../../util/errors.js'
 import { MAX_PAGE_CHARS, readPage, savePage } from '../fetched.js'
 import { htmlToText } from './html.js'
