@@ -12,7 +12,8 @@ import type { ToolContext } from '../src/core/tools/types.js'
 const home = mkdtempSync(path.join(tmpdir(), 'milo-jobs-'))
 process.env.MILO_HOME = home
 
-const { JobManager, announceJob, attachJobNotifier, jobPrompt, JOB_SILENT } = await import('../src/core/jobs/index.js')
+const { JobManager, announceJob, attachJobNotifier, jobPrompt } = await import('../src/core/jobs/index.js')
+const { SILENT } = await import('../src/core/silent.js')
 const { buildSystemPrompt } = await import('../src/core/agent/system.js')
 const { createJobStatusTool, createJobKillTool } = await import('../src/core/tools/jobs.js')
 const { shellTool } = await import('../src/core/tools/shell.js')
@@ -225,9 +226,9 @@ describe('the announcement', () => {
   })
 
   it('offers silence only for a success that was not asked to be told', () => {
-    expect(jobPrompt(job({ notify: 'auto' }))).toContain(JOB_SILENT)
-    expect(jobPrompt(job({ notify: 'always' }))).not.toContain(JOB_SILENT)
-    expect(jobPrompt(job({ state: 'error', exitCode: 1, notify: 'auto' }))).not.toContain(JOB_SILENT)
+    expect(jobPrompt(job({ notify: 'auto' }))).toContain(SILENT)
+    expect(jobPrompt(job({ notify: 'always' }))).not.toContain(SILENT)
+    expect(jobPrompt(job({ state: 'error', exitCode: 1, notify: 'auto' }))).not.toContain(SILENT)
   })
 
   it('announces what the turn said', async () => {
@@ -236,11 +237,11 @@ describe('the announcement', () => {
   })
 
   it('stays silent for an auto success that Milo judged unnecessary', async () => {
-    expect(await announceJob(fakeSession(JOB_SILENT), job())).toBeNull()
+    expect(await announceJob(fakeSession(SILENT), job())).toBeNull()
   })
 
   it('still says something when it should have spoken', async () => {
-    const message = await announceJob(fakeSession(JOB_SILENT), job({ notify: 'always' }))
+    const message = await announceJob(fakeSession(SILENT), job({ notify: 'always' }))
     expect(message?.text).toContain('job_1')
   })
 

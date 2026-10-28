@@ -4,10 +4,8 @@ import { formatDuration } from '../../util/format.js'
 import type { OutgoingFile } from '../outgoing.js'
 import type { AgentRuntime } from '../runtime.js'
 import type { Session } from '../session.js'
+import { isSilent, SILENT } from '../silent.js'
 import type { JobInfo } from './types.js'
-
-/** What Milo answers with when waking up would only add noise, so nothing is said. */
-export const JOB_SILENT = 'SILENT'
 
 /** The instruction the announcement turn runs on: the result is in the transcript. */
 export function jobPrompt(job: JobInfo): string {
@@ -25,7 +23,7 @@ export function jobPrompt(job: JobInfo): string {
   // ask to be told and saying so would only add noise.
   const closing =
     job.state === 'done' && job.notify !== 'always'
-      ? `Not a message from the person. Tell them the job ended, in one or two lines, and do the useful thing with the result — send the file it made with \`send_file\` if there is one. If saying anything now would only add noise, reply with exactly ${JOB_SILENT} and nothing else.`
+      ? `Not a message from the person. Tell them the job ended, in one or two lines, and do the useful thing with the result — send the file it made with \`send_file\` if there is one. If saying anything now would only add noise, reply with exactly ${SILENT} and nothing else.`
       : 'Not a message from the person. Tell them what happened, in one or two lines, and do the useful thing with the result — send the file it made with `send_file` if there is one.'
   lines.push('', closing)
   return lines.join('\n')
@@ -50,12 +48,12 @@ export async function announceJob(session: Session, job: JobInfo): Promise<JobAn
   const files = session.takeOutgoing()
   const trimmed = text.trim()
   const silenceAllowed = job.state === 'done' && job.notify !== 'always'
-  if (silenceAllowed && (trimmed === '' || trimmed === JOB_SILENT)) {
+  if (silenceAllowed && isSilent(trimmed)) {
     return files.length > 0 ? { text: '', files } : null
   }
   // A turn that answered SILENT when it should have spoken, or nothing at all,
   // still says the one thing that matters rather than going quiet.
-  if (trimmed === '' || trimmed === JOB_SILENT) {
+  if (isSilent(trimmed)) {
     const what = job.state === 'done' ? 'finished' : job.state === 'killed' ? 'was stopped' : 'failed'
     return { text: `Background job ${job.id} ${what}.`, files }
   }
