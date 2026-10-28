@@ -37,6 +37,15 @@ class AnswerProvider implements Provider {
   }
 }
 
+/** Answers the silent marker: a run with nothing to report. */
+class SilentProvider implements Provider {
+  readonly id = 'test'
+  async *stream(_request: ChatRequest): AsyncGenerator<StreamEvent> {
+    yield { type: 'text', delta: 'SILENT' }
+    yield { type: 'done', finishReason: 'stop' }
+  }
+}
+
 /** Calls `send_file` once, then answers: a run whose whole job is a picture. */
 class ShotProvider implements Provider {
   readonly id = 'test'
@@ -115,6 +124,47 @@ describe('web Settings reads a routine’s runs', () => {
     // The prompt is the routine's own and its page says it, so the front page's gist
     // is the answer — opening on the ask would hand the person their own words back.
     expect(feed.map((entry) => entry.answer)).toEqual(['nothing moved'])
+  })
+
+  it('draws a silent run as what it meant, and says it in the feed', async () => {
+    writeConfig()
+    const settings = new WebSettings(build(new SilentProvider()), home, registry())
+    const created = await settings.handle('routine-add', {
+      prompt: 'check the rate; only tell me if it is above 5.40',
+      every: '2h',
+      target: { gateway: 'web', chatId: CHAT },
+      silent: true,
+    }) as { routine: { id: string; silentLabel: string | null } }
+
+    // The daemon says what the mode means, so no surface writes the words itself.
+    expect(created.routine.silentLabel).toBe('Stays silent when there is nothing to report')
+
+    const run = await settings.handle('routine-run', { id: created.routine.id }) as { runId: string; answer: string }
+    // Nothing was answered to the person, though the run itself is on record.
+    expect(run.answer).toBe('')
+
+    const transcript = await settings.handle('run-transcript', { id: run.runId }) as TranscriptMessage[]
+    expect(transcript.at(-1)).toMatchObject({
+      role: 'assistant',
+      parts: [{ kind: 'text', text: 'Nothing to report.' }],
+    })
+    const feed = await settings.handle('routine-feed') as { answer: string }[]
+    expect(feed.map((entry) => entry.answer)).toEqual(['Nothing to report.'])
+  })
+
+  it('leaves the marker as words from a routine that was not made silent', async () => {
+    writeConfig()
+    const settings = new WebSettings(build(new SilentProvider()), home, registry())
+    const created = await settings.handle('routine-add', {
+      prompt: 'look at the repo',
+      every: '2h',
+      target: { gateway: 'web', chatId: CHAT },
+    }) as { routine: { id: string; silentLabel: string | null } }
+    expect(created.routine.silentLabel).toBeNull()
+
+    const { runId } = await settings.handle('routine-run', { id: created.routine.id }) as { runId: string }
+    const transcript = await settings.handle('run-transcript', { id: runId }) as TranscriptMessage[]
+    expect(transcript.at(-1)).toMatchObject({ role: 'assistant', parts: [{ kind: 'text', text: 'SILENT' }] })
   })
 
   it('draws the file a run sent, through the server’s own registry', async () => {

@@ -68,9 +68,11 @@ import {
   readRoutines,
   remainingRuns,
   removeRoutineWithRuns,
+  ROUTINE_GATEWAY,
   ROUTINE_GATEWAYS,
   runRoutineOnce,
   setEnabled,
+  SILENT_NOTE,
   type Routine,
   type RoutineGateway,
   type RoutineTarget,
@@ -98,11 +100,19 @@ import { browseFolders, createFolder } from '../../core/browse.js'
 import { createWorkFolder, workFile, workTree } from '../../core/work.js'
 import { startTracking, workDiff } from '../../core/work-diff.js'
 import { PROJECT_RULES_PROMPT, readProjectInstructions, rulesOf } from '../../core/agent/instructions.js'
+import type { Message } from '../../core/providers/types.js'
+import { SILENT } from '../../core/silent.js'
 import { JobRegistry } from './jobs.js'
 import { transcriptOf, type RegisterFile } from './transcript.js'
 
 /** How many runs the front page's timeline shows, newest across every routine. */
 const FEED_LIMIT = 20
+
+/**
+ * What a run that had nothing to report says in place of the marker it answered
+ * with: the run is worth reading, the marker is not a word anyone reads.
+ */
+const QUIET_RUN = 'Nothing to report.'
 
 /**
  * How many future fire times a routine carries, for a surface that schedules on them
@@ -1018,14 +1028,17 @@ export class WebSettings {
   private async runText(runId: string): Promise<string> {
     const record = await this.runtime.loadSession(runId)
     if (!record) return ''
-    return record.messages
+    const text = record.messages
       .filter((message) => message.role === 'assistant')
       .flatMap((message) => message.content)
       .flatMap((part) => (part.type === 'text' ? [part.text] : []))
       .join(' ')
       .replace(/\s+/g, ' ')
       .trim()
-      .slice(0, 200)
+    // A silent run's marker is what it said to the model, not to the person: the
+    // gist is what it meant — the run happened and had nothing to report.
+    if (this.quietRun(record) && text === SILENT) return QUIET_RUN
+    return text.slice(0, 200)
   }
 
   private async addRoutine(body: Record<string, unknown>): Promise<unknown> {
@@ -1046,6 +1059,7 @@ export class WebSettings {
       when,
       target: routineTarget(body.target),
       allow: allow && allow.length > 0 ? allow : undefined,
+      silent: body.silent === true ? true : undefined,
       enabled: true,
     })
     return { routine: this.routineView(routine) }
@@ -1117,7 +1131,20 @@ export class WebSettings {
     })
     const [opening, ...answered] = record.messages
     const messages = opening?.role === 'user' ? answered : record.messages
-    return transcriptOf(messages, register, readDisplay().tools)
+    // A run that stayed quiet answered the marker; the page draws what it meant,
+    // because the marker is not a word anyone reads.
+    const shown = this.quietRun(record) ? quieted(messages) : messages
+    return transcriptOf(shown, register, readDisplay().tools)
+  }
+
+  /**
+   * Whether this run belongs to a routine that may stay quiet, read from the run's
+   * own scope rather than from a request: a routine removed since leaves its runs
+   * behind, and they are not quiet.
+   */
+  private quietRun(record: { scope?: { gateway: string; chatId: string } }): boolean {
+    const scope = record.scope
+    return scope?.gateway === ROUTINE_GATEWAY && findRoutine(scope.chatId)?.silent === true
   }
 
   private async browsers(): Promise<unknown> {
@@ -1220,6 +1247,9 @@ export class WebSettings {
       // Stopped because its own ceiling ran out, which is not the person pausing it:
       // the surfaces say which one it is, and this is the daemon saying it once.
       finished: isSpent(routine),
+      // Whether a run may answer nothing, in the daemon's words — the same ones the
+      // CLI and the agent's list use, so no surface writes the note itself.
+      silentLabel: routine.silent ? SILENT_NOTE : null,
     }
   }
 
@@ -1228,6 +1258,22 @@ export class WebSettings {
     this.writeTail = next.catch(() => undefined)
     return next
   }
+}
+
+/**
+ * A silent run's marker, drawn as what it means. Only a whole message is the
+ * marker: prose before a tool call is something the run said, and stays.
+ */
+function quieted(messages: Message[]): Message[] {
+  return messages.map((message) => {
+    if (message.role !== 'assistant') return message
+    return {
+      ...message,
+      content: message.content.map((part) =>
+        part.type === 'text' && part.text.trim() === SILENT ? { ...part, text: QUIET_RUN } : part,
+      ),
+    }
+  })
 }
 
 function sanitizeConfig(config: Config): Config {

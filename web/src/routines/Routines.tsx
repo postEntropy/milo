@@ -26,6 +26,8 @@ export type RoutineSummary = {
   /** Whether its own ceiling stopped it, which is not the person pausing it. */
   finished: boolean
   allow?: string[]
+  /** What a run that had nothing to report does, in the daemon's words; null when every run speaks. */
+  silentLabel: string | null
   lastRunAt?: number
   lastResult?: 'ok' | 'error'
 }
@@ -571,6 +573,7 @@ function RoutineDetail({
       </div>
     </div>
     {routine.allow?.length ? <p className="routine-grants"><Icon name="shield" size={14} /><span>May use {routine.allow.join(', ')} while unattended</span></p> : null}
+    {routine.silentLabel ? <p className="routine-grants"><Icon name="bell-off" size={14} /><span>{routine.silentLabel}</span></p> : null}
 
     <section className="routine-runs" aria-labelledby="routine-runs-title">
       <div className="routine-section-head">

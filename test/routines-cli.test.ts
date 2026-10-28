@@ -64,6 +64,20 @@ describe('milo routines', () => {
     expect(readRoutines()[0]!.limit).toBe(5)
   })
 
+  it('adds a routine that speaks only when there is something to report', async () => {
+    const { lines, code } = await run('add', 'check the rate', '--every', '2h', '--silent', '--gateway', 'none')
+
+    expect(code).toBe(0)
+    expect(readRoutines()[0]!.silent).toBe(true)
+    expect(lines.join('\n')).toContain('Stays silent when there is nothing to report')
+  })
+
+  it('lists which routines carry the silent mode', async () => {
+    await run('add', 'check the rate', '--every', '2h', '--silent', '--gateway', 'none')
+
+    expect((await run('list')).lines.join('\n')).toContain('stays silent when there is nothing to report')
+  })
+
   it('answers a ceiling that is not a count with the ones it takes', async () => {
     const { errors, code } = await run('add', 'ping', '--every', '1m', '--limit', 'five', '--gateway', 'none')
 

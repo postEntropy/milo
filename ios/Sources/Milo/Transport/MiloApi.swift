@@ -844,12 +844,15 @@ struct RoutineSummary: Decodable, Identifiable, Hashable {
     let finished: Bool
     /// The tools it may use unattended, approved when it was made.
     let allow: [String]
+    /// What a run that had nothing to report does, in the daemon's words. Nil when
+    /// every run speaks, and on a daemon that predates the mode.
+    let silentLabel: String?
     let lastRunAt: Double?
     let lastResult: String?
 
     private enum CodingKeys: String, CodingKey {
         case id, name, prompt, whenLabel, targetLabel, nextRunAt, nextRuns, enabled, allow, lastRunAt, lastResult
-        case finished
+        case finished, silentLabel
     }
 
     init(from decoder: Decoder) throws {
@@ -864,6 +867,7 @@ struct RoutineSummary: Decodable, Identifiable, Hashable {
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         finished = try container.decodeIfPresent(Bool.self, forKey: .finished) ?? false
         allow = try container.decodeIfPresent([String].self, forKey: .allow) ?? []
+        silentLabel = try container.decodeIfPresent(String.self, forKey: .silentLabel)
         lastRunAt = try container.decodeIfPresent(Double.self, forKey: .lastRunAt)
         lastResult = try container.decodeIfPresent(String.self, forKey: .lastResult)
     }

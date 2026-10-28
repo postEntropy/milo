@@ -312,6 +312,13 @@ export interface SendOptions {
    */
   notice?: string
   /**
+   * An instruction that rides this turn's system prompt beside the person's
+   * message without becoming part of it — how a routine tells the model that its
+   * run may stay silent. Unlike `notice`, the message is still the person's, and
+   * lands in the transcript as one.
+   */
+  aside?: string
+  /**
    * Whether the surface this turn is talking through draws a generated interface.
    * A client declares it when it connects — the web app does — and the hub hands it
    * here on every turn. Absent, or any surface but the web, draws nothing.
@@ -799,10 +806,11 @@ export class Session {
       mcp: this.mcpFacts(),
       google: this.options.google ?? null,
     })
-    // An instruction with no message behind it rides the system prompt, the way
-    // the out-of-steps closing request does — the transcript is never left
-    // carrying a sentence nobody said.
-    const turnSystem = opts?.notice ? `${systemPrompt}\n\n${opts.notice}` : systemPrompt
+    // An instruction a turn is given rather than said — a notice with no message
+    // behind it, or an aside beside one — rides the system prompt, so the
+    // transcript never carries words nobody said.
+    const instruction = opts?.notice ?? opts?.aside
+    const turnSystem = instruction ? `${systemPrompt}\n\n${instruction}` : systemPrompt
     // What every request carries besides the transcript: the prompt, and the tool
     // schemas the wire sends beside it. The transcript count is measured against
     // this, so leaving the catalog out said a request fitted while it did not.

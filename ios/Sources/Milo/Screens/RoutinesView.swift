@@ -418,6 +418,16 @@ private struct RoutineDetail: View {
                             .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
                     }
 
+                    // Whether a run may answer nothing, in the daemon's words.
+                    if let silent = routine.silentLabel {
+                        Label(silent, systemImage: "bell.slash")
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                            .padding(MiloTheme.Space.four)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                    }
+
                     // The two halves take the same room whatever their words are — "Run now"
                     // and "Pause" are not the same length, and hugging their own text left one
                     // pill wider than the other. The labels ride at the page's own control

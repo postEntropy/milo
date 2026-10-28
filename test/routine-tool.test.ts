@@ -101,6 +101,20 @@ describe('the routine tool', () => {
     expect(result.content).toContain('stops itself after 5 runs')
   })
 
+  it('makes a routine that speaks only when there is something to report', async () => {
+    const { ctx, added } = harness({ origin: { gateway: 'telegram', chatId: '123' } })
+
+    const result = await routineTool.execute(
+      { prompt: 'check the rate; only tell me if it is above 5.40', every: '2h', silent: true },
+      ctx,
+    )
+
+    expect(result.isError).toBeFalsy()
+    expect(added[0]!.silent).toBe(true)
+    // Said back, with the rest of what the routine is, before it ever fires.
+    expect(result.content).toContain('Stays silent when there is nothing to report')
+  })
+
   it('takes a ceiling off with a zero rather than reading it as a count', async () => {
     const { ctx, updated } = harness({}, undefined, [briefing({ limit: 5, runs: 4 })])
 
@@ -270,6 +284,16 @@ describe('the routine tool changing and dropping one', () => {
     expect(result.isError).toBeFalsy()
     expect(updated).toEqual([{ id: 'calm-otter-1', patch: { when: at('09:00', [1, 2, 3, 4, 5]) } }])
     expect(result.content).toContain('09:00, mon–fri')
+  })
+
+  it('lists the silent mode, and takes it off when asked', async () => {
+    const { ctx, updated } = harness({}, undefined, [briefing({ silent: true })])
+
+    const listed = await routineTool.execute({ action: 'list' }, ctx)
+    expect(listed.content).toContain('Stays silent when there is nothing to report')
+
+    await routineTool.execute({ action: 'update', id: 'calm-otter-1', silent: false }, ctx)
+    expect(updated[0]!.patch).toEqual({ silent: false })
   })
 
   it('changes only the fields it was given', async () => {

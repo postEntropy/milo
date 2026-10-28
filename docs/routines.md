@@ -11,6 +11,7 @@ milo routines add "look at the repo and tell me what moved" --name "daily briefi
   --at 08:00 --days mon-fri --gateway telegram --to 123456789
 milo routines add "monthly report" --at 09:00 --day-of-month 1 --gateway telegram --to 123456789
 milo routines add "deploy status" --every 6h --gateway discord --to 987654321
+milo routines add "check the rate" --every 2h --silent --gateway telegram --to 123456789
 milo routines add "ping" --every 1m --limit 5 --gateway none   # five runs, then it stops itself
 milo routines list
 milo routines disable calm-otter-7
@@ -37,6 +38,12 @@ again starts the count over (a routine paused mid-count keeps it). A ceiling is 
 runs, not a stretch of time: *"every minute for five minutes"* is `--every 1m --limit 5`.
 Runs you ask for by hand — `milo routines run`, the screen's **Run now** — are never counted
 against it.
+
+A routine can also be asked to speak **only when there is something to report**: *"every two
+hours, check the rate — only tell me if it is above 5.40, otherwise say nothing."* That is
+`silent: true` in chat (`--silent` on the terminal), with the condition kept in the prompt: a
+run with nothing to report posts nothing, while the run itself stays on the Routines screen
+for you to read. A failure still speaks, whatever the routine was asked to do.
 
 Three things to know before relying on one:
 

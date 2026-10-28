@@ -18,6 +18,7 @@ import {
   runRoutineOnce,
   runsLeft,
   setEnabled,
+  SILENT_NOTE,
   type RoutineGateway,
   type RoutineTarget,
 } from '../core/routines.js'
@@ -57,6 +58,7 @@ const USAGE = [
   '  milo routines add "<prompt>" --every 2h --gateway discord --to <channel id>',
   '  milo routines add "<prompt>" --every 6h --gateway web --to <chat id>',
   '  milo routines add "<prompt>" --every 1m --limit 5 --gateway none    at most five runs',
+  '  milo routines add "check the rate" --every 2h --silent --gateway telegram --to <chat id>',
   '  milo routines remove <id>                  delete a routine',
   '  milo routines enable|disable <id>          turn a routine on or off',
   '  milo routines run <id>                     fire it now, printing the answer (no delivery)',
@@ -66,6 +68,11 @@ const USAGE = [
   'finished. A run you asked for by hand — `milo routines run`, the screen\'s Run now',
   '— is not counted against the ceiling, and switching a routine on again after it',
   'ran out starts the count over.',
+  '',
+  'A routine that should speak only when there is something to report says so with',
+  '--silent: a run with nothing to report posts nothing, while a failure still',
+  'speaks. Keep the condition in the prompt — "only if the rate is above 5.40" —',
+  'and the run decides it.',
   '',
   'A routine fires only while `milo serve` is running, and delivers its answer to',
   'the chat named by --gateway/--to (telegram, discord or web — on the web, the chat',
@@ -150,6 +157,7 @@ function list(out: RoutineIo['out']): number {
     const left = runsLeft(routine)
     if (left !== null && left > 0) out(`     ${plural(left, 'run')} left of ${routine.limit}`)
     if (routine.allow?.length) out(`     may use ${routine.allow.join(', ')} with nobody there`)
+    if (routine.silent) out(`     ${SILENT_NOTE.toLowerCase()}`)
   }
   return 0
 }
@@ -166,12 +174,13 @@ interface AddFlags {
   chatId?: string
   limit?: number
   allow?: string[]
+  silent: boolean
   yes: boolean
 }
 
 function parseAdd(argv: string[]): AddFlags {
   const positionals: string[] = []
-  const flags: Omit<AddFlags, 'prompt' | 'yes'> & { yes?: boolean } = {}
+  const flags: Omit<AddFlags, 'prompt' | 'yes' | 'silent'> & { yes?: boolean; silent?: boolean } = {}
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index]!
@@ -197,7 +206,8 @@ function parseAdd(argv: string[]): AddFlags {
       flags.limit = Number(raw)
     } else if (token === '--allow') {
       flags.allow = value().split(',').map((name) => name.trim()).filter(Boolean)
-    } else if (token === '--yes' || token === '-y') flags.yes = true
+    } else if (token === '--silent') flags.silent = true
+    else if (token === '--yes' || token === '-y') flags.yes = true
     else if (token === '--gateway') {
       const gateway = value()
       if (gateway !== 'none' && !(ROUTINE_GATEWAYS as readonly string[]).includes(gateway)) {
@@ -209,7 +219,7 @@ function parseAdd(argv: string[]): AddFlags {
     else positionals.push(token)
   }
 
-  return { ...flags, yes: flags.yes ?? false, prompt: positionals.join(' ').trim() }
+  return { ...flags, yes: flags.yes ?? false, silent: flags.silent ?? false, prompt: positionals.join(' ').trim() }
 }
 
 async function add(argv: string[], context: Required<RoutineIo>): Promise<number> {
@@ -269,6 +279,7 @@ async function add(argv: string[], context: Required<RoutineIo>): Promise<number
     target,
     limit: flags.limit && flags.limit > 0 ? flags.limit : undefined,
     allow: flags.allow?.length ? flags.allow : undefined,
+    silent: flags.silent ? true : undefined,
     enabled: true,
   })
   context.out(
@@ -276,6 +287,7 @@ async function add(argv: string[], context: Required<RoutineIo>): Promise<number
   )
   if (routine.limit !== undefined) context.out(`It stops itself after ${plural(routine.limit, 'run')}.`)
   if (routine.allow?.length) context.out(`Granted: ${routine.allow.join(', ')} (unattended)`)
+  if (routine.silent) context.out(`${SILENT_NOTE}.`)
   context.out(
     `Next ${formatLocal(remainingRuns(routine, new Date(), 1)[0]!)}. Remove with: milo routines remove ${routine.id}`,
   )
@@ -345,7 +357,7 @@ async function run(argv: string[], out: RoutineIo['out'], err: RoutineIo['err'])
   try {
     const { answer, failure, files } = await runRoutineOnce(runtime, routine)
     if (failure) err(`⚠ ${failure}`)
-    out(answer || '(no answer)')
+    out(answer || (routine.silent && !failure ? '(nothing to report)' : '(no answer)'))
     if (files.length > 0) out(`(${files.length} file(s) prepared: ${files.map((file) => file.name).join(', ')})`)
     out('(printed only — `run` does not deliver)')
     return failure ? 1 : 0

@@ -33,6 +33,7 @@ const {
   upcomingRuns,
   updateRoutine,
 } = await import('../src/core/routines.js')
+const { SILENT } = await import('../src/core/silent.js')
 const { routinesFile } = await import('../src/core/config/paths.js')
 
 /** Seed the on-disk store directly; production writes go through the routine operations. */
@@ -526,6 +527,19 @@ describe('the store', () => {
     expect(findRoutine(added.id)).toMatchObject({ lastRunAt: 1_700_000_000_000, lastResult: 'error' })
   })
 
+  it('keeps the silent mode, takes it off with a false, and reads only a true', async () => {
+    await seedRoutines([])
+    const added = await addRoutine(routine({ silent: true }))
+    expect(findRoutine(added.id)?.silent).toBe(true)
+
+    await updateRoutine(added.id, { silent: false })
+    expect(findRoutine(added.id)?.silent).toBeUndefined()
+
+    // What a hand-edited file holds that is not a true is not the mode.
+    writeFileSync(routinesFile(), JSON.stringify([{ ...added, silent: 'yes' }]))
+    expect(readRoutines()[0]!.silent).toBeUndefined()
+  })
+
   it('keeps the grants a routine carries, and copes with a file without them', async () => {
     await seedRoutines([])
     const added = await addRoutine({ ...routine(), allow: ['shell_command'] })
@@ -662,9 +676,11 @@ interface SentSession {
 function fakeRuntime(options: FakeRun = {}): {
   runtime: AgentRuntime
   prompts: string[]
+  asides: Array<string | undefined>
   sessions: SentSession[]
 } {
   const prompts: string[] = []
+  const asides: Array<string | undefined> = []
   const sessions: SentSession[] = []
   const runtime = {
     // No history behind this run: the sweep has nothing to trim, and a run this
@@ -676,8 +692,9 @@ function fakeRuntime(options: FakeRun = {}): {
       sessions.push({ grantedTools: session?.grantedTools, deliverTo: session?.deliverTo })
       return {
         id: 'fake-run-1',
-        async *send(prompt: string) {
+        async *send(prompt: string, sent?: { aside?: string }) {
           prompts.push(prompt)
+          asides.push(sent?.aside)
           if (options.gate) await options.gate
           if (options.fail) {
             yield { type: 'error' as const, message: options.fail }
@@ -692,11 +709,11 @@ function fakeRuntime(options: FakeRun = {}): {
       }
     },
   }
-  return { runtime: runtime as unknown as AgentRuntime, prompts, sessions }
+  return { runtime: runtime as unknown as AgentRuntime, prompts, asides, sessions }
 }
 
 function harness(options: FakeRun = {}) {
-  const { runtime, prompts, sessions } = fakeRuntime(options)
+  const { runtime, prompts, asides, sessions } = fakeRuntime(options)
   const delivered: { id: string; text?: string; files?: OutgoingFile[]; routine?: RoutineDelivery }[] = []
   const logs: string[] = []
   let clock = new Date(2026, 8, 25, 7, 59, 30)
@@ -711,6 +728,7 @@ function harness(options: FakeRun = {}) {
   return {
     scheduler,
     prompts,
+    asides,
     sessions,
     delivered,
     logs,
@@ -905,6 +923,67 @@ describe('RoutineScheduler', () => {
     await h.advance(120_000)
 
     expect(h.delivered).toEqual([])
+    h.scheduler.stop()
+  })
+
+  it('tells only a silent routine’s run that it may stay silent, without rewriting the ask', async () => {
+    await seedRoutines([
+      sample({ when: every(1), silent: true }),
+      sample({ id: 'calm-otter-2', name: 'the other', when: every(1) }),
+    ])
+    const h = harness()
+    h.scheduler.start()
+
+    h.setClock(new Date(2026, 8, 25, 8, 0, 40))
+    await h.advance(120_000)
+
+    // The instruction rides the system prompt; each prompt is still the person's.
+    expect(h.prompts).toEqual(['look at the repo', 'look at the repo'])
+    expect(h.asides.filter((aside) => aside?.includes(SILENT))).toHaveLength(1)
+    expect(h.asides.filter((aside) => aside === undefined)).toHaveLength(1)
+    h.scheduler.stop()
+  })
+
+  it('stays silent when a silent routine had nothing to report', async () => {
+    await seedRoutines([sample({ when: every(1), silent: true })])
+    const h = harness({ answer: SILENT })
+    h.scheduler.start()
+
+    h.setClock(new Date(2026, 8, 25, 8, 0, 40))
+    await h.advance(120_000)
+
+    expect(h.delivered).toEqual([])
+    // The run happened and is on record, which is where the person reads it.
+    expect(readRoutines()[0]!.lastResult).toBe('ok')
+    h.scheduler.stop()
+  })
+
+  it('delivers the marker as words from a routine that was not made silent', async () => {
+    await seedRoutines([sample({ when: every(1) })])
+    const h = harness({ answer: SILENT })
+    h.scheduler.start()
+
+    h.setClock(new Date(2026, 8, 25, 8, 0, 40))
+    await h.advance(120_000)
+
+    expect(h.delivered[0]!.text).toBe(SILENT)
+    h.scheduler.stop()
+  })
+
+  it('sends the file a silent run made, with no words', async () => {
+    await seedRoutines([sample({ when: every(1), silent: true })])
+    const shot: OutgoingFile = { path: '/tmp/shot.png', name: 'shot.png', mimeType: 'image/png' }
+    const h = harness({ answer: SILENT, files: [shot] })
+    h.scheduler.start()
+
+    h.setClock(new Date(2026, 8, 25, 8, 0, 40))
+    await h.advance(120_000)
+
+    expect(h.delivered).toEqual([{
+      id: 'calm-otter-1',
+      files: [shot],
+      routine: { name: 'briefing', at: new Date(2026, 8, 25, 8, 0, 40).getTime() },
+    }])
     h.scheduler.stop()
   })
 

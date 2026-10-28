@@ -20,7 +20,7 @@
 | `recall` | yes | Which past session a question is about, and what it was about. |
 | `search_history` | yes | Term search over Milo's own past turns, reasoning and tool calls included. |
 | `sessions` | — | Lists the saved sessions or removes one; removal asks and cannot take the session it runs in. |
-| `routine` | — | Runs a prompt on a timer and delivers it to a chat. Asks only when the routine carries a standing grant; absent inside a routine's own run. |
+| `routine` | — | Runs a prompt on a timer and delivers it to a chat — or, for a routine that speaks only on a condition, stays silent on a run with nothing to report. Asks only when the routine carries a standing grant; absent inside a routine's own run. |
 | `send_file` | no | Sends a file to the chat a turn is talking in — the live chat, or a routine's target — as a picture when it is an image. A screenshot or any picture the person should see goes here, never to the panel. Asks; in a routine it needs a grant to run unattended. Not offered on the terminal, and its call is not drawn as a tool line. |
 | `panel` | — | Shows a document or the live browser in the Panel beside the chat, one tab per thing — the tab already holding something comes forward rather than a second copy of it. A picture is not the panel's: an image the person should see goes to the chat with `send_file`. The web app and the phone draw a panel, so it is offered there alone; its call is not drawn as a tool line. |
 | `web_search` | yes | Registered only when a search provider is configured. |

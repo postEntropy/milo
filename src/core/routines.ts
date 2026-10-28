@@ -9,6 +9,7 @@ import { routinesFile } from './config/paths.js'
 import type { OutgoingFile, OutgoingMessage } from './outgoing.js'
 import type { AgentRuntime } from './runtime.js'
 import { generateNickname } from './sessions/nickname.js'
+import { isSilent, SILENT } from './silent.js'
 
 /** The surfaces a routine can deliver to — ones that receive messages out of band. */
 export type RoutineGateway = 'telegram' | 'discord' | 'web'
@@ -77,6 +78,12 @@ export interface Routine {
    * here is refused. Read-only tools are never listed: they never ask anyway.
    */
   allow?: string[]
+  /**
+   * Whether a run may answer nothing. A routine asked to speak only when something
+   * holds — "only tell me if the rate is above 5.40" — says nothing when it does
+   * not, and nothing is delivered; the run itself stays on the Routines screen.
+   */
+  silent?: boolean
   enabled: boolean
   createdAt: number
   /** When it last fired, and how that went. Absent until it has. */
@@ -106,6 +113,9 @@ export type NewRoutine = Omit<Routine, 'id' | 'createdAt'>
  * grow the file without bound. Well past what a person writes by hand.
  */
 export const MAX_ROUTINES = 50
+
+/** How a routine that may answer nothing reads on every surface that shows it. */
+export const SILENT_NOTE = 'Stays silent when there is nothing to report'
 
 /**
  * The farthest a wall-clock schedule is walked to find its next time. A lone
@@ -377,6 +387,8 @@ function readRoutinesStrict(): Routine[] {
     // destination it cannot use is.
     limit: countOf(routine.limit),
     runs: countOf(routine.runs),
+    // Only a true is a mode: anything else a hand-edited file may hold is not.
+    silent: routine.silent === true ? true : undefined,
   }))
 }
 
@@ -471,6 +483,9 @@ export async function addRoutine(input: NewRoutine): Promise<Routine> {
       // Named here rather than at the surfaces, so every path — the tool, the CLI,
       // a hand-edited file — ends up with a routine a person can refer to by name.
       name: input.name?.trim() || nameFor(input.prompt),
+      // A mode that was not asked for is not written down, so the file says only
+      // what the routine is.
+      silent: input.silent === true ? true : undefined,
     }
     return { result: routine, next: [...routines, routine] }
   })
@@ -507,6 +522,8 @@ export async function updateRoutine(
       if (target.limit === undefined) target.runs = undefined
     }
     if (patch.allow !== undefined) target.allow = patch.allow.length > 0 ? patch.allow : undefined
+    // A false takes the mode off, the way an empty grant is no grant.
+    if (patch.silent !== undefined) target.silent = patch.silent || undefined
     if (patch.enabled !== undefined) {
       if (patch.enabled) rearmIfSpent(target)
       target.enabled = patch.enabled
@@ -605,6 +622,14 @@ export interface RoutineRunResult {
 }
 
 /**
+ * What a silent routine's run is told: the marker, and the one case it is for. It
+ * rides the turn's system prompt rather than the prompt, so the run still reads as
+ * the words the person asked for — the ask is not rewritten under them.
+ */
+const SILENT_RUN =
+  `This routine is allowed to stay silent. If this run found nothing the person needs to hear, answer with exactly ${SILENT} and nothing else — the words are not sent to anyone, though a file sent with \`send_file\` still is. Otherwise answer normally, and never use it to hide a failure or something you could not do.`
+
+/**
  * One run of a routine: a turn in a conversation of the routine's own, carrying
  * the grants the person approved and with nobody to ask — a tool that would need
  * confirmation is denied unless it is in `allow`. The turn is new every time: a
@@ -634,7 +659,8 @@ export async function runRoutineOnce(
   )
   let answer = ''
   let failure: string | null = null
-  for await (const event of session.send(routine.prompt)) {
+  const silent = routine.silent === true
+  for await (const event of session.send(routine.prompt, silent ? { aside: SILENT_RUN } : undefined)) {
     if (event.type === 'text-delta') answer += event.delta
     else if (event.type === 'tool-start') {
       answer = closeParagraph(answer)
@@ -648,7 +674,10 @@ export async function runRoutineOnce(
   // picture a run sent and not only the words around it. A failed turn keeps
   // nothing: what it half-produced is not something to hand over, here either.
   if (files.length > 0 && !failure) await session.appendNotice('', files)
-  return { id: session.id, answer: answer.trim(), failure, files }
+  // A silent routine that answered the marker had nothing to report: the run stays
+  // on record, and the chat gets no words. A file it produced still goes.
+  const said = answer.trim()
+  return { id: session.id, answer: silent && isSilent(said) ? '' : said, failure, files }
 }
 
 export interface RoutineSchedulerOptions {
