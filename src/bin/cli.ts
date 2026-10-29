@@ -40,6 +40,7 @@ Usage:
   milo mcp                   The external tool servers (list | check | enable | disable)
   milo serve                 Run the enabled bot gateways and the web UI
   milo web                   Run only the web UI (opens the browser)
+  milo spotlight             Milo in a desktop popup, a keystroke away
   milo serve --no-web        Run the bot gateways without the web UI
   milo run "prompt"          One turn, no UI: the answer on stdout, JSON with --json
   milo run --project <ref> "prompt"   Run in a registered project's folder
@@ -174,6 +175,11 @@ async function main(): Promise<void> {
     case 'web': {
       const { runWeb } = await import('./web.js')
       await runWeb(process.argv.slice(2))
+      return
+    }
+    case 'spotlight': {
+      const { runSpotlight } = await import('./spotlight.js')
+      await runSpotlight(process.argv.slice(2))
       return
     }
     case 'model':

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "id": "dev.leonardo.milo_spotlight",
+  "name": "Milo Spotlight",
+  "version": "0.1.0",
+  "author": "leonardo",
+  "license": "MIT",
+  "description": "Ask Milo from anywhere: a keystroke, a question, an answer.",
+  "kinds": ["overlay"],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Spotlight.qml"
+  }
+}

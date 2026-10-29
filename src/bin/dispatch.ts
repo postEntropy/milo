@@ -15,6 +15,7 @@ export type Command =
   | 'google'
   | 'mcp'
   | 'web'
+  | 'spotlight'
   | 'pair'
   | 'devices'
   | 'run'
@@ -62,6 +63,7 @@ export function resolveCommand(command: string): Command | null {
     case 'google':
     case 'mcp':
     case 'web':
+    case 'spotlight':
     case 'pair':
     case 'devices':
     case 'run':
