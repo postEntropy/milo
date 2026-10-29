@@ -16,6 +16,11 @@ import qs.Ui
 // NDJSON over stdio — the shell's own shape for a long-lived helper — and it
 // serves this panel the same turns the browser and the phone get, permissions
 // included. Anything richer than text is one key away in the full app.
+//
+// It lives in the bottom-right corner: close enough to the work to be read,
+// far enough to leave the machine usable. Summoned, it takes the keyboard only
+// long enough for the question; asked, it holds none at all — keys go to
+// whatever window is in front, and the popup only takes them back when clicked.
 Item {
   id: root
 
@@ -24,32 +29,38 @@ Item {
   property var shell: null
   property var manifest: null
   property bool opened: false
+  /** Asked: the popup has stepped aside and the desktop is usable again. */
+  property bool working: false
 
   readonly property string pluginId: (manifest && manifest.id) || "dev.leonardo.milo_spotlight"
 
   // ── theme: bound, never cached, so a theme swap repaints the popup ────────
-  readonly property color background: Commons.Color.menu.background
   readonly property color foreground: Commons.Color.menu.text
+  readonly property color background: Commons.Color.popups.background
   readonly property color accent: Commons.Color.accent
   readonly property color urgent: Commons.Color.urgent
-  readonly property color scrim: Commons.Color.menu.scrim
-  readonly property var borderSpec: Border.surfaceSpec("menu", "border", Commons.Color.menu.border, Math.max(1, Style.space(2)))
+  // Milo's own orange, not the desktop theme's accent: the popup is Milo in
+  // Omarchy's clothes, and the person's words wear Milo's colour. The same value
+  // as `src/gateways/cli/theme.ts` and the web's `--accent`.
+  readonly property color miloAccent: "#C4541C"
+  readonly property color miloAccentOn: "#FFFFFF"
+  readonly property var borderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Math.max(1, Style.space(2)))
+  readonly property var accentBorderSpec: Border.surfaceSpec("popups", "border", "#A64514", Math.max(1, Style.space(2)))
   readonly property string fontFamily: Style.font.menuFamily
   readonly property int cornerRadius: Style.cornerRadius
-  readonly property int pad: Style.spacing.panelPadding
-  readonly property int gap: Style.spacing.md
-  readonly property int cardWidth: Math.min(Style.space(680), panel.width - Style.gapsOut * 2)
-  readonly property int cardHeight: Math.min(Style.space(520), panel.height - Style.gapsOut * 2)
-  readonly property int answerHeight: Math.min(Style.space(320), panel.height - Style.gapsOut * 2 - Style.space(200))
+  readonly property int pad: Style.spacing.controlPaddingX
+  readonly property int gap: Style.spacing.sm
+  readonly property int margin: Style.space(16)
+  readonly property int stackWidth: Math.min(Style.space(420), panel.width - root.margin * 2)
+  readonly property int maxHeight: panel.height - root.margin * 2
 
   // ── what the panel is showing ────────────────────────────────────────────
   property string query: ""
-  property string question: ""
-  property string answer: ""
   property string step: ""
   property string status: "Ready"
   property bool busy: false
   property bool connected: false
+  property int miloAt: -1
   property string permissionId: ""
   property string permissionTool: ""
   property string permissionSummary: ""
@@ -58,12 +69,17 @@ Item {
   readonly property bool awaitingPermission: permissionId !== ""
   readonly property string line: step !== "" ? step : status
 
+  /** The conversation, one bubble each: `you`, `milo`, `step`. */
+  ListModel { id: thread }
+
   // ── the host's contract ──────────────────────────────────────────────────
   function open(payloadJson) {
     opened = true
+    working = false
+    thread.clear()
+    miloAt = -1
     query = ""
-    question = ""
-    answer = ""
+    prompt.text = ""
     step = ""
     status = "Ready"
     busy = false
@@ -78,16 +94,27 @@ Item {
     opened = false
   }
 
-  /** Dismissed by the person: Escape, a click outside, or the thread handed over. */
+  /** Dismissed by the person: Escape, a click outside, the close button, or a hand-over. */
   function dismiss() {
     stop()
     opened = false
+    working = false
     if (shell && typeof shell.hide === "function") shell.hide(pluginId)
   }
 
   function toggle() {
+    // The hotkey opens and closes. While the popup holds no keyboard — the answer
+    // is on its way — Escape belongs to whatever window is in front, so this is
+    // the way to put it away from the keyboard, and the close button for a pointer.
     if (opened) dismiss()
     else open("{}")
+  }
+
+  /** Back to typing, in the conversation that is already open. */
+  function focusInput() {
+    working = false
+    prompt.forceActiveFocus()
+    Qt.callLater(function() { prompt.forceActiveFocus() })
   }
 
   function stop() {
@@ -116,7 +143,7 @@ Item {
       connected = true
       if (status === "Starting Milo…" || status === "") status = "Ready"
     } else if (message.type === "text") {
-      answer += message.delta
+      appendToAnswer(String(message.delta))
     } else if (message.type === "tool") {
       step = message.text
     } else if (message.type === "permission") {
@@ -125,6 +152,7 @@ Item {
       permissionSummary = String(message.summary)
       status = "Waiting for you"
       busy = true
+      working = true
       Qt.callLater(function() { allowButton.forceActiveFocus() })
     } else if (message.type === "permission-result") {
       if (String(message.id) === permissionId) clearPermission()
@@ -132,7 +160,6 @@ Item {
       busy = false
       step = ""
       status = message.says ? String(message.says) : (message.status === "done" ? "Done" : message.status === "stopped" ? "Stopped" : "Something went wrong")
-      Qt.callLater(function() { prompt.forceActiveFocus() })
     } else if (message.type === "error") {
       status = String(message.message)
       busy = false
@@ -140,6 +167,15 @@ Item {
       if (message.url) Quickshell.execDetached(["xdg-open", String(message.url)])
       dismiss()
     }
+  }
+
+  function appendToAnswer(delta) {
+    if (miloAt >= 0 && miloAt < thread.count) {
+      thread.setProperty(miloAt, "text", String(thread.get(miloAt).text) + delta)
+      return
+    }
+    thread.append({ role: "milo", text: delta })
+    miloAt = thread.count - 1
   }
 
   function clearPermission() {
@@ -155,34 +191,27 @@ Item {
     Qt.callLater(function() { prompt.forceActiveFocus() })
   }
 
-  // ── the two keys ─────────────────────────────────────────────────────────
-  function handleKey(event) {
-    if (event.key === Qt.Key_Escape) {
-      dismiss()
-      event.accepted = true
-    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-      if (event.modifiers & Qt.ControlModifier) handOver()
-      else ask()
-      event.accepted = true
-    }
-  }
-
   function ask() {
     const text = query.trim()
     if (text === "" || busy) return
-    question = text
-    answer = ""
+    thread.append({ role: "you", text: text })
+    thread.append({ role: "milo", text: "" })
+    miloAt = thread.count - 1
+    query = ""
+    prompt.text = ""
     step = ""
     status = "Thinking…"
     busy = true
-    query = ""
+    // Asked: the popup steps out of the way so the machine can be used while the
+    // answer arrives. The keyboard is given back to whatever is in front.
+    working = true
+    prompt.focus = false
     send({ type: "ask", text: text })
-    Qt.callLater(function() { prompt.forceActiveFocus() })
   }
 
   /** The question outgrew the popup: the bridge forks it and hands over its address. */
   function handOver() {
-    if (question === "" || busy) return
+    if (thread.count === 0 || busy) return
     status = "Opening in Milo…"
     send({ type: "continue" })
   }
@@ -229,130 +258,97 @@ Item {
   OverlayWindow {
     id: panel
     shown: root.opened
+    // Exclusive only while the question is being typed: a layer surface that asks
+    // for focus keeps the whole desktop from receiving keys. Asked, it holds
+    // `None`, so the person can type into whatever is behind this — the popup
+    // takes the keyboard back only when it is clicked.
+    shownKeyboardFocus: root.working ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
     WlrLayershell.namespace: "omarchy-milo-spotlight"
 
-    Rectangle {
-      anchors.fill: parent
-      color: root.scrim
+    // The rest of the screen is not ours: only the bubbles and the field take a
+    // click, so the desktop behind stays usable the whole time.
+    mask: Region {
+      item: stack
     }
 
-    MouseArea {
-      anchors.fill: parent
-      onClicked: root.dismiss()
-    }
+    Item {
+      id: stack
+      width: root.stackWidth
+      height: Math.min(root.maxHeight, column.implicitHeight)
+      x: parent.width - width - root.margin
+      y: parent.height - height - root.margin
 
-    BorderSurface {
-      id: card
-      anchors.centerIn: parent
-      width: root.cardWidth
-      height: Math.min(root.cardHeight, content.implicitHeight + card.contentTopInset + card.contentBottomInset)
-      radius: root.cornerRadius
-      color: root.background
-      borderSpec: root.borderSpec
-      padding: root.pad
-
-      MouseArea { anchors.fill: parent; onClicked: {} }
-
-      Item {
+      // A click on the bubbles brings the field back, for a follow-up.
+      MouseArea {
         anchors.fill: parent
-        // Keys the field does not take — Escape while a button has focus — still
-        // reach the popup on their way up.
-        Keys.onPressed: function(event) { root.handleKey(event) }
+        onClicked: root.focusInput()
+      }
 
-        ColumnLayout {
-          id: content
-          anchors.fill: parent
-          anchors.topMargin: card.contentTopInset
-          anchors.rightMargin: card.contentRightInset
-          anchors.bottomMargin: card.contentBottomInset
-          anchors.leftMargin: card.contentLeftInset
-          spacing: root.gap
+      Column {
+        id: column
+        width: parent.width
+        spacing: root.gap
 
-          RowLayout {
-            Layout.fillWidth: true
-            spacing: Style.spacing.controlGap
+        Repeater {
+          model: thread
 
-            Text {
-              textFormat: Text.PlainText
-              text: "󰚩"
-              color: root.accent
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.title
-              Layout.alignment: Qt.AlignVCenter
-            }
+          delegate: Item {
+            id: bubbleRow
+            required property int index
+            required property string role
+            required property string text
 
-            TextField {
-              id: prompt
-              Layout.fillWidth: true
-              foreground: root.foreground
-              accent: root.accent
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.title
-              placeholderText: "Ask Milo anything…"
-              horizontalPadding: Style.spacing.controlPaddingX
-              verticalPadding: Style.spacing.controlPaddingY
-              Keys.priority: Keys.BeforeItem
-              Keys.onPressed: function(event) { root.handleKey(event) }
-            }
+            width: column.width
+            // An answer that has not said anything yet has no bubble: the status
+            // line below is what says the turn is on its way.
+            height: bubbleRow.text === "" ? 0 : bubble.height
 
-            Button {
-              visible: root.busy
-              text: "Stop"
-              foreground: root.foreground
-              accent: root.accent
-              fontFamily: root.fontFamily
-              onClicked: {
-                root.stop()
-                Qt.callLater(function() { prompt.forceActiveFocus() })
+            BorderSurface {
+              id: bubble
+              visible: bubbleRow.text !== ""
+              x: bubbleRow.role === "you" ? bubbleRow.width - width : 0
+              width: Math.min(
+                bubbleRow.width * (bubbleRow.role === "you" ? 0.86 : 0.94),
+                label.implicitWidth + root.pad * 2)
+              height: label.implicitHeight + root.pad * 2
+              radius: root.cornerRadius
+              borderSpec: bubbleRow.role === "you" ? root.accentBorderSpec : root.borderSpec
+              // The person's own words wear Milo's orange; the answer wears the
+              // kit's plain popup surface. Two fills, so the two speakers read
+              // apart at a glance.
+              color: bubbleRow.role === "you" ? root.miloAccent : root.background
+
+              Text {
+                id: label
+                anchors.fill: parent
+                anchors.margins: root.pad
+                text: bubbleRow.text
+                textFormat: Text.PlainText
+                color: bubbleRow.role === "you" ? root.miloAccentOn : root.foreground
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                lineHeight: 1.3
+                wrapMode: Text.Wrap
               }
             }
           }
+        }
 
-          Text {
-            textFormat: Text.PlainText
-            visible: root.question !== ""
-            Layout.fillWidth: true
-            text: root.question
-            color: root.foreground
-            opacity: 0.62
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            elide: Text.ElideRight
-          }
+        // An approval is the one thing the popup cannot skip: a turn waiting on
+        // one goes nowhere until the person says yes or no.
+        BorderSurface {
+          width: parent.width
+          height: permissionColumn.implicitHeight + root.pad * 2
+          radius: root.cornerRadius
+          color: root.background
+          borderSpec: root.borderSpec
+          visible: root.awaitingPermission
 
-          PanelSeparator { visible: root.question !== ""; foreground: root.foreground }
-
-          ScrollView {
-            id: output
-            Layout.fillWidth: true
-            Layout.preferredHeight: root.answerHeight
-            visible: root.answer !== ""
-            clip: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-
-            Text {
-              id: answerText
-              width: output.availableWidth
-              text: root.answer
-              textFormat: Text.PlainText
-              color: root.foreground
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              lineHeight: 1.35
-              wrapMode: Text.Wrap
-              onContentHeightChanged: {
-                const bar = output.ScrollBar.vertical
-                if (bar) bar.position = Math.max(0, 1 - bar.size)
-              }
-            }
-          }
-
-          // An approval is the one thing the popup cannot skip: a turn waiting on
-          // one goes nowhere until the person says yes or no.
           ColumnLayout {
-            Layout.fillWidth: true
+            id: permissionColumn
+            anchors.fill: parent
+            anchors.margins: root.pad
             spacing: Style.spacing.sm
-            visible: root.awaitingPermission
 
             Text {
               textFormat: Text.PlainText
@@ -402,27 +398,108 @@ Item {
               }
             }
           }
+        }
 
-          Text {
-            textFormat: Text.PlainText
-            Layout.fillWidth: true
-            text: root.line
-            color: root.busy ? root.accent : root.foreground
-            opacity: 0.7
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
-          }
+        // The question line, in a surface of its own so it reads as one control
+        // among the messages rather than as part of them.
+        BorderSurface {
+          width: parent.width
+          height: promptRow.implicitHeight + Style.spacing.controlPaddingY * 2
+          radius: root.cornerRadius
+          color: root.background
+          borderSpec: root.borderSpec
 
-          Text {
-            textFormat: Text.PlainText
-            Layout.fillWidth: true
-            text: "Esc closes · Ctrl + Enter continues in Milo"
-            color: root.foreground
-            opacity: 0.45
-            font.family: root.fontFamily
-            font.pixelSize: Style.font.caption
+          RowLayout {
+            id: promptRow
+            anchors.fill: parent
+            anchors.leftMargin: Style.spacing.controlPaddingX
+            anchors.rightMargin: Style.spacing.controlPaddingX
+            anchors.topMargin: Style.spacing.controlPaddingY
+            anchors.bottomMargin: Style.spacing.controlPaddingY
+            spacing: Style.spacing.controlGap
+
+            Text {
+              textFormat: Text.PlainText
+              text: "󰚩"
+              color: root.miloAccent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.title
+              Layout.alignment: Qt.AlignVCenter
+            }
+
+            TextField {
+              id: prompt
+              Layout.fillWidth: true
+              foreground: root.foreground
+              accent: root.accent
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+              placeholderText: "Ask Milo anything…"
+              horizontalPadding: 0
+              verticalPadding: Style.spacing.controlPaddingY / 2
+              background: null
+              // The field owns the two keys: a layer-shell surface is not an active
+              // Qt window, so a window-level shortcut never fires there.
+              onTextChanged: root.query = text
+              // A TextField consumes Return itself, so the popup listens to its own
+              // `accepted` rather than to the key: the latter never sees it.
+              onAccepted: root.ask()
+              Keys.priority: Keys.BeforeItem
+              Keys.onPressed: function(event) {
+                if (event.key === Qt.Key_Escape) {
+                  root.dismiss()
+                  event.accepted = true
+                } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
+                  && (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier))) {
+                  root.handOver()
+                  event.accepted = true
+                }
+              }
+            }
+
+            Button {
+              visible: root.busy
+              text: "Stop"
+              foreground: root.foreground
+              accent: root.accent
+              onClicked: {
+                root.stop()
+                Qt.callLater(function() { prompt.forceActiveFocus() })
+              }
+            }
+
+            Button {
+              iconText: "󰅖"
+              tooltipText: "Close"
+              foreground: root.foreground
+              accent: root.accent
+              onClicked: root.dismiss()
+            }
           }
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          width: parent.width
+          text: root.line
+          color: root.busy ? root.accent : root.foreground
+          opacity: 0.7
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
+          elide: Text.ElideRight
+        }
+
+        Text {
+          textFormat: Text.PlainText
+          width: parent.width
+          // Only while it is true: at work the popup holds no keyboard, and Escape
+          // there belongs to the window in front.
+          visible: !root.working
+          text: "Esc closes · Ctrl + Enter continues in Milo"
+          color: root.foreground
+          opacity: 0.45
+          font.family: root.fontFamily
+          font.pixelSize: Style.font.caption
         }
       }
     }
