@@ -159,7 +159,18 @@ export function readDisplay(): DisplayConfig {
   return readConfigOrNull()?.display ?? DEFAULT_DISPLAY
 }
 
+/**
+ * A provider's key: what this install stores first, the environment second.
+ *
+ * The stored key is the person's explicit choice — `milo setup` and the model
+ * picker write it — and a variable left in a shell from a key that was since
+ * rotated would otherwise win without saying so, leaving every surface failing
+ * after the key had been changed. The environment is the fallback for a machine
+ * configured entirely that way (CI, a container), where nothing is stored.
+ */
 export function resolveApiKey(id: string, entry: ProviderEntry, auth: Auth): string | false | undefined {
+  const stored = auth.providers[id]
+  if (stored?.trim()) return stored.trim()
   const envNames = [entry.keyEnv, ...(PROVIDER_ENV[id] ?? [])].filter(
     (name): name is string => Boolean(name),
   )
@@ -167,30 +178,30 @@ export function resolveApiKey(id: string, entry: ProviderEntry, auth: Auth): str
     const value = process.env[name]
     if (value?.trim()) return value.trim()
   }
-  const stored = auth.providers[id]
-  if (stored?.trim()) return stored.trim()
   if (entry.keyless) return false
   return undefined
 }
 
+/** A gateway's token: stored first, as a provider's key is. */
 export function resolveGatewayToken(id: string, auth: Auth): string | undefined {
-  const envName = GATEWAY_ENV[id]
-  if (envName && process.env[envName]?.trim()) return process.env[envName]!.trim()
   const stored = auth.gateways[id]
   if (stored?.trim()) return stored.trim()
+  const envName = GATEWAY_ENV[id]
+  if (envName && process.env[envName]?.trim()) return process.env[envName]!.trim()
   return undefined
 }
 
+/** A search provider's key: stored first, as a provider's key is. */
 export function resolveSearchKey(
   search: { provider: 'tavily' | 'exa' | 'parallel'; keyEnv?: string } | undefined,
   auth: Auth,
 ): string | undefined {
   if (!search) return undefined
+  const stored = auth.search[search.provider]
+  if (stored?.trim()) return stored.trim()
   const envName = search.keyEnv ?? DEFAULT_SEARCH_KEY_ENV[search.provider]
   const fromEnv = process.env[envName]
   if (fromEnv?.trim()) return fromEnv.trim()
-  const stored = auth.search[search.provider]
-  if (stored?.trim()) return stored.trim()
   return undefined
 }
 

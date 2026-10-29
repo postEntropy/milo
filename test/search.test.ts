@@ -191,12 +191,15 @@ describe('resolveSearchKey', () => {
     expect(resolveSearchKey(undefined, auth)).toBeUndefined()
   })
 
-  it('prefers the environment and honours a custom variable name', () => {
+  it('keeps the stored key over one left in the environment, and honours a custom variable name', () => {
     process.env.MILO_TEST_SEARCH_KEY = '  from-env  '
     try {
       expect(resolveSearchKey({ provider: 'exa', keyEnv: 'MILO_TEST_SEARCH_KEY' }, auth)).toBe(
-        'from-env',
+        'exa-stored',
       )
+      expect(
+        resolveSearchKey({ provider: 'parallel', keyEnv: 'MILO_TEST_SEARCH_KEY' }, auth),
+      ).toBe('from-env')
     } finally {
       delete process.env.MILO_TEST_SEARCH_KEY
     }

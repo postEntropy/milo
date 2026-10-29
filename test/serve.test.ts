@@ -175,9 +175,19 @@ describe('runServe', () => {
     expect(calls.web).toEqual({ host: '127.0.0.1', port: 7717, token: 'stored-token' })
   })
 
-  it('lets MILO_WEB_TOKEN override the stored one', async () => {
+  it('keeps the stored token over MILO_WEB_TOKEN, which is only the fallback', async () => {
     writeFileSync(path.join(home, 'config.yml'), configWith({}))
     writeFileSync(path.join(home, 'auth.json'), JSON.stringify({ gateways: { web: 'stored-token' } }))
+    process.env.MILO_WEB_TOKEN = 'from-env'
+
+    await runServe()
+
+    expect(calls.web).toEqual({ host: '127.0.0.1', port: 7717, token: 'stored-token' })
+  })
+
+  it('uses MILO_WEB_TOKEN when the install stores no token', async () => {
+    writeFileSync(path.join(home, 'config.yml'), configWith({}))
+    writeFileSync(path.join(home, 'auth.json'), JSON.stringify({ gateways: {} }))
     process.env.MILO_WEB_TOKEN = 'from-env'
 
     await runServe()

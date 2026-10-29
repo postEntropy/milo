@@ -98,9 +98,11 @@ A corrupt `config.yml` is reported at startup; the settings a running session ch
 defensively, so a file that cannot be parsed leaves the current values alone. A write is an edit rather
 than a rewrite: only the keys whose values moved are replaced, and comments and order stay.
 
-Environment variables override stored secrets: `COMMANDCODE_API_KEY`, `OPENCODE_API_KEY`,
-`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`,
-`MILO_WEB_TOKEN`.
+A secret set in Milo wins over one left in the environment: `milo setup` and the model picker write
+`auth.json`, and a variable from a shell would otherwise keep an old key winning after it was
+changed. The environment is the fallback for an install that stores nothing — `COMMANDCODE_API_KEY`,
+`OPENCODE_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`,
+`TELEGRAM_BOT_TOKEN`, `DISCORD_BOT_TOKEN`, `MILO_WEB_TOKEN`.
 `MILO_HOME` relocates `~/.milo`; `MILO_DEBUG=1` logs memory calls and skipped stream chunks.
 
 ### Providers
