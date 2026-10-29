@@ -6,13 +6,15 @@ import { message } from '../lib/format.js'
 import { formatIn, formatWhen } from '../../../src/core/time.js'
 import { usePhone } from '../lib/phone.js'
 import { Field } from '../ui/Form.js'
+import { ConnectionChip } from '../ui/ConnectionChip.js'
 import { Icon, type IconName } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { PageHeader } from '../ui/PageHeader.js'
 import { Select } from '../ui/Select.js'
 import { SkeletonList } from '../ui/Skeleton.js'
 import { Panel, SplitWorkspace } from '../ui/Workspace.js'
-import { MessageList, type ChatMessage } from '../chat/MessageList.js'
+import { MessageList } from '../chat/MessageList.js'
+import type { ChatMessage } from '../chat/message.js'
 import { Permissions } from '../chat/Permissions.js'
 
 export type RoutineSummary = {
@@ -678,7 +680,7 @@ function NewRoutine({ chatId, chat, initialAsk = '', onBack, inSplit }: { chatId
       <div className="ask-actions">
         <button className="button primary" type="button" disabled={!ask.trim() || chat.busy || chat.connection !== 'online'} onClick={create}>{chat.busy ? 'Milo is on it…' : 'Create routine'}</button>
         {inSplit && <button className="button" type="button" onClick={onBack}>Cancel</button>}
-        {chat.connection !== 'online' && <span className={`connection-status ${chat.connection}`}><span />{chat.connection === 'refused' ? 'Disconnected' : chat.connection === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
+        {chat.connection !== 'online' && <ConnectionChip state={chat.connection} />}
       </div>
     </div>
     {thread.length > 0 && <div className="routines-thread">

@@ -3,7 +3,7 @@ import { useCopy, type CopyState } from '../lib/clipboard.js'
 import { formatSeconds } from '../../../src/core/sessions/format.ts'
 import { formatWhen } from '../../../src/core/time.js'
 import { formatTokens, humanSize } from '../../../src/util/format.ts'
-import type { ActionRow, FrameAttachment, SessionCardItem, ThinkingDisplay, ToolMark, TranscriptMessage, TranscriptPart } from '@protocol'
+import type { FrameAttachment, SessionCardItem, ThinkingDisplay, ToolMark, TranscriptPart } from '@protocol'
 import { proseOf } from '@protocol'
 import type { RoutineDelivery } from '../../../src/core/outgoing.ts'
 import { toolBrand, toolLabel, changeTotals } from '../../../src/gateways/tool-line.ts'
@@ -18,22 +18,7 @@ import { Icon, type IconName } from '../ui/Icons.js'
 import { ImageViewer } from '../ui/ImageViewer.js'
 import { WaitLine } from '../ui/WaitLine.js'
 import { defaultSuggestions, type Suggestion } from './suggestions.js'
-
-export interface ChatMessage extends TranscriptMessage {
-  id: string
-  status?: string
-  /** What this turn cost the model: tokens in, tokens out. */
-  tokens?: { input: number; output: number }
-  /** How long the model took before its first output of this turn, in ms. */
-  thoughtMs?: number
-  /** When the turn's wait for its next output began: what the thought time is
-   *  measured from, and that its own line belongs on screen. */
-  waitingSince?: number
-  /** Already on screen when the session was opened, so it does not settle in again. */
-  loaded?: boolean
-  actions?: ActionRow[]
-  cards?: SessionCardItem[]
-}
+import type { ChatMessage } from './message.js'
 
 /**
  * The files delivered into this conversation. A picture shows itself, opening

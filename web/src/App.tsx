@@ -7,8 +7,10 @@ import { randomUUID } from './lib/uuid.js'
 import { trackVisualViewport } from './lib/viewport.js'
 import { MiloSocket, type ConnectionStatus } from './lib/ws.js'
 import { Composer, type ComposerHandle } from './chat/Composer.js'
-import { MessageList, type ChatMessage } from './chat/MessageList.js'
-import { appendDeltas, withDelta, withWidget, type PendingDelta } from './chat/parts.js'
+import { MessageList } from './chat/MessageList.js'
+import type { ChatMessage } from './chat/message.js'
+import { appendDeltas, withDelta, type PendingDelta } from './chat/parts.js'
+import { applyEvent, settled, thoughtMsFor } from './chat/frames.js'
 import { buildSuggestions } from './chat/suggestions.js'
 import { Permissions } from './chat/Permissions.js'
 import { Routines } from './routines/Routines.js'
@@ -18,14 +20,14 @@ import { Email } from './email/Email.js'
 import { Settings } from './settings/Settings.js'
 import { settingsSectionFromPath } from './settings/sections.js'
 import { Panel } from './panel/Panel.js'
-import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, ThinkingDisplay, TranscriptPart } from '@protocol'
-import { drawsToolFailure, toolText } from '../../src/gateways/tool-line.ts'
+import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, ThinkingDisplay } from '@protocol'
 import { SessionRow } from './sessions/SessionRow.js'
 import type { SessionSummary } from './sessions/types.js'
 import { chatSessions, isWorkSession } from './sessions/scopes.js'
 import { WorkList } from './sessions/WorkList.js'
 import type { ProjectView } from '../../src/core/projects.ts'
 import { Icon } from './ui/Icons.js'
+import { ConnectionChip } from './ui/ConnectionChip.js'
 import { Notice, useAutoDismiss, type Report } from './ui/Notice.js'
 import { Select } from './ui/Select.js'
 import { miloAvatar } from './ui/milo.js'
@@ -632,64 +634,9 @@ export default function App() {
         if (drawFrame.current === null) drawFrame.current = requestAnimationFrame(drawDeltas)
         return
       }
-      setMessages((current) => current.map((message) => {
-        if (message.id !== frame.turnId) return message
-        if (event.type === 'tool-start') {
-          // Reasoning deltas do not end a wait — they are what fills it. A tool
-          // call is an output of its own, and the wait before it was thinking.
-          const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-          return { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name, event.args), state: 'running' } }], waitingSince: undefined, ...(thoughtMsFor(waited, message)) }
-        }
-        if (event.type === 'tool-end') {
-          // The result is in: the model is thinking again about what to do with it.
-          // The call that just ended is the one still marked running, which is how the
-          // line knows to stop saying it is underway — no second source of truth for
-          // what is running, and no name matched against names that repeat.
-          // The result rides the same part, for the detail under the line; the server
-          // sends it empty below the `full` level, so an empty one draws nothing.
-          const result = event.result ? { result: event.result } : {}
-          const change = event.change && event.change.length > 0 ? { change: event.change } : {}
-          let running = -1
-          for (let index = message.parts.length - 1; index >= 0; index -= 1) {
-            const part = message.parts[index]
-            if (part?.kind === 'tool' && part.tool.state === 'running') { running = index; break }
-          }
-          const parts: TranscriptPart[] = running === -1
-            // A call whose own line is not drawn — the plan, a widget — still has a
-            // failure worth saying, unless it is a tool that is not one any more.
-            // Nothing goes wrong in silence.
-            ? event.isError && (event.drawFailure ?? drawsToolFailure(event.name))
-              ? [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name), state: 'failed', ...result, ...change } }]
-              : message.parts
-            : message.parts.map((part, index): TranscriptPart => index === running && part.kind === 'tool'
-              ? { ...part, tool: { ...part.tool, state: event.isError ? 'failed' : 'done', ...result, ...change } }
-              : part)
-          return { ...message, parts, waitingSince: Date.now() }
-        }
-        if (event.type === 'todo') return event.items.length > 0
-          ? { ...message, parts: [...message.parts, { kind: 'todo', items: event.items }] }
-          : message
-        if (event.type === 'verification') {
-          return { ...message, parts: [...message.parts, { kind: 'verification', ok: event.ok, text: event.text }] }
-        }
-        if (event.type === 'ui') {
-          // A widget arrives as the model writes it: each draft takes the place of the
-          // one before it, and the closed block takes the place of the last draft.
-          const part: TranscriptPart = { kind: 'ui', render: event.render, ...(event.draft ? { draft: true } : {}) }
-          return { ...message, parts: withWidget(message.parts, part) }
-        }
-        // The words are the daemon's: `says` is what the turn's row shows about the step,
-        // written in one place and not once per surface. A step with nothing to say about
-        // the row — a finished turn, a tool line — leaves the line that is already there.
-        if (event.type === 'error' || event.type === 'aborted') {
-          // A call left marked running never heard back from, whether the turn failed or was
-          // stopped: it stops saying it is underway, and the row says why.
-          return { ...message, parts: settled(message.parts), ...(frame.says ? { status: frame.says } : {}) }
-        }
-        if (event.type === 'usage') return { ...message, tokens: { input: event.inputTokens, output: event.outputTokens } }
-        if (frame.says) return { ...message, status: frame.says }
-        return message
-      }))
+      setMessages((current) => current.map((message) => message.id === frame.turnId
+        ? applyEvent(message, event, frame.says)
+        : message))
       return
     }
     if (frame.type === 'permission') { setPendingPermission(frame); return }
@@ -1027,6 +974,23 @@ export default function App() {
       setSidebarOpen(false)
     } catch (error) { fail(error) }
   }, [socket, fail, setView])
+
+  /**
+   * A link that names a session — `<url>/?open=<id>` — opens it. The spotlight's
+   * "continue in Milo" is the reason: the popup forks what was asked there and hands
+   * the fork over by its id. Read once, then taken out of the address bar so a reload
+   * leaves the session instead of resuming it again.
+   */
+  const openedLink = useRef(false)
+  useEffect(() => {
+    if (openedLink.current) return
+    openedLink.current = true
+    const wanted = new URLSearchParams(location.search).get('open')
+    if (wanted === null) return
+    window.history.replaceState(null, '', withToken('/'))
+    if (/^[a-z]+-[a-z]+-\d{1,3}$/.test(wanted)) void openSession(wanted)
+    else setNotice({ text: 'That link does not name a session.', error: true })
+  }, [openSession])
 
   const currentSession = sessions.find((session) => session.id === sessionId)
   /** The projects a session can start in: a folder that is gone is read on its page. */
@@ -1388,7 +1352,7 @@ export default function App() {
         <div className="topbar-actions">
           {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelVisible(!panelOpen)}><Icon name="panel-right" size={18} /></button>}
           {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newSessionHere()}><Icon name="plus" size={18} /></button>}
-          {view === 'chat' && connection.state !== 'online' && <span className={`connection-status ${connection.state}`} title={connection.reason}><span />{connection.state === 'refused' ? 'Disconnected' : connection.state === 'offline' ? 'Reconnecting…' : 'Connecting…'}</span>}
+          {view === 'chat' && <ConnectionChip state={connection.state} reason={connection.reason} />}
         </div>
       </header>
       {view === 'settings'
@@ -1434,29 +1398,6 @@ export default function App() {
     </main>
     {view === 'chat' && panelOpen && panel && panel.tabs.length > 0 && <Panel view={panel} onClose={() => setPanelVisible(false)} onInput={panelInput} onActivateTab={activateTab} onCloseTab={closeTab} />}
   </div>
-}
-
-/**
- * The number a wait leaves behind on the message. The first one worth reporting
- * wins: it belongs to the tool call or the answer it led to, and it sits above
- * both, so a later wait replacing it would rewrite what the reader already read.
- * Under a second there is nothing to report — the terminal's own threshold.
- */
-function thoughtMsFor(waited: number, message: ChatMessage): { thoughtMs?: number } {
-  if (message.thoughtMs !== undefined || waited < 1000) return {}
-  return { thoughtMs: waited }
-}
-
-/**
- * A call left marked running when the turn ended — a stop, an error, a dropped
- * connection — never heard back from. The line stops saying it is underway rather
- * than guessing how it went, which is the same thing a call read back from disk
- * with no result beside it says: nothing.
- */
-function settled(parts: TranscriptPart[]): TranscriptPart[] {
-  return parts.map((part) => part.kind === 'tool' && part.tool.state === 'running'
-    ? { ...part, tool: { ...part.tool, state: undefined } }
-    : part)
 }
 
 /** Sessions bucketed by how recent they are, newest group first — the list itself arrives already sorted newest-first. */

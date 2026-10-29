@@ -11,6 +11,9 @@
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
     "noEmit": true,
+    /* The tests reach into `web/` for the modules both screens share, and those speak
+       the web build's convention of a `.ts` specifier. Safe here: this project never emits. */
+    "allowImportingTsExtensions": true,
     "types": ["node"],
     "paths": { "@protocol": ["./src/gateways/web/protocol.ts"] }
   },

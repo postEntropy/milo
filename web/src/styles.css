@@ -485,7 +485,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .message.user:hover .message-below, .message-below:focus-within { opacity: 1; }
 }
 .message-content { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--space-5); }
-.message.user .message-content { flex: initial; max-width: 82%; border: 0; border-radius: var(--radius-xl); background: var(--surface); padding: var(--space-6) var(--space-7); }
+.message.user .message-content { flex: initial; max-width: 82%; border: 0; border-radius: var(--radius-xl); background: var(--accent); padding: var(--space-6) var(--space-7); }
 .message-status { margin-top: var(--space-2); color: var(--muted); font-size: var(--text-2xs); }
 .message-prose { max-width: 100%; color: var(--fg-2); font-size: var(--text-md); line-height: 1.65; overflow-wrap: anywhere; }
 .message-prose p { margin: 0; }
@@ -2266,3 +2266,8 @@ textarea.genui-text-input { min-height: 88px; resize: vertical; }
 .tasklist-card.active { background: var(--accent-wash); }
 .workspace-rail .tasklist-footer { margin-top: var(--space-8); }
 .workspace-rail .tasklist-new { width: 100%; }
+
+/* User text sits on the accent fill; keep its prose readable, including emphasis and quotes. */
+.message.user .message-prose,
+.message.user .message-prose strong,
+.message.user .message-prose blockquote { color: #FFE8D3; }
