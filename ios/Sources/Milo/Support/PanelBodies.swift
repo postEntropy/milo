@@ -100,27 +100,16 @@ struct PanelDocument: View {
     }
 }
 
-/// A picture, drawn at the panel's own width. Its bytes come from the daemon by id, with the
-/// token in the query, which is the request an image loader can make.
+/// A picture, drawn at the panel's own width and opened full screen when pressed. Its bytes
+/// come from the daemon by id, with the token in the query, which is the request an image
+/// loader can make.
 struct PanelImage: View {
     let tab: PanelTab
     @Environment(AppModel.self) private var model
 
     var body: some View {
         if let url = tab.artifact.flatMap({ model.panelURL($0.id) }) {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .scaledToFit()
-                        .frame(maxWidth: .infinity)
-                case .failure:
-                    PanelLine(text: "That picture could not be drawn.")
-                default:
-                    PanelLine(text: "Loading the picture…")
-                }
-            }
+            Picture(url: url, alt: tab.artifact?.name ?? "", maxWidth: .infinity)
         } else {
             PanelLine(text: "That tab has no picture behind it.")
         }

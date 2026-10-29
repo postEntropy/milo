@@ -522,15 +522,7 @@ struct Attachments: View {
             ForEach(items) { item in
                 if let url = model.attachmentURL(item.id) {
                     if item.image {
-                        AsyncImage(url: url) { image in
-                            image.resizable().scaledToFit()
-                        } placeholder: {
-                            RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
-                                .fill(MiloTheme.surface)
-                                .frame(height: 160)
-                        }
-                        .frame(maxWidth: 280, alignment: .leading)
-                        .clipShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                        Picture(url: url, alt: item.name)
                     } else {
                         Link(destination: url) {
                             HStack(spacing: MiloTheme.Space.two) {

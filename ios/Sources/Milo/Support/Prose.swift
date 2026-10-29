@@ -113,29 +113,18 @@ struct Prose: View {
             .padding(.vertical, MiloTheme.Space.two)
     }
 
-    /// A picture in the reply, drawn where it sits. It loads from the URL the text carries,
-    /// so it appears as it is read; one that will not load says so rather than leaving an
-    /// empty box.
+    /// A picture in the reply, drawn where it sits and opened full screen when pressed. It
+    /// loads from the URL the text carries, so it appears as it is read; one that will not
+    /// load says so rather than leaving an empty box.
+    @ViewBuilder
     private func picture(alt: String, url: String) -> some View {
-        AsyncImage(url: URL(string: url)) { phase in
-            switch phase {
-            case .success(let image):
-                image.resizable().scaledToFit()
-            case .empty:
-                RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
-                    .fill(MiloTheme.surface)
-                    .frame(height: 160)
-            case .failure:
-                Text(alt.isEmpty ? "The image could not be shown." : alt)
-                    .font(MiloTheme.Text.small)
-                    .foregroundStyle(MiloTheme.muted)
-            @unknown default:
-                EmptyView()
-            }
+        if let address = URL(string: url) {
+            Picture(url: address, alt: alt)
+        } else {
+            Text("That picture could not be shown.")
+                .font(MiloTheme.Text.small)
+                .foregroundStyle(MiloTheme.muted)
         }
-        .frame(maxWidth: 280, alignment: .leading)
-        .clipShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
-        .accessibilityLabel(alt.isEmpty ? "Image" : alt)
     }
 
     /// A table is wider than a phone, so it scrolls sideways rather than squeezing its
