@@ -3,6 +3,16 @@ import type { Message } from '../providers/types.js'
 import { sessionRowLabel } from './format.js'
 
 /**
+ * The surface that asked for a session, when it is not the one it is read on. Absent
+ * means the one that owns the scope — the browser, for a web session. A popup question
+ * and a browser conversation are the same kind of session in the same place; this is
+ * what lets a row say which one asked.
+ */
+export const SESSION_SURFACES = ['spotlight'] as const
+
+export type SessionSurface = (typeof SESSION_SURFACES)[number]
+
+/**
  * A session is the conversation itself — a named entity that outlives the
  * transport address it happens to be bound to. The gateway address
  * (`MemoryScope`) is only a pointer to one of these.
@@ -28,6 +38,8 @@ export interface SessionRecord {
    * rather than quietly working somewhere else.
    */
   project?: string
+  /** The surface that asked for this session; see `SessionSurface`. */
+  surface?: SessionSurface
   /**
    * Revision of the record, bumped by the store on every accepted save. A write
    * names the revision it is based on, so a save built from a copy another
@@ -58,6 +70,8 @@ export interface SessionSummary {
   scope?: MemoryScope
   /** The project it works in, by id; see `SessionRecord.project`. */
   project?: string
+  /** The surface that asked for it; see `SessionSurface`. */
+  surface?: SessionSurface
   /**
    * Whether a turn holds this session right now — read off the lease, so it is
    * true for a turn running anywhere, a daemon or a terminal. Absent means no.
@@ -124,12 +138,12 @@ export interface CompactResult {
  */
 export interface SessionStore {
   /**
-   * Mints an empty record, recording the address it was created under and the
-   * project it will work in. Both are written here rather than by whoever saves
-   * first: a session that has not been spoken in yet is in no file, so what the
-   * store mints is the only place they can live.
+   * Mints an empty record, recording the address it was created under, the project
+   * it will work in and the surface that asked for it. All are written here rather
+   * than by whoever saves first: a session that has not been spoken in yet is in no
+   * file, so what the store mints is the only place they can live.
    */
-  create(scope?: MemoryScope, project?: string): Promise<SessionRecord>
+  create(scope?: MemoryScope, project?: string, surface?: SessionSurface): Promise<SessionRecord>
   load(id: string): Promise<SessionRecord | null>
   /**
    * Writes the record only if the stored one is still at `expectedVersion`,
@@ -287,5 +301,6 @@ export function toSummary(record: SessionRecord): SessionSummary {
     label: sessionRowLabel({ title: record.title, preview }),
     scope: record.scope,
     project: record.project,
+    ...(record.surface ? { surface: record.surface } : {}),
   }
 }

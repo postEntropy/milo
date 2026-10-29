@@ -32,9 +32,12 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     /// The project this session works in, by id. Absent on a session working in the
     /// install's own folder — a screen names the project from the list of them.
     let project: String?
+    /// The surface that asked for it, when it was not the browser: `spotlight` for the
+    /// desktop popup. A row wears it as a mark beside the name.
+    let surface: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, createdAt, updatedAt, messageCount, preview, label, recap, running, unread, project
+        case id, title, createdAt, updatedAt, messageCount, preview, label, recap, running, unread, project, surface
     }
 
     /// Read leniently, and only `id` as the one thing it cannot do without: a row
@@ -48,6 +51,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         running = try container.decodeIfPresent(Bool.self, forKey: .running)
         unread = try container.decodeIfPresent(Bool.self, forKey: .unread)
         project = try container.decodeIfPresent(String.self, forKey: .project)
+        surface = try container.decodeIfPresent(String.self, forKey: .surface)
         preview = try container.decodeIfPresent(String.self, forKey: .preview) ?? ""
         label = try container.decodeIfPresent(String.self, forKey: .label) ?? ""
         messageCount = try container.decodeIfPresent(Int.self, forKey: .messageCount) ?? 0

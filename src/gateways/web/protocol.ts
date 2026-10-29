@@ -7,6 +7,7 @@ import type { TodoItem } from '../../core/todos.js'
 import type { FileChange } from '../../core/change.js'
 import type { VerificationResult } from '../../core/verification.js'
 import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
+import { SESSION_SURFACES, type SessionSurface } from '../../core/sessions/types.js'
 import type { CommandEntry } from '../command-catalog.js'
 
 // 13: a session too large for one websocket message hands its transcript over in
@@ -139,7 +140,7 @@ export interface SessionCardItem {
 const CONTROL_ACTIONS = ['stop', 'allow', 'always', 'deny', 'plan', 'approve-plan'] as const
 
 export type ClientFrame =
-  | { type: 'hello'; version: number; chatId: string; genui?: boolean; client?: ClientKind }
+  | { type: 'hello'; version: number; chatId: string; genui?: boolean; client?: ClientKind; surface?: SessionSurface }
   | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[] }
   | {
       type: 'control'
@@ -424,7 +425,7 @@ export function transcriptChunks(
 export function parseClientFrame(value: unknown): ClientFrame | null {
   if (!value || typeof value !== 'object') return null
   const frame = value as Record<string, unknown>
-  if (frame.type === 'hello' && typeof frame.chatId === 'string' && typeof frame.version === 'number' && (frame.genui === undefined || typeof frame.genui === 'boolean') && (frame.client === undefined || (CLIENT_KINDS as readonly string[]).includes(String(frame.client)))) {
+  if (frame.type === 'hello' && typeof frame.chatId === 'string' && typeof frame.version === 'number' && (frame.genui === undefined || typeof frame.genui === 'boolean') && (frame.client === undefined || (CLIENT_KINDS as readonly string[]).includes(String(frame.client))) && (frame.surface === undefined || (SESSION_SURFACES as readonly string[]).includes(String(frame.surface)))) {
     return frame as ClientFrame
   }
   if (

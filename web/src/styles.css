@@ -305,6 +305,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-title, .session-preview { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-title { color: var(--fg); font-size: var(--text-sm); font-weight: 500; line-height: 1.35; }
 .session-preview { color: var(--muted); font-size: var(--text-2xs); line-height: 1.35; }
+/* Where a session was asked from, when it was not the browser: a mark beside the name,
+   in the accent because Milo asked it — the same tint a label chip wears, never a
+   second line and never a control. */
+.session-title-row { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
+.session-title-row .session-title { min-width: 0; }
+.session-surface { flex: none; padding: 1px 6px; border-radius: var(--radius-pill); background: color-mix(in oklab, var(--accent) 16%, var(--surface)); color: var(--accent); font-size: var(--text-2xs); font-weight: 550; line-height: 1.4; }
 .session-item.active .session-title { font-weight: 600; }
 /* A session running now, said with the accent the way the accent already points: one
    dot at the row's own edge, no words and no second label. It breathes while it runs,

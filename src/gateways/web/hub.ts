@@ -4,6 +4,7 @@ import { basename, extname } from 'node:path'
 import { deriveIdeas, type Idea } from '../../core/ideas.js'
 import type { AgentRuntime } from '../../core/runtime.js'
 import type { Session } from '../../core/session.js'
+import type { SessionSurface } from '../../core/sessions/types.js'
 import { INSTALL_SCOPE, type MemoryScope } from '../../core/memory/index.js'
 import { isImage, mimeFor, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
 import type { PanelRequest } from '../../core/panel.js'
@@ -214,12 +215,18 @@ export class WebHub {
     this.detachWork = this.runtime.onWorkChanged(() => this.workChanged())
   }
 
-  async connect(client: WebClient, chatId: string, genui?: boolean, clientKind?: ClientKind): Promise<void> {
+  async connect(client: WebClient, chatId: string, genui?: boolean, clientKind?: ClientKind, surface?: SessionSurface): Promise<void> {
     if (!/^[0-9a-f-]{36}$/i.test(chatId)) throw new Error('Invalid chat id.')
     let chat = this.chats.get(chatId)
     if (!chat) {
       const scope: MemoryScope = { gateway: 'web', chatId }
-      chat = { scope, session: await this.runtime.sessionFor(scope), clients: new Set() }
+      // The scope stays the web's — same place, same memory — and the surface that
+      // asked is recorded on the session, so a row can say where it came from.
+      chat = {
+        scope,
+        session: await this.runtime.sessionFor(scope, surface ? { surface } : undefined),
+        clients: new Set(),
+      }
       this.chats.set(chatId, chat)
     } else if (!this.turns.busy(chatId)) {
       chat.session = await this.runtime.getSession(chat.scope)

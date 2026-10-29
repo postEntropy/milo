@@ -41,6 +41,15 @@ describe('web protocol', () => {
     expect(parseClientFrame({ ...hello, genui: 'canvas' })).toBeNull()
   })
 
+  it('takes the surface that asked on the handshake, and nothing else', () => {
+    const hello = { type: 'hello', version: PROTOCOL_VERSION, chatId: 'e76b3fc7-f93d-4ee2-a1d8-1cc6e7e7ab92' }
+    expect(parseClientFrame({ ...hello, surface: 'spotlight' })?.type).toBe('hello')
+    // A surface this build does not know is refused, not read as the browser's own and
+    // then recorded under a name nobody agreed on.
+    expect(parseClientFrame({ ...hello, surface: 'popup' })).toBeNull()
+    expect(parseClientFrame({ ...hello, surface: 1 })).toBeNull()
+  })
+
   it('carries the planning switch, and refuses half of one', () => {
     expect(parseClientFrame({ type: 'control', action: 'plan', plan: true })?.type).toBe('control')
     expect(parseClientFrame({ type: 'control', action: 'plan', plan: false })?.type).toBe('control')

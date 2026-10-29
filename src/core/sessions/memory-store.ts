@@ -11,6 +11,7 @@ import {
   type SessionRecord,
   type SessionStore,
   type SessionSummary,
+  type SessionSurface,
 } from './types.js'
 
 export interface MemorySessionStoreOptions {
@@ -37,7 +38,7 @@ export class MemorySessionStore implements SessionStore {
     this.now = options.now ?? Date.now
   }
 
-  async create(scope?: MemoryScope, project?: string): Promise<SessionRecord> {
+  async create(scope?: MemoryScope, project?: string, surface?: SessionSurface): Promise<SessionRecord> {
     const id = generateNickname((candidate) => this.records.has(candidate))
     const timestamp = this.now()
     const record: SessionRecord = {
@@ -48,6 +49,7 @@ export class MemorySessionStore implements SessionStore {
       version: INITIAL_SESSION_VERSION,
       ...(scope ? { scope } : {}),
       ...(project ? { project } : {}),
+      ...(surface ? { surface } : {}),
     }
     this.records.set(id, record)
     return structuredClone(record)

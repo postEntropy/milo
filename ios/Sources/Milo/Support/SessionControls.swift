@@ -14,10 +14,22 @@ struct SessionRow: View {
     var body: some View {
         HStack(spacing: MiloTheme.Space.three) {
             VStack(alignment: .leading, spacing: 1) {
-                Text(session.label)
-                    .font(MiloTheme.Text.base)
-                    .foregroundStyle(MiloTheme.foreground)
-                    .lineLimit(1)
+                HStack(spacing: MiloTheme.Space.two) {
+                    Text(session.label)
+                        .font(MiloTheme.Text.base)
+                        .foregroundStyle(MiloTheme.foreground)
+                        .lineLimit(1)
+                    if session.surface == "spotlight" {
+                        Text("Spotlight")
+                            .font(MiloTheme.Text.meta.weight(.medium))
+                            .foregroundStyle(MiloTheme.accent)
+                            .lineLimit(1)
+                            .fixedSize()
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 1)
+                            .background(MiloTheme.accent.opacity(0.16), in: Capsule())
+                    }
+                }
                 Text(session.meta)
                     .font(MiloTheme.Text.meta.monospacedDigit())
                     .foregroundStyle(MiloTheme.muted)

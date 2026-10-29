@@ -19,6 +19,7 @@ import {
   type SessionRecord,
   type SessionStore,
   type SessionSummary,
+  type SessionSurface,
 } from './types.js'
 
 const BINDINGS_DIR = 'bindings'
@@ -105,7 +106,7 @@ export class FileSessionStore implements SessionStore {
    * has handed out and the ones already on disk, so a second process cannot take
    * a nickname this one is holding.
    */
-  async create(scope?: MemoryScope, project?: string): Promise<SessionRecord> {
+  async create(scope?: MemoryScope, project?: string, surface?: SessionSurface): Promise<SessionRecord> {
     return this.run(() => {
       const timestamp = this.now()
       const id = generateNickname(
@@ -121,6 +122,7 @@ export class FileSessionStore implements SessionStore {
         // came from even if the process dies before the first turn lands.
         ...(scope ? { scope } : {}),
         ...(project ? { project } : {}),
+        ...(surface ? { surface } : {}),
       } satisfies SessionRecord
       this.pending.set(id, record)
       return structuredClone(record)

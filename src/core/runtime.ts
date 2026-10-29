@@ -28,6 +28,7 @@ import {
   type SessionSeen,
   type SessionStore,
   type SessionSummary,
+  type SessionSurface,
   sessionRowLabel,
   withRecaps,
 } from './sessions/index.js'
@@ -171,6 +172,8 @@ export interface NewSessionOptions {
    * directory — what every session before this one used.
    */
   project?: string
+  /** The surface asking for it, when it is not the one that owns the scope. */
+  surface?: SessionSurface
 }
 
 /**
@@ -636,7 +639,7 @@ export class AgentRuntime {
     options?: NewSessionOptions,
   ): Promise<Session> {
     await this.detach(scope)
-    const record = await this.store.create(scope, options?.project)
+    const record = await this.store.create(scope, options?.project, options?.surface)
     // The session's mark starts where it was born. A session with no mark at all would
     // read as looked at forever, and the first thing it is owed is exactly what the
     // mark is for: an answer a routine delivers into a chat nobody has open.

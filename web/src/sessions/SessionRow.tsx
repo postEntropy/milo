@@ -102,7 +102,10 @@ export function SessionRow({
       ) : (
         <button className="session-row" type="button" onClick={onClick}>
           <span className="session-content">
-            <span className="session-title">{session.label}</span>
+            <span className="session-title-row">
+              <span className="session-title">{session.label}</span>
+              {session.surface === 'spotlight' && <span className="session-surface">Spotlight</span>}
+            </span>
             <span className="session-preview">{sessionMeta(session)}</span>
           </span>
         </button>

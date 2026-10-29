@@ -17,4 +17,6 @@ export type SessionSummary = {
   /** The session moved after it was last looked at; absent when it did not. */
   unread?: boolean
   project?: string
+  /** The surface that asked for it, when it was not the browser; a row wears it as a mark. */
+  surface?: 'spotlight'
 }

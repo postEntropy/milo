@@ -155,7 +155,7 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           return
         }
         chatId = frame.chatId
-        void hub.connect(client, chatId, frame.genui, frame.client).catch((error: unknown) => {
+        void hub.connect(client, chatId, frame.genui, frame.client, frame.surface).catch((error: unknown) => {
           client.send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
           socket.close(1011, 'Could not open chat')
         })

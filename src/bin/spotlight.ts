@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { spawn } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { createInterface } from 'node:readline'
@@ -42,8 +42,6 @@ const PROBE_TIMEOUT_MS = 1200
 const RETRY_MS = 1500
 const START_INTERVAL_MS = 150
 
-const STATE_FILE = path.join(MILO_HOME, 'spotlight.json')
-
 /**
  * `milo spotlight` — the process behind the desktop popup.
  *
@@ -52,6 +50,10 @@ const STATE_FILE = path.join(MILO_HOME, 'spotlight.json')
  * and its own IPC. What travels here is the web UI's own protocol: the popup and
  * the browser are two clients of one daemon, and the same session, permissions
  * and tools work in both.
+ *
+ * What it leaves behind is a session like any other, marked with the surface that
+ * asked for it (`surface: 'spotlight'` on the handshake): the question can be found
+ * later in the browser and on the phone, and resumed there.
  */
 class SpotlightBridge {
   private readonly token: string
@@ -155,7 +157,10 @@ class SpotlightBridge {
     closeSync(log)
   }
 
-  /** A fresh question starts in a fresh conversation; the old one is forgotten. */
+  /**
+   * A fresh question starts in a fresh conversation. The one before is not taken
+   * with it: it stays on disk with the turns it has, to be read where it can be read.
+   */
   private reset(): void {
     if (this.busy) {
       this.restartPending = true
@@ -168,7 +173,7 @@ class SpotlightBridge {
     this.clearRetry()
     this.socket?.close()
     this.socket = null
-    void this.dropStored()
+    this.sessionId = ''
     this.chatId = randomUUID()
     this.connect()
   }
@@ -183,7 +188,7 @@ class SpotlightBridge {
     const socket = new WebSocket(this.wsUrl)
     this.socket = socket
     socket.addEventListener('open', () => {
-      socket.send(JSON.stringify({ type: 'hello', version: PROTOCOL_VERSION, chatId, genui: false } satisfies ClientFrame))
+      socket.send(JSON.stringify({ type: 'hello', version: PROTOCOL_VERSION, chatId, genui: false, surface: 'spotlight' } satisfies ClientFrame))
     })
     socket.addEventListener('message', (event) => {
       if (generation !== this.generation || typeof event.data !== 'string') return
@@ -226,7 +231,6 @@ class SpotlightBridge {
     if (frame.type === 'ready') {
       this.connected = true
       this.sessionId = frame.sessionId
-      this.writeStored(frame.sessionId)
       this.report({ type: 'ready' })
       if (this.queued !== null) {
         const text = this.queued
@@ -277,15 +281,14 @@ class SpotlightBridge {
 
   /**
    * The question outgrew the popup: fork it into a session of its own and hand its
-   * address to the browser. The fork is separate, so forgetting this conversation
-   * afterwards cannot take the real one with it.
+   * address to the browser. The fork is separate, so the popup carrying on with a
+   * fresh conversation cannot take the real one with it.
    */
   private async handOver(): Promise<void> {
     if (this.busy || !this.sessionId) return
     try {
       const fork = await this.post<{ id: string }>('fork-session', { chatId: randomUUID(), sessionId: this.sessionId })
       this.report({ type: 'fork', url: appUrl({ host: this.host, port: this.port, token: this.token, open: fork.id }) })
-      await this.dropStored()
       this.reset()
     } catch (error) {
       this.complain(errorMessage(error))
@@ -305,42 +308,6 @@ class SpotlightBridge {
       throw new Error(said)
     }
     return payload as T
-  }
-
-  /**
-   * What a popup leaves behind: a session is written to disk on its first turn, so
-   * forgetting means deleting it — and a window killed before it could ask leaves
-   * its id in a file for the next run to sweep.
-   */
-  private writeStored(sessionId: string): void {
-    try {
-      mkdirSync(MILO_HOME, { recursive: true })
-      writeFileSync(STATE_FILE, `${JSON.stringify({ sessionId })}\n`)
-    } catch {
-      // A state file that cannot be written only costs a cleanup.
-    }
-  }
-
-  private async dropStored(): Promise<void> {
-    const stored = this.readStored()
-    if (!stored) return
-    try {
-      rmSync(STATE_FILE, { force: true })
-    } catch {
-      // Same: best effort.
-    }
-    this.sessionId = ''
-    await this.post('session-delete', { id: stored }).catch(() => undefined)
-  }
-
-  private readStored(): string {
-    try {
-      if (!existsSync(STATE_FILE)) return ''
-      const parsed = JSON.parse(readFileSync(STATE_FILE, 'utf8')) as { sessionId?: unknown }
-      return typeof parsed.sessionId === 'string' ? parsed.sessionId : ''
-    } catch {
-      return ''
-    }
   }
 
   private command(line: string): void {

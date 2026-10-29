@@ -13,6 +13,7 @@ import {
   INITIAL_SESSION_VERSION,
   isValidSessionId,
   SessionConflictError,
+  toSummary,
   type SessionRecord,
 } from '../src/core/sessions/types.js'
 
@@ -47,6 +48,21 @@ describe('FileSessionStore', () => {
     const list = await store.list()
     expect(list.map((entry) => entry.id)).toEqual([created.id])
     expect(list[0]!.preview).toContain('hello')
+  })
+
+  it('keeps the surface that asked for a session, and says it in the list', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    const created = await store.create({ gateway: 'web', chatId: 'chat' }, undefined, 'spotlight')
+    expect(created.surface).toBe('spotlight')
+
+    created.messages.push({ role: 'user', content: [{ type: 'text', text: 'what is this' }] })
+    await store.save(created, created.version)
+    expect((await store.list()).find((entry) => entry.id === created.id)?.surface).toBe('spotlight')
+
+    // A session the browser asked for says nothing rather than naming a surface: the
+    // row's mark appears where there is something to mark.
+    const plain = await store.create({ gateway: 'web', chatId: 'chat' })
+    expect('surface' in toSummary(plain)).toBe(false)
   })
 
   it('keeps the project a session works in, through a save and a fork', async () => {
