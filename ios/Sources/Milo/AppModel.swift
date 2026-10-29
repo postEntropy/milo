@@ -2109,6 +2109,10 @@ final class AppModel {
             // the handshake says so, so the composer's own control is on the right line
             // before the settings screen has ever been read.
             if let running = ready.effort { effort = running }
+            // And how the thought is drawn, from the same handshake: the display setting is
+            // the install's, so a thought opens folded as it says without the settings screen
+            // ever being read — which is where this was left at its own default.
+            thinking = ready.thinking
             sessionId = ready.sessionId
             // It is on the screen now, wherever it was opened from.
             Task { await markSeen(ready.sessionId) }

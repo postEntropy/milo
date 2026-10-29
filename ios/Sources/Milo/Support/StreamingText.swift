@@ -44,9 +44,6 @@ struct StreamingText: View {
     }
 
     @State private var arrivals: [Arrival] = [Arrival(from: 0, at: Date())]
-    /// The words with each block's span marked, so the layout keeps a boundary where a block
-    /// begins and the renderer can draw the block apart from what is already written.
-    @State private var blocked: AttributedString?
     /// A reply keeps arriving after the person leaves the screen — that is what the phone's
     /// notice is for — but nothing is being looked at, so the clock that fades it in has no
     /// one to fade for. Left running it is a redraw of the whole answer sixty times a second
@@ -54,10 +51,16 @@ struct StreamingText: View {
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
+        // The words drawn are the words this view was handed, cut at each block's start so
+        // the renderer can settle a block apart from what is already written. The cut is made
+        // here, on the way in, rather than kept in a state of its own: a copy in `@State` is a
+        // second place the words could come from, and an update it missed left a shorter
+        // answer on screen than the one that had arrived.
+        let marked = Self.marking(attributed, arrivals: arrivals)
         TimelineView(
             .animation(minimumInterval: 1.0 / 60.0, paused: arrivals.isEmpty || scenePhase != .active)
         ) { timeline in
-            Text(blocked ?? attributed)
+            Text(marked)
                 .font(font)
                 .lineSpacing(MiloTheme.leading)
                 .foregroundStyle(tone)
@@ -67,7 +70,6 @@ struct StreamingText: View {
             let now = Date()
             let head = Self.shared(before, after)
             arrivals = Self.arriving(arrivals, head: head, now: now)
-            blocked = Self.marking(after, arrivals: arrivals)
         }
         // The last block's own landing, which is when it has settled. Blocks that have already
         // settled are dropped here rather than drawn at a floor forever.
