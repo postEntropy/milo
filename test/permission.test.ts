@@ -323,6 +323,19 @@ describe('summarizeToolCall', () => {
     expect(summary).toContain('shell_command')
   })
 
+  it('shows who a message is for and what it says, sent or drafted', () => {
+    const args = { to: 'ana@exemplo', subject: 'Weekly note', body: 'All good.' }
+    const sending = summarizeToolCall(args, 'gmail_send')
+    const drafting = summarizeToolCall(args, 'gmail_draft')
+
+    expect(sending).toContain('Send mail to ana@exemplo')
+    expect(drafting).toContain('Draft mail to ana@exemplo')
+    for (const summary of [sending, drafting]) {
+      expect(summary).toContain('Subject: Weekly note')
+      expect(summary).toContain('All good.')
+    }
+  })
+
   it('says a session is being dropped, not a routine, though both carry an id', () => {
     const args = { action: 'remove', id: 'calm-otter-7' }
     expect(summarizeToolCall(args, 'sessions')).toBe('Remove session calm-otter-7')

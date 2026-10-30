@@ -47,6 +47,8 @@ const GRANTABLE = new Set([
   'browser_screenshot',
   'browser_act',
   'gmail_modify',
+  'gmail_draft',
+  'gmail_send',
   'mail_labels',
 ])
 

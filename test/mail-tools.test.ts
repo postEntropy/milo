@@ -124,7 +124,7 @@ describe('the mail_labels tool', () => {
 describe('the gmail_modify tool', () => {
   it('is not read-only — it changes the account, so it asks', () => {
     const tools = createGmailWriteTools(account)
-    expect(tools.map((tool) => tool.name)).toEqual(['gmail_modify'])
+    expect(tools.map((tool) => tool.name)).toEqual(['gmail_modify', 'gmail_draft', 'gmail_send'])
     expect(tools[0]!.readOnly).toBeUndefined()
     expect(tools[0]!.internal).toBeUndefined()
   })
@@ -170,6 +170,179 @@ describe('the gmail_modify tool', () => {
   it('with no account connected, says what to run instead of failing on its own', async () => {
     const [tool] = createGmailWriteTools(null)
     const result = await tool!.execute({ id: 'm1', op: 'trash' }, {} as never)
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('milo google connect')
+  })
+})
+
+/** One of the tools that write mail, by name, at the access level given. */
+const writeTool = (
+  name: 'gmail_draft' | 'gmail_send',
+  access: 'modify' | 'compose' | 'send' = 'send',
+) => createGmailWriteTools({ ...account, access }).find((tool) => tool.name === name)!
+
+describe('the gmail_draft tool', () => {
+  const drafter = (access: 'modify' | 'compose' = 'compose') => writeTool('gmail_draft', access)
+
+  it('is not read-only — it writes to the account, so it asks', () => {
+    const draft = drafter()
+    expect(draft.name).toBe('gmail_draft')
+    expect(draft.readOnly).toBeUndefined()
+    expect(draft.internal).toBeUndefined()
+  })
+
+  it('leaves the message in Drafts, over drafts rather than messages/send', async () => {
+    let asked = ''
+    let body = ''
+    gmail((url, init) => {
+      asked = url
+      body = String(init?.body ?? '')
+      return json({ id: 'd1' })
+    })
+
+    const result = await drafter().execute(
+      { to: 'ana@exemplo', subject: 'Weekly note', body: 'All good.' },
+      {} as never,
+    )
+
+    expect(result.isError).toBeFalsy()
+    expect(result.content).toBe('Drafted "Weekly note" to ana@exemplo — it sits in Drafts, nothing was sent.')
+    expect(asked).toContain('/drafts')
+    expect(asked).not.toContain('/messages/send')
+    const payload = JSON.parse(body) as { message: { raw: string } }
+    const raw = Buffer.from(payload.message.raw, 'base64url').toString('utf8')
+    expect(raw).toContain('To: ana@exemplo')
+    expect(raw).toContain('Subject: Weekly note')
+  })
+
+  it('answers in the thread it was given, rather than starting one', async () => {
+    let body = ''
+    gmail((_url, init) => {
+      body = String(init?.body ?? '')
+      return json({ id: 'd2' })
+    })
+
+    await drafter().execute(
+      { to: 'ana@exemplo', subject: 'Re: Weekly note', body: 'Thanks.', threadId: 't-1' },
+      {} as never,
+    )
+    expect((JSON.parse(body) as { message: { threadId?: string } }).message.threadId).toBe('t-1')
+  })
+
+  it('passes the grant refusal through, naming the level to reconnect at', async () => {
+    gmail(() => json({}))
+    const result = await drafter('modify').execute(
+      { to: 'ana@exemplo', subject: 's', body: 'b' },
+      {} as never,
+    )
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('--access compose')
+  })
+
+  it('refuses an address that is not one, and writes nothing', async () => {
+    const asked: string[] = []
+    gmail((url) => {
+      asked.push(url)
+      return json({ id: 'd1' })
+    })
+
+    const result = await drafter().execute({ to: 'ana', subject: 's', body: 'b' }, {} as never)
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('not an email address')
+    expect(asked.some((url) => url.includes('/drafts'))).toBe(false)
+  })
+
+  it('with no account connected, says what to run instead of failing on its own', async () => {
+    const draft = createGmailWriteTools(null).find((tool) => tool.name === 'gmail_draft')!
+    const result = await draft.execute({ to: 'ana@exemplo', subject: 's', body: 'b' }, {} as never)
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('milo google connect')
+  })
+})
+
+describe('the gmail_send tool', () => {
+  const sender = (access: 'compose' | 'send' = 'send') => writeTool('gmail_send', access)
+
+  it('is not read-only — it sends as the person, so it asks', () => {
+    const send = sender()
+    expect(send.name).toBe('gmail_send')
+    expect(send.readOnly).toBeUndefined()
+    expect(send.internal).toBeUndefined()
+  })
+
+  it('sends over messages/send, in the shape Gmail carries', async () => {
+    let asked = ''
+    let body = ''
+    gmail((url, init) => {
+      asked = url
+      body = String(init?.body ?? '')
+      return json({ id: 'm1' })
+    })
+
+    const result = await sender().execute(
+      { to: 'ana@exemplo', subject: 'Weekly note', body: 'All good.' },
+      {} as never,
+    )
+
+    expect(result.isError).toBeFalsy()
+    expect(result.content).toBe('Sent "Weekly note" to ana@exemplo.')
+    expect(asked).toContain('/messages/send')
+    const payload = JSON.parse(body) as { raw: string; threadId?: string }
+    // A new message is not threaded onto anything.
+    expect(payload.threadId).toBeUndefined()
+    const raw = Buffer.from(payload.raw, 'base64url').toString('utf8')
+    expect(raw).toContain('To: ana@exemplo')
+    expect(raw).toContain('Subject: Weekly note')
+    expect(raw).toContain(Buffer.from('All good.', 'utf8').toString('base64'))
+  })
+
+  it('answers in the thread it was given, rather than starting one', async () => {
+    let body = ''
+    gmail((_url, init) => {
+      body = String(init?.body ?? '')
+      return json({ id: 'm2' })
+    })
+
+    await sender().execute(
+      { to: 'ana@exemplo', subject: 'Re: Weekly note', body: 'Thanks.', threadId: 't-1' },
+      {} as never,
+    )
+    expect((JSON.parse(body) as { threadId?: string }).threadId).toBe('t-1')
+  })
+
+  it('passes the grant refusal through, naming the level to reconnect at', async () => {
+    gmail(() => json({}))
+    const result = await sender('compose').execute(
+      { to: 'ana@exemplo', subject: 's', body: 'b' },
+      {} as never,
+    )
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('--access send')
+  })
+
+  it('refuses an address that is not one, and sends nothing', async () => {
+    const asked: string[] = []
+    gmail((url) => {
+      asked.push(url)
+      return json({ id: 'm1' })
+    })
+
+    const result = await sender().execute({ to: 'ana', subject: 's', body: 'b' }, {} as never)
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('not an email address')
+    expect(asked.some((url) => url.includes('/messages/send'))).toBe(false)
+  })
+
+  it('refuses to send a message with nothing in it', async () => {
+    gmail(() => json({ id: 'm1' }))
+    const result = await sender().execute({ to: 'ana@exemplo', subject: 's', body: '  ' }, {} as never)
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('empty')
+  })
+
+  it('with no account connected, says what to run instead of failing on its own', async () => {
+    const send = createGmailWriteTools(null).find((tool) => tool.name === 'gmail_send')!
+    const result = await send.execute({ to: 'ana@exemplo', subject: 's', body: 'b' }, {} as never)
     expect(result.isError).toBe(true)
     expect(result.content).toContain('milo google connect')
   })

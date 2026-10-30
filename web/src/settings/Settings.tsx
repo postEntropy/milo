@@ -608,8 +608,8 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
                 {tierOf(data.google.tiers, data.google.access)?.description}
               </p>
               <p className="panel-note">
-                Reading tools: <code className="mono">{data.google.tools.join(', ')}</code>. Tools that can
-                change mail or its labels: <code className="mono">{data.google.writeTools.join(', ')}</code>{' '}
+                Reading tools: <code className="mono">{data.google.tools.join(', ')}</code>. Tools that act
+                on mail or its labels: <code className="mono">{data.google.writeTools.join(', ')}</code>{' '}
                 — each only as far as this access allows, and each asks before it acts. To widen it, run{' '}
                 <code className="mono">milo google connect</code> again: Google grants access only on a
                 fresh consent.

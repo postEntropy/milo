@@ -28,6 +28,8 @@
 | `gmail_search` | yes | Search the connected Gmail account; registered only when Google is on. `label:` reaches Gmail's own labels. |
 | `gmail_read` | yes | One message in full, by the id `gmail_search` returned. |
 | `gmail_modify` | no | Archive, mark read/unread, or move a message to the bin, by id. Needs the `modify` grant; asks before acting, and a routine must name it in `allow`. |
+| `gmail_draft` | no | Writes a message and leaves it in Drafts — nothing is sent. One address or several, optionally in a thread. Needs the `compose` grant; asks before writing, and a routine must name it in `allow`. |
+| `gmail_send` | no | Sends a message as the connected account — one address or several, optionally in a thread. It leaves the account and cannot be recalled. Needs the `send` grant; asks before sending, and a routine must name it in `allow`. |
 | `mail_labels` | — | Lists and edits Milo's own mail labels — local to `~/.milo/labels.json`, never written to Gmail — and says which messages carry one. Sorts mail to answer, so it is not read-only, but only touches Milo's own state, so it never asks. |
 | `drive_search` | yes | Search the connected Drive. |
 | `drive_read` | yes | One Drive file as text; Docs and Sheets come back exported. |

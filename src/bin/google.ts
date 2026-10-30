@@ -116,7 +116,7 @@ function status(out: GoogleIo['out']): number {
   const tools = googleToolNames(auth.google ?? null)
   const writeTools = googleWriteToolNames(auth.google ?? null)
   out(`  Reading tools: ${tools.join(', ')}.`)
-  out(`  Tools that can change mail or its labels: ${writeTools.join(', ')}.`)
+  out(`  Tools that act on mail or its labels: ${writeTools.join(', ')}.`)
   if (!state.enabled) out('…but the config says `google.enabled: false`, so the tools are not registered.')
   return 0
 }

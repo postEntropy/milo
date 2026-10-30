@@ -21,6 +21,13 @@ describe('toolLine', () => {
   it('gives every email tool the one envelope, and Drive the folder', () => {
     expect(toolLine('gmail_search', { query: 'is:unread' })).toBe('📧 gmail_search is:unread')
     expect(toolLine('gmail_modify', { id: 'm1', op: 'trash' })).toBe('📧 gmail_modify')
+    // Who a message is for, not the message itself: a body has no place on a gist.
+    expect(toolLine('gmail_draft', { to: 'ana@exemplo', subject: 'Hello', body: 'x' })).toBe(
+      '📧 gmail_draft ana@exemplo',
+    )
+    expect(toolLine('gmail_send', { to: 'ana@exemplo', subject: 'Hello', body: 'x' })).toBe(
+      '📧 gmail_send ana@exemplo',
+    )
     expect(toolLine('mail_labels', { action: 'list' })).toBe('📧 mail_labels list')
     expect(toolLine('drive_search', { query: 'budget' })).toBe('📂 drive_search budget')
   })
@@ -80,7 +87,7 @@ describe('toolLine', () => {
 
   it('starts every line with an emoji, never a typographic glyph', () => {
     const emoji = /\p{Extended_Pictographic}/u
-    const names = ['read_file', 'list_dir', 'glob', 'grep', 'fetch_url', 'write_file', 'edit_file', 'remember', 'recall', 'search_history', 'web_search', 'read_skill', 'task', 'shell_command', 'gmail_search', 'gmail_read', 'gmail_modify', 'mail_labels', 'drive_search', 'drive_read', 'unknown_tool']
+    const names = ['read_file', 'list_dir', 'glob', 'grep', 'fetch_url', 'write_file', 'edit_file', 'remember', 'recall', 'search_history', 'web_search', 'read_skill', 'task', 'shell_command', 'gmail_search', 'gmail_read', 'gmail_modify', 'gmail_draft', 'gmail_send', 'mail_labels', 'drive_search', 'drive_read', 'unknown_tool']
 
     for (const name of names) {
       const [icon] = toolLine(name, { path: 'a' }).split(' ')

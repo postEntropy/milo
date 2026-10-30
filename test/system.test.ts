@@ -584,6 +584,12 @@ describe('what Milo knows about its own setup', () => {
     expect(connected).toContain('account access: Read only')
     expect(connected).toContain('gmail_modify')
     expect(connected).toContain('needs the `modify` grant')
+    // Drafting and sending are the two ways mail is written, and each needs its own
+    // grant: the prompt names them so the model does not promise an act it lacks.
+    expect(connected).toContain('gmail_draft')
+    expect(connected).toContain('needs the `compose` grant')
+    expect(connected).toContain('gmail_send')
+    expect(connected).toContain('needs the `send` grant')
   })
 
   it('knows how a routine runs, so it is not answered by reading its own source', () => {

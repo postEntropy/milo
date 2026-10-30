@@ -379,9 +379,13 @@ function googleLine(state: GoogleState): string {
     `${accessLabel(state.access)}. ` +
     'Gmail is read with `gmail_search` and `gmail_read`; `gmail_modify` archives, marks read/unread and moves a ' +
     'message to the bin — it needs the `modify` grant and asks before acting, and a routine must name ' +
-    '`gmail_modify` in `allow`. `mail_labels` lists and edits Milo\'s own mail labels — local to ' +
-    '`~/.milo/labels.json`, never written back to Gmail — and says which messages carry one. Drive is read-only. ' +
-    'The grant lives in `~/.milo/auth.json`; `milo google status` reports it.'
+    '`gmail_modify` in `allow`. `gmail_draft` writes a message and leaves it in Drafts — it needs the ' +
+    '`compose` grant and asks before writing; nothing is sent. `gmail_send` sends a message as the ' +
+    'person — the one call that leaves the account: it needs the `send` grant, asks before it sends, and ' +
+    'a routine must name it in `allow`; send only what the person asked for. `mail_labels` lists and ' +
+    'edits Milo\'s own mail labels — local to `~/.milo/labels.json`, never written back to Gmail — and ' +
+    'says which messages carry one. Drive is read-only. The grant lives in `~/.milo/auth.json`; ' +
+    '`milo google status` reports it.'
   )
 }
 

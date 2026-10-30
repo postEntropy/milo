@@ -23,8 +23,11 @@ form of the author's own taste notes, which live outside the repo in
 - Email carries no exception. Reading and writing are both core capabilities the web **Email**
   screen and the agent reach through the same functions: the agent's `gmail_modify` and
   `mail_labels` are gated on the grant and ask before acting, and they reach the bin — Gmail's
-  `trash`, recoverable — never a permanent delete. A routine that acts on mail carries the grant
-  in `allow`. Drive stays read-only.
+  `trash`, recoverable — never a permanent delete. Writing a draft is the same act stopped short:
+  `gmail_draft` needs the `compose` grant and leaves the message in Drafts. Sending is the one call
+  that leaves the account: `gmail_send` needs the `send` grant and asks with the recipient, subject
+  and body in front of the person. A routine that acts on mail carries the grant in `allow`. Drive
+  stays read-only.
 - Same data, same meaning everywhere. Something that is not actionable is marked
   `disabled` in the model and drawn inert on every surface — never guessed at.
 

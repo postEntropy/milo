@@ -53,6 +53,8 @@ const TOOL_ICONS: Record<string, IconName> = {
   gmail_search: 'mail-shield',
   gmail_read: 'mail-shield',
   gmail_modify: 'mail-shield',
+  gmail_draft: 'mail-shield',
+  gmail_send: 'mail-shield',
   mail_labels: 'mail-shield',
 }
 

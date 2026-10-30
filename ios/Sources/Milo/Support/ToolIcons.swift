@@ -51,6 +51,8 @@ enum ToolIcons {
         "gmail_search": "envelope",
         "gmail_read": "envelope",
         "gmail_modify": "envelope",
+        "gmail_draft": "envelope",
+        "gmail_send": "envelope",
         "mail_labels": "envelope",
         // Drive's own colours are the product's mark, which this surface does not draw
         // yet; a drive is the honest stand-in until it does.

@@ -422,6 +422,15 @@ export function summarizeToolCall(args: unknown, tool?: string): string {
       }
       return `${verb[record.op] ?? record.op} message ${record.id}`
     }
+    // Mail written in the turn: who it goes to and what it says. A prompt that
+    // showed neither would be asking someone to approve a blank.
+    if (tool === 'gmail_send' || tool === 'gmail_draft') {
+      const to = typeof record.to === 'string' ? record.to.trim() : ''
+      const subject = typeof record.subject === 'string' ? record.subject.trim() : ''
+      const body = typeof record.body === 'string' ? preview(record.body) : ''
+      const verb = tool === 'gmail_draft' ? 'Draft mail to' : 'Send mail to'
+      return [`${verb} ${to}`, subject ? `Subject: ${subject}` : '', body].filter(Boolean).join('\n')
+    }
     // A rule, and where it lands: the prompt carries it from the next turn on, in
     // every session of that scope — so the rule itself is what is being approved.
     if (tool === 'instructions' && typeof record.text === 'string' && record.text.trim()) {

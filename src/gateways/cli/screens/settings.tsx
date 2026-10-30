@@ -2080,7 +2080,7 @@ export function SettingsScreen({
                 </Box>
                 <Box marginTop={1}>
                   <Text color={theme.muted}>
-                    Tools that can change mail or its labels:{' '}
+                    Tools that act on mail or its labels:{' '}
                     {googleWriteToolNames(auth.google ?? null).join(', ')}.
                   </Text>
                 </Box>

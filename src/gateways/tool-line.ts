@@ -69,6 +69,8 @@ const TOOLS: Record<string, { icon: string; brand?: ToolBrand }> = {
   gmail_search: { icon: '📧' },
   gmail_read: { icon: '📧' },
   gmail_modify: { icon: '📧' },
+  gmail_draft: { icon: '📧' },
+  gmail_send: { icon: '📧' },
   mail_labels: { icon: '📧' },
   // A folder rather than Drive's logotype: the text surfaces can only draw a
   // character, and there is no Drive emoji — the browser draws the mark instead.
@@ -332,8 +334,9 @@ export function toolDetail(args: unknown): string {
   }
   // `description` is the `task` tool's label for a subtask (its `prompt` is the
   // whole instruction, and has no place on a one-line activity log); `url` and
-  // `name` are the one interesting value of `fetch_url` and `read_skill`.
-  for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name', 'app']) {
+  // `name` are the one interesting value of `fetch_url` and `read_skill`; `to` is
+  // who mail is for, which is what a draft or a send line is about.
+  for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name', 'to', 'app']) {
     const value = record[key]
     if (typeof value === 'string' && value.trim()) return gist(value)
   }
