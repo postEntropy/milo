@@ -988,7 +988,7 @@ export const GENUI_SECTION = [
   '- `chart`: `type` ("line", "bar" or "area"), `labels` (at most 12), and `series` — at most 2 `{label?, values}` with one value per label; optionally `height` ("sm", "md" or "lg"), `prefix`, `suffix`, `decimals`.',
   '- `stat`: `label` and `formula`, and optionally `prefix`, `suffix`, `decimals`, `delta` (a formula shown as the change), `deltaSuffix`, `deltaTone` ("good", "bad" or "neutral"), `trend` (2 to 24 values, drawn as a sparkline).',
   '- `progress`: `formula`, and optionally `label`, `max` (default 100), `suffix`, `tone`.',
-  '- `table`: `columns` (at most 8) and `rows` — one array of cell strings per row, at most 50; optionally `align` (one "start" or "end" per column). A cell is a phrase, not a sentence: the detail that does not fit belongs in the prose beside it.',
+  '- `table`: `columns` (at most 8) and `rows` — one array of cell strings per row, at most 50; optionally `align` (one "start" or "end" per column). A cell is a phrase, not a sentence: the detail that does not fit belongs in the prose beside it. A total, a sum or a closing figure is the table\'s last row, written in the same cells as the rest — never a node of its own.',
   '- `list`: `items`, at most 24. An item is a line, not a paragraph.',
   '- `steps`: an optional `title`, and `entries` — `{title, detail?, when?}`, at most 12.',
   '- `facts`: an optional `title`, and `entries` — `{label, value, tone?}`, at most 12.',
