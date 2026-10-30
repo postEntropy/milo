@@ -412,7 +412,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           </button>}
           <div className="composer-model-wrap">
             <Select
-              className="composer-pill icon-only"
+              className={`composer-pill${folded ? ' icon-only' : ''}`}
               label={folded ? 'Model and reasoning effort' : `${providerName} models`}
               icon="spark"
               body={wide ? (close) => <ModelPicker
@@ -446,7 +446,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                 >{EFFORT_LABELS[level]}</button>)}
               </div> : undefined}
               value={model}
-              triggerLabel=""
+              triggerLabel={folded ? '' : model}
               choices={(catalog ?? []).map((item) => ({
                 value: item.id, label: item.id, meta: <ModelDetails model={item} />,
               }))}
