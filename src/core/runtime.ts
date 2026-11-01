@@ -18,6 +18,7 @@ import type { Project, ProjectLookup, ProjectPlacement } from './projects.js'
 import type { VerificationResult } from './verification.js'
 import type { ProjectInstructions } from './agent/instructions.js'
 import { Session } from './session.js'
+import { TurnWatchdog } from './watchdog.js'
 import {
   contextBudget,
   FileSessionSeen,
@@ -195,12 +196,20 @@ export class AgentRuntime {
   private readonly turnListeners = new Set<() => void>()
   /** Told when a turn here may have changed what is on disk; see `onWorkChanged`. */
   private readonly workListeners = new Set<() => void>()
+  /**
+   * The watch over this process's turns: every session it makes is handed this
+   * one, so a turn that goes quiet is noticed wherever it came from. The daemon
+   * starts its clock; a process that never does — a terminal, a script — only
+   * records, and a stop is the person's own.
+   */
+  private readonly turnWatch: TurnWatchdog
 
   constructor(options: RuntimeOptions) {
     this.options = options
     this.store = options.store ?? new MemorySessionStore()
     this.recaps = options.recaps ?? new MemoryRecapStore()
     this.seen = options.seen ?? new FileSessionSeen()
+    this.turnWatch = new TurnWatchdog({ traces: options.traces })
   }
 
   /** The session bound to `scope`, creating and binding one on first use. */
@@ -480,6 +489,15 @@ export class AgentRuntime {
    */
   get jobs(): JobManager | null {
     return this.options.jobs ?? null
+  }
+
+  /**
+   * The watch over this process's turns. The daemon starts its clock; anywhere
+   * else it only records, because the person stopping the turn is better than a
+   * guess about when it should have answered.
+   */
+  get watchdog(): TurnWatchdog {
+    return this.turnWatch
   }
 
   /** The skills on this install, for `/skills`. */
@@ -770,6 +788,10 @@ export class AgentRuntime {
       // And the steps of those turns that may have changed a folder, so a screen drawing
       // one follows the work as it happens rather than only when the turn is over.
       onSideEffect: () => this.announceWork(),
+      // The one watch, shared by every session this process makes: a turn that
+      // stops producing anything holds its session's lease until something
+      // outside it says so.
+      watch: this.turnWatch,
     })
     this.cacheSession(record.id, session)
     return session

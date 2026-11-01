@@ -49,7 +49,8 @@ and **prunes the toolchain** — `tsc`, `vitest` and `tsup` disappear. Recover w
     (`document.ts`, `comments.ts`).
   - `work.ts` / `work-diff.ts` — the Work tab's folder tree, file pages and git changes.
   - `runtime.ts` / `session.ts` / `bootstrap.ts` / `history.ts` (the log and its readout) /
-    `traces.ts` (the execution log).
+    `traces.ts` (the execution log) / `watchdog.ts` (the watch over a turn that stops producing
+    anything: reported at five minutes, stopped at fifteen, and only where a daemon started it).
 - `src/gateways/` — `cli/` (Ink), `telegram/` (grammY), `discord/` (discord.js) and `web/` (the HTTP +
   WebSocket server, the hub that drives turns, the settings actions and the job registry).
 - `web/` — the browser frontend (React + Vite), built into `web/dist` and served by `src/gateways/web/`.

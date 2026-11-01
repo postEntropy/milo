@@ -43,6 +43,9 @@ export async function runWeb(args = process.argv.slice(2)): Promise<void> {
     throw new Error(bindProblem(error, host, port))
   }
 
+  // This process serves turns nobody may be watching: a turn that stops producing
+  // anything is reported here and ended rather than holding its conversation.
+  runtime.watchdog.start()
   console.error(`Milo web · ${loaded.model} (${loaded.provider.id}) · mode ${runtime.permissions?.mode ?? 'ask'} · effort ${runtime.reasoningEffort} · ${runtime.skills.length} skills · browser ${runtime.browser ? 'on' : 'off'} · ${MILO_HOME}`)
   console.error(`Open ${hyperlink(web.url)}`)
   for (const line of webReachLines(host, web.urls)) console.error(line)
@@ -53,6 +56,7 @@ export async function runWeb(args = process.argv.slice(2)): Promise<void> {
     // A second Ctrl+C is the person insisting: go now.
     if (closing) process.exit(0)
     closing = true
+    runtime.watchdog.stop()
     await web.stop().catch(() => undefined)
     await runtime.close().catch(() => undefined)
     process.exit(0)

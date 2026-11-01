@@ -35,7 +35,7 @@ cost* — one append-only JSONL file, a line per event, each with `at`, `event`,
 numbers. It never holds a prompt, an argument or an answer, so it is safe to keep and to read; that line
 is the whole reason it can live beside the history.
 
-Four events, each a closed name:
+Five events, each a closed name:
 
 - `model.request` — one call to the chat model: `purpose` (`chat`, `task`, `compaction`, `recap`,
   `derive`), `model`, `provider`, `ttftMs` (time to the first token), `ms`, `inputTokens`, `outputTokens`,
@@ -44,6 +44,9 @@ Four events, each a closed name:
   `cached`, and the typed answer it gave.
 - `tool.call` — `tool`, `ms`, `ok` (no arguments).
 - `turn` — the whole turn: `surface`, `session`, `model`, `ms`, `ok`.
+- `watchdog` — a turn the daemon stopped because it had produced nothing for a long time: `session`,
+  `reason` (`stalled`), `ms` (how long it had been silent), `ok` false. A turn that is only slow is
+  said in the daemon's log first; this line is written when the wait is over, not when it begins.
 
 Every model call goes through one seam (`Provider.stream`), so wrapping it once covers the chat turn, a
 delegated subtask and the mechanical calls alike, from one measurement instead of counting the same span
