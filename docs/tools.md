@@ -38,7 +38,7 @@
 | `browser_snapshot` | yes | The current page again: its elements, its text, or a picture of the viewport for the model. |
 | `browser_screenshot` | no | A picture of the viewport written to a file, for the person. Asks, because it writes. |
 | `browser_act` | no | Click, double-click, type, press, hover, scroll, choose, upload — and the page afterwards. |
-| `shell_command` | no | Runs with `/bin/sh`; asks for confirmation first. |
+| `shell_command` | no | Runs with `/bin/sh`; asks for confirmation first. `background: true` hands a long command to the job manager and returns at once, and a job keeps the shell sandbox when one is on: it runs inside the same `bwrap` box rather than being refused. |
 | `job_status` | yes | A background job's state, exit code and output tail. Only where a job manager exists. |
 | `job_kill` | no | Stops a running background job; asks for confirmation. |
 

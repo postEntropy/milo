@@ -113,14 +113,16 @@ export class JobManager {
     }
     this.jobs.set(id, job)
 
+    const spawnSpec = input.spawn ?? { file: '/bin/sh', args: ['-c', input.command] }
     let child: ChildProcess
     try {
-      child = spawn('/bin/sh', ['-c', input.command], {
+      child = spawn(spawnSpec.file, spawnSpec.args, {
         cwd: input.cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         // A job is a command, not just its shell. Give it a process group so
         // stopping the job also stops the tools it started (npm, servers, etc.).
         detached: true,
+        ...(input.env ? { env: input.env } : {}),
       })
     } catch (error) {
       this.jobs.delete(id)

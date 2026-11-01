@@ -147,6 +147,44 @@ describe('runSubagent', () => {
     expect(effects).toEqual([{ tool: 'fake_write', args: { path: 'a.txt' } }])
   })
 
+  it('carries the parent\'s job manager, so delegated work can leave a long command running', async () => {
+    // A subagent that cannot background a build freezes the whole delegated task,
+    // which is the opposite of what delegating was for.
+    const jobs = { list: () => [] } as unknown as NonNullable<ToolContext['jobs']>
+    let seen: ToolContext | undefined
+    const probe: Tool<Record<string, never>> = {
+      name: 'fake_probe',
+      description: 'fake probe',
+      schema: z.object({}),
+      readOnly: true,
+      async execute(_args, toolCtx) {
+        seen = toolCtx
+        return { content: 'seen' }
+      },
+    }
+    const provider = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'fake_probe', args: {} },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      [
+        { type: 'text', delta: 'the report' },
+        { type: 'done', finishReason: 'stop' },
+      ],
+    ])
+
+    await run({
+      provider,
+      registry: new ToolRegistry([probe]),
+      context: { jobs, sessionId: 'calm-otter-7' },
+    })
+
+    expect(seen?.jobs).toBe(jobs)
+    // The job belongs to the conversation that asked for the work, so the parent's
+    // own session id is the one it is stamped with.
+    expect(seen?.sessionId).toBe('calm-otter-7')
+  })
+
   it('does not offer `task` to the subagent — delegation is one level deep', async () => {
     const provider = new ScriptedProvider([
       [

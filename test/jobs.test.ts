@@ -153,6 +153,35 @@ describe('shell_command background', () => {
     await jobs.close()
   })
 
+  it('keeps a job inside the shell sandbox instead of refusing it', async () => {
+    const jobs = new JobManager()
+    const result = await shellTool.execute(
+      { command: 'echo boxed', background: true },
+      { ...ctx(jobs), sandbox: 'workspace', confineTo: process.cwd() },
+    )
+    expect(result.content).toMatch(/Started job job_\d+/)
+    await jobs.close()
+  })
+
+  it('spawns what it is told, and names the command a person reads', async () => {
+    // The seam the sandbox rides on: `bwrap` is the file, the command stays the
+    // line `/jobs` and the prompt show.
+    const jobs = new JobManager()
+    const done = settle(jobs)
+    const started = jobs.start({
+      command: 'echo wrapped into a box',
+      cwd: process.cwd(),
+      origin,
+      spawn: { file: '/bin/sh', args: ['-c', 'echo wrapped into a box'] },
+    })
+    expect(started.ok).toBe(true)
+    const job = await done
+    expect(job.command).toBe('echo wrapped into a box')
+    expect(job.state).toBe('done')
+    expect(job.lines.join('\n')).toContain('wrapped into a box')
+    await jobs.close()
+  })
+
   it('runs in the foreground inside a routine, and says so', async () => {
     const jobs = new JobManager()
     const result = await shellTool.execute(
