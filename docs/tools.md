@@ -17,7 +17,7 @@
 | `format` | no | Runs the formatter the project already has (Biome, Prettier, Ruff, Cargo or gofmt) over the changed files or one path; `check` writes nothing. |
 | `remember` | — | Saves a durable fact; only touches Milo's own memory, so it never asks. |
 | `memories` | — | The notes Milo keeps, the same store `/memory` shows: list, page, forget. Only Milo's own state; forgetting asks. |
-| `recall` | yes | Which past session a question is about, and what it was about. |
+| `recall` | yes | Which past session a question is about, and what it was about. Each hit also names, by id, what it is tied to — the routine whose run it was, the project it worked in, the jobs it started — so the context is followed a hop at a time instead of searched again. |
 | `search_history` | yes | Term search over Milo's own past turns, reasoning and tool calls included. |
 | `sessions` | — | Lists the saved sessions or removes one; removal asks and cannot take the session it runs in. |
 | `routine` | — | Runs a prompt on a timer and delivers it to a chat — or, for a routine that speaks only on a condition, stays silent on a run with nothing to report. Asks only when the routine carries a standing grant; absent inside a routine's own run. |

@@ -6,6 +6,7 @@ import { FileRecapStore, MemoryRecapStore } from '../src/core/sessions/recap.js'
 import { rankSessions, withRecaps } from '../src/core/sessions/recall.js'
 import type { SessionSummary } from '../src/core/sessions/types.js'
 import { recallTool } from '../src/core/tools/recall.js'
+import type { ToolContext } from '../src/core/tools/types.js'
 
 function session(id: string, updatedAt: number, extra: Partial<SessionSummary> = {}): SessionSummary {
   // The name a row would show, by the rule the daemon composes it with.
@@ -119,6 +120,92 @@ describe('recall', () => {
   it('points at search_history when nothing matches', async () => {
     const result = await recallTool.execute({ query: 'oauth' }, { ...ctx, recall: async () => [] })
     expect(result.content).toContain('search_history')
+  })
+
+  it('names the routine a run belongs to, so the context is followed rather than searched again', async () => {
+    const result = await recallTool.execute(
+      { query: 'oauth' },
+      {
+        ...ctx,
+        routine: {
+          list: () => [
+            {
+              id: 'calm-otter-7',
+              name: 'daily briefing',
+              prompt: 'check the deploy',
+              when: { kind: 'every', minutes: 60 },
+              target: { gateway: 'none' },
+              enabled: true,
+              createdAt: 1,
+            },
+          ],
+          create: async () => {
+            throw new Error('not here')
+          },
+          update: async () => undefined,
+          remove: async () => false,
+        },
+        recall: async () => [
+          session('calm-otter-7', Date.now(), {
+            recap: '- switched the auth flow to OAuth',
+            scope: { gateway: 'routine', chatId: 'calm-otter-7' },
+          }),
+        ],
+      },
+    )
+
+    expect(result.content).toContain('linked: routine calm-otter-7 (daily briefing)')
+  })
+
+  it('names the project and the jobs a session left behind', async () => {
+    const jobs = {
+      list: (sessionId?: string) =>
+        sessionId === 'calm-otter-7'
+          ? [
+              {
+                id: 'job_3',
+                command: 'npm test',
+                cwd: '/p',
+                notify: 'auto' as const,
+                origin: { gateway: 'cli' as const, chatId: 'main' },
+                sessionId,
+                state: 'done' as const,
+                startedAt: 1,
+                logPath: '/l',
+                lines: [],
+              },
+            ]
+          : [],
+    }
+    const result = await recallTool.execute(
+      { query: 'oauth' },
+      {
+        ...ctx,
+        jobs: jobs as unknown as ToolContext['jobs'],
+        recall: async () => [
+          session('calm-otter-7', Date.now(), {
+            recap: '- switched the auth flow to OAuth',
+            project: 'milo',
+          }),
+        ],
+      },
+    )
+
+    expect(result.content).toContain('linked: project milo · jobs job_3 (done)')
+  })
+
+  it('says nothing about links when a session is tied to nothing', async () => {
+    const result = await recallTool.execute(
+      { query: 'oauth' },
+      {
+        ...ctx,
+        recall: async () => [
+          session('calm-otter-7', Date.now(), { recap: '- switched the auth flow to OAuth' }),
+        ],
+      },
+    )
+
+    expect(result.content).not.toContain('linked:')
   })
 
   it('fails cleanly with nowhere to recall from', async () => {
