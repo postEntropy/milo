@@ -33,7 +33,7 @@
 | `mail_labels` | — | Lists and edits Milo's own mail labels — local to `~/.milo/labels.json`, never written to Gmail — and says which messages carry one. Sorts mail to answer, so it is not read-only, but only touches Milo's own state, so it never asks. |
 | `drive_search` | yes | Search the connected Drive. |
 | `drive_read` | yes | One Drive file as text; Docs and Sheets come back exported. |
-| `task` | — | Runs a subtask in its own context; only the report comes back. In a project the model may delegate on its own; outside one, only on request. Never asks itself. |
+| `task` | — | Runs a subtask in its own context; only the report comes back. In a project a broad search, a read through several files or a multi-step investigation is delegated first, as the rule; outside one, only on request. Never asks itself. It carries the parent's job manager, so a long command it leaves running is announced in the conversation that asked for it. |
 | `browser_open` | yes | Opens an http(s) URL and returns the page as numbered elements. Only when the browser is on. |
 | `browser_snapshot` | yes | The current page again: its elements, its text, or a picture of the viewport for the model. |
 | `browser_screenshot` | no | A picture of the viewport written to a file, for the person. Asks, because it writes. |

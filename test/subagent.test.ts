@@ -75,8 +75,12 @@ describe('task tool', () => {
     expect(taskTool.description).toContain('do not delegate on your own initiative')
   })
 
-  it('lets a project turn delegate on its own, with the same confirmations', () => {
-    expect(taskDescription(true)).toContain('on your own initiative')
+  it('makes a project turn delegate the long read by default, with the same confirmations', () => {
+    // A single session that decides for itself whether to delegate does it
+    // rarely, and only after the read has already crowded the transcript: in a
+    // project the description says the long read leaves first.
+    expect(taskDescription(true)).toContain('this is the rule and not a preference')
+    expect(taskDescription(true)).toContain('as the first move, without asking anyone')
     expect(taskDescription(true)).not.toContain('do not delegate on your own initiative')
     expect(taskDescription(true)).toContain('put to the user the same way')
     expect(taskDescription(false)).toContain('do not delegate on your own initiative')

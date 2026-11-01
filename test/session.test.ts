@@ -459,7 +459,7 @@ describe('Session', () => {
     expect(provider.lastEffort).toBeUndefined()
   })
 
-  it('lets a project turn delegate on its own, and keeps the ask outside one', async () => {
+  it('sends a project turn\'s long read to a subagent by default, and keeps the ask outside one', async () => {
     const inProject = new CapturingProvider()
     const { session } = await sessionWith(inProject, {
       project: {
@@ -471,7 +471,7 @@ describe('Session', () => {
       // drain
     }
     expect(inProject.lastTools?.find((tool) => tool.name === 'task')?.description).toContain(
-      'on your own initiative',
+      'as the first move, without asking anyone',
     )
 
     const outside = new CapturingProvider()
