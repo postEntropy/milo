@@ -133,10 +133,9 @@ export interface ToolContext {
   sendFile?: SendFileFn
   /**
    * The background jobs of this process, for a turn that may leave a command
-   * running behind the session. A subagent carries the parent's, so delegated
-   * work can leave a long command behind too. Absent on a context with no manager
-   * behind it — a routine's own run, a bare test one — so `shell_command` with
-   * `background` falls back to running in the foreground and says so.
+   * running behind the session. Absent on a context with no manager behind
+   * it — a subagent's own, a bare test one — so `shell_command` with `background`
+   * falls back to running in the foreground and says so.
    */
   jobs?: JobManager
 }

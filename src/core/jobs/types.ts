@@ -16,18 +16,8 @@ export type JobState = 'running' | 'done' | 'error' | 'killed' | 'interrupted'
 export type JobNotify = 'auto' | 'always' | 'never'
 
 export interface JobStartInput {
-  /** The command as a person reads it back in `/jobs`, and the line the prompt shows. */
   command: string
   cwd: string
-  /**
-   * How the command is started, when `/bin/sh -c command` is not it. A command
-   * that must stay inside the shell sandbox is `bwrap …` — a file and its
-   * arguments — and the manager spawns what it is told rather than rebuilding a
-   * box out of a string. `command` stays the readable line either way.
-   */
-  spawn?: { file: string; args: string[] }
-  /** What the child sees; absent is this process's own environment. */
-  env?: NodeJS.ProcessEnv
   /** The conversation to tell when it ends. */
   origin: MemoryScope
   /**

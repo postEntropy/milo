@@ -149,22 +149,6 @@ function sandboxPath(workspace: string): string {
   ].filter((entry) => existsSync(entry)).join(path.delimiter)
 }
 
-/**
- * What a command sees under the sandbox: the box's own scratch space rather than
- * this machine's home, and a `PATH` that reaches the workspace's installed tools.
- * The same environment for a foreground command and for a job, so a command is not
- * a different command depending on how long it was asked to run.
- */
-function sandboxEnv(workspace: string): NodeJS.ProcessEnv {
-  return {
-    PATH: sandboxPath(workspace),
-    HOME: '/tmp',
-    TMPDIR: '/tmp',
-    LANG: process.env.LANG ?? 'C.UTF-8',
-    TERM: process.env.TERM ?? 'dumb',
-  }
-}
-
 export const shellTool: Tool<ShellArgs> = {
   name: 'shell_command',
   description:
@@ -177,19 +161,21 @@ export const shellTool: Tool<ShellArgs> = {
 
     const canBackground = Boolean(ctx.jobs) && ctx.origin?.gateway !== ROUTINE_GATEWAY
     const sandboxed = ctx.sandbox === 'workspace'
-    // The workspace is the project's folder; a turn with no project works in its
-    // own cwd, so that is the only thing it may write to.
-    const workspace = ctx.confineTo ?? cwd
+    // A job is started by the manager from a command string, so there is no place
+    // to put the box around it. Saying so is better than starting something the
+    // person believed was contained.
+    if (args.background && canBackground && sandboxed) {
+      return {
+        content:
+          'The shell sandbox is on (sandbox: workspace), and a background job would run outside it. ' +
+          'Run the command in the foreground, or turn the sandbox off.',
+        isError: true,
+      }
+    }
     if (args.background && canBackground) {
       const started = ctx.jobs!.start({
         command: args.command,
         cwd,
-        // A job under the sandbox is the same command in the same box, started
-        // through `bwrap` rather than through a shell this process would have to
-        // wrap again. A long command is not a reason to leave the box.
-        ...(sandboxed
-          ? { spawn: { file: 'bwrap', args: sandboxArgs(args.command, cwd, workspace) }, env: sandboxEnv(workspace) }
-          : {}),
         origin: ctx.origin ?? { gateway: 'local', chatId: 'install' },
         sessionId: ctx.sessionId,
         notify: args.notify,
@@ -243,6 +229,9 @@ export const shellTool: Tool<ShellArgs> = {
 
     return new Promise<ToolResult>((resolve) => {
       if (sandboxed) {
+        // The workspace is the project's folder; a turn with no project works in
+        // its own cwd, so that is the only thing it may write to.
+        const workspace = ctx.confineTo ?? cwd
         execFile(
           'bwrap',
           sandboxArgs(args.command, cwd, workspace),
@@ -251,7 +240,13 @@ export const shellTool: Tool<ShellArgs> = {
             timeout,
             maxBuffer: MAX_BUFFER,
             signal: ctx.signal,
-            env: sandboxEnv(workspace),
+            env: {
+              PATH: sandboxPath(workspace),
+              HOME: '/tmp',
+              TMPDIR: '/tmp',
+              LANG: process.env.LANG ?? 'C.UTF-8',
+              TERM: process.env.TERM ?? 'dumb',
+            },
           },
           (error, stdout, stderr) => done(resolve, error, stdout, stderr),
         )

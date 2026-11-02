@@ -70,16 +70,8 @@ export interface SubagentRun {
   reasoningEffort?: ReasoningEffort
   /** The subtask, exactly as the `task` tool received it. */
   input: { description: string; prompt: string }
-  /**
-   * The parent's memory, recall, address and delivery, so the subagent's tools
-   * still work — and the parent's job manager, so a long command it runs can be
-   * left behind instead of freezing the delegated work that was meant to keep the
-   * session free.
-   */
-  context: Pick<
-    ToolContext,
-    'remember' | 'memories' | 'recall' | 'origin' | 'routine' | 'sendFile' | 'jobs' | 'sessionId'
-  >
+  /** The parent's memory, recall, address and delivery, so the subagent's tools still work. */
+  context: Pick<ToolContext, 'remember' | 'memories' | 'recall' | 'origin' | 'routine' | 'sendFile'>
   /** Carried through from the parent turn, so the subtask's requests are logged too. */
   trace?: RunTrace
 }
@@ -133,10 +125,6 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     origin: options.context.origin,
     routine: options.context.routine,
     sendFile: options.context.sendFile,
-    // The parent's jobs and the parent's session: a job the subtask leaves running
-    // belongs to the conversation that asked for the work, and is announced there.
-    jobs: options.context.jobs,
-    sessionId: options.context.sessionId,
   }
 
   let text = ''
