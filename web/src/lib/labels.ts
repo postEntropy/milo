@@ -2,8 +2,9 @@ import type { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVI
 
 /**
  * What each stored value is called on screen. One place, so every control that
- * offers these values — the settings dropdowns and the composer's effort pill —
- * reads them the same way, and as a capitalised word rather than the raw key.
+ * offers these values — the settings dropdowns, the effort slider, the composer's
+ * model pill — reads them the same way, and as a capitalised word rather than the
+ * raw key.
  */
 export const EFFORT_LABELS: Record<(typeof EFFORT_LEVELS)[number], string> = { low: 'Low', medium: 'Medium', high: 'High' }
 export const SEARCH_LABELS: Record<(typeof SEARCH_PROVIDERS)[number], string> = { off: 'Off', tavily: 'Tavily', exa: 'Exa', parallel: 'Parallel' }

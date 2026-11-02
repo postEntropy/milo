@@ -2,26 +2,30 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../lib/api.js'
 import { message, splitNames } from '../lib/format.js'
 import { formatWhen } from '../../../src/core/time.js'
-import { CLASSIFIER_LABELS, EFFORT_LABELS, PERMISSION_LABELS, SEARCH_LABELS, skillOriginLabel } from '../lib/labels.js'
+import { CLASSIFIER_LABELS, PERMISSION_LABELS, SEARCH_LABELS, skillOriginLabel } from '../lib/labels.js'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { humanSize } from '../../../src/util/format.ts'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
 import { Notice, useAutoDismiss } from '../ui/Notice.js'
 import { Select } from '../ui/Select.js'
+import { ReasoningSlider } from '../ui/ReasoningSlider.js'
 import { ModelPicker } from '../ui/ModelPicker.js'
+import { ProviderMark } from '../ui/ProviderMark.js'
 import { usePhone } from '../lib/phone.js'
 import { settingsSections } from './sections.js'
 import { MobileModelSheet } from './MobileModelPicker.js'
 import { DisplayPreview } from './DisplayPreview.js'
-import { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS, type ThinkingDisplay } from '@protocol'
+import { CLASSIFIER_BACKENDS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS, type ThinkingDisplay } from '@protocol'
 import { GOOGLE_SHORTCUT, GOOGLE_STEPS } from '../../../src/core/google/walkthrough.ts'
+import { chatGptPlanName } from '../../../src/core/chatgpt/plan.ts'
 
-type ProviderPreset = { id: string; name: string; baseURL: string; wire: string; keyless?: boolean; models: string[]; keyURL?: string }
+type ProviderPreset = { id: string; name: string; baseURL: string; wire: string; keyless?: boolean; oauth?: 'chatgpt'; models: string[]; keyURL?: string }
+type ChatGptStatus = { signedIn: boolean; email?: string; planType?: string; planName?: string; expiresAt?: number; codexLogin?: boolean }
 type SettingsConfig = {
   provider: string
   model: string
-  providers: Record<string, { name?: string; baseURL: string; wire?: string; keyless?: boolean; keyEnv?: string; headers?: Record<string, string> }>
+  providers: Record<string, { name?: string; baseURL: string; wire?: string; keyless?: boolean; keyEnv?: string; oauth?: 'chatgpt'; headers?: Record<string, string> }>
   memory: { keepSaid?: number; recallLimit?: number; derive?: boolean; embedding?: { provider: 'ollama' | 'openrouter'; model?: string; url?: string } }
   sessions: { compactAt: number; contextWindow?: number; maxInputTokens: number; keepTurns: number; compaction: boolean; maxSessions: number; generateTitles: boolean; titleModel?: string }
   display: { tools: 'full' | 'name' | 'off'; thinking: ThinkingDisplay; genui?: boolean }
@@ -101,6 +105,7 @@ type SettingsData = {
   config: SettingsConfig
   auth: Record<string, Record<string, { set: boolean; masked?: string }>>
   presets: ProviderPreset[]
+  chatgpt?: ChatGptStatus
   skills: Skill[]
   sessions: Array<{ id: string; title?: string; preview: string; updatedAt: number; messageCount: number }>
   memoryStats: MemoryStats
@@ -137,6 +142,103 @@ function describeMcpServer(server: McpServer): string {
 /** The display levels as a person reads them; the stored value stays the short form. */
 const TOOL_DETAIL_LABELS: Record<(typeof TOOL_LEVELS)[number], string> = { full: 'Full detail', name: 'Name only', off: 'Hidden' }
 const REASONING_LABELS: Record<(typeof THINKING_LEVELS)[number], string> = { expanded: 'Expanded', collapsed: 'Collapsed' }
+
+/**
+ * The ChatGPT grant, as the provider screen draws it. A subscription is a
+ * sign-in, not a key: the panel offers the browser and one-time-code flows, and
+ * polls while the server waits for the callback.
+ */
+function ChatGptAccount({ status, onChanged }: { status?: ChatGptStatus; onChanged: () => Promise<void> }) {
+  const [pending, setPending] = useState<{ url: string; userCode?: string; device?: boolean } | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!pending) return
+    const timer = window.setInterval(() => {
+      void api<ChatGptStatus>('chatgpt-status')
+        .then((next) => {
+          if (!next.signedIn) return
+          window.clearInterval(timer)
+          setPending(null)
+          void onChanged()
+        })
+        .catch(() => {})
+    }, 2_000)
+    return () => window.clearInterval(timer)
+  }, [pending, onChanged])
+
+  async function start(device: boolean): Promise<void> {
+    setBusy(true)
+    setError(null)
+    try {
+      const answer = await api<ChatGptStatus & { url?: string; userCode?: string; device?: boolean }>('chatgpt-login', { mode: device ? 'device' : 'browser' })
+      if (answer.signedIn) {
+        setPending(null)
+        await onChanged()
+        return
+      }
+      if (!answer.url) throw new Error('The server did not return a sign-in link.')
+      setPending({ url: answer.url, ...(answer.userCode ? { userCode: answer.userCode } : {}), ...(answer.device ? { device: true } : {}) })
+      if (!answer.device) window.open(answer.url, '_blank', 'noopener,noreferrer')
+    } catch (problem) {
+      setError(message(problem))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function signOut(): Promise<void> {
+    setBusy(true)
+    setError(null)
+    try {
+      await api('chatgpt-logout')
+      setPending(null)
+      await onChanged()
+    } catch (problem) {
+      setError(message(problem))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (status?.signedIn) {
+    const plan = status.planName ?? chatGptPlanName(status.planType) ?? ''
+    return (
+      <div>
+        <p className="panel-note">
+          Signed in to ChatGPT as {status.email ?? 'this account'}
+          {plan ? ` (${plan})` : ''}. The Codex subscription is used through this grant.
+        </p>
+        <button className="button" type="button" onClick={() => void signOut()} disabled={busy}>Sign out</button>
+        {error && <p className="panel-note">{error}</p>}
+      </div>
+    )
+  }
+
+  return (
+    <div>
+      <p className="panel-note">
+        ChatGPT (Codex) uses a ChatGPT subscription, not an API key. A Codex login on this machine is imported first.
+      </p>
+      <div>
+        <button className="button" type="button" onClick={() => void start(false)} disabled={busy}>Sign in with ChatGPT</button>
+        <button className="button" type="button" onClick={() => void start(true)} disabled={busy}>Use a one-time code</button>
+      </div>
+      {pending && (
+        <p className="panel-note">
+          {pending.userCode ? (
+            <>Open <a href={pending.url} target="_blank" rel="noreferrer">{pending.url}</a> and enter <strong>{pending.userCode}</strong>. </>
+          ) : (
+            <>Finish signing in in the tab that opened, or <a href={pending.url} target="_blank" rel="noreferrer">open it again</a>. </>
+          )}
+          Waiting for the sign-in to finish…
+        </p>
+      )}
+      {error && <p className="panel-note">{error}</p>}
+    </div>
+  )
+}
 
 export function Settings({ section, onSection, chatId, sessionId, onClose, onSessionChange, theme, onThemeChange, onDirtyChange }: {
   /** The open section; null is the index of them, which a phone shows and a wide screen replaces with the first. */
@@ -223,6 +325,23 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
 
   const currentProvider = draft?.provider ?? ''
   const browsedProvider = browsing ?? currentProvider
+
+  /**
+   * The ChatGPT status alone, so a sign-in refreshes the panel without replacing
+   * the draft — switching to ChatGPT is unsaved work until Save is pressed.
+   */
+  const refreshChatGpt = useCallback(async (): Promise<void> => {
+    try {
+      const status = await api<ChatGptStatus>('chatgpt-status')
+      setData((current) => current ? { ...current, chatgpt: status } : current)
+      // The list was read while the provider was only being browsed; a sign-in
+      // is what makes the ChatGPT catalog answer, so read it again.
+      if (status.signedIn && browsedProvider) {
+        setCatalog(null)
+        setCatalog(await api<ModelInfo[]>('models', { provider: browsedProvider }).catch(() => []))
+      }
+    } catch { /* the sign-in panel keeps its last answer */ }
+  }, [browsedProvider])
 
   // What the provider itself reports, through the same call the composer's model
   // menu makes, so the two pickers cannot offer different models.
@@ -323,7 +442,16 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
     setBrowsing(null)
     update(['provider'], next)
     if (item) {
-      update(['providers', item.id], { name: item.name, baseURL: item.baseURL, wire: item.wire, ...(item.keyless ? { keyless: true } : { keyEnv: `${item.id.toUpperCase()}_API_KEY` }) })
+      update(['providers', item.id], {
+        name: item.name,
+        baseURL: item.baseURL,
+        wire: item.wire,
+        ...(item.oauth
+          ? { oauth: item.oauth }
+          : item.keyless
+            ? { keyless: true }
+            : { keyEnv: `${item.id.toUpperCase()}_API_KEY` }),
+      })
       if (item.models[0]) update(['model'], item.models[0])
     }
   }
@@ -488,8 +616,11 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
               onPick={pickModel}
             />
           )}
+          {(draft.provider === 'chatgpt' || browsedProvider === 'chatgpt') && (
+            <ChatGptAccount status={data.chatgpt} onChanged={refreshChatGpt} />
+          )}
           <div className="form-grid">
-            <Field label="Reasoning effort"><Select label="Reasoning effort" value={draft.reasoningEffort} choices={EFFORT_LEVELS.map((value) => ({ value, label: EFFORT_LABELS[value] }))} onChange={(next) => update(['reasoningEffort'], next)} /><small>How hard the model thinks before it answers; every request carries it.</small></Field>
+            <Field label="Reasoning effort"><ReasoningSlider value={draft.reasoningEffort} onChange={(next) => update(['reasoningEffort'], next)} /><small>How hard the model thinks before it answers; every request carries it.</small></Field>
           </div>
           <Advanced>
             <div className="form-grid model-url">
@@ -506,7 +637,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
         <Section title="API keys" description="Stored keys stay hidden. Add or replace one, then save changes below." active={current === 'keys'}>
           <div className="secret-groups">
             {(['providers', 'audio', 'search', 'gateways'] as const).map((group) => {
-              const ids = group === 'providers' ? [...new Set([...data.presets.map((item) => item.id), ...Object.keys(data.auth.providers)])].filter((id) => id !== 'groq') : group === 'audio' ? ['groq'] : group === 'search' ? ['tavily', 'exa', 'parallel'] : ['telegram', 'discord']
+              const ids = group === 'providers' ? [...new Set([...data.presets.filter((item) => !item.oauth && item.id !== 'chatgpt').map((item) => item.id), ...Object.keys(data.auth.providers)])].filter((id) => id !== 'groq' && id !== 'chatgpt' && !data.presets.some((item) => item.id === id && item.oauth)) : group === 'audio' ? ['groq'] : group === 'search' ? ['tavily', 'exa', 'parallel'] : ['telegram', 'discord']
               const label = group === 'providers' ? 'Providers' : group === 'audio' ? 'Audio' : group === 'search' ? 'Web search' : 'Gateways'
               const orderedIds = [...ids].sort((a, b) => Number(Boolean(data.auth[group]?.[b]?.set)) - Number(Boolean(data.auth[group]?.[a]?.set)))
               const configured = orderedIds.filter((id) => data.auth[group]?.[id]?.set).length
@@ -525,6 +656,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
                       : id === 'exa' ? 'Exa' : id.charAt(0).toUpperCase() + id.slice(1)
                     return <div className={`secret-row${editing ? ' editing' : ''}`} key={slot}>
                       <div className="secret-identity">
+                        {group === 'providers' && <ProviderMark id={id} size={16} />}
                         <span className="secret-name">{serviceName}</span>
                         <span className={`secret-state ${configured ? 'configured' : ''}`}>{configured ? data.auth[group]?.[id]?.masked : 'Not set'}</span>
                       </div>

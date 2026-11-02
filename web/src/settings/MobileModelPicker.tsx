@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { Icon } from '../ui/Icons.js'
 import { ModelDetails } from '../ui/ModelDetails.js'
+import { ProviderMark } from '../ui/ProviderMark.js'
 
 type Preset = { id: string; name: string; models: string[] }
 
@@ -59,6 +60,7 @@ export function MobileModelSheet({
             className={`mobile-model-chip ${preset.id === browsing ? 'active' : ''}`}
             onClick={() => onBrowse(preset.id)}
           >
+            <ProviderMark id={preset.id} size={14} />
             {preset.name}
             {preset.id === provider && <Icon name="check" size={12} />}
           </button>

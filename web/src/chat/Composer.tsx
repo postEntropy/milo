@@ -1,16 +1,16 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react'
 import { api } from '../lib/api.js'
 import { isPhone, usePhone } from '../lib/phone.js'
-import { EFFORT_LABELS } from '../lib/labels.js'
 import { formatDuration, formatTokens } from '../../../src/util/format.ts'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { quotedLead } from '../../../src/core/sessions/format.ts'
 import { COMMAND_CATALOG } from '../../../src/gateways/command-catalog.ts'
-import { EFFORT_LEVELS, type JobView } from '@protocol'
+import type { JobView } from '@protocol'
 import { Icon } from '../ui/Icons.js'
 import { Select } from '../ui/Select.js'
 import { ModelDetails } from '../ui/ModelDetails.js'
 import { ModelPicker } from '../ui/ModelPicker.js'
+import { ReasoningSlider } from '../ui/ReasoningSlider.js'
 
 interface Props {
   busy: boolean
@@ -413,7 +413,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           <div className="composer-model-wrap">
             <Select
               className={`composer-pill${folded ? ' icon-only' : ''}`}
-              label={folded ? 'Model and reasoning effort' : `${providerName} models`}
+              label="Model and reasoning effort"
               icon="spark"
               body={wide ? (close) => <ModelPicker
                 className="composer-model-panes"
@@ -437,14 +437,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
                   note="No other provider with a key is configured."
                 />
               </div>}
-              foot={folded ? <div className="composer-effort-seg">
-                {EFFORT_LEVELS.map((level) => <button
-                  key={level}
-                  type="button"
-                  aria-pressed={level === effort}
-                  onClick={() => onEffortChange(level)}
-                >{EFFORT_LABELS[level]}</button>)}
-              </div> : undefined}
+              foot={<div className="composer-effort">
+                <span className="composer-effort-title">Reasoning effort</span>
+                <ReasoningSlider value={effort} onChange={onEffortChange} />
+              </div>}
               value={model}
               triggerLabel={folded ? '' : model}
               choices={(catalog ?? []).map((item) => ({
@@ -455,16 +451,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               note={loading ? 'Loading models…' : error || 'No models found.'}
             />
           </div>
-          {!folded && <div className="composer-effort-wrap">
-            <Select
-              className="composer-pill"
-              label="Reasoning effort"
-              icon="light"
-              value={effort}
-              choices={EFFORT_LEVELS.map((level) => ({ value: level, label: EFFORT_LABELS[level] }))}
-              onChange={(next) => onEffortChange(next as 'low' | 'medium' | 'high')}
-            />
-          </div>}
           <span className="composer-spacer" />
           {context && context.budget > 0 && <span className={`composer-context${context.used / context.budget >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.budget.toLocaleString()} tokens — Milo tidies the oldest turns at ${context.budget.toLocaleString()}`}>
             <svg className="composer-context-ring" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">

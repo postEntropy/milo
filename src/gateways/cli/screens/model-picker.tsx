@@ -1,3 +1,4 @@
+import { spawn } from 'node:child_process'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Box, Text, useInput } from 'ink'
 import TextInput from 'ink-text-input'
@@ -6,12 +7,14 @@ import { errorMessage } from '../../../util/errors.js'
 import { readAuth, readConfig, resolveApiKey, saveAuth, saveConfig } from '../../../core/config/load.js'
 import { PRESETS, type Preset } from '../../../core/config/presets.js'
 import { ConfigSchema, type Config, type ProviderEntry } from '../../../core/config/schema.js'
+import { beginChatGptBrowserLogin, type ChatGptLogin } from '../../../core/chatgpt/auth.js'
+import { chatGptModels } from '../../../core/chatgpt/models.js'
 import { listModels, type ModelInfo } from '../../../core/providers/models.js'
 import { modelNote } from '../../model-label.js'
 import { isCtrlC } from '../keys.js'
 import { theme } from '../theme.js'
 
-type Step = 'provider' | 'key' | 'loading' | 'models' | 'manual'
+type Step = 'provider' | 'key' | 'login' | 'loading' | 'models' | 'manual'
 
 const VISIBLE_ROWS = 12
 
@@ -33,6 +36,7 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
   const [filter, setFilter] = useState('')
   const [selected, setSelected] = useState(0)
   const [notice, setNotice] = useState<string | null>(null)
+  const [loginUrl, setLoginUrl] = useState<string | null>(null)
 
   const preset: Preset = PRESETS[index] ?? PRESETS[0]!
   const apiKeyValue = preset.keyless ? false : apiKey.trim() || undefined
@@ -44,12 +48,17 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
 
     void (async () => {
       try {
-        const list = await listModels({
-          baseURL: preset.baseURL,
-          wire: preset.wire,
-          apiKey: apiKeyValue,
-          signal: controller.signal,
-        })
+        // The ChatGPT backend serves no catalog; Codex's own cache is the one
+        // that knows what the subscription currently offers.
+        const list =
+          preset.oauth === 'chatgpt'
+            ? chatGptModels()
+            : await listModels({
+                baseURL: preset.baseURL,
+                wire: preset.wire,
+                apiKey: apiKeyValue,
+                signal: controller.signal,
+              })
         if (cancelled) return
         if (list.length > 0) {
           setModels(list)
@@ -73,7 +82,38 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
       cancelled = true
       controller.abort()
     }
-  }, [step, preset.baseURL, preset.wire, preset.models[0], apiKeyValue, current?.model])
+  }, [step, preset.baseURL, preset.wire, preset.oauth, preset.models[0], apiKeyValue, current?.model])
+
+  useEffect(() => {
+    if (step !== 'login') return
+    let cancelled = false
+    let pending: ChatGptLogin | undefined
+
+    void (async () => {
+      try {
+        pending = await beginChatGptBrowserLogin()
+        if (cancelled) {
+          pending.cancel()
+          return
+        }
+        setLoginUrl(pending.url)
+        openBrowser(pending.url)
+        const account = await pending.wait
+        if (cancelled) return
+        setNotice(`Signed in as ${account.email ?? 'your account'}.`)
+        setStep('loading')
+      } catch (error) {
+        if (cancelled) return
+        setNotice(errorMessage(error))
+        setStep('provider')
+      }
+    })()
+
+    return () => {
+      cancelled = true
+      pending?.cancel()
+    }
+  }, [step])
 
   const filtered = models.filter((model) => {
     const haystack = `${model.id} ${model.name ?? ''}`.toLowerCase()
@@ -87,6 +127,7 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
     wire: preset.wire,
     keyless: preset.keyless,
     keyEnv: preset.keyEnv,
+    ...(preset.oauth ? { oauth: preset.oauth } : {}),
   })
 
   useInput((_input, key) => {
@@ -99,8 +140,10 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
       if (key.upArrow) setIndex((value) => (value - 1 + PRESETS.length) % PRESETS.length)
       else if (key.downArrow) setIndex((value) => (value + 1) % PRESETS.length)
       else if (key.return) {
+        const signedIn = preset.oauth === 'chatgpt' ? Boolean(readAuth().chatgpt) : false
         const hasKey = Boolean(resolveApiKey(preset.id, presetEntry(), readAuth()))
-        setStep(preset.keyless || hasKey ? 'loading' : 'key')
+        if (preset.oauth === 'chatgpt' && !signedIn) setStep('login')
+        else setStep(preset.keyless || hasKey || signedIn ? 'loading' : 'key')
       } else if (key.escape) onCancel?.()
       return
     }
@@ -110,7 +153,7 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
       else if (key.escape) onCancel?.()
       return
     }
-    if ((step === 'key' || step === 'manual') && key.escape) onCancel?.()
+    if ((step === 'key' || step === 'manual' || step === 'login') && key.escape) onCancel?.()
   })
 
   const finish = (chosen: string) => {
@@ -159,7 +202,7 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
             <Text key={item.id} color={itemIndex === index ? theme.accent : undefined}>
               {itemIndex === index ? '❯ ' : '  '}
               {item.name}
-              {item.keyless ? ' (no key needed)' : ''}
+              {item.oauth === 'chatgpt' ? ' (ChatGPT sign-in)' : item.keyless ? ' (no key needed)' : ''}
             </Text>
           ))}
         </Box>
@@ -174,6 +217,16 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
             <Text>❯ </Text>
             <TextInput value={apiKey} onChange={setApiKey} mask="*" onSubmit={() => setStep('loading')} />
           </Box>
+        </Box>
+      )}
+
+      {step === 'login' && (
+        <Box flexDirection="column">
+          <Text>Sign in to ChatGPT to use the Codex subscription:</Text>
+          {loginUrl ? <Text color={theme.accent}>{loginUrl}</Text> : <Text color={theme.muted}>Opening the sign-in page…</Text>}
+          <Text color={theme.muted}>
+            <Spinner type="dots" /> Waiting for the browser… Esc to cancel.
+          </Text>
         </Box>
       )}
 
@@ -218,6 +271,22 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
       )}
     </Box>
   )
+}
+
+function openBrowser(url: string): void {
+  const command =
+    process.platform === 'darwin'
+      ? (['open', [url]] as const)
+      : process.platform === 'win32'
+        ? (['cmd', ['/c', 'start', '', url]] as const)
+        : (['xdg-open', [url]] as const)
+  try {
+    const child = spawn(command[0], [...command[1]], { stdio: 'ignore', detached: true })
+    child.on('error', () => {})
+    child.unref()
+  } catch {
+    // The URL is on screen; opening the browser is a convenience.
+  }
 }
 
 function renderModelList(filtered: ModelInfo[], selected: number): ReactNode {

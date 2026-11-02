@@ -1,4 +1,5 @@
 import { Children, cloneElement, isValidElement, useId, type ReactElement, type ReactNode } from 'react'
+import { ReasoningSlider } from './ReasoningSlider.js'
 import { Select } from './Select.js'
 
 /** A labelled field, wiring the label to the control it wraps. */
@@ -9,7 +10,7 @@ export function Field({ label, children, className = '' }: { label: string; chil
     {Children.map(children, (child) => {
       if (!isValidElement(child)) return child
       const type = child.type
-      if (type !== 'input' && type !== 'select' && type !== 'textarea' && type !== Select) return child
+      if (type !== 'input' && type !== 'select' && type !== 'textarea' && type !== Select && type !== ReasoningSlider) return child
       return cloneElement(child as ReactElement<{ id?: string }>, { id })
     })}
   </div>

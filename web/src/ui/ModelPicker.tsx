@@ -2,6 +2,7 @@ import { useState, type ReactNode } from 'react'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { Icon } from './Icons.js'
 import { ModelDetails } from './ModelDetails.js'
+import { ProviderMark } from './ProviderMark.js'
 
 type Preset = { id: string; name: string }
 
@@ -46,6 +47,7 @@ export function ModelPicker({ presets, provider, model, browsing, catalog, onBro
           aria-current={preset.id === provider ? 'true' : undefined}
           onClick={() => onBrowse(preset.id)}
         >
+          <ProviderMark id={preset.id} size={16} />
           <span className="model-picker-name">{preset.name}</span>
           {preset.id === provider && <Icon name="check" size={14} />}
         </button>)}

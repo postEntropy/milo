@@ -6,6 +6,16 @@ import {
   type SecretGroup,
 } from '../../core/settings.js'
 import { PRESETS } from '../../core/config/presets.js'
+import {
+  beginChatGptBrowserLogin,
+  beginChatGptDeviceLogin,
+  chatGptStatus,
+  enableChatGptProvider,
+  forgetChatGptAccount,
+  importCodexLogin,
+  type ChatGptDeviceLogin,
+  type ChatGptLogin,
+} from '../../core/chatgpt/auth.js'
 import { tokenSource, type TokenSource } from '../../core/google/access.js'
 import { ASSIST_MODES, emailAssist, type AssistMode } from '../../core/google/assist.js'
 import {
@@ -136,6 +146,9 @@ export class WebSettings {
    */
   private mail: { refreshToken: string; source: TokenSource } | null = null
 
+  /** The sign-in waiting for a browser, so a second click shows the same URL instead of a second server. */
+  private chatGpt: ChatGptLogin | ChatGptDeviceLogin | null = null
+
   /**
    * The browser is handed the running server's file registry, so a past run's
    * delivered files are served by the same `/attachment/<id>` a chat message's
@@ -158,6 +171,9 @@ export class WebSettings {
       case 'set-provider': return this.setProvider(body)
       case 'save-secret': return this.saveSecret(body)
       case 'remove-secret': return this.removeSecret(body)
+      case 'chatgpt-login': return this.chatGptLogin(body)
+      case 'chatgpt-status': return this.chatGptReport()
+      case 'chatgpt-logout': return this.chatGptSignOut()
       case 'models': return this.models(body)
       case 'sessions': return this.runtime.listSessions()
       case 'new-session': return this.newSession(body)
@@ -495,6 +511,7 @@ export class WebSettings {
     if (!config) throw new Error('Milo is not configured. Run `milo` in a terminal first.')
     const auth = readAuth()
     return {
+      chatgpt: chatGptStatus(),
       config: sanitizeConfig(config),
       auth: {
         providers: maskRecord(auth.providers),
@@ -504,7 +521,7 @@ export class WebSettings {
         search: maskRecord(auth.search),
         gateways: maskRecord(auth.gateways),
       },
-      presets: PRESETS.map(({ id, name, baseURL, wire, keyless, models, keyURL }) => ({ id, name, baseURL, wire, keyless, models, keyURL })),
+      presets: PRESETS.map(({ id, name, baseURL, wire, keyless, oauth, models, keyURL }) => ({ id, name, baseURL, wire, keyless, oauth, models, keyURL })),
       skills: this.skills(),
       sessions: await this.runtime.listSessions(),
       memoryStats: memoryStatus(memoryDir()),
@@ -610,6 +627,60 @@ export class WebSettings {
       if (!res.ok) throw new Error(res.error)
       return res.value
     })
+  }
+
+  /**
+   * Starts a ChatGPT sign-in and returns what the screen needs to show it. The
+   * pending server is kept on this instance, so polling can tell when the grant
+   * landed and a second click cannot bind the callback port twice.
+   */
+  private async chatGptLogin(body: Record<string, unknown>): Promise<unknown> {
+    const status = chatGptStatus()
+    if (status.signedIn) {
+      enableChatGptProvider()
+      return status
+    }
+    if (this.chatGpt) return chatGptPayload(this.chatGpt)
+    // The common case: Codex is already signed in on this machine, and the same
+    // grant is what Milo needs. A fresh sign-in is one flag away when it is not.
+    if (body.new !== true) {
+      try {
+        if (await importCodexLogin()) {
+          enableChatGptProvider()
+          return chatGptStatus()
+        }
+      } catch {
+        // The Codex grant could not be refreshed; the browser flow is next.
+      }
+    }
+    const pending =
+      body.mode === 'device' ? await beginChatGptDeviceLogin() : await beginChatGptBrowserLogin()
+    this.chatGpt = pending
+    void pending.wait
+      .then(() => this.serialize(() => enableChatGptProvider()))
+      .catch(() => undefined)
+      .finally(() => {
+        this.chatGpt = null
+      })
+    return chatGptPayload(pending)
+  }
+
+  /**
+   * The grant's state, and the one write that belongs with it: a signed-in
+   * install should list `chatgpt` as a provider without anyone adding it by
+   * hand. Called by the phone and the browser after a poll turns true.
+   */
+  private chatGptReport(): unknown {
+    const status = chatGptStatus()
+    if (status.signedIn) enableChatGptProvider()
+    return status
+  }
+
+  private chatGptSignOut(): unknown {
+    this.chatGpt?.cancel()
+    this.chatGpt = null
+    forgetChatGptAccount()
+    return { signedIn: false }
   }
 
   private async saveSecret(body: Record<string, unknown>): Promise<unknown> {
@@ -1287,6 +1358,13 @@ function sanitizeConfig(config: Config): Config {
       },
     ])),
   }
+}
+
+function chatGptPayload(pending: ChatGptLogin | ChatGptDeviceLogin): Record<string, unknown> {
+  if ('userCode' in pending) {
+    return { url: pending.verificationUrl, userCode: pending.userCode, device: true }
+  }
+  return { url: pending.url }
 }
 
 function maskRecord(record: Record<string, string>): Record<string, { set: boolean; masked?: string }> {

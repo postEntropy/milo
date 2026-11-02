@@ -61,8 +61,8 @@ export function Select({
   filterExtra?: ReactNode
   /**
    * Content pinned at the foot of the menu, under the scrolling rows — where a
-   * control that belongs to the same panel lives, e.g. the phone picker's row of
-   * reasoning-effort segments below the model list.
+   * control that belongs to the same panel lives, e.g. the composer's reasoning
+   * slider under the model list, whichever way the panel is drawn.
    */
   foot?: ReactNode
   /**
