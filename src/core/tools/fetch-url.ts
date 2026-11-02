@@ -1,7 +1,8 @@
 import { lookup } from 'node:dns'
 import { isIP, type LookupFunction } from 'node:net'
+import type { ReadableStream as NodeReadableStream } from 'node:stream/web'
 import { z } from 'zod'
-import { Agent, fetch } from 'undici'
+import { Agent, fetch, type RequestInit, type Response } from 'undici'
 import { errorMessage } from '../../util/errors.js'
 import { MAX_PAGE_CHARS, readPage, savePage } from '../fetched.js'
 import { htmlToText } from './html.js'
@@ -168,7 +169,7 @@ async function fetchPublic(start: URL, signal: AbortSignal): Promise<SafeRespons
         redirect: 'manual',
         headers: { accept: 'text/html,application/json,text/plain;q=0.9,*/*;q=0.5' },
         dispatcher: agent,
-      } as RequestInit & { dispatcher: Agent })
+      } satisfies RequestInit)
     } catch (error) {
       await agent.close().catch(() => undefined)
       throw error
@@ -247,7 +248,7 @@ function isPublicAddress(address: string): boolean {
  * bounded amount of memory — and the download stops instead of being drained
  * into a string nobody asked for.
  */
-async function readCapped(body: ReadableStream<Uint8Array>): Promise<Page> {
+async function readCapped(body: NodeReadableStream<Uint8Array>): Promise<Page> {
   const reader = body.getReader()
   const decoder = new TextDecoder()
   const chunks: string[] = []

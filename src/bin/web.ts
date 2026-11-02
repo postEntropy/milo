@@ -16,7 +16,9 @@ interface Options {
 }
 
 export async function runWeb(args = process.argv.slice(2)): Promise<void> {
-  const options = parseOptions(args)
+  // `cli.ts` hands the whole command line over, as it does to every resource
+  // command; the bare word is this command's own name.
+  const options = parseOptions(args[0] === 'web' ? args.slice(1) : args)
   const loaded = loadConfig()
   if (!loaded) throw new Error('No configuration found. Run `milo` first to set things up.')
   // Where the config puts it, unless a flag overrode it for this run.
