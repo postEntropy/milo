@@ -47,14 +47,10 @@ The subagent gets the same family section, the same plan section when the parent
 planning, and the same project, because it runs under the same model and in the same
 folder. A routine gets the family section too: it is a turn like any other.
 
-In a project, the long read is delegated rather than done in the session: the `task` tool's
-description says a broad search, a read through several files or a multi-step investigation
-goes to a subagent first, without asking, and the session keeps what needs its own context —
-what the person just said, or a choice that changes the plan. Leaving that decision to the
-model's judgement is what a single session does badly: the read has already crowded the
-transcript by the time it decides. Outside a project, it waits to be asked. The tool's
-description is the whole rule, and it is chosen per turn from whether the session has a
-project.
+In a project, the `task` tool lets the model delegate on its own: a broad search or a long
+read is exactly what a subagent keeps out of the session. Outside a project, it waits
+to be asked. The tool's description is the whole rule, and it is chosen per turn from
+whether the session has a project.
 
 ## The hierarchy
 
