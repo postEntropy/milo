@@ -124,10 +124,6 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     log: (line) => console.error(line),
   })
   scheduler.start()
-  // Nobody may be looking at a turn the daemon is running. A turn that stops
-  // producing anything is reported here, and one that stays silent is ended
-  // rather than holding its conversation's lease forever.
-  runtime.watchdog.start()
   const routines = readRoutines().filter((routine) => routine.enabled).length
 
   console.error(`Milo serving: ${gateways.map((gateway) => gateway.id).join(', ')}`)
@@ -154,7 +150,6 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   /** Lets go of everything this run holds. The port is free once it returns. */
   const stop = async (): Promise<void> => {
     scheduler.stop()
-    runtime.watchdog.stop()
     detachJobs()
     for (const gateway of gateways) {
       await gateway.stop().catch(() => undefined)

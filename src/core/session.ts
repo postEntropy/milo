@@ -21,7 +21,6 @@ import { taskDescription } from './tools/task.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent, type RunTrace } from './agent/loop.js'
 import type { TraceWriter } from './traces.js'
-import type { TurnWatchdog } from './watchdog.js'
 import { runSubagent } from './agent/subagent.js'
 import { buildSystemPrompt, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import type { Project, ProjectPlacement } from './projects.js'
@@ -276,12 +275,6 @@ export interface SessionOptions {
    * while the turn is still running rather than only once it is over.
    */
   onSideEffect?: () => void
-  /**
-   * The watch over the turns of this process. The runtime hands every session the
-   * same one: a turn that stops producing anything holds its session's lease, and
-   * only something outside the loop — this — can notice it and end it.
-   */
-  watch?: TurnWatchdog
 }
 
 export interface SendOptions {
@@ -831,12 +824,8 @@ export class Session {
     }
 
     // The turn's one signal, one permission decision and one effort, shared by
-    // the turn and by any subagent it delegates to. It is the caller's stop and
-    // the watchdog's, joined: either one ends the same turn, and the transcript
-    // is answered the same way.
-    const watched = new AbortController()
-    const abort = signal ? AbortSignal.any([signal, watched.signal]) : watched.signal
-    const unwatch = this.options.watch?.watch(this.id, watched)
+    // the turn and by any subagent it delegates to.
+    const abort = signal ?? new AbortController().signal
     // A model that declared it has no reasoning mode is not sent an effort: the
     // field is a guess about a mode it does not have, and some wires refuse it.
     const effort = profile?.reasoning === false
@@ -1006,7 +995,7 @@ export class Session {
         maxSteps,
         maxTokens,
         temperature,
-        signal: abort,
+        signal,
         steering,
         // A step that may have written in the folder, said to the session's owner while
         // the turn is still running: this is what keeps a page drawing that folder from
@@ -1021,10 +1010,6 @@ export class Session {
         genui: draws,
         trace: this.runTrace('chat'),
       })) {
-        // Anything at all is news that the turn is alive: a token, a thought, a
-        // tool starting. Without this the watch cannot tell a slow turn from a
-        // stopped one.
-        this.options.watch?.touch(this.id)
         // Measured once, on the turn's first output of any kind, so a session read
         // back reports the same wait the surface that watched it drew.
         if (
@@ -1111,7 +1096,7 @@ export class Session {
       // A stop is not a failure: reporting `AbortError` to the user turns their
       // own Ctrl+C into a red error line, and the abort is the expected end of
       // a stream the caller cancelled.
-      if (isAbort(error, abort)) {
+      if (isAbort(error, signal)) {
         errored = true
         yield { type: 'aborted' }
       } else {
@@ -1123,8 +1108,6 @@ export class Session {
         yield { type: 'error', message: errorMessage(error) }
       }
     } finally {
-      // The turn is over; whatever this process was watching it for ends here.
-      unwatch?.()
       // The wait belongs to the turn's first message, and it is set before the persist
       // below so a session read back carries the number the live turn drew. Only a wait
       // worth reporting is written — the same under-a-second rule the surfaces draw by —
