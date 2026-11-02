@@ -204,11 +204,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    colour — the app's own background, handed over as a paint. The installed app needs
    nothing either: `apple-mobile-web-app-status-bar-style` in the markup is what makes
    its bar translucent over the page. */
-.sidebar { grid-column: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: linear-gradient(180deg, var(--sidebar-tint), var(--surface-warm) 70%); }
+.sidebar { grid-column: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; background: var(--surface-warm); }
+:root[data-theme='dark'] .sidebar { background: linear-gradient(180deg, var(--sidebar-tint), var(--surface-warm) 70%); }
 .sidebar-chat-nav { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.brand-row { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-8) var(--space-8) var(--space-7); }
+.brand-row { display: flex; align-items: center; gap: var(--space-5); padding: var(--space-9) var(--space-8) var(--space-8); }
 .brand-mark { display: block; width: 30px; height: 30px; flex: none; object-fit: contain; }
-.brand-name { font-size: var(--text-lg); font-weight: 600; letter-spacing: -.01em; line-height: 1.1; }
+.brand-name { font-size: var(--text-lg); font-weight: 650; letter-spacing: -.01em; line-height: 1.1; }
 .sidebar-pad { padding-inline: var(--space-7); }
 /* The page tabs are the sidebar's primary navigation: its largest text, on a row that
    sits between the roomy original and a cramped list — enough air to stay readable
@@ -216,19 +217,20 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-tab { display: flex; align-items: center; gap: var(--space-5); width: 100%; min-height: var(--control-md); margin-top: var(--space-2); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-3) var(--space-5); color: var(--fg-2); font-size: var(--text-md); font-weight: 500; text-align: start; transition: background var(--motion-fast); }
 .sidebar-tab > svg { flex: none; }
 .sidebar-tab:hover { background: var(--surface); }
-.sidebar-tab.active { background: var(--surface); color: var(--fg); }
+.sidebar-tab.active { background: var(--accent-wash); color: var(--accent); }
 /* New mail waiting behind the Email tab: a number, not a control — a filled pill at
    the end of the tab's own row, tinted off the text colour so it reads on the warm
    sidebar and on the lighter fill its tab takes when hovered or active. */
 .sidebar-badge { flex: none; margin-inline-start: auto; border-radius: var(--radius-pill); background: color-mix(in oklab, var(--fg) 9%, var(--surface-warm)); padding: 1px var(--space-4); color: var(--fg); font: var(--text-2xs) var(--font-mono); font-variant-numeric: tabular-nums; animation: fade-in var(--motion-base) var(--ease-standard) backwards; }
-.sidebar-actions { display: flex; align-items: center; gap: var(--space-4); padding: 0 var(--space-7) var(--space-5); }
+.sidebar-actions { display: flex; align-items: center; gap: var(--space-4); padding: 0 var(--space-7) var(--space-7); }
 .sidebar-foot { flex: none; padding: var(--space-4) var(--space-7) var(--space-7); }
 /* The two rows the sidebar is for — the way into a session, and the sessions themselves
    below — take the sidebar's own small step rather than the base UI size: both are one
    line to scan in a column, and at the base size the column read heavier than the
    content it indexes. */
-.new-chat { display: flex; width: auto; flex: 1; min-height: var(--control-md); align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--action-fill); padding: 0 var(--space-7); color: var(--fg); font-size: var(--text-sm); font-weight: 500; box-shadow: var(--shadow-sm); transition: background var(--motion-fast); }
-.new-chat:hover { background: var(--border-soft); }
+/* A neutral solid action anchors the sidebar; orange is reserved for selection. */
+.new-chat { display: flex; width: auto; flex: 1; min-height: var(--control-lg); align-items: center; justify-content: flex-start; gap: var(--space-5); border: 0; border-radius: var(--radius-md); background: var(--fg); padding: 0 var(--space-6); color: var(--surface-raised); font-size: var(--text-sm); font-weight: 500; box-shadow: var(--shadow-sm); transition: background var(--motion-fast); }
+.new-chat:hover { background: var(--fg-2); }
 .new-chat.is-hidden { display: none; }
 /* The Work side's other act: the folder is added from its mark, beside the session that
    asks which project it works in. One row, two different things. */
@@ -247,7 +249,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sidebar-search input:focus { outline: 0; border-color: var(--accent); box-shadow: var(--focus-ring); }
 .sidebar-search-close { position: absolute; inset-inline-end: 6px; display: grid; width: var(--control-sm); height: var(--control-sm); place-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
 .sidebar-search-close:hover { background: var(--border-soft); color: var(--fg); }
-.sidebar-search-toggle { display: grid; width: var(--control-md); height: var(--control-md); flex: none; place-items: center; border: 0; border-radius: var(--radius-md); background: var(--action-fill); color: var(--fg); box-shadow: var(--shadow-sm); transition: background var(--motion-fast), color var(--motion-fast); }
+.sidebar-search-toggle { display: grid; width: var(--control-lg); height: var(--control-lg); flex: none; place-items: center; border: 0; border-radius: var(--radius-md); background: var(--surface); color: var(--muted); transition: background var(--motion-fast), color var(--motion-fast); }
 .sidebar-search-toggle:hover { background: var(--border-soft); }
 /* Open, the field carries its own magnifier and an ×; the icon that opened it stands
    down, so the row never shows the same glyph twice. Last, and so the one rule that
@@ -298,7 +300,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-item:hover, .session-item.menu-open { background: var(--surface); }
 /* The one you are in, lifted off the warm sidebar rather than merely tinted into it:
    white and a hairline shadow say which session the chat belongs to. */
-.session-item.active { background: var(--surface-raised); }
+.session-item.active { background: var(--accent-wash); }
 .session-row { display: flex; align-items: center; gap: var(--space-5); flex: 1; min-width: 0; min-height: var(--control-lg); border: 0; border-radius: var(--radius-md); background: transparent; padding: var(--space-4) var(--space-3) var(--space-4) var(--space-5); color: var(--fg-2); text-align: start; }
 /* The row's focus is the row's, not the button's: the ring wraps the whole card — the
    `⋯` column with it — instead of the half the button inside happens to fill.
@@ -316,7 +318,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .session-title-row { display: flex; align-items: center; gap: var(--space-3); min-width: 0; }
 .session-title-row .session-title { min-width: 0; }
 .session-surface { flex: none; padding: 1px 6px; border-radius: var(--radius-pill); background: color-mix(in oklab, var(--accent) 16%, var(--surface)); color: var(--accent); font-size: var(--text-2xs); font-weight: 550; line-height: 1.4; }
-.session-item.active .session-title { font-weight: 600; }
+.session-item.active .session-title { color: var(--accent); font-weight: 600; }
 /* A session running now, said with the accent the way the accent already points: one
    dot at the row's own edge, no words and no second label. It breathes while it runs,
    and the reduced-motion rule above holds it still. */
@@ -475,16 +477,29 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .chat-view { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .messages { flex: 1; min-height: 0; overflow: auto; padding: var(--space-8) 28px var(--space-6); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
 .thread-inner { width: min(940px, 100%); margin: 0 auto; padding: var(--space-3) 0 var(--space-8); }
-.empty-state { display: flex; min-height: min(70vh, 720px); flex-direction: column; align-items: center; justify-content: center; padding: 42px var(--space-8) 56px; text-align: center; }
-.empty-state h1 { max-width: 16ch; margin: 0; font-family: var(--font-body); font-size: var(--text-display); font-weight: 600; letter-spacing: -.03em; line-height: 1.14; }
-/* A chip wraps its own text rather than widening the row: a title that is one unbroken
-   word — a path, a URL, a session's auto-title — would otherwise push it past the screen
-   on a phone. `min-width: 0` lets it shrink below its content, and `overflow-wrap: anywhere`
-   is what lets the long word break at all. The detail is the tooltip's, not the chip's. */
-.suggestion-grid { display: flex; width: min(640px, 100%); flex-wrap: wrap; justify-content: center; gap: var(--space-4); margin-top: var(--space-10); }
-.suggestion { display: inline-flex; min-width: 0; max-width: 100%; min-height: var(--control-md); align-items: center; gap: var(--space-4); border: 0; border-radius: var(--radius-pill); background: var(--surface); padding: var(--space-3) var(--space-7) var(--space-3) var(--space-6); color: var(--fg-2); font-size: var(--text-sm); font-weight: 500; line-height: 1.35; text-align: start; overflow-wrap: anywhere; transition: background var(--motion-fast), color var(--motion-fast); }
-.suggestion:hover { background: var(--border-soft); color: var(--fg); }
-.suggestion-grid .suggestion > svg { flex: none; color: var(--muted); }
+/* Starting points stay close to the prompt; accent marks the hovered action. */
+.empty-state { position: relative; isolation: isolate; display: flex; min-height: min(70vh, 720px); flex-direction: column; align-items: center; justify-content: center; padding: var(--space-9) var(--space-6); text-align: center; }
+.empty-state h1 { margin: 0; color: var(--fg); font-family: var(--font-body); font-size: var(--text-display); font-weight: 600; letter-spacing: -.035em; line-height: 1.2; }
+.welcome-description { margin: var(--space-5) 0 0; color: var(--muted); font-size: var(--text-md); line-height: 1.6; }
+.suggestion-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); width: min(720px, 100%); gap: var(--space-4); margin-top: var(--space-10); }
+.suggestion { position: relative; display: flex; min-width: 0; flex-direction: column; align-items: flex-start; gap: var(--space-7); border: 0; border-radius: var(--radius-lg); background: var(--surface); padding: var(--space-7); color: var(--fg-2); text-align: start; overflow-wrap: anywhere; transition: background var(--motion-fast), transform var(--motion-fast), box-shadow var(--motion-fast); }
+.suggestion:hover { background: var(--accent-wash); transform: translateY(-4px); box-shadow: var(--shadow-menu); }
+.suggestion:focus-visible { outline: 2px solid var(--fg); outline-offset: 3px; }
+.suggestion-icon { display: grid; flex: none; place-items: center; color: var(--muted); }
+.suggestion:hover .suggestion-icon, .suggestion:focus-visible .suggestion-icon { color: var(--accent); }
+.suggestion-title { display: -webkit-box; overflow: hidden; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; font-size: var(--text-sm); font-weight: 500; line-height: 1.4; }
+.suggestion-arrow { position: absolute; top: var(--space-7); right: var(--space-5); color: var(--muted); opacity: 0; transition: opacity var(--motion-fast); }
+.suggestion:hover .suggestion-arrow, .suggestion:focus-visible .suggestion-arrow { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .suggestion { transition: none; } }
+@media (max-height: 760px) and (min-width: 601px) {
+  .empty-state { min-height: auto; padding-block: var(--space-5); }
+  .suggestion-grid { margin-top: var(--space-8); }
+}
+@media (max-width: 600px) {
+  .empty-state { min-height: auto; padding: var(--space-8) 0 var(--space-6); }
+  .suggestion-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: var(--space-8); }
+  .suggestion { padding: var(--space-6); gap: var(--space-5); }
+}
 .message { display: flex; max-width: 940px; gap: var(--space-7); margin: 0 auto; padding: var(--space-6) 0; content-visibility: auto; contain-intrinsic-size: auto 160px; }
 /* The person's own message is a bubble with its controls beneath it. On a pointer
    they hang out of the flow, in the gap between messages, shown on hover — so the
@@ -688,17 +703,19 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tool-line:hover .tool-copy-btn, .tool-copy-btn:focus-visible { opacity: 1; }
 .tool-copy-btn:hover { background: var(--surface-warm); color: var(--fg); }
 /* The buttons under a turn are always there, each showing only its mark; the word
-   comes out on hover. Pulled up against the answer — the content's own gap leaves
+   appears above it without moving its neighbours. Pulled up against the answer — the content's own gap leaves
    the space, and this trims the rest of it. */
 .message-toolbar { display: flex; align-items: center; gap: 0; margin-top: -4px; }
-.message-tool-btn { display: inline-flex; min-height: var(--control-md); align-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0 var(--space-3); color: var(--muted); font-size: var(--text-xs); transition: background var(--motion-fast), color var(--motion-fast); }
+.message-tool-btn { position: relative; display: inline-flex; min-height: var(--control-md); align-items: center; border: 0; border-radius: var(--radius-sm); background: transparent; padding: 0 var(--space-3); color: var(--muted); font-size: var(--text-xs); transition: background var(--motion-fast), color var(--motion-fast); }
 .message-tool-btn:hover, .message-tool-btn:focus-visible { background: var(--surface-warm); color: var(--fg); }
 .message-tool-btn:disabled { color: var(--muted); cursor: not-allowed; }
 .message-below .message-toolbar { margin-top: 0; }
 .message-below .message-tool-btn { min-height: var(--control-sm); }
 .message-tool-label { font-size: var(--text-2xs); font-weight: 500; }
-.message-tool-btn .message-tool-label { max-width: 0; margin-inline-start: 0; overflow: hidden; opacity: 0; white-space: nowrap; transition: max-width var(--motion-slow) var(--ease-standard), margin-inline-start var(--motion-slow) var(--ease-standard), opacity var(--motion-base); }
-.message-tool-btn:hover .message-tool-label, .message-tool-btn:focus-visible .message-tool-label, .message-tool-btn.failed .message-tool-label { max-width: 160px; margin-inline-start: var(--space-3); opacity: 1; }
+.message-tool-btn .message-tool-label { font-size: var(--text-xs); position: absolute; z-index: 2; bottom: 100%; left: 50%; transform: translateX(-50%); border-radius: var(--radius-sm); background: var(--surface-raised); box-shadow: var(--shadow-menu); padding: var(--space-3) var(--space-5); color: var(--fg); opacity: 0; pointer-events: none; white-space: nowrap; transition: opacity var(--motion-base); }
+.message-tool-btn:hover .message-tool-label, .message-tool-btn:focus-visible .message-tool-label, .message-tool-btn.failed .message-tool-label { opacity: 1; }
+.message-toolbar > .message-tool-btn:first-child .message-tool-label { left: 0; transform: none; }
+.message-below .message-more .message-tool-label { right: 0; left: auto; transform: none; }
 /* A refused copy says so where the control is, and says it whether or not the
    pointer is on the control — the toolbar and the tool line are otherwise
    revealed on hover alone, which would hide the one answer worth reading. */

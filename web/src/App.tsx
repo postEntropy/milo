@@ -1358,7 +1358,7 @@ export default function App() {
           >
             <Icon name={projectMark(project.icon)} size={12} /> <span>{project.name}</span>
           </button>}
-          <h1>{currentSession ? currentSession.label : 'New session'}</h1>
+          {messages.length > 0 && <h1>{currentSession ? currentSession.label : 'New session'}</h1>}
         </>}</div>
         <div className="topbar-actions">
           {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''} ${panelNew ? 'has-new' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelVisible(!panelOpen)}><Icon name="panel-right" size={18} /></button>}

@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom'
 import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { useCopy, type CopyState } from '../lib/clipboard.js'
 import { formatSeconds } from '../../../src/core/sessions/format.ts'
@@ -298,7 +299,8 @@ export function MessageList({
 }) {
   if (messages.length === 0) return (
     <section className="empty-state" aria-labelledby="welcome-title">
-      <h1 id="welcome-title">How can I help today?</h1>
+      <h1 id="welcome-title">What’s on your mind?</h1>
+      <p className="welcome-description">Let’s make something of it.</p>
       {/* Remounted when the ideas take over from the standing four, so the chips
           fade in rather than the set jumping in place. */}
       <div className="suggestion-grid" key={hasIdeas ? 'ideas' : 'standing'}>
@@ -310,8 +312,9 @@ export function MessageList({
             title={item.detail}
             onClick={() => (item.action ? onAction?.(item.action) : onPrompt?.(item.prompt ?? ''))}
           >
-            <Icon name={item.icon} size={16} />
-            <span>{item.title}</span>
+            <span className="suggestion-icon"><Icon name={item.icon} size={20} /></span>
+            <span className="suggestion-title">{item.title}</span>
+            <Icon className="suggestion-arrow" name="chevron" size={16} />
           </button>
         ))}
       </div>
@@ -543,7 +546,6 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
               className="message-tool-btn"
               type="button"
               disabled={busy}
-              title="Ask this again"
               aria-label="Regenerate this answer"
               onClick={() => onRegenerate(regenPrompt, regenUpToTurn ?? 0)}
             >
@@ -561,7 +563,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
         inside it, the way the model's sit under its answer. */}
     {message.role === 'user' && prose && (onEdit || onQuote) && <div className="message-below">
       <div className="message-toolbar">
-        {onEdit && <button className="message-tool-btn" type="button" title="Edit this message" aria-label="Edit this message" onClick={() => onEdit(prose, turn - 1)}>
+        {onEdit && <button className="message-tool-btn" type="button" aria-label="Edit this message" onClick={() => onEdit(prose, turn - 1)}>
           <Icon name="edit" size={15} />
           <span className="message-tool-label">Edit</span>
         </button>}
@@ -651,7 +653,7 @@ function MessageMenu({ at, tokens, thoughtMs, prose, raw, rawNoOutput, onFork, t
   useEffect(() => {
     if (!open) return
     const onDown = (event: MouseEvent): void => {
-      if (!box.current?.contains(event.target as Node)) setOpen(false)
+      if (!box.current?.contains(event.target as Node) && !panel.current?.contains(event.target as Node) && !subPanel.current?.contains(event.target as Node)) setOpen(false)
     }
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') setOpen(false)
@@ -732,14 +734,14 @@ function MessageMenu({ at, tokens, thoughtMs, prose, raw, rawNoOutput, onFork, t
       ref={anchor}
       className={`message-tool-btn${open ? ' open' : ''}`}
       type="button"
-      title="Message actions"
       aria-label="Message actions"
       aria-expanded={open}
       onClick={() => setOpen((value) => !value)}
     >
       <Icon name="dots" size={15} />
+      <span className="message-tool-label">Message actions</span>
     </button>
-    {open && <div
+    {open && createPortal(<div
       ref={panel}
       className={`message-menu${shown ? ' in' : ''}${spot?.up ? ' up' : ''}`}
       role="menu"
@@ -786,7 +788,7 @@ function MessageMenu({ at, tokens, thoughtMs, prose, raw, rawNoOutput, onFork, t
         <span>Copy raw</span>
         <Icon className="menu-more" name="chevron" size={14} />
       </button>}
-      {copyOpen && raw && <div
+      {copyOpen && raw && createPortal(<div
         ref={subPanel}
         className={`message-submenu${subShown ? ' in' : ''}${subSpot?.leftOf ? ' left' : ''}`}
         role="menu"
@@ -801,7 +803,7 @@ function MessageMenu({ at, tokens, thoughtMs, prose, raw, rawNoOutput, onFork, t
           <Icon name={withoutState === 'copied' ? 'check' : 'copy'} size={15} />
           <span>{copyLabelFor(withoutState, 'Without output')}</span>
         </button>}
-      </div>}
+      </div>, document.body)}
       {onQuote && <button
         className="message-menu-action"
         type="button"
@@ -814,7 +816,7 @@ function MessageMenu({ at, tokens, thoughtMs, prose, raw, rawNoOutput, onFork, t
         <Icon name="quote" size={15} />
         <span>Quote this message</span>
       </button>}
-    </div>}
+    </div>, document.body)}
   </span>
 }
 
@@ -825,7 +827,6 @@ function CopyButton({ text }: { text: string }) {
     <button
       className={`message-tool-btn${state === 'failed' ? ' failed' : ''}`}
       type="button"
-      title={copyLabel(state)}
       aria-label={copyLabel(state)}
       onClick={copy}
     >
