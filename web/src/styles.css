@@ -2283,6 +2283,7 @@ textarea.genui-text-input { min-height: 88px; resize: vertical; }
 
 /* User text sits on the accent fill; keep its prose readable, including emphasis and quotes. */
 .message.user .message-prose,
+.message.user .message-prose a,
 .message.user .message-prose strong,
 .message.user .message-prose blockquote { color: #FFE8D3; }
 
