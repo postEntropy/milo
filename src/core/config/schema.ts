@@ -2,8 +2,16 @@ import { z } from 'zod'
 import { REASONING_EFFORTS, DEFAULT_REASONING_EFFORT } from '../providers/types.js'
 import { GoogleAccessSchema } from '../google/tiers.js'
 
-export const WireSchema = z.enum(['openai', 'anthropic', 'auto'])
+export const WireSchema = z.enum(['openai', 'anthropic', 'responses', 'auto'])
 export type WireInput = z.infer<typeof WireSchema>
+
+/**
+ * The sign-in a provider uses instead of an API key. `chatgpt` is the Codex
+ * subscription: the tokens come from the same OAuth app the Codex CLI uses and
+ * are refreshed from `auth.chatgpt`.
+ */
+export const ProviderOAuthSchema = z.enum(['chatgpt'])
+export type ProviderOAuth = z.infer<typeof ProviderOAuthSchema>
 
 export const ProviderEntrySchema = z.object({
   name: z.string().optional(),
@@ -12,6 +20,8 @@ export const ProviderEntrySchema = z.object({
   headers: z.record(z.string(), z.string()).optional(),
   keyless: z.boolean().optional(),
   keyEnv: z.string().optional(),
+  /** A provider reached with a sign-in rather than a pasted key. */
+  oauth: ProviderOAuthSchema.optional(),
 })
 export type ProviderEntry = z.infer<typeof ProviderEntrySchema>
 
@@ -476,6 +486,24 @@ export const ConfigSchema = z.object({
 })
 export type Config = z.infer<typeof ConfigSchema>
 
+/**
+ * A ChatGPT sign-in: the tokens the Codex OAuth app hands out, kept beside the
+ * Google grant because they are the same kind of thing — a grant, not a key.
+ * `accountId` is what the ChatGPT backend wants in `chatgpt-account-id`; the
+ * email and plan are notes for the person, never sent on a request.
+ */
+export const ChatGptAccountSchema = z.object({
+  accessToken: z.string(),
+  refreshToken: z.string(),
+  idToken: z.string().optional(),
+  accountId: z.string(),
+  email: z.string().optional(),
+  planType: z.string().optional(),
+  /** Epoch milliseconds. Absent when the token carried no expiry of its own. */
+  expiresAt: z.number().int().positive().optional(),
+})
+export type ChatGptAccount = z.infer<typeof ChatGptAccountSchema>
+
 export const AuthSchema = z.object({
   providers: z.record(z.string(), z.string()).default({}),
   gateways: z.record(z.string(), z.string()).default({}),
@@ -487,6 +515,12 @@ export const AuthSchema = z.object({
   search: z.record(z.string(), z.string()).catch({}).default({}),
   /** The Google grant, when one has been made: `milo google connect` writes it. */
   google: GoogleAccountSchema.optional(),
+  /**
+   * The ChatGPT sign-in, when one has been made: `milo chatgpt login` writes it.
+   * A damaged grant is dropped rather than failing the file, which would take
+   * every other key with it.
+   */
+  chatgpt: ChatGptAccountSchema.optional().catch(undefined),
 })
 export type Auth = z.infer<typeof AuthSchema>
 

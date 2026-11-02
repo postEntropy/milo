@@ -13,6 +13,7 @@ export type Command =
   | 'routines'
   | 'projects'
   | 'google'
+  | 'chatgpt'
   | 'mcp'
   | 'web'
   | 'spotlight'
@@ -20,11 +21,22 @@ export type Command =
   | 'devices'
   | 'run'
 
+/**
+ * Flags a resource command reads itself. The global parser does not know them,
+ * so they are kept out of the unknown list for the command that owns them
+ * rather than added to every command's vocabulary.
+ */
+const RESOURCE_FLAGS: Record<string, readonly string[]> = {
+  chatgpt: ['--device', '--new'],
+  web: ['--no-open', '--host', '--port'],
+}
+
 /** What the command line asks for, or the message to say instead of running. */
 export function validateArgs(args: Args): string | null {
-  if (args.unknownFlags.length > 0) {
+  const unknown = args.unknownFlags.filter((flag) => !RESOURCE_FLAGS[args.command]?.includes(flag))
+  if (unknown.length > 0) {
     const valid = '--version (-v), --help (-h), --yolo, --no-web, --json, --web-port, --mode, --provider, --model (-m), --resume, --continue (-c), --project, --cwd, --session, --allow'
-    return `Unknown option "${args.unknownFlags[0]}". Valid options: ${valid}.`
+    return `Unknown option "${unknown[0]}". Valid options: ${valid}.`
   }
   if (args.mode && !['ask', 'auto', 'yolo'].includes(args.mode)) {
     return `Invalid --mode "${args.mode}". Use ask, auto or yolo.`
@@ -61,6 +73,7 @@ export function resolveCommand(command: string): Command | null {
     case 'routines':
     case 'projects':
     case 'google':
+    case 'chatgpt':
     case 'mcp':
     case 'web':
     case 'spotlight':

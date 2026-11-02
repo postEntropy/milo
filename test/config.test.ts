@@ -8,11 +8,13 @@ import { stringify } from 'yaml'
 const home = mkdtempSync(path.join(tmpdir(), 'milo-config-'))
 process.env.MILO_HOME = home
 
-const { listProviderModels, readConfig, readDisplay, saveConfig, setDisplay, setPermissionMode } =
+const { listProviders, listProviderModels, readConfig, readDisplay, saveConfig, setDisplay, setPermissionMode } =
   await import('../src/core/config/load.js')
 const { ConfigSchema } = await import('../src/core/config/schema.js')
+const { enableChatGptProvider } = await import('../src/core/chatgpt/auth.js')
 
 const configFile = path.join(home, 'config.yml')
+const authFile = path.join(home, 'auth.json')
 
 const base = {
   provider: 'commandcode',
@@ -35,6 +37,77 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals()
   rmSync(configFile, { force: true })
+  rmSync(authFile, { force: true })
+  delete process.env.CODEX_HOME
+})
+
+describe('ChatGPT provider', () => {
+  it('reads the subscription models from the Codex cache', async () => {
+    const codex = mkdtempSync(path.join(tmpdir(), 'milo-codex-'))
+    process.env.CODEX_HOME = codex
+    writeFileSync(
+      path.join(codex, 'models_cache.json'),
+      JSON.stringify({
+        models: [
+          { slug: 'gpt-6.1-terra', visibility: 'list', supported_in_api: true, context_window: 500_000 },
+          { slug: 'hidden-model', visibility: 'hide', supported_in_api: true, context_window: 1_000 },
+        ],
+      }),
+    )
+
+    const models = await listProviderModels('chatgpt')
+
+    expect(models).toEqual([{ id: 'gpt-6.1-terra', context: 500_000 }])
+    rmSync(codex, { recursive: true, force: true })
+  })
+
+  it('adds its provider entry after a sign-in, keeping the others', () => {
+    enableChatGptProvider()
+
+    const config = readConfig()
+    expect(config?.providers.chatgpt).toMatchObject({
+      name: 'ChatGPT (Codex)',
+      baseURL: 'https://chatgpt.com/backend-api/codex',
+      wire: 'responses',
+      oauth: 'chatgpt',
+    })
+    expect(config?.providers.commandcode).toBeDefined()
+
+    // Idempotent: a second call does not disturb the entry.
+    enableChatGptProvider()
+    expect(readConfig()?.providers.chatgpt).toMatchObject({ oauth: 'chatgpt' })
+  })
+
+  it('is offered only once its grant exists', () => {
+    writeFileSync(
+      configFile,
+      stringify({
+        ...base,
+        providers: {
+          ...base.providers,
+          chatgpt: {
+            baseURL: 'https://chatgpt.com/backend-api/codex',
+            wire: 'responses',
+            oauth: 'chatgpt',
+          },
+        },
+      }),
+    )
+
+    expect(listProviders().map((provider) => provider.id)).not.toContain('chatgpt')
+
+    writeFileSync(
+      authFile,
+      JSON.stringify({
+        providers: {},
+        gateways: {},
+        search: {},
+        chatgpt: { accessToken: 'access', refreshToken: 'refresh', accountId: 'acct_1' },
+      }),
+    )
+
+    expect(listProviders().map((provider) => provider.id)).toContain('chatgpt')
+  })
 })
 
 describe('listProviderModels', () => {

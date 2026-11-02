@@ -35,6 +35,7 @@ Usage:
   milo routines              The prompts Milo runs on a timer (list | add | remove | enable | run)
   milo projects              The folders a session may work in (list | add | rename | move | remove)
   milo google                Connect a Google account, read-only (connect | status | forget)
+  milo chatgpt               Sign in with a ChatGPT (Codex) subscription (login | status | logout)
   milo pair                  Let a phone in: prints a one-time code and the address to give
   milo devices               The devices paired with this Milo (list | revoke)
   milo mcp                   The external tool servers (list | check | enable | disable)
@@ -218,6 +219,11 @@ async function main(): Promise<void> {
     case 'google': {
       const { runGoogle } = await import('./google.js')
       process.exitCode = await runGoogle(process.argv.slice(2))
+      return
+    }
+    case 'chatgpt': {
+      const { runChatGpt } = await import('./chatgpt.js')
+      process.exitCode = await runChatGpt(process.argv.slice(2))
       return
     }
     case 'pair': {

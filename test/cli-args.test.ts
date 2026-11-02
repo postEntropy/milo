@@ -108,6 +108,12 @@ describe('parseArgs', () => {
 })
 
 describe('validateArgs', () => {
+  it('lets a resource command read its own flags', () => {
+    expect(validateArgs(parseArgs(['chatgpt', 'login', '--device']))).toBeNull()
+    expect(validateArgs(parseArgs(['chatgpt', 'login', '--new']))).toBeNull()
+    expect(validateArgs(parseArgs(['chatgpt', 'login', '--banana']))).toContain('Unknown option')
+  })
+
   it('checks the web port, and accepts one in range', () => {
     expect(validateArgs(parseArgs(['serve', '--web-port', '70000']))).toContain('Invalid --web-port')
     expect(validateArgs(parseArgs(['serve', '--web-port', 'nonsense']))).toContain('Invalid --web-port')

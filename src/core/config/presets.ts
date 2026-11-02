@@ -1,10 +1,14 @@
+import type { ProviderOAuth } from './schema.js'
+
 export interface Preset {
   id: string
   name: string
   baseURL: string
-  wire: 'openai' | 'anthropic' | 'auto'
+  wire: 'openai' | 'anthropic' | 'responses' | 'auto'
   keyEnv?: string
   keyless?: boolean
+  /** A sign-in instead of a key: the preset is offered once the grant exists. */
+  oauth?: ProviderOAuth
   models: string[]
   keyURL?: string
 }
@@ -34,7 +38,7 @@ export const PRESETS: Preset[] = [
     keyURL: 'https://opencode.ai/auth',
     // The gateway serves each family on its own endpoint: Claude ids on
     // `/messages` (auto), the rest on `/chat/completions`. Its GPT models live
-    // on `/responses`, which Milo does not speak, so they are left out.
+    // on `/responses`, a wire this preset does not select, so they are left out.
     models: ['claude-sonnet-5', 'deepseek-v4.1-flash', 'glm-5.3-flash', 'kimi-k2.7-code'],
   },
   {
@@ -54,6 +58,26 @@ export const PRESETS: Preset[] = [
     keyEnv: 'OPENAI_API_KEY',
     keyURL: 'https://platform.openai.com/api-keys',
     models: ['gpt-5.4-mini'],
+  },
+  {
+    // The Codex subscription, not the API: the ChatGPT backend speaks the
+    // Responses wire, and the grant comes from `milo chatgpt login` rather than
+    // a key. The model list is what a fresh install knows; with Codex on the
+    // same machine the picker reads its own catalog instead.
+    id: 'chatgpt',
+    name: 'ChatGPT (Codex)',
+    baseURL: 'https://chatgpt.com/backend-api/codex',
+    wire: 'responses',
+    oauth: 'chatgpt',
+    models: [
+      'gpt-6.1-terra',
+      'gpt-6.1-sol',
+      'gpt-6-astra',
+      'gpt-5.6-terra',
+      'gpt-5.6-sol',
+      'gpt-5.6-luna',
+      'gpt-6-luna',
+    ],
   },
   {
     id: 'anthropic',

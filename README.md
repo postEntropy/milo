@@ -17,7 +17,7 @@ GATEWAYS   CLI (Ink)        Web (React)        iOS (SwiftUI)
                └─────────────────┴───────────────────┘
            Telegram (grammY) · Discord (discord.js)   optional bots
 CORE       AgentRuntime → Session → AgentLoop   +  Tools · Memory · Providers · Config · Routines
-PROVIDERS  Command Code Provider API · OpenCode Zen · OpenRouter · OpenAI · Anthropic · Ollama · custom
+PROVIDERS  Command Code Provider API · OpenCode Zen · OpenRouter · OpenAI · ChatGPT (Codex) · Anthropic · Ollama · custom
 ```
 
 The core never knows about Ink, a browser, a phone, Telegram or Discord: it hands each gateway a stream
@@ -113,20 +113,27 @@ changed. The environment is the fallback for an install that stores nothing — 
 | `opencode` | `https://opencode.ai/zen/v1` | auto (Claude → `/messages`, others → `/chat/completions`) |
 | `openrouter` | `https://openrouter.ai/api/v1` | OpenAI |
 | `openai` | `https://api.openai.com/v1` | OpenAI |
+| `chatgpt` | `https://chatgpt.com/backend-api/codex` | Responses (ChatGPT sign-in) |
 | `anthropic` | `https://api.anthropic.com/v1` | Anthropic |
 | `ollama` | `http://localhost:11434/v1` | OpenAI (no key) |
 
 The Command Code Provider API needs a plan above Go (GOAT/Pro/Max/Team or the Provider plan) and uses
 the same API key as the CLI.
 
-`/provider` lists the presets that carry a key and switches the one in use — live, and saved for every
+`chatgpt` is the Codex subscription, not the OpenAI API: there is no key to paste. `milo chatgpt login`
+signs in with the same OAuth app and grant the Codex CLI uses, and writes the same grant to
+`~/.codex/auth.json` so one sign-in serves both tools. A Codex login already on the machine is imported
+first; `--new` starts a fresh one, and `--device` prints a one-time code for a headless machine.
+`/model` then lists the models Codex's own catalog knows, and the provider works on every surface.
+
+`/provider` lists the presets that carry a key or a sign-in and switches the one in use — live, and saved for every
 surface. `/model` does the same for the model: with no argument it lists the current provider's, with one
 it switches. Adding a provider or a key is still `milo setup` → **Provider & model**. On a bot that answers
 more than one person both are **locked**, like `/effort`.
 
 OpenCode Zen serves each family on its own endpoint, so the preset uses the same auto wire: Claude ids
-go to `/messages`, everything else to `/chat/completions`. Its GPT models live on `/responses`, which
-Milo does not speak, so those ids are not offered.
+go to `/messages`, everything else to `/chat/completions`. Its GPT models live on `/responses`, a wire
+this preset does not select, so those ids are not offered.
 
 ## Gateways
 

@@ -3,10 +3,12 @@ import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import { DEFAULT_SEARCH_KEY_ENV } from '../search/types.js'
 import { listModels, normalizeModels, type ModelInfo } from '../providers/models.js'
+import { chatGptModels } from '../chatgpt/models.js'
 import type { ReasoningEffort } from '../providers/types.js'
 import type { PermissionMode } from '../tools/permission.js'
 import { MILO_HOME, authFile, configFile } from './paths.js'
 import { findPreset } from './presets.js'
+import type { ProviderOAuth } from './schema.js'
 import { applyConfig, readDocument, renderDocument } from './document.js'
 import {
   AuthSchema,
@@ -43,8 +45,10 @@ export interface ResolvedProvider {
   name?: string
   baseURL: string
   apiKey?: string | false
-  wire?: 'openai' | 'anthropic' | 'auto'
+  wire?: 'openai' | 'anthropic' | 'responses' | 'auto'
   headers?: Record<string, string>
+  /** A provider reached with a sign-in: the key is absent, and `auth.chatgpt` is the grant. */
+  oauth?: ProviderOAuth
 }
 
 export interface LoadedConfig {
@@ -236,13 +240,19 @@ export function resolveClassifierKey(classifier: ClassifierConfig, auth: Auth): 
 export function resolveProvider(config: Config, auth: Auth, id: string): ResolvedProvider | undefined {
   const entry = config.providers[id]
   if (!entry) return undefined
+  const oauth = entry.oauth ?? findPreset(id)?.oauth
   return {
     id,
     name: entry.name,
     baseURL: entry.baseURL,
     wire: entry.wire,
     headers: entry.headers,
-    apiKey: resolveApiKey(id, entry, auth),
+    // `false` means "needs no pasted key", which is also true of a signed-in
+    // provider: the surface that checks for a missing key must not send a
+    // ChatGPT install back to the key screen. Before the sign-in exists it is
+    // `undefined`, so the terminal opens the model picker and offers the login.
+    apiKey: oauth === 'chatgpt' && !auth.chatgpt ? undefined : oauth ? false : resolveApiKey(id, entry, auth),
+    ...(oauth ? { oauth } : {}),
   }
 }
 
@@ -257,7 +267,13 @@ export function listProviders(): { id: string; name: string }[] {
   if (!config) return []
   const auth = readAuth()
   return Object.entries(config.providers)
-    .filter(([id, entry]) => resolveApiKey(id, entry, auth) !== undefined)
+    .filter(([id, entry]) => {
+      const oauth = entry.oauth ?? findPreset(id)?.oauth
+      // A signed-in provider is available for a different reason than a keyed
+      // one: the grant, not a string, is what makes it usable.
+      if (oauth === 'chatgpt') return Boolean(auth.chatgpt)
+      return resolveApiKey(id, entry, auth) !== undefined
+    })
     .map(([id, entry]) => ({ id, name: entry.name ?? findPreset(id)?.name ?? id }))
 }
 
@@ -272,11 +288,21 @@ export async function listProviderModels(id: string): Promise<ModelInfo[]> {
   const config = readConfig()
   if (!config) throw new Error('Milo is not configured.')
   const entry = config.providers[id]
-  if (!entry) throw new Error(`Provider "${id}" is not configured.`)
+  if (!entry) {
+    // The ChatGPT catalog is local (Codex's cache) and does not depend on the
+    // entry existing, so browsing the preset before saving still shows models.
+    const preset = findPreset(id)
+    if (preset?.oauth === 'chatgpt') return chatGptModels()
+    throw new Error(`Provider "${id}" is not configured.`)
+  }
   const modelUrl = new URL(entry.baseURL)
   if (modelUrl.protocol !== 'https:' && !['localhost', '127.0.0.1', '::1'].includes(modelUrl.hostname)) {
     throw new Error('Model catalog URLs must use HTTPS unless they point to localhost.')
   }
+  const oauth = entry.oauth ?? findPreset(id)?.oauth
+  // The ChatGPT backend serves no `/models`; the catalog is the Codex CLI's own
+  // cache beside it, or the preset's short list when Codex is not installed.
+  if (oauth === 'chatgpt') return chatGptModels()
   const apiKey = resolveApiKey(id, entry, readAuth())
   return listModels({ baseURL: entry.baseURL, wire: entry.wire, headers: entry.headers, apiKey })
     .catch(() => normalizeModels(findPreset(id)?.models ?? []))

@@ -47,6 +47,8 @@ export function outputTokenCap(detail: string): number | undefined {
     /max_tokens[^0-9]*\(current value:\s*\d+\)\s*must be between\s+\d+\s+and\s+(\d+)/i,
     /max_tokens[^0-9]*(?:must be|is)\s+(?:less than or equal to|at most|no more than)\s+(\d+)/i,
     /max_tokens:\s*\d+\s*>\s*(\d+)/i,
+    /max_output_tokens[^0-9]*(?:must be|is)\s+(?:less than or equal to|at most|no more than)\s+(\d+)/i,
+    /max_output_tokens:\s*\d+\s*>\s*(\d+)/i,
     /maximum allowed number of output tokens[^0-9]*(\d+)/i,
   ]
   for (const pattern of patterns) {

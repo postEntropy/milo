@@ -1,8 +1,11 @@
+import { chatGptAccessToken } from '../chatgpt/auth.js'
+import type { ProviderOAuth } from '../config/schema.js'
 import { AnthropicProvider } from './anthropic.js'
 import { OpenAIProvider } from './openai.js'
+import { ResponsesProvider } from './responses.js'
 import type { Provider } from './types.js'
 
-export type Wire = 'openai' | 'anthropic' | 'auto'
+export type Wire = 'openai' | 'anthropic' | 'responses' | 'auto'
 
 export interface ProviderInit {
   id: string
@@ -10,6 +13,8 @@ export interface ProviderInit {
   apiKey?: string | false
   wire?: Wire
   headers?: Record<string, string>
+  /** A sign-in the provider uses instead of a key. */
+  oauth?: ProviderOAuth
 }
 
 /**
@@ -25,8 +30,8 @@ export interface ProviderHooks {
   onOutputCap?: (tokens: number) => void | Promise<void>
 }
 
-export function resolveWire(wire: Wire | undefined, model: string): 'openai' | 'anthropic' {
-  if (wire === 'openai' || wire === 'anthropic') return wire
+export function resolveWire(wire: Wire | undefined, model: string): 'openai' | 'anthropic' | 'responses' {
+  if (wire === 'openai' || wire === 'anthropic' || wire === 'responses') return wire
   return /^claude/i.test(model) ? 'anthropic' : 'openai'
 }
 
@@ -39,6 +44,20 @@ export function createProvider(init: ProviderInit, model: string, hooks?: Provid
       id: init.id,
       baseURL: init.baseURL,
       apiKey,
+      headers: init.headers,
+      onOutputCap: hooks?.onOutputCap,
+    })
+  }
+
+  if (wire === 'responses') {
+    return new ResponsesProvider({
+      id: init.id,
+      baseURL: init.baseURL,
+      apiKey,
+      token:
+        init.oauth === 'chatgpt'
+          ? (force) => chatGptAccessToken({ ...(force ? { force: true } : {}) })
+          : undefined,
       headers: init.headers,
       onOutputCap: hooks?.onOutputCap,
     })

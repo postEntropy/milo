@@ -1,5 +1,6 @@
 import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
 import { BrowserSession } from './browser/index.js'
+import { chatGptModels } from './chatgpt/models.js'
 import { browserProfileDir, embedEngineDir, historyDir, memoryDir, recapsDir, sessionsDir, scratchDir, skillsDir } from './config/paths.js'
 import { readAuth, readConfig, resolveClassifierKey, resolveProvider, resolveSearchKey, type LoadedConfig, type ResolvedProvider } from './config/load.js'
 import { findPreset } from './config/presets.js'
@@ -238,13 +239,15 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
       lookupModelProfile(model, {
         override: loaded.config.models[model],
         fetchProvider: () =>
-          listModels({
-            baseURL: loaded.provider.baseURL,
-            apiKey: loaded.provider.apiKey,
-            wire: loaded.provider.wire,
-            headers: loaded.provider.headers,
-            signal: AbortSignal.timeout(4_000),
-          }),
+          activeProvider.oauth === 'chatgpt'
+            ? Promise.resolve(chatGptModels())
+            : listModels({
+                baseURL: activeProvider.baseURL,
+                apiKey: activeProvider.apiKey,
+                wire: activeProvider.wire,
+                headers: activeProvider.headers,
+                signal: AbortSignal.timeout(4_000),
+              }),
       }),
     reasoningEffort: loaded.config.reasoningEffort,
     cwd,
