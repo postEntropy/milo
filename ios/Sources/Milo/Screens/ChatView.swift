@@ -936,10 +936,10 @@ struct ChatView: View {
         let rows: [MenuRow]
         switch which {
         case .actions:
-            // What belongs to the message being written: the files, and how hard the model
-            // thinks — one set of rows, from `ComposerAttach`, so the panel a project's own
-            // page raises is this one. The model's own line is only in the panel on an
-            // ordinary chat: a work session carries it on the composer's bar.
+            // What belongs to the message being written: the files — one set of rows, from
+            // `ComposerAttach`, so the panel a project's own page raises is this one. The
+            // model's own line is only in the panel on an ordinary chat: a work session
+            // carries it on the composer's bar, and the effort rides with the picker.
             let modelRow: (() -> Void)? = model.sessionProject == nil ? {
                 closeMenu()
                 self.picker = true

@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /**
  The settings the daemon owns. Nothing is kept on the phone: the screen reads the
@@ -125,6 +126,7 @@ struct SettingsView: View {
 private struct ProviderSettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var picker = false
+    @State private var copiedCode = false
 
     var body: some View {
         List {
@@ -134,24 +136,93 @@ private struct ProviderSettingsView: View {
                     // information rather than noise.
                     LabeledContent("Model", value: model.modelName.isEmpty ? "—" : model.modelName)
                 }
-                Picker("Reasoning", selection: effort) {
-                    ForEach(model.efforts, id: \.self) { value in
-                        Text(SettingsWording.of(value)).tag(value)
-                    }
+            }
+            // How hard the model thinks: the same slider the picker carries, so the value
+            // is read and moved in one shape wherever it is set.
+            Section("Reasoning effort") {
+                ReasoningSlider(efforts: model.efforts, value: model.effort) { level in
+                    Task { await model.setEffort(level) }
                 }
+            }
+            Section {
+                if model.chatGpt?.signedIn == true {
+                    LabeledContent("Account", value: model.chatGpt?.email ?? "Signed in")
+                    if let plan = model.chatGpt?.planType, !plan.isEmpty {
+                        // The daemon spells the name; the fallback keeps an older daemon's
+                        // claim readable on the phone.
+                        LabeledContent("Plan", value: model.chatGpt?.planName ?? plan.prefix(1).uppercased() + String(plan.dropFirst()))
+                    }
+                    Button("Sign out", role: .destructive) {
+                        Task { await model.signOutChatGpt() }
+                    }
+                    Text("Choose a ChatGPT model above to use the subscription.")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                } else if let prompt = model.chatGptLogin {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Open the sign-in page and enter this code:")
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                        if let text = prompt.url, let url = URL(string: text) {
+                            Link(text, destination: url)
+                                .font(MiloTheme.Text.body)
+                        }
+                        VStack(spacing: 12) {
+                            Text(prompt.userCode ?? "—")
+                                .font(.system(.title, design: .monospaced).weight(.semibold))
+                                .tracking(2)
+                                .textSelection(.enabled)
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.7)
+                            Button {
+                                guard let code = prompt.userCode else { return }
+                                UIPasteboard.general.string = code
+                                copiedCode = true
+                                Task {
+                                    try? await Task.sleep(for: .seconds(1.5))
+                                    copiedCode = false
+                                }
+                            } label: {
+                                Label(copiedCode ? "Copied" : "Copy code", systemImage: copiedCode ? "checkmark" : "doc.on.doc")
+                                    .font(MiloTheme.Text.small.weight(.semibold))
+                                    .foregroundStyle(MiloTheme.foreground)
+                                    .padding(.horizontal, 14)
+                                    .padding(.vertical, 8)
+                                    .background(Capsule().fill(MiloTheme.surface))
+                            }
+                            .buttonStyle(PressableStyle())
+                            .disabled(prompt.userCode == nil)
+                            .accessibilityLabel(copiedCode ? "Code copied" : "Copy code")
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 16)
+                        .padding(.horizontal, 12)
+                        .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                        HStack(spacing: 8) {
+                            ProgressView().controlSize(.small)
+                            Text("Waiting for sign-in…")
+                                .font(MiloTheme.Text.small)
+                                .foregroundStyle(MiloTheme.muted)
+                        }
+                        Button("Cancel") { model.cancelChatGptSignIn() }
+                            .font(MiloTheme.Text.small)
+                    }
+                } else {
+                    Button("Sign in with ChatGPT") {
+                        Task { await model.signInChatGpt() }
+                    }
+                    Text("Uses the ChatGPT (Codex) subscription instead of an API key.")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+            } header: {
+                Text("ChatGPT")
             }
             SettingsErrorSection()
         }
         .navigationTitle("Provider & model")
         .navigationBarTitleDisplayMode(.inline)
         .sheet(isPresented: $picker) { ModelPickerSheet() }
-    }
-
-    private var effort: Binding<String> {
-        Binding(
-            get: { model.effort },
-            set: { value in Task { await model.setEffort(value) } }
-        )
     }
 }
 
@@ -1155,8 +1226,11 @@ private enum KeyGroup: String, CaseIterable {
     func ids(presets: [SettingsOverview.Preset], auth: SettingsOverview.Auth?) -> [String] {
         switch self {
         case .providers:
-            var ids = presets.map(\.id).filter { !$0.isEmpty && $0 != "groq" }
-            for id in auth.map({ Array($0.providers.keys) }) ?? [] where id != "groq" && !ids.contains(id) {
+            // A signed-in provider has no key to paste, so it is not listed here —
+            // even when an older daemon omits the `oauth` marker.
+            var ids = presets.filter { $0.oauth == nil && $0.id != "chatgpt" }.map(\.id).filter { !$0.isEmpty && $0 != "groq" }
+            let signedIn = Set(presets.filter { $0.oauth != nil || $0.id == "chatgpt" }.map(\.id))
+            for id in auth.map({ Array($0.providers.keys) }) ?? [] where id != "groq" && !signedIn.contains(id) && !ids.contains(id) {
                 ids.append(id)
             }
             return ids
@@ -1237,6 +1311,9 @@ private struct ApiKeysSettingsView: View {
         let open = editing == slot
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 12) {
+                if group == .providers {
+                    ProviderMark(id: id, size: 24)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name(group: group, id: id))
                         .font(MiloTheme.Text.body)
@@ -1245,29 +1322,7 @@ private struct ApiKeysSettingsView: View {
                         .foregroundStyle(MiloTheme.muted)
                 }
                 Spacer()
-                Button(open ? "Cancel" : configured ? "Replace" : "Add key") {
-                    if open {
-                        closeEditor()
-                    } else {
-                        editing = slot
-                        draft = ""
-                        typing = true
-                    }
-                }
-                .font(MiloTheme.Text.small)
-                .buttonStyle(.borderless)
-                if configured && !open {
-                    Button("Remove", role: .destructive) {
-                        busy = true
-                        Task {
-                            await model.removeSecret(group: group.rawValue, id: id)
-                            busy = false
-                        }
-                    }
-                    .font(MiloTheme.Text.small)
-                    .buttonStyle(.borderless)
-                    .disabled(busy)
-                }
+                keyActions(group: group, id: id, configured: configured, open: open)
             }
             if open {
                 SecureField("API key", text: $draft)
@@ -1292,6 +1347,58 @@ private struct ApiKeysSettingsView: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// One control at the row's trailing end, whatever the key's state: add when
+    /// there is nothing, actions when there is, cancel while it is being edited.
+    @ViewBuilder
+    private func keyActions(group: KeyGroup, id: String, configured: Bool, open: Bool) -> some View {
+        if open {
+            MiloIconButton(systemName: "xmark", size: 13, span: 32) {
+                closeEditor()
+            }
+            .accessibilityLabel("Cancel")
+        } else if configured {
+            Menu {
+                menuItem("Replace key", "key") {
+                    beginEditing(group: group, id: id)
+                }
+                Button(role: .destructive) {
+                    removeKey(group: group, id: id)
+                } label: {
+                    Label("Remove key", systemImage: "trash")
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundStyle(MiloTheme.foreground)
+                    .frame(width: 32, height: 32)
+                    .background(Circle().fill(MiloTheme.surface))
+            }
+            .buttonStyle(PressableStyle())
+            .disabled(busy)
+            .opacity(busy ? 0.35 : 1)
+            .accessibilityLabel("Key actions")
+        } else {
+            MiloIconButton(systemName: "plus", size: 13, span: 32, disabled: busy) {
+                beginEditing(group: group, id: id)
+            }
+            .accessibilityLabel("Add key")
+        }
+    }
+
+    private func beginEditing(group: KeyGroup, id: String) {
+        editing = "\(group.rawValue):\(id)"
+        draft = ""
+        typing = true
+    }
+
+    private func removeKey(group: KeyGroup, id: String) {
+        busy = true
+        Task {
+            await model.removeSecret(group: group.rawValue, id: id)
+            busy = false
+        }
     }
 
     private func closeEditor() {

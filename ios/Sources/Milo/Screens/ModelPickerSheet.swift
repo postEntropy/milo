@@ -22,7 +22,8 @@ struct ModelPickerSheet: View {
                             provider = entry.id
                             Task { await model.loadModels(from: entry.id) }
                         } label: {
-                            HStack {
+                            HStack(spacing: MiloTheme.Space.two) {
+                                ProviderMark(id: entry.id, size: 20)
                                 Text(entry.name).foregroundStyle(MiloTheme.foreground)
                                 Spacer()
                                 if entry.id == provider {
@@ -43,7 +44,7 @@ struct ModelPickerSheet: View {
                     ForEach(matches) { entry in
                         Button {
                             Task {
-                                await model.choose(entry.id)
+                                await model.choose(entry.id, from: provider)
                                 dismiss()
                             }
                         } label: {
@@ -82,6 +83,19 @@ struct ModelPickerSheet: View {
             // catalog below and nothing else, and it is the field this surface already has —
             // in the material the platform draws it in.
             .searchable(text: $query, placement: .navigationBarDrawer(displayMode: .always), prompt: "Filter models")
+            // How hard the model thinks, pinned under the catalog: the model and the effort
+            // it runs at are one choice, so the slider stays in reach while the list scrolls
+            // — the browser's own foot on its model panel.
+            .safeAreaInset(edge: .bottom) {
+                if !model.efforts.isEmpty {
+                    ReasoningSlider(efforts: model.efforts, value: model.effort) { level in
+                        Task { await model.setEffort(level) }
+                    }
+                    .padding(.horizontal, MiloTheme.margin)
+                    .padding(.vertical, MiloTheme.Space.four)
+                    .background(.bar)
+                }
+            }
             .navigationTitle("Model")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -93,6 +107,9 @@ struct ModelPickerSheet: View {
         .task {
             await model.openPicker()
             provider = model.providerId
+            // The slider's stops are the settings read's own list, so the picker asks for
+            // them here when the sheet is the first thing opened.
+            if model.efforts.isEmpty { await model.loadSettings() }
         }
     }
 

@@ -242,11 +242,6 @@ struct Composer: View {
         }
         .buttonStyle(PressableStyle())
         .accessibilityLabel("More")
-        // The choices are the settings screen's own read, so this asks for them once when
-        // it does not have them — one reader, two places that show it.
-        .onAppear {
-            if model.efforts.isEmpty { Task { await model.loadSettings() } }
-        }
     }
 
     /// The way to send, or the control a running turn answers to. The same span as the `+`

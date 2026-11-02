@@ -36,7 +36,10 @@ let package = Package(
                 .product(name: "MiloConnection", package: "Connection"),
                 .product(name: "MiloGenUi", package: "GenUi"),
                 .product(name: "MiloHighlight", package: "Highlight"),
-            ]
+            ],
+            // The provider marks are monochrome PNGs drawn from the CC0 Simple
+            // Icons set; SwiftPM carries them in the module's own bundle.
+            resources: [.process("Resources")]
         ),
     ]
 )

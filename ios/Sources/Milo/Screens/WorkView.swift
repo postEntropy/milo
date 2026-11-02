@@ -878,8 +878,9 @@ private struct ProjectDetail: View {
         }
     }
 
-    /// What the `+`'s panel holds here: the files, and how hard it thinks — one set of rows
-    /// on every composer. The model is not among them: this composer carries it on the bar.
+    /// What the `+`'s panel holds here: the files — one set of rows on every composer. The
+    /// model and its effort are not among them: this composer carries the model on the bar,
+    /// and the picker it opens carries the effort.
     private var panelRows: [MenuRow] {
         composerActionRows(
             model: model,

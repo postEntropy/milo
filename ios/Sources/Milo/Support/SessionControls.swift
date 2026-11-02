@@ -13,10 +13,10 @@ struct SessionRow: View {
 
     var body: some View {
         HStack(spacing: MiloTheme.Space.three) {
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
                 HStack(spacing: MiloTheme.Space.two) {
                     Text(session.label)
-                        .font(MiloTheme.Text.base)
+                        .font(MiloTheme.Text.base.weight(current ? .semibold : .regular))
                         .foregroundStyle(MiloTheme.foreground)
                         .lineLimit(1)
                     if session.surface == "spotlight" {
@@ -39,7 +39,7 @@ struct SessionRow: View {
             SessionMark(running: session.running, unread: session.unread)
         }
         .padding(.horizontal, horizontalPadding)
-        .padding(.vertical, MiloTheme.Space.two)
+        .padding(.vertical, MiloTheme.Space.three)
         .background {
             if case .drawer(let current) = style, current {
                 RoundedRectangle(cornerRadius: MiloTheme.Radius.md).fill(MiloTheme.surfaceRaised)
@@ -49,7 +49,13 @@ struct SessionRow: View {
         .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
         .onTapGesture(perform: onOpen)
         .accessibilityAddTraits(.isButton)
+        .accessibilityAddTraits(current ? .isSelected : [])
         .sessionMenu(session, renaming: $renaming)
+    }
+
+    private var current: Bool {
+        if case .drawer(let selected) = style { return selected }
+        return false
     }
 
     private var horizontalPadding: CGFloat {

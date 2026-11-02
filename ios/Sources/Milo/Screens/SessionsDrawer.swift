@@ -76,7 +76,7 @@ struct SessionsDrawer: View {
             // rows. It is glass, as the drawer's floating controls are.
             HStack(spacing: MiloTheme.Space.two) {
                 Text("Milo")
-                    .font(.title.weight(.bold))
+                    .font(MiloTheme.Text.title)
                     .foregroundStyle(MiloTheme.foreground)
                 Spacer(minLength: 0)
                 if canSearch {
@@ -94,7 +94,8 @@ struct SessionsDrawer: View {
                 }
             }
             .padding(.horizontal, MiloTheme.Space.four)
-            .padding(.top, MiloTheme.Space.four)
+            .padding(.top, MiloTheme.Space.six)
+            .padding(.bottom, MiloTheme.Space.two)
 
             // Places, not modes: the routines and the task lists are pages of their own,
             // reached the same way from either world, so they sit above the switch — never
@@ -160,10 +161,7 @@ struct SessionsDrawer: View {
     /// first — a work session works in one, and the menu is where it is chosen, with no
     /// caret to spend the row's room on — and adding the folder, as a mark-only control
     /// because its name is said on the page the press opens.
-    /// New session states what it does in words — a disc with a mark on it would leave the
-    /// mark to be read — and wears the accent as the glass's tint, in the tone the composer
-    /// spends on the way to send; the way into the settings keeps the plain glass of a
-    /// control that only goes somewhere, and the gear says that much on its own.
+    /// New session keeps neutral glass, leaving the accent for selection and send.
     private var controls: some View {
         // One glass surface per control, held in the drawer's container, so switching sides
         // morphs the strip rather than replacing it: the session keeps its capsule and the
@@ -187,12 +185,12 @@ struct SessionsDrawer: View {
                                 Text("New session")
                                     .font(MiloTheme.Text.base)
                             }
-                            .foregroundStyle(MiloTheme.accentOn)
+                            .foregroundStyle(MiloTheme.foreground)
                             .padding(.horizontal, MiloTheme.Space.five)
                             .frame(height: Self.controlSpan)
                             .contentShape(Capsule())
                         }
-                        .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
+                        .glassEffect(.regular.interactive(), in: Capsule())
                         .glassEffectID("new-session", in: footerGlass)
                         .accessibilityLabel("New session in a project")
                     }
@@ -209,17 +207,17 @@ struct SessionsDrawer: View {
                 } else {
                     Button { onNewSession() } label: {
                         HStack(spacing: MiloTheme.Space.two) {
-                            Image(systemName: "square.and.pencil")
+                            Image(systemName: "plus")
                                 .font(.system(size: 16, weight: .semibold))
                             Text("New session")
                                 .font(MiloTheme.Text.base)
                         }
-                        .foregroundStyle(MiloTheme.accentOn)
+                        .foregroundStyle(MiloTheme.foreground)
                         .padding(.horizontal, MiloTheme.Space.five)
                         .frame(height: Self.controlSpan)
                         .contentShape(Capsule())
                     }
-                    .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
+                    .glassEffect(.regular.interactive(), in: Capsule())
                     .glassEffectID("new-session", in: footerGlass)
                 }
 
@@ -250,14 +248,16 @@ struct SessionsDrawer: View {
         Button(action: action) {
             HStack(spacing: MiloTheme.Space.two) {
                 Image(systemName: symbol)
-                    .font(.system(size: 18, weight: .medium))
+                    .font(MiloTheme.Text.body)
+                    .foregroundStyle(selected ? MiloTheme.accent : MiloTheme.muted)
+                    .frame(width: MiloTheme.Space.six)
                 Text(title)
                     .font(MiloTheme.Text.body.weight(.medium))
                     .foregroundStyle(MiloTheme.foreground)
                 Spacer(minLength: MiloTheme.Space.two)
             }
             .padding(.horizontal, MiloTheme.Space.three)
-            .padding(.vertical, MiloTheme.Space.two)
+            .padding(.vertical, MiloTheme.Space.three)
             .background(
                 selected ? MiloTheme.surfaceRaised : Color.clear,
                 in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
@@ -391,9 +391,7 @@ struct SessionsDrawer: View {
         }
         ForEach(groups, id: \.title) { group in
             Text(group.title)
-                .font(MiloTheme.Text.meta.weight(.medium))
-                .textCase(.uppercase)
-                .tracking(0.7)
+                .font(MiloTheme.Text.small.weight(.medium))
                 .foregroundStyle(MiloTheme.muted)
                 .padding(.horizontal, MiloTheme.Space.three)
                 .padding(.top, MiloTheme.Space.three)

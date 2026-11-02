@@ -313,6 +313,30 @@ enum MiloApi {
         _ = try await call("set-effort", ["effort": effort], account: account, as: Ack.self)
     }
 
+    /// Moves the install onto another provider. The daemon resolves it from disk
+    /// and answers with the provider it landed on.
+    static func setProvider(_ account: Account, provider: String) async throws -> String? {
+        struct Switched: Decodable { let provider: String? }
+        let result = try await call("set-provider", ["provider": provider], account: account, as: Switched.self)
+        return result.provider
+    }
+
+    /// Starts a ChatGPT sign-in. The phone always uses the one-time-code flow:
+    /// the loopback callback belongs to the machine running the daemon, which a
+    /// phone may not be.
+    static func chatGptLogin(_ account: Account) async throws -> SettingsOverview.ChatGptLogin {
+        try await call("chatgpt-login", ["mode": "device"], account: account, as: SettingsOverview.ChatGptLogin.self)
+    }
+
+    /// Whether the grant landed yet, for the poll the sign-in screen runs.
+    static func chatGptStatus(_ account: Account) async throws -> SettingsOverview.ChatGpt {
+        try await call("chatgpt-status", account: account, as: SettingsOverview.ChatGpt.self)
+    }
+
+    static func chatGptLogout(_ account: Account) async throws {
+        _ = try await call("chatgpt-logout", account: account, as: Ack.self)
+    }
+
     /**
      A patch, not a whole config: the daemon merges it section by section, so only
      what changed travels and the rest of the file — and its comments — is left
@@ -533,17 +557,43 @@ struct SettingsOverview: Decodable {
         }
     }
 
+    /// The ChatGPT (Codex) grant, as the settings screen reports it. No token
+    /// ever reaches the phone: the daemon holds it, and this is whether one is
+    /// held and who it belongs to.
+    struct ChatGpt: Decodable, Equatable {
+        let signedIn: Bool?
+        let email: String?
+        let planType: String?
+        let planName: String?
+        let expiresAt: Double?
+        let codexLogin: Bool?
+    }
+
+    /// What a started sign-in hands the phone: the device page and its one-time
+    /// code, or — when a Codex login was already there — the account itself.
+    struct ChatGptLogin: Decodable, Equatable {
+        let url: String?
+        let userCode: String?
+        let device: Bool?
+        let signedIn: Bool?
+        let email: String?
+        let planType: String?
+    }
+
     /// A provider the install can be pointed at, with the name its key is listed under.
     struct Preset: Decodable, Identifiable, Hashable {
         let id: String
         let name: String
+        /// The sign-in a preset uses instead of a key: `chatgpt` for the Codex subscription.
+        let oauth: String?
 
-        private enum CodingKeys: String, CodingKey { case id, name }
+        private enum CodingKeys: String, CodingKey { case id, name, oauth }
 
         init(from decoder: Decoder) throws {
             let container = try decoder.container(keyedBy: CodingKeys.self)
             id = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
             name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+            oauth = try container.decodeIfPresent(String.self, forKey: .oauth)
         }
     }
 
@@ -621,7 +671,30 @@ struct SettingsOverview: Decodable {
         let keepSnapshots: Int?
     }
 
+    /// One provider entry as the config file holds it. Headers never reach the
+    /// phone — the daemon strips them — and a save keeps the ones already there.
+    struct ProviderConfig: Decodable {
+        let name: String?
+        let baseURL: String?
+        let wire: String?
+        let keyless: Bool?
+        let keyEnv: String?
+        let oauth: String?
+
+        var patch: [String: Any] {
+            var out: [String: Any] = [:]
+            if let name { out["name"] = name }
+            if let baseURL { out["baseURL"] = baseURL }
+            if let wire { out["wire"] = wire }
+            if let keyless { out["keyless"] = keyless }
+            if let keyEnv { out["keyEnv"] = keyEnv }
+            if let oauth { out["oauth"] = oauth }
+            return out
+        }
+    }
+
     struct Config: Decodable {
+        let providers: [String: ProviderConfig]?
         let reasoningEffort: String?
         let display: Display?
         let permissions: Permissions?
@@ -646,6 +719,7 @@ struct SettingsOverview: Decodable {
     let config: Config?
     let auth: Auth?
     let presets: [Preset]?
+    let chatgpt: ChatGpt?
     let live: Live?
     let skills: [InstalledSkill]?
     let memoryStats: MemoryStats?

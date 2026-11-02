@@ -1426,9 +1426,16 @@ final class AppModel {
         }
     }
 
-    func choose(_ model: String) async {
+    func choose(_ model: String, from provider: String? = nil) async {
         guard let account else { return }
         do {
+            // A model id belongs to the provider that serves it: picking one from
+            // another provider's list moves the install there first.
+            if let provider, !provider.isEmpty, provider != providerId {
+                if let landed = try await MiloApi.setProvider(account, provider: provider) {
+                    providerId = landed
+                }
+            }
             try await MiloApi.setModel(account, model: model)
             modelName = model
         } catch {
@@ -1492,6 +1499,12 @@ final class AppModel {
     // Keys, and the edges of the install
     private(set) var auth: SettingsOverview.Auth?
     private(set) var presets: [SettingsOverview.Preset] = []
+    private(set) var chatGpt: SettingsOverview.ChatGpt?
+    /** The one-time code while a sign-in is waiting, so the screen can draw it. */
+    private(set) var chatGptLogin: SettingsOverview.ChatGptLogin?
+    private var chatGptPoll: Task<Void, Never>?
+    /** The provider entries last read from the daemon, for the one the app adds itself. */
+    private var providerEntries: [String: SettingsOverview.ProviderConfig] = [:]
     private(set) var gateways: [String: GatewaySettings] = [:]
     private(set) var web = WebSettings()
     private(set) var transcript = SessionsSettings()
@@ -1557,6 +1570,8 @@ final class AppModel {
 
             auth = overview.auth
             presets = overview.presets ?? []
+            chatGpt = overview.chatgpt
+            providerEntries = overview.config?.providers ?? [:]
 
             // Only the channels the screen offers, so a name the daemon does not carry
             // reads as off rather than as a row that vanished.
@@ -1668,6 +1683,99 @@ final class AppModel {
     func removeSecret(group: String, id: String) async {
         guard await write({ try await MiloApi.removeSecret($0, group: group, id: id) }) else { return }
         await loadSettings()
+    }
+
+    // MARK: - ChatGPT sign-in
+
+    /**
+     Starts the one-time-code sign-in. The daemon asks OpenAI for a code, the
+     phone shows it, and a poll waits for the grant to land — the browser flow's
+     loopback callback is on the daemon's machine, not necessarily this phone's.
+     */
+    func signInChatGpt() async {
+        guard let account else { return }
+        settingsError = nil
+        chatGptLogin = nil
+        do {
+            let answer = try await MiloApi.chatGptLogin(account)
+            if answer.signedIn == true {
+                await loadSettings()
+                await enableChatGptProvider()
+                providers = []
+                return
+            }
+            chatGptLogin = answer
+            pollChatGpt(account)
+        } catch {
+            settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    func cancelChatGptSignIn() {
+        chatGptPoll?.cancel()
+        chatGptPoll = nil
+        chatGptLogin = nil
+    }
+
+    func signOutChatGpt() async {
+        cancelChatGptSignIn()
+        guard await write({ try await MiloApi.chatGptLogout($0) }) else { return }
+        providers = []
+        await loadSettings()
+    }
+
+    /**
+     Writes the `chatgpt` provider entry into the config, keeping every entry
+     already there. The daemon's own status read does this too on a current
+     build; doing it here is what lets a phone whose daemon predates that change
+     use the grant without waiting for a restart.
+     */
+    private func enableChatGptProvider() async {
+        guard let account, !providerEntries.isEmpty, providerEntries["chatgpt"] == nil else { return }
+        var entries = providerEntries
+        entries["chatgpt"] = SettingsOverview.ProviderConfig(
+            name: "ChatGPT (Codex)",
+            baseURL: "https://chatgpt.com/backend-api/codex",
+            wire: "responses",
+            keyless: nil,
+            keyEnv: nil,
+            oauth: "chatgpt"
+        )
+        do {
+            try await MiloApi.saveConfig(account, ["providers": entries.mapValues(\.patch)])
+            providerEntries = entries
+        } catch {
+            settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    private func pollChatGpt(_ account: Account) {
+        chatGptPoll?.cancel()
+        chatGptPoll = Task { [weak self] in
+            guard let self else { return }
+            // Fifteen minutes, the life of the code, read every two seconds.
+            for _ in 0..<450 {
+                try? await Task.sleep(for: .seconds(2))
+                if Task.isCancelled { return }
+                do {
+                    let status = try await MiloApi.chatGptStatus(account)
+                    self.chatGpt = status
+                    if status.signedIn == true {
+                        self.chatGptLogin = nil
+                        // A daemon that predates the auto-add does not write the
+                        // provider entry; this install writes it here instead, so
+                        // the next picker opens with ChatGPT in the list.
+                        await self.enableChatGptProvider()
+                        self.providers = []
+                        return
+                    }
+                } catch {
+                    // A status read that fails is not the sign-in failing.
+                }
+            }
+            self.chatGptLogin = nil
+            self.settingsError = "The ChatGPT sign-in timed out. Try again."
+        }
     }
 
     @discardableResult

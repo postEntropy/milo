@@ -19,9 +19,8 @@ func composerActionRows(
     modelRow: (() -> Void)?,
     ask: @escaping (AttachKind) -> Void
 ) -> [MenuRow] {
-    // The files, and how hard the model thinks: what belongs to the message is what is
-    // being written. Each line carries the mark of what it does, the way every other line
-    // of a panel does.
+    // The files belong to the message being written. Each line carries the mark of what it
+    // does, the way every other line of a panel does.
     let attach = [
         MenuRow(title: "Photo", symbol: "photo") { ask(.photo) },
         MenuRow(title: "File", symbol: "doc") { ask(.file) },
@@ -34,27 +33,7 @@ func composerActionRows(
             action: action
         )]
     } ?? []
-    let rows = attach + picker
-    // The bulb is the browser's own mark for this control, off its reasoning pill; the
-    // levels live inside it as a submenu, so the root panel names what is being chosen and
-    // a press unfolds the levels in place.
-    guard !model.efforts.isEmpty else { return rows }
-    return rows + [
-        MenuRow(
-            title: "Reasoning effort",
-            symbol: "lightbulb",
-            children: model.efforts.map { value in
-                MenuRow(
-                    title: SettingsWording.of(value),
-                    chosen: value == model.effort
-                ) {
-                    // The panel stays open: choosing how hard to think is not leaving, and
-                    // the tick has to be seen moving onto what was chosen.
-                    Task { await model.setEffort(value) }
-                }
-            }
-        ),
-    ]
+    return attach + picker
 }
 
 extension View {
