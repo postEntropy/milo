@@ -1,14 +1,9 @@
 #!/usr/bin/env node
-import { spawn } from 'node:child_process'
 import { randomBytes, randomUUID } from 'node:crypto'
-import { closeSync, existsSync, mkdirSync, openSync } from 'node:fs'
-import path from 'node:path'
 import process from 'node:process'
 import { createInterface } from 'node:readline'
-import { fileURLToPath } from 'node:url'
 import { WebSocket } from 'undici'
 import { loadConfig, readAuth, resolveGatewayToken, saveAuth } from '../core/config/load.js'
-import { MILO_HOME } from '../core/config/paths.js'
 import type { ClientFrame, ServerFrame } from '../gateways/web/protocol.js'
 import { PROTOCOL_VERSION } from '../gateways/web/protocol.js'
 import { appUrl, hostForUrl } from '../gateways/web/spotlight.js'
@@ -27,6 +22,7 @@ type Command =
 type Report =
   | { type: 'status'; text: string }
   | { type: 'ready' }
+  | { type: 'offline' }
   | { type: 'text'; delta: string }
   | { type: 'tool'; text: string; state: 'running' | 'done' | 'failed' }
   | { type: 'permission'; id: string; tool: string; summary: string; expiresAt: number }
@@ -40,7 +36,6 @@ type Probe = 'ok' | 'refused' | 'down'
 
 const PROBE_TIMEOUT_MS = 1200
 const RETRY_MS = 1500
-const START_INTERVAL_MS = 150
 
 /**
  * `milo spotlight` — the process behind the desktop popup.
@@ -71,7 +66,6 @@ class SpotlightBridge {
   private queued: string | null = null
   private restartPending = false
   private retry: ReturnType<typeof setTimeout> | null = null
-  private spawnTried = false
   private stopped = false
   /** Complaints already said, so a retrying loop does not repeat itself. */
   private readonly complained = new Set<string>()
@@ -84,10 +78,11 @@ class SpotlightBridge {
     this.wsUrl = `ws://${hostForUrl(host)}:${port}/ws?t=${encodeURIComponent(token)}`
   }
 
-  async start(): Promise<void> {
-    await this.ensureServer()
-    this.reset()
+  start(): void {
+    // Commands are read first: a closed stdin is noticed even while no daemon is there,
+    // so the helper is never left waiting for nobody.
     this.readCommands()
+    this.reset()
   }
 
   private report(message: Report): void {
@@ -119,42 +114,24 @@ class SpotlightBridge {
   }
 
   /**
-   * The popup is worth nothing without a daemon behind it, so a missing one is
-   * started and the reason said out loud. A source tree has no built entry to
-   * start, and that is said too rather than left to a silent window.
+   * Whether a daemon is there to talk to. The popup never starts one: `milo serve` is the
+   * person's to start, and this only watches for it. A missing daemon is said as `offline`
+   * and tried again, so one started later is picked up without the popup being reopened.
    */
-  private async ensureServer(): Promise<void> {
-    for (;;) {
-      const state = await this.probe()
-      if (state === 'ok') return
-      if (state === 'refused') {
-        this.complain(`Something on port ${this.port} serves Milo with another token. Restart \`milo serve\` so it reads ~/.milo/auth.json.`)
-      } else if (!this.spawnTried) {
-        this.spawnTried = true
-        this.report({ type: 'status', text: 'Starting Milo…' })
-        this.spawnServer()
-      }
-      await new Promise((resolve) => setTimeout(resolve, START_INTERVAL_MS))
-    }
-  }
-
-  private spawnServer(): void {
-    // The web entry rather than `milo web`: that subcommand would read the bare
-    // word "web" as an option from the argv the dispatcher hands it.
-    const entry = findUp(path.join('dist', 'bin', 'web.js'))
-    if (!entry) {
-      this.complain('Milo has no built entry to start. Run `npm run build`, or start `milo serve`.')
+  private async reconnect(): Promise<void> {
+    const generation = this.generation
+    const state = await this.probe()
+    if (this.stopped || generation !== this.generation) return // a reset or close overtook the probe
+    if (state === 'ok') {
+      this.connect()
       return
     }
-    mkdirSync(MILO_HOME, { recursive: true })
-    const log = openSync(path.join(MILO_HOME, 'web.log'), 'a')
-    const child = spawn(
-      process.execPath,
-      [entry, '--no-open', '--host', this.host, '--port', String(this.port)],
-      { detached: true, stdio: ['ignore', log, log] },
-    )
-    child.unref()
-    closeSync(log)
+    if (state === 'refused') {
+      this.complain(`Something on port ${this.port} serves Milo with another token. Restart \`milo serve\` so it reads ~/.milo/auth.json.`)
+    } else {
+      this.report({ type: 'offline' })
+    }
+    this.scheduleRetry()
   }
 
   /**
@@ -175,7 +152,8 @@ class SpotlightBridge {
     this.socket = null
     this.sessionId = ''
     this.chatId = randomUUID()
-    this.connect()
+    this.generation += 1
+    void this.reconnect()
   }
 
   private connect(): void {
@@ -212,7 +190,7 @@ class SpotlightBridge {
     this.connected = false
     this.retry = setTimeout(() => {
       this.retry = null
-      if (!this.stopped) this.connect()
+      if (!this.stopped) void this.reconnect()
     }, RETRY_MS)
   }
 
@@ -269,7 +247,6 @@ class SpotlightBridge {
 
   private ask(text: string): void {
     const trimmed = text.trim()
-    process.stderr.write(`[debug] ask ${trimmed} connected=${this.connected} state=${this.socket?.readyState}\n`)
     if (!trimmed) return
     if (!this.connected) {
       this.queued = trimmed
@@ -364,25 +341,12 @@ function ensureToken(): string {
   return token
 }
 
-/** Walks up from this module to the tree that holds a file, whatever the bundle's shape. */
-function findUp(relative: string): string | null {
-  let dir = fileURLToPath(new URL('.', import.meta.url))
-  for (let depth = 0; depth < 8; depth += 1) {
-    const candidate = path.join(dir, relative)
-    if (existsSync(candidate)) return candidate
-    const parent = path.dirname(dir)
-    if (parent === dir) break
-    dir = parent
-  }
-  return null
-}
-
 export async function runSpotlight(argv = process.argv.slice(2)): Promise<void> {
   for (const arg of argv[0] === 'spotlight' ? argv.slice(1) : argv) {
     if (arg === '--help' || arg === '-h') {
       console.log('Usage: milo spotlight')
       console.log('Speaks the desktop popup\'s line protocol on stdin and stdout. The Omarchy shell plugin starts it;')
-      console.log('it starts the web server when none is running. Nothing here is meant to be typed by hand.')
+      console.log('it never starts the web server: it says so while none is running and connects once `milo serve` is up. Nothing here is meant to be typed by hand.')
       return
     }
     throw new Error(`Unknown option: ${arg}. Usage: milo spotlight`)
@@ -393,5 +357,5 @@ export async function runSpotlight(argv = process.argv.slice(2)): Promise<void> 
   if (!Number.isInteger(port) || port < 0 || port > 65535) {
     throw new Error(`The web port in ~/.milo/config.yml is not one: ${String(port)}.`)
   }
-  await new SpotlightBridge(host, port, ensureToken()).start()
+  new SpotlightBridge(host, port, ensureToken()).start()
 }

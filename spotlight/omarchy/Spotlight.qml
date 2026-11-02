@@ -60,11 +60,15 @@ Item {
   property string status: "Ready"
   property bool busy: false
   property bool connected: false
+  /** No daemon is there: the popup says so and keeps a question in its field rather than losing it. */
+  property bool offline: false
   property int miloAt: -1
   property string permissionId: ""
   property string permissionTool: ""
   property string permissionSummary: ""
   property int restartDelay: 1000
+
+  readonly property string offlineText: "Milo is not running. Start it with milo serve."
 
   readonly property bool awaitingPermission: permissionId !== ""
   readonly property string line: step !== "" ? step : status
@@ -81,7 +85,7 @@ Item {
     query = ""
     prompt.text = ""
     step = ""
-    status = "Ready"
+    status = offline ? offlineText : "Ready"
     busy = false
     clearPermission()
     send({ type: "new" })
@@ -139,9 +143,16 @@ Item {
     restartDelay = 1000
     if (message.type === "status") {
       status = message.text
+    } else if (message.type === "offline") {
+      offline = true
+      connected = false
+      busy = false
+      step = ""
+      status = offlineText
     } else if (message.type === "ready") {
       connected = true
-      if (status === "Starting Milo…" || status === "") status = "Ready"
+      if (offline || status === "") status = "Ready"
+      offline = false
     } else if (message.type === "text") {
       appendToAnswer(String(message.delta))
     } else if (message.type === "tool") {
@@ -193,7 +204,7 @@ Item {
 
   function ask() {
     const text = query.trim()
-    if (text === "" || busy) return
+    if (text === "" || busy || offline) return
     thread.append({ role: "you", text: text })
     thread.append({ role: "milo", text: "" })
     miloAt = thread.count - 1

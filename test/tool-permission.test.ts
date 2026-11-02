@@ -79,6 +79,7 @@ describe('tool permission gating', () => {
       recall: true,
       sessions: false,
       search_history: true,
+      read_x_post: true,
       routine: false,
       send_file: false,
       panel: false,

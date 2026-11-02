@@ -165,6 +165,9 @@ export default function App() {
   /** The background jobs still running, for the strip above the composer. */
   const [jobs, setJobs] = useState<JobView[]>([])
   const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem('milo-panel') === 'open')
+  /** A tab opened while the panel was folded away, for the dot on its toggle. */
+  const [panelNew, setPanelNew] = useState(false)
+  const panelTabCount = useRef(0)
   const [theme, setTheme] = useState(() => localStorage.getItem('milo-theme') ?? 'system')
   const [notice, setNotice] = useState<Notice | null>(null)
   useAutoDismiss(notice, setNotice)
@@ -1096,6 +1099,14 @@ export default function App() {
   const closeTab = useCallback((key: string): void => {
     try { socket.send({ type: 'panel-close', key }) } catch (error) { fail(error) }
   }, [socket, fail])
+  useEffect(() => {
+    const count = panel?.tabs.length ?? 0
+    if (count > panelTabCount.current && !panelOpen) setPanelNew(true)
+    panelTabCount.current = count
+  }, [panel, panelOpen])
+  useEffect(() => {
+    if (panelOpen) setPanelNew(false)
+  }, [panelOpen])
 
   /**
    * Folding or unfolding the panel, and remembering it: the one thing about the
@@ -1286,7 +1297,7 @@ export default function App() {
           {/* The two halves of the list: the sessions that work in Milo's own folder, and
               the ones that work in a project. The switch says whose list this is, and Work
               is no longer a fourth page beside Routines — it is the other half of this one. */}
-          <fieldset className="session-mode">
+          <fieldset className="session-mode" data-mode={mode}>
             <legend className="sr-only">Session lists</legend>
             <button className={mode === 'chat' ? 'on' : ''} type="button" aria-pressed={mode === 'chat'} onClick={() => switchTo('chat')}>Chat</button>
             <button className={mode === 'work' ? 'on' : ''} type="button" aria-pressed={mode === 'work'} onClick={() => switchTo('work')}>Work</button>
@@ -1350,7 +1361,7 @@ export default function App() {
           <h1>{currentSession ? currentSession.label : 'New session'}</h1>
         </>}</div>
         <div className="topbar-actions">
-          {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelVisible(!panelOpen)}><Icon name="panel-right" size={18} /></button>}
+          {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''} ${panelNew ? 'has-new' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelVisible(!panelOpen)}><Icon name="panel-right" size={18} /></button>}
           {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newSessionHere()}><Icon name="plus" size={18} /></button>}
           {view === 'chat' && <ConnectionChip state={connection.state} reason={connection.reason} />}
         </div>

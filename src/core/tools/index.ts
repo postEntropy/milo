@@ -20,6 +20,7 @@ import { createJobTools } from './jobs.js'
 import { grepTool } from './grep.js'
 import { listDirTool } from './list-dir.js'
 import { readFileTool } from './read-file.js'
+import { readXPostTool } from './read-x-post.js'
 import { recallTool } from './recall.js'
 import { rememberTool } from './remember.js'
 import { memoriesTool } from './memories.js'
@@ -80,6 +81,7 @@ export const builtinTools = [
   globTool,
   grepTool,
   fetchUrlTool,
+  readXPostTool,
   gitTool,
   gitCommitTool,
   writeFileTool,

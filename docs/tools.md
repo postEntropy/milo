@@ -10,6 +10,7 @@
 | `task_lists` | — | Named task lists kept across every session and surface; only touches Milo's own state, so it never asks. |
 | `git` | yes | Read a repository: `status`, `diff`, `log`, `show` and `blame`. |
 | `git_commit` | no | Stage files (or every tracked change) and commit them; asks for confirmation. |
+| `read_x_post` | yes | Reads a public X post by URL through the free, unofficial FxTwitter service. |
 | `fetch_url` | yes | One public http(s) URL, served back as text; local and private addresses are refused. Long pages come back in pages. |
 | `write_file` | no | Creates or replaces a file; asks for confirmation. |
 | `edit_file` | no | Exact string replacement; asks for confirmation. |

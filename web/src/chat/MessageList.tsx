@@ -491,7 +491,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
     )}
     {message.attachments && message.attachments.length > 0 && <Attachments items={message.attachments} />}
   </>
-  return <article className={`message ${message.role}${message.loaded ? ' is-loaded' : ''}`}>
+  return <article className={`message ${message.role}${message.loaded ? ' is-loaded' : ''}${running && message.waitingSince === undefined ? ' is-streaming' : ''}`}>
     <div className="message-content">
       {message.routine ? <RoutineCard routine={message.routine}>{body}</RoutineCard> : body}
       {message.actions && message.actions.length > 0 && (

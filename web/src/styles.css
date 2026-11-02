@@ -261,12 +261,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
    not a page beside Routines any more, it is the other half of this list, so the control
    that picks it belongs to the list and says whose it is. Filled like every control:
    a track, and the half in front raised inside it. */
-.session-mode { display: flex; gap: var(--space-1); min-width: 0; margin: var(--space-4) var(--space-7) var(--space-2); border: 0; border-radius: var(--radius-pill); background: var(--track); padding: var(--space-2); }
-.session-mode button { flex: 1; min-height: var(--control-sm); border: 0; border-radius: var(--radius-pill); background: transparent; padding: 0 var(--space-5); color: var(--muted); font-size: var(--text-sm); font-weight: 600; transition: background var(--motion-fast), color var(--motion-fast); }
+.session-mode { position: relative; display: flex; gap: var(--space-1); min-width: 0; margin: var(--space-4) var(--space-7) var(--space-2); border: 0; border-radius: var(--radius-pill); background: var(--track); padding: var(--space-2); }
+.session-mode button { position: relative; z-index: 1; flex: 1; min-height: var(--control-sm); border: 0; border-radius: var(--radius-pill); background: transparent; padding: 0 var(--space-5); color: var(--muted); font-size: var(--text-sm); font-weight: 600; transition: background var(--motion-fast), color var(--motion-fast); }
 .session-mode button:hover { color: var(--fg); }
 /* The chosen half is lifted off the track, not merely tinted into it: the track is what
    gives the half in front something to stand off, and the shadow is what lifts it. */
-.session-mode button.on { background: var(--action-fill); color: var(--fg); box-shadow: var(--shadow-sm); }
+.session-mode button.on { color: var(--fg); }
+/* The raised half is one pill that slides between the two, so the choice moves instead of
+   swapping. Two halves and a one-step gap: the pill is half the inner width, minus the gap. */
+.session-mode::before { content: ''; position: absolute; inset-block: var(--space-2); inset-inline-start: var(--space-2); width: calc((100% - 2 * var(--space-2) - var(--space-1)) / 2); border-radius: var(--radius-pill); background: var(--action-fill); box-shadow: var(--shadow-sm); transition: transform var(--motion-base) var(--ease-standard); }
+.session-mode[data-mode='work']::before { transform: translateX(calc(100% + var(--space-1))); }
+.session-mode[data-mode='work']:dir(rtl)::before { transform: translateX(calc(-100% - var(--space-1))); }
 /* The Work side: a project's own name over the sessions it holds. The heading is a
    control that opens the project's page — a heading, not a card, because the list is
    one column and the mark already says which folder the rows work in. */
@@ -289,7 +294,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .history-hit:hover { background: var(--surface); }
 .history-hit-text { display: -webkit-box; overflow: hidden; color: var(--fg-2); font-size: var(--text-xs); line-height: 1.45; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; }
 .history-hit-where { color: var(--muted); font: var(--text-2xs) var(--font-mono); }
-.session-item { position: relative; display: flex; align-items: center; width: 100%; margin: var(--space-1) 0; border-radius: var(--radius-md); background: transparent; transition: background var(--motion-fast) var(--ease-standard); }
+.session-item { animation: fade-in var(--motion-base) var(--ease-standard) backwards; position: relative; display: flex; align-items: center; width: 100%; margin: var(--space-1) 0; border-radius: var(--radius-md); background: transparent; transition: background var(--motion-fast) var(--ease-standard); }
 .session-item:hover, .session-item.menu-open { background: var(--surface); }
 /* The one you are in, lifted off the warm sidebar rather than merely tinted into it:
    white and a hairline shadow say which session the chat belongs to. */
@@ -499,7 +504,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-prose strong { color: var(--fg); font-weight: 600; }
 .message-prose code, .message-prose pre { font-family: var(--font-mono); }
 .message-prose code { border: 1px solid var(--border-soft); border-radius: var(--radius-xs); background: var(--surface-warm); padding: 1px var(--space-3); font-size: .86em; }
-.message-prose pre { overflow: auto; margin: var(--space-6) 0; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--surface-warm); padding: var(--space-6) var(--space-7); font-size: var(--text-sm); line-height: 1.6; }
+.message-prose pre { position: relative; overflow: auto; margin: var(--space-6) 0; border: 1px solid var(--border-soft); border-radius: var(--radius-lg); background: var(--surface-warm); padding: var(--space-6) var(--space-7); font-size: var(--text-sm); line-height: 1.6; }
+.code-copy-btn { position: absolute; top: var(--space-4); right: var(--space-4); display: inline-flex; align-items: center; justify-content: center; gap: var(--space-3); min-width: var(--control-sm); height: var(--control-sm); border: 0; border-radius: var(--radius-xs); background: var(--surface); padding: 0 var(--space-3); color: var(--muted); }
+.code-copy-btn:hover { background: var(--border-soft); color: var(--fg); }
+.code-copy-btn.failed { color: var(--danger); }
 .message-prose pre code { border: 0; background: none; padding: 0; }
 /* Syntax colouring, from the roles `src/core/highlight.ts` reads out of a block: one class per
    role, worn wherever code is drawn — a fenced block in a reply, a project's file, the lines of
@@ -907,7 +915,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 }
 .send-button { display: grid; width: var(--control-md); height: var(--control-md); flex: none; place-items: center; border: 0; border-radius: 50%; background: var(--accent); color: var(--accent-on); box-shadow: 0 2px 10px color-mix(in oklab, var(--accent) 26%, transparent); transition: background var(--motion-fast), box-shadow var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .send-button:hover:not(:disabled) { background: var(--accent-hover); transform: translateY(-1px); }
-.send-button:active:not(:disabled) { transform: none; }
+.send-button:active:not(:disabled) { transform: scale(.94); }
 .send-button:disabled { cursor: not-allowed; background: var(--surface-warm); color: var(--muted); box-shadow: none; }
 .send-button.stop { border: 0; background: var(--surface-warm); color: var(--fg); box-shadow: none; }
 .send-button.stop:hover:not(:disabled) { background: var(--border-soft); transform: none; }
@@ -2277,3 +2285,11 @@ textarea.genui-text-input { min-height: 88px; resize: vertical; }
 .message.user .message-prose,
 .message.user .message-prose strong,
 .message.user .message-prose blockquote { color: #FFE8D3; }
+
+/* A turn still being written: one soft dot under the text that has arrived, the same
+   pulse the running session wears, gone the moment the turn ends. */
+.message.assistant.is-streaming .message-content::after { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: session-running 1.8s var(--ease-standard) infinite; }
+
+/* Something new opened in the panel while it was folded away: one dot on its toggle, once. */
+.panel-toggle { position: relative; }
+.panel-toggle.has-new::after { content: ''; position: absolute; inset-block-start: var(--space-3); inset-inline-end: var(--space-3); width: 7px; height: 7px; border-radius: 50%; background: var(--accent); animation: fade-in var(--motion-base) var(--ease-standard) backwards; }

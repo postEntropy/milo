@@ -1,6 +1,9 @@
 import DOMPurify from 'dompurify'
 import { marked, type Tokens } from 'marked'
-import { memo, useMemo } from 'react'
+import { memo, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
+import { useCopy } from '../lib/clipboard.js'
+import { Icon } from '../ui/Icons.js'
 import { codeHtml } from '../ui/Code.js'
 
 marked.setOptions({ breaks: true, gfm: true })
@@ -69,6 +72,24 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
     // the block carries its own padding — drop it instead of painting the gap.
     return clean.replace(/<pre><code[^>]*>\s*<\/code><\/pre>/g, '')
   }, [text])
-  // biome-ignore lint/security/noDangerouslySetInnerHtml: the HTML is produced by marked and sanitized with DOMPurify above, which strips scripts, event handlers and unsafe URLs.
-  return <div className="message-prose" dangerouslySetInnerHTML={{ __html: html }} />
+  const container = useRef<HTMLDivElement>(null)
+  const [blocks, setBlocks] = useState<HTMLElement[]>([])
+  useEffect(() => {
+    setBlocks(Array.from(container.current?.querySelectorAll<HTMLElement>('pre') ?? []))
+  }, [html])
+
+  return <>
+    {/* biome-ignore lint/security/noDangerouslySetInnerHtml: the HTML is produced by marked and sanitized with DOMPurify above. */}
+    <div ref={container} className="message-prose" dangerouslySetInnerHTML={{ __html: html }} />
+    {blocks.map((block, index) => createPortal(<CodeCopy code={block.querySelector('code')?.textContent ?? ''} />, block, index))}
+  </>
 })
+
+function CodeCopy({ code }: { code: string }) {
+  const { state, copy } = useCopy(code)
+  const label = state === 'copied' ? 'Copied' : state === 'failed' ? 'Copy failed — select the code and copy it by hand' : 'Copy code'
+  return <button className={`code-copy-btn${state === 'failed' ? ' failed' : ''}`} type="button" title={label} aria-label={label} onClick={copy}>
+    <Icon name={state === 'copied' ? 'check' : 'copy'} size={15} />
+    {state === 'failed' && <span>Copy failed</span>}
+  </button>
+}
