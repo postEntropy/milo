@@ -33,12 +33,18 @@ class CapturingProvider implements Provider {
   lastMaxTokens?: number
   lastEffort?: ReasoningEffort
   lastTools?: ToolSpec[]
+  lastMessages?: ChatRequest['messages']
+  lastNativePdf?: boolean
+  lastModel?: string
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     this.lastSystem = req.system
     this.lastMaxTokens = req.maxTokens
     this.lastEffort = req.reasoningEffort
     this.lastTools = req.tools
+    this.lastMessages = structuredClone(req.messages)
+    this.lastNativePdf = req.nativePdf
+    this.lastModel = req.model
     yield { type: 'text', delta: 'SECRET_ASSISTANT_REPLY' }
     yield { type: 'done', finishReason: 'stop' }
   }
@@ -86,7 +92,7 @@ async function sessionWith(provider: Provider, extra: Partial<SessionOptions> = 
     maxSteps: 4,
     ...extra,
   })
-  return { session, memory, scope }
+  return { session, memory, scope, store }
 }
 
 function abortError(): Error {
@@ -410,6 +416,98 @@ describe('Session', () => {
       // drain
     }
     expect(provider.lastEffort).toBe('high')
+  })
+
+  it('keeps attached documents in the session and copies them to a fork', async () => {
+    const provider = new CapturingProvider()
+    const { session, store } = await sessionWith(provider)
+    const document = { type: 'document' as const, name: 'report.pdf', path: '/some/document', mimeType: 'application/pdf' }
+    for await (const _event of session.send('Read this', { documents: [document] })) { /* drain */ }
+    expect((await store.load(session.id))?.attachments).toEqual([document])
+    const fork = await store.fork(session.id)
+    expect(fork?.attachments).toEqual([document])
+    await session.clear()
+    expect((await store.load(session.id))?.attachments).toEqual([])
+  })
+
+  it('enables native PDF only when both the model and provider support it', async () => {
+    class PdfProvider extends CapturingProvider { readonly nativePdf = 'openai' as const }
+    const provider = new PdfProvider()
+    const { session } = await sessionWith(provider, { modelProfile: async (id) => ({ id, document: true }) })
+    expect(await session.supportsNativePdf('test-model')).toBe(true)
+    for await (const _event of session.send('Read this')) { /* drain */ }
+    expect(provider.lastNativePdf).toBe(true)
+    const withoutDocuments = await sessionWith(provider, { modelProfile: async (id) => ({ id, document: false }) })
+    expect(await withoutDocuments.session.supportsNativePdf('test-model')).toBe(false)
+    for await (const _event of withoutDocuments.session.send('Read this')) { /* drain */ }
+    expect(provider.lastNativePdf).toBe(false)
+  })
+
+  it('can reanalyze an attached image through the vision model in a later turn', async () => {
+    const vision = new CapturingProvider()
+    class MainProvider implements Provider {
+      readonly id = 'main'
+      calls = 0
+      seen: ChatRequest['messages'] = []
+      async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+        this.seen = structuredClone(req.messages)
+        if (this.calls++ === 0) {
+          yield { type: 'tool-call', id: 'inspect', name: 'read_attachment', args: { id: 'abcdef123456', question: 'What is written?' } }
+          yield { type: 'done', finishReason: 'tool_calls' }
+        } else {
+          yield { type: 'text', delta: 'done' }
+          yield { type: 'done', finishReason: 'stop' }
+        }
+      }
+    }
+    const main = new MainProvider()
+    const { session, store } = await sessionWith(main, {
+      model: 'main', mediaModels: { vision: 'vision', audio: 'whisper-large-v3-turbo' },
+      providerFor: (model) => model === 'vision' ? vision : main,
+      modelProfile: async (id) => ({ id, vision: id === 'vision' }),
+    })
+    const image = { type: 'image' as const, path: '/images/abcdef1234567890.png', mimeType: 'image/png' as const, name: 'photo.png', analysisOnly: true }
+    for await (const _event of session.send('Read the sign', { images: [image], imagesForDisplayOnly: true })) { /* drain */ }
+    expect((await store.load(session.id))?.attachments).toContainEqual(image)
+    expect(vision.lastModel).toBe('vision')
+    expect(JSON.stringify(main.seen)).toContain('Visual analysis by vision')
+  })
+
+  it('uses the main model to answer after a separate vision analysis', async () => {
+    const main = new CapturingProvider()
+    const vision = new CapturingProvider()
+    const { session } = await sessionWith(main, {
+      model: 'main', mediaModels: { vision: 'vision', audio: 'whisper-large-v3-turbo' },
+      providerFor: (model) => model === 'vision' ? vision : main,
+      modelProfile: async (id) => ({ id, vision: id === 'vision' }),
+    })
+    const images = [{ type: 'image' as const, path: '/old.png', mimeType: 'image/png' as const, name: 'old.png', analysisOnly: true }]
+    const description = await session.analyzeImages('vision', images, 'What is it?')
+    expect(vision.lastModel).toBe('vision')
+    for await (const _event of session.send(description.text, { images, imagesForDisplayOnly: true })) { /* drain */ }
+    expect(main.lastModel).toBe('main')
+    expect(main.lastMessages?.at(-1)?.content.some((part) => part.type === 'image')).toBe(false)
+  })
+
+  it('does not replay an auxiliary image when model vision support is unknown', async () => {
+    const provider = new CapturingProvider()
+    const { session } = await sessionWith(provider)
+    session.messages.push({ role: 'user', content: [{ type: 'image', path: '/old.png', mimeType: 'image/png', name: 'old.png', analysisOnly: true }] })
+    for await (const _event of session.send('Continue')) { /* drain */ }
+    expect(provider.lastMessages?.[0]?.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('not sent') })
+    expect(session.messages[0]?.content[0]?.type).toBe('image')
+  })
+
+  it('keeps old images in the session but does not replay them to a text-only model', async () => {
+    const provider = new CapturingProvider()
+    const { session } = await sessionWith(provider, { modelProfile: async (id) => ({ id, vision: false }) })
+    session.messages.push({ role: 'user', content: [{ type: 'image', path: '/old.png', mimeType: 'image/png', name: 'old.png' }] })
+    session.messages.push({ role: 'tool', content: [{ type: 'tool-result', id: 't', name: 'view_image', content: 'Looking', images: [{ path: '/old.png', mimeType: 'image/png' }] }] })
+    for await (const _event of session.send('Continue')) { /* drain */ }
+    expect(session.messages[0]?.content[0]?.type).toBe('image')
+    expect(provider.lastMessages?.[0]?.content[0]).toMatchObject({ type: 'text', text: expect.stringContaining('not sent') })
+    expect(provider.lastMessages?.[1]?.content[0]).toMatchObject({ type: 'tool-result', content: expect.stringContaining('not sent') })
+    expect(provider.lastMessages?.[1]?.content[0]).not.toHaveProperty('images')
   })
 
   it("reads the project's instructions per turn, so an edit lands on the next one", async () => {

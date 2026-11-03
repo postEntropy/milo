@@ -17,6 +17,7 @@ export const ProviderEntrySchema = z.object({
   name: z.string().optional(),
   baseURL: z.string(),
   wire: WireSchema.optional(),
+  nativePdf: z.boolean().optional(),
   headers: z.record(z.string(), z.string()).optional(),
   keyless: z.boolean().optional(),
   keyEnv: z.string().optional(),
@@ -432,6 +433,7 @@ export const ModelProfileSchema = z.object({
   context: z.number().int().positive().optional(),
   maxOutput: z.number().int().positive().optional(),
   vision: z.boolean().optional(),
+  document: z.boolean().optional(),
   audio: z.boolean().optional(),
   reasoning: z.boolean().optional(),
   /** The share of the window at which this model folds; `sessions.compactAt` otherwise. */

@@ -151,7 +151,7 @@ describe('dropOldImages', () => {
     expect((messages[0]!.content[0] as { content: string }).content).toBe(after)
   })
 
-  it('keeps recent incoming pictures and leaves a note for older ones', () => {
+  it('keeps older incoming pictures for display while omitting them from requests', () => {
     const messages: Message[] = ['a', 'b', 'c'].map((name) => ({
       role: 'user', content: [
         { type: 'text', text: `look at ${name}` },
@@ -160,7 +160,7 @@ describe('dropOldImages', () => {
     }))
     dropOldImages(messages, 2)
 
-    expect(messages[0]!.content).toContainEqual({ type: 'text', text: '[Image a.png omitted to keep the request small]' })
+    expect(messages[0]!.content).toContainEqual({ type: 'image', name: 'a.png', mimeType: 'image/png', path: '/img/a.png', contextOmitted: true })
     expect(messages[1]!.content.some((part) => part.type === 'image')).toBe(true)
     expect(messages[2]!.content.some((part) => part.type === 'image')).toBe(true)
   })

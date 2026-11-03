@@ -1,3 +1,4 @@
+import { isAttachmentPart } from '../providers/types.js'
 import type { MemoryScope } from '../memory/types.js'
 import { KeyedMutex, waitForLease } from './lease.js'
 import { generateNickname } from './nickname.js'
@@ -131,6 +132,7 @@ export class MemorySessionStore implements SessionStore {
       createdAt: timestamp,
       updatedAt: timestamp,
       messages: structuredClone(messages),
+      attachments: structuredClone(whole ? source.attachments ?? [] : messages.flatMap((message) => message.content.filter(isAttachmentPart))),
       version: INITIAL_SESSION_VERSION,
       summary: whole ? source.summary : undefined,
       droppedTokens: whole ? source.droppedTokens : undefined,

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { Box, Text, useApp, useInput } from 'ink'
 import TextInput from 'ink-text-input'
@@ -14,8 +14,9 @@ import {
   type ReasoningEffort,
 } from '../../../core/providers/types.js'
 import type { AgentRuntime } from '../../../core/runtime.js'
-import { prepareIncoming } from '../../../core/media.js'
-import type { ImagePart } from '../../../core/providers/types.js'
+import { MAX_INCOMING_BYTES, MAX_INCOMING_TOTAL_BYTES } from '../../../core/media.js'
+import { prepareTurnMedia } from '../../media.js'
+import type { DocumentPart, ImagePart } from '../../../core/providers/types.js'
 import { describeRebase, formatSeconds, type SessionStats } from '../../../core/sessions/index.js'
 import { formatWhen } from '../../../core/time.js'
 import { formatSkillList } from '../../../core/skills/index.js'
@@ -220,7 +221,7 @@ export function ChatScreen({
   /** The thought being written, in a ref for the same reason: it is committed between renders. */
   const reasoningRef = useRef('')
   /** Messages typed behind the turn in flight, in the order they were typed. */
-  const queueRef = useRef<Array<{ text: string; images: ImagePart[]; audio: AudioPart[]; model?: string }>>([])
+  const queueRef = useRef<Array<{ text: string; images: ImagePart[]; audio: AudioPart[]; documents?: DocumentPart[]; imagesForDisplayOnly?: boolean; displayText?: string; mediaNotices?: string[]; model?: string }>>([])
   /** The running turn's inbox: non-null for exactly as long as one is streaming. */
   const steeringRef = useRef<string[] | null>(null)
   /** True while the pump is working, which spans the gaps between turns. */
@@ -578,7 +579,7 @@ export function ChatScreen({
     if (text.trim()) push({ kind: 'assistant', text })
   }
 
-  const runTurn = async (text: string, images: ImagePart[] = [], model?: string, audio: AudioPart[] = []) => {
+  const runTurn = async (text: string, images: ImagePart[] = [], model?: string, audio: AudioPart[] = [], documents: DocumentPart[] = [], imagesForDisplayOnly = false, displayText?: string, mediaNotices?: string[]) => {
     setScrollOffset(0)
     setLive('')
     liveRef.current = ''
@@ -627,6 +628,10 @@ export function ChatScreen({
         steering,
         images,
         audio,
+        documents,
+        imagesForDisplayOnly,
+        displayText,
+        mediaNotices,
         ...(model ? { model } : {}),
       })) {
         applyEvent(event, {
@@ -789,10 +794,10 @@ export function ChatScreen({
     void (async () => {
       try {
         while (queueRef.current.length > 0) {
-          const queued = queueRef.current.shift() as { text: string; images: ImagePart[]; audio: AudioPart[]; model?: string }
+          const queued = queueRef.current.shift() as { text: string; images: ImagePart[]; audio: AudioPart[]; documents?: DocumentPart[]; imagesForDisplayOnly?: boolean; displayText?: string; mediaNotices?: string[]; model?: string }
           setQueued(queueRef.current.length)
           try {
-            await runTurn(queued.text, queued.images, queued.model, queued.audio)
+            await runTurn(queued.text, queued.images, queued.model, queued.audio, queued.documents, queued.imagesForDisplayOnly, queued.displayText, queued.mediaNotices)
           } catch (error) {
             // A turn that blows up must not take the rest of the queue with it.
             push({ kind: 'error', text: errorMessage(error) })
@@ -905,27 +910,39 @@ export function ChatScreen({
     if (!text && fileTokens.length === 0) return
     let images: ImagePart[] = []
     let audio: AudioPart[] = []
-    let attachedText: string[] = []
+    let documents: DocumentPart[] = []
+    let imagesForDisplayOnly = false
+    let mediaNotices: string[] | undefined
+    let prompt = text
     let mediaModel: string | undefined
     try {
       if (fileTokens.length) {
+        const sizes = await Promise.all(fileTokens.map((file) => stat(path.resolve(file))))
+        if (sizes.some((info) => info.size > MAX_INCOMING_BYTES)) throw new Error('A file is larger than 50 MB.')
+        if (sizes.reduce((total, info) => total + info.size, 0) > MAX_INCOMING_TOTAL_BYTES) throw new Error('Attachments together are larger than 50 MB.')
         const files = await Promise.all(fileTokens.map(async (file) => {
-          const bytes = await readFile(path.resolve(file))
+          const resolved = path.resolve(file)
+          const bytes = await readFile(resolved)
           const ext = path.extname(file).toLowerCase()
           const mimeType = ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.txt': 'text/plain', '.md': 'text/markdown' } as Record<string, string>)[ext] ?? 'application/octet-stream'
           return { name: path.basename(file), mimeType, data: bytes }
         }))
-        const prepared = await prepareIncoming(files, { model: runtime.model })
+        const session = await runtime.getSession(scope)
+        const prepared = await prepareTurnMedia(session, text, files)
+        prompt = prepared.prompt
         images = prepared.images
         audio = prepared.audio
-        attachedText = prepared.text
+        documents = prepared.documents
+        imagesForDisplayOnly = prepared.imagesForDisplayOnly
+        mediaNotices = prepared.notices
         mediaModel = prepared.model
+        for (const notice of prepared.notices) push({ kind: 'error', text: notice })
       }
     } catch (error) {
       push({ kind: 'error', text: `Could not read attachment: ${errorMessage(error)}` })
       return
     }
-    const prompt = [text, ...attachedText].filter(Boolean).join('\n\n') || 'Please inspect the attached media.'
+    prompt ||= 'Please inspect the attached media.'
     setInput('')
     remember(rawText)
 
@@ -934,7 +951,7 @@ export function ChatScreen({
     // trace read as if it had never been sent. Filing the answer still
     // streaming first is what keeps the order.
     commitLive()
-    push({ kind: 'user', text: prompt })
+    push({ kind: 'user', text: rawText })
     setScrollOffset(0)
 
     // A command that throws must not become an unhandled rejection: say what
@@ -949,11 +966,11 @@ export function ChatScreen({
     }
 
     const steering = steeringRef.current
-    if (steer && steering && images.length === 0) {
+    if (steer && steering && fileTokens.length === 0) {
       steering.push(prompt)
       return
     }
-    queueRef.current.push({ text: prompt, images, audio, ...(mediaModel ? { model: mediaModel } : {}) })
+    queueRef.current.push({ text: prompt, images, audio, documents, imagesForDisplayOnly, displayText: rawText, mediaNotices, ...(mediaModel ? { model: mediaModel } : {}) })
     setQueued(queueRef.current.length)
     pump()
   }

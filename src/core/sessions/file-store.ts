@@ -1,3 +1,4 @@
+import { isAttachmentPart } from '../providers/types.js'
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs'
 import path from 'node:path'
@@ -380,6 +381,7 @@ export class FileSessionStore implements SessionStore {
         createdAt: timestamp,
         updatedAt: timestamp,
         messages: structuredClone(messages),
+        attachments: structuredClone(whole ? source.attachments ?? [] : messages.flatMap((message) => message.content.filter(isAttachmentPart))),
         version: INITIAL_SESSION_VERSION,
         summary: whole ? source.summary : undefined,
         droppedTokens: whole ? source.droppedTokens : undefined,
@@ -546,6 +548,7 @@ function parseRecord(value: unknown): SessionRecord | null {
     // is accepted rather than looking like a conflict with nothing.
     version: typeof raw.version === 'number' ? raw.version : INITIAL_SESSION_VERSION,
     messages: raw.messages as Message[],
+    attachments: Array.isArray(raw.attachments) ? raw.attachments : undefined,
     summary: typeof raw.summary === 'string' ? raw.summary : undefined,
     droppedTokens: typeof raw.droppedTokens === 'number' ? raw.droppedTokens : undefined,
     // Records written before the scope was kept read as having none; they are

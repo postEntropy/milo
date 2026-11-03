@@ -28,6 +28,8 @@ export interface ModelProfile {
   maxOutput?: number
   /** Whether the model reads pictures. */
   vision?: boolean
+  /** Whether the model accepts native document input. */
+  document?: boolean
   /** Whether the model reads audio. */
   audio?: boolean
   /** False when the model has no reasoning mode; absent when nothing said either way. */
@@ -68,6 +70,7 @@ export function mergeModelProfile(id: string, sources: ModelProfileSources): Mod
   const context = override?.context ?? provider?.context ?? openRouter?.context
   const maxOutput = override?.maxOutput ?? provider?.maxOutput ?? openRouter?.maxOutput
   const vision = override?.vision ?? provider?.vision ?? provider?.inputModalities?.includes('image') ?? openRouter?.vision
+  const document = override?.document ?? (provider?.inputModalities?.includes('file') ? true : undefined)
   const audio = override?.audio ?? provider?.inputModalities?.includes('audio') ?? openRouter?.audio
   const reasoning = override?.reasoning ?? provider?.reasoning ?? openRouter?.reasoning
 
@@ -78,6 +81,7 @@ export function mergeModelProfile(id: string, sources: ModelProfileSources): Mod
     ...(maxOutput ? { maxOutput } : {}),
     ...(vision !== undefined ? { vision } : {}),
     ...(audio !== undefined ? { audio } : {}),
+    ...(document !== undefined ? { document } : {}),
     ...(reasoning !== undefined ? { reasoning } : {}),
     ...(override?.compactionAt ? { compactionAt: override.compactionAt } : {}),
   }
@@ -219,6 +223,7 @@ function applyOverride(profile: ModelProfile, override?: ModelProfileOverride): 
     ...(override.maxOutput !== undefined ? { maxOutput: override.maxOutput } : {}),
     ...(override.vision !== undefined ? { vision: override.vision } : {}),
     ...(override.audio !== undefined ? { audio: override.audio } : {}),
+    ...(override.document !== undefined ? { document: override.document } : {}),
     ...(override.reasoning !== undefined ? { reasoning: override.reasoning } : {}),
     ...(override.compactionAt !== undefined ? { compactionAt: override.compactionAt } : {}),
   }

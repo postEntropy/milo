@@ -294,6 +294,27 @@ describe('a file a client sends with a message', () => {
     expect(said).toContain('what does this say?')
     expect(said).toContain('Attached notes.txt')
     expect(said).toContain('the milk is off')
+    const displayed = transcriptOf(session.messages, (file) => hub.register(file))
+    expect(displayed[0]?.attachments?.[0]).toMatchObject({ name: 'notes.txt', mimeType: 'text/plain' })
+    expect(JSON.stringify(displayed[0]?.parts)).toContain('what does this say?')
+    expect(JSON.stringify(displayed[0]?.parts)).not.toContain('the milk is off')
+    expect(hub.attachment(displayed[0]!.attachments![0]!.id)?.path).toBeTruthy()
+  })
+
+  it('shows an extraction failure before the model answers', async () => {
+    const runtime = build()
+    const hub = new WebHub(runtime)
+    const frames: ServerFrame[] = []
+    const client = { send: (frame: ServerFrame) => frames.push(frame) }
+    const uploadId = hub.stageUpload({ name: 'archive.zip', mimeType: 'application/zip', data: Buffer.from('bytes') })
+    await hub.connect(client, CHAT)
+    frames.length = 0
+    hub.handle(client, { type: 'send', text: 'read it', uploadIds: [uploadId] }, CHAT)
+    expect(await waitFor(() => frames.some((frame) => frame.type === 'turn-end'))).toBe(true)
+    expect(frames.some((frame) => frame.type === 'event' && frame.event.type === 'text-delta' && frame.event.delta.includes('cannot extract'))).toBe(true)
+    expect((await transcript(runtime)).join('\n')).toContain('cannot extract')
+    const session = await runtime.getSession({ gateway: 'web', chatId: CHAT })
+    expect(JSON.stringify(transcriptOf(session.messages, (file) => hub.register(file)))).toContain('cannot extract')
   })
 
   it('refuses an id it never staged rather than running a turn with nothing attached', async () => {

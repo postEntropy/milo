@@ -20,6 +20,7 @@ import { createJobTools } from './jobs.js'
 import { grepTool } from './grep.js'
 import { listDirTool } from './list-dir.js'
 import { readFileTool } from './read-file.js'
+import { readAttachmentTool } from './read-attachment.js'
 import { readXPostTool } from './read-x-post.js'
 import { recallTool } from './recall.js'
 import { rememberTool } from './remember.js'
@@ -46,6 +47,7 @@ export * from './permission.js'
 export * from './rules.js'
 export { ToolRegistry } from './registry.js'
 export { readFileTool } from './read-file.js'
+export { readAttachmentTool } from './read-attachment.js'
 export { viewImageTool } from './view-image.js'
 export { listDirTool } from './list-dir.js'
 export { globTool } from './glob.js'
@@ -76,6 +78,7 @@ export type { ClassifierQuestion, ClassifierAnswers, ClassifierOptions } from '.
 
 export const builtinTools = [
   readFileTool,
+  readAttachmentTool,
   viewImageTool,
   listDirTool,
   globTool,

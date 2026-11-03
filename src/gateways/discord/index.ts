@@ -20,7 +20,7 @@ import { chunk } from '../chunk.js'
 import { TurnQueue } from '../turns.js'
 import type { ChatSurface } from '../surface.js'
 import type { Gateway } from '../types.js'
-import type { IncomingFile } from '../../core/media.js'
+import { MAX_INCOMING_TOTAL_BYTES, readIncomingResponse, type IncomingFile } from '../../core/media.js'
 import type { ImagePart } from '../../core/providers/types.js'
 import {
   ActionRouter,
@@ -263,10 +263,11 @@ export class DiscordGateway implements Gateway {
 
   private async receiveDiscordMedia(message: Message, ask: ChannelAsk, caption: string): Promise<void> {
     try {
+      if ([...message.attachments.values()].reduce((total, item) => total + item.size, 0) > MAX_INCOMING_TOTAL_BYTES) throw new Error('Attachments together are larger than 50 MB.')
       const files = await Promise.all([...message.attachments.values()].map(async (attachment) => {
         const response = await fetch(attachment.url)
         if (!response.ok) throw new Error(`Discord download failed (${response.status}).`)
-        return { name: attachment.name ?? 'attachment', mimeType: attachment.contentType ?? 'application/octet-stream', data: new Uint8Array(await response.arrayBuffer()) }
+        return { name: attachment.name ?? 'attachment', mimeType: attachment.contentType ?? 'application/octet-stream', data: await readIncomingResponse(response) }
       }))
       this.startTurn(message, ask, caption || 'Please inspect the attached media.', [], files)
     } catch (error) {

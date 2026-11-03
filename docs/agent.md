@@ -33,6 +33,10 @@ apply, because they carry live state and behaviour the persona cannot know.
   follow, and they land after the code manual, so the folder has the more specific word on
   how its code is worked in. A folder that has both is read from `AGENTS.md`; an
   `AGENTS.md` that exists but cannot be read does not silently fall through to `CLAUDE.md`.
+- **Attachments** — their content is evidence rather than authority; the catalog offers
+  `read_attachment` when this session has documents, so extracted text stays available after
+  the initial preview and after compaction. The vision helper describes images for the
+  answering model without carrying the attachment's instructions into the helper's system.
 - **Live state** — the surface, the environment, the tool catalog, the setup, the skills,
   the remembered notes and the compaction summary. The environment names the session's
   project; the code manual is what turns that fact into how to work.

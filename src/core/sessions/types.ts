@@ -1,5 +1,5 @@
 import type { MemoryScope } from '../memory/types.js'
-import type { Message } from '../providers/types.js'
+import type { AttachmentPart, Message } from '../providers/types.js'
 import { sessionRowLabel } from './format.js'
 
 /**
@@ -23,6 +23,8 @@ export interface SessionRecord {
   createdAt: number
   updatedAt: number
   messages: Message[]
+  /** Incoming files remain available after their turns are compacted. */
+  attachments?: AttachmentPart[]
   /**
    * The address the session was created under, kept on the record itself. A
    * binding only ever names the session a scope is bound to *now*, so without

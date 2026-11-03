@@ -12,6 +12,7 @@ export interface ProviderInit {
   baseURL: string
   apiKey?: string | false
   wire?: Wire
+  nativePdf?: boolean
   headers?: Record<string, string>
   /** A sign-in the provider uses instead of a key. */
   oauth?: ProviderOAuth
@@ -43,6 +44,7 @@ export function createProvider(init: ProviderInit, model: string, hooks?: Provid
     return new AnthropicProvider({
       id: init.id,
       baseURL: init.baseURL,
+      nativePdf: init.nativePdf,
       apiKey,
       headers: init.headers,
       onOutputCap: hooks?.onOutputCap,
@@ -53,6 +55,7 @@ export function createProvider(init: ProviderInit, model: string, hooks?: Provid
     return new ResponsesProvider({
       id: init.id,
       baseURL: init.baseURL,
+      nativePdf: init.nativePdf,
       apiKey,
       token:
         init.oauth === 'chatgpt'
@@ -66,6 +69,7 @@ export function createProvider(init: ProviderInit, model: string, hooks?: Provid
   return new OpenAIProvider({
     id: init.id,
     baseURL: init.baseURL,
+    nativePdf: init.nativePdf,
     apiKey,
     headers: init.headers,
     onOutputCap: hooks?.onOutputCap,

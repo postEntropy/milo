@@ -22,7 +22,7 @@ export function estimateTokens(messages: Message[]): number {
           images += part.images?.length ?? 0
           break
         case 'image':
-          images += 1
+          if (!part.contextOmitted) images += 1
           break
         case 'audio':
           audio += 1
@@ -36,6 +36,7 @@ export function estimateTokens(messages: Message[]): number {
           // which therefore rides every later request.
           if (part.signature) chars += part.text.length
           break
+        case 'document':
         case 'file':
           // A delivered file is on disk, not in the request: the wires skip the
           // part, so it is not charged to the transcript it sits in.
@@ -170,11 +171,11 @@ export const KEEP_AUDIO_IN_CONTEXT = 1
 const AUDIO_TOKENS = 3000
 
 /**
- * Forgets older pictures in tool results and incoming messages. Their text stays
+ * Keeps older incoming pictures for display but stops replaying them. Tool screenshots
+ * are removed from the request. Their text stays
  * in place with a note, so the model never mistakes missing bytes for no image.
  *
- * Idempotent: the images are removed, so a second pass finds nothing to drop and
- * appends nothing.
+ * Idempotent: a second pass keeps the same omissions and adds no new notes.
  */
 export function dropOldImages(messages: Message[], keep = KEEP_IMAGES_IN_CONTEXT): void {
   let seen = 0
@@ -187,7 +188,7 @@ export function dropOldImages(messages: Message[], keep = KEEP_IMAGES_IN_CONTEXT
       if (part.type === 'image') {
         seen += 1
         if (seen <= keep) continue
-        message.content.splice(partIndex, 1, { type: 'text', text: `[Image ${part.name} omitted to keep the request small]` })
+        part.contextOmitted = true
         continue
       }
       if (part.type !== 'tool-result' || !part.images?.length) continue

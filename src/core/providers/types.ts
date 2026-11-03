@@ -11,7 +11,23 @@ export interface TextPart {
 /** An image attached to an incoming user message. Bytes stay outside session files. */
 export interface ImagePart {
   type: 'image'
+  /** A vision model described this image for a model whose support is unknown. */
+  analysisOnly?: boolean
+  /** Kept in the transcript but excluded from automatic history replay. */
+  contextOmitted?: boolean
+  /** Rendered from a document for the model, not a separate user attachment. */
+  derivedFromDocument?: boolean
   mimeType: ImageMime
+  path: string
+  name: string
+}
+
+/** An incoming document kept outside the session so it can be opened again. */
+export interface DocumentPart {
+  type: 'document'
+  /** False when local checks show that this PDF exceeds native limits. */
+  nativeEligible?: boolean
+  mimeType: string
   path: string
   name: string
 }
@@ -93,11 +109,21 @@ export interface FilePart {
   mimeType: string
 }
 
-export type ContentPart = TextPart | ImagePart | AudioPart | ReasoningPart | ToolCallPart | ToolResultPart | FilePart
+export type AttachmentPart = ImagePart | DocumentPart
+
+export type ContentPart = TextPart | ImagePart | DocumentPart | AudioPart | ReasoningPart | ToolCallPart | ToolResultPart | FilePart
+
+export function isAttachmentPart(part: ContentPart): part is AttachmentPart {
+  return part.type === 'document' || (part.type === 'image' && !part.derivedFromDocument)
+}
 
 export interface Message {
   role: Role
   content: ContentPart[]
+  /** The person's own text, without extracted attachment contents. */
+  displayText?: string
+  /** Media preparation notices shown with this turn. */
+  mediaNotices?: string[]
   /**
    * When this message was said. Kept for the surfaces that show it — a session
    * read back from disk still knows when each turn happened — and ignored by the
@@ -176,6 +202,8 @@ export interface ChatRequest {
   temperature?: number
   maxTokens?: number
   signal?: AbortSignal
+  /** Native PDFs are enabled only after the turn checks model and provider support. */
+  nativePdf?: boolean
   /** For the execution log. Ignored by every provider. */
   trace?: TraceTag
   /**
@@ -203,6 +231,8 @@ export type StreamEvent =
 
 export interface Provider {
   readonly id: string
+  /** This route implements native PDF input; model support is checked separately. */
+  readonly nativePdf?: 'openai' | 'anthropic'
   stream(req: ChatRequest): AsyncIterable<StreamEvent>
 }
 

@@ -65,6 +65,7 @@ export const fileTraces: TraceWriter = {
  */
 export class TracedProvider implements Provider {
   readonly id: string
+  readonly nativePdf?: 'openai' | 'anthropic'
   private readonly inner: Provider
   private readonly traces: TraceWriter
 
@@ -72,6 +73,7 @@ export class TracedProvider implements Provider {
     this.inner = inner
     this.traces = traces
     this.id = inner.id
+    this.nativePdf = inner.nativePdf
   }
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {

@@ -71,7 +71,7 @@ export interface SubagentRun {
   /** The subtask, exactly as the `task` tool received it. */
   input: { description: string; prompt: string }
   /** The parent's memory, recall, address and delivery, so the subagent's tools still work. */
-  context: Pick<ToolContext, 'remember' | 'memories' | 'recall' | 'origin' | 'routine' | 'sendFile'>
+  context: Pick<ToolContext, 'remember' | 'memories' | 'recall' | 'origin' | 'routine' | 'sendFile' | 'attachments' | 'inspectAttachmentImage'>
   /** Carried through from the parent turn, so the subtask's requests are logged too. */
   trace?: RunTrace
 }
@@ -125,6 +125,8 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     origin: options.context.origin,
     routine: options.context.routine,
     sendFile: options.context.sendFile,
+    attachments: options.context.attachments,
+    inspectAttachmentImage: options.context.inspectAttachmentImage,
   }
 
   let text = ''

@@ -94,12 +94,14 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
     const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
     if (message.role === 'user') {
       closeAssistant()
-      const attachments = message.content.flatMap((part) => part.type === 'image'
+      const shown = message.displayText ?? text
+      const attachments = message.content.flatMap((part) => (part.type === 'image' && !part.derivedFromDocument) || part.type === 'document'
         ? [register({ path: part.path, name: part.name, mimeType: part.mimeType })]
         : [])
-      if (text || attachments.length) {
-        transcript.push({ role: 'user', parts: text ? [{ kind: 'text', text }] : [], ...(attachments.length ? { attachments } : {}), ...(message.at !== undefined ? { at: message.at } : {}) })
+      if (shown || attachments.length) {
+        transcript.push({ role: 'user', parts: shown ? [{ kind: 'text', text: shown }] : [], ...(attachments.length ? { attachments } : {}), ...(message.at !== undefined ? { at: message.at } : {}) })
       }
+      if (message.mediaNotices?.length) transcript.push({ role: 'assistant', parts: [{ kind: 'text', text: message.mediaNotices.map((notice) => `⚠ ${notice}`).join('\n\n') }] })
       continue
     }
     if (message.role === 'assistant' && message.routine) {

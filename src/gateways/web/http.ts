@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { AgentRuntime } from '../../core/runtime.js'
 import { isImage, type OutgoingMessage } from '../../core/outgoing.js'
+import { MAX_INCOMING_BYTES } from '../../core/media.js'
 import { errorMessage } from '../../util/errors.js'
 import { hyperlink } from '../../util/terminal.js'
 import { helloVersion, parseClientFrame, PROTOCOL_VERSION, protocolRefusal, type ServerFrame } from './protocol.js'
@@ -18,7 +19,7 @@ import { ClaimLimiter, redeemPairing } from './pair.js'
 const MAX_BODY = 1024 * 1024
 
 /** The most an upload may be. A file larger than a delivery can carry is not worth buffering. */
-const MAX_UPLOAD = 50 * 1024 * 1024
+const MAX_UPLOAD = MAX_INCOMING_BYTES
 
 /**
  * The built frontend. Found by walking up from this module rather than by one

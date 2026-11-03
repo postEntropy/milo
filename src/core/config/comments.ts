@@ -15,9 +15,9 @@
 export const CONFIG_NOTES: Record<string, string> = {
   provider: 'Which provider this install talks to: a key of `providers` below.',
   model: 'The model the surfaces open on. `/model` changes it and writes it here.',
-  providers: 'One entry per provider: base URL, wire format, and any extra headers.',
+  providers: 'One entry per provider: base URL, wire format, optional nativePdf support, and any extra headers.',
   models:
-    'Per-model facts that outrank the catalogs: context, maxOutput, vision, audio, reasoning and compactionAt, keyed by model id.',
+    'Per-model facts that outrank the catalogs: context, maxOutput, vision, document, audio, reasoning and compactionAt, keyed by model id.',
   sandbox:
     'How shell_command is contained: off, or workspace (bwrap: project writable, home and host state hidden, system runtime read-only, no network).',
   verification: "The project's own checks, run after a turn that changed files.",

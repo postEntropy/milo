@@ -1,4 +1,5 @@
 import { parseSSE } from './sse.js'
+import { inlinePdfs } from './native-pdf.js'
 import { fetchWithRetry } from './retry.js'
 import { errorMessage } from '../../util/errors.js'
 import { logDebug, logWarn } from '../../util/log.js'
@@ -19,6 +20,7 @@ import {
 export interface AnthropicProviderOptions {
   id: string
   baseURL: string
+  nativePdf?: boolean
   apiKey?: string
   headers?: Record<string, string>
   /** Told the ceiling a refusal named, so the run after it need not learn it again. */
@@ -61,6 +63,7 @@ const ANTHROPIC_VERSION = '2023-06-01'
 
 export class AnthropicProvider implements Provider {
   readonly id: string
+  readonly nativePdf?: 'openai' | 'anthropic'
   private readonly baseURL: string
   private readonly apiKey?: string
   private readonly headers: Record<string, string>
@@ -70,6 +73,7 @@ export class AnthropicProvider implements Provider {
 
   constructor(options: AnthropicProviderOptions) {
     this.id = options.id
+    this.nativePdf = (options.nativePdf ?? (new URL(options.baseURL).protocol === 'https:' && new URL(options.baseURL).hostname === 'api.anthropic.com')) ? 'anthropic' : undefined
     this.baseURL = options.baseURL.replace(/\/+$/, '')
     this.apiKey = options.apiKey
     this.headers = options.headers ?? {}
@@ -78,7 +82,7 @@ export class AnthropicProvider implements Provider {
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     const thinking = thinkingBlock(req)
-    const messages = await toAnthropicMessages(req.messages)
+    const messages = await toAnthropicMessages(req.messages, req.nativePdf === true)
     const tools = req.tools?.length ? req.tools.map(toAnthropicTool) : undefined
     if (tools?.length) {
       tools[tools.length - 1] = {
@@ -289,7 +293,8 @@ function toAnthropicTool(spec: ToolSpec): Record<string, unknown> {
   }
 }
 
-async function toAnthropicMessages(messages: Message[]): Promise<unknown[]> {
+async function toAnthropicMessages(messages: Message[], nativePdf: boolean): Promise<unknown[]> {
+  const pdfs = inlinePdfs(messages, nativePdf)
   const out: { role: 'user' | 'assistant'; content: unknown[] }[] = []
 
   const push = (role: 'user' | 'assistant', blocks: unknown[]) => {
@@ -325,10 +330,16 @@ async function toAnthropicMessages(messages: Message[]): Promise<unknown[]> {
         }
       } else if (part.type === 'text') {
         if (part.text) blocks.push({ type: 'text', text: part.text })
+      } else if (part.type === 'image' && part.contextOmitted) {
+        blocks.push({ type: 'text', text: `[Image ${part.name} omitted to keep the request small]` })
       } else if (part.type === 'image') {
         const data = readImageBase64({ mimeType: part.mimeType, path: part.path })
         if (data) blocks.push({ type: 'image', source: { type: 'base64', media_type: part.mimeType, data } })
         else missingImages += 1
+      } else if (nativePdf && part.type === 'document' && part.mimeType === 'application/pdf') {
+        const data = pdfs.get(part.path)
+        if (data) blocks.push({ type: 'document', source: { type: 'base64', media_type: 'application/pdf', data } })
+        else blocks.push({ type: 'text', text: `[PDF ${part.name} was not sent as a file: it is unavailable or exceeds the request limit.]` })
       } else if (part.type === 'audio') {
         blocks.push({ type: 'text', text: `[Audio attachment ${part.name} is not supported by this model.]` })
       } else if (part.type === 'tool-call') {

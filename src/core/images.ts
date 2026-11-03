@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import {
   existsSync,
   readdirSync,
@@ -7,11 +7,11 @@ import {
   statSync,
   utimesSync,
 } from 'node:fs'
-import { rename, writeFile } from 'node:fs/promises'
+import { rename, unlink, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { errorMessage } from '../util/errors.js'
 import { logDebug } from '../util/log.js'
-import { imagesDir } from './config/paths.js'
+import { imagesDir, MILO_HOME } from './config/paths.js'
 import { ensurePrivateDir, PRIVATE_FILE_MODE } from '../util/fs.js'
 import type { ImageMime, ImageRef } from './providers/types.js'
 import type { ImagePart } from './providers/types.js'
@@ -71,12 +71,25 @@ export async function saveImage(image: { mimeType: ImageMime; data: string }): P
   }
 }
 
-/** Keep an incoming picture beside the transcript and return its small path reference. */
+/** Incoming and rendered pictures stay outside the transcript as private files. */
 export async function saveIncomingImage(input: { mimeType: string; data: Uint8Array; name: string }): Promise<ImagePart> {
   const mimeType: ImageMime = input.mimeType === 'image/png' ? 'image/png' : 'image/jpeg'
-  const ref = await saveImage({ mimeType, data: Buffer.from(input.data).toString('base64') })
-  if (!ref) throw new Error(`Could not save image ${input.name}.`)
-  return { type: 'image', mimeType, path: ref.path, name: input.name }
+  const dir = path.join(MILO_HOME, 'attachments')
+  ensurePrivateDir(dir)
+  const file = path.join(dir, `${createHash('sha256').update(input.data).digest('hex')}.${EXTENSION[mimeType]}`)
+  if (existsSync(file)) {
+    const now = new Date()
+    utimesSync(file, now, now)
+  } else {
+    const temp = path.join(dir, `${randomUUID()}.tmp`)
+    try {
+      await writeFile(temp, input.data, { mode: PRIVATE_FILE_MODE })
+      await rename(temp, file)
+    } finally {
+      await unlink(temp).catch(() => undefined)
+    }
+  }
+  return { type: 'image', mimeType, path: file, name: input.name }
 }
 
 /** The picture's bytes, base64, or null when it has been evicted meanwhile. */

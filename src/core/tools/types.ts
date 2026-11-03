@@ -4,7 +4,7 @@ import type { JobManager } from '../jobs/index.js'
 import type { MemoryInput, MemoryItem, MemoryScope } from '../memory/types.js'
 import type { OutgoingFile } from '../outgoing.js'
 import type { PanelRequest } from '../panel.js'
-import type { ImageMime } from '../providers/types.js'
+import type { AttachmentPart, ImageMime, ImagePart } from '../providers/types.js'
 import type { NewRoutine, Routine } from '../routines.js'
 import type { SessionSummary } from '../sessions/types.js'
 import type { TodoItem } from '../todos.js'
@@ -93,6 +93,9 @@ export interface ToolContext {
    * only, and no network.
    */
   sandbox?: 'off' | 'workspace'
+  /** Files attached to this session, including ones from compacted turns. */
+  attachments?: () => AttachmentPart[]
+  inspectAttachmentImage?: (image: ImagePart, question: string) => Promise<ToolResult>
   /** Absent on a context with no memory behind it, so `remember` fails cleanly. */
   remember?: RememberFn
   /** The same store the `remember` write goes to, for the `memories` tool. */

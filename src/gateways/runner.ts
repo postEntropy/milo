@@ -4,8 +4,9 @@ import { formatTodos } from '../core/todos.js'
 import { describeRebase } from '../core/sessions/index.js'
 import { errorMessage } from '../util/errors.js'
 import type { ChatSurface } from './surface.js'
-import type { AudioPart, ImagePart } from '../core/providers/types.js'
-import { prepareIncoming, type IncomingFile } from '../core/media.js'
+import type { AudioPart, DocumentPart, ImagePart } from '../core/providers/types.js'
+import type { IncomingFile } from '../core/media.js'
+import { prepareTurnMedia } from './media.js'
 import { compactReply } from './commands.js'
 import { changeCounts, shellCommand, showsToolCall, toolLabel, toolLine } from './tool-line.js'
 
@@ -89,6 +90,10 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   let text = options.text
   let images = options.images ?? []
   let audio = options.audio ?? []
+  let documents: DocumentPart[] = []
+  let imagesForDisplayOnly = false
+  let displayText: string | undefined
+  let mediaNotices: string[] | undefined
   let mediaModel: string | undefined
   let output = ''
   let lastFlush = 0
@@ -173,17 +178,26 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
 
   try {
     if (options.files?.length) {
-      const prepared = await prepareIncoming(options.files, { model: session.model })
-      text = [text, options.files.map((file) => `Attached ${file.name}`).join('\n'), ...prepared.text].filter(Boolean).join('\n\n') || 'Please inspect the attached media.'
+      const prepared = await prepareTurnMedia(session, text, options.files, options.signal)
+      text = prepared.prompt
       images = [...images, ...prepared.images]
       audio = [...audio, ...prepared.audio]
+      documents = prepared.documents
+      imagesForDisplayOnly = prepared.imagesForDisplayOnly
+      displayText = prepared.displayText
+      mediaNotices = prepared.notices
       mediaModel = prepared.model
+      for (const notice of prepared.notices) await appendLine(`⚠ ${notice}`)
     }
     for await (const event of session.send(text, {
       signal: options.signal,
       steering: options.steering,
       images,
       audio,
+      documents,
+      imagesForDisplayOnly,
+      displayText,
+      mediaNotices,
       ...(mediaModel ? { model: mediaModel } : {}),
       ...(options.sessionsAllowed === false ? { sessionsAllowed: false } : {}),
       ask: (request) => surface.ask(chatId, messageId, request),

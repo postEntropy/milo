@@ -24,8 +24,8 @@ import type { ClientKind } from '../../core/client.js'
 import { resolveToolPath } from '../../core/tools/walk.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
-import { prepareIncoming } from '../../core/media.js'
-import type { IncomingFile } from '../../core/media.js'
+import { prepareTurnMedia } from '../media.js'
+import { MAX_INCOMING_TOTAL_BYTES, type IncomingFile } from '../../core/media.js'
 import type { ImagePart } from '../../core/providers/types.js'
 
 /**
@@ -455,6 +455,8 @@ export class WebHub {
 
   stageUpload(file: IncomingFile): string {
     this.pruneStagedUploads()
+    const stagedBytes = [...this.stagedUploads.values()].reduce((total, entry) => total + entry.file.data.byteLength, 0)
+    if (this.stagedUploads.size >= 200 || stagedBytes + file.data.byteLength > MAX_INCOMING_TOTAL_BYTES * 2) throw new Error('Too many uploads are waiting. Send or remove them before attaching more.')
     const id = randomUUID()
     const expires = Date.now() + 10 * 60_000
     const timer = setTimeout(() => this.stagedUploads.delete(id), 10 * 60_000)
@@ -984,6 +986,10 @@ export class WebHub {
       const display = readDisplay()
       let currentImages = images
       let currentAudio: import('../../core/providers/types.js').AudioPart[] = []
+      let currentDocuments: import('../../core/providers/types.js').DocumentPart[] = []
+      let imagesForDisplayOnly = false
+      let displayText: string | undefined
+      let mediaNotices: string[] | undefined
       let currentFiles = files
       let currentModel: string | undefined
       /** Where this run's messages start, so its raw is the run and not the whole thread. */
@@ -1008,15 +1014,23 @@ export class WebHub {
           // opened with: this is the index the turn's own user message is written at,
           // and what a late client's ready is cut at.
           if (live) live.from = runFrom
+          const hasFiles = Boolean(currentFiles?.length)
           if (currentFiles?.length) {
-            const prepared = await prepareIncoming(currentFiles, { model: session.model })
-            currentText = [currentText, currentFiles.map((file) => `Attached ${file.name}`).join('\n'), ...prepared.text].filter(Boolean).join('\n\n') || 'Please inspect the attached media.'
+            const prepared = await prepareTurnMedia(session, currentText, currentFiles, signal)
+            currentText = prepared.prompt
             currentImages = [...currentImages, ...prepared.images]
             currentAudio = [...currentAudio, ...prepared.audio]
+            currentDocuments = prepared.documents
+            imagesForDisplayOnly = prepared.imagesForDisplayOnly
+            displayText = prepared.displayText
+            mediaNotices = prepared.notices
             currentModel = prepared.model
+            if (sessionId && prepared.notices.length) {
+              this.emitTurn(sessionId, { type: 'event', turnId: id, event: { type: 'text-delta', delta: `${prepared.notices.map((notice) => `⚠ ${notice}`).join('\n\n')}\n\n` } })
+            }
             currentFiles = undefined
           }
-          const command = currentFiles?.length
+          const command = hasFiles
             ? { handled: false as const }
             : await handleCommand(currentText, this.commandContext(chat, session, signal))
           if (command.handled) {
@@ -1049,6 +1063,10 @@ export class WebHub {
             client: chat.client,
             ...(currentImages.length ? { images: currentImages } : {}),
             ...(currentAudio.length ? { audio: currentAudio } : {}),
+            ...(currentDocuments.length ? { documents: currentDocuments } : {}),
+            imagesForDisplayOnly,
+            displayText,
+            mediaNotices,
             ...(currentModel ? { model: currentModel } : {}),
             // A screen may pin where this turn is addressing — the routines screen
             // names a routine's destination, and the tool takes it from here
@@ -1098,6 +1116,10 @@ export class WebHub {
           }
           currentImages = []
           currentAudio = []
+          currentDocuments = []
+          imagesForDisplayOnly = false
+          displayText = undefined
+          mediaNotices = undefined
           currentModel = undefined
           // The files this turn asked to send, read once it is over. They go
           // through the delivery a routine's answer uses, so the transcript keeps

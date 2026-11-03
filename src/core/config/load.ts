@@ -46,6 +46,7 @@ export interface ResolvedProvider {
   baseURL: string
   apiKey?: string | false
   wire?: 'openai' | 'anthropic' | 'responses' | 'auto'
+  nativePdf?: boolean
   headers?: Record<string, string>
   /** A provider reached with a sign-in: the key is absent, and `auth.chatgpt` is the grant. */
   oauth?: ProviderOAuth
@@ -246,6 +247,7 @@ export function resolveProvider(config: Config, auth: Auth, id: string): Resolve
     name: entry.name,
     baseURL: entry.baseURL,
     wire: entry.wire,
+    nativePdf: entry.nativePdf,
     headers: entry.headers,
     // `false` means "needs no pasted key", which is also true of a signed-in
     // provider: the surface that checks for a missing key must not send a

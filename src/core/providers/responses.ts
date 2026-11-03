@@ -1,4 +1,5 @@
 import { parseSSE } from './sse.js'
+import { inlinePdfs } from './native-pdf.js'
 import { fetchWithRetry } from './retry.js'
 import { errorMessage } from '../../util/errors.js'
 import { logDebug, logWarn } from '../../util/log.js'
@@ -24,6 +25,7 @@ export interface ResponsesAccess {
 export interface ResponsesProviderOptions {
   id: string
   baseURL: string
+  nativePdf?: boolean
   apiKey?: string
   /** A token source used instead of a fixed key. `force` asks for a refresh after a 401. */
   token?: (force?: boolean) => Promise<ResponsesAccess>
@@ -75,6 +77,7 @@ interface ResponsesStreamEvent {
  */
 export class ResponsesProvider implements Provider {
   readonly id: string
+  readonly nativePdf?: 'openai' | 'anthropic'
   private readonly baseURL: string
   private readonly apiKey?: string
   private readonly token?: (force?: boolean) => Promise<ResponsesAccess>
@@ -84,6 +87,7 @@ export class ResponsesProvider implements Provider {
 
   constructor(options: ResponsesProviderOptions) {
     this.id = options.id
+    this.nativePdf = (options.nativePdf ?? (new URL(options.baseURL).protocol === 'https:' && new URL(options.baseURL).hostname === 'api.openai.com')) ? 'openai' : undefined
     this.baseURL = options.baseURL.replace(/\/+$/, '')
     this.apiKey = options.apiKey
     this.token = options.token
@@ -268,7 +272,7 @@ export class ResponsesProvider implements Provider {
   }
 
   private async buildBody(req: ChatRequest): Promise<Record<string, unknown>> {
-    const { instructions, input } = await toResponsesInput(req.system, req.messages)
+    const { instructions, input } = await toResponsesInput(req.system, req.messages, req.nativePdf === true)
     const maxTokens = clampOutput(req.maxTokens, this.maxTokensCap)
     const body: Record<string, unknown> = {
       model: req.model,
@@ -394,7 +398,9 @@ function outputText(item: ResponseItem): string {
 async function toResponsesInput(
   system: string | undefined,
   messages: Message[],
+  nativePdf: boolean,
 ): Promise<{ instructions?: string; input: unknown[] }> {
+  const pdfs = inlinePdfs(messages, nativePdf)
   const input: unknown[] = []
 
   for (const message of messages) {
@@ -438,6 +444,8 @@ async function toResponsesInput(
     for (const part of message.content) {
       if (part.type === 'text') {
         parts.push({ type: 'input_text', text: part.text })
+      } else if (part.type === 'image' && part.contextOmitted) {
+        parts.push({ type: 'input_text', text: `[Image ${part.name} omitted to keep the request small]` })
       } else if (part.type === 'image') {
         const data = readImageBase64(part)
         if (data) {
@@ -445,6 +453,10 @@ async function toResponsesInput(
         } else {
           missingImages += 1
         }
+      } else if (nativePdf && part.type === 'document' && part.mimeType === 'application/pdf') {
+        const data = pdfs.get(part.path)
+        if (data) parts.push({ type: 'input_file', filename: part.name, file_data: `data:application/pdf;base64,${data}` })
+        else parts.push({ type: 'input_text', text: `[PDF ${part.name} was not sent as a file: it is unavailable or exceeds the request limit.]` })
       } else if (part.type === 'audio') {
         missingAudio += 1
       }

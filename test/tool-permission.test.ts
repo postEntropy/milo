@@ -62,6 +62,7 @@ describe('tool permission gating', () => {
 
     expect(readOnly).toEqual({
       read_file: true,
+      read_attachment: true,
       view_image: true,
       list_dir: true,
       glob: true,

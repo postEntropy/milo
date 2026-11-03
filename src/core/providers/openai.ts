@@ -1,4 +1,5 @@
 import { parseSSE } from './sse.js'
+import { inlinePdfs } from './native-pdf.js'
 import { fetchWithRetry } from './retry.js'
 import { errorMessage } from '../../util/errors.js'
 import { logDebug, logWarn } from '../../util/log.js'
@@ -19,6 +20,7 @@ import {
 export interface OpenAIProviderOptions {
   id: string
   baseURL: string
+  nativePdf?: boolean
   apiKey?: string
   headers?: Record<string, string>
   /** Told the ceiling a refusal named, so the run after it need not learn it again. */
@@ -46,6 +48,7 @@ interface OpenAIStreamChunk {
 
 export class OpenAIProvider implements Provider {
   readonly id: string
+  readonly nativePdf?: 'openai' | 'anthropic'
   private readonly baseURL: string
   private readonly apiKey?: string
   private readonly headers: Record<string, string>
@@ -59,6 +62,7 @@ export class OpenAIProvider implements Provider {
 
   constructor(options: OpenAIProviderOptions) {
     this.id = options.id
+    this.nativePdf = (options.nativePdf ?? (new URL(options.baseURL).protocol === 'https:' && new URL(options.baseURL).hostname === 'api.openai.com')) ? 'openai' : undefined
     this.baseURL = options.baseURL.replace(/\/+$/, '')
     this.apiKey = options.apiKey
     this.headers = options.headers ?? {}
@@ -71,7 +75,7 @@ export class OpenAIProvider implements Provider {
       model: req.model,
       stream: true,
       stream_options: { include_usage: true },
-      messages: await toOpenAIMessages(req.system, req.messages),
+      messages: await toOpenAIMessages(req.system, req.messages, req.nativePdf === true),
     }
     if (req.tools?.length) {
       body.tools = req.tools.map(toOpenAITool)
@@ -248,7 +252,8 @@ function toOpenAITool(spec: ToolSpec): Record<string, unknown> {
   }
 }
 
-async function toOpenAIMessages(system: string | undefined, messages: Message[]): Promise<unknown[]> {
+async function toOpenAIMessages(system: string | undefined, messages: Message[], nativePdf: boolean): Promise<unknown[]> {
+  const pdfs = inlinePdfs(messages, nativePdf)
   const out: unknown[] = []
   if (system) out.push({ role: 'system', content: system })
 
@@ -263,11 +268,11 @@ async function toOpenAIMessages(system: string | undefined, messages: Message[])
     }
 
     const images = message.content.flatMap((part) => {
-      if (part.type !== 'image') return []
+      if (part.type !== 'image' || part.contextOmitted) return []
       const data = readImageBase64({ mimeType: part.mimeType, path: part.path })
       return data ? [{ mimeType: part.mimeType, data }] : []
     })
-    const missingImages = message.content.filter((part) => part.type === 'image').length - images.length
+    const missingImages = message.content.filter((part) => part.type === 'image' && !part.contextOmitted).length - images.length
     const audio = message.content.flatMap((part) => {
       if (part.type !== 'audio') return []
       try {
@@ -279,7 +284,7 @@ async function toOpenAIMessages(system: string | undefined, messages: Message[])
     const text = message.content
       .filter((part) => part.type === 'text')
       .map((part) => (part as { text: string }).text)
-      .join('') + (missingImages ? `\n[${missingImages} attached image(s) are unavailable]` : '')
+      .join('') + message.content.flatMap((part) => part.type === 'image' && part.contextOmitted ? [`\n[Image ${part.name} omitted to keep the request small]`] : []).join('') + (missingImages ? `\n[${missingImages} attached image(s) are unavailable]` : '')
       + (missingAudio ? `\n[${missingAudio} attached audio file(s) are unavailable]` : '')
 
     if (message.role === 'assistant') {
@@ -306,6 +311,13 @@ async function toOpenAIMessages(system: string | undefined, messages: Message[])
             type: 'image_url', image_url: { url: `data:${image.mimeType};base64,${image.data}` },
           })),
         ...audio.map((item) => ({ type: 'input_audio', input_audio: { data: item.data, format: item.format } })),
+        ...message.content.flatMap<unknown>((part) => {
+          if (!nativePdf || part.type !== 'document' || part.mimeType !== 'application/pdf') return []
+          const data = pdfs.get(part.path)
+          return data
+            ? [{ type: 'file', file: { filename: part.name, file_data: `data:application/pdf;base64,${data}` } }]
+            : [{ type: 'text', text: `[PDF ${part.name} was not sent as a file: it is unavailable or exceeds the request limit.]` }]
+        }),
       ]
       out.push({ role: message.role, content: parts.length ? parts : text })
     }

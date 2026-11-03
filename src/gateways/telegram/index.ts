@@ -25,7 +25,7 @@ import { runTurns } from '../runner.js'
 import { TurnQueue } from '../turns.js'
 import type { ChatSurface } from '../surface.js'
 import type { Gateway } from '../types.js'
-import type { IncomingFile } from '../../core/media.js'
+import { readIncomingResponse, type IncomingFile } from '../../core/media.js'
 import type { ImagePart } from '../../core/providers/types.js'
 import { TelegramMessenger, isNotModified } from './messenger.js'
 import { commandReplyParts } from './reply.js'
@@ -234,7 +234,7 @@ export class TelegramGateway implements Gateway {
       if (!file.file_path) throw new Error('Telegram did not return a download path.')
       const response = await fetch(`https://api.telegram.org/file/bot${this.options.token}/${file.file_path}`)
       if (!response.ok) throw new Error(`Telegram download failed (${response.status}).`)
-      const incoming: IncomingFile[] = [{ name, mimeType, data: new Uint8Array(await response.arrayBuffer()) }]
+      const incoming: IncomingFile[] = [{ name, mimeType, data: await readIncomingResponse(response) }]
       const caption = ctx.msg && 'caption' in ctx.msg ? String(ctx.msg.caption ?? '') : ''
       this.startMediaTurn(bot, ctx, chatId, caption || 'Please inspect the attached media.', incoming)
     } catch (error) {
