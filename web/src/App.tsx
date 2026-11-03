@@ -354,6 +354,7 @@ export default function App() {
 
   /** Bumped per read, so a slower earlier answer cannot overwrite a newer one. */
   const projectsSeq = useRef(0)
+  const sessionsSeq = useRef(0)
   const refreshProjects = useCallback(async (): Promise<void> => {
     const mine = ++projectsSeq.current
     try {
@@ -379,8 +380,10 @@ export default function App() {
   }, [refreshProjects])
 
   const refreshSessions = useCallback(async (): Promise<void> => {
+    const mine = ++sessionsSeq.current
     try {
       const list = await api<SessionSummary[]>('sessions')
+      if (mine !== sessionsSeq.current) return
       // The thread on screen is being read: a list that still calls it unread is behind
       // that look, so the mark is not drawn on the session the person is in while the
       // chat is the screen showing.
@@ -388,8 +391,17 @@ export default function App() {
         ? list.map((session) => (session.id === sessionIdRef.current ? { ...session, unread: undefined } : session))
         : list)
     }
-    catch (error) { fail(error) }
+    catch (error) {
+      if (mine === sessionsSeq.current) fail(error)
+    }
   }, [fail])
+
+  // Project membership is part of the daemon's session summaries, so refresh both
+  // together whenever the registered project list changes.
+  const projectIds = projects?.map((item) => item.id).sort().join('\0') ?? null
+  useEffect(() => {
+    if (projectIds !== null) void refreshSessions()
+  }, [projectIds, refreshSessions])
 
   /**
    * The session is in front of the person — it was opened, something landed in it,
@@ -1006,7 +1018,7 @@ export default function App() {
    */
   const mode: 'chat' | 'work' = view === 'work'
     || project !== null
-    || (currentSession !== undefined && isWorkSession(currentSession, projects))
+    || (currentSession !== undefined && isWorkSession(currentSession))
     ? 'work'
     : 'chat'
 
@@ -1026,7 +1038,7 @@ export default function App() {
         return
       }
       const left = sessions.find((session) => session.id === places.current.work)
-      if (left && isWorkSession(left, projects)) { void openSession(left.id); return }
+      if (left && isWorkSession(left)) { void openSession(left.id); return }
       setWorkProject(null)
       setView('work')
       return
@@ -1036,9 +1048,9 @@ export default function App() {
       return
     }
     const left = sessions.find((session) => session.id === places.current.chat)
-    if (left && !isWorkSession(left, projects)) { void openSession(left.id); return }
+    if (left && !isWorkSession(left)) { void openSession(left.id); return }
     void newChat()
-  }, [mode, view, sessions, projects, setView, openSession, newChat])
+  }, [mode, view, sessions, setView, openSession, newChat])
 
   const forkSession = useCallback(async (upToTurn: number): Promise<void> => {
     if (!sessionId) return
@@ -1224,13 +1236,13 @@ export default function App() {
     } catch (error) { fail(error) }
   }, [fail])
 
-  const chatList = chatSessions(sessions, projects, search)
+  const chatList = chatSessions(sessions, search)
   const sessionGroups = groupSessions(chatList)
   // The welcome offers what is left of the Chat side: a work session belongs to Work, and
   // opening one from here would carry the person out of the list they are looking at.
   const suggestions = useMemo(
-    () => buildSuggestions({ sessions: chatSessions(sessions, projects), ideas, currentId: sessionId }),
-    [sessions, projects, ideas, sessionId],
+    () => buildSuggestions({ sessions: chatSessions(sessions), ideas, currentId: sessionId }),
+    [sessions, ideas, sessionId],
   )
   // The size of what the model last read is the size of the conversation, which is
   // what the meter measures against the window.

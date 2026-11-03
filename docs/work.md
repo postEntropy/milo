@@ -95,10 +95,11 @@ are the ordinary ones, with the folder they run in changed.
   client — `web/src/sessions/SessionRow.tsx`, and the phone's `SessionRow` with the actions
   from `Support/SessionControls.swift` — so the drawer, the index and a project's page cannot
   disagree about a session's name, its second line or what it answers to. Which side a
-  session belongs to, and how many of a project's are drawn, are one rule per client:
-  `web/src/sessions/scopes.ts` and `web/src/work/sessions.ts` in the browser,
-  `ios/Sources/Milo/Support/WorkSessions.swift` on the phone. The switch itself is one
-  control on the phone (`Support/ModeSwitch.swift`), in the drawer.
+  session belongs to, and which sessions stay in a project's short list, are decided once by
+  `src/core/work-sessions.ts` and sent on each summary as `work`, `workInline` and `searchText`.
+  The clients draw those facts. A search shows every matching session, including ones outside
+  the short list. The switch itself is one control on the phone (`Support/ModeSwitch.swift`),
+  in the drawer.
 - Git is the source of truth for changes. A folder that is not a repository is answered as
   that — never as an empty change list that would read as "nothing changed".
 - Every path read is confined to the project's folder, and every refusal names what was
@@ -142,8 +143,8 @@ are the ordinary ones, with the folder they run in changed.
 | Plan / Build | `src/core/agent/system.ts` (`PLAN_SECTION`), `src/core/tools/permission.ts` (`withPlan`, `isPlanTool`) |
 | Daemon actions | `src/gateways/web/settings.ts` (`projects`, `project-*`) |
 | The Chat \| Work switch | `web/src/App.tsx`, `ios/Sources/Milo/Support/ModeSwitch.swift` |
-| Which side a session is on | `web/src/sessions/scopes.ts`, `ios/Sources/Milo/Support/WorkSessions.swift` |
-| Work side of the web list | `web/src/sessions/WorkList.tsx`, `web/src/work/sessions.ts` |
+| Session Work placement and short-list visibility | `src/core/work-sessions.ts` |
+| Work side of the web list | `web/src/sessions/WorkList.tsx`, `web/src/sessions/scopes.ts` |
 | Work screen | `web/src/work/Work.tsx`, `web/src/App.tsx` (`/work`) |
 | A session row | `web/src/sessions/SessionRow.tsx`, `ios/Sources/Milo/Support/SessionControls.swift` (`SessionRow`) |
 | Phone screen | `ios/Sources/Milo/Screens/WorkView.swift`, `ios/Sources/Milo/Screens/SessionsDrawer.swift` |

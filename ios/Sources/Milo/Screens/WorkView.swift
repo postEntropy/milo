@@ -124,7 +124,6 @@ private struct WorkIndex: View {
     @AppStorage("work-collapsed") private var collapsedRaw = ""
 
     /// How many of a project's sessions the index draws before the rest are one tap away.
-    private static let sessionsShown = 3
 
     private var collapsed: Set<String> {
         Set(collapsedRaw.split(separator: ",").map(String.init))
@@ -150,7 +149,7 @@ private struct WorkIndex: View {
     /// and work waiting to be read are never hidden behind a count, however long either
     /// has been going. The drawer's Work list cuts the same list the same way.
     private func shownSessions(of id: String) -> [SessionSummary] {
-        inlineWorkSessions(sessions(of: id), limit: Self.sessionsShown)
+        sessions(of: id).filter(\.workInline)
     }
 
     /// Opening a session from the index: the chat takes it, the way a project's page does.

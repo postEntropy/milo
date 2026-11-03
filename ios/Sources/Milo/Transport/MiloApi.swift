@@ -32,12 +32,17 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     /// The project this session works in, by id. Absent on a session working in the
     /// install's own folder — a screen names the project from the list of them.
     let project: String?
+    /// Work placement and short-list visibility come from the daemon's shared rule.
+    let work: Bool
+    let workInline: Bool
+    /// Normalized title, preview and id for the shared session search.
+    let searchText: String
     /// The surface that asked for it, when it was not the browser: `spotlight` for the
     /// desktop popup. A row wears it as a mark beside the name.
     let surface: String?
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, createdAt, updatedAt, messageCount, preview, label, recap, running, unread, project, surface
+        case id, title, createdAt, updatedAt, messageCount, preview, label, recap, running, unread, project, work, workInline, searchText, surface
     }
 
     /// Read leniently, and only `id` as the one thing it cannot do without: a row
@@ -51,8 +56,14 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         running = try container.decodeIfPresent(Bool.self, forKey: .running)
         unread = try container.decodeIfPresent(Bool.self, forKey: .unread)
         project = try container.decodeIfPresent(String.self, forKey: .project)
+        // Older daemon answers and an offline cache have no shared placement yet. Keep
+        // project sessions under Work until the next live answer supplies the decision.
+        work = try container.decodeIfPresent(Bool.self, forKey: .work) ?? (project != nil)
+        workInline = try container.decodeIfPresent(Bool.self, forKey: .workInline) ?? (project != nil)
         surface = try container.decodeIfPresent(String.self, forKey: .surface)
         preview = try container.decodeIfPresent(String.self, forKey: .preview) ?? ""
+        searchText = try container.decodeIfPresent(String.self, forKey: .searchText)
+            ?? "\(title ?? "") \(preview) \(id)".lowercased()
         label = try container.decodeIfPresent(String.self, forKey: .label) ?? ""
         messageCount = try container.decodeIfPresent(Int.self, forKey: .messageCount) ?? 0
         createdAt = try container.decodeIfPresent(Double.self, forKey: .createdAt) ?? 0

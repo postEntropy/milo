@@ -1,27 +1,16 @@
 import type { ProjectView } from '../../../src/core/projects.js'
 import type { SessionSummary } from './types.js'
-import { inlineSessions } from '../work/sessions.js'
 
 /**
- * Whether a session is work. It is the project it names that decides — not the
- * presence of an id: a project removed from the list leaves its sessions bound to
- * an id nothing answers to any more, and those are sessions with no project to be
- * in. Counting them as work would take them out of both lists, which is a session
- * disappearing.
- *
- * While the projects have not been read yet, anything naming one is treated as
- * work: it may be, and showing it under the wrong roof is worse than a beat of
- * nothing. The Work side says it is still reading.
+ * The daemon decides which side owns a session.
  */
-export function isWorkSession(session: SessionSummary, projects: ProjectView[] | null): boolean {
-  if (!session.project) return false
-  if (projects === null) return true
-  return projects.some((project) => project.id === session.project)
+export function isWorkSession(session: SessionSummary): boolean {
+  return session.work === true
 }
 
 /** What a row is found by: the same three fields the drawer's search has always read. */
 function matches(session: SessionSummary, query: string): boolean {
-  return `${session.title ?? ''} ${session.preview} ${session.id}`.toLowerCase().includes(query)
+  return session.searchText?.includes(query) === true
 }
 
 /**
@@ -30,12 +19,11 @@ function matches(session: SessionSummary, query: string): boolean {
  */
 export function chatSessions(
   sessions: SessionSummary[],
-  projects: ProjectView[] | null,
   query = '',
 ): SessionSummary[] {
   const asked = query.trim().toLowerCase()
   return sessions
-    .filter((session) => session.messageCount > 0 && !isWorkSession(session, projects))
+    .filter((session) => session.messageCount > 0 && !isWorkSession(session))
     .filter((session) => asked === '' || matches(session, asked))
     .sort((a, b) => b.updatedAt - a.updatedAt)
 }
@@ -73,7 +61,8 @@ export function workGroups(
     const named = asked !== '' && project.name.toLowerCase().includes(asked)
     const matching = asked === '' || named ? mine : mine.filter((session) => matches(session, asked))
     if (asked !== '' && !named && matching.length === 0) continue
-    groups.push({ project, sessions: inlineSessions(matching), total: mine.length })
+    const shown = asked ? matching : matching.filter((session) => session.workInline)
+    groups.push({ project, sessions: shown, total: mine.length })
   }
   return groups
 }

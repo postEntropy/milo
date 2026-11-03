@@ -288,13 +288,13 @@ struct SessionsDrawer: View {
     /// project belongs to the Work side, under that project's own name.
     private var chats: [SessionSummary] {
         model.sessions.filter {
-            !isWorkSession($0, projects: model.projects, read: model.projectsRead)
+            !$0.work
         }
     }
 
     private var filtered: [SessionSummary] {
         guard searched else { return chats }
-        return chats.filter { sessionMatches($0, query: text) }
+        return chats.filter { $0.searchText.contains(text) }
     }
 
     /// The projects a session can start in: a folder that is gone is read on its page, and
@@ -424,11 +424,11 @@ struct SessionsDrawer: View {
                 .filter { $0.project == project.id }
                 .sorted { $0.updatedAt > $1.updatedAt }
             let named = searched && project.name.lowercased().contains(text)
-            let matching = searched && !named ? mine.filter { sessionMatches($0, query: text) } : mine
+            let matching = searched && !named ? mine.filter { $0.searchText.contains(text) } : mine
             if searched && !named && matching.isEmpty { return nil }
             return WorkGroupRow(
                 project: project,
-                sessions: inlineWorkSessions(matching),
+                sessions: searched ? matching : matching.filter(\.workInline),
                 total: mine.count
             )
         }

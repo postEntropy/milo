@@ -186,6 +186,7 @@ final class AppModel {
 
     // The folders a session can work in, and the sessions that ran in one.
     private(set) var projects: [Project] = []
+    private var sessionsSeq = 0
     private(set) var projectsLoading = false
     private(set) var projectsSaving = false
     /// Bumped per read and per action, so a read already on its way — asked before a write
@@ -225,7 +226,7 @@ final class AppModel {
         // a chat like the drawer treats it, and is offered again rather than lost.
         buildSuggestions(
             sessions: sessions.filter {
-                !isWorkSession($0, projects: projects, read: projectsRead)
+                !$0.work
             },
             ideas: ideas,
             currentId: sessionId
@@ -750,10 +751,13 @@ final class AppModel {
 
     func refreshSessions() async {
         guard let account else { return }
+        sessionsSeq += 1
+        let mine = sessionsSeq
         sessionsLoading = true
-        defer { sessionsLoading = false }
+        defer { if mine == sessionsSeq { sessionsLoading = false } }
         do {
             let next = try await MiloApi.sessions(account).sorted { $0.updatedAt > $1.updatedAt }
+            guard mine == sessionsSeq else { return }
             // The thread on screen is being read: a list that still calls it unread is
             // behind that look, so the mark is not drawn on the session the person is in.
             let shown = threadOnScreen ? next.map { $0.id == sessionId ? $0.looked : $0 } : next
@@ -765,7 +769,7 @@ final class AppModel {
             cacheSessions(account)
             note = nil
         } catch {
-            failed(error)
+            if mine == sessionsSeq { failed(error) }
         }
     }
 
@@ -1252,6 +1256,7 @@ final class AppModel {
             projects = next
             projectsError = nil
             projectsRead = true
+            Task { await refreshSessions() }
         } catch is URLError {
             guard mine == projectsSeq else { return }
             // The socket's own glass pill already speaks for a connection that is down or
@@ -1303,6 +1308,7 @@ final class AppModel {
             let outcome = try await MiloApi.projectAction(account, body)
             projects = outcome.projects
             projectsRead = true
+            Task { await refreshSessions() }
             return outcome.result
         } catch is URLError {
             connectionSaid = true

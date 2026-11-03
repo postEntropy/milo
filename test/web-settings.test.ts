@@ -1193,8 +1193,17 @@ describe('the Work screen’s projects', () => {
       project: id,
     })) as { id: string }
 
-    const sessions = (await settings.handle('sessions')) as Array<{ id: string; project?: string }>
-    expect(sessions.find((session) => session.id === created.id)?.project).toBe(id)
+    const sessions = (await settings.handle('sessions')) as Array<{
+      id: string
+      project?: string
+      work: boolean
+      workInline: boolean
+    }>
+    expect(sessions.find((session) => session.id === created.id)).toMatchObject({
+      project: id,
+      work: true,
+      workInline: true,
+    })
   })
 
   it('answers an unknown project with the ones it knows', async () => {

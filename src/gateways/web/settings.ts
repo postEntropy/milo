@@ -110,6 +110,7 @@ import { browseFolders, createFolder } from '../../core/browse.js'
 import { createWorkFolder, workFile, workTree } from '../../core/work.js'
 import { startTracking, workDiff } from '../../core/work-diff.js'
 import { PROJECT_RULES_PROMPT, readProjectInstructions, rulesOf } from '../../core/agent/instructions.js'
+import { placeWorkSessions } from '../../core/work-sessions.js'
 import type { Message } from '../../core/providers/types.js'
 import { SILENT } from '../../core/silent.js'
 import { JobRegistry } from './jobs.js'
@@ -175,7 +176,7 @@ export class WebSettings {
       case 'chatgpt-status': return this.chatGptReport()
       case 'chatgpt-logout': return this.chatGptSignOut()
       case 'models': return this.models(body)
-      case 'sessions': return this.runtime.listSessions()
+      case 'sessions': return this.sessionSummaries()
       case 'new-session': return this.newSession(body)
       case 'resume-session': return this.resumeSession(body)
       case 'fork-session': return this.forkSession(body)
@@ -523,7 +524,7 @@ export class WebSettings {
       },
       presets: PRESETS.map(({ id, name, baseURL, wire, keyless, oauth, models, keyURL }) => ({ id, name, baseURL, wire, keyless, oauth, models, keyURL })),
       skills: this.skills(),
-      sessions: await this.runtime.listSessions(),
+      sessions: await this.sessionSummaries(),
       memoryStats: memoryStatus(memoryDir()),
       // Reported with everything else, so a server that failed to start is
       // visible when the screen opens rather than only when it is asked about.
@@ -821,6 +822,13 @@ export class WebSettings {
    */
   private async projects(): Promise<ProjectView[]> {
     return byRecentUse(projectViews(), await this.runtime.listSessions())
+  }
+
+  /** Sessions carry the daemon's Work classification and short-list visibility. */
+  private async sessionSummaries() {
+    const projects = projectViews()
+    const sessions = await this.runtime.listSessions()
+    return placeWorkSessions(sessions, projects)
   }
 
   /**

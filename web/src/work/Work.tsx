@@ -11,7 +11,6 @@ import {
 } from '../../../src/core/project-icons.ts'
 import { SessionMark, SessionRow } from '../sessions/SessionRow.js'
 import type { SessionSummary } from '../sessions/types.js'
-import { inlineSessions } from './sessions.js'
 import { Code } from '../ui/Code.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
@@ -392,7 +391,7 @@ function WorkIndex({
         : <div className="work-list">
           {projects.map((project) => {
             const mine = sessions.filter((session) => session.project === project.id)
-            const shown = inlineSessions(mine)
+            const shown = mine.filter((session) => session.workInline === true)
             // A project with nothing in it has nothing to fold: its count says zero and the
             // card stays shut, rather than opening onto a line that says the same thing.
             const open = mine.length > 0 && !collapsed.has(project.id)
