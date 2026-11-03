@@ -198,6 +198,20 @@ describe('the generated interface schema', () => {
     expect(result.success).toBe(false)
   })
 
+  it('draws a day sampled every half hour, which runs past a dozen points', () => {
+    // A generation curve is a dozen and a half readings, and a chart that refused it
+    // lost the whole widget over the count — the shape was the answer.
+    const labels = [
+      '05:40', '06:30', '07:30', '08:30', '09:30', '10:30', '11:30', '12:20',
+      '13:00', '13:30', '14:00', '14:35', '15:30', '16:30', '17:30', '18:10',
+    ]
+    const values = [0.02, 0.51, 2.24, 3.14, 4.04, 4.66, 4.83, 5.34, 5.02, 1.79, 2.16, 4.88, 1.73, 2.26, 0.37, 0.06]
+    const result = genUiSchema.safeParse({
+      tree: { kind: 'chart', type: 'line', labels, series: [{ label: 'Solar', values }], suffix: ' kW' },
+    })
+    expect(result.success).toBe(true)
+  })
+
   it('refuses a day that is not written YYYY-MM-DD', () => {
     expect(genUiSchema.safeParse({ tree: { kind: 'date', id: 'day', label: 'Day', value: '24/10/2026' } }).success).toBe(false)
     expect(genUiSchema.safeParse({ tree: { kind: 'daterange', id: 'span', label: 'Span', from: '2026-10-01', to: 'soon' } }).success).toBe(false)

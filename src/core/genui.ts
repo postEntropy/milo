@@ -471,12 +471,12 @@ const genUiNodeSchema: z.ZodType<GenUiNode> = z.lazy(() =>
       .object({
         kind: z.literal('chart'),
         type: z.enum(['line', 'bar', 'area']),
-        labels: z.array(shown(60, 1)).min(1).max(12),
+        labels: z.array(shown(60, 1)).min(1).max(24),
         series: z
           .array(
             z.object({
               label: shown(60, 1).optional(),
-              values: z.array(z.number().finite()).min(1).max(12),
+              values: z.array(z.number().finite()).min(1).max(24),
             }),
           )
           .min(1)
@@ -985,7 +985,7 @@ export const GENUI_SECTION = [
   '- `divider`: no fields.',
   '- `callout`: `text`, and optionally `tone` ("info", "ok", "warn" or "danger") and `title`.',
   '- `badge`: `label`, and optionally `tone` ("neutral", "ok", "warn" or "danger").',
-  '- `chart`: `type` ("line", "bar" or "area"), `labels` (at most 12), and `series` — at most 2 `{label?, values}` with one value per label; optionally `height` ("sm", "md" or "lg"), `prefix`, `suffix`, `decimals`.',
+  '- `chart`: `type` ("line", "bar" or "area"), `labels` (at most 24), and `series` — at most 2 `{label?, values}` with one value per label; optionally `height` ("sm", "md" or "lg"), `prefix`, `suffix`, `decimals`.',
   '- `stat`: `label` and `formula`, and optionally `prefix`, `suffix`, `decimals`, `delta` (a formula shown as the change), `deltaSuffix`, `deltaTone` ("good", "bad" or "neutral"), `trend` (2 to 24 values, drawn as a sparkline).',
   '- `progress`: `formula`, and optionally `label`, `max` (default 100), `suffix`, `tone`.',
   '- `table`: `columns` (at most 8) and `rows` — one array of cell strings per row, at most 50; optionally `align` (one "start" or "end" per column). A cell is a phrase, not a sentence: the detail that does not fit belongs in the prose beside it. A total, a sum or a closing figure is the table\'s last row, written in the same cells as the rest — never a node of its own.',
