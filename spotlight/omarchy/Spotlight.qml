@@ -35,17 +35,22 @@ Item {
   readonly property string pluginId: (manifest && manifest.id) || "dev.leonardo.milo_spotlight"
 
   // ── theme: bound, never cached, so a theme swap repaints the popup ────────
-  readonly property color foreground: Commons.Color.menu.text
+  // Paired with `popups.background`, the surface every part of the popup is drawn on.
+  readonly property color foreground: Commons.Color.popups.text
   readonly property color background: Commons.Color.popups.background
   readonly property color accent: Commons.Color.accent
   readonly property color urgent: Commons.Color.urgent
-  // Milo's own orange, not the desktop theme's accent: the popup is Milo in
-  // Omarchy's clothes, and the person's words wear Milo's colour. The same value
-  // as `src/gateways/cli/theme.ts` and the web's `--accent`.
-  readonly property color miloAccent: "#C4541C"
-  readonly property color miloAccentOn: "#FFFFFF"
+  // Every colour here is the theme's: the popup is a guest on the desktop, and a
+  // theme swap is meant to repaint all of it. The person's words are the one filled
+  // surface, and it is the accent mixed half into the popup surface — opaque,
+  // because the popup floats on the desktop — so the words keep the foreground's
+  // contrast instead of sitting on a slab dark enough to swallow them.
+  readonly property color youFill: Qt.rgba(
+    background.r + (accent.r - background.r) * 0.5,
+    background.g + (accent.g - background.g) * 0.5,
+    background.b + (accent.b - background.b) * 0.5,
+    1)
   readonly property var borderSpec: Border.surfaceSpec("popups", "border", Commons.Color.popups.border, Math.max(1, Style.space(2)))
-  readonly property var accentBorderSpec: Border.surfaceSpec("popups", "border", "#A64514", Math.max(1, Style.space(2)))
   readonly property string fontFamily: Style.font.menuFamily
   readonly property int cornerRadius: Style.cornerRadius
   readonly property int pad: Style.spacing.controlPaddingX
@@ -67,11 +72,20 @@ Item {
   property string permissionTool: ""
   property string permissionSummary: ""
   property int restartDelay: 1000
+  /** The last thing the helper said on stderr — the reason it stopped, never guessed at. */
+  property string helperError: ""
 
   readonly property string offlineText: "Milo is not running. Start it with milo serve."
 
   readonly property bool awaitingPermission: permissionId !== ""
   readonly property string line: step !== "" ? step : status
+
+  /** What the line says when no turn is in flight: the daemon's state, or the helper's own failure. */
+  function idleStatus() {
+    if (offline) return offlineText
+    if (!bridge.running) return helperError !== "" ? "Milo's popup helper failed: " + helperError : "Milo's popup helper stopped. Retrying…"
+    return "Ready"
+  }
 
   /** The conversation, one bubble each: `you`, `milo`, `step`. */
   ListModel { id: thread }
@@ -85,7 +99,7 @@ Item {
     query = ""
     prompt.text = ""
     step = ""
-    status = offline ? offlineText : "Ready"
+    status = idleStatus()
     busy = false
     clearPermission()
     send({ type: "new" })
@@ -151,8 +165,10 @@ Item {
       status = offlineText
     } else if (message.type === "ready") {
       connected = true
-      if (offline || status === "") status = "Ready"
       offline = false
+      helperError = ""
+      // The turn in flight keeps its own line; a reconnection that interrupts nothing says where things stand.
+      if (!busy) status = idleStatus()
     } else if (message.type === "text") {
       appendToAnswer(String(message.delta))
     } else if (message.type === "tool") {
@@ -204,7 +220,8 @@ Item {
 
   function ask() {
     const text = query.trim()
-    if (text === "" || busy || offline) return
+    // Nothing to send a question to: keep it in the field, and let the line say why.
+    if (text === "" || busy || offline || !bridge.running) return
     thread.append({ role: "you", text: text })
     thread.append({ role: "milo", text: "" })
     miloAt = thread.count - 1
@@ -234,9 +251,16 @@ Item {
     stdinEnabled: true
     command: ["milo", "spotlight"]
     onRunningChanged: {
-      if (running) return
+      if (running) {
+        root.helperError = ""
+        return
+      }
+      // The helper is the popup's own, not the daemon: its death says nothing about
+      // whether Milo is up, so the line reports what happened and restarts quietly.
       root.connected = false
-      if (root.status.indexOf("milo") === -1) root.status = "Milo is not running"
+      root.busy = false
+      root.step = ""
+      root.status = root.idleStatus()
       restartTimer.restart()
     }
     stdout: SplitParser {
@@ -244,7 +268,11 @@ Item {
     }
     stderr: SplitParser {
       onRead: function(line) {
-        if (line.trim() !== "") console.warn("milo spotlight:", line.trim())
+        var said = line.trim()
+        if (said === "") return
+        console.warn("milo spotlight:", said)
+        // The first line is the reason; the rest is its tail.
+        if (root.helperError === "") root.helperError = said
       }
     }
   }
@@ -323,19 +351,21 @@ Item {
                 label.implicitWidth + root.pad * 2)
               height: label.implicitHeight + root.pad * 2
               radius: root.cornerRadius
-              borderSpec: bubbleRow.role === "you" ? root.accentBorderSpec : root.borderSpec
-              // The person's own words wear Milo's orange; the answer wears the
-              // kit's plain popup surface. Two fills, so the two speakers read
+              borderSpec: root.borderSpec
+              // The person's own words wear a tint of the accent; the answer wears
+              // the kit's plain popup surface. Two fills, so the two speakers read
               // apart at a glance.
-              color: bubbleRow.role === "you" ? root.miloAccent : root.background
+              color: bubbleRow.role === "you" ? root.youFill : root.background
 
               Text {
                 id: label
                 anchors.fill: parent
                 anchors.margins: root.pad
                 text: bubbleRow.text
-                textFormat: Text.PlainText
-                color: bubbleRow.role === "you" ? root.miloAccentOn : root.foreground
+                // The answer is written in markdown, like every other Milo surface draws
+                // it; the person's own words are shown as they typed them.
+                textFormat: bubbleRow.role === "you" ? Text.PlainText : Text.MarkdownText
+                color: root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.body
                 lineHeight: 1.3
@@ -432,7 +462,7 @@ Item {
             Text {
               textFormat: Text.PlainText
               text: "󰚩"
-              color: root.miloAccent
+              color: root.accent
               font.family: root.fontFamily
               font.pixelSize: Style.font.title
               Layout.alignment: Qt.AlignVCenter
@@ -489,28 +519,50 @@ Item {
           }
         }
 
-        Text {
-          textFormat: Text.PlainText
+        // The footer sits on the same surface the fields and bubbles do: the popup
+        // floats over the desktop, and text laid straight on whatever is behind it
+        // is unreadable.
+        BorderSurface {
           width: parent.width
-          text: root.line
-          color: root.busy ? root.accent : root.foreground
-          opacity: 0.7
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
-          elide: Text.ElideRight
-        }
+          height: footer.implicitHeight + Style.spacing.controlPaddingY
+          radius: root.cornerRadius
+          color: root.background
+          borderSpec: root.borderSpec
 
-        Text {
-          textFormat: Text.PlainText
-          width: parent.width
-          // Only while it is true: at work the popup holds no keyboard, and Escape
-          // there belongs to the window in front.
-          visible: !root.working
-          text: "Esc closes · Ctrl + Enter continues in Milo"
-          color: root.foreground
-          opacity: 0.45
-          font.family: root.fontFamily
-          font.pixelSize: Style.font.caption
+          Column {
+            id: footer
+            anchors.fill: parent
+            anchors.leftMargin: Style.spacing.controlPaddingX
+            anchors.rightMargin: Style.spacing.controlPaddingX
+            anchors.topMargin: Style.spacing.controlPaddingY / 2
+            anchors.bottomMargin: Style.spacing.controlPaddingY / 2
+            spacing: Style.spacing.sm / 2
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              text: root.line
+              color: root.busy ? root.accent : root.foreground
+              opacity: 0.85
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              width: parent.width
+              // Only while it is true: at work the popup holds no keyboard, and Escape
+              // there belongs to the window in front.
+              visible: !root.working
+              text: "Esc closes · Ctrl + Enter continues in Milo"
+              color: root.foreground
+              opacity: 0.55
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+            }
+          }
         }
       }
     }
