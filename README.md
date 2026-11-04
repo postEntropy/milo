@@ -311,6 +311,33 @@ address. `/pair/claim` is the one route that answers without a token; the code i
 instead, and the tries are capped per address. The open code is written to `~/.milo/pairing.json`, which
 is why the terminal that prints it and the daemon that redeems it can be two processes.
 
+## Omarchy desktop popup (optional)
+
+`spotlight/omarchy/` is an [Omarchy](https://omarchy.org) shell plugin: a hotkey brings a popup to the
+bottom-right corner, a question goes out and the answer streams in where you are, without leaving the
+window in front. It is a client of the same daemon the browser and the phone talk to — the web gateway,
+with `surface: 'spotlight'` on the handshake — so the session it leaves behind is found later in the
+browser and on the phone, with its turns and its permissions.
+
+```bash
+ln -s "$PWD/spotlight/omarchy" ~/.config/omarchy/plugins/dev.leonardo.milo_spotlight
+```
+
+It needs `milo` on `PATH` and `milo serve` up with the web gateway on (`--no-web` closes this door the
+way it closes the phone's). The popup never starts a daemon: with none there it says so, keeps the
+question in its field, and connects by itself once one appears. The shell starts `milo spotlight` as its
+helper — NDJSON over stdio, because QML has no WebSocket — and restarts it if it dies; a helper that
+cannot start is reported with the first thing it said on stderr, which is the line worth reading.
+
+Asked, the popup hands the keyboard back so the machine stays usable; `Enter` asks, `Stop` ends the
+turn, `Esc` closes and `Ctrl+Enter` forks the conversation into the browser. The answer is drawn as
+markdown, each tool call as one line, and a confirmation as an Allow / Always / Deny card. Every
+colour, font and radius comes from the shell's own theme (`Commons.Color`, `Style`), so a theme swap
+repaints the popup with everything else.
+
+Editing it: the shell hot-reloads a plugin on save, but only through a real directory — inotify does not
+follow the symlink — so after a change under `spotlight/omarchy/` run `omarchy-restart-shell`.
+
 ## Telegram & Discord (optional)
 
 The bots are the same core reached from a chat app. `milo setup` → **Gateways** toggles them and stores
