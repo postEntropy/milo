@@ -4,6 +4,7 @@ import process from 'node:process'
 import { createInterface } from 'node:readline'
 import { WebSocket } from 'undici'
 import { loadConfig, readAuth, resolveGatewayToken, saveAuth } from '../core/config/load.js'
+import { matchProjectMention, type Project } from '../core/projects.js'
 import type { ClientFrame, ServerFrame } from '../gateways/web/protocol.js'
 import { PROTOCOL_VERSION } from '../gateways/web/protocol.js'
 import { appUrl, hostForUrl } from '../gateways/web/spotlight.js'
@@ -58,12 +59,21 @@ class SpotlightBridge {
   private readonly wsUrl: string
   private chatId = ''
   private sessionId = ''
+  /** The project the session in front works in, as its own ready said it. */
+  private project: string | undefined
+  /** Bumped whenever the chat is replaced, so an HTTP reply cannot bind an old question. */
+  private chatEpoch = 0
   private socket: WebSocket | null = null
   /** Bumped per connection, so a socket being retired cannot speak for the next one. */
   private generation = 0
   private connected = false
   private busy = false
-  private queued: string | null = null
+  /**
+   * A question waiting for the daemon to greet the chat it belongs to. `resolved`
+   * is a request whose project was already chosen: it is said as it is, not read
+   * for a mention a second time.
+   */
+  private queued: { text: string; resolved: boolean } | null = null
   private restartPending = false
   private retry: ReturnType<typeof setTimeout> | null = null
   private stopped = false
@@ -144,14 +154,26 @@ class SpotlightBridge {
       this.sendFrame({ type: 'control', action: 'stop' })
       return
     }
+    this.startChat(randomUUID(), null)
+  }
+
+  /**
+   * Binds the popup to a chat. A fresh chat is a fresh conversation; one a work
+   * session was started for over HTTP is already bound to that session by the
+   * runtime, so the handshake finds it. `queued` is said as soon as the daemon
+   * greets the chat, which is what lets a mention become the turn it names.
+   */
+  private startChat(chatId: string, queued: { text: string; resolved: boolean } | null): void {
+    this.chatEpoch += 1
     this.restartPending = false
     this.connected = false
-    this.queued = null
+    this.queued = queued
     this.clearRetry()
     this.socket?.close()
     this.socket = null
     this.sessionId = ''
-    this.chatId = randomUUID()
+    this.project = undefined
+    this.chatId = chatId
     this.generation += 1
     void this.reconnect()
   }
@@ -209,11 +231,15 @@ class SpotlightBridge {
     if (frame.type === 'ready') {
       this.connected = true
       this.sessionId = frame.sessionId
+      // Where this session works, read from the session rather than remembered: a
+      // daemon restarted behind the popup hands back a session that may be elsewhere.
+      this.project = frame.project?.id
       this.report({ type: 'ready' })
       if (this.queued !== null) {
-        const text = this.queued
+        const { text, resolved } = this.queued
         this.queued = null
-        this.ask(text)
+        if (resolved) this.send(text)
+        else this.ask(text)
       }
       return
     }
@@ -249,11 +275,71 @@ class SpotlightBridge {
     const trimmed = text.trim()
     if (!trimmed) return
     if (!this.connected) {
-      this.queued = trimmed
+      // Said again once the daemon greets the chat: which project the popup is in
+      // is only known from that greeting, and a mention is read against it.
+      this.queued = { text: trimmed, resolved: false }
       return
     }
+    const mention = matchProjectMention(trimmed)
+    if (mention.kind === 'error') {
+      // Said every time it is asked: an unanswered question would leave the popup
+      // waiting on a turn that was never started.
+      this.report({ type: 'error', message: mention.error })
+      return
+    }
+    if (mention.kind === 'none') {
+      this.send(trimmed)
+      return
+    }
+    if (!mention.text) {
+      this.report({ type: 'error', message: `Say what to do in ${mention.project.name} after its name.` })
+      return
+    }
+    // The session already works there: the mention only chose the context, and the
+    // words belong to the conversation in front.
+    if (this.project === mention.project.id) {
+      this.send(mention.text)
+      return
+    }
+    if (this.busy) {
+      this.report({ type: 'error', message: 'A turn is still running. Stop it before asking in another project.' })
+      return
+    }
+    void this.startInProject(mention.project, mention.text)
+  }
+
+  /** Sends the words into the session the popup is bound to. */
+  private send(text: string): void {
     this.busy = true
-    this.sendFrame({ type: 'send', text: trimmed })
+    this.sendFrame({ type: 'send', text })
+  }
+
+  /**
+   * A question that names a project is a work session in that project's folder: the
+   * same session the Work screen starts, with the folder's tools, rules and changes,
+   * opened without the list. The session is created over HTTP first, because only a
+   * request can bind a chat to a session the handshake has not minted yet; the chat id
+   * is fresh, so the conversation before this one stays where it is.
+   */
+  private async startInProject(project: Project, text: string): Promise<void> {
+    const epoch = this.chatEpoch
+    const chatId = randomUUID()
+    try {
+      await this.post<{ id: string }>('new-session', {
+        chatId,
+        project: project.id,
+        surface: 'spotlight',
+      })
+    } catch (error) {
+      // Said where the person is looking, and the chat in front is left as it was:
+      // a project this daemon cannot start says so instead of asking somewhere else.
+      this.report({ type: 'error', message: errorMessage(error) })
+      return
+    }
+    // A fresh popup or a reset while the session was being created takes the question
+    // with it rather than binding it to a chat the person has already left.
+    if (epoch !== this.chatEpoch) return
+    this.startChat(chatId, { text, resolved: true })
   }
 
   /**
@@ -347,6 +433,7 @@ export async function runSpotlight(argv = process.argv.slice(2)): Promise<void> 
       console.log('Usage: milo spotlight')
       console.log('Speaks the desktop popup\'s line protocol on stdin and stdout. The Omarchy shell plugin starts it;')
       console.log('it never starts the web server: it says so while none is running and connects once `milo serve` is up. Nothing here is meant to be typed by hand.')
+      console.log('A question that begins @<project> opens a work session in that project\'s folder.')
       return
     }
     throw new Error(`Unknown option: ${arg}. Usage: milo spotlight`)
