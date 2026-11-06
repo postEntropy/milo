@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, readdirSync, readFileSync, statSync, writeFileS
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { writeFileAtomic } from '../src/util/fs.js'
+import { writeFileAtomic, writePrivateFile } from '../src/util/fs.js'
 
 const freshDir = () => mkdtempSync(path.join(tmpdir(), 'milo-fs-'))
 
@@ -26,6 +26,15 @@ describe('writeFileAtomic', () => {
     chmodSync(file, 0o755)
     await writeFileAtomic(file, 'echo new')
     expect(statSync(file).mode & 0o7777).toBe(0o755)
+  })
+
+  it('tightens an existing file before atomically replacing it privately', async () => {
+    const file = path.join(freshDir(), 'private.txt')
+    writeFileSync(file, 'old')
+    chmodSync(file, 0o644)
+    await writePrivateFile(file, 'new')
+    expect(readFileSync(file, 'utf8')).toBe('new')
+    expect(statSync(file).mode & 0o7777).toBe(0o600)
   })
 
   it('leaves no temporary files behind', async () => {

@@ -26,6 +26,22 @@ export const PRIVATE_DIR_MODE = 0o700
  * (`writeFile`'s own `mode` goes through the umask, hence the explicit chmod.)
  * A file that does not exist yet is created with `fallbackMode`.
  */
+async function writeAtMode(file: string, content: string | Buffer, mode: number): Promise<void> {
+  const temp = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`,
+  )
+
+  try {
+    await writeFile(temp, content, { mode })
+    await chmod(temp, mode)
+    await rename(temp, file)
+  } catch (error) {
+    await rm(temp, { force: true }).catch(() => undefined)
+    throw error
+  }
+}
+
 export async function writeFileAtomic(
   file: string,
   content: string | Buffer,
@@ -34,29 +50,12 @@ export async function writeFileAtomic(
   const mode = await stat(file)
     .then((info) => info.mode & 0o7777)
     .catch(() => null)
-  const temp = path.join(
-    path.dirname(file),
-    `.${path.basename(file)}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`,
-  )
-
-  try {
-    await writeFile(temp, content, { mode: mode ?? fallbackMode })
-    if (mode !== null) await chmod(temp, mode)
-    await rename(temp, file)
-  } catch (error) {
-    await rm(temp, { force: true }).catch(() => undefined)
-    throw error
-  }
+  await writeAtMode(file, content, mode ?? fallbackMode)
 }
 
-/**
- * The same, for a file of Milo's own: created 0600, and tightened if it already
- * exists with something looser — which is just what a file written by an earlier
- * Milo looks like, since `writeFileAtomic` keeps an existing mode on purpose.
- */
+/** Writes and atomically replaces one private file with mode 0600. */
 export async function writePrivateFile(file: string, content: string): Promise<void> {
-  await writeFileAtomic(file, content, PRIVATE_FILE_MODE)
-  await chmod(file, PRIVATE_FILE_MODE)
+  await writeAtMode(file, content, PRIVATE_FILE_MODE)
 }
 
 /** A directory Milo makes for its own files: 0700, so its names are not a listing. */
