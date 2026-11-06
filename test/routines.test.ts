@@ -762,12 +762,12 @@ describe('RoutineScheduler', () => {
   })
 
   it('fires a due routine and delivers what it answered', async () => {
-    await seedRoutines([sample()])
+    await seedRoutines([sample({ when: every(1) })])
     const h = harness()
     h.scheduler.start()
 
-    h.advanceClock(60_000)
-    await h.advance(61_000)
+    h.setClock(new Date(2026, 8, 25, 8, 0, 40))
+    await h.advance(120_000)
 
     expect(h.prompts).toEqual(['look at the repo'])
     // The name travels as data, not as the first line of the answer: a surface that
@@ -776,7 +776,7 @@ describe('RoutineScheduler', () => {
     expect(h.delivered).toEqual([{
       id: 'calm-otter-1',
       text: 'ok',
-      routine: { name: 'briefing', at: new Date(2026, 8, 25, 8, 0, 30).getTime() },
+      routine: { name: 'briefing', at: new Date(2026, 8, 25, 8, 0, 40).getTime() },
     }])
     expect(readRoutines()[0]).toMatchObject({ lastResult: 'ok' })
     expect(readRoutines()[0]!.lastRunAt).toBeGreaterThan(0)

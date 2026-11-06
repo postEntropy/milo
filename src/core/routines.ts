@@ -420,6 +420,7 @@ export function readRoutines(): Routine[] {
 const LOCK_STALE_MS = 10_000
 /** Write windows are short and rare: waiting is cheaper than losing a change. */
 const WRITE_LOCK_RETRIES = { retries: 15, factor: 1.5, minTimeout: 20, maxTimeout: 250, randomize: true }
+let localRoutineWrites = Promise.resolve()
 
 /**
  * Takes the file's lock, so a read-modify-write is one step across processes.
@@ -456,8 +457,13 @@ export function findRoutine(id: string): Routine | undefined {
 async function changeRoutines<T>(
   change: (routines: Routine[]) => { result: T; next?: Routine[] },
 ): Promise<T> {
-  const release = await lockRoutines()
+  const previous = localRoutineWrites
+  let releaseLocal!: () => void
+  localRoutineWrites = new Promise<void>((resolve) => { releaseLocal = resolve })
+  await previous
+  let releaseFile: (() => Promise<void>) | undefined
   try {
+    releaseFile = await lockRoutines()
     // Strict: a read-modify-write must never be built on a tolerant empty reading
     // of a file it could not parse, which is how a corrupt one got erased.
     const routines = readRoutinesStrict()
@@ -465,7 +471,11 @@ async function changeRoutines<T>(
     if (outcome.next) await writePrivateFile(routinesFile(), serialize(outcome.next))
     return outcome.result
   } finally {
-    await release()
+    try {
+      await releaseFile?.()
+    } finally {
+      releaseLocal()
+    }
   }
 }
 
