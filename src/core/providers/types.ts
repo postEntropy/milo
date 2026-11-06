@@ -120,6 +120,8 @@ export function isAttachmentPart(part: ContentPart): part is AttachmentPart {
 export interface Message {
   role: Role
   content: ContentPart[]
+  /** Internal instruction supplied by Milo; sent to the model but hidden in transcripts. */
+  internal?: 'verification'
   /** The person's own text, without extracted attachment contents. */
   displayText?: string
   /** Media preparation notices shown with this turn. */

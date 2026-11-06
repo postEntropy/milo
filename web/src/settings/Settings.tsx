@@ -4,6 +4,7 @@ import { message, splitNames } from '../lib/format.js'
 import { formatWhen } from '../../../src/core/time.js'
 import { CLASSIFIER_LABELS, PERMISSION_LABELS, SEARCH_LABELS, skillOriginLabel } from '../lib/labels.js'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
+import type { SessionBackendSummary } from '../../../src/core/sessions/types.js'
 import { humanSize } from '../../../src/util/format.ts'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
@@ -107,7 +108,7 @@ type SettingsData = {
   presets: ProviderPreset[]
   chatgpt?: ChatGptStatus
   skills: Skill[]
-  sessions: Array<{ id: string; title?: string; preview: string; updatedAt: number; messageCount: number }>
+  sessions: Array<{ id: string; title?: string; preview: string; updatedAt: number; messageCount: number; backend?: SessionBackendSummary }>
   memoryStats: MemoryStats
   mcp: McpReport
   live: { model: string; effort: string; permissionMode: string; skills: Skill[]; browser: boolean }
@@ -909,9 +910,9 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
             <div><div className="secret-name">{session.title || session.preview || session.id}{session.id === sessionId ? ' · current' : ''}</div><div className="secret-state">{session.preview} · {session.messageCount} msgs · {formatWhen(session.updatedAt)}</div></div>
             <div className="row-actions">
               <button className="button" type="button" onClick={async () => { await api('resume-session', { chatId, id: session.id }); onSessionChange(session.id) }}>Open</button>
-              <button className="button" type="button" onClick={() => void exportSession(session.id)}><Icon name="download" size={13} /></button>
+              {session.backend?.kind !== 'command-code' && <button className="button" type="button" onClick={() => void exportSession(session.id)}><Icon name="download" size={13} /></button>}
               {session.id === sessionId
-                ? <button className="button" type="button" onClick={async () => { await api('clear-session', { chatId }); await load(); setNotice({ text: 'Session cleared.', error: false }) }}>Clear</button>
+                ? session.backend?.kind !== 'command-code' && <button className="button" type="button" onClick={async () => { await api('clear-session', { chatId }); await load(); setNotice({ text: 'Session cleared.', error: false }) }}>Clear</button>
                 : <button className="button danger" type="button" onClick={() => void deleteSession(session.id)}><Icon name="trash" size={13} /></button>}
             </div>
           </div>)}

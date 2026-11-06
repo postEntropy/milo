@@ -23,10 +23,12 @@ import { Panel } from './panel/Panel.js'
 import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, ThinkingDisplay } from '@protocol'
 import { SessionRow } from './sessions/SessionRow.js'
 import type { SessionSummary } from './sessions/types.js'
+import type { SessionBackendKind, SessionBackendView } from '../../src/core/sessions/types.js'
 import { chatSessions, isWorkSession } from './sessions/scopes.js'
 import { WorkList } from './sessions/WorkList.js'
 import type { ProjectView } from '../../src/core/projects.ts'
 import { Icon } from './ui/Icons.js'
+import { SessionBackendMark } from './ui/SessionBackendMark.js'
 import { ConnectionChip } from './ui/ConnectionChip.js'
 import { Notice, useAutoDismiss, type Report } from './ui/Notice.js'
 import { Select } from './ui/Select.js'
@@ -35,6 +37,7 @@ import { projectMark } from './work/marks.js'
 
 type PendingPermission = { id: string; request: PermissionRequest; expiresAt: number }
 type SessionGroup = { label: string; sessions: SessionSummary[] }
+type NewSessionContext = { project?: string; firstMessage?: string; plan?: boolean }
 /** A past turn the search box found, with the session it belongs to. */
 type HistoryHit = { session: string; at: string; kind: string; text: string }
 
@@ -120,6 +123,10 @@ export default function App() {
   const [thinking, setThinking] = useState<ThinkingDisplay>('expanded')
   const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium')
   const [identity, setIdentity] = useState({ provider: 'milo', providerName: 'Milo', model: '' })
+  const [sessionBackend, setSessionBackend] = useState<SessionBackendView>({ kind: 'milo' })
+  const [commandCodeInfoOpen, setCommandCodeInfoOpen] = useState(false)
+  const commandCodeInfoRef = useRef<HTMLDivElement>(null)
+  const sessionBackendRef = useRef(sessionBackend)
   const [connection, setConnection] = useState<ConnectionStatus>({ state: 'connecting' })
   const [view, setViewRaw] = useState<View>(() => viewFromPath(location.pathname))
   /** The screen in front, for callbacks that outlive this render. */
@@ -396,6 +403,22 @@ export default function App() {
     }
   }, [fail])
 
+  useEffect(() => {
+    if (!commandCodeInfoOpen) return
+    const dismissOutside = (event: PointerEvent): void => {
+      if (event.target instanceof Node && !commandCodeInfoRef.current?.contains(event.target)) setCommandCodeInfoOpen(false)
+    }
+    const dismissEscape = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setCommandCodeInfoOpen(false)
+    }
+    document.addEventListener('pointerdown', dismissOutside)
+    document.addEventListener('keydown', dismissEscape)
+    return () => {
+      document.removeEventListener('pointerdown', dismissOutside)
+      document.removeEventListener('keydown', dismissEscape)
+    }
+  }, [commandCodeInfoOpen])
+
   // Project membership is part of the daemon's session summaries, so refresh both
   // together whenever the registered project list changes.
   const projectIds = projects?.map((item) => item.id).sort().join('\0') ?? null
@@ -550,11 +573,18 @@ export default function App() {
       setQueued(0)
       setConnection({ state: 'online' })
       setSessionId(frame.sessionId)
+      setCommandCodeInfoOpen(false)
       // It is on the screen now, wherever it was opened from.
       markSeen(frame.sessionId)
       setThinking(frame.thinking)
       if (frame.effort) setEffort(frame.effort)
       setIdentity({ provider: frame.provider, providerName: frame.providerName, model: frame.model })
+      const nextBackend = frame.backend ?? { kind: 'milo' }
+      sessionBackendRef.current = nextBackend
+      setSessionBackend(nextBackend)
+      if (frame.backend?.kind === 'command-code' && frame.backend.error) {
+        setNotice({ text: frame.backend.error, error: true })
+      }
       // What the panel was left showing, resolved by the server from the session's
       // own history, so a reload comes back to the same view.
       setPanel(frame.panel ?? null)
@@ -630,13 +660,28 @@ export default function App() {
       return
     }
     if (frame.type === 'suggestions') { setIdeas(frame.items); return }
+    if (frame.type === 'session-backend') {
+      sessionBackendRef.current = frame.backend
+      setSessionBackend(frame.backend)
+      return
+    }
     if (frame.type === 'state') { setBusy(frame.busy); setQueued(frame.queued); return }
     if (frame.type === 'jobs') { setJobs(frame.jobs); return }
     if (frame.type === 'turn-start') {
       // The wait starts here and the turn says so on screen: the assistant
       // message carries it, so the line appears where the reply will.
       const now = Date.now()
-      setMessages((current) => [...current, { id: `user-${frame.id}`, role: 'user', parts: [{ kind: 'text', text: frame.text }], at: now }, { id: frame.id, role: 'assistant', parts: [], waitingSince: now, at: now }])
+      setMessages((current) => {
+        const currentBackend = sessionBackendRef.current
+        const pending = frame.retryPendingId && currentBackend.kind === 'command-code' && currentBackend.pendingTurn?.id === frame.retryPendingId
+          ? currentBackend.pendingTurn
+          : undefined
+        const alreadyVisible = pending && current.slice(pending.baseMessageCount).some((message) =>
+          message.role === 'user' && message.parts.filter((part) => part.kind === 'text').map((part) => part.text).join('') === frame.text,
+        )
+        const user = alreadyVisible ? [] : [{ id: `user-${frame.id}`, role: 'user' as const, parts: [{ kind: 'text' as const, text: frame.text }], at: now }]
+        return [...current, ...user, { id: frame.id, role: 'assistant', parts: [], waitingSince: now, at: now }]
+      })
       setBusy(true)
       return
     }
@@ -715,58 +760,33 @@ export default function App() {
     }
   }, [refreshSessions, markSeen, markSeenOnChat])
 
-  const newChat = useCallback(async (): Promise<boolean> => {
+  const newChat = useCallback(async (
+    backend: SessionBackendKind = 'milo',
+    confirmed = false,
+    context: NewSessionContext = {},
+  ): Promise<boolean> => {
     editingTurn.current = null
     const nextChatId = randomUUID()
-    // Inside the click that asked for it, before any state moves: a focus handed
-    // over a tick later is a focus the browser is free to drop. The counter is
-    // the other half — when this chat is not the view on screen, the composer
-    // mounts only once it is, and takes the cursor then.
+    pendingSend.current = context.firstMessage ?? null
     composerRef.current?.focus()
     setComposerFocus((current) => current + 1)
     try {
-      const session = await api<{ id: string }>('new-session', { chatId: nextChatId })
+      const session = await api<{ id: string }>('new-session', {
+        chatId: nextChatId,
+        backend,
+        confirmed,
+        ...(context.project ? { project: context.project } : {}),
+        ...(context.plan ? { plan: true } : {}),
+      })
       socket.close()
       setMessages([])
       setPanel(null)
       setProject(null)
       setPlan(false)
       setSessionId(session.id)
-      setView('chat')
-      setSidebarOpen(false)
-      setChatId(nextChatId)
-      return true
-    } catch (error) {
-      // Reported here, and said as a failure to the caller: a delete that moves
-      // off the current session first must not go on when that move did not happen.
-      fail(error)
-      return false
-    }
-  }, [socket, fail, setView])
-
-  /**
-   * Start a work session in a project and open it — `newChat`'s move, with the
-   * folder the session works in. The daemon binds the conversation to that
-   * project, so the chat that opens is the ordinary one, working there.
-   *
-   * A `firstMessage` is said for the person: the words are owed exactly as a redo
-   * owes them (`pendingSend`), and go out once the new session is the one the socket
-   * speaks to. The Work screen uses it to ask for the project's rules to be written.
-   */
-  const startWorkSession = useCallback(async (project: string, firstMessage?: string): Promise<boolean> => {
-    editingTurn.current = null
-    const nextChatId = randomUUID()
-    pendingSend.current = firstMessage ?? null
-    composerRef.current?.focus()
-    setComposerFocus((current) => current + 1)
-    try {
-      const session = await api<{ id: string }>('new-session', { chatId: nextChatId, project })
-      socket.close()
-      setMessages([])
-      setPanel(null)
-      setProject(null)
-      setPlan(false)
-      setSessionId(session.id)
+      const nextBackend: SessionBackendView = backend === 'command-code' ? { kind: backend, state: 'waiting' } : { kind: 'milo' }
+      sessionBackendRef.current = nextBackend
+      setSessionBackend(nextBackend)
       setView('chat')
       setSidebarOpen(false)
       setChatId(nextChatId)
@@ -778,15 +798,23 @@ export default function App() {
     }
   }, [socket, fail, setView])
 
-  /**
-   * A new session in the world the session in front works in: a chat from a chat, and the
-   * same project from a work session. A work session cannot become a chat, so starting one
-   * inside a project and landing in a plain chat would drop the folder it was chosen for.
-   */
+  const startWorkSession = useCallback((
+    project: string,
+    firstMessage: string,
+    backend: SessionBackendKind,
+    confirmed: boolean,
+  ): Promise<boolean> => newChat(backend, confirmed, { project, firstMessage }), [newChat])
+
   const newSessionHere = useCallback((): Promise<boolean> => {
     const project = sessions.find((session) => session.id === sessionId)?.project
-    return project ? startWorkSession(project) : newChat()
-  }, [sessions, sessionId, startWorkSession, newChat])
+    if (project) {
+      setWorkProject(project)
+      setView('work')
+      setSidebarOpen(false)
+      return Promise.resolve(true)
+    }
+    return newChat()
+  }, [sessions, sessionId, newChat, setView])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-render triggers, not closure values — the list has already grown by the time this runs, and the scroll follows the rendered height
   useEffect(() => {
@@ -1052,6 +1080,20 @@ export default function App() {
     void newChat()
   }, [mode, view, sessions, setView, openSession, newChat])
 
+  /**
+   * The Chat | Work switch, drawn by the drawer and, on a Session that has not begun and on the
+   * Work index, at the top of the page — one control in two places, so the world is chosen where
+   * the app opens.
+   */
+  const renderModeSwitch = (className: string) => (
+    <fieldset className={className} data-mode={mode}>
+      <legend className="sr-only">Session lists</legend>
+      <button className={mode === 'chat' ? 'on' : ''} type="button" aria-pressed={mode === 'chat'} onClick={() => switchTo('chat')}>Chat</button>
+      <button className={mode === 'work' ? 'on' : ''} type="button" aria-pressed={mode === 'work'} onClick={() => switchTo('work')}>Work</button>
+    </fieldset>
+  )
+  const modeSwitch = renderModeSwitch('session-mode')
+  const atHome = view === 'chat' ? messages.length === 0 && project === null : view === 'work' && workProject === null
   const forkSession = useCallback(async (upToTurn: number): Promise<void> => {
     if (!sessionId) return
     editingTurn.current = null
@@ -1266,10 +1308,28 @@ export default function App() {
     messages.length > planSince &&
     lastMessage?.role === 'assistant' &&
     lastMessage.parts.some((part) => part.kind === 'text' && part.text.trim() !== '')
+  const pendingCodeTurn = sessionBackend.kind === 'command-code' ? sessionBackend.pendingTurn : undefined
+  const pendingCodeMessageVisible = pendingCodeTurn
+    ? messages.slice(pendingCodeTurn.baseMessageCount).some((message) =>
+      message.role === 'user' && message.parts.filter((part) => part.kind === 'text').map((part) => part.text).join('') === pendingCodeTurn.input,
+    )
+    : false
 
   /** The main chat's thread: prose, tools, the plan and anything the model drew. */
   const thread = <>
-    <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} />
+    {pendingCodeTurn && !busy && <section className="command-code-recovery" role="status">
+      <div className="command-code-recovery-copy">
+        <strong>Command Code has not confirmed this turn.</strong>
+        <span>{pendingCodeMessageVisible ? 'The message is in native history, but the answer did not finish.' : 'The message may still be running or may not have reached native history.'}</span>
+        {!pendingCodeMessageVisible && <blockquote>{pendingCodeTurn.input}</blockquote>}
+      </div>
+      <button type="button" className="button" onClick={() => {
+        if (window.confirm('Retry this pending Command Code turn? It may duplicate the request if the first run is still starting.')) {
+          socket.send({ type: 'control', action: 'retry-command-code', id: pendingCodeTurn.id, confirmed: true })
+        }
+      }}>Retry pending turn</button>
+    </section>}
+    <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={sessionBackend.kind === 'milo' ? forkSession : undefined} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} />
     {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(action) => socket.send({ type: 'control', action, id: pendingPermission.id })} /></article>}
   </>
 
@@ -1290,7 +1350,7 @@ export default function App() {
             {!searchOpen && startableProjects.length > 0 && <Select
               value=""
               choices={startableProjects.map((project) => ({ value: project.id, label: project.name }))}
-              onChange={(project) => void startWorkSession(project)}
+              onChange={(project) => { setWorkProject(project); setView('work'); setSidebarOpen(false) }}
               label="New session in a project"
               icon="plus"
               triggerLabel="New session"
@@ -1309,11 +1369,7 @@ export default function App() {
           {/* The two halves of the list: the sessions that work in Milo's own folder, and
               the ones that work in a project. The switch says whose list this is, and Work
               is no longer a fourth page beside Routines — it is the other half of this one. */}
-          <fieldset className="session-mode" data-mode={mode}>
-            <legend className="sr-only">Session lists</legend>
-            <button className={mode === 'chat' ? 'on' : ''} type="button" aria-pressed={mode === 'chat'} onClick={() => switchTo('chat')}>Chat</button>
-            <button className={mode === 'work' ? 'on' : ''} type="button" aria-pressed={mode === 'work'} onClick={() => switchTo('work')}>Work</button>
-          </fieldset>
+          {modeSwitch}
           <nav className="session-list" aria-label={mode === 'work' ? 'Work sessions' : 'Chat sessions'}>
             {mode === 'chat' ? <>
               {historyHits && historyHits.length > 0 && <div className="history-hits">
@@ -1355,21 +1411,42 @@ export default function App() {
             and the bar saying it again was a second naming. The chat has no such heading,
             so the name of the session it is showing lives here — and, on a phone, this is
             the only place that names it. */}
+        {atHome && renderModeSwitch('session-mode topbar-mode')}
         <div className="topbar-title">{view === 'chat' && <>
           {/* The project over the name: a session in one is work in a place, and which place
               is the first thing to know about it — said even before the first word, with the
               mark the project wears (a folder until another one is chosen). A project whose
               folder has gone says so rather than reading as workable. Pressing it opens that
               project's own page in Work. */}
-          {project && <button
-            className={`topbar-project ${project.error ? 'gone' : ''}`}
-            type="button"
-            title={project.error ?? `Open ${project.name}`}
-            aria-label={project.error ? `Project: ${project.name}, ${project.error}` : `Open the ${project.name} project`}
-            onClick={() => { setWorkProject(project.id); setView('work'); setSidebarOpen(false) }}
-          >
-            <Icon name={projectMark(project.icon)} size={12} /> <span>{project.name}</span>
-          </button>}
+          {project && <div className={`topbar-project-group${sessionBackend.kind === 'command-code' ? ' with-backend' : ''}`}>
+            <button
+              className={`topbar-project ${project.error ? 'gone' : ''}`}
+              type="button"
+              title={project.error ?? `Open ${project.name}`}
+              aria-label={project.error ? `Project: ${project.name}, ${project.error}` : `Open the ${project.name} project`}
+              onClick={() => { setWorkProject(project.id); setView('work'); setSidebarOpen(false) }}
+            >
+              <Icon name={projectMark(project.icon)} size={12} /> <span>{project.name}</span>
+            </button>
+            {sessionBackend.kind === 'command-code' && <div className="topbar-backend-wrap" ref={commandCodeInfoRef}>
+              <button
+                className="topbar-backend-info"
+                type="button"
+                title="Command Code access details"
+                aria-label="Command Code access details"
+                aria-expanded={commandCodeInfoOpen}
+                onClick={() => setCommandCodeInfoOpen((open) => !open)}
+              ><SessionBackendMark backend="command-code" size={18} /></button>
+              {commandCodeInfoOpen && <section className="topbar-backend-popover" role="dialog" aria-label="Command Code access details">
+                <header className="topbar-backend-popover-head">
+                  <SessionBackendMark backend="command-code" size={18} />
+                  <strong>Command Code</strong>
+                  <button className="topbar-backend-close" type="button" aria-label="Close Command Code access details" onClick={() => setCommandCodeInfoOpen(false)}><span aria-hidden="true">×</span></button>
+                </header>
+                <p>Command Code uses its own tools and --yolo permissions, not Milo's per-tool approvals. It can edit files and run shell commands outside {project.path}. Its native history and Herdr run record retain this Session activity.</p>
+              </section>}
+            </div>}
+          </div>}
           {messages.length > 0 && <h1>{currentSession ? currentSession.label : 'New session'}</h1>}
         </>}</div>
         <div className="topbar-actions">
@@ -1410,7 +1487,7 @@ export default function App() {
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock" ref={composerDockRef}>
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} provider={identity.provider} providerName={identity.providerName} draftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={Boolean(project)} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); socket.send({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => socket.send({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
+            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} sessionBackend={sessionBackend.kind} provider={identity.provider} providerName={identity.providerName} draftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={Boolean(project) && sessionBackend.kind === 'milo'} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); socket.send({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => socket.send({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
           </div>
         </section>
         : null}

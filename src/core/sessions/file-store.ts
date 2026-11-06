@@ -15,7 +15,9 @@ import {
   INITIAL_SESSION_VERSION,
   isValidSessionId,
   SessionConflictError,
+  SESSION_SURFACES,
   toSummary,
+  type SessionBackend,
   type SessionLease,
   type SessionRecord,
   type SessionStore,
@@ -99,6 +101,17 @@ export class FileSessionStore implements SessionStore {
     this.now = options.now ?? Date.now
   }
 
+  async withCreationLock<T>(key: string, work: () => Promise<T>): Promise<T> {
+    ensurePrivateDir(this.dir)
+    const digest = createHash('sha256').update(key).digest('hex')
+    const release = await this.takeLock(path.join(this.dir, `.creation-${digest}`), TURN_LOCK_RETRIES)
+    try {
+      return await work()
+    } finally {
+      await release()
+    }
+  }
+
   /**
    * Mints an id and returns an empty record — in memory, not on disk. A session
    * takes its file on the first save, so a run that opens a conversation and
@@ -107,7 +120,7 @@ export class FileSessionStore implements SessionStore {
    * has handed out and the ones already on disk, so a second process cannot take
    * a nickname this one is holding.
    */
-  async create(scope?: MemoryScope, project?: string, surface?: SessionSurface): Promise<SessionRecord> {
+  async create(scope?: MemoryScope, project?: string, surface?: SessionSurface, backend?: SessionBackend): Promise<SessionRecord> {
     return this.run(() => {
       const timestamp = this.now()
       const id = generateNickname(
@@ -123,6 +136,7 @@ export class FileSessionStore implements SessionStore {
         // came from even if the process dies before the first turn lands.
         ...(scope ? { scope } : {}),
         ...(project ? { project } : {}),
+        ...(backend ? { backend } : {}),
         ...(surface ? { surface } : {}),
       } satisfies SessionRecord
       this.pending.set(id, record)
@@ -171,15 +185,17 @@ export class FileSessionStore implements SessionStore {
     })
   }
 
-  /** The revision on disk; a missing or unreadable file reads as the initial one. */
+  /** The revision on disk; only a missing file is a new record. */
   private storedVersion(file: string): number {
     if (!existsSync(file)) return INITIAL_SESSION_VERSION
+    let record: SessionRecord | null
     try {
-      return parseRecord(JSON.parse(readFileSync(file, 'utf8')))?.version ?? INITIAL_SESSION_VERSION
+      record = parseRecord(JSON.parse(readFileSync(file, 'utf8')))
     } catch (error) {
-      logWarn(`reading the version of ${file} failed: ${errorMessage(error)}`)
-      return INITIAL_SESSION_VERSION
+      throw new Error(`Cannot save over unreadable session file ${file}: ${errorMessage(error)}`)
     }
+    if (!record) throw new Error(`Cannot save over invalid session file ${file}.`)
+    return record.version
   }
 
   /**
@@ -364,6 +380,9 @@ export class FileSessionStore implements SessionStore {
     return this.run(async () => {
       const source = await this.load(sourceId)
       if (!source) return null
+      if (source.backend?.kind === 'command-code') {
+        throw new Error('Forking a Command Code Session is not supported; use Command Code to branch its native history.')
+      }
 
       const timestamp = this.now()
       const id = generateNickname(
@@ -422,7 +441,7 @@ export class FileSessionStore implements SessionStore {
 
     const removed: string[] = []
     for (const summary of summaries.slice(options.keep)) {
-      if (keep.has(summary.id)) continue
+      if (keep.has(summary.id) || summary.backend?.kind === 'command-code') continue
       await this.remove(summary.id)
       removed.push(summary.id)
     }
@@ -439,7 +458,7 @@ export class FileSessionStore implements SessionStore {
   async pruneEmpty(): Promise<string[]> {
     const removed: string[] = []
     for (const summary of await this.list()) {
-      if (summary.messageCount > 0) continue
+      if (summary.backend?.kind === 'command-code' || summary.messageCount > 0) continue
       await this.remove(summary.id)
       removed.push(summary.id)
     }
@@ -538,6 +557,8 @@ function parseRecord(value: unknown): SessionRecord | null {
   if (!value || typeof value !== 'object') return null
   const raw = value as Partial<SessionRecord>
   if (typeof raw.id !== 'string' || !Array.isArray(raw.messages)) return null
+  const backend = raw.backend === undefined ? undefined : parseBackend(raw.backend)
+  if (raw.backend !== undefined && !backend) return null
   const createdAt = typeof raw.createdAt === 'number' ? raw.createdAt : Date.now()
   return {
     id: raw.id,
@@ -555,5 +576,56 @@ function parseRecord(value: unknown): SessionRecord | null {
     // still readable, just unattributable.
     scope: readScope(raw.scope),
     project: typeof raw.project === 'string' && raw.project.length > 0 ? raw.project : undefined,
+    ...(backend ? { backend } : {}),
+    ...(typeof raw.surface === 'string' && SESSION_SURFACES.includes(raw.surface as SessionSurface)
+      ? { surface: raw.surface as SessionSurface }
+      : {}),
+  }
+}
+
+function parseBackend(value: unknown): SessionBackend | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const backend = value as Record<string, unknown>
+  if (backend.kind === 'milo') return { kind: 'milo' }
+  if (backend.kind !== 'command-code' ||
+    !['starting', 'ready', 'running', 'waiting', 'stopped', 'error'].includes(String(backend.state)) ||
+    typeof backend.nativeTitle !== 'string' || typeof backend.workingDirectory !== 'string' ||
+    typeof backend.requestId !== 'string' ||
+    (backend.terminalId !== undefined && typeof backend.terminalId !== 'string') ||
+    (backend.nativeSessionId !== undefined && typeof backend.nativeSessionId !== 'string') ||
+    (backend.projectIncarnation !== undefined && typeof backend.projectIncarnation !== 'string') ||
+    (backend.preview !== undefined && typeof backend.preview !== 'string') ||
+    (backend.messageCount !== undefined && (!Number.isInteger(backend.messageCount) || Number(backend.messageCount) < 0)) ||
+    (backend.nativeUpdatedAt !== undefined && (typeof backend.nativeUpdatedAt !== 'number' || !Number.isFinite(backend.nativeUpdatedAt))) ||
+    (backend.pendingTurn !== undefined && (!backend.pendingTurn || typeof backend.pendingTurn !== 'object' ||
+      typeof (backend.pendingTurn as Record<string, unknown>).id !== 'string' ||
+      typeof (backend.pendingTurn as Record<string, unknown>).input !== 'string' ||
+      typeof (backend.pendingTurn as Record<string, unknown>).startedAt !== 'number' ||
+      !Number.isFinite((backend.pendingTurn as Record<string, unknown>).startedAt) ||
+      typeof (backend.pendingTurn as Record<string, unknown>).baseMessageCount !== 'number' ||
+      !Number.isInteger((backend.pendingTurn as Record<string, unknown>).baseMessageCount) ||
+      Number((backend.pendingTurn as Record<string, unknown>).baseMessageCount) < 0)) ||
+    (backend.error !== undefined && typeof backend.error !== 'string')) return null
+  return {
+    kind: 'command-code',
+    state: backend.state as Extract<SessionBackend, { kind: 'command-code' }>['state'],
+    nativeTitle: backend.nativeTitle,
+    workingDirectory: backend.workingDirectory,
+    requestId: backend.requestId,
+    ...(backend.terminalId ? { terminalId: backend.terminalId } : {}),
+    ...(backend.nativeSessionId ? { nativeSessionId: backend.nativeSessionId } : {}),
+    ...(backend.projectIncarnation ? { projectIncarnation: backend.projectIncarnation } : {}),
+    ...(typeof backend.preview === 'string' ? { preview: backend.preview } : {}),
+    ...(typeof backend.messageCount === 'number' ? { messageCount: backend.messageCount } : {}),
+    ...(typeof backend.nativeUpdatedAt === 'number' ? { nativeUpdatedAt: backend.nativeUpdatedAt } : {}),
+    ...(backend.pendingTurn ? {
+      pendingTurn: {
+        id: (backend.pendingTurn as Record<string, string | number>).id as string,
+        input: (backend.pendingTurn as Record<string, string | number>).input as string,
+        startedAt: (backend.pendingTurn as Record<string, string | number>).startedAt as number,
+        baseMessageCount: (backend.pendingTurn as Record<string, string | number>).baseMessageCount as number,
+      },
+    } : {}),
+    ...(backend.error ? { error: backend.error } : {}),
   }
 }

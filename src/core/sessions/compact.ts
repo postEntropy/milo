@@ -99,7 +99,7 @@ export function planCut(messages: Message[], keepTurns: number): number {
   if (keepTurns <= 0) return 0
   const userIndexes: number[] = []
   messages.forEach((message, index) => {
-    if (message.role === 'user') userIndexes.push(index)
+    if (message.role === 'user' && !message.internal) userIndexes.push(index)
   })
   if (userIndexes.length <= keepTurns) return 0
   return userIndexes[userIndexes.length - keepTurns]!
@@ -116,7 +116,7 @@ export function sliceMessagesUpToTurn(messages: Message[], upToTurn?: number): M
   if (upToTurn <= 0) return []
   const userIndexes: number[] = []
   messages.forEach((msg, idx) => {
-    if (msg.role === 'user') userIndexes.push(idx)
+    if (msg.role === 'user' && !msg.internal) userIndexes.push(idx)
   })
   if (upToTurn < userIndexes.length) {
     const cutIdx = userIndexes[upToTurn]!
@@ -146,7 +146,7 @@ export function planCutUnderBudget(
 ): number {
   const userIndexes: number[] = []
   messages.forEach((message, index) => {
-    if (message.role === 'user') userIndexes.push(index)
+    if (message.role === 'user' && !message.internal) userIndexes.push(index)
   })
   if (userIndexes.length === 0) return 0
 
@@ -628,7 +628,9 @@ function renderTranscript(messages: Message[]): string {
       .join('\n')
       .trim()
     if (text) {
-      const speaker = message.role === 'user' ? 'User' : message.role === 'assistant' ? 'Assistant' : message.role
+      const speaker = message.internal === 'verification'
+        ? 'Verification'
+        : message.role === 'user' ? 'User' : message.role === 'assistant' ? 'Assistant' : message.role
       lines.push(`${speaker}: ${text}`)
     }
     for (const part of message.content) {

@@ -91,6 +91,7 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
   }
 
   for (const message of messages) {
+    if (message.internal) continue
     const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('')
     if (message.role === 'user') {
       closeAssistant()

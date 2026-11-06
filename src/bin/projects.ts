@@ -222,13 +222,15 @@ async function remove(argv: string[], out: ProjectIo['out'], err: ProjectIo['err
     err(found.error)
     return 1
   }
-  if (!(await removeProject(found.project.id))) {
+  const result = await removeProject(found.project.id)
+  if (!result.removed) {
     err(`No project ${found.project.id}.`)
     return 1
   }
   // Said plainly: the sessions are not dropped with it. They lose the folder they
   // worked in, and the next turn of one says so rather than working elsewhere.
   out(`Removed ${found.project.name} (${found.project.id}). Sessions that ran there stay, without a project.`)
+  if (result.warning) err(result.warning)
   return 0
 }
 

@@ -8,7 +8,9 @@ struct MenuRow: Identifiable {
     let title: String
     var subtitle: String? = nil
     var symbol: String? = nil
+    var mark: AnyView? = nil
     var chosen = false
+    var disabled = false
     var children: [MenuRow] = []
     var action: () -> Void = {}
 
@@ -106,7 +108,11 @@ struct MenuPanel: View {
             }
         } label: {
             HStack(spacing: MiloTheme.Space.four) {
-                if let symbol = row.symbol {
+                if let mark = row.mark {
+                    mark
+                        .frame(width: 42, height: 42)
+                        .background(MiloTheme.surfaceWarm, in: Circle())
+                } else if let symbol = row.symbol {
                     Image(systemName: symbol)
                         .font(.system(size: 18, weight: .medium))
                         .foregroundStyle(MiloTheme.foreground)
@@ -137,10 +143,11 @@ struct MenuPanel: View {
                         .padding(.trailing, MiloTheme.Space.one)
                 }
             }
-            .padding(.leading, row.symbol == nil ? MiloTheme.Space.one : 0)
-            .padding(.vertical, row.symbol == nil ? MiloTheme.Space.two : 0)
+            .padding(.leading, row.symbol == nil && row.mark == nil ? MiloTheme.Space.one : 0)
+            .padding(.vertical, row.symbol == nil && row.mark == nil ? MiloTheme.Space.two : 0)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle())
+        .disabled(row.disabled)
     }
 }

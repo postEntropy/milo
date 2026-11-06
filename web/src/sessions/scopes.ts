@@ -14,8 +14,8 @@ function matches(session: SessionSummary, query: string): boolean {
 }
 
 /**
- * The Chat side of the list: sessions working in Milo's own folder, with something
- * said in them, newest first. The projects' sessions live on the other side.
+ * The Chat side of the list: sessions working in Milo's own folder, plus external
+ * Sessions as soon as they are chosen, newest first. The projects' sessions live on the other side.
  */
 export function chatSessions(
   sessions: SessionSummary[],
@@ -23,7 +23,7 @@ export function chatSessions(
 ): SessionSummary[] {
   const asked = query.trim().toLowerCase()
   return sessions
-    .filter((session) => session.messageCount > 0 && !isWorkSession(session))
+    .filter((session) => (session.messageCount > 0 || session.backend?.kind === 'command-code') && !isWorkSession(session))
     .filter((session) => asked === '' || matches(session, asked))
     .sort((a, b) => b.updatedAt - a.updatedAt)
 }

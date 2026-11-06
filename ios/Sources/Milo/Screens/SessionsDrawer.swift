@@ -15,8 +15,6 @@ struct SessionsDrawer: View {
     let onClose: () -> Void
     let onNewSession: () -> Void
     let onNewProject: () -> Void
-    /// A new session in a project, chosen in the Work side's own menu: a work session is the
-    /// ordinary chat working there, and it is started from here rather than from a page.
     let onNewWorkSession: (String) -> Void
     let onSettings: () -> Void
     let onRoutines: () -> Void
@@ -53,7 +51,14 @@ struct SessionsDrawer: View {
                 // What starts a session and what sets one up float at the drawer's own
                 // end, over the list, on the right, in the platform's glass — the controls
                 // here that are not sessions themselves.
-                .overlay(alignment: .bottomTrailing) { controls }
+                .overlay(alignment: .bottomTrailing) {
+                    // Out of the tree the moment the drawer starts to close, not faded: glass
+                    // does not follow its parent's opacity, and the card sliding over this
+                    // layer is glass too, so a control still there shows through it.
+                    if revealed {
+                        controls.transition(.identity)
+                    }
+                }
             Spacer(minLength: 0)
         }
         .frame(maxHeight: .infinity, alignment: .top)
@@ -284,11 +289,11 @@ struct SessionsDrawer: View {
         return "No projects yet"
     }
 
-    /// The sessions this drawer holds on the Chat side: the chats. A session working in a
-    /// project belongs to the Work side, under that project's own name.
+    /// Milo sessions enter the list with a turn; an external Session belongs there from
+    /// creation, because its native thread is already the conversation it will resume.
     private var chats: [SessionSummary] {
         model.sessions.filter {
-            !$0.work
+            !$0.work && ($0.messageCount > 0 || $0.backend?.kind == "command-code" || $0.id == model.sessionId)
         }
     }
 

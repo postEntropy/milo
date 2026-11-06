@@ -1,8 +1,14 @@
 # The agent
 
-The prompt a turn runs under is a base persona plus sections, assembled per turn by
+A Milo-backed turn runs under a base persona plus sections, assembled per turn by
 `buildSystemPrompt`. `config.systemPrompt` replaces the persona only: the sections still
-apply, because they carry live state and behaviour the persona cannot know.
+apply, because they carry live state and behaviour the persona cannot know. A Session started
+inside a Work project may instead select Command Code; it owns its model, tools and native JSONL history.
+Milo stores a link to that history and projects it into the chat UI, but never writes a second
+copy into `SessionRecord.messages`. Milo's prompt sections, memory, Plan mode and per-tool
+permission policy do not apply to Command Code; the CLI reads its own project rules and runs
+with `--yolo`. The active Session's Command Code mark opens the access details; starting a
+Session does not show a warning.
 
 ## What a turn is told
 
@@ -42,8 +48,9 @@ apply, because they carry live state and behaviour the persona cannot know.
   project; the code manual is what turns that fact into how to work.
 - **The verification gate** — not a prompt section: an event after the turn. When
   `verification.enabled` is on and the turn wrote anything in a project, the project's own
-  test/typecheck/lint commands run once and the turn ends with what they answered. It is
-  display state and a trace line; the model is not told, and the failure is not fed back.
+  test/typecheck/lint commands run. A failed check is sent back to the model for one bounded
+  repair attempt, followed by one more check run. Results stay on the answers they verified
+  and in trace lines. The gate stays opt-in because project commands execute code.
   Discovery is `src/core/verification.ts`: `projects.json` → `checks`, then `package.json`
   scripts, `Cargo.toml`, `go.mod`, `pyproject.toml`, `Makefile`. Off by default.
 
@@ -55,6 +62,12 @@ In a project, the `task` tool lets the model delegate on its own: a broad search
 read is exactly what a subagent keeps out of the session. Outside a project, it waits
 to be asked. The tool's description is the whole rule, and it is chosen per turn from
 whether the session has a project.
+
+The external Command Code agent started from the web Work page is separate from this
+subagent. Herdr owns its terminal; Milo supplies the project folder and the install and
+project rules, but cannot enforce its permission policy, Plan mode, or sandbox on that
+process. Starting it does not prompt; the mark in an active Session's header opens the
+access details for `--yolo`.
 
 ## The hierarchy
 
@@ -79,6 +92,7 @@ An order in either is an instruction to follow, never a promotion over the perso
 | Verification gate | `src/core/verification.ts` |
 | Assembly order | `src/core/agent/system.ts` (`buildSystemPrompt`) |
 | A session's project | `src/core/runtime.ts` (`adopt`), `src/core/sessions/` |
+| Command Code backend and native transcript projection | `src/core/command-code-session.ts`, `src/core/command-code-history.ts` |
 
 ## Deliberately not here
 
@@ -88,7 +102,7 @@ These are separate decisions. A reference in a plan is not a feature.
 - Per-subfolder rules: `AGENTS.md` is read at the project's root, not per directory.
 - LSP diagnostics; the verification gate has to run first.
 - An OS sandbox beyond `sandbox: workspace` (path confinement plus `bwrap` on Linux).
-- Feeding a failed check back for the model to fix in a follow-up step.
+- Repeating repair attempts beyond the single automatic follow-up.
 
 ## A family joins when a vice is observed
 

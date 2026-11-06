@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The panel a composer control has raised: what belongs to the message being written, or
+/// The panel a composer control has raised: message attachments, or
 /// what a running turn answers to. One at a time, and never in place of the composer.
 enum ComposerMenu: Equatable {
     case actions
@@ -30,6 +30,7 @@ struct Composer: View {
     /// the work surface keeps the plan switch and the model on the bar, an ordinary chat
     /// keeps the model in the `+` panel.
     let work: Bool
+    var sessionBackend = "milo"
     /// Which composer this is: the one the open session is spoken into, or the one a project's
     /// own page carries, where the words being written are what starts a session.
     ///
@@ -37,8 +38,7 @@ struct Composer: View {
     /// to it — not the queued count, not the job strip, not the control a running turn answers
     /// to. The `+` stays: what it holds is a file on the message **being written**, and that
     /// message is what starts the session — so the first thing said to a project can carry a
-    /// file, read the same way the chat reads one. The model stays too, because it is what the
-    /// message about to be sent will run on.
+    /// file, read the same way the chat reads one.
     enum Role { case session, start }
 
     var role: Role = .session
@@ -81,7 +81,7 @@ struct Composer: View {
 
             // The plan's own line, said once, with the one action it has. Only in a
             // work session: a plan is about the folder the turn is working in.
-            if role == .session, work, model.planMode {
+            if role == .session, work, sessionBackend != "command-code", model.planMode {
                 planBanner
             }
 
@@ -100,7 +100,7 @@ struct Composer: View {
 
             // What `/` offers, above the field: the browser's own palette, drawn from the
             // daemon's catalog so the two surfaces cannot drift.
-            if !palette.isEmpty {
+            if sessionBackend != "command-code", !palette.isEmpty {
                 commandPalette
             }
 
@@ -122,7 +122,7 @@ struct Composer: View {
                     // Centred against the field: the send control is shorter than a line of
                     // text, so bottom-aligning it left the air above it and read as a bump.
                     HStack(alignment: .center, spacing: MiloTheme.Space.one) {
-                        actionsButton
+                        if sessionBackend != "command-code" { actionsButton }
                         field
                         sendControl
                     }
@@ -145,10 +145,6 @@ struct Composer: View {
     /// column instead of the words hanging off the left of the control below them.
     private static let mark: CGFloat = 17
     private static let markLead: CGFloat = (40 - mark) / 2
-
-    /// The mark a pill carries: the plan switch and the model are one row, so their marks
-    /// are one size.
-    private static let pillMark: CGFloat = 13
 
     /// What the field says while it is empty.
     ///
@@ -266,33 +262,19 @@ struct Composer: View {
         }
     }
 
-    /// A work session's second line: the files, the shape of the turn, what it runs on, and
-    /// the way to send.
+    /// A work session's second line: the files, the shape of the turn with what it runs on,
+    /// and the way to send. Command Code brings its own tools and model, and takes no files
+    /// here, so its line is the way to send alone.
     private var workRow: some View {
         HStack(spacing: MiloTheme.Space.one) {
-            actionsButton
-            modelPill
-            planPill
+            if sessionBackend != "command-code" {
+                actionsButton
+                turnMenu
+            }
             Spacer(minLength: MiloTheme.Space.two)
             sendControl
         }
         .padding(.horizontal, MiloTheme.Space.two)
-    }
-
-    /// The model picker on the work session's own line. The icon names the control; the
-    /// selected model remains available to VoiceOver and in the picker itself.
-    private var modelPill: some View {
-        Button(action: onModel) {
-            Image(systemName: "cpu")
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(MiloTheme.foreground2)
-                .frame(width: 40, height: 40)
-                .contentShape(Rectangle())
-        }
-        .buttonStyle(PressableStyle())
-        .accessibilityLabel("Model")
-        .accessibilityValue(model.modelLabel)
-        .accessibilityHint("Choose the model")
     }
 
     /// Whether the plan switch is on: the session's own state, or the choice held for a
@@ -301,31 +283,44 @@ struct Composer: View {
         startPlan?.wrappedValue ?? model.planMode
     }
 
-    /// The shape of the turn: **Build** works in the folder, **Plan** reads and proposes.
-    /// The icon carries the state; the accessible label spells out the mode.
-    private var planPill: some View {
-        Button {
-            if let startPlan { startPlan.wrappedValue.toggle() }
-            else { model.setPlan(!model.planMode) }
+    private var planChoice: Binding<Bool> {
+        Binding(
+            get: { planOn },
+            set: { on in
+                if let startPlan { startPlan.wrappedValue = on } else { model.setPlan(on) }
+            }
+        )
+    }
+
+    /// The shape of the turn and what it runs on, in the platform's own menu: **Build** works
+    /// in the folder, **Plan** reads and proposes, and the model opens its picker.
+    private var turnMenu: some View {
+        Menu {
+            Picker("Mode", selection: planChoice) {
+                Label("Build", systemImage: "hammer").tag(false)
+                Label("Plan", systemImage: "list.bullet.rectangle").tag(true)
+            }
+            .disabled(startPlan == nil && model.busy)
+            Button(action: onModel) {
+                Label("Model: \(model.modelLabel)", systemImage: "cpu")
+            }
         } label: {
             HStack(spacing: MiloTheme.Space.two) {
                 Image(systemName: planOn ? "list.bullet.rectangle" : "hammer")
                     .font(.system(size: 17, weight: .semibold))
                 Text(planOn ? "Plan" : "Build")
                     .font(MiloTheme.Text.small)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
             }
             .foregroundStyle(MiloTheme.foreground2)
-            .padding(.horizontal, MiloTheme.Space.two)
-            .frame(height: 40)
-            .contentShape(Rectangle())
+            .padding(.horizontal, MiloTheme.Space.three)
+            .frame(height: 36)
+            .background(Capsule().fill(MiloTheme.surfaceWarm))
+            .contentShape(Capsule())
         }
-        .buttonStyle(PressableStyle())
-        .disabled(startPlan == nil && model.busy)
-        .opacity(startPlan == nil && model.busy ? 0.5 : 1)
-        .accessibilityLabel(planOn ? "Plan mode" : "Build mode")
-        .accessibilityHint(planOn ? "Switch to build mode" : "Switch to plan mode")
-        // A tick under the thumb when the shape of the turn changes — the same selection
-        // feedback the panel gives a submenu, because this is the same kind of choice.
+        .accessibilityLabel("Turn settings")
+        .accessibilityValue("\(planOn ? "Plan" : "Build") mode, \(model.modelLabel)")
         .sensoryFeedback(.selection, trigger: planOn)
     }
 

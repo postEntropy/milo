@@ -30,10 +30,15 @@ struct SessionRow: View {
                             .background(MiloTheme.accent.opacity(0.16), in: Capsule())
                     }
                 }
-                Text(session.meta)
-                    .font(MiloTheme.Text.meta.monospacedDigit())
-                    .foregroundStyle(MiloTheme.muted)
-                    .lineLimit(1)
+                HStack(spacing: MiloTheme.Space.two) {
+                    Text(session.meta)
+                        .font(MiloTheme.Text.meta.monospacedDigit())
+                        .foregroundStyle(MiloTheme.muted)
+                        .lineLimit(1)
+                    if session.backend?.kind == "command-code" {
+                        SessionBackendMark(backend: "command-code", size: 16)
+                    }
+                }
             }
             Spacer(minLength: MiloTheme.Space.two)
             SessionMark(running: session.running, unread: session.unread)
@@ -50,6 +55,7 @@ struct SessionRow: View {
         .onTapGesture(perform: onOpen)
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(current ? .isSelected : [])
+        .accessibilityValue(session.backend?.kind == "command-code" ? "Command Code backend" : "")
         .sessionMenu(session, renaming: $renaming)
     }
 
@@ -84,13 +90,15 @@ extension SessionSummary {
 @ViewBuilder
 func sessionActions(
     onRename: @escaping () -> Void,
-    onExport: @escaping () -> Void,
+    onExport: (() -> Void)?,
     onCopy: @escaping () -> Void,
     onClear: (() -> Void)? = nil,
     onDelete: @escaping () -> Void
 ) -> some View {
     menuItem("Rename", "pencil", action: onRename)
-    menuItem("Export", "arrow.down.doc", action: onExport)
+    if let onExport {
+        menuItem("Export", "arrow.down.doc", action: onExport)
+    }
     menuItem("Copy ID", "doc.on.doc", action: onCopy)
     // Only the session this chat is in can be cleared: the daemon clears the session
     // the chat is bound to, and the transcript it empties is this one's.
@@ -143,9 +151,9 @@ private struct SessionMenu: ViewModifier {
             .contextMenu {
                 sessionActions(
                     onRename: { renaming = session.id },
-                    onExport: { Task { await model.export(session.id) } },
+                    onExport: session.backend?.kind == "command-code" ? nil : { Task { await model.export(session.id) } },
                     onCopy: { model.copyId(session.id) },
-                    onClear: session.id == model.sessionId ? { Task { await model.clear() } } : nil,
+                    onClear: session.id == model.sessionId && session.backend?.kind != "command-code" ? { Task { await model.clear() } } : nil,
                     onDelete: { Task { await model.delete(session.id) } }
                 )
             } preview: {

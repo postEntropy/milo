@@ -5,7 +5,7 @@ import Foundation
  `src/gateways/web/protocol.ts`; the server refuses any other number aloud, so a
  drift between the two is a refusal rather than a mis-drawn chat.
  */
-let miloProtocolVersion = 13
+let miloProtocolVersion = 14
 
 // MARK: - What the app sends
 
@@ -24,14 +24,14 @@ struct SendTarget: Equatable {
 
 enum ClientFrame {
     enum Intent: String { case steer, queue }
-    enum Control: String { case stop, allow, always, deny }
+    enum Control: String { case stop, allow, always, deny; case retryCommandCode = "retry-command-code" }
 
     case hello(chatId: String)
     /// The files the message carries: the daemon's names for bytes this app has already
     /// posted to `/upload`, which is how a file reaches a turn — the bytes never ride the
     /// socket. Empty for every message with nothing attached.
     case send(text: String, intent: Intent? = nil, target: SendTarget? = nil, uploadIds: [String] = [])
-    case control(Control, id: String? = nil)
+    case control(Control, id: String? = nil, confirmed: Bool? = nil)
     /// Turn the session's planning mode on or off. The state belongs to the session, so
     /// the daemon answers with a `plan` frame that every screen watching it sees.
     case setPlan(Bool)
@@ -74,9 +74,11 @@ enum ClientFrame {
             }
             if !uploadIds.isEmpty { frame["uploadIds"] = uploadIds }
             return frame
-        case .control(let action, let id):
-            guard let id else { return ["type": "control", "action": action.rawValue] }
-            return ["type": "control", "action": action.rawValue, "id": id]
+        case .control(let action, let id, let confirmed):
+            var frame: [String: Any] = ["type": "control", "action": action.rawValue]
+            if let id { frame["id"] = id }
+            if let confirmed { frame["confirmed"] = confirmed }
+            return frame
         case .setPlan(let on):
             return ["type": "control", "action": "plan", "plan": on]
         case .approvePlan:
@@ -486,6 +488,7 @@ struct Ready: Decodable {
     /// be worked in, when the folder has gone. Set on a session that has said nothing yet
     /// too: which folder the work happens in is a fact of the session, not of its words.
     let project: Project?
+    let backend: SessionBackendView?
     /// Whether this session's turns are planning turns. Kept on the session, so a screen
     /// that arrives mid-plan opens with the switch already on.
     let plan: Bool?
@@ -504,7 +507,8 @@ enum ServerFrame: Decodable {
     /// The rest of a session whose transcript did not fit in the `ready`, whole rows in
     /// the order they happened.
     case history([WireMessage])
-    case turnStart(id: String, text: String)
+    case sessionBackend(SessionBackendView)
+    case turnStart(id: String, text: String, retryPendingId: String?)
     case event(turnId: String, event: AgentEvent, says: String?)
     case permission(id: String, request: PermissionRequest, expiresAt: Double)
     case permissionResult(id: String, allowed: Bool)
@@ -530,7 +534,7 @@ enum ServerFrame: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case type, id, text, turnId, event, request, expiresAt, allowed, status, raw, rawNoOutput, says
-        case busy, queued, plan, jobs, items, message, panel, messages
+        case busy, queued, plan, jobs, items, message, panel, messages, backend, retryPendingId
     }
 
     init(from decoder: Decoder) throws {
@@ -539,10 +543,13 @@ enum ServerFrame: Decodable {
         case "ready": self = .ready(try Ready(from: decoder))
         case "history":
             self = .history(try container.decode([WireMessage].self, forKey: .messages))
+        case "session-backend":
+            self = .sessionBackend(try container.decode(SessionBackendView.self, forKey: .backend))
         case "turn-start":
             self = .turnStart(
                 id: try container.decode(String.self, forKey: .id),
-                text: try container.decode(String.self, forKey: .text)
+                text: try container.decode(String.self, forKey: .text),
+                retryPendingId: try container.decodeIfPresent(String.self, forKey: .retryPendingId)
             )
         case "event":
             self = .event(

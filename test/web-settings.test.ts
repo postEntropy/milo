@@ -31,6 +31,7 @@ const { WebSettings } = await import('../src/gateways/web/settings.js')
 const { createMcpServers } = await import('../src/core/mcp/servers.js')
 const { mcpFile } = await import('../src/core/config/paths.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
+const { placeProject } = await import('../src/core/projects.js')
 const { saveAuth, readConfig } = await import('../src/core/config/load.js')
 const { fileHistory } = await import('../src/core/history.js')
 const { CLASSIFIER_BACKENDS } = await import('../src/gateways/web/protocol.js')
@@ -55,6 +56,7 @@ function build(
   memory: Record<string, unknown> = {},
   mcp: McpServers | null = null,
   classifier: Classifier | null = null,
+  commandCode?: Record<string, unknown>,
 ): InstanceType<typeof AgentRuntime> {
   return new AgentRuntime({
     provider: { id: 'test', stream: async function* () {} },
@@ -69,8 +71,10 @@ function build(
       ...memory,
     } as never,
     cwd: home,
+    project: placeProject,
     mcp,
     classifier,
+    ...(commandCode ? { commandCode: commandCode as never } : {}),
   })
 }
 
@@ -349,6 +353,16 @@ describe('web Settings routines', () => {
 })
 
 describe('web Settings sessions', () => {
+  it('refuses Command Code when a new Session has no Work project', async () => {
+    const settings = new WebSettings(build(), home)
+
+    await expect(settings.handle('new-session', {
+      chatId: CHAT,
+      backend: 'command-code',
+      confirmed: true,
+    })).rejects.toThrow('must be started in a Work project')
+  })
+
   it('starts a work session in plan mode when the project page asks for it', async () => {
     writeConfig()
     const runtime = build({})
@@ -365,6 +379,7 @@ describe('web Settings sessions', () => {
     const building = await runtime.getSession(scope)
     expect(building.id).toBe(plain.id)
     expect(building.planMode).toBe(false)
+    expect(building.backend.kind).toBe('milo')
   })
 
   it('deletes a saved session but refuses the one being looked at', async () => {
@@ -402,6 +417,37 @@ describe('web Settings sessions', () => {
     // than a failure, and an id that is not one is refused as such.
     expect(await settings.handle('session-peek', { id: 'peek-goose-9' })).toEqual([])
     await expect(settings.handle('session-peek', {})).rejects.toThrow('Invalid session id')
+  })
+
+  it('peeks at Command Code messages from its native history', async () => {
+    writeConfig()
+    const runtime = build({}, null, null, {
+      availability: async () => ({ id: 'command-code', available: true }),
+      history: async () => ({
+        messages: [
+          { role: 'user', content: [{ type: 'text', text: 'native question' }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'native answer' }] },
+        ],
+        preview: 'native question',
+        messageCount: 2,
+        updatedAt: 2,
+      }),
+    } as never)
+    const settings = new WebSettings(runtime, home)
+    const projectPath = path.join(home, 'native-history-project')
+    mkdirSync(projectPath)
+    const added = await settings.handle('project-action', { action: 'add', path: projectPath, name: 'Native history' }) as {
+      projects: Array<{ id: string; name: string }>
+    }
+    const project = added.projects[0]!.id
+    const session = await runtime.newSession({ gateway: 'web', chatId: CHAT }, undefined, {
+      backend: 'command-code', confirmed: true, project,
+    })
+
+    expect(await settings.handle('session-peek', { id: session.id })).toEqual([
+      { who: 'you', text: 'native question' },
+      { who: 'milo', text: 'native answer' },
+    ])
   })
 
   it('renames a saved session', async () => {
@@ -1213,6 +1259,26 @@ describe('the Work screen’s projects', () => {
     await expect(
       settings.handle('new-session', { chatId: CHAT, project: 'calm-otter-9' }),
     ).rejects.toThrow(`Known: ${id} — Milo`)
+  })
+
+  it('marks a session with the surface that asked for it over HTTP', async () => {
+    const settings = new WebSettings(build(), home)
+
+    const created = (await settings.handle('new-session', {
+      chatId: CHAT,
+      surface: 'spotlight',
+    })) as { id: string }
+
+    const sessions = (await settings.handle('sessions')) as Array<{ id: string; surface?: string }>
+    expect(sessions.find((session) => session.id === created.id)?.surface).toBe('spotlight')
+  })
+
+  it('refuses a surface it does not have, naming the ones it does', async () => {
+    const settings = new WebSettings(build(), home)
+
+    await expect(
+      settings.handle('new-session', { chatId: CHAT, surface: 'television' }),
+    ).rejects.toThrow('Unknown surface "television". Use one of: spotlight.')
   })
 
   it('lists the folders of the machine the daemon runs on, and nothing that is a file', async () => {

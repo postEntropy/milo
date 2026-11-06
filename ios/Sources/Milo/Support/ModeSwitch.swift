@@ -23,6 +23,7 @@ struct ModeSwitch: View {
         }
         .pickerStyle(.segmented)
         .labelsHidden()
+        .glassEffect(.regular.interactive(), in: Capsule())
         .sensoryFeedback(.selection, trigger: work)
     }
 }

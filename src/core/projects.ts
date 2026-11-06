@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname } from 'node:path'
 import lockfile from 'proper-lockfile'
@@ -32,6 +33,8 @@ export interface Project {
   /** The folder, absolute — so two entries cannot name the same one by accident. */
   path: string
   createdAt: number
+  /** Stable identity for one lifetime of this project id; migrated when a legacy record is next written. */
+  incarnation?: string
   /**
    * The mark the project wears, one of `PROJECT_ICONS` — absent until one is chosen, and
    * drawn as `folder` until then. Kept as a plain string on a read, so a build that does
@@ -68,6 +71,7 @@ export const MAX_PROJECTS = 50
 
 /** What changing the list answered: the project, or why the change was refused. */
 export type ProjectOutcome = { ok: true; project: Project } | { ok: false; error: string }
+export type RemoveProjectResult = { removed: false } | { removed: true; warning?: string }
 
 /**
  * Whether a registered folder can still be worked in, and why not when it cannot.
@@ -108,7 +112,8 @@ function readProjectsStrict(): Project[] {
   return parsed.filter(isProject).map((project) => ({
     ...project,
     name: project.name.trim() || basename(project.path),
-    createdAt: typeof project.createdAt === 'number' ? project.createdAt : Date.now(),
+    createdAt: typeof project.createdAt === 'number' ? project.createdAt : 0,
+    incarnation: typeof project.incarnation === 'string' && project.incarnation ? project.incarnation : undefined,
   }))
 }
 
@@ -143,21 +148,46 @@ const WRITE_LOCK_RETRIES = { retries: 15, factor: 1.5, minTimeout: 20, maxTimeou
  * list from the copy it read, so without the lock the slower writer's copy wins
  * and the other change is gone.
  */
-async function lockProjects(): Promise<() => Promise<void>> {
-  // Only the directory has to exist: `realpath: false` locks the path as given,
-  // and the lock itself is a directory created beside the file.
+interface ProjectLock {
+  assert(): void
+  release(): Promise<void>
+}
+
+async function lockProjects(): Promise<ProjectLock> {
   mkdirSync(dirname(projectsFile()), { recursive: true })
-  return lockfile.lock(projectsFile(), {
+  let compromised = false
+  const unlock = await lockfile.lock(projectsFile(), {
     realpath: false,
     stale: LOCK_STALE_MS,
     retries: WRITE_LOCK_RETRIES,
-    // A late write is not a reason to take the process down.
-    onCompromised: (error) => logWarn(`lost the lock on projects.json: ${errorMessage(error)}`),
+    onCompromised: (error) => {
+      compromised = true
+      logWarn(`lost the lock on projects.json: ${errorMessage(error)}`)
+    },
   })
+  return {
+    assert() {
+      if (compromised) throw new Error('The project lock was lost; the operation was not allowed to continue.')
+    },
+    release: unlock,
+  }
 }
 
 function serialize(projects: Project[]): string {
   return `${JSON.stringify(projects, null, 2)}\n`
+}
+
+async function persistIncarnations(projects: Project[], assertLock: () => void): Promise<void> {
+  let changed = false
+  for (const project of projects) {
+    if (project.incarnation) continue
+    project.incarnation = randomUUID()
+    changed = true
+  }
+  if (changed) {
+    assertLock()
+    await writePrivateFile(projectsFile(), serialize(projects))
+  }
 }
 
 export function findProject(id: string): Project | undefined {
@@ -189,6 +219,83 @@ export function projectNames(): Map<string, string> {
 }
 
 /**
+ * What a message that opens with `@` named. `none` is a message that does not, and
+ * `error` is a mention the list cannot answer — a name it does not have, or a name
+ * two projects share. The popup asks a project its question this way, so a folder
+ * is chosen in the line being written rather than in a screen.
+ */
+export type ProjectMention =
+  | { kind: 'none' }
+  | { kind: 'project'; project: Project; text: string }
+  | { kind: 'error'; error: string }
+
+/**
+ * Reads a leading `@<project>` off a message. The name is the project's own, or its
+ * id when two projects share a name; it ends where the request begins. Names are
+ * tried longest first, so `@Camera fpv rig` is that project and not `Camera fpv`.
+ */
+export function matchProjectMention(
+  text: string,
+  projects: readonly Project[] = readProjects(),
+): ProjectMention {
+  const trimmed = text.trim()
+  if (!trimmed.startsWith('@')) return { kind: 'none' }
+  const rest = trimmed.slice(1)
+  if (!rest.trim()) return { kind: 'error', error: `Name a project after @. ${knownProjects(projects)}` }
+
+  // Both ways a person may name one, kept apart from the message so the request
+  // that follows starts on a word boundary rather than inside another project's name.
+  const candidates = projects
+    .flatMap((project) => [project.name, project.id].map((token) => ({ project, token: token.trim() })))
+    .filter(({ token }) => token !== '')
+    .sort((a, b) => b.token.length - a.token.length)
+  const matched = candidates.filter(({ token }) => beginsWith(rest, token))
+  if (matched.length === 0) {
+    const said = rest.split(/\s/, 1)[0] ?? rest
+    return { kind: 'error', error: `No project "@${said}". ${knownProjects(projects)}` }
+  }
+  // Only the longest match counts: `Camera fpv rig` must not fall back to `Camera fpv`.
+  const longest = matched[0]!.token.length
+  const best = matched.filter(({ token }) => token.length === longest)
+  const distinct = [...new Map(best.map((entry) => [entry.project.id, entry])).values()]
+  if (distinct.length > 1) {
+    const ids = distinct.map(({ project }) => `${project.id} (${project.path})`).join(', ')
+    return {
+      kind: 'error',
+      error: `@${rest.slice(0, longest)} names ${distinct.length} projects: ${ids} — mention one by its id.`,
+    }
+  }
+  const project = distinct[0]!.project
+  // A colon or comma between the name and the request is the person's punctuation,
+  // not the project's: `@Camera fpv: start` asks for `start`.
+  return { kind: 'project', project, text: rest.slice(longest).replace(/^[\s,;:]+/, '') }
+}
+
+/** Whether `token` starts `text` and stops where the request begins. */
+function beginsWith(text: string, token: string): boolean {
+  if (text.length < token.length) return false
+  if (text.slice(0, token.length).toLowerCase() !== token.toLowerCase()) return false
+  const after = text[token.length]
+  return after === undefined || /[\s,;:]/.test(after)
+}
+
+/** The projects a person may name, said the way a refusal says them. */
+function knownProjects(projects: readonly Project[]): string {
+  if (projects.length === 0) {
+    return 'None yet — add one from Work, or with `milo projects add <folder>`.'
+  }
+  return `Known: ${projects.map((project) => `${project.id} — ${project.name}`).join(', ')}`
+}
+
+/**
+ * The refusal a surface gets when it names a project the list does not have. One
+ * sentence, so a bad reference answers the same wherever it was typed.
+ */
+export function unknownProjectError(id: string): string {
+  return `No project ${id}. ${knownProjects(readProjects())}`
+}
+
+/**
  * Where a session carrying this project runs — or why it cannot run there. The
  * folder is checked at the moment it is wanted, so a project whose directory was
  * deleted, unmounted or moved answers with that rather than handing a session a
@@ -202,6 +309,27 @@ export function placeProject(id: string): ProjectPlacement {
   const reason = missingReason(project)
   if (reason) return { ok: false, id, project, error: reason }
   return { ok: true, project }
+}
+
+export async function withProjectPlacement<T>(id: string, work: (placement: ProjectPlacement, assertLock: () => void) => Promise<T>): Promise<T> {
+  const lock = await lockProjects()
+  try {
+    lock.assert()
+    const projects = readProjectsStrict()
+    await persistIncarnations(projects, lock.assert)
+    const project = projects.find((entry) => entry.id === id)
+    const reason = project ? missingReason(project) : undefined
+    const placement: ProjectPlacement = !project
+      ? { ok: false, id, error: `the project ${id} is not in the list any more` }
+      : reason
+        ? { ok: false, id, project, error: reason }
+        : { ok: true, project }
+    const result = await work(placement, lock.assert)
+    lock.assert()
+    return result
+  } finally {
+    await lock.release()
+  }
 }
 
 /**
@@ -266,18 +394,21 @@ function missingReason(project: Project): string | undefined {
  * all while holding the lock. `next` absent means there was nothing to write.
  */
 async function changeProjects<T>(
-  change: (projects: Project[]) => { result: T; next?: Project[] },
+  change: (projects: Project[], assertLock: () => void) => { result: T; next?: Project[] } | Promise<{ result: T; next?: Project[] }>,
 ): Promise<T> {
-  const release = await lockProjects()
+  const lock = await lockProjects()
   try {
-    // Strict: a read-modify-write must never be built on a tolerant empty reading
-    // of a file it could not parse, which is how a corrupt one got erased.
+    lock.assert()
     const projects = readProjectsStrict()
-    const outcome = change(projects)
-    if (outcome.next) await writePrivateFile(projectsFile(), serialize(outcome.next))
+    await persistIncarnations(projects, lock.assert)
+    const outcome = await change(projects, lock.assert)
+    if (outcome.next) {
+      lock.assert()
+      await writePrivateFile(projectsFile(), serialize(outcome.next))
+    }
     return outcome.result
   } finally {
-    await release()
+    await lock.release()
   }
 }
 
@@ -303,7 +434,7 @@ export async function addProject(input: NewProject): Promise<ProjectOutcome> {
     const taken = projects.find((project) => project.path === folder)
     if (taken) return { result: { ok: false, error: `${folder} is already the project ${taken.name}` } }
     const id = generateNickname((candidate) => projects.some((project) => project.id === candidate))
-    const project: Project = { id, name, path: folder, createdAt: Date.now() }
+    const project: Project = { id, name, path: folder, createdAt: Date.now(), incarnation: randomUUID() }
     if (input.icon !== undefined) project.icon = input.icon
     return { result: { ok: true, project }, next: [...projects, project] }
   })
@@ -328,9 +459,10 @@ export async function updateProject(
     const problem = folderProblem(folder)
     if (problem) return { ok: false, error: problem }
   }
-  return changeProjects<ProjectOutcome>((projects) => {
+  return changeProjects<ProjectOutcome>(async (projects, assertLock) => {
     const target = projects.find((project) => project.id === id)
     if (!target) return { result: { ok: false, error: `no project with the id ${id}` } }
+    if (folder !== undefined && folder !== target.path) await ensureProjectCanMove(target, assertLock)
     if (folder !== undefined) {
       const taken = projects.find((project) => project.path === folder && project.id !== id)
       if (taken) return { result: { ok: false, error: `${folder} is already the project ${taken.name}` } }
@@ -345,12 +477,44 @@ export async function updateProject(
 }
 
 /** Drops a project from the list. Its sessions stay; they just lose their folder. */
-export async function removeProject(id: string): Promise<boolean> {
-  return changeProjects((projects) => {
-    const kept = projects.filter((project) => project.id !== id)
-    if (kept.length === projects.length) return { result: false }
-    return { result: true, next: kept }
-  })
+export async function removeProject(id: string): Promise<RemoveProjectResult> {
+  const lock = await lockProjects()
+  try {
+    lock.assert()
+    const projects = readProjectsStrict()
+    await persistIncarnations(projects, lock.assert)
+    const project = projects.find((entry) => entry.id === id)
+    if (!project) return { removed: false }
+    await ensureProjectCanMove(project, lock.assert)
+    lock.assert()
+    await writePrivateFile(projectsFile(), serialize(projects.filter((entry) => entry.id !== id)))
+    const { removeAgentMarker } = await import('./agent-runner.js')
+    try {
+      lock.assert()
+      await removeAgentMarker(project)
+      return { removed: true }
+    } catch (error) {
+      const warning = `The project was removed, but its external-agent record could not be cleaned up: ${errorMessage(error)}`
+      logWarn(warning)
+      return { removed: true, warning }
+    }
+  } finally {
+    await lock.release()
+  }
+}
+
+async function ensureProjectCanMove(project: Project, assertLock: () => void): Promise<void> {
+  const [{ FileSessionStore }, { sessionsDir }] = await Promise.all([
+    import('./sessions/file-store.js'),
+    import('./config/paths.js'),
+  ])
+  const linked = (await new FileSessionStore({ dir: sessionsDir() }).list())
+    .filter((session) => session.project === project.id && session.backend?.kind === 'command-code')
+  if (linked.length > 0) {
+    throw new Error(`Remove or resume these Command Code Sessions before moving or removing this project: ${linked.map((session) => session.id).join(', ')}.`)
+  }
+  const { assertProjectAgentsSettled, hasAgentMarker } = await import('./agent-runner.js')
+  if (hasAgentMarker(project)) await assertProjectAgentsSettled(project, assertLock)
 }
 
 /** Why this folder cannot be a project's, or nothing when it can. */

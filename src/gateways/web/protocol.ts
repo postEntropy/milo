@@ -7,7 +7,7 @@ import type { TodoItem } from '../../core/todos.js'
 import type { FileChange } from '../../core/change.js'
 import type { VerificationResult } from '../../core/verification.js'
 import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
-import { SESSION_SURFACES, type SessionSurface } from '../../core/sessions/types.js'
+import { SESSION_SURFACES, type SessionBackendView, type SessionSurface } from '../../core/sessions/types.js'
 import type { CommandEntry } from '../command-catalog.js'
 
 // 13: a session too large for one websocket message hands its transcript over in
@@ -33,7 +33,7 @@ import type { CommandEntry } from '../command-catalog.js'
 // is what the version is for. 8 made the handshake's `genui` a flag again: there is
 // one way a turn draws, so a page naming a transport named something that no longer
 // exists.
-export const PROTOCOL_VERSION = 13
+export const PROTOCOL_VERSION = 14
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
@@ -137,7 +137,7 @@ export interface SessionCardItem {
  * so does the parser. Two spellings of one vocabulary is how `always` — the button
  * every surface draws — came to be refused by the parser while the type promised it.
  */
-const CONTROL_ACTIONS = ['stop', 'allow', 'always', 'deny', 'plan', 'approve-plan'] as const
+const CONTROL_ACTIONS = ['stop', 'allow', 'always', 'deny', 'plan', 'approve-plan', 'retry-command-code'] as const
 
 export type ClientFrame =
   | { type: 'hello'; version: number; chatId: string; genui?: boolean; client?: ClientKind; surface?: SessionSurface }
@@ -148,6 +148,7 @@ export type ClientFrame =
       action: (typeof CONTROL_ACTIONS)[number]
       id?: string
       plan?: boolean
+      confirmed?: boolean
     }
   /** Stop a background job. Pressing the control is the confirmation. */
   | { type: 'job-kill'; id: string }
@@ -252,7 +253,7 @@ export interface ActiveTurn {
 }
 
 export type ServerFrame =
-  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; continues?: boolean; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn; project?: ProjectView; plan?: boolean; commands?: CommandEntry[] }
+  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; continues?: boolean; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn; project?: ProjectView; backend?: SessionBackendView; plan?: boolean; commands?: CommandEntry[] }
   /**
    * The rest of a transcript too large for the `ready` alone, in order, each one whole
    * rows. A surface appends them to the thread the `ready` opened — before the running
@@ -260,9 +261,10 @@ export type ServerFrame =
    * one is the end of the replay.
    */
   | { type: 'history'; messages: TranscriptMessage[] }
+  | { type: 'session-backend'; backend: SessionBackendView }
   /** The session's planning turn went on or off, for every screen watching it. */
   | { type: 'plan'; plan: boolean }
-  | { type: 'turn-start'; id: string; text: string }
+  | { type: 'turn-start'; id: string; text: string; retryPendingId?: string }
   /**
    * A step of the turn. `says` is what the turn's own row shows about the step, in the
    * daemon's words (`statusText` in `src/core/sessions/format.ts`): a surface that cannot
@@ -442,6 +444,9 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
       return typeof frame.plan === 'boolean' ? (frame as ClientFrame) : null
     }
     if (frame.action === 'approve-plan') return frame as ClientFrame
+    if (frame.action === 'retry-command-code') {
+      return typeof frame.id === 'string' && frame.id !== '' && frame.confirmed === true ? (frame as ClientFrame) : null
+    }
     if ((CONTROL_ACTIONS as readonly string[]).includes(String(frame.action))) return frame as ClientFrame
   }
   if (frame.type === 'job-kill' && typeof frame.id === 'string' && frame.id !== '') {

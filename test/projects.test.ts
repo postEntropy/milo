@@ -11,6 +11,7 @@ const {
   addProject,
   byRecentUse,
   findProject,
+  matchProjectMention,
   MAX_PROJECTS,
   placedProject,
   placeProject,
@@ -182,12 +183,12 @@ describe('removeProject', () => {
     const first = await addProject({ path: folder('one') })
     const second = await addProject({ path: folder('two') })
     if (!first.ok || !second.ok) throw new Error('the projects were not added')
-    expect(await removeProject(first.project.id)).toBe(true)
+    expect(await removeProject(first.project.id)).toEqual({ removed: true })
     expect(readProjects().map((project) => project.id)).toEqual([second.project.id])
   })
 
   it('answers that there was nothing to drop', async () => {
-    expect(await removeProject('no-such-1')).toBe(false)
+    expect(await removeProject('no-such-1')).toEqual({ removed: false })
   })
 })
 
@@ -256,6 +257,85 @@ describe('byRecentUse', () => {
   it('leaves a session with no project out of the order', () => {
     const ordered = byRecentUse(list(), [{ updatedAt: 99 }])
     expect(ordered.map((project) => project.id)).toEqual(['calm-otter-1', 'calm-otter-2'])
+  })
+})
+
+describe('matchProjectMention', () => {
+  const projects = [
+    { id: 'camera-fpv-1', name: 'Camera fpv', path: '/tmp/camera', createdAt: 1 },
+    { id: 'camera-fpv-2', name: 'Camera fpv rig', path: '/tmp/rig', createdAt: 2 },
+    { id: 'milo-1', name: 'Milo', path: '/tmp/milo', createdAt: 3 },
+  ]
+
+  it('names the project a message opens with, and leaves the request after it', () => {
+    expect(matchProjectMention('@Camera fpv start the service', projects)).toEqual({
+      kind: 'project',
+      project: projects[0],
+      text: 'start the service',
+    })
+  })
+
+  it('takes the longest name a message begins with', () => {
+    expect(matchProjectMention('@Camera fpv rig start the service', projects)).toMatchObject({
+      project: projects[1],
+      text: 'start the service',
+    })
+  })
+
+  it('reads an id as a name, whatever the case', () => {
+    expect(matchProjectMention('@MILO-1 run the tests', projects)).toMatchObject({
+      project: projects[2],
+      text: 'run the tests',
+    })
+  })
+
+  it('reads a colon or comma after the name as the person’s punctuation', () => {
+    expect(matchProjectMention('@Camera fpv: start the service', projects)).toMatchObject({
+      project: projects[0],
+      text: 'start the service',
+    })
+    expect(matchProjectMention('@Milo, run the tests', projects)).toMatchObject({
+      project: projects[2],
+      text: 'run the tests',
+    })
+  })
+
+  it('leaves a message that names no project alone', () => {
+    expect(matchProjectMention('start the service', projects)).toEqual({ kind: 'none' })
+  })
+
+  it('names a project that ends the message, with nothing asked yet', () => {
+    expect(matchProjectMention('@Milo', projects)).toMatchObject({ project: projects[2], text: '' })
+  })
+
+  it('says which projects it knows when the mention names none of them', () => {
+    const outcome = matchProjectMention('@Camera start the service', projects)
+    expect(outcome).toMatchObject({ kind: 'error' })
+    if (outcome.kind !== 'error') throw new Error('a mention of no project cannot be a match')
+    expect(outcome.error).toContain('No project "@Camera".')
+    expect(outcome.error).toContain('camera-fpv-1 — Camera fpv')
+  })
+
+  it('refuses a name two projects share, naming the ids that tell them apart', () => {
+    const twins = [...projects, { id: 'other-1', name: 'Milo', path: '/tmp/other', createdAt: 4 }]
+    const outcome = matchProjectMention('@Milo run the tests', twins)
+    if (outcome.kind !== 'error') throw new Error('two projects called Milo cannot be a match')
+    expect(outcome.error).toContain('names 2 projects')
+    expect(outcome.error).toContain('milo-1')
+    expect(outcome.error).toContain('other-1')
+  })
+
+  it('answers a bare @ with the projects there are', () => {
+    const outcome = matchProjectMention('@', projects)
+    if (outcome.kind !== 'error') throw new Error('@ on its own names no project')
+    expect(outcome.error).toContain('Name a project after @.')
+    expect(outcome.error).toContain('Milo')
+  })
+
+  it('says there are none when the install has no project', () => {
+    const outcome = matchProjectMention('@Camera go', [])
+    if (outcome.kind !== 'error') throw new Error('a mention cannot match an empty list')
+    expect(outcome.error).toContain('None yet')
   })
 })
 

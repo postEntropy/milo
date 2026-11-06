@@ -57,12 +57,33 @@ are the ordinary ones, with the folder they run in changed.
 ## The project's page
 
 - **Sessions** that ran there, newest first, with the running mark.
-- **New session here** — the composer starts an ordinary session in that folder. The first
-  words may also be the ones that ask the agent to write the folder's rules.
+- **New session here** — the first-message composer starts a Session in that folder. Milo is
+  selected by default; Command Code can be selected there before sending. The first words may
+  also ask the agent to write the folder's rules.
 - **Build or Plan** — the composer's mode switch. Build works in the folder. Plan keeps
   the tools that read and proposes a change; the write tools are out of the catalog and
   the permission gate refuses them anyway. **Approve plan** leaves Plan and starts the
   build turn with the plan as the turn before it.
+- **One agent backend per Session** — Milo is the default for Chat. Command Code is available
+  only when starting a Session in a registered Work project, selected in the project's first-
+  message composer before the Session exists. The project title shows that pending choice; it
+  does not set a project-wide backend. Existing Sessions keep their backend when resumed, and
+  older sessions without a backend field remain Milo Sessions. There is no separate Agents panel.
+- **Command Code Sessions** — when selected, Herdr starts one headless Command Code turn per
+  message and resumes the same native thread by its ID. The chat transcript is projected from
+  Command Code's native JSONL; Milo does not persist a second transcript. New turns show a busy
+  state while Herdr runs and appear in the transcript when Command Code commits them. A pending
+  message is kept as a recoverable intent; an empty Herdr list does not clear it or trigger an
+  automatic retry.
+- Command Code runs with `--yolo` and its own tools; Milo's Plan mode, per-tool permissions,
+  sandbox and model selection do not apply. The CLI reads its own project instructions, not
+  Milo's installed prompt. The Command Code mark in an active Session's header opens the access
+  details; creating a Session does not show a warning. Messages live in Command Code's native
+  history, and Herdr may also retain the command arguments. Herdr and Command Code must be
+  installed separately.
+- Removing a Milo Session stops an active Herdr turn and removes the Milo link, but leaves
+  Command Code's native history intact. A project cannot be moved or removed while a Command
+  Code Session still refers to it; remove the Milo link first.
 - **Rules** — whether the folder carries an `AGENTS.md` (`present`, `absent`, or `unreadable`
   with the reason). The file's text is not shown here; it is read in Files. A folder with no
   rules offers one control that starts a session told to write them.
@@ -85,6 +106,11 @@ are the ordinary ones, with the folder they run in changed.
   be: their session list names a session's project and that is the whole of it. The CLI
   manages projects with `milo projects`, and works in one with `milo --project <ref>` or
   `milo run --project <ref>` — the same session and the same folder, without the list.
+  The desktop popup works in one the same way, in one act: a question that begins
+  `@<project>` opens a work session there and asks it, so the folder is chosen in the
+  line being written rather than on a screen. A question already in that project keeps
+  its session; naming another one starts a new session there, and the one before stays
+  on disk.
 
 ## Behaviour
 
@@ -102,8 +128,8 @@ are the ordinary ones, with the folder they run in changed.
   in the drawer.
 - Git is the source of truth for changes. A folder that is not a repository is answered as
   that — never as an empty change list that would read as "nothing changed".
-- Every path read is confined to the project's folder, and every refusal names what was
-  wrong.
+- Paths read by the Work file browser are confined to the project's folder, and every refusal
+  names what was wrong. An external agent is a separate process and is not confined by Milo.
 - The model may delegate a broad read to a subagent on its own initiative here; outside a
   project, delegation waits to be asked. The subagent works in the same folder and carries
   the same rules.
@@ -137,9 +163,11 @@ are the ordinary ones, with the folder they run in changed.
 | Concern | Where |
 | --- | --- |
 | Projects on disk | `src/core/projects.ts`, `~/.milo/projects.json` |
+| A project named in the popup's question | `src/core/projects.ts` (`matchProjectMention`), `src/bin/spotlight.ts` |
 | Folder tree and file pages | `src/core/work.ts` |
 | Changes and first state | `src/core/work-diff.ts` |
 | Project rules | `src/core/agent/instructions.ts` |
+| Session backend selection and Command Code driver | `src/core/sessions/types.ts`, `src/core/command-code-session.ts`, `src/core/command-code-history.ts`, `web/src/work/Work.tsx`, `ios/Sources/Milo/Screens/WorkProjectDetail.swift`, `ios/Sources/Milo/Support/Composer.swift` |
 | Plan / Build | `src/core/agent/system.ts` (`PLAN_SECTION`), `src/core/tools/permission.ts` (`withPlan`, `isPlanTool`) |
 | Daemon actions | `src/gateways/web/settings.ts` (`projects`, `project-*`) |
 | The Chat \| Work switch | `web/src/App.tsx`, `ios/Sources/Milo/Support/ModeSwitch.swift` |

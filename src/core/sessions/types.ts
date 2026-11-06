@@ -17,6 +17,54 @@ export type SessionSurface = (typeof SESSION_SURFACES)[number]
  * transport address it happens to be bound to. The gateway address
  * (`MemoryScope`) is only a pointer to one of these.
  */
+export type SessionBackendKind = 'milo' | 'command-code'
+
+export type CommandCodeSessionState = 'waiting' | 'starting' | 'ready' | 'running' | 'stopped' | 'error'
+
+export interface CommandCodeSessionBackend {
+  kind: 'command-code'
+  state: CommandCodeSessionState
+  terminalId?: string
+  nativeSessionId?: string
+  nativeTitle: string
+  requestId: string
+  workingDirectory: string
+  projectIncarnation?: string
+  preview?: string
+  messageCount?: number
+  nativeUpdatedAt?: number
+  pendingTurn?: { id: string; input: string; startedAt: number; baseMessageCount: number }
+  error?: string
+}
+
+export interface MiloSessionBackend {
+  kind: 'milo'
+}
+
+export type SessionBackend = MiloSessionBackend | CommandCodeSessionBackend
+
+export interface SessionBackendSummary {
+  kind: SessionBackendKind
+  state?: CommandCodeSessionState
+  nativeSessionId?: string
+  pendingTurnId?: string
+  error?: string
+}
+
+export interface SessionBackendView {
+  kind: SessionBackendKind
+  state?: CommandCodeSessionState
+  nativeSessionId?: string
+  error?: string
+  pendingTurn?: { id: string; input: string; baseMessageCount: number }
+}
+
+export interface SessionBackendChoice {
+  id: SessionBackendKind
+  available: boolean
+  reason?: string
+}
+
 export interface SessionRecord {
   id: string
   title?: string
@@ -40,6 +88,7 @@ export interface SessionRecord {
    * rather than quietly working somewhere else.
    */
   project?: string
+  backend?: SessionBackend
   /** The surface that asked for this session; see `SessionSurface`. */
   surface?: SessionSurface
   /**
@@ -74,6 +123,7 @@ export interface SessionSummary {
   project?: string
   /** The surface that asked for it; see `SessionSurface`. */
   surface?: SessionSurface
+  backend?: SessionBackendSummary
   /**
    * Whether a turn holds this session right now — read off the lease, so it is
    * true for a turn running anywhere, a daemon or a terminal. Absent means no.
@@ -139,13 +189,14 @@ export interface CompactResult {
  * address (`scopeKey`) to the session currently bound to it.
  */
 export interface SessionStore {
+  withCreationLock<T>(key: string, work: () => Promise<T>): Promise<T>
   /**
    * Mints an empty record, recording the address it was created under, the project
    * it will work in and the surface that asked for it. All are written here rather
    * than by whoever saves first: a session that has not been spoken in yet is in no
    * file, so what the store mints is the only place they can live.
    */
-  create(scope?: MemoryScope, project?: string, surface?: SessionSurface): Promise<SessionRecord>
+  create(scope?: MemoryScope, project?: string, surface?: SessionSurface, backend?: SessionBackend): Promise<SessionRecord>
   load(id: string): Promise<SessionRecord | null>
   /**
    * Writes the record only if the stored one is still at `expectedVersion`,
@@ -244,7 +295,7 @@ export function isValidSessionId(id: string): boolean {
 
 export function countTurns(messages: Message[]): number {
   let turns = 0
-  for (const message of messages) if (message.role === 'user') turns += 1
+  for (const message of messages) if (message.role === 'user' && !message.internal) turns += 1
   return turns
 }
 
@@ -261,6 +312,7 @@ export function countMessages(messages: Message[]): number {
   let count = 0
   let answering = false
   for (const message of messages) {
+    if (message.internal) continue
     if (message.role === 'assistant') {
       if (!answering) count += 1
       answering = true
@@ -276,7 +328,7 @@ export function countMessages(messages: Message[]): number {
 /** First line of the first thing the user said, for listing sessions. */
 export function previewOf(messages: Message[], limit = 80): string {
   for (const message of messages) {
-    if (message.role !== 'user') continue
+    if (message.role !== 'user' || message.internal) continue
     const text = message.content
       .filter((part) => part.type === 'text')
       .map((part) => part.text)
@@ -290,13 +342,14 @@ export function previewOf(messages: Message[], limit = 80): string {
 }
 
 export function toSummary(record: SessionRecord): SessionSummary {
-  const preview = previewOf(record.messages)
+  const commandCode = record.backend?.kind === 'command-code' ? record.backend : undefined
+  const preview = commandCode?.preview ?? previewOf(record.messages)
   return {
     id: record.id,
     title: record.title,
     createdAt: record.createdAt,
-    updatedAt: record.updatedAt,
-    messageCount: countMessages(record.messages),
+    updatedAt: Math.max(record.updatedAt, commandCode?.nativeUpdatedAt ?? 0),
+    messageCount: commandCode?.messageCount ?? countMessages(record.messages),
     preview,
     // A recap is kept in a store of its own, so it is not here to fall back on: the list
     // that adds one says the label again with it. Same rule, one function.
@@ -304,5 +357,16 @@ export function toSummary(record: SessionRecord): SessionSummary {
     scope: record.scope,
     project: record.project,
     ...(record.surface ? { surface: record.surface } : {}),
+    ...(commandCode
+      ? {
+          backend: {
+            kind: commandCode.kind,
+            state: commandCode.state,
+            ...(commandCode.nativeSessionId ? { nativeSessionId: commandCode.nativeSessionId } : {}),
+            ...(commandCode.pendingTurn ? { pendingTurnId: commandCode.pendingTurn.id } : {}),
+            ...(commandCode.error ? { error: commandCode.error } : {}),
+          },
+        }
+      : {}),
   }
 }

@@ -11,9 +11,11 @@ import {
 } from '../../../src/core/project-icons.ts'
 import { SessionMark, SessionRow } from '../sessions/SessionRow.js'
 import type { SessionSummary } from '../sessions/types.js'
+import type { SessionBackendChoice, SessionBackendKind } from '../../../src/core/sessions/types.js'
 import { Code } from '../ui/Code.js'
 import { Field } from '../ui/Form.js'
 import { Icon } from '../ui/Icons.js'
+import { SessionBackendMark } from '../ui/SessionBackendMark.js'
 import { Notice, useAutoDismiss, type Report } from '../ui/Notice.js'
 import { PageHeader } from '../ui/PageHeader.js'
 import { SkeletonList } from '../ui/Skeleton.js'
@@ -156,7 +158,7 @@ export function Work({
   onPicked(): void
   onOpenSession(id: string): void
   /** Start a work session in a project and open it. False when it could not. */
-  onStartSession(projectId: string, firstMessage?: string): Promise<boolean>
+  onStartSession(projectId: string, firstMessage: string, backend: SessionBackendKind, confirmed: boolean): Promise<boolean>
   onRenameSession(id: string, title: string, report: Report): Promise<void>
   onExportSession(id: string, report: Report): Promise<void>
   onCopySessionId(id: string, report: Report): void
@@ -573,7 +575,7 @@ function ProjectPage({
   onDismiss(): void
   onBack(): void
   onOpenSession(id: string): void
-  onStartSession(projectId: string, firstMessage?: string): Promise<boolean>
+  onStartSession(projectId: string, firstMessage: string, backend: SessionBackendKind, confirmed: boolean): Promise<boolean>
   onAct(body: Record<string, unknown>): Promise<boolean>
 }) {
   const [renaming, setRenaming] = useState(false)
@@ -599,6 +601,14 @@ function ProjectPage({
   const [folderName, setFolderName] = useState<string | null>(null)
   const [folderBusy, setFolderBusy] = useState(false)
   const [folderError, setFolderError] = useState<string | null>(null)
+  const [startDraft, setStartDraft] = useState('')
+  const [startBackend, setStartBackend] = useState<SessionBackendKind>('milo')
+  const [backendChoices, setBackendChoices] = useState<SessionBackendChoice[]>([{ id: 'milo', available: true }])
+  const [backendChoicesLoading, setBackendChoicesLoading] = useState(true)
+  const [backendChoicesError, setBackendChoicesError] = useState<string | null>(null)
+  const [startingSession, setStartingSession] = useState(false)
+  const [startError, setStartError] = useState<string | null>(null)
+  const startField = useRef<HTMLTextAreaElement>(null)
 
   /** Bumped per read, so a slower earlier walk cannot overwrite a newer one. */
   const treeSeq = useRef(0)
@@ -642,6 +652,23 @@ function ProjectPage({
       if (mine !== rulesSeq.current) return
       setRulesError(message(error))
     }
+  }, [project.id])
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: project changes reset the pending backend and refresh its availability
+  useEffect(() => {
+    let current = true
+    setStartBackend('milo')
+    setBackendChoicesLoading(true)
+    setBackendChoicesError(null)
+    void api<SessionBackendChoice[]>('session-backends')
+      .then((choices) => { if (current) setBackendChoices(choices) })
+      .catch((error: unknown) => {
+        if (!current) return
+        setBackendChoices([{ id: 'milo', available: true }])
+        setBackendChoicesError(message(error))
+      })
+      .finally(() => { if (current) setBackendChoicesLoading(false) })
+    return () => { current = false }
   }, [project.id])
 
   useEffect(() => { void readTree(); void readDiff(); void readRules() }, [readTree, readDiff, readRules])
@@ -710,6 +737,25 @@ function ProjectPage({
     void onAct({ action: 'update', id: project.id, icon: mark }).then((ok) => { if (ok) setChoosingIcon(false) })
   }
 
+  async function startProjectSession(event: FormEvent<HTMLFormElement>): Promise<void> {
+    event.preventDefault()
+    const firstMessage = startDraft.trim()
+    const choice = backendChoices.find((item) => item.id === startBackend)
+    if (!firstMessage || startingSession || project.error || choice?.available !== true) return
+    const confirmed = startBackend === 'command-code'
+    setStartingSession(true)
+    setStartError(null)
+    try {
+      const started = await onStartSession(project.id, firstMessage, startBackend, confirmed)
+      if (started) setStartDraft('')
+      else setStartError('The Session could not be started. Review the notice and try again.')
+    } catch (error) {
+      setStartError(message(error))
+    } finally {
+      setStartingSession(false)
+    }
+  }
+
   function removeProject(): void {
     if (window.confirm(`Remove “${project.name}” from the list? Its sessions stay.`)) {
       void onAct({ action: 'remove', id: project.id })
@@ -721,7 +767,7 @@ function ProjectPage({
     onDismiss={onDismiss}
     head={<PageHeader
       back={<button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Work</span></button>}
-      title={<span className="work-title"><span className="work-title-mark"><Icon name={projectMark(project.icon)} size={18} /></span><span>{project.name}</span></span>}
+      title={<span className="work-title"><span className="work-title-mark"><Icon name={projectMark(project.icon)} size={18} /></span><span>{project.name}</span>{startBackend === 'command-code' && <span className="work-title-backend" role="img" aria-label="Command Code selected for the next Session" title="Command Code"><SessionBackendMark backend="command-code" size={17} /></span>}</span>}
       description={project.error ?? project.path}
       action={<div className="work-actions">
         <button className="button" type="button" aria-expanded={choosingIcon} onClick={() => setChoosingIcon((open) => !open)}><Icon name={projectMark(project.icon)} size={14} /> Icon</button>
@@ -749,12 +795,44 @@ function ProjectPage({
         <button className="button primary" type="submit" disabled={saving || !rename.trim()}>Save name</button>
       </div>
     </form>}
-    <div className="work-start">
-      <button className="button primary" type="button" disabled={saving || project.error !== undefined} onClick={() => void onStartSession(project.id)}>
-        <Icon name="plus" size={15} /> New session here
-      </button>
-      <span className="work-start-note">Opens a chat that works in {project.path}.</span>
-    </div>
+    <form className="work-start" onSubmit={(event) => void startProjectSession(event)}>
+      <textarea
+        ref={startField}
+        className="work-start-field"
+        aria-label={`First message for a Session in ${project.name}`}
+        placeholder={`Start a Session in ${project.name}`}
+        rows={3}
+        value={startDraft}
+        disabled={project.error !== undefined || startingSession}
+        onChange={(event) => setStartDraft(event.target.value)}
+      />
+      <div className="work-start-controls">
+        <label className="work-start-backend">
+          <SessionBackendMark backend={startBackend} size={16} />
+          <span className="sr-only">Session backend</span>
+          <select
+            aria-label="Session backend"
+            value={startBackend}
+            disabled={startingSession || project.error !== undefined}
+            onChange={(event) => setStartBackend(event.target.value as SessionBackendKind)}
+          >
+            {backendChoices.map((choice) => <option
+              key={choice.id}
+              value={choice.id}
+              disabled={!choice.available}
+            >{choice.id === 'milo' ? 'Milo' : choice.available ? 'Command Code' : `Command Code — ${choice.reason ?? 'unavailable'}`}</option>)}
+          </select>
+          <Icon className="work-start-backend-chevron" name="chevron" size={13} />
+        </label>
+        <button className="button primary" type="submit" disabled={!startDraft.trim() || startingSession || project.error !== undefined || backendChoices.find((choice) => choice.id === startBackend)?.available !== true}>
+          <Icon name="send" size={15} /> {startingSession ? 'Starting…' : 'Start Session'}
+        </button>
+      </div>
+      {backendChoicesLoading && <p className="work-start-status" role="status">Checking available backends…</p>}
+      {backendChoicesError && <p className="work-start-error" role="alert">Could not check Command Code availability: {backendChoicesError}</p>}
+      {!backendChoicesLoading && backendChoices.find((choice) => choice.id === 'command-code' && !choice.available) && <p className="work-start-status">Command Code unavailable: {backendChoices.find((choice) => choice.id === 'command-code')?.reason ?? 'not available'}</p>}
+      {startError && <p className="work-start-error" role="alert">{startError}</p>}
+    </form>
     {sessions.length === 0
       ? <p className="list-empty">No sessions yet. Start one above, or ask Milo for something that needs this folder.</p>
       : <div className="work-sessions">
@@ -780,7 +858,7 @@ function ProjectPage({
                     makes them: a session told to read the folder and write the file, which
                     the person then watches, rather than a file written behind their back. */}
                 <p className="list-empty">This folder has no <code>AGENTS.md</code> — the file that tells a session started here how the project is worked in: its commands, its layout, its conventions.</p>
-                <button className="button" type="button" disabled={saving} onClick={() => void onStartSession(project.id, rules.prompt)}>
+                <button className="button" type="button" disabled={saving} onClick={() => { setStartDraft(rules.prompt); requestAnimationFrame(() => startField.current?.focus()) }}>
                   <Icon name="edit" size={14} /> Write the rules
                 </button>
               </div>}

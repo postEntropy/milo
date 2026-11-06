@@ -17,6 +17,7 @@ import {
   updateRoutine,
 } from './routines.js'
 import { createProvider } from './providers/create.js'
+import { HerdrCommandCodeSessionDriver } from './command-code-session.js'
 import type { Provider } from './providers/types.js'
 import { placeProject } from './projects.js'
 import { readOwnInstructions, readProjectInstructions } from './agent/instructions.js'
@@ -195,6 +196,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
 
   runtime = new AgentRuntime({
     provider: traced(createProvider(loaded.provider, loaded.model, { onOutputCap: learnOutputCap(loaded.model) })),
+    commandCode: new HerdrCommandCodeSessionDriver(),
     // One entry, and the model it is on: `auto` picks its wire from the model
     // id, so a model switched later resolves a provider of its own instead of
     // keeping the wire of the one it replaced.
@@ -263,9 +265,8 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     // The shell's box, when the config asks for one. Off is the default and the
     // meaning of an install that never chose.
     sandbox: loaded.config.sandbox,
-    // The verification gate, when the config asks for one. Off by default: it
-    // runs the project's own commands after every writing turn, which is a
-    // change the person makes on purpose.
+    // The verification gate is opt-in because it executes project commands.
+    // A failed check gets one bounded repair attempt in-session.
     verify: loaded.config.verification.enabled
       ? (project) => verifyProject(project, { timeoutMs: loaded.config.verification.timeoutMs })
       : undefined,

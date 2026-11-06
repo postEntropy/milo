@@ -33,6 +33,7 @@ struct ChatView: View {
     /// the edited words replace it rather than stacking a second copy on top.
     @State private var editing: Int?
     @State private var drawer = false
+    @State private var showCommandCodeInfo = false
     @State private var picker = false
     @State private var settings = false
     @State private var routines = false
@@ -434,7 +435,7 @@ struct ChatView: View {
         } else if work {
             // A session started or opened here is a session like any other: the card goes
             // back to the chat it was begun in, which is where it is read and spoken to.
-            WorkView(pushed: $workPage, opening: $workProject, newProject: $workNewProject, onSessions: openDrawer, onChat: leaveWork)
+            WorkView(pushed: $workPage, opening: $workProject, newProject: $workNewProject, onSessions: openDrawer, onChat: leaveWork, onChatWorld: chooseChatWorld)
         } else {
             chat
         }
@@ -691,31 +692,11 @@ struct ChatView: View {
         }
     }
 
-    /// A work session from the drawer: the project was chosen in its own menu, and the chat
-    /// that opens works there — the same move the project's page makes, with the cursor
-    /// waiting in the field.
+    /// A work session from the drawer: the project was chosen in its own menu, and its page
+    /// opens with the composer that starts the session there — where the backend, the mode
+    /// and the model are chosen before the first words.
     private func startWorkSessionFromDrawer(_ project: String) {
-        routinesSelected = false
-        routines = false
-        tasksSelected = false
-        tasks = false
-        workSelected = false
-        work = false
-        // The tap is the whole move: the drawer leaves and the card comes back over the chat
-        // in the same update, with the cursor already asked for — the keyboard rises with
-        // the card. Closing the drawer from a Task left a frame of the Work page standing
-        // under a keyboard that was on its way, and the page was pushed up before it went.
-        drawer = false
-        composing = true
-        starting = true
-        Task { @MainActor in
-            await model.startWorkSession(project: project)
-            starting = false
-            // A session is a new thread and a new id under the same field. Asking again
-            // once it has landed is what keeps the keyboard from folding and reopening
-            // under the words as they swap.
-            composing = true
-        }
+        openWorkProject(project)
     }
 
     /// The picker lives on the Work index, so the card goes there with the ask: the control
@@ -773,7 +754,7 @@ struct ChatView: View {
             work = false
             // A work session cannot become a chat: leaving one is going back to the chat
             // this side was last in, the browser's own rule.
-            guard model.sessionProject != nil else { return }
+            guard work || model.sessionProject != nil else { return }
             if let last = model.lastChatSession, model.sessions.contains(where: { $0.id == last }) {
                 Task { await model.resume(last) }
             } else {
@@ -1329,32 +1310,57 @@ struct ChatView: View {
                     // controls and the left one, and that difference was the tilt.
                     .frame(maxWidth: .infinity, alignment: .leading)
 
+                // A Session that has not begun is where the world is chosen, so the switch is
+                // here the moment the app opens — the drawer's own switch, from the same view.
+                // Once there are words, or a project, the bar names the Session instead.
+                if model.messages.isEmpty, model.sessionProject == nil, !starting {
+                    ModeSwitch(work: false, onChat: chooseChatWorld, onWork: chooseWorkWorld)
+                        .frame(width: 180)
+                }
+
                 // Where this session works, said on a session that has not written anything yet
                 // too: which folder the work happens in is a fact of the session, not of its
                 // words. A project whose folder has gone says so rather than reading as workable.
                 if let project = model.sessionProject {
-                    // Where the session works is also the way into that place: the name opens
-                    // the project's own page, the way it does in the browser, so the folder's
-                    // sessions, files and rules are one press from the chat working in it.
-                    Button { openPage(.work, project: project.id) } label: {
-                        HStack(spacing: MiloTheme.Space.two) {
-                            Image(systemName: ProjectMark.symbol(project.icon))
-                                .font(.system(size: 13, weight: .semibold))
-                            Text(project.name)
-                                .font(.headline)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
+                    HStack(spacing: 0) {
+                        Button { openPage(.work, project: project.id) } label: {
+                            HStack(spacing: MiloTheme.Space.two) {
+                                Image(systemName: ProjectMark.symbol(project.icon))
+                                    .font(.system(size: 13, weight: .semibold))
+                                Text(project.name)
+                                    .font(.headline)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            .padding(.horizontal, MiloTheme.Space.two)
+                            .frame(minHeight: 46)
+                            .foregroundStyle(project.error == nil ? MiloTheme.foreground : MiloTheme.danger)
+                            .contentShape(Rectangle())
                         }
-                        .foregroundStyle(project.error == nil ? MiloTheme.foreground : MiloTheme.danger)
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .layoutPriority(1)
+                        .accessibilityElement(children: .combine)
+                        .accessibilityLabel(project.error == nil ? "Project: \(project.name)" : "Project: \(project.name), \(project.error ?? "")")
+                        .accessibilityHint("Opens the project's page")
+
+                        if model.sessionBackend?.kind == "command-code" {
+                            Button { showCommandCodeInfo = true } label: {
+                                SessionBackendMark(backend: "command-code", size: 18)
+                                    .frame(width: 44, height: 44)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Command Code access details")
+                            .accessibilityHint("Shows access and history details for this Session")
+                            .popover(isPresented: $showCommandCodeInfo, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
+                                commandCodeInfoPopover(path: project.path)
+                                    .presentationCompactAdaptation(.popover)
+                            }
+                        }
                     }
-                    .buttonStyle(.plain)
-                    // Its own width first, so the name keeps its room and the two ends give
-                    // way; only a name wider than the bar itself is truncated.
+                    .padding(.horizontal, MiloTheme.Space.one)
+                    .glassEffect(.regular.interactive(), in: Capsule())
                     .layoutPriority(1)
-                    .accessibilityElement(children: .combine)
-                    .accessibilityLabel(project.error == nil ? "Project: \(project.name)" : "Project: \(project.name), \(project.error ?? "")")
-                    .accessibilityHint("Opens the project's page")
                 }
 
                 // Starting a new session and acting on this one: one surface holding both,
@@ -1369,22 +1375,16 @@ struct ChatView: View {
                     if !model.messages.isEmpty, !starting {
                         HStack(spacing: 0) {
                             Button {
-                                // Inside the tap that asked for it, before the session moves:
-                                // the cursor is in the field the press just opened, so the next
-                                // thing said is typed rather than looked for. The browser's own
-                                // new session takes focus the same way. It starts in the world
-                                // the session in front works in — the same project from a work
-                                // session, because a chat cannot be where the next one belongs.
-                                composing = true
-                                starting = true
-                                Task { @MainActor in
-                                    if let project = model.sessionProject {
-                                        await model.startWorkSession(project: project.id)
-                                    } else {
-                                        await model.newSession()
-                                    }
-                                    starting = false
+                                if let project = model.sessionProject {
+                                    openWorkProject(project.id)
+                                } else {
                                     composing = true
+                                    starting = true
+                                    Task { @MainActor in
+                                        await model.newSession()
+                                        starting = false
+                                        composing = true
+                                    }
                                 }
                             } label: {
                                 topGlyph("square.and.pencil")
@@ -1395,9 +1395,9 @@ struct ChatView: View {
                             Menu {
                                 sessionActions(
                                     onRename: { renaming = model.sessionId },
-                                    onExport: { Task { await model.export(model.sessionId) } },
+                                    onExport: model.sessionBackend?.kind == "command-code" ? nil : { Task { await model.export(model.sessionId) } },
                                     onCopy: { model.copyId(model.sessionId) },
-                                    onClear: { Task { await model.clear() } },
+                                    onClear: model.sessionBackend?.kind == "command-code" ? nil : { Task { await model.clear() } },
                                     onDelete: { Task { await model.delete(model.sessionId) } }
                                 )
                             } label: {
@@ -1445,6 +1445,51 @@ struct ChatView: View {
         // The line comes and goes as a fade rather than a jump, the way the notice over the
         // thread does: the two are the same kind of thing, a state said once and then gone.
         .animation(.smooth(duration: 0.22), value: model.connectionLine)
+    }
+
+    /// What this Session's backend is allowed to do, said once where the mark is: a header with
+    /// the backend, then one short line per fact, each with its own glyph.
+    private func commandCodeInfoPopover(path: String) -> some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.four) {
+            HStack(spacing: MiloTheme.Space.three) {
+                SessionBackendMark(backend: "command-code", size: 22)
+                    .frame(width: 40, height: 40)
+                    .background(MiloTheme.surfaceWarm, in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Command Code")
+                        .font(MiloTheme.Text.body.weight(.semibold))
+                        .foregroundStyle(MiloTheme.foreground)
+                    Text("Runs this Session instead of Milo")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+            }
+            VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                commandCodeFact("hammer", "Its own tools", "Milo's Plan mode, per-tool approvals and model do not apply.")
+                commandCodeFact("lock.open", "Full access", "Runs with --yolo: it can edit files and run commands, also outside \(path).")
+                commandCodeFact("clock.arrow.circlepath", "History", "Kept in Command Code's own history and in Herdr's run record.")
+            }
+        }
+        .padding(MiloTheme.Space.four)
+        .frame(width: 300, alignment: .leading)
+    }
+
+    private func commandCodeFact(_ symbol: String, _ title: String, _ text: String) -> some View {
+        HStack(alignment: .top, spacing: MiloTheme.Space.three) {
+            Image(systemName: symbol)
+                .font(.system(size: 14, weight: .medium))
+                .foregroundStyle(MiloTheme.foreground2)
+                .frame(width: 20, height: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(MiloTheme.Text.small.weight(.semibold))
+                    .foregroundStyle(MiloTheme.foreground)
+                Text(text)
+                    .font(MiloTheme.Text.small)
+                    .foregroundStyle(MiloTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
     }
 
     /// The mark a glass control in the top bar wears: one size, so the row's buttons
@@ -1523,6 +1568,7 @@ struct ChatView: View {
                 // switch and the model on the field's line. An ordinary chat keeps the model
                 // in the `+` panel.
                 work: model.sessionProject != nil,
+                sessionBackend: model.sessionBackend?.kind ?? "milo",
                 onModel: {
                     closeMenu()
                     picker = true

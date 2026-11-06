@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { isAttachmentPart } from './providers/types.js'
 import { errorMessage, isAbort } from '../util/errors.js'
 import { closeParagraph } from '../util/format.js'
@@ -31,6 +32,7 @@ import type { Project, ProjectPlacement } from './projects.js'
 import { verificationText, type VerificationResult } from './verification.js'
 import type { ProjectInstructions } from './agent/instructions.js'
 import type { ClientKind } from './client.js'
+import type { CommandCodeSessionDriver, NativeSessionHistory, NativeSessionTurn } from './session-backend.js'
 import {
   contextBudget,
   countMessages,
@@ -56,6 +58,8 @@ import {
   type SessionLease,
   type SessionRecord,
   type SessionStats,
+  type SessionBackend,
+  type SessionBackendView,
   type SessionStore,
   type SessionSummary,
 } from './sessions/index.js'
@@ -193,6 +197,7 @@ export interface SessionOptions {
    */
   derive?: boolean
   permissionPolicy?: PermissionPolicy
+  commandCode?: CommandCodeSessionDriver
   /** The record this session reads from and writes back to. */
   record: SessionRecord
   store: SessionStore
@@ -283,6 +288,7 @@ export interface SessionOptions {
 
 export interface SendOptions {
   signal?: AbortSignal
+  retryPendingId?: string
   /** The surface's inline confirmation prompt for tools that need it. */
   ask?: PermissionAsker
   /**
@@ -410,7 +416,7 @@ export class Session {
     this.recaps = options.recaps ?? new MemoryRecapStore()
     this.id = options.record.id
     this.scope = options.scope
-    this.messages = options.record.messages
+    this.messages = options.record.backend?.kind === 'command-code' ? [] : options.record.messages
     this.record.attachments ??= this.messages.flatMap((message) => message.content.filter(isAttachmentPart))
     this.summary = options.record.summary
     this.baseVersion = options.record.version
@@ -503,6 +509,9 @@ export class Session {
    * ready to work rather than stuck proposing.
    */
   setPlan(plan: boolean): void {
+    if (this.record.backend?.kind === 'command-code' && plan) {
+      throw new Error('Plan mode is managed by Command Code for this Session.')
+    }
     this.plan = plan
   }
 
@@ -571,6 +580,58 @@ export class Session {
    */
   get project(): ProjectPlacement | undefined {
     return this.options.project
+  }
+
+  get backend(): SessionBackend {
+    return this.record.backend ?? { kind: 'milo' }
+  }
+
+  get backendSummary() {
+    const backend = this.record.backend
+    return backend?.kind === 'command-code'
+      ? {
+          kind: backend.kind,
+          state: backend.state,
+          ...(backend.nativeSessionId ? { nativeSessionId: backend.nativeSessionId } : {}),
+          ...(backend.pendingTurn ? { pendingTurnId: backend.pendingTurn.id } : {}),
+          ...(backend.error ? { error: backend.error } : {}),
+        }
+      : undefined
+  }
+
+  get backendView(): SessionBackendView {
+    const backend = this.record.backend
+    if (backend?.kind !== 'command-code') return { kind: 'milo' }
+    return {
+      kind: backend.kind,
+      state: backend.state,
+      ...(backend.nativeSessionId ? { nativeSessionId: backend.nativeSessionId } : {}),
+      ...(backend.error ? { error: backend.error } : {}),
+      ...(backend.pendingTurn ? { pendingTurn: { id: backend.pendingTurn.id, input: backend.pendingTurn.input, baseMessageCount: backend.pendingTurn.baseMessageCount } } : {}),
+    }
+  }
+
+  async refreshHistory(): Promise<Message[]> {
+    if (this.backend.kind !== 'command-code') return this.messages
+    const driver = this.options.commandCode
+    if (!driver) throw new Error('Command Code sessions are unavailable in this Milo runtime.')
+    const history = await driver.history(this.record)
+    this.applyNativeHistory(history)
+    return this.messages
+  }
+
+  private applyNativeHistory(history: NativeSessionHistory): void {
+    const backend = this.record.backend
+    if (backend?.kind !== 'command-code') return
+    this.messages.splice(0, this.messages.length, ...history.messages)
+    if (!this.record.title && history.title && history.title !== backend.nativeTitle) this.record.title = history.title
+    this.record.backend = {
+      ...backend,
+      ...(history.nativeSessionId ? { nativeSessionId: history.nativeSessionId } : {}),
+      preview: history.preview,
+      messageCount: history.messageCount,
+      nativeUpdatedAt: history.updatedAt,
+    }
   }
 
   /**
@@ -703,7 +764,24 @@ export class Session {
     return this.send('', { ...opts, notice: instruction })
   }
 
+  async *retryPendingCommandCode(confirmed: boolean, options?: Omit<SendOptions, 'retryPendingId'>): AsyncGenerator<AgentEvent> {
+    if (!confirmed) {
+      yield { type: 'error', message: 'Confirm retrying the unresolved Command Code message.' }
+      return
+    }
+    const pendingTurn = this.record.backend?.kind === 'command-code' ? this.record.backend.pendingTurn : undefined
+    if (!pendingTurn) {
+      yield { type: 'error', message: 'This Session has no unresolved Command Code message.' }
+      return
+    }
+    yield* this.send(pendingTurn.input, { ...options, retryPendingId: pendingTurn.id })
+  }
+
   private async *turn(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
+    if (this.record.backend?.kind === 'command-code') {
+      yield* this.commandCodeTurn(input, opts)
+      return
+    }
     const {
       system,
       registry,
@@ -1012,7 +1090,7 @@ export class Session {
       // having moved the session on — has to be reported, not thrown past the
       // caller's event loop.
       await this.persist()
-      for await (const event of runAgent({
+      const runAgentTurn = () => runAgent({
         provider,
         model,
         system: systemPrompt,
@@ -1096,88 +1174,103 @@ export class Session {
         keepSnapshots: this.options.keepSnapshots,
         genui: draws,
         trace: this.runTrace('chat'),
-      })) {
-        // Measured once, on the turn's first output of any kind, so a session read
-        // back reports the same wait the surface that watched it drew.
-        if (
-          firstOutputMs === undefined &&
-          (event.type === 'text-delta' || event.type === 'reasoning-delta' || event.type === 'tool-start')
-        ) {
-          firstOutputMs = Date.now() - startedAt
+      })
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        for await (const event of runAgentTurn()) {
+          // Measured once, on the turn's first output of any kind, so a session read
+          // back reports the same wait the surface that watched it drew.
+          if (
+            firstOutputMs === undefined &&
+            (event.type === 'text-delta' || event.type === 'reasoning-delta' || event.type === 'tool-start')
+          ) {
+            firstOutputMs = Date.now() - startedAt
+          }
+          if (event.type === 'error') errored = true
+          else if (event.type === 'text-delta') answer += event.delta
+          else if (event.type === 'reasoning-delta') reasoning += event.delta
+          else if (event.type === 'tool-start') {
+            // The step that called a tool is finished being written. Without the
+            // break, the line before a tool call and the answer after it are one
+            // sentence in the log — and in an export, one paragraph.
+            answer = closeParagraph(answer)
+            running = { name: event.name, args: event.args }
+          }
+          else if (event.type === 'steer') {
+            note({ kind: 'user', text: event.text })
+            // For the same reason the opening message is written down before the
+            // answer comes: a crash mid-turn must not lose what the user said.
+            await this.persist()
+          } else if (event.type === 'tool-end') {
+            note({
+              kind: 'tool',
+              tool: {
+                name: event.name,
+                args: running?.args ?? {},
+                result: event.result,
+                isError: event.isError,
+              },
+            })
+            running = null
+          }
+          yield event
         }
-        if (event.type === 'error') errored = true
-        else if (event.type === 'text-delta') answer += event.delta
-        else if (event.type === 'reasoning-delta') reasoning += event.delta
-        else if (event.type === 'tool-start') {
-          // The step that called a tool is finished being written. Without the
-          // break, the line before a tool call and the answer after it are one
-          // sentence in the log — and in an export, one paragraph.
-          answer = closeParagraph(answer)
-          running = { name: event.name, args: event.args }
-        }
-        else if (event.type === 'steer') {
-          note({ kind: 'user', text: event.text })
-          // For the same reason the opening message is written down before the
-          // answer comes: a crash mid-turn must not lose what the user said.
-          await this.persist()
-        } else if (event.type === 'tool-end') {
-          note({
-            kind: 'tool',
-            tool: {
-              name: event.name,
-              args: running?.args ?? {},
-              result: event.result,
-              isError: event.isError,
-            },
-          })
-          running = null
-        }
-        yield event
-      }
 
-      // The gate: a turn that changed files ends with what the project's own
-      // checks answered, not only with what the model said it ran. It is off
-      // unless the install turned it on, and it never feeds the failure back —
-      // v1 reports, so the answer already on screen is not rewritten under it.
-      if (
-        !errored &&
-        !abort.aborted &&
-        this.wroteThisTurn &&
-        this.options.project?.ok &&
-        this.options.verify
-      ) {
-        const project = this.options.project.project
-        const startedVerification = Date.now()
-        let result: VerificationResult
-        try {
-          result = await this.options.verify(project)
-        } catch (error) {
-          result = { kind: 'unreadable', error: errorMessage(error) }
+        // The gate: a turn that changed files ends with what the project's own
+        // checks answered. An actionable failure gets one bounded repair attempt.
+        if (
+          !errored &&
+          !abort.aborted &&
+          this.wroteThisTurn &&
+          this.options.project?.ok &&
+          this.options.verify
+        ) {
+          const project = this.options.project.project
+          const startedVerification = Date.now()
+          let result: VerificationResult
+          try {
+            result = await this.options.verify(project)
+          } catch (error) {
+            result = { kind: 'unreadable', error: errorMessage(error) }
+          }
+          this.options.traces?.record({
+            at: new Date().toISOString(),
+            event: 'verification',
+            ok: result.kind === 'checks' ? result.ok : result.kind === 'none',
+            ms: Date.now() - startedVerification,
+            purpose: 'verification',
+            surface: this.scope.gateway,
+            session: this.id,
+            project: project.id,
+            ...(result.kind === 'checks'
+              ? {
+                  checks: result.checks.length,
+                  failed: result.checks.filter((check) => !check.ok).map((check) => check.name),
+                }
+              : { checks: 0 }),
+          })
+          const text = verificationText(result)
+          const ok = result.kind === 'checks' ? result.ok : result.kind === 'none'
+          // Kept on the message the answer landed on — the last one this turn left — so a
+          // session read back draws the card the live turn drew. The event is not the only
+          // carrier: without this, reopening a conversation loses what the checks said.
+          const landed = this.messages.findLast((message, index) => index >= firstNew && message.role === 'assistant')
+          if (landed) landed.verification = { ok, text }
+          yield { type: 'verification', result, text, ok }
+          if (attempt === 0 && result.kind === 'checks' && !result.ok && !abort.aborted) {
+            this.messages.push({
+              role: 'user',
+              internal: 'verification',
+              displayText: '',
+              content: [{
+                type: 'text',
+                text: `Milo's automatic project checks failed after your changes. Diagnose and fix the failures below, then report what changed. Do not hide or revert unrelated user work. If a failure is unrelated or cannot be fixed safely, explain that.\n\n${text}`,
+              }],
+            })
+            await this.persist()
+            continue
+          }
         }
-        this.options.traces?.record({
-          at: new Date().toISOString(),
-          event: 'verification',
-          ok: result.kind === 'checks' ? result.ok : result.kind === 'none',
-          ms: Date.now() - startedVerification,
-          purpose: 'verification',
-          surface: this.scope.gateway,
-          session: this.id,
-          project: project.id,
-          ...(result.kind === 'checks'
-            ? {
-                checks: result.checks.length,
-                failed: result.checks.filter((check) => !check.ok).map((check) => check.name),
-              }
-            : { checks: 0 }),
-        })
-        const text = verificationText(result)
-        const ok = result.kind === 'checks' ? result.ok : result.kind === 'none'
-        // Kept on the message the answer landed on — the last one this turn left — so a
-        // session read back draws the card the live turn drew. The event is not the only
-        // carrier: without this, reopening a conversation loses what the checks said.
-        const landed = this.messages.findLast((message, index) => index >= firstNew && message.role === 'assistant')
-        if (landed) landed.verification = { ok, text }
-        yield { type: 'verification', result, text, ok }
+        break
       }
     } catch (error) {
       // A stop is not a failure: reporting `AbortError` to the user turns their
@@ -1262,8 +1355,131 @@ export class Session {
     }
   }
 
+  private async *commandCodeTurn(input: string, opts?: SendOptions): AsyncGenerator<AgentEvent> {
+    const driver = this.options.commandCode
+    if (!driver) {
+      yield { type: 'error', message: 'Command Code is unavailable in this Milo runtime.' }
+      return
+    }
+    if (opts?.notice || opts?.aside) {
+      yield { type: 'error', message: 'Command Code Sessions cannot receive background notices.' }
+      return
+    }
+    if (opts?.model) {
+      yield { type: 'error', message: 'Change the model in Command Code for this Session.' }
+      return
+    }
+    if (opts?.images?.length || opts?.audio?.length || opts?.documents?.length) {
+      yield { type: 'error', message: 'Attachments are not supported in Command Code Sessions yet.' }
+      return
+    }
+    if (!input.trim()) {
+      yield { type: 'error', message: 'A message is required.' }
+      return
+    }
+    const initialBackend = this.record.backend
+    if (initialBackend?.kind !== 'command-code') {
+      yield { type: 'error', message: 'This Session does not have a Command Code backend.' }
+      return
+    }
+    const existingPending = initialBackend.pendingTurn
+    if (existingPending && opts?.retryPendingId !== existingPending.id) {
+      yield { type: 'error', message: 'A previous Command Code turn is unresolved. Review or explicitly retry it before sending another message.' }
+      return
+    }
+    if (existingPending && input !== existingPending.input) {
+      yield { type: 'error', message: 'Retry the exact unresolved Command Code message before sending a different one.' }
+      return
+    }
+    if (!existingPending && opts?.retryPendingId) {
+      yield { type: 'error', message: 'The pending Command Code turn was already resolved.' }
+      return
+    }
+    if (!existingPending) {
+      try {
+        await this.refreshHistory()
+      } catch (error) {
+        yield { type: 'error', message: `Could not read the Command Code history: ${errorMessage(error)}` }
+        return
+      }
+    }
+    const readyBackend = this.record.backend
+    if (readyBackend?.kind !== 'command-code') {
+      yield { type: 'error', message: 'This Session no longer has a Command Code backend.' }
+      return
+    }
+    const pendingTurn = existingPending ?? {
+      id: randomUUID(),
+      input,
+      startedAt: Date.now(),
+      baseMessageCount: this.messages.length,
+    }
+    this.record.backend = {
+      ...readyBackend,
+      state: 'running',
+      pendingTurn,
+      error: undefined,
+    }
+    if (!existingPending) await this.persist()
+    let attempted = false
+    try {
+      attempted = true
+      const result: NativeSessionTurn = yield* driver.send(this.record, input, {
+        signal: opts?.signal,
+        retryPending: existingPending !== undefined,
+        newTurn: existingPending === undefined,
+        onBackendUpdate: async (backend) => {
+          this.record.backend = backend
+          await this.persist()
+        },
+      })
+      this.record.backend = { ...result.backend }
+      this.applyNativeHistory(result.history)
+      if (result.error) {
+        const failedBackend = this.record.backend
+        if (failedBackend?.kind === 'command-code') {
+          this.record.backend = { ...failedBackend, state: 'error', error: result.error }
+        }
+        yield { type: 'error', message: result.error }
+      } else if (this.record.backend?.kind === 'command-code' && this.record.backend.pendingTurn) {
+        this.record.backend = {
+          ...this.record.backend,
+          state: 'error',
+          error: 'Command Code did not confirm that the message reached its native transcript.',
+        }
+        yield { type: 'error', message: this.record.backend.error ?? 'Command Code could not verify the pending turn.' }
+      }
+      await this.persist()
+    } catch (error) {
+      if (isAbort(error, opts?.signal)) {
+        yield { type: 'aborted' }
+      } else {
+        logWarn(`Command Code Session ${this.id} failed: ${errorMessage(error)}`)
+        yield { type: 'error', message: errorMessage(error) }
+      }
+      const backend = this.record.backend
+      if (backend?.kind === 'command-code') {
+        this.record.backend = {
+          ...backend,
+          state: isAbort(error, opts?.signal) ? 'stopped' : 'error',
+          pendingTurn,
+          error: isAbort(error, opts?.signal) ? undefined : errorMessage(error),
+        }
+      }
+      try {
+        const history = await driver.history(this.record)
+        this.applyNativeHistory(history)
+        await this.persist()
+      } catch (historyError) {
+        logWarn(`could not refresh Command Code Session ${this.id}: ${errorMessage(historyError)}`)
+      }
+    }
+    if (attempted) this.options.onSideEffect?.()
+  }
+
   /** Whether this finished turn is the one that names the session. */
   private shouldBeNamed(errored: boolean): boolean {
+    if (this.record.backend?.kind === 'command-code') return false
     if (errored) return false
     if (this.options.sessions?.generateTitles !== true) return false
     if (this.record.title) return false
@@ -1356,9 +1572,10 @@ export class Session {
     // Compared before `summary` is replaced: a summary that was not there, or
     // reads differently, is the other Milo having summarized the older turns.
     const compacted = latest.summary !== this.summary
-    // In place, not reassigned: this is the same array a running turn reads from
-    // and the record writes back.
-    this.messages.splice(0, this.messages.length, ...latest.messages)
+    // In place, not reassigned: Milo's transcript is the record's array. A Command Code
+    // Session instead holds a read-only projection of its native transcript in memory.
+    if (latest.backend?.kind !== 'command-code') this.messages.splice(0, this.messages.length, ...latest.messages)
+    this.record.backend = latest.backend
     this.summary = latest.summary
     this.record.title = latest.title ?? this.record.title
     this.record.droppedTokens = latest.droppedTokens
@@ -1374,6 +1591,9 @@ export class Session {
 
   /** Forgets the transcript (and any summary) but keeps the session's identity. */
   async clear(): Promise<void> {
+    if (this.record.backend?.kind === 'command-code') {
+      throw new Error('Clear the native transcript in Command Code for this Session.')
+    }
     // Under the lease for the same reason a turn is: clearing from a stale copy
     // would either be refused or would drop turns written since. Adopting first
     // is what makes this the session as it actually stands.
@@ -1412,6 +1632,9 @@ export class Session {
    * from a stale copy would be refused, or would erase the turns written since.
    */
   async appendNotice(text: string, files: OutgoingFile[] = [], routine?: RoutineDelivery): Promise<void> {
+    if (this.record.backend?.kind === 'command-code') {
+      throw new Error('Background notices cannot be appended to a Command Code Session.')
+    }
     const lease = await this.store.acquire(this.id)
     try {
       if (lease.latest) this.adoptLatest(lease.latest)
@@ -1445,7 +1668,7 @@ export class Session {
    * simply no longer a match, and the next one will be.
    */
   async recap(): Promise<void> {
-    if (this.messages.length === 0) return
+    if (this.record.backend?.kind === 'command-code' || this.messages.length === 0) return
     const seenAt = this.record.updatedAt
     const existing = await this.recaps.read(this.id)
     // Current, or written from a transcript newer than this copy knows about:
@@ -1473,7 +1696,7 @@ export class Session {
    * would erase the turns the other writer added.
    */
   async persist(): Promise<void> {
-    this.record.messages = this.messages
+    this.record.messages = this.record.backend?.kind === 'command-code' ? [] : this.messages
     this.record.summary = this.summary
     // Strictly increasing: a recap names the transcript version it was written
     // from, and two writes inside the same millisecond would otherwise look
@@ -1532,6 +1755,9 @@ export class Session {
    * hand, so it keeps the same rule about how much stays (the last `keepTurns`).
    */
   async compact(signal?: AbortSignal): Promise<CompactResult> {
+    if (this.record.backend?.kind === 'command-code') {
+      return { folded: 0, tokens: 0, ms: 0, summarized: false, reason: 'compaction is managed by Command Code for this Session' }
+    }
     const config = this.options.sessions
     const nothing = (reason: string): CompactResult => ({
       folded: 0,

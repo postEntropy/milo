@@ -3,7 +3,7 @@ import { statSync } from 'node:fs'
 import { basename, extname } from 'node:path'
 import { deriveIdeas, type Idea } from '../../core/ideas.js'
 import type { AgentRuntime } from '../../core/runtime.js'
-import type { Session } from '../../core/session.js'
+import type { SendOptions, Session } from '../../core/session.js'
 import type { SessionSurface } from '../../core/sessions/types.js'
 import { INSTALL_SCOPE, type MemoryScope } from '../../core/memory/index.js'
 import { isImage, mimeFor, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
@@ -236,6 +236,14 @@ export class WebHub {
     if (genui !== undefined) chat.genui = genui
     if (clientKind !== undefined) chat.client = clientKind
     chat.clients.add(client)
+    let historyError: string | undefined
+    if (chat.session.backend.kind === 'command-code') {
+      try {
+        await chat.session.refreshHistory()
+      } catch (error) {
+        historyError = errorMessage(error)
+      }
+    }
     // The turn running now, when there is one: this client missed its `turn-start`,
     // so the id it is drawn under rides with the ready and the events it has already
     // said are replayed under it, in order, before anything new arrives.
@@ -259,6 +267,7 @@ export class WebHub {
       // trusts this field was being told `1` while the server spoke `10`.
       version: PROTOCOL_VERSION,
       sessionId: chat.session.id,
+      backend: chat.session.backendView,
       ...(project ? { project } : {}),
       messages: firstChunk,
       ...(rest.length > 0 ? { continues: true } : {}),
@@ -292,10 +301,9 @@ export class WebHub {
     if (asking) {
       client.send({ type: 'permission', id: asking.id, request: asking.request, expiresAt: asking.expiresAt })
     }
+    if (historyError) client.send({ type: 'error', message: `Could not read this Session's Command Code history: ${historyError}` })
     this.sendState(chatId)
-    // An empty home asks for ideas in the background: the page is already drawn
-    // from the standing four, which the ideas arrive to take the place of.
-    if (chat.session.messages.length === 0) this.ensureIdeas()
+    if (chat.session.backend.kind === 'milo' && chat.session.messages.length === 0) this.ensureIdeas()
   }
 
   /**
@@ -316,6 +324,15 @@ export class WebHub {
     if (!chat?.clients.has(client)) return
 
     if (frame.type === 'control') {
+      if (frame.action === 'retry-command-code') {
+        const pending = chat.session.backend.kind === 'command-code' ? chat.session.backend.pendingTurn : undefined
+        if (!pending || pending.id !== frame.id || frame.confirmed !== true) {
+          client.send({ type: 'error', message: 'This Command Code turn is no longer awaiting recovery.' })
+          return
+        }
+        this.startTurn(chatId, pending.input, undefined, [], undefined, pending.id)
+        return
+      }
       if (frame.action === 'stop') {
         // The turn may be running in a sibling's queue: stopping is the session's own
         // act, not the asking chat's, so it lands on whoever owns it.
@@ -323,6 +340,10 @@ export class WebHub {
         this.sendState(chatId)
         if (!result.stopped) client.send({ type: 'error', message: 'Nothing is running to stop.' })
       } else if (frame.action === 'plan') {
+        if (chat.session.backend.kind === 'command-code') {
+          client.send({ type: 'error', message: 'Plan mode is controlled by Command Code for this Session.' })
+          return
+        }
         // The switch is the session's, not the tab's: a sibling watching the same
         // session is proposing with it, and has to see the same state.
         chat.session.setPlan(frame.plan === true)
@@ -368,6 +389,16 @@ export class WebHub {
     }
 
     if (frame.type === 'send') {
+      if (chat.session.backend.kind === 'command-code' && frame.uploadIds?.length) {
+        client.send({ type: 'error', message: 'Command Code Sessions accept project paths, not chat attachments.' })
+        return
+      }
+      const pendingCodeTurn = chat.session.backend.kind === 'command-code' ? chat.session.backend.pendingTurn : undefined
+      const currentOwner = this.liveOwner(chat.session.id) ?? chatId
+      if (pendingCodeTurn && !this.turns.busy(currentOwner)) {
+        client.send({ type: 'error', message: 'A Command Code turn is awaiting recovery. Review its status before sending another message.' })
+        return
+      }
       let files: IncomingFile[] = []
       try {
         files = frame.uploadIds?.map((uploadId) => this.takeUpload(uploadId)) ?? []
@@ -386,7 +417,7 @@ export class WebHub {
         this.startTurn(key, frame.text, frame.target, [], files)
         return
       }
-      if (frame.intent === 'steer') {
+      if (frame.intent === 'steer' && chat.session.backend.kind === 'milo') {
         const steered = this.turns.steer(key, frame.text)
         if (steered) {
           const turnId = this.live.get(sessionId)?.id
@@ -417,9 +448,15 @@ export class WebHub {
       return
     }
 
-    if (frame.type === 'command') void this.command(client, chat, frame.text).catch((error: unknown) => {
-      client.send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
-    })
+    if (frame.type === 'command') {
+      if (chat.session.backend.kind === 'command-code') {
+        client.send({ type: 'error', message: 'Milo slash commands are not available in Command Code Sessions.' })
+        return
+      }
+      void this.command(client, chat, frame.text).catch((error: unknown) => {
+        client.send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+      })
+    }
 
     if (frame.type === 'action') {
       const actionId = frame.actionId
@@ -940,16 +977,17 @@ export class WebHub {
     if (!items || items.length === 0) return
     const frame: ServerFrame = { type: 'suggestions', items }
     for (const [id, chat] of this.chats) {
-      if (chat.session.messages.length === 0) this.broadcast(id, frame)
+      if (chat.session.backend.kind === 'milo' && chat.session.messages.length === 0) this.broadcast(id, frame)
     }
   }
 
-  private startTurn(chatId: string, text: string, target?: SendTarget, images: ImagePart[] = [], files?: IncomingFile[]): void {
+  private startTurn(chatId: string, text: string, target?: SendTarget, images: ImagePart[] = [], files?: IncomingFile[], retryPendingId?: string): void {
     // A person who is already typing does not want ideas. The call they started
     // is about to be wasted work, so it is cut here rather than left to finish
     // behind the turn and replace cards nobody is looking at any more.
     this.ideaWork?.controller.abort()
     this.ideaWork = null
+    let pendingRetry = retryPendingId
     // The state frame that *ends* a turn comes from the queue's settle handler
     // below, not from the turn's own `finally`. `busy` is the queue's answer to
     // "is a turn running", and the queue only lets the turn go after this work
@@ -973,7 +1011,7 @@ export class WebHub {
       }
       if (sessionId) this.emitTurn(sessionId, { type: 'turn-start', id, text: files?.length
         ? [text, files.map((file) => `Attached ${file.name}`).join(', ')].filter(Boolean).join('\n')
-        : text })
+        : text, ...(pendingRetry ? { retryPendingId: pendingRetry } : {}) })
       // Said again now the live turn is open: the state frame the caller sent when it
       // queued this turn read `busy` before the queue had registered it, so it still
       // said false. This is the one that turns the sibling's composer busy.
@@ -1049,17 +1087,10 @@ export class WebHub {
             continue
           }
 
-          for await (const event of session.send(currentText, {
+          const sendOptions: SendOptions = {
             signal,
             steering: inbox,
-            // Whether this chat's clients draw a generated interface, so the
-            // teaching reaches the model only where it can be shown: the surface says
-            // it draws one, and the setting has been turned on (unset is off — the
-            // feature is experimental, and the teaching rides every turn).
             genui: chat.genui === true && display.genui === true,
-            // Who is holding the chat: the phone said it is the phone, which
-            // the gateway alone cannot tell from a browser. Named per turn, like
-            // `genui`, and absent until a client declares one.
             client: chat.client,
             ...(currentImages.length ? { images: currentImages } : {}),
             ...(currentAudio.length ? { audio: currentAudio } : {}),
@@ -1068,20 +1099,11 @@ export class WebHub {
             displayText,
             mediaNotices,
             ...(currentModel ? { model: currentModel } : {}),
-            // A screen may pin where this turn is addressing — the routines screen
-            // names a routine's destination, and the tool takes it from here
-            // rather than from the chat the turn happens to be running in.
             ...(target ? { origin: target } : {}),
-            // What is on the panel, so the model knows what the person is looking
-            // at, and where each tab's contents are, without having to ask.
             panel: this.panelFacts(chat),
             ask: async (request) => {
               const permissionId = randomUUID()
               const expiresAt = Date.now() + PERMISSION_TIMEOUT_MS
-              // Held on the session's live turn while it waits: the frame below reaches
-              // the clients that are here, and this is what a client arriving later is
-              // told. The question is the session's own, so any screen bound to it can
-              // answer — not only the chat whose queue raised it.
               if (live) live.permission = { id: permissionId, request, expiresAt }
               if (sessionId) this.emitTurn(sessionId, { type: 'permission', id: permissionId, request, expiresAt })
               const result = await this.pending.wait(permissionId, PERMISSION_TIMEOUT_MS, signal, sessionId ?? chatId)
@@ -1096,7 +1118,12 @@ export class WebHub {
               }
               return result
             },
-          })) {
+          }
+          const turn = pendingRetry
+            ? session.retryPendingCommandCode(true, sendOptions)
+            : session.send(currentText, sendOptions)
+          pendingRetry = undefined
+          for await (const event of turn) {
             if (event.type === 'error') {
               status = 'error'
               failureReason ??= event.message
@@ -1158,7 +1185,11 @@ export class WebHub {
           : null
         const raw = messages ? rawTurn(messages) : null
         const noOutput = messages ? rawTurn(messages, { output: false }) : null
-        if (sessionId) this.emitTurn(sessionId, { type: 'turn-end', id, status, ...(raw ? { raw } : {}), ...(noOutput && noOutput !== raw ? { rawNoOutput: noOutput } : {}) })
+        if (sessionId) {
+          this.emitTurn(sessionId, { type: 'turn-end', id, status, ...(raw ? { raw } : {}), ...(noOutput && noOutput !== raw ? { rawNoOutput: noOutput } : {}) })
+          const updated = this.chatsOf(sessionId)[0]?.session
+          if (updated?.backend.kind === 'command-code') this.emitTurn(sessionId, { type: 'session-backend', backend: updated.backendView })
+        }
         // The refusal the turn reported is taken down with the turn, so it is written
         // after the turn-end: the live screens have the message's own status, and this
         // is what the chat shows again when it is reopened.

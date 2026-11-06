@@ -16,38 +16,14 @@ import {
   type ChatGptDeviceLogin,
   type ChatGptLogin,
 } from '../../core/chatgpt/auth.js'
-import { tokenSource, type TokenSource } from '../../core/google/access.js'
-import { ASSIST_MODES, emailAssist, type AssistMode } from '../../core/google/assist.js'
-import {
-  applyMailOperation,
-  createDraft,
-  INBOX_FILTERS,
-  isMailOperation,
-  listInbox,
-  MAIL_OPERATIONS,
-  read as readMail,
-  readBody,
-  readThread,
-  search as searchMail,
-  sendMessage,
-  unreadSince,
-  type DraftInput,
-  type InboxFilter,
-  type MailSummary,
-} from '../../core/google/gmail.js'
-import { htmlToText } from '../../core/tools/html.js'
-import type { GoogleOutcome, GoogleTokens } from '../../core/google/oauth.js'
-import { LABEL_COLORS, createLabel, deleteLabel, labelMessages, toggleAssignment, unsorted } from '../../core/google/labels.js'
-import { markSeen, seenAt } from '../../core/google/seen.js'
-import { googleState } from '../../core/google/state.js'
-import { GOOGLE_TIERS, accessOf, type GoogleAccess } from '../../core/google/tiers.js'
 import { googleToolNames, googleWriteToolNames } from '../../core/tools/index.js'
+import { googleState } from '../../core/google/state.js'
+import { GOOGLE_TIERS } from '../../core/google/tiers.js'
 import {
   listProviders,
   listProviderModels,
   readAuth,
   readConfig,
-  readDisplay,
   saveConfig,
   setDisplay,
   setPermissionMode,
@@ -68,25 +44,6 @@ import {
 import { chromeVersion, copyProfile, findProfiles, listBrowsers, tryInstall } from '../../core/browser/index.js'
 import { INSTALL_SCOPE, memoryStatus } from '../../core/memory/index.js'
 import { provisionEmbedding } from '../../core/memory/provision.js'
-import {
-  addRoutine,
-  describeSchedule,
-  describeTarget,
-  findRoutine,
-  isSpent,
-  parseWhen,
-  readRoutines,
-  remainingRuns,
-  removeRoutineWithRuns,
-  ROUTINE_GATEWAY,
-  ROUTINE_GATEWAYS,
-  runRoutineOnce,
-  setEnabled,
-  SILENT_NOTE,
-  type Routine,
-  type RoutineGateway,
-  type RoutineTarget,
-} from '../../core/routines.js'
 import { listInstalled, removeSkill, installSkill } from '../../core/skills/install.js'
 import { fetchPopular } from '../../core/skills/catalog.js'
 import { resolveSource } from '../../core/skills/sources.js'
@@ -96,56 +53,26 @@ import { writeSessionExport } from '../../core/export.js'
 import { readTaskLists } from '../../core/task-lists.js'
 import { taskListsTool } from '../../core/tools/task-lists.js'
 import {
-  addProject,
-  byRecentUse,
   findProject,
-  placeProject,
-  projectViews,
-  readProjects,
-  removeProject,
-  updateProject,
-  type ProjectView,
+  unknownProjectError,
 } from '../../core/projects.js'
-import { browseFolders, createFolder } from '../../core/browse.js'
-import { createWorkFolder, workFile, workTree } from '../../core/work.js'
-import { startTracking, workDiff } from '../../core/work-diff.js'
-import { PROJECT_RULES_PROMPT, readProjectInstructions, rulesOf } from '../../core/agent/instructions.js'
-import { placeWorkSessions } from '../../core/work-sessions.js'
-import type { Message } from '../../core/providers/types.js'
-import { SILENT } from '../../core/silent.js'
+import { SESSION_SURFACES, type SessionBackendKind, type SessionSurface } from '../../core/sessions/types.js'
+import { browseFolders } from '../../core/browse.js'
 import { JobRegistry } from './jobs.js'
-import { transcriptOf, type RegisterFile } from './transcript.js'
+import type { RegisterFile } from './transcript.js'
+import { WebEmailSettings } from './settings/email.js'
+import { WebWorkSettings } from './settings/work.js'
+import { WebRoutineSettings } from './settings/routines.js'
+import { optionalText, sessionId } from './settings/input.js'
 
-/** How many runs the front page's timeline shows, newest across every routine. */
-const FEED_LIMIT = 20
-
-/**
- * What a run that had nothing to report says in place of the marker it answered
- * with: the run is worth reading, the marker is not a word anyone reads.
- */
-const QUIET_RUN = 'Nothing to report.'
-
-/**
- * How many future fire times a routine carries, for a surface that schedules on them
- * — the phone's own reminders. Small: the schedule's arithmetic stays in `nextRunAt`,
- * and a client takes what it needs rather than this guessing how far ahead it looks.
- * A routine with a ceiling carries no more than it still has left.
- */
-const UPCOMING_RUNS = 5
-
-const SESSION_ID = /^[a-z]+-[a-z]+-\d{1,3}$/
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
 export class WebSettings {
   private writeTail: Promise<unknown> = Promise.resolve()
   private readonly jobs = new JobRegistry()
-
-  /**
-   * The mail grant the running server holds, rebuilt when the grant changes. One
-   * token source per grant, so a page of inbox rows refreshes the access token
-   * once rather than once per row.
-   */
-  private mail: { refreshToken: string; source: TokenSource } | null = null
+  private readonly email: WebEmailSettings
+  private readonly work: WebWorkSettings
+  private readonly routines: WebRoutineSettings
 
   /** The sign-in waiting for a browser, so a second click shows the same URL instead of a second server. */
   private chatGpt: ChatGptLogin | ChatGptDeviceLogin | null = null
@@ -159,8 +86,12 @@ export class WebSettings {
   constructor(
     private readonly runtime: AgentRuntime,
     private readonly cwd: string,
-    private readonly files?: { register: RegisterFile },
-  ) {}
+    files?: { register: RegisterFile },
+  ) {
+    this.email = new WebEmailSettings(runtime)
+    this.work = new WebWorkSettings(runtime, cwd)
+    this.routines = new WebRoutineSettings(runtime, files)
+  }
 
   async handle(action: string, body: Record<string, unknown> = {}): Promise<unknown> {
     switch (action) {
@@ -176,7 +107,8 @@ export class WebSettings {
       case 'chatgpt-status': return this.chatGptReport()
       case 'chatgpt-logout': return this.chatGptSignOut()
       case 'models': return this.models(body)
-      case 'sessions': return this.sessionSummaries()
+      case 'sessions': return this.work.sessionSummaries()
+      case 'session-backends': return this.runtime.sessionBackends()
       case 'new-session': return this.newSession(body)
       case 'resume-session': return this.resumeSession(body)
       case 'fork-session': return this.forkSession(body)
@@ -195,26 +127,26 @@ export class WebSettings {
       case 'history-search': return this.historySearch(body)
       case 'memory-notes': return this.memoryNotes()
       case 'forget-note': return this.forgetNote(body)
-      case 'routines': return this.listRoutines()
+      case 'routines': return this.routines.listRoutines()
       case 'task-lists': return readTaskLists()
       case 'task-list-action': return this.taskListAction(body)
-      case 'projects': return this.projects()
-      case 'project-action': return this.projectAction(body)
+      case 'projects': return this.work.projects()
+      case 'project-action': return this.work.projectAction(body)
       case 'browse-folders': return browseFolders(optionalText(body.path), { cwd: this.cwd })
-      case 'folder-create': return this.folderCreate(body)
-      case 'project-tree': return this.projectTree(body)
-      case 'project-folder': return this.projectFolder(body)
-      case 'project-file': return this.projectFile(body)
-      case 'project-diff': return this.projectDiff(body)
-      case 'project-track': return this.projectTrack(body)
-      case 'project-rules': return this.projectRules(body)
-      case 'routine-feed': return this.routineFeed()
-      case 'routine-add': return this.addRoutine(body)
-      case 'routine-remove': return this.removeRoutine(body)
-      case 'routine-enable': return this.enableRoutine(body)
-      case 'routine-run': return this.runRoutine(body)
-      case 'routine-runs': return this.routineRuns(body)
-      case 'run-transcript': return this.runTranscript(body)
+      case 'folder-create': return this.work.folderCreate(body)
+      case 'project-tree': return this.work.projectTree(body)
+      case 'project-folder': return this.work.projectFolder(body)
+      case 'project-file': return this.work.projectFile(body)
+      case 'project-diff': return this.work.projectDiff(body)
+      case 'project-track': return this.work.projectTrack(body)
+      case 'project-rules': return this.work.projectRules(body)
+      case 'routine-feed': return this.routines.routineFeed()
+      case 'routine-add': return this.routines.addRoutine(body)
+      case 'routine-remove': return this.routines.removeRoutine(body)
+      case 'routine-enable': return this.routines.enableRoutine(body)
+      case 'routine-run': return this.routines.runRoutine(body)
+      case 'routine-runs': return this.routines.routineRuns(body)
+      case 'run-transcript': return this.routines.runTranscript(body)
       case 'browsers': return this.browsers()
       case 'profiles': return this.profiles()
       case 'mcp': return this.mcpReport()
@@ -222,21 +154,21 @@ export class WebSettings {
       case 'mcp-toggle': return this.mcpToggle(body)
       case 'job-start': return this.jobStart(body)
       case 'job-status': return this.jobStatus(body)
-      case 'email-status': return this.emailStatus()
-      case 'email-unread': return this.emailUnread()
-      case 'email-seen': return this.emailSeen()
-      case 'email-inbox': return this.emailInbox(body)
-      case 'email-sort': return this.emailSort(body)
-      case 'email-body': return this.emailBody(body)
-      case 'email-message': return this.emailMessage(body)
-      case 'email-thread': return this.emailThread(body)
-      case 'email-modify': return this.emailModify(body)
-      case 'email-draft': return this.emailDraft(body)
-      case 'email-send': return this.emailSend(body)
-      case 'email-assist': return this.emailAssist(body)
-      case 'email-label-create': return this.emailLabelCreate(body)
-      case 'email-label-delete': return this.emailLabelDelete(body)
-      case 'email-label-assign': return this.emailLabelAssign(body)
+      case 'email-status':
+      case 'email-unread':
+      case 'email-seen':
+      case 'email-inbox':
+      case 'email-sort':
+      case 'email-body':
+      case 'email-message':
+      case 'email-thread':
+      case 'email-modify':
+      case 'email-draft':
+      case 'email-send':
+      case 'email-assist':
+      case 'email-label-create':
+      case 'email-label-delete':
+      case 'email-label-assign': return this.email.handle(action, body)
       // The action that arrived is named: a screen calling a route this daemon does not
       // have — because it is running an older build — has to say which one it was.
       default: throw new Error(`Unknown Settings action: "${action}".`)
@@ -247,222 +179,6 @@ export class WebSettings {
    * What the Email screen needs to draw itself: the state of the grant and the
    * levels it could have been made at. The same `googleState` every surface reads.
    */
-  private emailStatus(): unknown {
-    return {
-      ...googleState(readConfig(), readAuth()),
-      tiers: GOOGLE_TIERS.map(({ id, label, description }) => ({ id, label, description })),
-      // The quick filters the inbox can be narrowed by, named once in the core so the
-      // query and the controls that offer it cannot drift apart.
-      filters: INBOX_FILTERS.map(({ id, label }) => ({ id, label })),
-      // Whether Milo can sort the mail at all. Said here, up front, so the screen
-      // can tell the person rather than promise a sorting that will never come.
-      sorting: this.runtime.classifier !== null,
-    }
-  }
-
-  /**
-   * The sidebar's badge: unread mail in the inbox that arrived after the person
-   * last looked. Zero when no account is connected, so the number is drawn only
-   * when there is a grant behind it.
-   */
-  private async emailUnread(): Promise<unknown> {
-    if (!readAuth().google?.refreshToken) return { count: 0, more: false }
-    return this.mailCall((tokens) => unreadSince(tokens, seenAt()))
-  }
-
-  /** The inbox was looked at: the badge starts counting from now. */
-  private async emailSeen(): Promise<unknown> {
-    return markSeen()
-  }
-
-  /**
-   * A page of the inbox, each message carrying the labels Milo has already sorted it
-   * into — and nothing else. The classifier is never on this path: the mail is drawn
-   * from the store as it is, and the messages with no label yet come back as `unsorted`
-   * for `email-sort` to ask about. A slow or down classifier used to hold the whole
-   * inbox behind its timeout; now it can only delay the labels, never the mail.
-   *
-   * The quick filter and the search narrow the Gmail query itself, so a page is a page
-   * of what was asked for. A label is Milo's own and does not change that query, so it
-   * is not read for here — the surface filters the page it drew.
-   */
-  private async emailInbox(body: Record<string, unknown>): Promise<unknown> {
-    const pageToken = optionalText(body.pageToken)
-    const limit = typeof body.limit === 'number' && body.limit > 0 ? Math.min(Math.floor(body.limit), 50) : 20
-    const filter = inboxFilter(body.filter)
-    const search = optionalText(body.search)
-    const page = await this.mailCall((tokens) => listInbox(tokens, {
-      ...(pageToken ? { pageToken } : {}),
-      limit,
-      ...(filter ? { filter } : {}),
-      ...(search ? { search } : {}),
-    }))
-    const { byMessage, labels } = await labelMessages(null, page.messages)
-    return {
-      messages: page.messages.map((message) => ({ ...message, labels: byMessage.get(message.id) ?? [] })),
-      ...(page.nextPageToken ? { nextPageToken: page.nextPageToken } : {}),
-      labels,
-      colors: LABEL_COLORS,
-      unsorted: unsorted(page.messages),
-    }
-  }
-
-  /**
-   * Sorts the mail the inbox handed back and could not place. A separate call on
-   * purpose: this is the only mail path that reaches the classifier, so the inbox
-   * itself is never waiting on it. The rows come back from the client rather than
-   * being listed again — re-fetching a page's metadata just to sort it would double
-   * every Gmail call the inbox already made.
-   */
-  private async emailSort(body: Record<string, unknown>): Promise<unknown> {
-    const messages = sortableMessages(body.messages)
-    if (!this.runtime.classifier || messages.length === 0) return { byMessage: {}, labels: [] }
-    const { byMessage, labels } = await labelMessages(this.runtime.classifier, messages)
-    return { byMessage: Object.fromEntries(byMessage), labels }
-  }
-
-  /**
-   * One message's body past the `BODY_LIMIT` the thread draws. A text body is paged
-   * from `offset`; an HTML one is answered whole, since only a whole document renders.
-   */
-  private emailBody(body: Record<string, unknown>): Promise<unknown> {
-    const id = googleId(body.id)
-    const offset = typeof body.offset === 'number' && body.offset > 0 ? Math.floor(body.offset) : 0
-    return this.mailCall((tokens) => readBody(tokens, id, offset))
-  }
-
-  /** The person's own label, added to the set. Local to Milo — nothing reaches Gmail. */
-  private async emailLabelCreate(body: Record<string, unknown>): Promise<unknown> {
-    const result = await createLabel(optionalText(body.name) ?? '', optionalText(body.color) ?? '')
-    if (!result.ok) throw new Error(result.error)
-    return { labels: result.labels, colors: LABEL_COLORS }
-  }
-
-  private async emailLabelDelete(body: Record<string, unknown>): Promise<unknown> {
-    const result = await deleteLabel(optionalText(body.id) ?? '')
-    if (!result.ok) throw new Error(result.error)
-    return { labels: result.labels, colors: LABEL_COLORS }
-  }
-
-  /** Puts a label on one message or takes it off, by hand. Milo's own, so no grant. */
-  private async emailLabelAssign(body: Record<string, unknown>): Promise<unknown> {
-    const id = googleId(body.id)
-    const label = optionalText(body.label)
-    if (!label) throw new Error('A label is required.')
-    const on = body.on !== false
-    const result = await toggleAssignment(id, label, on)
-    if (!result.ok) throw new Error(result.error)
-    return { id, label, on, labels: result.labels }
-  }
-
-  private emailMessage(body: Record<string, unknown>): Promise<unknown> {
-    const id = googleId(body.id)
-    return this.mailCall((tokens) => readMail(tokens, id))
-  }
-
-  /**
-   * One thread, each message carrying the labels already sorted onto it. It is a
-   * lookup, not a sort — the inbox is what sorts — so opening a thread asks the
-   * classifier nothing and is never slower for it.
-   */
-  private async emailThread(body: Record<string, unknown>): Promise<unknown> {
-    const id = googleId(body.threadId ?? body.id)
-    const thread = await this.mailCall((tokens) => readThread(tokens, id))
-    const { byMessage } = await labelMessages(null, thread.messages)
-    return {
-      ...thread,
-      messages: thread.messages.map((message) => ({ ...message, labels: byMessage.get(message.id) ?? [] })),
-    }
-  }
-
-  /** What a message answers to: out of the inbox, read or unread, and into the bin. */
-  private async emailModify(body: Record<string, unknown>): Promise<unknown> {
-    const id = googleId(body.id)
-    const op = optionalText(body.op) ?? ''
-    // An argument it does not know answers with the ones it does.
-    if (!isMailOperation(op)) {
-      throw new Error(`Unknown mail action "${op || '(none)'}" — one of ${MAIL_OPERATIONS.join(', ')}.`)
-    }
-    // The move and its wording live in the core, shared with the agent's tool.
-    const done = await this.mailCall((tokens, access) => applyMailOperation(tokens, access, id, op))
-    return { done }
-  }
-
-  private emailDraft(body: Record<string, unknown>): Promise<unknown> {
-    const draft = draftInput(body.draft)
-    return this.mailCall((tokens, access) => createDraft(tokens, access, draft))
-  }
-
-  private emailSend(body: Record<string, unknown>): Promise<unknown> {
-    const mail = draftInput(body.draft)
-    return this.mailCall((tokens, access) => sendMessage(tokens, access, mail))
-  }
-
-  /**
-   * The agentic reading: the model is asked about mail the server has already
-   * fetched. The unread summary reads the unread; summarize and draft read one
-   * thread. The answer is text, and a draft is only a body — the screen puts the
-   * recipient and subject on it, from the message it is looking at.
-   */
-  private async emailAssist(body: Record<string, unknown>): Promise<unknown> {
-    const mode = optionalText(body.mode) ?? ''
-    if (!(ASSIST_MODES as string[]).includes(mode)) {
-      throw new Error(`Unknown mail assistance "${mode || '(none)'}" — one of ${ASSIST_MODES.join(', ')}.`)
-    }
-
-    if (mode === 'summarize-unread') {
-      const found = await this.mailCall((tokens) => searchMail(tokens, 'is:unread newer_than:3d', 20))
-      if (found.length === 0) return { text: 'Nothing unread in the last three days.' }
-      const mail = found
-        .map((message) => `- ${message.from ?? '(unknown sender)'} — ${message.subject ?? '(no subject)'}${message.snippet ? ` — ${message.snippet}` : ''}`)
-        .join('\n')
-      return { text: await this.askModel('summarize-unread', mail) }
-    }
-
-    const id = googleId(body.threadId)
-    const thread = await this.mailCall((tokens) => readThread(tokens, id))
-    if (thread.messages.length === 0) throw new Error('That thread has no messages to read.')
-    // An HTML-only message is stripped to its words before it reaches the model:
-    // sending the markup spends the window on tags the model cannot use.
-    const bodyOf = (message: (typeof thread.messages)[number]): string =>
-      message.html ? htmlToText(message.text) : message.text
-    const mail = thread.messages
-      .map((message) => `From: ${message.from ?? '(unknown)'}\nDate: ${message.date ?? '(no date)'}\nSubject: ${message.subject ?? '(no subject)'}\n\n${bodyOf(message)}`)
-      .join('\n\n---\n\n')
-    return { text: await this.askModel(mode as AssistMode, mail) }
-  }
-
-  private async askModel(mode: AssistMode, mail: string): Promise<string> {
-    const answer = await emailAssist({ provider: this.runtime.provider, model: this.runtime.model, mode, mail })
-    if (!answer.ok) throw new Error(answer.error)
-    return answer.text
-  }
-
-  private mailToken(): TokenSource {
-    const account = readAuth().google
-    const refresh = account?.refreshToken ?? ''
-    if (this.mail?.refreshToken !== refresh) {
-      this.mail = { refreshToken: refresh, source: tokenSource(account ?? null) }
-    }
-    return this.mail.source
-  }
-
-  /**
-   * One Gmail call, with the two things every one of them needs done first: a
-   * token, and the level the grant was made at. A failure that is the flow's own —
-   * not connected, or above the grant — leaves here as the sentence the screen
-   * shows, never as a bare 403.
-   */
-  private async mailCall<T>(
-    work: (tokens: GoogleTokens, access: GoogleAccess) => Promise<GoogleOutcome<T>>,
-  ): Promise<T> {
-    const tokens = await this.mailToken()()
-    if (!tokens.ok) throw new Error(tokens.error)
-    const got = await work(tokens.value, accessOf(readAuth().google))
-    if (!got.ok) throw new Error(got.error)
-    return got.value
-  }
-
   private async taskListAction(body: Record<string, unknown>): Promise<unknown> {
     const parsed = taskListsTool.schema.safeParse(body)
     if (!parsed.success) throw new Error('Invalid task list action.')
@@ -524,7 +240,7 @@ export class WebSettings {
       },
       presets: PRESETS.map(({ id, name, baseURL, wire, keyless, oauth, models, keyURL }) => ({ id, name, baseURL, wire, keyless, oauth, models, keyURL })),
       skills: this.skills(),
-      sessions: await this.sessionSummaries(),
+      sessions: await this.work.sessionSummaries(),
       memoryStats: memoryStatus(memoryDir()),
       // Reported with everything else, so a server that failed to start is
       // visible when the screen opens rather than only when it is asked about.
@@ -796,21 +512,36 @@ export class WebSettings {
   private async newSession(body: Record<string, unknown>): Promise<unknown> {
     const chatId = validChatId(body.chatId)
     const scope = { gateway: 'web', chatId }
-    // A work session is started in a project. The id is checked here rather than
-    // written blind: a session pointed at a project that is not in the list would
-    // start and then work somewhere else, saying nothing about why.
     const project = optionalText(body.project)
-    if (project && !findProject(project)) {
-      const known = readProjects().map((entry) => `${entry.id} — ${entry.name}`).join(', ')
-      throw new Error(`No project ${project}. ${known ? `Known: ${known}` : 'None yet — add one first.'}`)
+    if (project && !findProject(project)) throw new Error(unknownProjectError(project))
+    const surface = optionalText(body.surface)
+    if (surface !== undefined && !(SESSION_SURFACES as readonly string[]).includes(surface)) {
+      throw new Error(`Unknown surface "${surface}". Use one of: ${SESSION_SURFACES.join(', ')}.`)
+    }
+    const rawBackend = body.backend
+    if (rawBackend !== undefined && rawBackend !== 'milo' && rawBackend !== 'command-code') {
+      throw new Error(`Unknown Session backend "${String(rawBackend)}". Use one of: milo, command-code.`)
+    }
+    const backend = rawBackend as SessionBackendKind | undefined
+    if (backend === 'command-code' && !project) {
+      throw new Error('Command Code Sessions must be started in a Work project.')
+    }
+    if (backend === 'command-code' && body.confirmed !== true) {
+      throw new Error('Confirm Command Code access before creating this Session.')
+    }
+    if (backend === 'command-code' && body.plan === true) {
+      throw new Error('Plan mode is controlled by Command Code for this Session.')
     }
     const session = await this.runtime.newSession(
       scope,
       typeof body.title === 'string' ? body.title : undefined,
-      project ? { project } : undefined,
+      {
+        ...(project ? { project } : {}),
+        ...(surface ? { surface: surface as SessionSurface } : {}),
+        ...(backend ? { backend } : {}),
+        ...(backend === 'command-code' ? { confirmed: true, creationKey: chatId } : {}),
+      },
     )
-    // A work session can be started planning: the first words are the proposal, and
-    // the session has to be in the mode before they arrive.
     if (body.plan === true) session.setPlan(true)
     return { id: session.id }
   }
@@ -820,150 +551,6 @@ export class WebSettings {
    * most recently first. The views say whether each folder is still there; the
    * sessions say when it was last used.
    */
-  private async projects(): Promise<ProjectView[]> {
-    return byRecentUse(projectViews(), await this.runtime.listSessions())
-  }
-
-  /** Sessions carry the daemon's Work classification and short-list visibility. */
-  private async sessionSummaries() {
-    const projects = projectViews()
-    const sessions = await this.runtime.listSessions()
-    return placeWorkSessions(sessions, projects)
-  }
-
-  /**
-   * Adding, changing and dropping a project from the Work screen. Every argument
-   * is validated here, and a refusal comes back as the reason the store gave —
-   * which names the folder or the project it is about. Like the task lists, the
-   * answer is the sentence plus the whole list back, so the screen draws what the
-   * store decided instead of guessing at what a change made.
-   */
-  private async projectAction(body: Record<string, unknown>): Promise<unknown> {
-    const action = body.action
-    if (action === 'add') {
-      const outcome = await addProject({
-        path: requireText(body.path, 'folder'),
-        name: optionalText(body.name),
-        icon: body.icon === undefined ? undefined : requireText(body.icon, 'icon'),
-      })
-      if (!outcome.ok) throw new Error(outcome.error)
-      return { result: `Added ${outcome.project.name} at ${outcome.project.path}.`, projects: await this.projects() }
-    }
-    const id = projectId(body.id)
-    if (action === 'remove') {
-      if (!(await removeProject(id))) throw new Error(`No project ${id}.`)
-      return { result: `Removed ${id}. Its sessions stay, without a project.`, projects: await this.projects() }
-    }
-    if (action === 'update') {
-      const name = body.name === undefined ? undefined : (optionalText(body.name) ?? '')
-      const path = body.path === undefined ? undefined : requireText(body.path, 'folder')
-      const icon = body.icon === undefined ? undefined : requireText(body.icon, 'icon')
-      if (name === undefined && path === undefined && icon === undefined) {
-        throw new Error('An update needs a name, a folder, or an icon.')
-      }
-      const outcome = await updateProject(id, {
-        ...(name !== undefined ? { name } : {}),
-        ...(path !== undefined ? { path } : {}),
-        ...(icon !== undefined ? { icon } : {}),
-      })
-      if (!outcome.ok) throw new Error(outcome.error)
-      return { result: `Updated ${outcome.project.name}.`, projects: await this.projects() }
-    }
-    throw new Error(`Invalid project action: "${String(action)}". Use add, update or remove.`)
-  }
-
-  /**
-   * A project's folder as a tree, for the Work screen. The id is checked here and the
-   * reading happens in the core, so the same tree is what the phone and the browser
-   * draw — including what was cut and what could not be read, which ride back with it.
-   */
-  private async projectTree(body: Record<string, unknown>): Promise<unknown> {
-    const outcome = await workTree(projectId(body.id))
-    if (!outcome.ok) throw new Error(outcome.error)
-    return outcome
-  }
-
-  /**
-   * A folder made while choosing one: the picker a project is added with can make the
-   * folder it was missing instead of ending at "there is no folder at …". It answers the
-   * listing inside the new folder, so the picker stands in it.
-   */
-  private folderCreate(body: Record<string, unknown>): unknown {
-    return createFolder(optionalText(body.parent), requireText(body.name, 'folder'), { cwd: this.cwd })
-  }
-
-  /**
-   * A folder made in a project, for the Work screen. The id, the parent and the name are
-   * checked in the core; the answer is the whole tree after the write, so the screen draws
-   * the folder it just made in the same round trip.
-   */
-  private async projectFolder(body: Record<string, unknown>): Promise<unknown> {
-    const outcome = await createWorkFolder(
-      projectId(body.id),
-      optionalText(body.parent) ?? '',
-      requireText(body.name, 'folder'),
-    )
-    if (!outcome.ok) throw new Error(outcome.error)
-    return outcome
-  }
-
-  /**
-   * One file of a project, read as a page of text. `offset` continues a longer file;
-   * everything else about the page — how many lines, where it stopped — is the core's,
-   * so the person reading a file reads the same page the agent would be handed.
-   */
-  private async projectFile(body: Record<string, unknown>): Promise<unknown> {
-    const offset = typeof body.offset === 'number' && body.offset > 0 ? Math.floor(body.offset) : undefined
-    const outcome = await workFile(projectId(body.id), requireText(body.path, 'file'), {
-      ...(offset !== undefined ? { offset } : {}),
-    })
-    if (!outcome.ok) throw new Error(outcome.error)
-    return outcome
-  }
-
-  /**
-   * What a project's folder has changed, read from its own repository. A folder that
-   * is not one is answered with that — the screen says so instead of drawing an empty
-   * list that would read as "nothing changed" — so an `ok` outcome carries whether
-   * there was anything to read at all.
-   */
-  private async projectDiff(body: Record<string, unknown>): Promise<unknown> {
-    const outcome = await workDiff(projectId(body.id))
-    if (!outcome.ok) throw new Error(outcome.error)
-    return outcome
-  }
-
-  /**
-   * Recording what a project's folder holds now as its first state — the button under
-   * "nothing is recorded here yet". It is their folder and their repository: nothing
-   * asks, and what was done is said. The answer carries the changes it made readable,
-   * so the screen draws them instead of asking again.
-   */
-  private async projectTrack(body: Record<string, unknown>): Promise<unknown> {
-    const id = projectId(body.id)
-    const outcome = await startTracking(id)
-    if (!outcome.ok) throw new Error(outcome.error)
-    const diff = await workDiff(id)
-    if (!diff.ok) throw new Error(diff.error)
-    return diff
-  }
-
-  /**
-   * Whether a project's folder carries rules, and the words that ask the agent to write
-   * them. Only the status travels: the file's own text is for the prompt, not for a
-   * screen, and a screen only says that the rules are there. The `prompt` is the same
-   * text on every surface — it lives in the core, so the phone and the browser hand over
-   * one thing rather than two that drift.
-   */
-  private projectRules(body: Record<string, unknown>): unknown {
-    const id = projectId(body.id)
-    const placement = placeProject(id)
-    // The project has to exist: a line about the rules of a project that is not there
-    // would be a screen answering for something that is not in the list.
-    if (!placement.project) throw new Error(`No project with the id ${id}.`)
-    return { ...rulesOf(readProjectInstructions(placement)), prompt: PROJECT_RULES_PROMPT }
-  }
-
   private async resumeSession(body: Record<string, unknown>): Promise<unknown> {
     const chatId = validChatId(body.chatId)
     if (typeof body.id !== 'string') throw new Error('Invalid session id.')
@@ -1033,8 +620,16 @@ export class WebSettings {
    * on the phone. A read and nothing else: a peek at a session is not a visit to it, so
    * this never opens, moves or renames one.
    */
-  private sessionPeek(body: Record<string, unknown>): unknown {
-    return peekSession(sessionId(body.id))
+  private async sessionPeek(body: Record<string, unknown>): Promise<unknown> {
+    const id = sessionId(body.id)
+    const native = await this.runtime.nativeSessionHistory(id)
+    if (!native) return peekSession(id)
+    return native.messages.flatMap((message) => {
+      if (message.role !== 'user' && message.role !== 'assistant') return []
+      const text = message.content.filter((part) => part.type === 'text').map((part) => part.text).join('').trim()
+      if (!text) return []
+      return [{ who: message.role === 'user' ? 'you' as const : 'milo' as const, text: text.length > 240 ? `${text.slice(0, 239)}…` : text }]
+    }).slice(-3)
   }
 
   private async export(body: Record<string, unknown>): Promise<unknown> {
@@ -1072,158 +667,6 @@ export class WebSettings {
     const id = typeof body.id === 'string' ? body.id.trim() : ''
     if (!id) throw new Error('A note id is required.')
     return { removed: await this.runtime.memory.forget(INSTALL_SCOPE, id) }
-  }
-
-  private listRoutines(): unknown {
-    return readRoutines().map((routine) => this.routineView(routine))
-  }
-
-  /**
-   * The most recent runs across every routine, newest first — a timeline of what
-   * the routines have said, mixed together rather than read one routine at a time.
-   */
-  private async routineFeed(): Promise<unknown> {
-    const runs: Array<{ routine: Routine; id: string; at: number }> = []
-    for (const routine of readRoutines()) {
-      for (const run of (await this.runtime.listRuns(routine.id)).slice(0, FEED_LIMIT)) {
-        runs.push({ routine, id: run.id, at: run.updatedAt })
-      }
-    }
-    const recent = runs.sort((a, b) => b.at - a.at).slice(0, FEED_LIMIT)
-    return Promise.all(recent.map(async (entry) => ({
-      id: entry.routine.id,
-      runId: entry.id,
-      routine: entry.routine.name ?? entry.routine.prompt,
-      at: entry.at,
-      answer: await this.runText(entry.id),
-    })))
-  }
-
-  /**
-   * The words a run answered with, flattened and cut for a one-line gist. What the
-   * run was asked is not one of them: the prompt is its routine's own, said on the
-   * routine's page, so a gist that led with it would say the ask and not the answer.
-   */
-  private async runText(runId: string): Promise<string> {
-    const record = await this.runtime.loadSession(runId)
-    if (!record) return ''
-    const text = record.messages
-      .filter((message) => message.role === 'assistant')
-      .flatMap((message) => message.content)
-      .flatMap((part) => (part.type === 'text' ? [part.text] : []))
-      .join(' ')
-      .replace(/\s+/g, ' ')
-      .trim()
-    // A silent run's marker is what it said to the model, not to the person: the
-    // gist is what it meant — the run happened and had nothing to report.
-    if (this.quietRun(record) && text === SILENT) return QUIET_RUN
-    return text.slice(0, 200)
-  }
-
-  private async addRoutine(body: Record<string, unknown>): Promise<unknown> {
-    const prompt = typeof body.prompt === 'string' ? body.prompt.trim() : ''
-    if (!prompt) throw new Error('A prompt is required.')
-    const when = parseWhen({
-      every: optionalText(body.every),
-      at: optionalText(body.at),
-      days: stringList(body.days),
-      dayOfMonth: stringList(body.dayOfMonth),
-      month: stringList(body.month),
-    })
-    if (!when) throw new Error('Set a time: an interval like "2h", or a clock time like "08:00" with optional days, a day of the month, or a month.')
-    const allow = stringList(body.allow)
-    const routine = await addRoutine({
-      prompt,
-      name: optionalText(body.name),
-      when,
-      target: routineTarget(body.target),
-      allow: allow && allow.length > 0 ? allow : undefined,
-      silent: body.silent === true ? true : undefined,
-      enabled: true,
-    })
-    return { routine: this.routineView(routine) }
-  }
-
-  private async removeRoutine(body: Record<string, unknown>): Promise<unknown> {
-    const id = optionalText(body.id)
-    if (!id || !(await removeRoutineWithRuns(this.runtime, id))) throw new Error('No routine with that id.')
-    return { removed: true }
-  }
-
-  private async enableRoutine(body: Record<string, unknown>): Promise<unknown> {
-    const id = optionalText(body.id)
-    if (!id) throw new Error('A routine id is required.')
-    const enabled = body.enabled !== false
-    if (!(await setEnabled(id, enabled))) throw new Error('No routine with that id.')
-    return { id, enabled }
-  }
-
-  /**
-   * Fires one now and answers with what it said, and with the id of the run it
-   * just made — so the surface can open the run rather than draw the answer a
-   * second way. It does not deliver: the chat would get it twice.
-   */
-  private async runRoutine(body: Record<string, unknown>): Promise<unknown> {
-    const id = optionalText(body.id)
-    if (!id) throw new Error('A routine id is required.')
-    const routine = findRoutine(id)
-    if (!routine) throw new Error('No routine with that id.')
-    const { id: runId, answer, failure } = await runRoutineOnce(this.runtime, routine)
-    return { ...(runId ? { runId } : {}), answer, failure }
-  }
-
-  /**
-   * What a routine has produced, newest first, a page at a time. The runs are
-   * kept for good now, so the surface asks for more as it scrolls rather than
-   * being handed a history nobody bounded.
-   */
-  private async routineRuns(body: Record<string, unknown>): Promise<unknown> {
-    const id = optionalText(body.id)
-    if (!id) throw new Error('A routine id is required.')
-    if (!findRoutine(id)) throw new Error('No routine with that id.')
-    const all = await this.runtime.listRuns(id)
-    const offset = typeof body.offset === 'number' && body.offset > 0 ? Math.floor(body.offset) : 0
-    const limit = typeof body.limit === 'number' && body.limit > 0 ? Math.min(Math.floor(body.limit), 100) : 20
-    return {
-      total: all.length,
-      runs: all.slice(offset, offset + limit).map((run) => ({ id: run.id, at: run.updatedAt })),
-    }
-  }
-
-  /**
-   * One run as the page draws a conversation. Read-only: it binds nothing and
-   * takes no lease, so opening a past run does not take the conversation over
-   * from whoever is in it.
-   *
-   * A run opens on the routine's own prompt, and the page a run is read on says
-   * that prompt above it already — so the run is drawn from the prompt onwards:
-   * what it answered, not the ask said a second time. Only the opening message
-   * goes; a later word in a run would be something that happened in it.
-   */
-  private async runTranscript(body: Record<string, unknown>): Promise<unknown> {
-    const record = await this.runtime.loadSession(sessionId(body.id))
-    if (!record) throw new Error('No such run.')
-    // A run that delivered a file is only drawable where the files can be
-    // served; said rather than dropped, so a picture never vanishes from a run.
-    const register = this.files?.register ?? ((file: { name: string }) => {
-      throw new Error(`Serving ${file.name} needs the web server's file registry.`)
-    })
-    const [opening, ...answered] = record.messages
-    const messages = opening?.role === 'user' ? answered : record.messages
-    // A run that stayed quiet answered the marker; the page draws what it meant,
-    // because the marker is not a word anyone reads.
-    const shown = this.quietRun(record) ? quieted(messages) : messages
-    return transcriptOf(shown, register, readDisplay().tools)
-  }
-
-  /**
-   * Whether this run belongs to a routine that may stay quiet, read from the run's
-   * own scope rather than from a request: a routine removed since leaves its runs
-   * behind, and they are not quiet.
-   */
-  private quietRun(record: { scope?: { gateway: string; chatId: string } }): boolean {
-    const scope = record.scope
-    return scope?.gateway === ROUTINE_GATEWAY && findRoutine(scope.chatId)?.silent === true
   }
 
   private async browsers(): Promise<unknown> {
@@ -1311,48 +754,11 @@ export class WebSettings {
     return job
   }
 
-  private routineView(routine: Routine): Record<string, unknown> {
-    const now = new Date()
-    // What is still coming, read once from the one place that knows the ceiling: a
-    // routine that has run out has no next time, and a surface that reminded on one
-    // would be reminding for something that will never happen again.
-    const upcoming = routine.enabled ? remainingRuns(routine, now, UPCOMING_RUNS) : []
-    return {
-      ...routine,
-      whenLabel: describeSchedule(routine),
-      targetLabel: describeTarget(routine.target),
-      nextRunAt: upcoming[0]?.getTime() ?? null,
-      nextRuns: upcoming.map((at) => at.getTime()),
-      // Stopped because its own ceiling ran out, which is not the person pausing it:
-      // the surfaces say which one it is, and this is the daemon saying it once.
-      finished: isSpent(routine),
-      // Whether a run may answer nothing, in the daemon's words — the same ones the
-      // CLI and the agent's list use, so no surface writes the note itself.
-      silentLabel: routine.silent ? SILENT_NOTE : null,
-    }
-  }
-
   private serialize<T>(work: () => T | Promise<T>): Promise<T> {
     const next = this.writeTail.then(work, work)
     this.writeTail = next.catch(() => undefined)
     return next
   }
-}
-
-/**
- * A silent run's marker, drawn as what it means. Only a whole message is the
- * marker: prose before a tool call is something the run said, and stays.
- */
-function quieted(messages: Message[]): Message[] {
-  return messages.map((message) => {
-    if (message.role !== 'assistant') return message
-    return {
-      ...message,
-      content: message.content.map((part) =>
-        part.type === 'text' && part.text.trim() === SILENT ? { ...part, text: QUIET_RUN } : part,
-      ),
-    }
-  })
 }
 
 function sanitizeConfig(config: Config): Config {
@@ -1382,105 +788,4 @@ function maskRecord(record: Record<string, string>): Record<string, { set: boole
 function validChatId(value: unknown): string {
   if (typeof value !== 'string' || !/^[0-9a-f-]{36}$/i.test(value)) throw new Error('Invalid chat id.')
   return value
-}
-
-function sessionId(value: unknown): string {
-  if (typeof value !== 'string' || !SESSION_ID.test(value)) throw new Error('Invalid session id.')
-  return value
-}
-
-function optionalText(value: unknown): string | undefined {
-  return typeof value === 'string' && value.trim() ? value.trim() : undefined
-}
-
-/** Text a call cannot do without: absent reads as the reason, not as an empty value. */
-function requireText(value: unknown, what: string): string {
-  const text = optionalText(value)
-  if (!text) throw new Error(`A ${what} is required.`)
-  return text
-}
-
-/** A project id as the page sends it: the nickname shape, and nothing else. */
-function projectId(value: unknown): string {
-  if (typeof value !== 'string' || !SESSION_ID.test(value)) throw new Error('Invalid project id.')
-  return value
-}
-
-function stringList(value: unknown): string[] | undefined {
-  if (!Array.isArray(value)) return undefined
-  return value.filter((item): item is string => typeof item === 'string' && item.trim().length > 0).map((item) => item.trim())
-}
-
-/** A Gmail id as the page sends it: the shape the API takes, and nothing path-shaped. */
-function googleId(value: unknown): string {
-  const id = optionalText(value)
-  if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('Invalid mail id.')
-  return id
-}
-
-/**
- * The rows `email-sort` was handed, reduced to what the classifier reads: an id and
- * the three fields a person sorts by. Anything else the body carried is dropped, and
- * a row without a usable id is skipped rather than trusted.
- */
-function sortableMessages(value: unknown): MailSummary[] {
-  if (!Array.isArray(value)) return []
-  const rows: MailSummary[] = []
-  for (const entry of value.slice(0, 50)) {
-    if (!entry || typeof entry !== 'object') continue
-    const row = entry as Record<string, unknown>
-    const id = optionalText(row.id)
-    if (!id || !/^[A-Za-z0-9_-]+$/.test(id)) continue
-    const from = optionalText(row.from)
-    const subject = optionalText(row.subject)
-    const snippet = optionalText(row.snippet)
-    rows.push({
-      id,
-      threadId: optionalText(row.threadId) ?? '',
-      ...(from ? { from } : {}),
-      ...(subject ? { subject } : {}),
-      ...(snippet ? { snippet } : {}),
-    })
-  }
-  return rows
-}
-
-/** A quick filter as the page sends it — one of the filters the core declares. */
-function inboxFilter(value: unknown): InboxFilter | undefined {
-  const id = optionalText(value)
-  if (!id) return undefined
-  if (!INBOX_FILTERS.some((filter) => filter.id === id)) {
-    throw new Error(`Unknown inbox filter "${id}" — one of ${INBOX_FILTERS.map((filter) => filter.id).join(', ')}.`)
-  }
-  return id as InboxFilter
-}
-
-/** A message body out of the page, with what Gmail needs to carry it. */
-function draftInput(value: unknown): DraftInput {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('A message is required.')
-  const draft = value as Record<string, unknown>
-  const to = optionalText(draft.to)
-  const body = typeof draft.body === 'string' ? draft.body : ''
-  if (!to) throw new Error('A recipient is required.')
-  if (!body.trim()) throw new Error('An empty message is not worth sending.')
-  const threadId = optionalText(draft.threadId)
-  return {
-    to,
-    subject: typeof draft.subject === 'string' ? draft.subject : '',
-    body,
-    ...(threadId ? { threadId } : {}),
-  }
-}
-
-function routineTarget(value: unknown): RoutineTarget {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('A destination is required.')
-  const target = value as Record<string, unknown>
-  if (target.gateway === 'none') return { gateway: 'none' }
-  const gateway = String(target.gateway ?? '')
-  if (!(ROUTINE_GATEWAYS as readonly string[]).includes(gateway)) {
-    throw new Error(`The destination must be one of ${ROUTINE_GATEWAYS.join(', ')}, or none.`)
-  }
-  const chatId = optionalText(target.chatId)
-  if (!chatId) throw new Error('The destination needs a chat id.')
-  return { gateway: gateway as RoutineGateway, chatId }
 }

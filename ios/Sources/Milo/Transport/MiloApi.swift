@@ -40,9 +40,10 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     /// The surface that asked for it, when it was not the browser: `spotlight` for the
     /// desktop popup. A row wears it as a mark beside the name.
     let surface: String?
+    let backend: SessionBackendSummary?
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, createdAt, updatedAt, messageCount, preview, label, recap, running, unread, project, work, workInline, searchText, surface
+        case id, title, createdAt, updatedAt, messageCount, preview, label, recap, running, unread, project, work, workInline, searchText, surface, backend
     }
 
     /// Read leniently, and only `id` as the one thing it cannot do without: a row
@@ -61,6 +62,7 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         work = try container.decodeIfPresent(Bool.self, forKey: .work) ?? (project != nil)
         workInline = try container.decodeIfPresent(Bool.self, forKey: .workInline) ?? (project != nil)
         surface = try container.decodeIfPresent(String.self, forKey: .surface)
+        backend = try container.decodeIfPresent(SessionBackendSummary.self, forKey: .backend)
         preview = try container.decodeIfPresent(String.self, forKey: .preview) ?? ""
         searchText = try container.decodeIfPresent(String.self, forKey: .searchText)
             ?? "\(title ?? "") \(preview) \(id)".lowercased()
@@ -227,6 +229,10 @@ enum MiloApi {
         try await call("sessions", account: account, as: [SessionSummary].self)
     }
 
+    static func sessionBackends(_ account: Account) async throws -> [SessionBackendChoice] {
+        try await call("session-backends", account: account, as: [SessionBackendChoice].self)
+    }
+
     static func providers(_ account: Account) async throws -> [ProviderInfo] {
         try await call("providers", account: account, as: [ProviderInfo].self)
     }
@@ -235,8 +241,9 @@ enum MiloApi {
         try await call("models", ["provider": provider], account: account, as: [ModelInfo].self)
     }
 
-    static func newSession(_ account: Account, title: String? = nil, project: String? = nil, plan: Bool = false) async throws {
-        var body: [String: Any] = ["chatId": account.chatId]
+    static func newSession(_ account: Account, title: String? = nil, project: String? = nil, plan: Bool = false, backend: String = "milo", confirmed: Bool = false) async throws {
+        var body: [String: Any] = ["chatId": account.chatId, "backend": backend]
+        if backend == "command-code" { body["confirmed"] = confirmed }
         if let title { body["title"] = title }
         // The folder this session works in. The daemon refuses an id it does not know,
         // which is what keeps a work session from starting in the install's own folder
@@ -1140,6 +1147,34 @@ struct ProjectActionOutcome: Decodable {
         result = try container.decodeIfPresent(String.self, forKey: .result) ?? ""
         projects = try container.decodeIfPresent([Project].self, forKey: .projects) ?? []
     }
+}
+
+struct SessionBackendChoice: Decodable, Identifiable, Hashable {
+    let id: String
+    let available: Bool
+    let reason: String?
+}
+
+struct SessionPendingTurn: Decodable, Hashable {
+    let id: String
+    let input: String
+    let baseMessageCount: Int
+}
+
+struct SessionBackendView: Decodable, Hashable {
+    let kind: String
+    let state: String?
+    let nativeSessionId: String?
+    let error: String?
+    let pendingTurn: SessionPendingTurn?
+}
+
+struct SessionBackendSummary: Codable, Hashable {
+    let kind: String
+    let state: String?
+    let nativeSessionId: String?
+    let pendingTurnId: String?
+    let error: String?
 }
 
 /// One folder inside the one being listed.

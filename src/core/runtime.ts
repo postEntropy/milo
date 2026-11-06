@@ -14,16 +14,19 @@ import type { Skill, SkillLibrary } from './skills/index.js'
 import type { PermissionPolicy } from './tools/index.js'
 import type { RoutineStore, ToolRegistry } from './tools/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
-import type { Project, ProjectLookup, ProjectPlacement } from './projects.js'
+import { withProjectPlacement as lockProjectPlacement, type Project, type ProjectLookup, type ProjectPlacement } from './projects.js'
 import type { VerificationResult } from './verification.js'
 import type { ProjectInstructions } from './agent/instructions.js'
 import { Session } from './session.js'
+import type { CommandCodeSessionDriver, NativeSessionHistory } from './session-backend.js'
 import {
   contextBudget,
   FileSessionSeen,
   MemoryRecapStore,
   MemorySessionStore,
   type RecapStore,
+  type SessionBackendChoice,
+  type SessionBackendKind,
   type SessionRecord,
   type SessionSeen,
   type SessionStore,
@@ -38,6 +41,7 @@ import { findPreset } from './config/presets.js'
 
 export interface RuntimeOptions {
   provider: Provider
+  commandCode?: CommandCodeSessionDriver
   /**
    * How a provider is built for a model. `auto` picks its wire from the model
    * id, so a runtime given this builds the provider again when `setModel` moves
@@ -174,6 +178,12 @@ export interface NewSessionOptions {
   project?: string
   /** The surface asking for it, when it is not the one that owns the scope. */
   surface?: SessionSurface
+  /** The execution backend chosen for this Session; absent means Milo. */
+  backend?: SessionBackendKind
+  /** Required to create a Command Code Session because it runs with CLI-owned tools. */
+  confirmed?: boolean
+  /** Stable per-creation scope key used to reconcile a repeated external-session request. */
+  creationKey?: string
 }
 
 /**
@@ -230,6 +240,32 @@ export class AgentRuntime {
     title?: string,
     options?: NewSessionOptions,
   ): Promise<Session> {
+    if (options?.backend === 'command-code') {
+      if (!options.project) throw new Error('Command Code Sessions must be started in a Work project.')
+      if (options.confirmed !== true) throw new Error('Confirm the Command Code backend before creating this Session.')
+      const commandCode = this.options.commandCode
+      if (!commandCode) throw new Error('The Command Code backend is not available in this Milo runtime.')
+      const creationKey = options.creationKey?.trim() || scopeKey(scope)
+      const lockKey = `command-code:${JSON.stringify([scopeKey(scope), creationKey])}`
+      return this.store.withCreationLock(lockKey, async () => {
+        const candidates = (await this.store.list()).filter((summary) =>
+          summary.scope && scopeKey(summary.scope) === scopeKey(scope) && summary.backend?.kind === 'command-code'
+        )
+        for (const candidate of candidates) {
+          const record = await this.store.load(candidate.id)
+          if (record?.backend?.kind !== 'command-code' || record.backend.requestId !== creationKey) continue
+          if (record.project !== options.project) {
+            throw new Error('This Command Code creation key was already used for a different project.')
+          }
+          const session = await this.resumeSession(scope, record.id)
+          if (!session) throw new Error(`Session ${record.id} disappeared while resuming.`)
+          return session
+        }
+        const available = await commandCode.availability()
+        if (!available.available) throw new Error(available.reason ?? 'Command Code is unavailable.')
+        return this.createSession(scope, title, options)
+      })
+    }
     return this.createSession(scope, title, options)
   }
 
@@ -288,6 +324,10 @@ export class AgentRuntime {
     options?: { upToTurn?: number; title?: string },
   ): Promise<Session | null> {
     const cached = this.cache.get(sourceId)
+    const source = cached ? undefined : await this.store.load(sourceId)
+    if (cached?.backend.kind === 'command-code' || source?.backend?.kind === 'command-code') {
+      throw new Error('Forking a Command Code Session is not supported; use Command Code to branch its native history.')
+    }
     if (cached) {
       await cached.settle()
     }
@@ -397,6 +437,13 @@ export class AgentRuntime {
     return this.store.load(id)
   }
 
+  async nativeSessionHistory(id: string): Promise<NativeSessionHistory | null> {
+    const record = await this.store.load(id)
+    if (record?.backend?.kind !== 'command-code') return null
+    if (!this.options.commandCode) throw new Error('Command Code sessions are unavailable in this Milo runtime.')
+    return this.options.commandCode.history(record)
+  }
+
   /**
    * Deletes a saved session outright — the record and the recap with it. Only
    * the record goes: a scope still bound to it falls through to a fresh
@@ -404,8 +451,12 @@ export class AgentRuntime {
    * conversation is currently in is the caller's decision, not this one's.
    */
   async removeSession(id: string): Promise<boolean> {
-    const exists = (await this.store.list()).some((session) => session.id === id)
-    if (!exists) return false
+    const record = await this.store.load(id)
+    if (!record) return false
+    if (record.backend?.kind === 'command-code') {
+      if (!this.options.commandCode) throw new Error('Cannot remove this Session while the Command Code backend is unavailable.')
+      await this.options.commandCode.stop(record)
+    }
     this.cache.delete(id)
     await this.store.remove(id)
     await this.recaps.remove(id)
@@ -444,6 +495,16 @@ export class AgentRuntime {
 
   get sessionCount(): number {
     return this.cache.size
+  }
+
+  async sessionBackends(): Promise<SessionBackendChoice[]> {
+    const choices: SessionBackendChoice[] = [{ id: 'milo', available: true }]
+    if (!this.options.commandCode) {
+      choices.push({ id: 'command-code', available: false, reason: 'The Command Code backend is not configured.' })
+      return choices
+    }
+    choices.push(await this.options.commandCode.availability())
+    return choices
   }
 
   /**
@@ -637,23 +698,39 @@ export class AgentRuntime {
     scope: MemoryScope,
     title?: string,
     options?: NewSessionOptions,
+    lockedPlacement?: ProjectPlacement,
+    assertProjectLock?: () => void,
   ): Promise<Session> {
+    if (options?.backend === 'command-code' && options.project && !lockedPlacement && this.options.project) {
+      return lockProjectPlacement(options.project, (placement, assertLock) =>
+        this.createSession(scope, title, options, placement, assertLock),
+      )
+    }
+    const placement = options?.project
+      ? lockedPlacement ?? this.options.project?.(options.project)
+      : undefined
+    if (options?.backend === 'command-code' && options.project && !placement?.ok) {
+      throw new Error(placement && !placement.ok ? placement.error : `No project with the id ${options.project}.`)
+    }
     await this.detach(scope)
     const record = await this.store.create(scope, options?.project, options?.surface)
-    // The session's mark starts where it was born. A session with no mark at all would
-    // read as looked at forever, and the first thing it is owed is exactly what the
-    // mark is for: an answer a routine delivers into a chat nobody has open.
-    this.seen.mark(record.id, record.createdAt)
     if (title?.trim()) record.title = title.trim()
+    if (options?.backend === 'command-code') {
+      record.backend = {
+        kind: 'command-code',
+        state: 'waiting',
+        nativeTitle: `Milo Session ${record.id}`,
+        workingDirectory: placement?.ok ? placement.project.path : this.options.cwd,
+        ...(placement?.ok && placement.project.incarnation ? { projectIncarnation: placement.project.incarnation } : {}),
+        requestId: options.creationKey?.trim() || scopeKey(scope),
+      }
+      assertProjectLock?.()
+      await this.store.save(record, record.version)
+      record.version += 1
+    }
+    this.seen.mark(record.id, record.createdAt)
     await this.store.setBinding(scopeKey(scope), record.id)
-    // This run has opened the scope. A surface that starts a session and then opens it —
-    // the web and the phone both ask for one over HTTP and then connect the socket on the
-    // conversation they minted — has to land in the session it just asked for, or the one
-    // it started, project and all, is left unwritten and the screen speaks to another. The
-    // same reason `resumeSession` marks the scope it takes.
     this.opened.add(scopeKey(scope))
-    // Not written out here: a session takes its file on its first turn, so a run
-    // that opens a conversation and never speaks in it leaves nothing behind.
     return this.adopt(record, scope, options)
   }
 
@@ -695,6 +772,7 @@ export class AgentRuntime {
     const session = new Session({
       scope,
       provider: this.options.provider,
+      commandCode: this.options.commandCode,
       providerFor: this.options.providerFor,
       mediaModels: this.options.mediaModels,
       model: this.options.model,

@@ -1631,10 +1631,12 @@ describe('the verification gate', () => {
   class GateProvider implements Provider {
     readonly id = 'gate'
     calls = 0
+    sawVerificationFeedback = false
 
     constructor(private readonly write: boolean) {}
 
-    async *stream(): AsyncGenerator<StreamEvent> {
+    async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
+      this.sawVerificationFeedback ||= req.messages.some((message) => message.internal === 'verification')
       if (this.calls++ === 0) {
         if (this.write) {
           yield { type: 'tool-call', id: 'c1', name: 'write_file', args: { path: 'a.txt', content: 'x\n' } }
@@ -1649,12 +1651,14 @@ describe('the verification gate', () => {
     }
   }
 
-  async function runGate(options: { project?: boolean; write?: boolean; plan?: boolean } = {}) {
+  async function runGate(options: { project?: boolean; write?: boolean; plan?: boolean; failFirst?: boolean } = {}) {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-gate-'))
     const project = { id: 'p1', name: 'Demo', path: dir, createdAt: 0 }
     const store = new MemorySessionStore()
     const record = await store.create()
     const verified: string[] = []
+    const provider = new GateProvider(options.write ?? true)
+    let verifications = 0
     const session = new Session({
       model: 'test-model',
       system: 'BASE',
@@ -1664,17 +1668,18 @@ describe('the verification gate', () => {
       scope: { gateway: 'cli', chatId: 'gate' },
       record,
       cwd: dir,
-      provider: new GateProvider(options.write ?? true),
+      provider,
       maxSteps: 4,
       permissionPolicy: new DefaultPermissionPolicy({ mode: 'yolo' }),
       ...(options.project ? { project: { ok: true as const, project } } : {}),
       verify: async (target) => {
         verified.push(target.id)
+        const ok = !options.failFirst || verifications++ > 0
         return {
           kind: 'checks',
-          ok: true,
+          ok,
           checks: [
-            { name: 'test', command: 'npm test', ok: true, exitCode: 0, timedOut: false, ms: 1, output: '' },
+            { name: 'test', command: 'npm test', ok, exitCode: ok ? 0 : 1, timedOut: false, ms: 1, output: ok ? '' : 'assertion failed' },
           ],
         }
       },
@@ -1683,7 +1688,7 @@ describe('the verification gate', () => {
 
     const events: AgentEvent[] = []
     for await (const event of session.send('go')) events.push(event)
-    return { events, verified, saved: await store.load(record.id) }
+    return { events, verified, provider, saved: await store.load(record.id) }
   }
 
   it('runs the checks after a turn that wrote, and says what they answered', async () => {
@@ -1704,6 +1709,19 @@ describe('the verification gate', () => {
     // from disk draws it again instead of losing the one thing that said the work held.
     const answer = saved?.messages.findLast((message) => message.role === 'assistant')
     expect(answer?.verification).toEqual({ ok: true, text: expect.stringContaining('Checks passed — test.') })
+  })
+
+  it('feeds a failed check back once and verifies the follow-up', async () => {
+    const { events, verified, provider, saved } = await runGate({ project: true, failFirst: true })
+    const gates = events.filter(
+      (event): event is Extract<AgentEvent, { type: 'verification' }> => event.type === 'verification',
+    )
+
+    expect(verified).toEqual(['p1', 'p1'])
+    expect(provider.sawVerificationFeedback).toBe(true)
+    expect(gates.map((gate) => gate.ok)).toEqual([false, true])
+    expect(saved?.messages.some((message) => message.internal === 'verification')).toBe(true)
+    expect(saved?.messages.at(-1)?.verification?.ok).toBe(true)
   })
 
   it('does not run them after a turn that only read', async () => {

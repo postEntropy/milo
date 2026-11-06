@@ -329,6 +329,11 @@ question in its field, and connects by itself once one appears. The shell starts
 helper — NDJSON over stdio, because QML has no WebSocket — and restarts it if it dies; a helper that
 cannot start is reported with the first thing it said on stderr, which is the line worth reading.
 
+A question may open with a project: `@Camera fpv start the service` asks it in Camera fpv's folder,
+opening the work session the Work screen would have opened — the same session, tools and rules, without
+leaving the popup. The mention is the project's name, or its id when two projects share a name, at the
+start of the message; a mention that names none is answered with the projects there are.
+
 Asked, the popup hands the keyboard back so the machine stays usable; `Enter` asks, `Stop` ends the
 turn, `Esc` closes and `Ctrl+Enter` forks the conversation into the browser. The answer is drawn as
 markdown, each tool call as one line, and a confirmation as an Allow / Always / Deny card. Every

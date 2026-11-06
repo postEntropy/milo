@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { formatWhen } from '../../../src/core/time.js'
 import { Icon } from '../ui/Icons.js'
+import { SessionBackendMark } from '../ui/SessionBackendMark.js'
 import type { SessionSummary } from './types.js'
 
 /** What a row says under the name: how much has been said, and when. */
@@ -106,7 +107,15 @@ export function SessionRow({
               <span className="session-title">{session.label}</span>
               {session.surface === 'spotlight' && <span className="session-surface">Spotlight</span>}
             </span>
-            <span className="session-preview">{sessionMeta(session)}</span>
+            <span className="session-preview-row">
+              <span className="session-preview">{sessionMeta(session)}</span>
+              {session.backend?.kind === 'command-code' && <span
+                className={`session-backend-label ${session.backend.state === 'error' ? 'needs-recovery' : ''}`}
+                role="img"
+                aria-label={session.backend.state === 'error' ? 'Command Code Session needs recovery' : 'Command Code Session'}
+                title={session.backend.error ?? 'Command Code'}
+              ><SessionBackendMark backend="command-code" size={15} /></span>}
+            </span>
           </span>
         </button>
       )}
@@ -143,7 +152,7 @@ export function SessionRow({
               <Icon name="edit" size={16} />
               <span>Rename</span>
             </button>
-            <button
+            {session.backend?.kind !== 'command-code' && <button
               className="session-dropdown-item"
               type="button"
               role="menuitem"
@@ -155,7 +164,7 @@ export function SessionRow({
             >
               <Icon name="download" size={16} />
               <span>Export</span>
-            </button>
+            </button>}
             <button
               className="session-dropdown-item"
               type="button"

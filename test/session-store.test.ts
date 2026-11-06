@@ -51,13 +51,15 @@ describe('FileSessionStore', () => {
   })
 
   it('keeps the surface that asked for a session, and says it in the list', async () => {
-    const store = new FileSessionStore({ dir: tempDir() })
+    const dir = tempDir()
+    const store = new FileSessionStore({ dir })
     const created = await store.create({ gateway: 'web', chatId: 'chat' }, undefined, 'spotlight')
     expect(created.surface).toBe('spotlight')
 
     created.messages.push({ role: 'user', content: [{ type: 'text', text: 'what is this' }] })
     await store.save(created, created.version)
     expect((await store.list()).find((entry) => entry.id === created.id)?.surface).toBe('spotlight')
+    expect((await new FileSessionStore({ dir }).load(created.id))?.surface).toBe('spotlight')
 
     // A session the browser asked for says nothing rather than naming a surface: the
     // row's mark appears where there is something to mark.
@@ -115,6 +117,32 @@ describe('FileSessionStore', () => {
     await store.save(record('brave-wolf-2', 200), INITIAL_SESSION_VERSION)
 
     expect((await store.list()).map((entry) => entry.id)).toEqual(['brave-wolf-2', 'calm-otter-1'])
+  })
+
+  it('does not overwrite an unreadable session file', async () => {
+    const dir = tempDir()
+    const store = new FileSessionStore({ dir })
+    const file = path.join(dir, 'calm-otter-1.json')
+    const original = '{not valid json'
+    writeFileSync(file, original)
+
+    await expect(store.save(record('calm-otter-1'), INITIAL_SESSION_VERSION)).rejects.toThrow('Cannot save over unreadable session file')
+    expect(readFileSync(file, 'utf8')).toBe(original)
+  })
+
+  it('rejects malformed pending-turn positions when loading a session', async () => {
+    const dir = tempDir()
+    const backend = {
+      kind: 'command-code',
+      state: 'error',
+      nativeTitle: 'Milo Session',
+      requestId: 'web:chat',
+      workingDirectory: dir,
+      pendingTurn: { id: 'turn-1', input: 'hello', startedAt: Number.NaN, baseMessageCount: -1 },
+    }
+    writeFileSync(path.join(dir, 'calm-otter-1.json'), JSON.stringify({ ...record('calm-otter-1'), backend }))
+
+    expect(await new FileSessionStore({ dir }).load('calm-otter-1')).toBeNull()
   })
 
   it('writes atomically, leaving no temp files behind', async () => {
@@ -369,6 +397,27 @@ describe('concurrent writers', () => {
   function message(text: string) {
     return { role: 'user' as const, content: [{ type: 'text' as const, text }] }
   }
+
+  it('serializes a creation key across separate processes', async () => {
+    const dir = tempDir()
+    const child = fileURLToPath(new URL('./fixtures/lease-child.ts', import.meta.url))
+    const run = (label: string) => new Promise<string>((resolve, reject) => {
+      const proc = spawn(process.execPath, ['--import', 'tsx', child, dir, 'same-request', label, 'creation'], {
+        stdio: ['ignore', 'pipe', 'pipe'],
+      })
+      let stdout = ''
+      let stderr = ''
+      proc.stdout.on('data', (chunk: Buffer) => { stdout += chunk.toString() })
+      proc.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+      proc.on('error', reject)
+      proc.on('exit', (code) => code === 0 ? resolve(stdout.trim()) : reject(new Error(`${label} exited ${code}: ${stderr}`)))
+    })
+
+    const [first, retry] = await Promise.all([run('first'), run('retry')])
+
+    expect(retry).toBe(first)
+    expect(await new FileSessionStore({ dir }).list()).toHaveLength(1)
+  })
 
   it('refuses a save built from a revision another writer has moved past', async () => {
     const dir = tempDir()

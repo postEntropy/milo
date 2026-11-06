@@ -12,6 +12,7 @@ import {
   type SessionRecord,
   type SessionStore,
   type SessionSummary,
+  type SessionBackend,
   type SessionSurface,
 } from './types.js'
 
@@ -31,6 +32,7 @@ export class MemorySessionStore implements SessionStore {
   private readonly records = new Map<string, SessionRecord>()
   private readonly bindings = new Map<string, string>()
   private readonly leases = new KeyedMutex()
+  private readonly creationLocks = new KeyedMutex()
   /** The ids a turn holds right now, for `busy` — the in-process stand-in for the file lock. */
   private readonly held = new Set<string>()
   private readonly now: () => number
@@ -39,7 +41,16 @@ export class MemorySessionStore implements SessionStore {
     this.now = options.now ?? Date.now
   }
 
-  async create(scope?: MemoryScope, project?: string, surface?: SessionSurface): Promise<SessionRecord> {
+  async withCreationLock<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const release = await this.creationLocks.acquire(key)
+    try {
+      return await work()
+    } finally {
+      release()
+    }
+  }
+
+  async create(scope?: MemoryScope, project?: string, surface?: SessionSurface, backend?: SessionBackend): Promise<SessionRecord> {
     const id = generateNickname((candidate) => this.records.has(candidate))
     const timestamp = this.now()
     const record: SessionRecord = {
@@ -50,6 +61,7 @@ export class MemorySessionStore implements SessionStore {
       version: INITIAL_SESSION_VERSION,
       ...(scope ? { scope } : {}),
       ...(project ? { project } : {}),
+      ...(backend ? { backend } : {}),
       ...(surface ? { surface } : {}),
     }
     this.records.set(id, record)
@@ -117,6 +129,9 @@ export class MemorySessionStore implements SessionStore {
     if (!isValidSessionId(sourceId)) return null
     const source = this.records.get(sourceId)
     if (!source) return null
+    if (source.backend?.kind === 'command-code') {
+      throw new Error('Forking a Command Code Session is not supported; use Command Code to branch its native history.')
+    }
 
     const timestamp = this.now()
     const id = generateNickname((candidate) => this.records.has(candidate))
@@ -155,7 +170,7 @@ export class MemorySessionStore implements SessionStore {
 
     const removed: string[] = []
     for (const record of newest.slice(options.keep)) {
-      if (keep.has(record.id)) continue
+      if (keep.has(record.id) || record.backend?.kind === 'command-code') continue
       await this.remove(record.id)
       removed.push(record.id)
     }
@@ -165,7 +180,7 @@ export class MemorySessionStore implements SessionStore {
   async pruneEmpty(): Promise<string[]> {
     const removed: string[] = []
     for (const [id, record] of [...this.records]) {
-      if (record.messages.length > 0) continue
+      if (record.backend?.kind === 'command-code' || record.messages.length > 0) continue
       await this.remove(id)
       removed.push(id)
     }

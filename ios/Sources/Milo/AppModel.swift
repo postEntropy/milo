@@ -97,6 +97,11 @@ final class AppModel {
     private(set) var modelName = ""
     private(set) var providerId = ""
     private(set) var sessionId = ""
+    private(set) var sessionBackend: SessionBackendView?
+    private(set) var sessionBackends: [SessionBackendChoice] = [SessionBackendChoice(id: "milo", available: true, reason: nil)]
+    private(set) var sessionBackendsLoading = false
+    private(set) var sessionBackendsLoaded = false
+    private(set) var sessionBackendsError: String?
     /// Whether the thread is the screen in front — kept by `ChatView`, which knows when a
     /// page is over it or the sessions are up. A reply that lands while this is false is
     /// unread: it arrived after the person left the chat.
@@ -809,6 +814,22 @@ final class AppModel {
         sessions = cached.sessions.map(\.settled).sorted { $0.updatedAt > $1.updatedAt }
     }
 
+    func refreshSessionBackends() async {
+        guard let account, !sessionBackendsLoading else { return }
+        sessionBackendsLoading = true
+        defer {
+            sessionBackendsLoading = false
+            sessionBackendsLoaded = true
+        }
+        do {
+            sessionBackends = try await MiloApi.sessionBackends(account)
+            sessionBackendsError = nil
+        } catch {
+            sessionBackends = [SessionBackendChoice(id: "milo", available: true, reason: nil)]
+            sessionBackendsError = error.localizedDescription
+        }
+    }
+
     func newSession() async {
         guard let account else { return }
         // Clear the screen in the same frame the person pressed New session, so the old
@@ -1032,6 +1053,7 @@ final class AppModel {
             // until the handshake names the next, and an id going out and back in
             // would make the thread jump to its top under the card.
             sessionId = ""
+            sessionBackend = nil
         }
         pending = nil
         turnStarted = nil
@@ -1378,20 +1400,27 @@ final class AppModel {
         return try await MiloApi.projectTrack(account, id: id)
     }
 
+    func retryPendingCommandCodeTurn(confirmed: Bool) {
+        guard confirmed,
+              sessionBackend?.kind == "command-code",
+              let pending = sessionBackend?.pendingTurn else { return }
+        client.send(.control(.retryCommandCode, id: pending.id, confirmed: true))
+    }
+
     /**
      Opens a work session in a project: `newSession`'s move, with the folder the session
      works in. The daemon binds this conversation to that project, so the chat that comes
      back to is the ordinary one, working there.
      */
     @discardableResult
-    func startWorkSession(project: String, plan: Bool = false) async -> Bool {
+    func startWorkSession(project: String, plan: Bool = false, backend: String = "milo", confirmed: Bool = false) async -> Bool {
         guard let account else { return false }
         reopening = true
         owed = nil
         owedIntent = nil
         owedUploads = []
         resetSessionState()
-        let opened = await openFresh(account) { try await MiloApi.newSession($0, project: project, plan: plan) }
+        let opened = await openFresh(account) { try await MiloApi.newSession($0, project: project, plan: plan, backend: backend, confirmed: confirmed) }
         if !opened {
             reopening = false
             owed = nil
@@ -2197,6 +2226,7 @@ final class AppModel {
             threadKept = false
             reopening = false
             sessionProject = ready.project
+            sessionBackend = ready.backend ?? SessionBackendView(kind: "milo", state: nil, nativeSessionId: nil, error: nil, pendingTurn: nil)
             // Where each world was left, for the drawer's switch: a chat is a chat, and a
             // session working in a project belongs to Work.
             if ready.project == nil {
@@ -2277,6 +2307,8 @@ final class AppModel {
             // The routines are read at connect, so the reminders are scheduled from what
             // is actually there before the screen is ever opened.
             Task { await refreshRoutines() }
+        case .sessionBackend(let backend):
+            sessionBackend = backend
         case .history(let chunk):
             // The rest of a session too long for the handshake, whole rows in the order
             // they happened — above a turn that is still running, so the turn keeps the end

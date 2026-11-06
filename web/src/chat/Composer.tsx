@@ -6,7 +6,9 @@ import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { quotedLead } from '../../../src/core/sessions/format.ts'
 import { COMMAND_CATALOG } from '../../../src/gateways/command-catalog.ts'
 import type { JobView } from '@protocol'
+import type { SessionBackendKind } from '../../../src/core/sessions/types.js'
 import { Icon } from '../ui/Icons.js'
+import { SessionBackendMark } from '../ui/SessionBackendMark.js'
 import { Select } from '../ui/Select.js'
 import { ModelDetails } from '../ui/ModelDetails.js'
 import { ModelPicker } from '../ui/ModelPicker.js'
@@ -19,6 +21,7 @@ interface Props {
   jobs?: JobView[]
   /** Stops a running job, from the control on its own row. */
   onKillJob?: (id: string) => void
+  sessionBackend: SessionBackendKind
   provider: string
   /** What the provider is called on screen, so its models can be lead with it. */
   providerName: string
@@ -94,7 +97,7 @@ function oneLine(text: string): string {
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { busy, queued, jobs, onKillJob, provider, providerName, draftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, onEffortChange, onProviderChange },
+  { busy, queued, jobs, onKillJob, sessionBackend, provider, providerName, draftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, onEffortChange, onProviderChange },
   handle,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -141,12 +144,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
    *  side. The app's own phone width is where the settings screen draws this
    *  same pair, so the composer asks the same question in the same place. */
   const wide = !usePhone()
+  const codeSession = sessionBackend === 'command-code'
 
   const palette = useMemo(() => {
-    if (!draft.startsWith('/') || draft.includes(' ') || dismissed === draft) return []
+    if (codeSession || !draft.startsWith('/') || draft.includes(' ') || dismissed === draft) return []
     const query = draft.slice(1).toLowerCase()
     return COMMAND_CATALOG.filter((command) => command.name.startsWith(query)).slice(0, 8)
-  }, [draft, dismissed])
+  }, [draft, dismissed, codeSession])
 
   useEffect(() => {
     if (highlight >= palette.length) setHighlight(0)
@@ -218,6 +222,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   async function submit(intent: 'steer' | 'queue'): Promise<void> {
     const text = draft.trim()
+    if (codeSession && files.length > 0) {
+      setUploadError('Command Code Sessions accept project paths, not chat attachments.')
+      return
+    }
     if (!text && files.length === 0) return
     // Sending puts the keys away on a phone: the answer is what is being waited
     // for, and the field is one tap away when the next message is typed. A wide
@@ -280,7 +288,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      void submit(busy && (event.ctrlKey || event.metaKey) ? 'steer' : 'queue')
+      void submit(!codeSession && busy && (event.ctrlKey || event.metaKey) ? 'steer' : 'queue')
     }
   }
 
@@ -389,16 +397,18 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         </div>}
         <textarea
           ref={ref}
-          aria-label="Message Milo"
-          placeholder="Ask Milo anything…"
+          aria-label={codeSession ? 'Message Command Code' : 'Message Milo'}
+          placeholder={codeSession ? 'Message Command Code…' : 'Ask Milo anything…'}
           rows={1}
           value={draft}
           onChange={(event) => editDraft(event.target.value)}
           onKeyDown={key}
         />
         <div className="composer-toolbar">
-          <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } fileDrafts.current.set(draftKey, next); return next }); event.target.value = '' }} />
-          <button className="composer-pill attach-button" type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={14} /></button>
+          {!codeSession && <>
+            <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } fileDrafts.current.set(draftKey, next); return next }); event.target.value = '' }} />
+            <button className="composer-pill attach-button" type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={14} /></button>
+          </>}
           {canPlan && <button
             type="button"
             className="composer-pill mode-pill icon-only"
@@ -410,7 +420,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           >
             <Icon name={plan ? 'list-check' : 'code'} size={15} />
           </button>}
-          <div className="composer-model-wrap">
+          {sessionBackend === 'milo' ? <div className="composer-model-wrap">
             <Select
               className={`composer-pill${folded ? ' icon-only' : ''}`}
               label="Model and reasoning effort"
@@ -450,9 +460,12 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               onOpen={() => { pickerOpened.current = true; void loadProviders(); void loadCatalog(browsing) }}
               note={loading ? 'Loading models…' : error || 'No models found.'}
             />
-          </div>
+          </div> : <div className="composer-agent">
+            <SessionBackendMark backend="command-code" size={16} />
+            <span>Command Code</span>
+          </div>}
           <span className="composer-spacer" />
-          {context && context.budget > 0 && <span className={`composer-context${context.used / context.budget >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.budget.toLocaleString()} tokens — Milo tidies the oldest turns at ${context.budget.toLocaleString()}`}>
+          {!codeSession && context && context.budget > 0 && <span className={`composer-context${context.used / context.budget >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.budget.toLocaleString()} tokens — Milo tidies the oldest turns at ${context.budget.toLocaleString()}`}>
             <svg className="composer-context-ring" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
               <circle className="composer-context-track" cx="11" cy="11" r="9" />
               <circle className="composer-context-arc" cx="11" cy="11" r="9" strokeDasharray={RING_CIRCUMFERENCE} strokeDashoffset={RING_CIRCUMFERENCE * (1 - Math.min(1, context.used / context.budget))} />
@@ -460,7 +473,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             <span className="composer-context-count">{formatTokens(context.used)} / {formatTokens(context.budget)}</span>
           </span>}
           {busy
-            ? <button className="send-button stop" type="button" title="Stop (Esc)" aria-label="Stop Milo" onClick={onStop}><Icon name="stop" size={24} /></button>
+            ? <button className="send-button stop" type="button" title="Stop (Esc)" aria-label={codeSession ? 'Stop Command Code turn' : 'Stop Milo turn'} onClick={onStop}><Icon name="stop" size={24} /></button>
             : <button className="send-button" type="button" title="Send (Enter)" aria-label="Send message" disabled={!draft.trim() && files.length === 0} onClick={() => void submit('queue')}><Icon name="send" size={17} /></button>}
         </div>
       </div>
