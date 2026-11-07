@@ -132,6 +132,7 @@ describe('Herdr Command Code Session backend', () => {
       backend: {
         kind: 'command-code',
         state: 'running',
+        model: 'anthropic/claude-test',
         nativeTitle: 'Milo Session calm-otter-7',
         requestId: 'web:chat-id',
         workingDirectory: '/project',
@@ -164,7 +165,7 @@ describe('Herdr Command Code Session backend', () => {
       name: expect.stringMatching(/^milo-/),
     })
     expect(run?.params.argv).toEqual([
-      'cmd', '-p', '--output-format', 'json', '--yolo', '--skip-onboarding', '--name', 'Milo Session calm-otter-7', 'Create a source file.',
+      'cmd', '-p', '--output-format', 'json', '--yolo', '--skip-onboarding', '--model', 'anthropic/claude-test', '--name', 'Milo Session calm-otter-7', 'Create a source file.',
     ])
   })
 
@@ -184,6 +185,7 @@ describe('Herdr Command Code Session backend', () => {
       backend: {
         kind: 'command-code',
         state: 'ready',
+        model: 'anthropic/claude-test',
         nativeSessionId,
         nativeTitle: 'Milo Session calm-otter-7',
         requestId: 'web:chat-id',
@@ -200,7 +202,7 @@ describe('Herdr Command Code Session backend', () => {
     expect(result.value.backend.nativeSessionId).toBe(nativeSessionId)
     expect(result.value.history.messages.at(-1)?.content).toEqual([{ type: 'text', text: 'Continued.' }])
     expect(calls.find((entry) => entry.method === 'terminal.run')?.params.argv).toEqual([
-      'cmd', '-p', '--output-format', 'json', '--yolo', '--skip-onboarding', '--resume', nativeSessionId, 'Continue the source file.',
+      'cmd', '-p', '--output-format', 'json', '--yolo', '--skip-onboarding', '--model', 'anthropic/claude-test', '--resume', nativeSessionId, 'Continue the source file.',
     ])
   })
 

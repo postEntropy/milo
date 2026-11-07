@@ -140,6 +140,19 @@ describe('Session agent backends', () => {
     })
   })
 
+  it('persists a selected model on the Command Code Session without changing Milo defaults', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-agent-'))
+    const commandCode = new StubCommandCode()
+    const scope = { gateway: 'web', chatId: '2e741b35-7ca0-4b32-9d1c-47ba5e7a22a1' }
+    const { runtime, session } = await seedCommandCodeSession(dir, commandCode, scope)
+
+    await session.setCommandCodeModel('anthropic/claude-sonnet-5-5')
+
+    expect(session.backendView).toMatchObject({ kind: 'command-code', model: 'anthropic/claude-sonnet-5-5' })
+    expect((await runtime.loadSession(session.id))?.backend).toMatchObject({ model: 'anthropic/claude-sonnet-5-5' })
+    expect(runtime.model).toBe('m')
+  })
+
   it('does not clear an unresolved turn from coincidentally matching native messages', async () => {
     const commandCode: CommandCodeSessionDriver = {
       availability: async () => ({ id: 'command-code', available: true }),

@@ -1278,6 +1278,12 @@ export default function App() {
     } catch (error) { fail(error) }
   }, [fail])
 
+  const changeCommandCodeModel = useCallback((model: string): void => {
+    try {
+      socket.send({ type: 'control', action: 'set-command-code-model', model })
+    } catch (error) { fail(error) }
+  }, [socket, fail])
+
   const chatList = chatSessions(sessions, search)
   const sessionGroups = groupSessions(chatList)
   // The welcome offers what is left of the Chat side: a work session belongs to Work, and
@@ -1487,7 +1493,7 @@ export default function App() {
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock" ref={composerDockRef}>
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} sessionBackend={sessionBackend.kind} provider={identity.provider} providerName={identity.providerName} draftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={Boolean(project) && sessionBackend.kind === 'milo'} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); socket.send({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => socket.send({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
+            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} sessionBackend={sessionBackend.kind} provider={identity.provider} providerName={identity.providerName} draftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={Boolean(project) && sessionBackend.kind === 'milo'} commandCodeModel={sessionBackend.kind === 'command-code' ? sessionBackend.model : undefined} onCommandCodeModelChange={changeCommandCodeModel} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); socket.send({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => socket.send({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
           </div>
         </section>
         : null}

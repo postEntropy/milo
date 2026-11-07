@@ -3,12 +3,12 @@ import { api } from '../lib/api.js'
 import { isPhone, usePhone } from '../lib/phone.js'
 import { formatDuration, formatTokens } from '../../../src/util/format.ts'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
+import type { CommandCodeModel } from '../../../src/core/command-code-models.js'
 import { quotedLead } from '../../../src/core/sessions/format.ts'
 import { COMMAND_CATALOG } from '../../../src/gateways/command-catalog.ts'
 import type { JobView } from '@protocol'
 import type { SessionBackendKind } from '../../../src/core/sessions/types.js'
 import { Icon } from '../ui/Icons.js'
-import { SessionBackendMark } from '../ui/SessionBackendMark.js'
 import { Select } from '../ui/Select.js'
 import { ModelDetails } from '../ui/ModelDetails.js'
 import { ModelPicker } from '../ui/ModelPicker.js'
@@ -48,6 +48,8 @@ interface Props {
   onStop(): void
   /** Sets the pair: the model, and the provider it answers through. */
   onModelChange(model: string, provider: string): Promise<void>
+  commandCodeModel?: string
+  onCommandCodeModelChange(model: string): void
   onEffortChange(effort: 'low' | 'medium' | 'high'): void
   onProviderChange(provider: string): Promise<void>
 }
@@ -97,7 +99,7 @@ function oneLine(text: string): string {
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { busy, queued, jobs, onKillJob, sessionBackend, provider, providerName, draftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, onEffortChange, onProviderChange },
+  { busy, queued, jobs, onKillJob, sessionBackend, provider, providerName, draftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, commandCodeModel, onCommandCodeModelChange, onEffortChange, onProviderChange },
   handle,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -138,6 +140,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [files, setFiles] = useState<File[]>([])
   const [uploadError, setUploadError] = useState('')
+  const [commandCodeModels, setCommandCodeModels] = useState<CommandCodeModel[] | null>(null)
+  const [commandCodeModelsError, setCommandCodeModelsError] = useState('')
+  const [commandCodeModelsLoading, setCommandCodeModelsLoading] = useState(false)
   const uploadRef = useRef<HTMLInputElement>(null)
   const folded = useFoldedToolbar()
   /** A screen with room for the two panes: the providers and the models side by
@@ -222,10 +227,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
 
   async function submit(intent: 'steer' | 'queue'): Promise<void> {
     const text = draft.trim()
-    if (codeSession && files.length > 0) {
-      setUploadError('Command Code Sessions accept project paths, not chat attachments.')
-      return
-    }
     if (!text && files.length === 0) return
     // Sending puts the keys away on a phone: the answer is what is being waited
     // for, and the field is one tap away when the next message is typed. A wide
@@ -359,6 +360,19 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     }
   }
 
+  async function loadCommandCodeModels(): Promise<void> {
+    if (commandCodeModels !== null || commandCodeModelsLoading) return
+    setCommandCodeModelsLoading(true)
+    setCommandCodeModelsError('')
+    try {
+      setCommandCodeModels(await api<CommandCodeModel[]>('command-code-models'))
+    } catch (error) {
+      setCommandCodeModelsError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setCommandCodeModelsLoading(false)
+    }
+  }
+
   return (
     <div className="composer-shell">
       <div className="queue-list" aria-live="polite">{queued > 0 && <div className="queue-chip"><Icon name="history" size={14} /> {queued} {queued === 1 ? 'message queued' : 'messages queued'}</div>}
@@ -405,10 +419,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           onKeyDown={key}
         />
         <div className="composer-toolbar">
-          {!codeSession && <>
-            <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } fileDrafts.current.set(draftKey, next); return next }); event.target.value = '' }} />
-            <button className="composer-pill attach-button" type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={14} /></button>
-          </>}
+          <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } fileDrafts.current.set(draftKey, next); return next }); event.target.value = '' }} />
+          <button className="composer-pill attach-button" type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={14} /></button>
           {canPlan && <button
             type="button"
             className="composer-pill mode-pill icon-only"
@@ -460,10 +472,22 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               onOpen={() => { pickerOpened.current = true; void loadProviders(); void loadCatalog(browsing) }}
               note={loading ? 'Loading models…' : error || 'No models found.'}
             />
-          </div> : <div className="composer-agent">
-            <SessionBackendMark backend="command-code" size={16} />
-            <span>Command Code</span>
-          </div>}
+          </div> : <Select
+            className={`composer-pill${folded ? ' icon-only' : ''}`}
+            label="Command Code model"
+            icon="spark"
+            value={commandCodeModel ?? ''}
+            triggerLabel={folded ? '' : commandCodeModel || 'Choose model'}
+            choices={(commandCodeModels ?? []).map((item) => ({
+              value: item.id,
+              label: item.id,
+              meta: <span className="command-code-model-description">{item.description}</span>,
+            }))}
+            onChange={onCommandCodeModelChange}
+            onOpen={() => void loadCommandCodeModels()}
+            note={commandCodeModelsLoading ? 'Loading models…' : commandCodeModelsError || 'No Command Code models found.'}
+            disabled={busy}
+          />}
           <span className="composer-spacer" />
           {!codeSession && context && context.budget > 0 && <span className={`composer-context${context.used / context.budget >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.budget.toLocaleString()} tokens — Milo tidies the oldest turns at ${context.budget.toLocaleString()}`}>
             <svg className="composer-context-ring" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">

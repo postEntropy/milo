@@ -1,8 +1,11 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
+import type { ChatRequest, Provider, StreamEvent, Message } from '../src/core/providers/types.js'
+import type { AgentEvent } from '../src/core/agent/events.js'
+import type { CommandCodeSessionDriver, NativeSessionHistory, NativeSessionTurn } from '../src/core/session-backend.js'
+import type { SessionRecord } from '../src/core/sessions/types.js'
 import type { ServerFrame } from '../src/gateways/web/protocol.js'
 
 const home = mkdtempSync(path.join(os.tmpdir(), 'milo-web-deliver-'))
@@ -11,6 +14,7 @@ process.env.MILO_HOME = home
 const { WebHub } = await import('../src/gateways/web/hub.js')
 const { transcriptOf } = await import('../src/gateways/web/transcript.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
+const { addProject, placeProject } = await import('../src/core/projects.js')
 const { createToolRegistry } = await import('../src/core/tools/index.js')
 
 const CHAT = '11111111-2222-3333-4444-555555555555'
@@ -20,7 +24,7 @@ afterEach(() => {
   mkdirSync(home, { recursive: true })
 })
 
-function build(): InstanceType<typeof AgentRuntime> {
+function build(commandCode?: CommandCodeSessionDriver): InstanceType<typeof AgentRuntime> {
   return new AgentRuntime({
     provider: { id: 'test', stream: async function* () {} },
     model: 'test-model',
@@ -33,6 +37,8 @@ function build(): InstanceType<typeof AgentRuntime> {
       forget: async () => false,
     } as never,
     cwd: home,
+    commandCode,
+    project: placeProject,
   })
 }
 
@@ -52,6 +58,46 @@ class ShotProvider implements Provider {
     }
     yield { type: 'text', delta: 'sent' }
     yield { type: 'done', finishReason: 'stop' }
+  }
+}
+
+class CaptureCommandCode implements CommandCodeSessionDriver {
+  readonly inputs: string[] = []
+  private messages: Message[] = []
+  private readonly nativeSessionId = 'native-command-code-session'
+
+  async availability() { return { id: 'command-code' as const, available: true } }
+
+  async history(record: SessionRecord): Promise<NativeSessionHistory> {
+    const messages = this.messages
+    return {
+      messages,
+      ...(record.backend?.kind === 'command-code' && record.backend.nativeSessionId ? { nativeSessionId: record.backend.nativeSessionId } : {}),
+      preview: messages.find((message) => message.role === 'user')?.content.filter((part) => part.type === 'text').map((part) => part.text).join(' ') ?? '',
+      messageCount: messages.length,
+      updatedAt: Date.now(),
+    }
+  }
+
+  async *send(record: SessionRecord, input: string): AsyncGenerator<AgentEvent, NativeSessionTurn, void> {
+    this.inputs.push(input)
+    const backend = record.backend
+    if (backend?.kind !== 'command-code') throw new Error('Wrong backend')
+    this.messages = [
+      ...this.messages,
+      { role: 'user', content: [{ type: 'text', text: input }] },
+      { role: 'assistant', content: [{ type: 'text', text: 'Done.' }] },
+    ]
+    yield { type: 'text-delta', delta: 'Done.' }
+    return {
+      backend: { ...backend, state: 'ready', nativeSessionId: this.nativeSessionId, pendingTurn: undefined },
+      history: await this.history({ ...record, backend: { ...backend, nativeSessionId: this.nativeSessionId } }),
+    }
+  }
+
+  async stop(record: SessionRecord) {
+    if (record.backend?.kind !== 'command-code') throw new Error('Wrong backend')
+    return { ...record.backend, state: 'stopped' as const }
   }
 }
 
@@ -299,6 +345,39 @@ describe('a file a client sends with a message', () => {
     expect(JSON.stringify(displayed[0]?.parts)).toContain('what does this say?')
     expect(JSON.stringify(displayed[0]?.parts)).not.toContain('the milk is off')
     expect(hub.attachment(displayed[0]!.attachments![0]!.id)?.path).toBeTruthy()
+  })
+
+  it('puts uploaded files in a Command Code project and sends their paths to the native turn', async () => {
+    const projectPath = path.join(home, 'work-project')
+    mkdirSync(projectPath)
+    const added = await addProject({ name: 'Work project', path: projectPath })
+    if (!added.ok) throw new Error(added.error)
+    const commandCode = new CaptureCommandCode()
+    const runtime = build(commandCode)
+    await runtime.newSession({ gateway: 'web', chatId: CHAT }, undefined, {
+      backend: 'command-code',
+      confirmed: true,
+      creationKey: CHAT,
+      project: added.project.id,
+    })
+    const hub = new WebHub(runtime)
+    const frames: ServerFrame[] = []
+    const client = { send: (frame: ServerFrame) => frames.push(frame) }
+    const uploadId = hub.stageUpload({ name: '../../spec.txt', mimeType: 'text/plain', data: Buffer.from('source file') })
+
+    await hub.connect(client, CHAT)
+    frames.length = 0
+    hub.handle(client, { type: 'send', text: 'Review this file.', uploadIds: [uploadId] }, CHAT)
+    expect(await waitFor(() => frames.some((frame) => frame.type === 'turn-end'))).toBe(true)
+
+    const input = commandCode.inputs[0] ?? ''
+    const relativePath = input.match(/- (\.milo-attachments\/[^\n]+)/)?.[1]
+    expect(relativePath).toMatch(/^\.milo-attachments\//)
+    expect(readFileSync(path.join(projectPath, relativePath!), 'utf8')).toBe('source file')
+    const session = await runtime.getSession({ gateway: 'web', chatId: CHAT })
+    expect(session.messages.flatMap((message) => message.content.flatMap((part) => part.type === 'text' ? [part.text] : [])))
+      .toContain(input)
+    expect(input).toContain('Review this file.')
   })
 
   it('shows an extraction failure before the model answers', async () => {

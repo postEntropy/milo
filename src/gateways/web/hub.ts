@@ -26,6 +26,8 @@ import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import { prepareTurnMedia } from '../media.js'
 import { MAX_INCOMING_TOTAL_BYTES, type IncomingFile } from '../../core/media.js'
+import { saveCommandCodeAttachments } from '../../core/command-code-attachments.js'
+import { listCommandCodeModels } from '../../core/command-code-models.js'
 import type { ImagePart } from '../../core/providers/types.js'
 
 /**
@@ -324,6 +326,25 @@ export class WebHub {
     if (!chat?.clients.has(client)) return
 
     if (frame.type === 'control') {
+      if (frame.action === 'set-command-code-model') {
+        if (chat.session.backend.kind !== 'command-code') {
+          client.send({ type: 'error', message: 'Model selection is only available in Command Code Sessions.' })
+          return
+        }
+        const model = frame.model!.trim()
+        if (this.turns.busy(this.liveOwner(chat.session.id) ?? chatId)) {
+          client.send({ type: 'error', message: 'Wait for the current turn to finish before changing its model.' })
+          return
+        }
+        void (async () => {
+          const models = await listCommandCodeModels()
+          if (!models.some((item) => item.id === model)) throw new Error(`Unknown Command Code model "${model}".`)
+          await this.runtime.setCommandCodeModel(chat.session.id, model)
+          chat.session = await this.runtime.getSession(chat.scope)
+          this.emitTurn(chat.session.id, { type: 'session-backend', backend: chat.session.backendView })
+        })().catch((error: unknown) => client.send({ type: 'error', message: errorMessage(error) }))
+        return
+      }
       if (frame.action === 'retry-command-code') {
         const pending = chat.session.backend.kind === 'command-code' ? chat.session.backend.pendingTurn : undefined
         if (!pending || pending.id !== frame.id || frame.confirmed !== true) {
@@ -389,10 +410,6 @@ export class WebHub {
     }
 
     if (frame.type === 'send') {
-      if (chat.session.backend.kind === 'command-code' && frame.uploadIds?.length) {
-        client.send({ type: 'error', message: 'Command Code Sessions accept project paths, not chat attachments.' })
-        return
-      }
       const pendingCodeTurn = chat.session.backend.kind === 'command-code' ? chat.session.backend.pendingTurn : undefined
       const currentOwner = this.liveOwner(chat.session.id) ?? chatId
       if (pendingCodeTurn && !this.turns.busy(currentOwner)) {
@@ -1053,7 +1070,13 @@ export class WebHub {
           // and what a late client's ready is cut at.
           if (live) live.from = runFrom
           const hasFiles = Boolean(currentFiles?.length)
-          if (currentFiles?.length) {
+          if (currentFiles?.length && session.backend.kind === 'command-code') {
+            const placement = session.project
+            if (!placement?.ok) throw new Error('Command Code attachments require an available Work project.')
+            const paths = await saveCommandCodeAttachments(placement.project.path, session.id, currentFiles)
+            currentText = [currentText || 'Please inspect the attached files.', 'Attached project files:', ...paths.map((filePath) => `- ${filePath}`)].join('\n')
+            currentFiles = undefined
+          } else if (currentFiles?.length) {
             const prepared = await prepareTurnMedia(session, currentText, currentFiles, signal)
             currentText = prepared.prompt
             currentImages = [...currentImages, ...prepared.images]

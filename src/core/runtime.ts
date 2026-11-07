@@ -437,6 +437,19 @@ export class AgentRuntime {
     return this.store.load(id)
   }
 
+  async setCommandCodeModel(id: string, model: string): Promise<void> {
+    const cached = this.cache.get(id)
+    if (cached) {
+      await cached.setCommandCodeModel(model)
+      return
+    }
+    const record = await this.store.load(id)
+    if (!record) throw new Error(`Session ${id} was not found.`)
+    if (!record.scope) throw new Error(`Session ${id} has no saved scope.`)
+    const session = this.adopt(record, record.scope)
+    await session.setCommandCodeModel(model)
+  }
+
   async nativeSessionHistory(id: string): Promise<NativeSessionHistory | null> {
     const record = await this.store.load(id)
     if (record?.backend?.kind !== 'command-code') return null

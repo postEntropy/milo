@@ -64,6 +64,7 @@ import { WebEmailSettings } from './settings/email.js'
 import { WebWorkSettings } from './settings/work.js'
 import { WebRoutineSettings } from './settings/routines.js'
 import { optionalText, sessionId } from './settings/input.js'
+import { listCommandCodeModels } from '../../core/command-code-models.js'
 
 const SAFE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]*$/
 
@@ -107,6 +108,7 @@ export class WebSettings {
       case 'chatgpt-status': return this.chatGptReport()
       case 'chatgpt-logout': return this.chatGptSignOut()
       case 'models': return this.models(body)
+      case 'command-code-models': return listCommandCodeModels()
       case 'sessions': return this.work.sessionSummaries()
       case 'session-backends': return this.runtime.sessionBackends()
       case 'new-session': return this.newSession(body)

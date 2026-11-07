@@ -34,6 +34,7 @@ export function Select({
   body,
   onOpen,
   onClose,
+  disabled = false,
 }: {
   id?: string
   value: string
@@ -76,6 +77,7 @@ export function Select({
   body?: (close: () => void) => ReactNode
   onOpen?(): void
   onClose?(): void
+  disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [filter, setFilter] = useState('')
@@ -158,6 +160,7 @@ export function Select({
       aria-label={label}
       aria-haspopup={body ? 'dialog' : 'listbox'}
       aria-expanded={open}
+      disabled={disabled}
       onClick={() => (open ? close() : expand())}
       onKeyDown={(event) => {
         if (open) {

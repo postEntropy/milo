@@ -605,6 +605,7 @@ export class Session {
     return {
       kind: backend.kind,
       state: backend.state,
+      ...(backend.model ? { model: backend.model } : {}),
       ...(backend.nativeSessionId ? { nativeSessionId: backend.nativeSessionId } : {}),
       ...(backend.error ? { error: backend.error } : {}),
       ...(backend.pendingTurn ? { pendingTurn: { id: backend.pendingTurn.id, input: backend.pendingTurn.input, baseMessageCount: backend.pendingTurn.baseMessageCount } } : {}),
@@ -646,6 +647,21 @@ export class Session {
     try {
       if (lease.latest) this.adoptLatest(lease.latest)
       this.record.title = trimmed || undefined
+      this.record.version = this.baseVersion + 1
+      await this.store.save(this.record, this.baseVersion)
+      this.baseVersion = this.record.version
+    } finally {
+      await lease.release()
+    }
+  }
+
+  async setCommandCodeModel(model: string): Promise<void> {
+    const lease = await this.store.acquire(this.id)
+    try {
+      if (lease.latest) this.adoptLatest(lease.latest)
+      const backend = this.record.backend
+      if (backend?.kind !== 'command-code') throw new Error(`Session ${this.id} is not a Command Code Session.`)
+      backend.model = model
       this.record.version = this.baseVersion + 1
       await this.store.save(this.record, this.baseVersion)
       this.baseVersion = this.record.version

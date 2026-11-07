@@ -27,6 +27,7 @@ export interface CommandCodeSessionBackend {
   terminalId?: string
   nativeSessionId?: string
   nativeTitle: string
+  model?: string
   requestId: string
   workingDirectory: string
   projectIncarnation?: string
@@ -54,6 +55,7 @@ export interface SessionBackendSummary {
 export interface SessionBackendView {
   kind: SessionBackendKind
   state?: CommandCodeSessionState
+  model?: string
   nativeSessionId?: string
   error?: string
   pendingTurn?: { id: string; input: string; baseMessageCount: number }

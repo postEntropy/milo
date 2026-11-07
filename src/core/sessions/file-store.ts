@@ -593,6 +593,7 @@ function parseBackend(value: unknown): SessionBackend | null {
     typeof backend.requestId !== 'string' ||
     (backend.terminalId !== undefined && typeof backend.terminalId !== 'string') ||
     (backend.nativeSessionId !== undefined && typeof backend.nativeSessionId !== 'string') ||
+    (backend.model !== undefined && typeof backend.model !== 'string') ||
     (backend.projectIncarnation !== undefined && typeof backend.projectIncarnation !== 'string') ||
     (backend.preview !== undefined && typeof backend.preview !== 'string') ||
     (backend.messageCount !== undefined && (!Number.isInteger(backend.messageCount) || Number(backend.messageCount) < 0)) ||
@@ -614,6 +615,7 @@ function parseBackend(value: unknown): SessionBackend | null {
     requestId: backend.requestId,
     ...(backend.terminalId ? { terminalId: backend.terminalId } : {}),
     ...(backend.nativeSessionId ? { nativeSessionId: backend.nativeSessionId } : {}),
+    ...(typeof backend.model === 'string' ? { model: backend.model } : {}),
     ...(backend.projectIncarnation ? { projectIncarnation: backend.projectIncarnation } : {}),
     ...(typeof backend.preview === 'string' ? { preview: backend.preview } : {}),
     ...(typeof backend.messageCount === 'number' ? { messageCount: backend.messageCount } : {}),

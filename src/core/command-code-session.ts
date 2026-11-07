@@ -107,6 +107,7 @@ export class HerdrCommandCodeSessionDriver implements CommandCodeSessionDriver {
       } else {
         const argv = [
           'cmd', '-p', '--output-format', 'json', '--yolo', '--skip-onboarding',
+          ...(backend.model ? ['--model', backend.model] : []),
           ...(backend.nativeSessionId ? ['--resume', backend.nativeSessionId] : ['--name', backend.nativeTitle]),
           input,
         ]

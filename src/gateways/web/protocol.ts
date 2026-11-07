@@ -10,7 +10,9 @@ import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
 import { SESSION_SURFACES, type SessionBackendView, type SessionSurface } from '../../core/sessions/types.js'
 import type { CommandEntry } from '../command-catalog.js'
 
-// 13: a session too large for one websocket message hands its transcript over in
+// 15: Command Code model changes are session controls, and the model rides in the
+// `session-backend` view so every open surface can show the same selection.
+// 14: a session too large for one websocket message hands its transcript over in
 // pieces — the first in `ready`, the rest as `history` frames. The phone cannot take a
 // message over 1 MiB (`URLSessionWebSocketTask` closes the socket with "Message too
 // long"), so a session with a couple of large tool results never opened there at all.
@@ -33,7 +35,7 @@ import type { CommandEntry } from '../command-catalog.js'
 // is what the version is for. 8 made the handshake's `genui` a flag again: there is
 // one way a turn draws, so a page naming a transport named something that no longer
 // exists.
-export const PROTOCOL_VERSION = 14
+export const PROTOCOL_VERSION = 15
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
@@ -137,7 +139,7 @@ export interface SessionCardItem {
  * so does the parser. Two spellings of one vocabulary is how `always` — the button
  * every surface draws — came to be refused by the parser while the type promised it.
  */
-const CONTROL_ACTIONS = ['stop', 'allow', 'always', 'deny', 'plan', 'approve-plan', 'retry-command-code'] as const
+const CONTROL_ACTIONS = ['stop', 'allow', 'always', 'deny', 'plan', 'approve-plan', 'retry-command-code', 'set-command-code-model'] as const
 
 export type ClientFrame =
   | { type: 'hello'; version: number; chatId: string; genui?: boolean; client?: ClientKind; surface?: SessionSurface }
@@ -149,6 +151,7 @@ export type ClientFrame =
       id?: string
       plan?: boolean
       confirmed?: boolean
+      model?: string
     }
   /** Stop a background job. Pressing the control is the confirmation. */
   | { type: 'job-kill'; id: string }
@@ -446,6 +449,9 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
     if (frame.action === 'approve-plan') return frame as ClientFrame
     if (frame.action === 'retry-command-code') {
       return typeof frame.id === 'string' && frame.id !== '' && frame.confirmed === true ? (frame as ClientFrame) : null
+    }
+    if (frame.action === 'set-command-code-model') {
+      return typeof frame.model === 'string' && frame.model.trim() !== '' ? (frame as ClientFrame) : null
     }
     if ((CONTROL_ACTIONS as readonly string[]).includes(String(frame.action))) return frame as ClientFrame
   }
