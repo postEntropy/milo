@@ -12,6 +12,7 @@ import UIKit
 @Observable
 final class AppModel {
     enum Phase {
+        case loading
         case pairing
         case chat(Account)
     }
@@ -37,6 +38,7 @@ final class AppModel {
         /// A line the turn leaves behind — a wait, a rebase, a stop — drawn where the
         /// reply lands.
         var status: String? = nil
+        var deliveryId: String? = nil
         /// The turn copied whole, for "Copy raw": the model's words, its thinking and
         /// every tool call with its arguments and result.
         var raw: String? = nil
@@ -56,8 +58,79 @@ final class AppModel {
         var routine: RoutineDelivery? = nil
     }
 
-    private(set) var phase: Phase = .pairing
+    private(set) var phase: Phase = .loading
     private(set) var messages: [Message] = []
+    private struct PendingDelivery: Codable {
+        let id: String
+        let session: String
+        let text: String
+        let files: [String]
+        var detail: String
+    }
+    private var deliveries: [PendingDelivery] = {
+        guard let data = UserDefaults.standard.data(forKey: "milo-pending-messages") else { return [] }
+        return (try? JSONDecoder().decode([PendingDelivery].self, from: data)) ?? []
+    }()
+    private var sendTails: [String: Task<Void, Never>] = [:]
+    private var sendTailIds: [String: String] = [:]
+
+    private func saveDeliveries() {
+        if let data = try? JSONEncoder().encode(deliveries) {
+            UserDefaults.standard.set(data, forKey: "milo-pending-messages")
+        }
+    }
+
+    private func updateDelivery(_ id: String, detail: String?) {
+        if let detail {
+            if let index = deliveries.firstIndex(where: { $0.id == id }) { deliveries[index].detail = detail }
+        } else {
+            deliveries.removeAll { $0.id == id }
+        }
+        saveDeliveries()
+        if let index = messages.firstIndex(where: { $0.deliveryId == id }) {
+            messages[index].status = detail
+            if detail == nil { messages[index].deliveryId = nil }
+        }
+    }
+
+    func dismissDelivery(_ id: String) {
+        deliveries.removeAll { $0.id == id }
+        saveDeliveries()
+        messages.removeAll { $0.deliveryId == id }
+    }
+
+    func deliveryText(_ id: String) -> String? {
+        deliveries.first(where: { $0.id == id })?.text
+    }
+
+    /// Places the message in the outbox before releasing the composer.
+    func queueDraft(_ text: String, intent: ClientFrame.Intent?, drafts: [AttachmentDraft]) -> Bool {
+        guard let account, !sessionId.isEmpty || reopening else {
+            note = Note("Wait for the session to finish opening.")
+            return false
+        }
+        let id = UUID().uuidString
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        var message = Message(isUser: true, parts: trimmed.isEmpty ? [] : [.text(trimmed)], attachments: [], drafts: drafts, streaming: false)
+        message.status = "Sending…"
+        message.deliveryId = id
+        let destination = reopening ? "chat:\(account.chatId)" : sessionId
+        deliveries.append(PendingDelivery(id: id, session: destination, text: trimmed, files: drafts.map(\.name), detail: "Sending…"))
+        saveDeliveries()
+        messages.append(message)
+        let chat = account.chatId
+        let previous = sendTails[destination]
+        sendTailIds[destination] = id
+        sendTails[destination] = Task {
+            await previous?.value
+            _ = await sendDraft(trimmed, intent: intent, drafts: drafts, deliveryId: id, expectedSession: destination.hasPrefix("chat:") ? nil : destination, expectedChat: chat)
+            if sendTailIds[destination] == id {
+                sendTails.removeValue(forKey: destination)
+                sendTailIds.removeValue(forKey: destination)
+            }
+        }
+        return true
+    }
     /// Bumped when a thread kept from the session being left is replaced by the one the
     /// handshake brought. The screen cross-fades the two on this, rather than swapping
     /// the old words for the new under the card.
@@ -159,7 +232,7 @@ final class AppModel {
         case .unreadable:
             return connection.wording
         case .connecting, .offline:
-            return connectionSaid ? connection.wording : nil
+            return connectionSaid ? "\(connection.wording) Milo may still be working on the server." : nil
         }
     }
     private(set) var pending: (id: String, request: PermissionRequest, expiresAt: Double)?
@@ -297,6 +370,12 @@ final class AppModel {
     private var account: Account? {
         if case .chat(let account) = phase { return account }
         return nil
+    }
+
+    func reconnect() {
+        guard let account else { return }
+        client.disconnect()
+        client.connect(to: account)
     }
 
     init() {
@@ -554,6 +633,66 @@ final class AppModel {
                 busy = false
                 failed(error)
             }
+        }
+    }
+
+    /// Keeps the composer's words and files in hand until the daemon accepts them.
+    func sendDraft(_ text: String, intent: ClientFrame.Intent?, drafts: [AttachmentDraft], deliveryId: String? = nil, expectedSession: String? = nil, expectedChat: String? = nil) async -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty || !drafts.isEmpty, let account else {
+            if let deliveryId { updateDelivery(deliveryId, detail: "Milo is disconnected.") }
+            return false
+        }
+        if (expectedSession != nil && expectedSession != sessionId) || (expectedChat != nil && expectedChat != account.chatId) {
+            if let deliveryId { updateDelivery(deliveryId, detail: "The session changed before the message could be sent.") }
+            return false
+        }
+        // A project's first message is written while its new session connects.
+        // Hold it at the composer until that particular chat has finished binding.
+        for _ in 0..<150 where reopening {
+            try? await Task.sleep(nanoseconds: 100_000_000)
+            if self.account?.chatId != account.chatId {
+                if let deliveryId { updateDelivery(deliveryId, detail: "The session changed before the message could be sent.") }
+                note = Note("The session changed before the message could be sent.")
+                return false
+            }
+        }
+        guard !reopening else {
+            if let deliveryId { updateDelivery(deliveryId, detail: "The session did not finish opening. Try again.") }
+            note = Note("The session did not finish opening. Try again.")
+            return false
+        }
+        let destination = sessionId
+        do {
+            var ids: [String] = []
+            for draft in drafts {
+                ids.append(try await MiloApi.upload(draft.data, name: draft.name, mimeType: draft.mimeType, account: account))
+            }
+            guard sessionId == destination else {
+                if let deliveryId { updateDelivery(deliveryId, detail: "The session changed while the files were uploading.") }
+                note = Note("The session changed while the files were uploading.")
+                return false
+            }
+            let frame: ClientFrame = trimmed.hasPrefix("/") && ids.isEmpty
+                ? .command(text: trimmed) : .send(text: trimmed, intent: intent, uploadIds: ids)
+            let message = Message(isUser: true, parts: trimmed.isEmpty ? [] : [.text(trimmed)], attachments: [], drafts: drafts, streaming: false)
+            if deliveryId == nil { messages.append(message) }
+            let outcome = await client.sendConfirmed(frame, requestId: deliveryId ?? UUID().uuidString)
+            if let error = outcome.error {
+                if let deliveryId { updateDelivery(deliveryId, detail: error) }
+                else { messages.removeAll { $0.id == message.id } }
+                note = Note(error)
+                return false
+            }
+            if let deliveryId, deliveries.contains(where: { $0.id == deliveryId }) {
+                updateDelivery(deliveryId, detail: (trimmed.hasPrefix("/") && ids.isEmpty) || outcome.steered ? nil : "Queued")
+            }
+            askToStayOn()
+            return true
+        } catch {
+            if let deliveryId { updateDelivery(deliveryId, detail: error.localizedDescription) }
+            failed(error)
+            return false
         }
     }
 
@@ -2220,7 +2359,15 @@ final class AppModel {
         }
         flushPendingStreamDeltas()
         switch frame {
+        case .sendResult: break // The client resolves confirmations before dispatch.
         case .ready(let ready):
+            if let chatId = account?.chatId {
+                let temporary = "chat:\(chatId)"
+                deliveries = deliveries.map { item in
+                    item.session == temporary ? PendingDelivery(id: item.id, session: ready.sessionId, text: item.text, files: item.files, detail: item.detail) : item
+                }
+                saveDeliveries()
+            }
             let keptThread = threadKept
             let waitingForFirstSend = reopening && !keptThread && owed != nil && ready.messages.isEmpty && !messages.isEmpty
             threadKept = false
@@ -2237,9 +2384,24 @@ final class AppModel {
             planMode = ready.plan ?? false
             // A reload joins the plan where it stands; a new proposal is what earns approval.
             planProposed = false
-            if !waitingForFirstSend, (!messages.isEmpty || !ready.messages.isEmpty) {
+            if !waitingForFirstSend, (!messages.isEmpty || !ready.messages.isEmpty || deliveries.contains(where: { $0.session == ready.sessionId })) {
                 // The whole session, so a reconnect replaces rather than grows it.
+                let held = messages
                 messages = ready.messages.map(row)
+                for delivery in deliveries where delivery.session == ready.sessionId {
+                    if let pending = held.first(where: { $0.deliveryId == delivery.id }) {
+                        messages.append(pending)
+                        continue
+                    }
+                    let text = [delivery.text, delivery.files.isEmpty ? "" : "Attached: \(delivery.files.joined(separator: ", "))"].filter { !$0.isEmpty }.joined(separator: "\n")
+                    var pending = Message(isUser: true, parts: [.text(text)], attachments: [], streaming: false)
+                    pending.deliveryId = delivery.id
+                    let detail = delivery.detail == "Sending…" || delivery.detail == "Queued"
+                        ? "Delivery is uncertain. Check the session before sending again."
+                        : delivery.detail
+                    pending.status = detail + (delivery.files.isEmpty ? "" : " Attachments must be selected again.")
+                    messages.append(pending)
+                }
                 // The words kept from the session being left give way to these ones as one
                 // move: the screen cross-fades the two, so a session opened from the drawer
                 // lands rather than appearing whole under the card.
@@ -2319,7 +2481,8 @@ final class AppModel {
             } else {
                 messages.append(contentsOf: rows)
             }
-        case .turnStart:
+        case .turnStart(_, _, _, let requestId):
+            if let requestId { updateDelivery(requestId, detail: nil) }
             busy = true
             began = false
             turnStarted = Date()

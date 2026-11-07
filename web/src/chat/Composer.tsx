@@ -27,6 +27,8 @@ interface Props {
   providerName: string
   /** The conversation the draft belongs to, so each one keeps its own. */
   draftKey: string
+  /** The chat id used while the first session handshake is still pending. */
+  pendingDraftKey: string
   model: string
   /**
    * How much of the context budget the last turn filled, when it is known. The
@@ -44,7 +46,7 @@ interface Props {
   onApprovePlan(): void
   /** Bumped when something asks for the cursor, so the field takes the next keystroke. */
   focusSignal: number
-  onSend(text: string, intent: 'steer' | 'queue', files?: File[]): void
+  onSend(text: string, intent: 'steer' | 'queue', files?: File[]): Promise<boolean>
   onStop(): void
   /** Sets the pair: the model, and the provider it answers through. */
   onModelChange(model: string, provider: string): Promise<void>
@@ -63,6 +65,7 @@ export interface ComposerHandle {
   insertQuote(text: string): void
   /** Put a message's own words back in the field, to edit and send again. */
   load(text: string): void
+  restore(text: string, files: File[]): boolean
 }
 
 /** The width at or under which the two toolbar pills fold into one menu. */
@@ -99,11 +102,17 @@ function oneLine(text: string): string {
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { busy, queued, jobs, onKillJob, sessionBackend, provider, providerName, draftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, commandCodeModel, onCommandCodeModelChange, onEffortChange, onProviderChange },
+  { busy, queued, jobs, onKillJob, sessionBackend, provider, providerName, draftKey, pendingDraftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, commandCodeModel, onCommandCodeModelChange, onEffortChange, onProviderChange },
   handle,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null)
-  const [draft, setDraft] = useState('')
+  const initialDraft = useRef<{ text: string; error: boolean } | null>(null)
+  if (!initialDraft.current) {
+    try { initialDraft.current = { text: localStorage.getItem(`milo-draft:${draftKey}`) ?? '', error: false } }
+    catch { initialDraft.current = { text: '', error: true } }
+  }
+  const [draft, setDraft] = useState(initialDraft.current.text)
+  const [draftStorageError, setDraftStorageError] = useState(initialDraft.current.error)
   /** The words picked out of a reply, held until the answer is sent. */
   const [quote, setQuote] = useState<string | null>(null)
   /** Which running job's output is expanded, if any. */
@@ -116,8 +125,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     return () => clearInterval(timer)
   }, [jobs])
   /** What was typed in each conversation, kept under the one it was typed in. */
-  const drafts = useRef(new Map<string, string>())
+  const drafts = useRef(new Map<string, string>([[draftKey, initialDraft.current.text]]))
   const fileDrafts = useRef(new Map<string, File[]>())
+  const sending = useRef(false)
   const shownKey = useRef(draftKey)
   const [catalog, setCatalog] = useState<ModelInfo[] | null>(null)
   /** Which provider the loaded catalog belongs to, so the list follows the eye. */
@@ -173,6 +183,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const load = useCallback((text: string): void => {
     setDraft(text)
     drafts.current.set(draftKey, text)
+    try { localStorage.setItem(`milo-draft:${draftKey}`, text); setDraftStorageError(false) }
+    catch { setDraftStorageError(true) }
     requestAnimationFrame(() => {
       const el = ref.current
       if (!el) return
@@ -192,7 +204,20 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       requestAnimationFrame(() => ref.current?.focus())
     },
     load,
-  }), [load])
+    restore: (text, restoredFiles) => {
+      const current = drafts.current.get(draftKey) ?? ''
+      const combined = [current, text].filter(Boolean).join('\n\n')
+      try { localStorage.setItem(`milo-draft:${draftKey}`, combined); setDraftStorageError(false) }
+      catch { setDraftStorageError(true); return false }
+      drafts.current.set(draftKey, combined)
+      setDraft(combined)
+      const nextFiles = [...(fileDrafts.current.get(draftKey) ?? []), ...restoredFiles]
+      fileDrafts.current.set(draftKey, nextFiles)
+      setFiles(nextFiles)
+      requestAnimationFrame(() => ref.current?.focus())
+      return true
+    },
+  }), [load, draftKey])
 
   /**
    * The box is as tall as what is written in it. The height is the textarea's
@@ -212,6 +237,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   function editDraft(next: string): void {
     setDraft(next)
     drafts.current.set(draftKey, next)
+    try {
+      if (next) localStorage.setItem(`milo-draft:${draftKey}`, next)
+      else localStorage.removeItem(`milo-draft:${draftKey}`)
+      setDraftStorageError(false)
+    } catch { setDraftStorageError(true) }
   }
 
   // Swapping conversations brings the other one's draft back in. The quote does not
@@ -219,13 +249,35 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   // answer is sent, so a session it was never picked from opens without it.
   useEffect(() => {
     if (shownKey.current === draftKey) return
+    const previous = shownKey.current
     shownKey.current = draftKey
-    setDraft(drafts.current.get(draftKey) ?? '')
+    let restored = drafts.current.get(draftKey)
+    if (restored === undefined) {
+      try { restored = localStorage.getItem(`milo-draft:${draftKey}`) ?? ''; setDraftStorageError(false) }
+      catch { restored = ''; setDraftStorageError(true) }
+      drafts.current.set(draftKey, restored)
+    }
+    // A person can type while the first handshake is still finding its session.
+    // Move that draft to the session once its id arrives, without replacing a
+    // draft already saved for the session.
+    const early = previous === pendingDraftKey ? drafts.current.get(previous) : undefined
+    if (early && !restored) {
+      restored = early
+      drafts.current.set(draftKey, early)
+      try {
+        localStorage.setItem(`milo-draft:${draftKey}`, early)
+        localStorage.removeItem(`milo-draft:${previous}`)
+        setDraftStorageError(false)
+      } catch { setDraftStorageError(true) }
+      drafts.current.delete(previous)
+    }
+    setDraft(restored)
     setFiles(fileDrafts.current.get(draftKey) ?? [])
     setQuote(null)
-  }, [draftKey])
+  }, [draftKey, pendingDraftKey])
 
   async function submit(intent: 'steer' | 'queue'): Promise<void> {
+    if (sending.current) return
     const text = draft.trim()
     if (!text && files.length === 0) return
     // Sending puts the keys away on a phone: the answer is what is being waited
@@ -240,11 +292,23 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     // answered is part of the message and not only in the reader's head.
     const quoted = quote ? quotedLead(quote) : ''
     setUploadError('')
-    onSend(quoted + text, intent, files)
-    setFiles([])
-    fileDrafts.current.delete(draftKey)
-    editDraft('')
-    setQuote(null)
+    sending.current = true
+    try {
+      if (!await onSend(quoted + text, intent, files)) return
+      if (drafts.current.get(draftKey) === draft) {
+        drafts.current.delete(draftKey)
+        try { localStorage.removeItem(`milo-draft:${draftKey}`); setDraftStorageError(false) }
+        catch { setDraftStorageError(true) }
+      }
+      if (fileDrafts.current.get(draftKey) === files) fileDrafts.current.delete(draftKey)
+      if (shownKey.current === draftKey) {
+        setDraft((current) => current === draft ? '' : current)
+        setFiles((current) => current === files ? [] : current)
+        setQuote((current) => current === quote ? null : current)
+      }
+    } finally {
+      sending.current = false
+    }
   }
 
   function choose(name: string): void {
@@ -399,6 +463,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         <button type="button" className="plan-approve" disabled={!planReady || busy} onClick={onApprovePlan}>Approve plan</button>
       </div>}
       <div className="composer-box">
+        {draftStorageError && <div className="composer-upload-error" role="alert">This draft could not be saved on this device.</div>}
         {uploadError && <div className="composer-upload-error" role="alert">{uploadError}</div>}
         {files.length > 0 && <div className="composer-files" aria-live="polite">{files.map((file, index) => <span className="composer-file" key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name}<button type="button" aria-label={`Remove ${file.name}`} title={`Remove ${file.name}`} onClick={() => setFiles((current) => { const next = current.filter((_, item) => item !== index); fileDrafts.current.set(draftKey, next); return next })}><Icon name="x" size={12} /></button></span>)}</div>}
         {palette.length > 0 && <div className="command-menu" role="listbox" aria-label="Commands">
@@ -489,6 +554,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             disabled={busy}
           />}
           <span className="composer-spacer" />
+          {busy && <>
+            <button className="composer-send-action" type="button" disabled={!draft.trim() && files.length === 0} onClick={() => void submit('queue')} title="Send after the current turn finishes">Queue</button>
+            {!codeSession && <button className="composer-send-action" type="button" disabled={!draft.trim() && files.length === 0} onClick={() => void submit('steer')} title="Send guidance to the running turn">Steer</button>}
+          </>}
           {!codeSession && context && context.budget > 0 && <span className={`composer-context${context.used / context.budget >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.budget.toLocaleString()} tokens — Milo tidies the oldest turns at ${context.budget.toLocaleString()}`}>
             <svg className="composer-context-ring" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
               <circle className="composer-context-track" cx="11" cy="11" r="9" />

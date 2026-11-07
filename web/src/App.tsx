@@ -36,6 +36,17 @@ import { miloAvatar } from './ui/milo.js'
 import { projectMark } from './work/marks.js'
 
 type PendingPermission = { id: string; request: PermissionRequest; expiresAt: number }
+type PendingMessage = { id: string; session: string; text: string; fileNames: string[]; at: number; state: 'sending' | 'queued' | 'failed'; detail?: string }
+const PENDING_MESSAGES_KEY = 'milo-pending-messages'
+
+function readPendingMessages(): PendingMessage[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(PENDING_MESSAGES_KEY) ?? '[]')
+    if (!Array.isArray(value)) return []
+    return value.filter((item): item is PendingMessage => item && typeof item.id === 'string' && typeof item.session === 'string' && typeof item.text === 'string' && Array.isArray(item.fileNames) && typeof item.at === 'number')
+      .map((item) => ({ ...item, state: 'failed', detail: `Milo could not confirm this message after the page closed. Check the session before sending again.${item.fileNames.length ? ' Attachments must be selected again.' : ''}` }))
+  } catch { return [] }
+}
 type SessionGroup = { label: string; sessions: SessionSummary[] }
 type NewSessionContext = { project?: string; firstMessage?: string; plan?: boolean }
 /** A past turn the search box found, with the session it belongs to. */
@@ -77,6 +88,16 @@ export default function App() {
   /** The session the socket is speaking to, for callbacks that outlive this render. */
   const sessionIdRef = useRef('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [pendingMessages, setPendingMessages] = useState<PendingMessage[]>(readPendingMessages)
+  const pendingMessagesRef = useRef(pendingMessages)
+  const sendTails = useRef(new Map<string, Promise<void>>())
+  const pendingFiles = useRef(new Map<string, File[]>())
+  const changePending = useCallback((change: (items: PendingMessage[]) => PendingMessage[]): void => {
+    const next = change(pendingMessagesRef.current)
+    localStorage.setItem(PENDING_MESSAGES_KEY, JSON.stringify(next))
+    pendingMessagesRef.current = next
+    setPendingMessages(next)
+  }, [])
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   /** The project this session works in, as the server resolved it for this connection. */
   const [project, setProject] = useState<ProjectView | null>(null)
@@ -508,8 +529,8 @@ export default function App() {
    * the prompt, and the prompt goes out once the new session is the one the socket
    * speaks to — so the answer is written afresh with the old one gone.
    */
-  const redo = useCallback(async (text: string, upToTurn: number): Promise<void> => {
-    if (!sessionId) return
+  const redo = useCallback(async (text: string, upToTurn: number): Promise<boolean> => {
+    if (!sessionId) return false
     const nextChatId = randomUUID()
     pendingSend.current = text
     try {
@@ -521,9 +542,11 @@ export default function App() {
       setSessionId(res.id)
       setChatId(nextChatId)
       setView('chat')
+      return true
     } catch (error) {
       pendingSend.current = null
       fail(error)
+      return false
     }
   }, [sessionId, socket, fail, setView])
 
@@ -668,6 +691,11 @@ export default function App() {
     if (frame.type === 'state') { setBusy(frame.busy); setQueued(frame.queued); return }
     if (frame.type === 'jobs') { setJobs(frame.jobs); return }
     if (frame.type === 'turn-start') {
+      if (frame.requestId && pendingMessagesRef.current.some((item) => item.id === frame.requestId)) {
+        try { changePending((items) => items.filter((item) => item.id !== frame.requestId)) }
+        catch { setNotice({ text: 'Could not update saved messages on this device.', error: true }) }
+        pendingFiles.current.delete(frame.requestId)
+      }
       // The wait starts here and the turn says so on screen: the assistant
       // message carries it, so the line appears where the reply will.
       const now = Date.now()
@@ -758,7 +786,7 @@ export default function App() {
       }
       void refreshSessions()
     }
-  }, [refreshSessions, markSeen, markSeenOnChat])
+  }, [refreshSessions, markSeen, markSeenOnChat, changePending])
 
   const newChat = useCallback(async (
     backend: SessionBackendKind = 'milo',
@@ -961,29 +989,57 @@ export default function App() {
    * screen pins the destination a routine it asks for is made for, when that is
    * not this chat — the sentence then does not have to say it.
    */
-  const send = useCallback((text: string, intent: 'queue' | 'steer' = 'queue', files?: File[], target?: SendTarget): void => {
+  const send = useCallback(async (text: string, intent: 'queue' | 'steer' = 'queue', files?: File[], target?: SendTarget): Promise<boolean> => {
     const sendingChat = chatId
     // An edit is a redo from the turn it was made on: the words go again with the
     // session forked to before them, rather than a second copy piling on top.
     if (editingTurn.current !== null && !files?.length) {
       const upToTurn = editingTurn.current
-      editingTurn.current = null
-      void redo(text, upToTurn)
-      return
+      const sent = await redo(text, upToTurn)
+      if (sent) editingTurn.current = null
+      return sent
     }
     editingTurn.current = null
-    void (async () => {
+    const requestId = randomUUID()
+    if (!sessionId) {
+      fail(new Error('Wait for the session to finish opening.'))
+      return false
+    }
+    const session = sessionId
+    try {
+      changePending((items) => [...items, { id: requestId, session, text, fileNames: files?.map((file) => file.name) ?? [], at: Date.now(), state: 'sending' }])
+      if (files?.length) pendingFiles.current.set(requestId, files)
+    } catch {
+      fail(new Error('The message could not be saved on this device.'))
+      return false
+    }
+    const previous = sendTails.current.get(session) ?? Promise.resolve()
+    const next = previous.then(async () => {
+    try {
       const uploadIds = files?.length ? await Promise.all(files.map(uploadFile)) : []
       followSend.current = true
       if (text.startsWith('/') && !uploadIds.length) {
-        setMessages((current) => [...current, { id: `user-${randomUUID()}`, role: 'user', parts: [{ kind: 'text', text }], at: Date.now() }])
-        socket.send({ type: 'command', text })
+        await socket.sendConfirmed(sendingChat, { type: 'command', text }, requestId)
+        changePending((items) => items.filter((item) => item.id !== requestId))
+        if (sessionIdRef.current === session) setMessages((current) => [...current, { id: `user-${randomUUID()}`, role: 'user', parts: [{ kind: 'text', text }], at: Date.now() }])
       } else {
-        socket.sendFor(sendingChat, { type: 'send', text, intent, ...(target ? { target } : {}), ...(uploadIds.length ? { uploadIds } : {}) })
+        const steered = await socket.sendConfirmed(sendingChat, { type: 'send', text, intent, ...(target ? { target } : {}), ...(uploadIds.length ? { uploadIds } : {}) }, requestId)
+        if (steered) {
+          changePending((items) => items.filter((item) => item.id !== requestId))
+          if (sessionIdRef.current === session) setMessages((current) => [...current, { id: `user-${requestId}`, role: 'user', parts: [{ kind: 'text', text }], at: Date.now() }])
+        } else changePending((items) => items.map((item) => item.id === requestId ? { ...item, state: 'queued' } : item))
       }
       setNotice(null)
-    })().catch(fail)
-  }, [socket, fail, redo, chatId])
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error)
+      try { changePending((items) => items.map((item) => item.id === requestId ? { ...item, state: 'failed', detail } : item)) }
+      catch { fail(error) }
+    }
+    })
+    sendTails.current.set(session, next)
+    void next.finally(() => { if (sendTails.current.get(session) === next) sendTails.current.delete(session) })
+    return true
+  }, [socket, fail, redo, chatId, sessionId, changePending])
 
   useEffect(() => { sendRef.current = send }, [send])
 
@@ -993,7 +1049,7 @@ export default function App() {
    * to spell it out.
    */
   function askRoutine(text: string, target?: SendTarget): void {
-    send(text, 'queue', undefined, target)
+    void send(text, 'queue', undefined, target)
   }
 
   /** The answer to a permission prompt, wherever on screen it is drawn. */
@@ -1335,7 +1391,15 @@ export default function App() {
         }
       }}>Retry pending turn</button>
     </section>}
-    <MessageList messages={messages} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={sessionBackend.kind === 'milo' ? forkSession : undefined} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} />
+    <MessageList messages={[...messages, ...pendingMessages.filter((item) => item.session === (sessionId || chatId)).map((item): ChatMessage => ({
+      id: item.id, role: 'user', at: item.at,
+      parts: [{ kind: 'text', text: [item.text, item.fileNames.length ? `Attached: ${item.fileNames.join(', ')}` : ''].filter(Boolean).join('\n') }],
+      delivery: { state: item.state, detail: item.detail },
+    }))]} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={sessionBackend.kind === 'milo' ? forkSession : undefined} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} onRestorePending={(id) => {
+      const item = pendingMessagesRef.current.find((entry) => entry.id === id)
+      if (!item || !composerRef.current?.restore(item.text, pendingFiles.current.get(id) ?? [])) return
+      try { changePending((items) => items.filter((entry) => entry.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) }
+    }} onDismissPending={(id) => { try { changePending((items) => items.filter((item) => item.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) } }} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} />
     {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(action) => socket.send({ type: 'control', action, id: pendingPermission.id })} /></article>}
   </>
 
@@ -1458,7 +1522,7 @@ export default function App() {
         <div className="topbar-actions">
           {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''} ${panelNew ? 'has-new' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelVisible(!panelOpen)}><Icon name="panel-right" size={18} /></button>}
           {view === 'chat' && <button className="topbar-new" type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newSessionHere()}><Icon name="plus" size={18} /></button>}
-          {view === 'chat' && <ConnectionChip state={connection.state} reason={connection.reason} />}
+          {view === 'chat' && <ConnectionChip state={connection.state} reason={connection.reason} onReconnect={() => socket.reconnect()} />}
         </div>
       </header>
       {view === 'settings'
@@ -1493,7 +1557,7 @@ export default function App() {
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock" ref={composerDockRef}>
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} sessionBackend={sessionBackend.kind} provider={identity.provider} providerName={identity.providerName} draftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={Boolean(project) && sessionBackend.kind === 'milo'} commandCodeModel={sessionBackend.kind === 'command-code' ? sessionBackend.model : undefined} onCommandCodeModelChange={changeCommandCodeModel} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); socket.send({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => socket.send({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
+            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} sessionBackend={sessionBackend.kind} provider={identity.provider} providerName={identity.providerName} draftKey={sessionId || chatId} pendingDraftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={Boolean(project) && sessionBackend.kind === 'milo'} commandCodeModel={sessionBackend.kind === 'command-code' ? sessionBackend.model : undefined} onCommandCodeModelChange={changeCommandCodeModel} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); socket.send({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => socket.send({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
           </div>
         </section>
         : null}

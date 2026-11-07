@@ -45,6 +45,7 @@ struct MessageRow: View {
     /// The person's own message, back in the composer to be said again — with the turn the
     /// session is forked at, so the edit replaces the message rather than following it.
     let onEdit: (String, Int) -> Void
+    var onRestore: (AppModel.Message) -> Void = { _ in }
     /// A message read back rather than spoken to — a routine's run. The controls that
     /// answer it (quote, ask again, fork) are left off, so a past run is read, not acted on.
     var readOnly = false
@@ -151,12 +152,16 @@ struct MessageRow: View {
                     if !message.attachments.isEmpty {
                         Attachments(items: message.attachments)
                     }
+                    if let status = message.status {
+                        Text(status).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.userBubbleText)
+                    }
                 }
                 .padding(.horizontal, MiloTheme.Space.four)
                 .padding(.vertical, MiloTheme.Space.three)
                 .background(MiloTheme.accent, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+                .contextMenu { menu }
             }
-            .contextMenu { menu }
         } else {
             VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
                 // A routine's delivery signs itself: the routine it came from and when
@@ -262,10 +267,16 @@ struct MessageRow: View {
     @ViewBuilder
     private var menu: some View {
         menuItem("Copy", "doc.on.doc") { UIPasteboard.general.string = message.prose }
+        if let id = message.deliveryId, message.status != "Sending…", message.status != "Queued" {
+            menuItem("Restore", "arrow.uturn.backward") { onRestore(message) }
+            menuItem("Dismiss", "xmark") { model.dismissDelivery(id) }
+        }
         // The words back in the composer and said again: the session forks before them, so
         // the edit replaces the message instead of following it. Not while a turn runs —
         // it would fork mid-answer.
-        menuItem("Edit", "pencil", disabled: model.busy) { onEdit(message.prose, turn - 1) }
+        if message.deliveryId == nil {
+            menuItem("Edit", "pencil", disabled: model.busy) { onEdit(message.prose, turn - 1) }
+        }
         if let raw = message.raw {
             rawCopyMenu(raw: raw, rawNoOutput: message.rawNoOutput)
         }

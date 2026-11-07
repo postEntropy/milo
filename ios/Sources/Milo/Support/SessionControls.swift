@@ -370,9 +370,11 @@ struct ConnectionPill: View {
             HStack(spacing: 0) {
                 Spacer(minLength: 0)
                 content
+                Button("Reconnect") { model.reconnect() }
+                    .font(MiloTheme.Text.small)
+                    .padding(.leading, MiloTheme.Space.two)
                 Spacer(minLength: 0)
             }
-            .accessibilityElement(children: .combine)
             .transition(.opacity)
         }
     }

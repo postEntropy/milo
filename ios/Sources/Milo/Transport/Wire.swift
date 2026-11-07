@@ -5,7 +5,7 @@ import Foundation
  `src/gateways/web/protocol.ts`; the server refuses any other number aloud, so a
  drift between the two is a refusal rather than a mis-drawn chat.
  */
-let miloProtocolVersion = 14
+let miloProtocolVersion = 17
 
 // MARK: - What the app sends
 
@@ -227,6 +227,7 @@ struct WireMessage: Decodable {
 struct PermissionRequest: Decodable, Hashable {
     let tool: String
     let summary: String
+    let approvalScope: String?
 }
 
 struct JobView: Decodable, Identifiable, Hashable {
@@ -503,12 +504,13 @@ struct Ready: Decodable {
 // MARK: - What the server sends
 
 enum ServerFrame: Decodable {
+    case sendResult(requestId: String, ok: Bool, error: String?, steered: Bool)
     case ready(Ready)
     /// The rest of a session whose transcript did not fit in the `ready`, whole rows in
     /// the order they happened.
     case history([WireMessage])
     case sessionBackend(SessionBackendView)
-    case turnStart(id: String, text: String, retryPendingId: String?)
+    case turnStart(id: String, text: String, retryPendingId: String?, requestId: String?)
     case event(turnId: String, event: AgentEvent, says: String?)
     case permission(id: String, request: PermissionRequest, expiresAt: Double)
     case permissionResult(id: String, allowed: Bool)
@@ -534,12 +536,14 @@ enum ServerFrame: Decodable {
 
     private enum CodingKeys: String, CodingKey {
         case type, id, text, turnId, event, request, expiresAt, allowed, status, raw, rawNoOutput, says
-        case busy, queued, plan, jobs, items, message, panel, messages, backend, retryPendingId
+        case busy, queued, plan, jobs, items, message, panel, messages, backend, retryPendingId, requestId, ok, error, steered
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         switch try container.decode(String.self, forKey: .type) {
+        case "send-result":
+            self = .sendResult(requestId: try container.decode(String.self, forKey: .requestId), ok: try container.decode(Bool.self, forKey: .ok), error: try container.decodeIfPresent(String.self, forKey: .error), steered: try container.decodeIfPresent(Bool.self, forKey: .steered) ?? false)
         case "ready": self = .ready(try Ready(from: decoder))
         case "history":
             self = .history(try container.decode([WireMessage].self, forKey: .messages))
@@ -549,7 +553,8 @@ enum ServerFrame: Decodable {
             self = .turnStart(
                 id: try container.decode(String.self, forKey: .id),
                 text: try container.decode(String.self, forKey: .text),
-                retryPendingId: try container.decodeIfPresent(String.self, forKey: .retryPendingId)
+                retryPendingId: try container.decodeIfPresent(String.self, forKey: .retryPendingId),
+                requestId: try container.decodeIfPresent(String.self, forKey: .requestId)
             )
         case "event":
             self = .event(

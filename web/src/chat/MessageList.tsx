@@ -276,6 +276,8 @@ export function MessageList({
   onQuote,
   onEdit,
   onRegenerate,
+  onDismissPending,
+  onRestorePending,
   suggestions,
   hasIdeas,
   busy,
@@ -291,6 +293,8 @@ export function MessageList({
   onEdit?(text: string, upToTurn: number): void
   /** Ask again from the prompt that produced the last answer. */
   onRegenerate?(text: string, upToTurn: number): void
+  onDismissPending?(id: string): void
+  onRestorePending?(id: string): void
   /** What the welcome screen offers; absent: the standing four. */
   suggestions?: Suggestion[]
   /** Whether the model's ideas have replaced the standing four on the home. */
@@ -328,11 +332,11 @@ export function MessageList({
   let lastUser: ChatMessage | undefined
   let runningId: string | undefined
   for (const m of messages) {
-    if (m.role === 'user') currentTurn++
+    if (m.role === 'user' && !m.delivery) currentTurn++
     messageTurns.set(m.id, currentTurn)
     if (hasContent(m)) visibleMessages.push(m)
     if (m.role === 'assistant' && !m.routine && proseOf(m) && m.waitingSince === undefined) lastAssistant = m
-    if (m.role === 'user') lastUser = m
+    if (m.role === 'user' && !m.delivery) lastUser = m
     if (busy && m.role === 'assistant') runningId = m.id
   }
 
@@ -356,6 +360,8 @@ export function MessageList({
           onFork={onFork}
           onEdit={onEdit}
           onRegenerate={onRegenerate}
+          onDismissPending={onDismissPending}
+          onRestorePending={onRestorePending}
           onQuote={onQuote}
           onSend={onPrompt}
           regenPrompt={message.id === regen?.id ? regen.prompt : undefined}
@@ -438,7 +444,7 @@ function RoutineCard({ routine, children }: { routine: RoutineDelivery; children
  * leaves every earlier one untouched, instead of reconciling the whole thread on
  * each frame.
  */
-const MessageRow = memo(function MessageRow({ message, thinking, busy, running, turn, onAction, onFork, onEdit, onRegenerate, onQuote, onSend, regenPrompt, regenUpToTurn }: {
+const MessageRow = memo(function MessageRow({ message, thinking, busy, running, turn, onAction, onFork, onEdit, onRegenerate, onDismissPending, onRestorePending, onQuote, onSend, regenPrompt, regenUpToTurn }: {
   message: ChatMessage
   thinking: ThinkingDisplay
   busy: boolean
@@ -449,6 +455,8 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
   onFork?(upToTurn: number): void
   onEdit?(text: string, upToTurn: number): void
   onRegenerate?(text: string, upToTurn: number): void
+  onDismissPending?(id: string): void
+  onRestorePending?(id: string): void
   onQuote?(text: string): void
   /** What a generated interface's button sends, as a new turn. */
   onSend?(text: string): void
@@ -559,9 +567,15 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
       {message.waitingSince !== undefined && !drawingADraft(parts) && <WaitLine label="Thinking" />}
       {message.status && <div className="message-status">{message.status}</div>}
     </div>
+    {message.delivery && <div className="message-delivery" role="status">
+      <span>{message.delivery.state === 'sending' ? 'Sending…' : message.delivery.state === 'queued' ? 'Queued' : message.delivery.detail ?? 'Could not send.'}</span>
+      {message.delivery.state === 'failed' && prose && <CopyButton text={prose} />}
+      {message.delivery.state === 'failed' && onRestorePending && <button type="button" className="button" onClick={() => onRestorePending(message.id)}>Restore</button>}
+      {message.delivery.state === 'failed' && onDismissPending && <button type="button" className="button" onClick={() => onDismissPending(message.id)}>Dismiss</button>}
+    </div>}
     {/* The person's own message is a filled bubble: its controls sit under it, not
         inside it, the way the model's sit under its answer. */}
-    {message.role === 'user' && prose && (onEdit || onQuote) && <div className="message-below">
+    {message.role === 'user' && !message.delivery && prose && (onEdit || onQuote) && <div className="message-below">
       <div className="message-toolbar">
         {onEdit && <button className="message-tool-btn" type="button" aria-label="Edit this message" onClick={() => onEdit(prose, turn - 1)}>
           <Icon name="edit" size={15} />

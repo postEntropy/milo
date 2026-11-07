@@ -22,6 +22,7 @@ export class MiloSocket {
   private ready = false
   /** What the server said when it refused, before the handshake finished. */
   private refusal = ''
+  private pending = new Map<string, { resolve(steered: boolean): void; reject(error: Error): void; timer: number }>()
 
   connect(chatId: string, genui: boolean | null = null): void {
     this.chatId = chatId
@@ -36,6 +37,13 @@ export class MiloSocket {
     this.retire()
   }
 
+  reconnect(): void {
+    if (this.closed || !this.chatId) return
+    this.retry = 0
+    this.retire()
+    this.open()
+  }
+
   /**
    * Detach the current socket before closing it, so the close event it fires
    * later finds `this.socket` pointing elsewhere and cannot revive a second
@@ -44,6 +52,7 @@ export class MiloSocket {
    */
   private retire(): void {
     window.clearTimeout(this.timer)
+    this.failPending()
     const socket = this.socket
     this.socket = null
     socket?.close()
@@ -57,6 +66,30 @@ export class MiloSocket {
   sendFor(chatId: string, frame: ClientFrame): void {
     if (this.chatId !== chatId) throw new Error('The active chat changed while files were uploading. Send them again.')
     this.send(frame)
+  }
+
+  /** Wait for the daemon to accept the message; never resend an uncertain delivery. */
+  sendConfirmed(chatId: string, frame: Extract<ClientFrame, { type: 'send' | 'command' }>, requestId: string): Promise<boolean> {
+    return new Promise((resolve, reject) => {
+      const timer = window.setTimeout(() => {
+        this.pending.delete(requestId)
+        reject(new Error('Milo did not confirm the message. It may have arrived; check the session before sending again.'))
+      }, 15000)
+      this.pending.set(requestId, { resolve, reject, timer })
+      try { this.sendFor(chatId, { ...frame, requestId }) } catch (error) {
+        window.clearTimeout(timer)
+        this.pending.delete(requestId)
+        reject(error)
+      }
+    })
+  }
+
+  private failPending(): void {
+    for (const pending of this.pending.values()) {
+      window.clearTimeout(pending.timer)
+      pending.reject(new Error('Connection lost before Milo confirmed the message. It may have arrived; check the session before sending again.'))
+    }
+    this.pending.clear()
   }
 
   subscribe(listener: (frame: ServerFrame) => void): () => void {
@@ -93,6 +126,16 @@ export class MiloSocket {
       if (this.socket !== socket) return
       try {
         const frame = JSON.parse(String(event.data)) as ServerFrame
+        if (frame.type === 'send-result') {
+          const pending = this.pending.get(frame.requestId)
+          if (pending) {
+            window.clearTimeout(pending.timer)
+            this.pending.delete(frame.requestId)
+            if (frame.ok) pending.resolve(frame.steered === true)
+            else pending.reject(new Error(frame.error))
+          }
+          return
+        }
         if (frame.type === 'ready') this.ready = true
         // The server names its refusal before it hangs up, and that text is a
         // better reason than the page could infer on its own.
@@ -104,6 +147,7 @@ export class MiloSocket {
     })
     socket.addEventListener('close', () => {
       if (this.socket !== socket || this.closed) return
+      this.failPending()
       void this.afterClose(socket)
     })
     socket.addEventListener('error', () => socket.close())

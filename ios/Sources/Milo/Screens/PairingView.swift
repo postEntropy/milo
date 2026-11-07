@@ -34,7 +34,7 @@ struct PairingView: View {
                     scanning = true
                 }
 
-                Text("or type it")
+                Text("Or enter the address and six-digit code shown by `milo pair`. Use the LAN or tailnet address reachable from this phone.")
                     .font(MiloTheme.Text.meta)
                     .foregroundStyle(MiloTheme.muted)
 
@@ -69,7 +69,7 @@ struct PairingView: View {
                 }
                 .disabled(model.pairingCode.isEmpty || model.pairingHost.isEmpty)
 
-                Text("Run `milo pair` on your machine. The address it prints is the tailnet or LAN one, never 127.0.0.1 — the phone has to reach it.")
+                Text("The code expires after two minutes. Run `milo pair` again for a new one.")
                     .font(MiloTheme.Text.meta)
                     .foregroundStyle(MiloTheme.muted)
             }

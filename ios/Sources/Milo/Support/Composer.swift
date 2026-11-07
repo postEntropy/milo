@@ -245,10 +245,18 @@ struct Composer: View {
     /// are the same height, not because each was nudged to look like the other.
     @ViewBuilder private var sendControl: some View {
         if role == .session, model.busy {
-            // While a turn runs the same control sends or stops, and what is in the field
-            // decides which — see `busyControl`. One control, never a second one standing
-            // beside it.
-            busyControl
+            HStack(spacing: MiloTheme.Space.one) {
+                if canSend {
+                    Button { menu = .running } label: {
+                        Image(systemName: "ellipsis")
+                            .frame(width: 36, height: 36)
+                    }
+                    .buttonStyle(PressableStyle())
+                    .accessibilityLabel("Turn actions")
+                    .accessibilityHint("Choose whether to steer, queue, or stop the turn.")
+                }
+                busyControl
+            }
         } else {
             MiloIconButton(
                 systemName: "paperplane.fill",
@@ -417,6 +425,9 @@ struct Composer: View {
                 .animation(.snappy(duration: 0.18), value: pressed)
                 .accessibilityAddTraits(.isButton)
                 .accessibilityLabel("Steer")
+                .accessibilityHint("Send guidance to the running turn.")
+                .accessibilityAction(named: "Queue message") { send(.queue) }
+                .accessibilityAction(named: "Stop turn") { model.stop() }
         } else {
             Button(action: model.stop) { stopGlyph }
                 .buttonStyle(PressableStyle())
@@ -550,12 +561,17 @@ struct PermissionBar: View {
                 .font(MiloTheme.Text.small)
                 .foregroundStyle(MiloTheme.foreground2)
                 .frame(maxWidth: .infinity, alignment: .leading)
+            if let scope = pending.request.approvalScope {
+                Text(scope).font(MiloTheme.Text.small).foregroundStyle(MiloTheme.foreground2)
+            }
             HStack(spacing: MiloTheme.Space.three) {
                 // The platform's own glass, as every control here is made. The browser's own
                 // pair is solid, and that is the browser's house: its surfaces are tokens, and
                 // this app's are the platform's material.
                 MiloWideButton(title: "Deny") { model.answerPermission(allowed: false) }
-                MiloWideButton(title: "Always") { model.answerPermission(allowed: true, remember: true) }
+                if pending.request.approvalScope != nil {
+                    MiloWideButton(title: "Session") { model.answerPermission(allowed: true, remember: true) }
+                }
                 MiloWideButton(title: "Allow", primary: true) { model.answerPermission(allowed: true) }
             }
             // The daemon lets a prompt expire; the countdown says how long it holds.

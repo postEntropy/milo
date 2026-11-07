@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
@@ -68,6 +68,18 @@ describe('opening a past session in the web', () => {
 })
 
 describe('the web handshake', () => {
+  it('acknowledges an accepted message and explains a rejected upload', async () => {
+    const hub = new WebHub(build())
+    const frames: ServerFrame[] = []
+    const client = { send: (frame: ServerFrame) => frames.push(frame) }
+    await hub.connect(client, PAST_CONVERSATION)
+    hub.handle(client, { type: 'send', text: 'hello', requestId: 'one' }, PAST_CONVERSATION)
+    expect(frames).toContainEqual({ type: 'send-result', requestId: 'one', ok: true })
+    await vi.waitFor(() => expect(frames).toContainEqual(expect.objectContaining({ type: 'turn-start', text: 'hello', requestId: 'one' })))
+    hub.handle(client, { type: 'send', text: 'file', uploadIds: ['missing'], requestId: 'two' }, PAST_CONVERSATION)
+    expect(frames).toContainEqual(expect.objectContaining({ type: 'send-result', requestId: 'two', ok: false, error: expect.any(String) }))
+    hub.close()
+  })
   it('says the protocol it speaks, not a number of its own', async () => {
     // The ready frame carried a hard-coded `1` while the server spoke 10, so a client
     // that trusted the field was reading a skew that could never close.

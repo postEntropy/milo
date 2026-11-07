@@ -21,4 +21,6 @@ export interface ChatMessage extends TranscriptMessage {
   loaded?: boolean
   actions?: ActionRow[]
   cards?: SessionCardItem[]
+  /** A local submission awaiting the server, or one that needs attention. */
+  delivery?: { state: 'sending' | 'queued' | 'failed'; detail?: string }
 }

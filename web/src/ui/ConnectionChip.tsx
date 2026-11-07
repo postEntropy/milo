@@ -12,7 +12,11 @@ const LABEL: Record<ConnectionState, string> = {
  * routines panel and the spotlight wear the same chip rather than each writing
  * its own words for the same three states. Nothing at all while the socket is up.
  */
-export function ConnectionChip({ state, reason }: { state: ConnectionState; reason?: string }) {
+export function ConnectionChip({ state, reason, onReconnect }: { state: ConnectionState; reason?: string; onReconnect?: () => void }) {
   if (state === 'online') return null
-  return <span className={`connection-status ${state}`} title={reason}><span />{LABEL[state]}</span>
+  return <div className={`connection-status ${state}`} role="status" aria-live="polite">
+    <span aria-hidden="true" />
+    <div>{LABEL[state]}{reason && <div>{reason}</div>}{state === 'offline' && <div>Milo may still be working on the server.</div>}</div>
+    {onReconnect && state !== 'connecting' && <button type="button" className="connection-retry" onClick={onReconnect}>Reconnect</button>}
+  </div>
 }

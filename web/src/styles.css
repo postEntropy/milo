@@ -486,7 +486,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .topbar-backend-close:hover, .topbar-backend-close:focus-visible { background: var(--border-soft); color: var(--fg); }
 .topbar-actions { display: flex; flex: none; align-items: center; gap: var(--space-4); margin-inline-start: auto; }
 .connection-status { display: flex; align-items: center; gap: var(--space-3); color: var(--muted); font-size: var(--text-2xs); }
-.connection-status > span { width: 7px; height: 7px; border-radius: 50%; background: var(--danger); }
+.topbar-actions > .connection-status { position: absolute; top: 100%; right: var(--space-6); width: min(380px, calc(100vw - 32px)); box-sizing: border-box; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-4); box-shadow: var(--shadow); }
+.topbar-actions > .connection-status > div { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.connection-status > span { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--danger); }
+.connection-retry, .composer-send-action { border: 0; border-radius: var(--radius-sm); background: var(--surface-warm); color: var(--fg); padding: var(--space-2) var(--space-3); }
+.connection-retry:hover, .composer-send-action:hover:not(:disabled) { background: var(--border-soft); }
+.composer-send-action:disabled { color: var(--muted); cursor: not-allowed; }
 .connection-status.connecting > span { background: var(--warn); }
 .chat-view { position: relative; display: flex; flex: 1; min-height: 0; flex-direction: column; }
 .messages { flex: 1; min-height: 0; overflow: auto; padding: var(--space-8) 28px var(--space-6); scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
@@ -527,6 +532,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message-content { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: var(--space-5); }
 .message.user .message-content { flex: initial; max-width: 82%; border: 0; border-radius: var(--radius-xl); background: var(--accent); padding: var(--space-6) var(--space-7); }
 .message-status { margin-top: var(--space-2); color: var(--muted); font-size: var(--text-2xs); }
+.message-delivery { display: flex; max-width: 82%; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); color: var(--muted); font-size: var(--text-xs); }
 .message-prose { max-width: 100%; color: var(--fg-2); font-size: var(--text-md); line-height: 1.65; overflow-wrap: anywhere; }
 .message-prose p { margin: 0; }
 .message-prose p + p { margin-top: var(--space-6); }
@@ -1537,10 +1543,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .secret-row-actions { grid-column: 2; grid-row: 1; }
   .secret-group .secret-row .secret-editor { grid-column: 1 / -1; grid-row: 2; }
   .secret-group-head h3 { font-size: var(--text-sm); }
-  .connection-status { font-size: 0; }
-  /* A refusal is terminal, unlike the reconnecting states the dot alone stands
-     in for: the word stays, so the state that will not clear itself is read. */
-  .connection-status.refused { font-size: var(--text-2xs); }
+  .connection-status { font-size: var(--text-2xs); }
   .connection-status > span { width: 8px; height: 8px; }
   .message.user .message-content { max-width: 92%; }
   .empty-state { min-height: 58vh; padding: 30px var(--space-8) 42px; }

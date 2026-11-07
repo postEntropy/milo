@@ -23,6 +23,7 @@ struct ProjectDetail: View {
     @State private var renamingSession: String?
     /// What is being said to this project, before there is a session to say it in.
     @State private var draft = ""
+    @State private var sendingDraft = false
     /// The files that will ride with those words: picked here, sent with the message that
     /// starts the session, and so read exactly as the chat reads one.
     @State private var drafts: [AttachmentDraft] = []
@@ -157,8 +158,13 @@ struct ProjectDetail: View {
         }
         .background(MiloTheme.background)
         .task(id: projectId) {
+            draft = UserDefaults.standard.string(forKey: "milo-work-draft:\(projectId)") ?? ""
             selectedBackend = "milo"
             await model.refreshSessionBackends()
+        }
+        .onChange(of: draft) { _, text in
+            if text.isEmpty { UserDefaults.standard.removeObject(forKey: "milo-work-draft:\(projectId)") }
+            else { UserDefaults.standard.set(text, forKey: "milo-work-draft:\(projectId)") }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if project?.error == nil {
@@ -386,6 +392,7 @@ struct ProjectDetail: View {
     /// files picked here ride with those words, so the first thing said to a project can
     /// carry a screenshot or a document — read exactly as the chat reads one.
     private func start(saying intent: ClientFrame.Intent) {
+        guard !sendingDraft else { return }
         let words = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         let files = drafts
         guard !words.isEmpty || !files.isEmpty else { return }
@@ -405,9 +412,7 @@ struct ProjectDetail: View {
         backend: String,
         confirmed: Bool,
     ) {
-        draft = ""
-        drafts = []
-        composing = false
+        sendingDraft = true
         begin(with: words, drafts: files, intent: intent, plan: backend == "milo" && planStart, backend: backend, confirmed: confirmed)
     }
 
@@ -420,14 +425,16 @@ struct ProjectDetail: View {
         confirmed: Bool,
     ) {
         Task {
+            defer { sendingDraft = false }
             guard await model.startWorkSession(project: projectId, plan: plan, backend: backend, confirmed: confirmed) else {
-                draft = words
-                drafts = files
                 composing = true
                 return
             }
+            guard model.queueDraft(words, intent: intent, drafts: files) else { return }
+            if draft.trimmingCharacters(in: .whitespacesAndNewlines) == words { draft = "" }
+            if drafts.map(\.id) == files.map(\.id) { drafts = [] }
             planStart = false
-            model.send(words, intent: intent, drafts: files)
+            composing = false
             onChat(false)
         }
     }

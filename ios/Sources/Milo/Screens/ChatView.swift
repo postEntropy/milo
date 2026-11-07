@@ -20,9 +20,19 @@ final class SidewaysDrags {
 /// composer pinned above the keyboard. No rules between the regions — each is
 /// carried by its own surface and spacing.
 struct ChatView: View {
+    private struct ProjectShortcut: Identifiable {
+        enum Section { case files, changes }
+        let id = UUID()
+        let projectId: String
+        let projectName: String
+        let section: Section
+    }
+
     let account: Account
     @Environment(AppModel.self) private var model
     @State private var draft = ""
+    @State private var draftSession = ""
+    @State private var fileDrafts: [String: [AttachmentDraft]] = [:]
     /// The words picked out of an answer, held until the reply is sent — the phone's half
     /// of the strip the browser keeps above its field.
     @State private var quote: String?
@@ -34,6 +44,7 @@ struct ChatView: View {
     @State private var editing: Int?
     @State private var drawer = false
     @State private var showCommandCodeInfo = false
+    @State private var projectShortcut: ProjectShortcut?
     @State private var picker = false
     @State private var settings = false
     @State private var routines = false
@@ -190,6 +201,25 @@ struct ChatView: View {
                     )
                     .ignoresSafeArea()
                 }
+                .overlay(alignment: .top) {
+                    if !routines && !tasks && !work {
+                        GeometryReader { geometry in
+                            Rectangle()
+                                .fill(.ultraThinMaterial)
+                                .mask {
+                                    LinearGradient(
+                                        stops: [.init(color: .black, location: 0.55), .init(color: .clear, location: 1)],
+                                        startPoint: .top,
+                                        endPoint: .bottom
+                                    )
+                                }
+                                .frame(height: geometry.safeAreaInsets.top + MiloTheme.Space.four)
+                                .offset(y: -geometry.safeAreaInsets.top)
+                                .allowsHitTesting(false)
+                                .accessibilityHidden(true)
+                        }
+                    }
+                }
                 .offset(x: travel)
                 // While either lid is open, the chat is that lid: a tap on it closes what it
                 // covers instead of reaching what is underneath. The lid starts where the chat
@@ -337,7 +367,14 @@ struct ChatView: View {
         // changes — a new one started, another resumed — that passage is no longer there
         // to answer, so the strip goes with it instead of following into a session it was
         // never picked from.
-        .onChange(of: model.sessionId) { _, _ in
+        .onChange(of: model.sessionId) { _, id in
+            if !draftSession.isEmpty {
+                UserDefaults.standard.set(draft, forKey: "milo-draft:\(draftSession)")
+                fileDrafts[draftSession] = drafts
+            }
+            draftSession = id
+            draft = id.isEmpty ? "" : (UserDefaults.standard.string(forKey: "milo-draft:\(id)") ?? "")
+            drafts = fileDrafts[id] ?? []
             quote = nil
             // An edit belongs to the session it was made in; a new one is not the one to
             // fork, so the request is dropped rather than carried over.
@@ -346,8 +383,30 @@ struct ChatView: View {
             // turn that this one does not have among them.
             closeMenu()
         }
+        .onChange(of: draft) { _, text in
+            guard !draftSession.isEmpty else { return }
+            if text.isEmpty { UserDefaults.standard.removeObject(forKey: "milo-draft:\(draftSession)") }
+            else { UserDefaults.standard.set(text, forKey: "milo-draft:\(draftSession)") }
+        }
         .sheet(isPresented: $picker) { ModelPickerSheet() }
         .sheet(isPresented: $settings) { SettingsView(account: account) }
+        .sheet(item: $projectShortcut) { shortcut in
+            DetailSheet {
+                VStack(alignment: .leading, spacing: MiloTheme.Space.five) {
+                    HStack {
+                        Text(shortcut.projectName)
+                            .font(MiloTheme.Text.base.weight(.semibold))
+                            .foregroundStyle(MiloTheme.foreground)
+                        Spacer()
+                        Button("Done") { projectShortcut = nil }
+                    }
+                    switch shortcut.section {
+                    case .files: ProjectFiles(projectId: shortcut.projectId)
+                    case .changes: ProjectChanges(projectId: shortcut.projectId)
+                    }
+                }
+            }
+        }
         // One lid at a time: the two surfaces move the same card in opposite directions, and
         // what the model has just shown is the one the card answers to.
         .onChange(of: model.panelOpen) { _, open in
@@ -522,7 +581,7 @@ struct ChatView: View {
         var turns: [UUID: Int] = [:]
         var turn = 0
         for message in model.messages {
-            if message.isUser { turn += 1 }
+            if message.isUser && message.deliveryId == nil { turn += 1 }
             turns[message.id] = turn
         }
         return turns
@@ -559,7 +618,7 @@ struct ChatView: View {
         var out: [ThreadPiece] = []
         var turn = 0
         for message in model.messages {
-            if message.isUser { turn += 1 }
+            if message.isUser && message.deliveryId == nil { turn += 1 }
             let count = MessageRow.pieceCount(of: message)
             let whole = message.isUser
                 || message.routine != nil
@@ -596,7 +655,7 @@ struct ChatView: View {
         var answer: AppModel.Message?
         var asked: AppModel.Message?
         for message in model.messages {
-            if message.isUser { asked = message; continue }
+            if message.isUser { if message.deliveryId == nil { asked = message }; continue }
             // A routine's delivery is nobody's turn: it is not what "ask this again"
             // would redo, and it must not take the offer away from the answer above it.
             if message.routine != nil { continue }
@@ -866,19 +925,12 @@ struct ChatView: View {
             editing = nil
             Task { await model.regenerate(prompt: outgoing, upToTurn: upToTurn) }
         } else {
-            // The arrival the bubble is drawn with is this transaction: a send moves the
-            // control that carried it the way the thread moves, so it reads as one motion.
-            withAnimation(SettlesIn.motion) {
-                draft = ""
-                quote = nil
-                editing = nil
-                drafts = []
-                model.send(outgoing, intent: intent, drafts: attached)
-            }
-            // Named here, inside the same update the words went in with: the row is told where
-            // it sits as it is laid out, and a name set any later would arrive after the
-            // measuring it is there for.
-            if let id = model.messages.last?.id { armSend(id) }
+            guard model.queueDraft(outgoing, intent: intent, drafts: attached) else { return }
+            draft = ""
+            quote = nil
+            drafts = []
+            editing = nil
+            if let id = model.messages.last(where: { $0.isUser })?.id { armSend(id) }
         }
         // The keys come down with the words: the room the keyboard was holding is where the
         // reply is about to write itself, and the person's own words have gone up to the top
@@ -999,6 +1051,13 @@ struct ChatView: View {
                                     },
                                     onQuote: quoteIt,
                                     onEdit: editMessage,
+                                    onRestore: { message in
+                                        guard let id = message.deliveryId, let text = model.deliveryText(id) else { return }
+                                        draft = [draft, text].filter { !$0.isEmpty }.joined(separator: "\n\n")
+                                        drafts.append(contentsOf: message.drafts)
+                                        model.dismissDelivery(id)
+                                        composing = true
+                                    },
                                     groups: piece.groups,
                                     head: piece.head,
                                     foot: piece.foot
@@ -1372,7 +1431,7 @@ struct ChatView: View {
                 // where there is a session to leave — and not while the next one is being
                 // opened, when the words below still belong to the session being left.
                 HStack(spacing: MiloTheme.Space.three) {
-                    if !model.messages.isEmpty, !starting {
+                    if (!model.messages.isEmpty || model.sessionProject != nil), !starting {
                         HStack(spacing: 0) {
                             Button {
                                 if let project = model.sessionProject {
@@ -1393,6 +1452,20 @@ struct ChatView: View {
                             .accessibilityLabel("New session")
 
                             Menu {
+                                if let project = model.sessionProject, project.error == nil {
+                                    Section {
+                                        Button {
+                                            projectShortcut = ProjectShortcut(projectId: project.id, projectName: project.name, section: .files)
+                                        } label: {
+                                            Label("Files", systemImage: "folder")
+                                        }
+                                        Button {
+                                            projectShortcut = ProjectShortcut(projectId: project.id, projectName: project.name, section: .changes)
+                                        } label: {
+                                            Label("Changes", systemImage: "arrow.triangle.branch")
+                                        }
+                                    }
+                                }
                                 sessionActions(
                                     onRename: { renaming = model.sessionId },
                                     onExport: model.sessionBackend?.kind == "command-code" ? nil : { Task { await model.export(model.sessionId) } },

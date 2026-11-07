@@ -57,6 +57,8 @@ struct RootView: View {
         ZStack {
             MiloTheme.background.ignoresSafeArea()
             switch model.phase {
+            case .loading:
+                EmptyView()
             case .pairing:
                 PairingView()
             case .chat(let account):

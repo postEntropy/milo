@@ -21,9 +21,10 @@ export function Permissions({ request, expiresAt, onDecision }: {
       <div className="approval-title"><span className="approval-eyebrow">Approval needed</span><h2>Milo wants to run {tool}</h2><p>Review the action before letting it happen.</p></div>
     </div>
     <pre className="approval-command">{request.summary}</pre>
+    {request.approvalScope && <p>{request.approvalScope}</p>}
     <div className="approval-actions">
       <button className="allow-button" type="button" onClick={() => onDecision('allow')}><Icon name="check" size={15} /> Allow</button>
-      <button className="always-button" type="button" title="Allow this act without asking again in this session" onClick={() => onDecision('always')}>Always allow</button>
+      {request.approvalScope && <button className="always-button" type="button" onClick={() => onDecision('always')}>Allow for session</button>}
       <button className="deny-button" type="button" onClick={() => onDecision('deny')}>Deny</button>
       <span className="approval-time"><Icon name="clock" size={14} /> {Math.floor(remaining / 60)}:{String(remaining % 60).padStart(2, '0')}</span>
     </div>

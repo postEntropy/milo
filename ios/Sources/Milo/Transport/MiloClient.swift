@@ -47,6 +47,8 @@ final class MiloClient {
     /// What the daemon said when it turned us away before we were ever online.
     private var refusal: String?
     private var reconnect: Task<Void, Never>?
+    struct SendOutcome { let error: String?; let steered: Bool }
+    private var pending: [String: CheckedContinuation<SendOutcome, Never>] = [:]
 
     func connect(to account: Account) {
         self.account = account
@@ -57,6 +59,7 @@ final class MiloClient {
     }
 
     func disconnect() {
+        failPending()
         reconnect?.cancel()
         reconnect = nil
         account = nil
@@ -79,6 +82,38 @@ final class MiloClient {
             Task { @MainActor in self?.onSendFailed?() }
         }
         return true
+    }
+
+    /// Returns nil on acceptance, or a reason while leaving the draft with its sender.
+    func sendConfirmed(_ frame: ClientFrame, requestId: String = UUID().uuidString) async -> SendOutcome {
+        guard state == .online, let socket else { return SendOutcome(error: "Milo is disconnected.", steered: false) }
+        let id = requestId
+        var json = frame.json
+        json["requestId"] = id
+        guard let data = try? JSONSerialization.data(withJSONObject: json) else { return SendOutcome(error: "The message could not be prepared.", steered: false) }
+        return await withCheckedContinuation { continuation in
+            pending[id] = continuation
+            socket.send(.data(data)) { [weak self] error in
+                guard error != nil else { return }
+                Task { @MainActor in self?.finish(id, error: "Connection lost before Milo confirmed the message. It may have arrived; check the session before sending again.") }
+            }
+            Task { [weak self] in
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                self?.finish(id, error: "Milo did not confirm the message. It may have arrived; check the session before sending again.")
+            }
+        }
+    }
+
+    private func finish(_ id: String, error: String?, steered: Bool = false) {
+        pending.removeValue(forKey: id)?.resume(returning: SendOutcome(error: error, steered: steered))
+    }
+
+    private func failPending() {
+        let waiting = pending
+        pending.removeAll()
+        for continuation in waiting.values {
+            continuation.resume(returning: SendOutcome(error: "Connection lost before Milo confirmed the message. It may have arrived; check the session before sending again.", steered: false))
+        }
     }
 
     private func open() {
@@ -129,6 +164,10 @@ final class MiloClient {
             state = .unreadable
             return
         }
+        if case .sendResult(let id, let ok, let error, let steered) = frame {
+            finish(id, error: ok ? nil : (error ?? "Milo did not accept the message."), steered: steered)
+            return
+        }
         if case .error(let message) = frame, !everOnline {
             // A refusal arrives as an `error` before anything else — a protocol this
             // app does not speak, a frame the server would not take. It is an answer,
@@ -165,6 +204,7 @@ final class MiloClient {
      daemon that simply was not there.
      */
     private func dropped(_ outcome: Outcome) {
+        failPending()
         socket = nil
         guard account != nil else { return }
         if let refusal {
