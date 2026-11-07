@@ -14,3 +14,5 @@ worklog.md
 ios-pending.md
 docs/review-fixes.md
 docs/web-frontend-audit.md
+web/src/brand/LogoLab.tsx
+web/src/brand/logo-lab.css
