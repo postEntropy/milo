@@ -122,12 +122,12 @@ export class DiscordGateway implements Gateway {
     ): Promise<PermissionResult> => {
       const row = new ActionRowBuilder<ButtonBuilder>().addComponents(
         new ButtonBuilder().setCustomId('perm:allow').setLabel('Allow').setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId('perm:always').setLabel('Always').setStyle(ButtonStyle.Primary),
-        new ButtonBuilder().setCustomId('perm:deny').setLabel('Deny').setStyle(ButtonStyle.Danger),
       )
+      if (request.approvalScope) row.addComponents(new ButtonBuilder().setCustomId('perm:always').setLabel('Allow for session').setStyle(ButtonStyle.Primary))
+      row.addComponents(new ButtonBuilder().setCustomId('perm:deny').setLabel('Deny').setStyle(ButtonStyle.Danger))
 
       const prompt = await target.reply({
-        content: `⚠ Allow ${toolDisplayName(request.tool)}?\n\n${request.summary}`,
+        content: `⚠ Allow ${toolDisplayName(request.tool)}?\n\n${request.summary}${request.approvalScope ? `\n\n${request.approvalScope}` : ''}`,
         components: [row],
       })
 

@@ -32,6 +32,8 @@ export interface PermissionRequest {
   tool: string
   args: unknown
   summary: string
+  /** The scope of a remembered approval; null means this act cannot be remembered. */
+  approvalScope?: string | null
 }
 
 export interface PermissionResult {
@@ -231,6 +233,10 @@ export function barredByRules(args: unknown, cwd: string): boolean {
 export function approvalKey(tool: string, args: unknown, cwd: string): string | null {
   const record = args && typeof args === 'object' ? (args as Record<string, unknown>) : {}
 
+  // Each mail action needs its own confirmation; an earlier message or recipient
+  // is not an approval of a later one.
+  if (tool === 'gmail_send' || tool === 'gmail_modify' || tool === 'mail_labels') return null
+
   if (tool === 'shell_command') {
     const command = typeof record.command === 'string' ? record.command : ''
     const parsed = parseShell(command)
@@ -266,6 +272,19 @@ export function approvalKey(tool: string, args: unknown, cwd: string): string | 
   }
 
   return `tool:${tool}`
+}
+
+/** The same key used by the policy, described before a person chooses to remember it. */
+export function approvalScope(key: string | null): string | null {
+  if (!key) return null
+  const separator = key.indexOf(':')
+  const kind = key.slice(0, separator)
+  const value = key.slice(separator + 1)
+  if (kind === 'shell') return `For this session: commands with the same program and first non-option argument (${value}).`
+  if (kind === 'dir') return `For this session: writing and editing files in ${value}.`
+  if (kind === 'dirs') return `For this session: patches affecting exactly these directories: ${value}.`
+  if (kind === 'format') return `For this session: formatting ${value}.`
+  return `For this session: all calls to ${value}.`
 }
 
 /**

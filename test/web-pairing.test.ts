@@ -140,6 +140,29 @@ function upgrade(url: string): Promise<number | 'open'> {
 }
 
 describe('redeeming a code at the server', () => {
+  it('keeps the paired credential in the page and manifest', async () => {
+    const base = await server()
+    const { token } = addDevice({ name: 'Phone', platform: 'ios' })
+    const page = await (await fetch(`${base}/?t=${token}`)).text()
+    expect(page).toContain(`manifest.webmanifest?t=${token}`)
+    expect(page).not.toContain('manifest.webmanifest?t=test-token')
+    const manifest = await (await fetch(`${base}/manifest.webmanifest?t=${token}`)).json() as { start_url: string }
+    expect(manifest.start_url).toBe(`/?t=${token}`)
+    const bearer = await (await fetch(`${base}/manifest.webmanifest`, { headers: { authorization: `Bearer ${token}` } })).json() as { start_url: string }
+    expect(bearer.start_url).toBe(`/?t=${token}`)
+  })
+
+  it('closes an open socket when its device is revoked', async () => {
+    const base = await server()
+    const { device, token } = addDevice({ name: 'Phone', platform: 'ios' })
+    const socket = new WebSocket(`ws://127.0.0.1:${new URL(base).port}/ws?t=${token}`)
+    await new Promise<void>((resolve, reject) => { socket.once('open', resolve); socket.once('error', reject) })
+    const closed = new Promise<void>((resolve) => socket.once('close', () => resolve()))
+    revokeDevice(device.id)
+    await closed
+    expect(await upgrade(`ws://127.0.0.1:${new URL(base).port}/ws?t=${token}`)).toBe(401)
+    expect(await upgrade(`ws://127.0.0.1:${new URL(base).port}/ws?t=test-token`)).toBe('open')
+  })
   it('refuses a claim when no code has been opened', async () => {
     const base = await server()
     expect((await claim(base, { code: '000000', name: 'iPhone', platform: 'ios' })).status).toBe(401)

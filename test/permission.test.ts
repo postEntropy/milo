@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { z } from 'zod'
-import { approvalKey, barredByRules, DefaultPermissionPolicy, summarizeToolCall, withApprovals, withGrants, withPlan } from '../src/core/tools/permission.js'
+import { approvalKey, approvalScope, barredByRules, DefaultPermissionPolicy, summarizeToolCall, withApprovals, withGrants, withPlan } from '../src/core/tools/permission.js'
 import type { DangerReviewer } from '../src/core/tools/permission.js'
 import type { RuleBook } from '../src/core/tools/rule-file.js'
 import type { Tool } from '../src/core/tools/types.js'
@@ -512,6 +512,15 @@ describe('an always answer', () => {
 
   it('gives a chain no key at all', () => {
     expect(approvalKey('shell_command', { command: 'cd app && npm test' }, '/p')).toBeNull()
+    expect(approvalScope(approvalKey('shell_command', { command: 'cd app && npm test' }, '/p'))).toBeNull()
+  })
+
+  it('describes the directory and tool covered by a session approval', () => {
+    expect(approvalScope(approvalKey('write_file', { path: '/p/src/a.ts' }, '/p'))).toBe('For this session: writing and editing files in /p/src.')
+    expect(approvalScope(approvalKey('some_tool', {}, '/p'))).toBe('For this session: all calls to some_tool.')
+    for (const tool of ['gmail_send', 'gmail_modify', 'mail_labels']) {
+      expect(approvalKey(tool, {}, '/p')).toBeNull()
+    }
   })
 
   it('keys a write by its directory, and a patch by all of them', () => {

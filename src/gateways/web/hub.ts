@@ -410,20 +410,27 @@ export class WebHub {
     }
 
     if (frame.type === 'send') {
+      const reject = (error: string): void => {
+        if (frame.requestId) client.send({ type: 'send-result', requestId: frame.requestId, ok: false, error })
+        else client.send({ type: 'error', message: error })
+      }
+      const accept = (steered = false): void => {
+        if (frame.requestId) client.send({ type: 'send-result', requestId: frame.requestId, ok: true, ...(steered ? { steered: true } : {}) })
+      }
       const pendingCodeTurn = chat.session.backend.kind === 'command-code' ? chat.session.backend.pendingTurn : undefined
       const currentOwner = this.liveOwner(chat.session.id) ?? chatId
       if (pendingCodeTurn && !this.turns.busy(currentOwner)) {
-        client.send({ type: 'error', message: 'A Command Code turn is awaiting recovery. Review its status before sending another message.' })
+        reject('A Command Code turn is awaiting recovery. Review its status before sending another message.')
         return
       }
       let files: IncomingFile[] = []
       try {
         files = frame.uploadIds?.map((uploadId) => this.takeUpload(uploadId)) ?? []
       } catch (error) {
-        client.send({ type: 'error', message: errorMessage(error) })
+        reject(errorMessage(error))
         return
       }
-      if (!frame.text.trim() && !files.length) return
+      if (!frame.text.trim() && !files.length) { reject('The message is empty.'); return }
       // A message from a sibling goes into the queue the session's turn lives in, so
       // it runs after the one in flight and its frames reach both screens. With
       // nothing live, the queue is this chat's own — the cross-process case,
@@ -431,7 +438,8 @@ export class WebHub {
       const sessionId = chat.session.id
       const key = this.liveOwner(sessionId) ?? chatId
       if (files.length) {
-        this.startTurn(key, frame.text, frame.target, [], files)
+        this.startTurn(key, frame.text, frame.target, [], files, undefined, frame.requestId)
+        accept()
         return
       }
       if (frame.intent === 'steer' && chat.session.backend.kind === 'milo') {
@@ -439,10 +447,12 @@ export class WebHub {
         if (steered) {
           const turnId = this.live.get(sessionId)?.id
           if (turnId) this.emitTurn(sessionId, { type: 'event', turnId, event: { type: 'steer', text: frame.text } })
+          accept(true)
           return
         }
       }
-      this.startTurn(key, frame.text, frame.target)
+      this.startTurn(key, frame.text, frame.target, [], undefined, undefined, frame.requestId)
+      accept()
       return
     }
 
@@ -467,11 +477,17 @@ export class WebHub {
 
     if (frame.type === 'command') {
       if (chat.session.backend.kind === 'command-code') {
-        client.send({ type: 'error', message: 'Milo slash commands are not available in Command Code Sessions.' })
+        const error = 'Milo slash commands are not available in Command Code Sessions.'
+        if (frame.requestId) client.send({ type: 'send-result', requestId: frame.requestId, ok: false, error })
+        else client.send({ type: 'error', message: error })
         return
       }
-      void this.command(client, chat, frame.text).catch((error: unknown) => {
-        client.send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
+      void this.command(client, chat, frame.text).then(() => {
+        if (frame.requestId) client.send({ type: 'send-result', requestId: frame.requestId, ok: true })
+      }).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : String(error)
+        if (frame.requestId) client.send({ type: 'send-result', requestId: frame.requestId, ok: false, error: message })
+        else client.send({ type: 'error', message })
       })
     }
 
@@ -998,7 +1014,7 @@ export class WebHub {
     }
   }
 
-  private startTurn(chatId: string, text: string, target?: SendTarget, images: ImagePart[] = [], files?: IncomingFile[], retryPendingId?: string): void {
+  private startTurn(chatId: string, text: string, target?: SendTarget, images: ImagePart[] = [], files?: IncomingFile[], retryPendingId?: string, requestId?: string): void {
     // A person who is already typing does not want ideas. The call they started
     // is about to be wasted work, so it is cut here rather than left to finish
     // behind the turn and replace cards nobody is looking at any more.
@@ -1028,7 +1044,7 @@ export class WebHub {
       }
       if (sessionId) this.emitTurn(sessionId, { type: 'turn-start', id, text: files?.length
         ? [text, files.map((file) => `Attached ${file.name}`).join(', ')].filter(Boolean).join('\n')
-        : text, ...(pendingRetry ? { retryPendingId: pendingRetry } : {}) })
+        : text, ...(pendingRetry ? { retryPendingId: pendingRetry } : {}), ...(requestId ? { requestId } : {}) })
       // Said again now the live turn is open: the state frame the caller sent when it
       // queued this turn read `busy` before the queue had registered it, so it still
       // said false. This is the one that turns the sibling's composer busy.

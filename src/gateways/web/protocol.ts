@@ -9,7 +9,11 @@ import type { VerificationResult } from '../../core/verification.js'
 import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
 import { SESSION_SURFACES, type SessionBackendView, type SessionSurface } from '../../core/sessions/types.js'
 import type { CommandEntry } from '../command-catalog.js'
+import type { PermissionRequest } from '../../core/tools/permission.js'
+export type { PermissionRequest } from '../../core/tools/permission.js'
 
+// 17: a turn identifies the submitted message that started it.
+// 16: clients wait for a send-result before clearing the message they just sent.
 // 15: Command Code model changes are session controls, and the model rides in the
 // `session-backend` view so every open surface can show the same selection.
 // 14: a session too large for one websocket message hands its transcript over in
@@ -35,7 +39,7 @@ import type { CommandEntry } from '../command-catalog.js'
 // is what the version is for. 8 made the handshake's `genui` a flag again: there is
 // one way a turn draws, so a page naming a transport named something that no longer
 // exists.
-export const PROTOCOL_VERSION = 15
+export const PROTOCOL_VERSION = 17
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
@@ -74,12 +78,6 @@ export const THINKING_LEVELS = ['expanded', 'collapsed'] as const
 export type ThinkingDisplay = (typeof THINKING_LEVELS)[number]
 export const EFFORT_LEVELS = ['low', 'medium', 'high'] as const
 export const SEARCH_PROVIDERS = ['off', 'tavily', 'exa', 'parallel'] as const
-
-export interface PermissionRequest {
-  tool: string
-  args: unknown
-  summary: string
-}
 
 export type AgentEvent =
   | { type: 'text-delta'; delta: string }
@@ -143,7 +141,7 @@ const CONTROL_ACTIONS = ['stop', 'allow', 'always', 'deny', 'plan', 'approve-pla
 
 export type ClientFrame =
   | { type: 'hello'; version: number; chatId: string; genui?: boolean; client?: ClientKind; surface?: SessionSurface }
-  | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[] }
+  | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[]; requestId?: string }
   | {
       type: 'control'
       /** `always`: allow, and for this session do not ask again about the same act. */
@@ -155,7 +153,7 @@ export type ClientFrame =
     }
   /** Stop a background job. Pressing the control is the confirmation. */
   | { type: 'job-kill'; id: string }
-  | { type: 'command'; text: string }
+  | { type: 'command'; text: string; requestId?: string }
   | { type: 'action'; actionId: string; messageId?: string }
   /** Pointer/keyboard the person sent into the live browser panel. */
   | { type: 'panel-input'; input: PanelInput }
@@ -256,6 +254,8 @@ export interface ActiveTurn {
 }
 
 export type ServerFrame =
+  | { type: 'send-result'; requestId: string; ok: true; steered?: boolean }
+  | { type: 'send-result'; requestId: string; ok: false; error: string }
   | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; continues?: boolean; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn; project?: ProjectView; backend?: SessionBackendView; plan?: boolean; commands?: CommandEntry[] }
   /**
    * The rest of a transcript too large for the `ready` alone, in order, each one whole
@@ -267,7 +267,7 @@ export type ServerFrame =
   | { type: 'session-backend'; backend: SessionBackendView }
   /** The session's planning turn went on or off, for every screen watching it. */
   | { type: 'plan'; plan: boolean }
-  | { type: 'turn-start'; id: string; text: string; retryPendingId?: string }
+  | { type: 'turn-start'; id: string; text: string; retryPendingId?: string; requestId?: string }
   /**
    * A step of the turn. `says` is what the turn's own row shows about the step, in the
    * daemon's words (`statusText` in `src/core/sessions/format.ts`): a surface that cannot
@@ -436,6 +436,7 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
   if (
     frame.type === 'send' &&
     typeof frame.text === 'string' &&
+    (frame.requestId === undefined || (typeof frame.requestId === 'string' && frame.requestId.length > 0 && frame.requestId.length <= 128)) &&
     (frame.uploadIds === undefined || (Array.isArray(frame.uploadIds) && frame.uploadIds.every((id) => typeof id === 'string'))) &&
     (frame.intent === undefined || frame.intent === 'steer' || frame.intent === 'queue') &&
     (frame.target === undefined || isSendTarget(frame.target))
@@ -458,7 +459,7 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
   if (frame.type === 'job-kill' && typeof frame.id === 'string' && frame.id !== '') {
     return frame as ClientFrame
   }
-  if (frame.type === 'command' && typeof frame.text === 'string') return frame as ClientFrame
+  if (frame.type === 'command' && typeof frame.text === 'string' && (frame.requestId === undefined || (typeof frame.requestId === 'string' && frame.requestId.length > 0 && frame.requestId.length <= 128))) return frame as ClientFrame
   if (frame.type === 'panel-input' && isPanelInput(frame.input)) return frame as ClientFrame
   if ((frame.type === 'panel-activate' || frame.type === 'panel-close') && typeof frame.key === 'string' && frame.key !== '') {
     return frame as ClientFrame

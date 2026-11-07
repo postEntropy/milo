@@ -117,14 +117,35 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
       webSocketServer.emit('connection', websocket, request)
     })
   })
-  webSocketServer.on('connection', (socket: WebSocket) => {
+  webSocketServer.on('connection', (socket: WebSocket, request: IncomingMessage) => {
+    const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
+    const credential = suppliedToken(request, url.searchParams.get('t'))
+    const owner = matches(credential, token)
+    const device = owner ? undefined : deviceForToken(credential)
+    const stillAuthorized = () => owner || (device !== undefined && deviceForToken(credential)?.id === device.id)
+    if (!stillAuthorized()) {
+      socket.terminate()
+      return
+    }
+    // Revocation is normally written by a separate `milo devices` process.
+    const check = device ? setInterval(() => {
+      if (!stillAuthorized()) socket.terminate()
+    }, 1000) : undefined
     let chatId: string | undefined
     const client = {
       send(frame: ServerFrame): void {
+        if (!stillAuthorized()) {
+          socket.terminate()
+          return
+        }
         if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame))
       },
     }
     socket.on('message', (data) => {
+      if (!stillAuthorized()) {
+        socket.terminate()
+        return
+      }
       let parsed: unknown
       try {
         parsed = JSON.parse(data.toString())
@@ -168,7 +189,10 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
       }
       hub.handle(client, frame, chatId)
     })
-    socket.on('close', () => hub.disconnect(client))
+    socket.on('close', () => {
+      if (check) clearInterval(check)
+      hub.disconnect(client)
+    })
   })
 
   await new Promise<void>((resolve, reject) => {
@@ -380,8 +404,9 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
   // manifest without one.
   if (url.pathname === '/manifest.webmanifest') {
     const manifest = JSON.parse(readFileSync(path.join(root, 'manifest.webmanifest'), 'utf8')) as Record<string, unknown>
+    const credential = suppliedToken(request, url.searchParams.get('t'))
     const named = authorized(request, token, url.searchParams.get('t'))
-      ? { ...manifest, start_url: `/?t=${encodeURIComponent(token)}` }
+      ? { ...manifest, start_url: `/?t=${encodeURIComponent(credential)}` }
       : manifest
     response.writeHead(200, {
       'content-type': 'application/manifest+json; charset=utf-8',
@@ -408,7 +433,7 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
   const html = page && authorized(request, token, url.searchParams.get('t'))
     ? readFileSync(file, 'utf8').replace(
       'href="/manifest.webmanifest"',
-      `href="/manifest.webmanifest?t=${encodeURIComponent(token)}"`,
+      `href="/manifest.webmanifest?t=${encodeURIComponent(suppliedToken(request, url.searchParams.get('t')))}"`,
     )
     : null
   response.writeHead(200, {
@@ -452,12 +477,16 @@ function headerName(name: string): string {
  * that also writes the config — and why it can be taken back on its own.
  */
 function authorized(request: IncomingMessage, token: string, queryToken?: string | null): boolean {
-  const header = request.headers.authorization
-  const supplied = header?.startsWith('Bearer ')
-    ? header.slice(7)
-    : queryToken ?? ''
+  const supplied = suppliedToken(request, queryToken)
   if (matches(supplied, token)) return true
   return deviceForToken(supplied) !== undefined
+}
+
+function suppliedToken(request: IncomingMessage, queryToken?: string | null): string {
+  const header = request.headers.authorization
+  return header?.startsWith('Bearer ')
+    ? header.slice(7)
+    : queryToken ?? ''
 }
 
 /** Constant-time: a length difference is not a match, and neither is a differing byte. */

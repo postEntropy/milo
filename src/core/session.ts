@@ -21,7 +21,7 @@ import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEf
 import type { ModelProfile } from './providers/profile.js'
 import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, SessionAdmin, ToolEffect, ToolRegistry } from './tools/index.js'
 import type { JobManager } from './jobs/index.js'
-import { approvalKey, isPlanTool, withApprovals, withGrants, withPlan } from './tools/index.js'
+import { approvalKey, approvalScope, isPlanTool, withApprovals, withGrants, withPlan } from './tools/index.js'
 import { taskDescription } from './tools/task.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent, type RunTrace } from './agent/loop.js'
@@ -1034,9 +1034,9 @@ export class Session {
     const asker = opts?.ask
     const ask: PermissionAsker | undefined = asker
       ? async (request) => {
-          const result = await asker(request)
+          const key = approvalKey(request.tool, request.args, cwd)
+          const result = await asker({ ...request, approvalScope: approvalScope(key) })
           if (result.allowed && result.remember) {
-            const key = approvalKey(request.tool, request.args, cwd)
             if (key) this.approved.add(key)
           }
           return result

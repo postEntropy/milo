@@ -414,12 +414,12 @@ export class TelegramGateway implements Gateway {
     const id = randomUUID()
     let promptId: number | undefined
     try {
-      const prompt = await bot.api.sendMessage(chatId, `⚠ Allow ${toolDisplayName(request.tool)}?\n\n${request.summary}`, {
+      const prompt = await bot.api.sendMessage(chatId, `⚠ Allow ${toolDisplayName(request.tool)}?\n\n${request.summary}${request.approvalScope ? `\n\n${request.approvalScope}` : ''}`, {
         reply_markup: {
           inline_keyboard: [
             [
               { text: '✅ Allow', callback_data: encodePermission(id, true) },
-              { text: '♾️ Always', callback_data: encodePermission(id, true, true) },
+              ...(request.approvalScope ? [{ text: 'Allow for session', callback_data: encodePermission(id, true, true) }] : []),
               { text: '🚫 Deny', callback_data: encodePermission(id, false) },
             ],
           ],

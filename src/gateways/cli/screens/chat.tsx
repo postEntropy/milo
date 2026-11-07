@@ -301,7 +301,7 @@ export function ChatScreen({
       // A tool is waiting on y/n, and the composer is not on screen.
       if (isCtrlC(inputChar, key)) resolvePermission(false)
       else if (inputChar === 'y' || inputChar === 'Y') resolvePermission(true)
-      else if (inputChar === 'a' || inputChar === 'A') resolvePermission(true, true)
+      else if ((inputChar === 'a' || inputChar === 'A') && permission.approvalScope) resolvePermission(true, true)
       else if (inputChar === 'n' || inputChar === 'N' || key.escape) resolvePermission(false)
       return
     }
@@ -1074,7 +1074,8 @@ export function ChatScreen({
         <Box flexDirection="column" paddingX={2}>
           <Text color={theme.warning}>⚠ Milo wants to run {toolDisplayName(permission.tool)}:</Text>
           <Text color={theme.warning}>  {permission.summary}</Text>
-          <Text color={theme.muted}>[y] allow · [a] always · [n] deny</Text>
+          {permission.approvalScope && <Text color={theme.muted}>  {permission.approvalScope}</Text>}
+          <Text color={theme.muted}>{permission.approvalScope ? '[y] allow · [a] allow for session · [n] deny' : '[y] allow · [n] deny'}</Text>
         </Box>
       ) : (
         <Box
