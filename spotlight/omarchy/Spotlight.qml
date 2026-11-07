@@ -31,6 +31,8 @@ Item {
   property bool opened: false
   /** Asked: the popup has stepped aside and the desktop is usable again. */
   property bool working: false
+  /** The pointer is over the popup, so it should take keyboard focus. */
+  property bool pointerInside: false
 
   readonly property string pluginId: (manifest && manifest.id) || "dev.leonardo.milo_spotlight"
 
@@ -209,7 +211,10 @@ Item {
     } else if (message.type === "state") {
       busy = message.busy
     } else if (message.type === "accepted") {
-      if (query === pendingQuery) prompt.text = ""
+      // Compare the field itself: `query` is updated from TextEdit.onTextChanged
+      // and can lag the bridge acknowledgement by a QML event turn. Keep newer
+      // text the person may have started typing, but clear the accepted question.
+      if (prompt.text.trim() === pendingQuery.trim()) prompt.text = ""
       pendingQuery = ""
       sending = false
       status = "Thinking…"
@@ -364,11 +369,9 @@ Item {
   OverlayWindow {
     id: panel
     shown: root.opened
-    // Exclusive only while the question is being typed: a layer surface that asks
-    // for focus keeps the whole desktop from receiving keys. Asked, it holds
-    // `None`, so the person can type into whatever is behind this — the popup
-    // takes the keyboard back only when it is clicked.
-    shownKeyboardFocus: root.working ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
+    // Keep keyboard focus with the desktop until the pointer enters the popup.
+    // This applies both before the first question and while Milo is working.
+    shownKeyboardFocus: root.pointerInside ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
     WlrLayershell.namespace: "omarchy-milo-spotlight"
 
     // The rest of the screen is not ours: only the bubbles and the field take a
@@ -383,6 +386,21 @@ Item {
       height: Math.min(root.maxHeight, column.implicitHeight)
       x: parent.width - width - root.margin
       y: parent.height - height - root.margin
+
+      // Observe clicks even when a child control (especially the TextEdit)
+      // handles the pointer event itself. With keyboard focus released, the
+      // first click must reclaim it before the person can type again.
+      TapHandler {
+        acceptedButtons: Qt.LeftButton
+        onTapped: root.focusInput()
+      }
+
+      HoverHandler {
+        onHoveredChanged: {
+          root.pointerInside = hovered
+          if (hovered) Qt.callLater(function() { prompt.forceActiveFocus() })
+        }
+      }
 
       // A click on the bubbles brings the field back, for a follow-up.
       MouseArea {
