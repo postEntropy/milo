@@ -480,7 +480,8 @@ final class AppModel {
             AccountStore.save(next)
             phase = .chat(next)
         } catch {
-            failed(error)
+            if case ApiError.unreachable = error { connectionSaid = true }
+            else { failed(error) }
             // The socket is opened either way: a daemon that could not start a session
             // leaves the conversation it does know for the socket to replay.
             next = account
@@ -913,7 +914,10 @@ final class AppModel {
             cacheSessions(account)
             note = nil
         } catch {
-            if mine == sessionsSeq { failed(error) }
+            if mine == sessionsSeq {
+                if case ApiError.unreachable = error { connectionSaid = true }
+                else { failed(error) }
+            }
         }
     }
 

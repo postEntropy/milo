@@ -3,12 +3,14 @@ import Foundation
 /// What the daemon answers for one action, or the reason it refused.
 enum ApiError: LocalizedError {
     case badAddress
+    case unreachable(String)
     case refused(String)
     case badAnswer
 
     var errorDescription: String? {
         switch self {
         case .badAddress: return "The address this device was paired with is not usable."
+        case .unreachable(let address): return "Could not reach the daemon at \(address)."
         case .refused(let message): return message
         case .badAnswer: return "The daemon answered with something that was not JSON."
         }
@@ -160,7 +162,7 @@ enum MiloApi {
         do {
             (data, response) = try await URLSession.shared.data(for: request)
         } catch {
-            throw ApiError.refused("Could not reach the daemon at \(account.display).")
+            throw ApiError.unreachable(account.display)
         }
         guard let http = response as? HTTPURLResponse else { throw ApiError.badAnswer }
         guard http.statusCode == 200 else {
