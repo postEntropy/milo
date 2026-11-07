@@ -45,7 +45,9 @@ Session does not show a warning.
   answering model without carrying the attachment's instructions into the helper's system.
 - **Live state** — the surface, the environment, the tool catalog, the setup, the skills,
   the remembered notes and the compaction summary. The environment names the session's
-  project; the code manual is what turns that fact into how to work.
+  project; the code manual is what turns that fact into how to work. Spotlight turns
+  carry their own surface so the agent keeps answers and updates brief for the popup;
+  continuing the Session on another surface uses that surface's instructions.
 - **The verification gate** — not a prompt section: an event after the turn. When
   `verification.enabled` is on and the turn wrote anything in a project, the project's own
   test/typecheck/lint commands run. A failed check is sent back to the model for one bounded

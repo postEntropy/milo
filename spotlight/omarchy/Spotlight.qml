@@ -61,8 +61,20 @@ Item {
 
   // ── what the panel is showing ────────────────────────────────────────────
   property string query: ""
+  property string pendingQuery: ""
+  property bool sending: false
+  property bool permissionSending: false
+  property string projectName: ""
+  property string chatId: ""
+  property var projects: []
+  property bool projectsRequested: false
+  property int selectedProject: -1
+  readonly property var matchingProjects: query.startsWith("@") && !query.includes("\n")
+    ? projects.filter(function(project) { return project.name.toLowerCase().includes(query.slice(1).toLowerCase()) || project.id.toLowerCase().includes(query.slice(1).toLowerCase()) }).slice(0, 5)
+    : []
   property string step: ""
   property string status: "Ready"
+  property string errorText: ""
   property bool busy: false
   property bool connected: false
   /** No daemon is there: the popup says so and keeps a question in its field rather than losing it. */
@@ -78,7 +90,7 @@ Item {
   readonly property string offlineText: "Milo is not running. Start it with milo serve."
 
   readonly property bool awaitingPermission: permissionId !== ""
-  readonly property string line: step !== "" ? step : status
+  readonly property string line: errorText !== "" ? errorText : step !== "" ? step : status
 
   /** What the line says when no turn is in flight: the daemon's state, or the helper's own failure. */
   function idleStatus() {
@@ -87,34 +99,23 @@ Item {
     return "Ready"
   }
 
-  /** The conversation, one bubble each: `you`, `milo`, `step`. */
+  /** The visible session, including progress and failed tools. */
   ListModel { id: thread }
 
   // ── the host's contract ──────────────────────────────────────────────────
   function open(payloadJson) {
     opened = true
     working = false
-    thread.clear()
-    miloAt = -1
-    query = ""
-    prompt.text = ""
-    step = ""
-    status = idleStatus()
-    busy = false
-    clearPermission()
-    send({ type: "new" })
-    Qt.callLater(function() { prompt.forceActiveFocus() })
+    Qt.callLater(function() { if (root.awaitingPermission) allowButton.forceActiveFocus(); else prompt.forceActiveFocus() })
   }
 
   /** Called by the shell when it hides the overlay for any reason. */
   function close() {
-    stop()
     opened = false
   }
 
   /** Dismissed by the person: Escape, a click outside, the close button, or a hand-over. */
   function dismiss() {
-    stop()
     opened = false
     working = false
     if (shell && typeof shell.hide === "function") shell.hide(pluginId)
@@ -128,7 +129,7 @@ Item {
     else open("{}")
   }
 
-  /** Back to typing, in the conversation that is already open. */
+  /** Back to typing in the session that is already open. */
   function focusInput() {
     working = false
     prompt.forceActiveFocus()
@@ -137,8 +138,29 @@ Item {
 
   function stop() {
     if (!busy) return
-    busy = false
+    status = "Stopping…"
+    step = ""
     send({ type: "stop" })
+  }
+
+  function newSession() {
+    if (busy || sending) return
+    thread.clear()
+    miloAt = -1
+    projectName = ""
+    chatId = ""
+    clearPermission()
+    send({ type: "new" })
+    errorText = ""
+    status = "Connecting…"
+    focusInput()
+  }
+
+  function appendHistory(messages) {
+    for (var i = 0; i < messages.length; i++) {
+      if (messages[i].text !== "") thread.append({ role: messages[i].role === "user" ? "you" : messages[i].role === "assistant" ? "milo" : messages[i].role, text: messages[i].text })
+    }
+    miloAt = -1
   }
 
   // ── talking to the bridge ────────────────────────────────────────────────
@@ -157,40 +179,82 @@ Item {
     restartDelay = 1000
     if (message.type === "status") {
       status = message.text
+      if (message.text === "Reconnecting…") { connected = false; permissionSending = false }
     } else if (message.type === "offline") {
       offline = true
       connected = false
-      busy = false
       step = ""
       status = offlineText
     } else if (message.type === "ready") {
       connected = true
       offline = false
       helperError = ""
+      chatId = message.chatId || ""
+      projectName = message.project || ""
+      thread.clear()
+      appendHistory(message.messages || [])
+      busy = message.busy
+      clearPermission()
       // The turn in flight keeps its own line; a reconnection that interrupts nothing says where things stand.
       if (!busy) status = idleStatus()
+    } else if (message.type === "history") {
+      appendHistory(message.messages || [])
+    } else if (message.type === "turn-start") {
+      if (thread.count === 0 || thread.get(thread.count - 1).role !== "you" || thread.get(thread.count - 1).text !== message.text)
+        thread.append({ role: "you", text: message.text })
+      thread.append({ role: "milo", text: "" })
+      miloAt = thread.count - 1
+      busy = true
+      status = "Thinking…"
+    } else if (message.type === "state") {
+      busy = message.busy
+    } else if (message.type === "accepted") {
+      if (query === pendingQuery) prompt.text = ""
+      pendingQuery = ""
+      sending = false
+      status = "Thinking…"
+      working = true
+      prompt.focus = false
+    } else if (message.type === "projects") {
+      projects = message.projects
     } else if (message.type === "text") {
       appendToAnswer(String(message.delta))
+    } else if (message.type === "notice") {
+      thread.append({ role: "milo", text: String(message.text) })
+      miloAt = -1
     } else if (message.type === "tool") {
+      if (message.state === "running") {
+        if (miloAt >= 0 && thread.get(miloAt).text !== "") thread.setProperty(miloAt, "role", "progress")
+        miloAt = -1
+      }
+      if (message.state === "failed") {
+        thread.append({ role: "tool", text: message.text + " failed" })
+        miloAt = -1
+      }
       step = message.text
     } else if (message.type === "permission") {
       permissionId = String(message.id)
       permissionTool = String(message.tool)
       permissionSummary = String(message.summary)
       status = "Waiting for you"
+      step = ""
       busy = true
-      working = true
+      working = false
+      permissionSending = false
       Qt.callLater(function() { allowButton.forceActiveFocus() })
     } else if (message.type === "permission-result") {
       if (String(message.id) === permissionId) clearPermission()
     } else if (message.type === "end") {
       busy = false
+      clearPermission()
       step = ""
       status = message.says ? String(message.says) : (message.status === "done" ? "Done" : message.status === "stopped" ? "Stopped" : "Something went wrong")
     } else if (message.type === "error") {
-      status = String(message.message)
-      busy = false
-    } else if (message.type === "fork") {
+      errorText = String(message.message)
+      step = ""
+      sending = false
+      permissionSending = false
+    } else if (message.type === "open") {
       if (message.url) Quickshell.execDetached(["xdg-open", String(message.url)])
       dismiss()
     }
@@ -209,39 +273,39 @@ Item {
     permissionId = ""
     permissionTool = ""
     permissionSummary = ""
+    permissionSending = false
   }
 
   function answerPermission(decision) {
-    if (permissionId === "") return
+    if (permissionId === "" || permissionSending) return
+    permissionSending = true
     send({ type: "permission", id: permissionId, decision: decision })
-    clearPermission()
-    Qt.callLater(function() { prompt.forceActiveFocus() })
   }
 
   function ask() {
     const text = query.trim()
     // Nothing to send a question to: keep it in the field, and let the line say why.
-    if (text === "" || busy || offline || !bridge.running) return
-    thread.append({ role: "you", text: text })
-    thread.append({ role: "milo", text: "" })
-    miloAt = thread.count - 1
-    query = ""
-    prompt.text = ""
+    if (text === "" || busy || sending || offline || !connected || !bridge.running) return
+    pendingQuery = query
+    sending = true
+    errorText = ""
     step = ""
-    status = "Thinking…"
-    busy = true
-    // Asked: the popup steps out of the way so the machine can be used while the
-    // answer arrives. The keyboard is given back to whatever is in front.
-    working = true
-    prompt.focus = false
+    status = "Sending…"
     send({ type: "ask", text: text })
   }
 
-  /** The question outgrew the popup: the bridge forks it and hands over its address. */
+  /** Open this session in the full app. */
   function handOver() {
-    if (thread.count === 0 || busy) return
+    if (!connected) return
     status = "Opening in Milo…"
     send({ type: "continue" })
+  }
+
+  function selectProject(project) {
+    prompt.text = "@" + project.id + " "
+    prompt.cursorPosition = prompt.length
+    selectedProject = -1
+    focusInput()
   }
 
   // ── the answer process ───────────────────────────────────────────────────
@@ -253,12 +317,15 @@ Item {
     onRunningChanged: {
       if (running) {
         root.helperError = ""
+        if (root.chatId !== "") root.send({ type: "resume", chatId: root.chatId })
         return
       }
       // The helper is the popup's own, not the daemon: its death says nothing about
       // whether Milo is up, so the line reports what happened and restarts quietly.
       root.connected = false
-      root.busy = false
+      if (root.sending) root.errorText = "The helper stopped before the message was confirmed. Check the session before sending again."
+      root.sending = false
+      root.permissionSending = false
       root.step = ""
       root.status = root.idleStatus()
       restartTimer.restart()
@@ -326,7 +393,34 @@ Item {
       Column {
         id: column
         width: parent.width
+        y: Math.min(0, stack.height - implicitHeight)
         spacing: root.gap
+
+        Flickable {
+          id: messagesView
+          width: parent.width
+          height: Math.min(messagesColumn.implicitHeight, Math.max(0, root.maxHeight - promptSurface.height - footerSurface.height - (permissionSurface.visible ? permissionSurface.height + root.gap : 0) - (projectSuggestions.visible ? projectSuggestions.implicitHeight + root.gap : 0) - root.gap * 3))
+          contentWidth: width
+          contentHeight: messagesColumn.implicitHeight
+          clip: true
+          boundsBehavior: Flickable.StopAtBounds
+          visible: thread.count > 0
+          property bool followEnd: true
+          onMovementStarted: followEnd = false
+          onMovementEnded: followEnd = atYEnd
+          onContentHeightChanged: {
+            if (followEnd) Qt.callLater(function() { messagesView.contentY = Math.max(0, messagesView.contentHeight - messagesView.height) })
+          }
+
+          ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AsNeeded
+            onPressedChanged: messagesView.followEnd = pressed ? false : messagesView.atYEnd
+          }
+
+          Column {
+            id: messagesColumn
+            width: messagesView.width
+            spacing: root.gap
 
         Repeater {
           model: thread
@@ -337,7 +431,7 @@ Item {
             required property string role
             required property string text
 
-            width: column.width
+            width: messagesColumn.width
             // An answer that has not said anything yet has no bubble: the status
             // line below is what says the turn is on its way.
             height: bubbleRow.text === "" ? 0 : bubble.height
@@ -357,27 +451,44 @@ Item {
               // apart at a glance.
               color: bubbleRow.role === "you" ? root.youFill : root.background
 
-              Text {
+              TextEdit {
                 id: label
                 anchors.fill: parent
                 anchors.margins: root.pad
                 text: bubbleRow.text
                 // The answer is written in markdown, like every other Milo surface draws
                 // it; the person's own words are shown as they typed them.
-                textFormat: bubbleRow.role === "you" ? Text.PlainText : Text.MarkdownText
+                textFormat: bubbleRow.role === "you" ? TextEdit.PlainText : TextEdit.MarkdownText
                 color: root.foreground
+                opacity: bubbleRow.role === "progress" ? 0.7 : 1
                 font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                lineHeight: 1.3
-                wrapMode: Text.Wrap
+                font.pixelSize: bubbleRow.role === "progress" ? Style.font.bodySmall : Style.font.body
+                readOnly: true
+                selectByMouse: true
+                wrapMode: TextEdit.Wrap
               }
             }
+          }
+        }
+          }
+        }
+
+        Button {
+          visible: messagesView.visible && !messagesView.atYEnd
+          text: "Latest"
+          focusable: true
+          foreground: root.foreground
+          accent: root.accent
+          onClicked: {
+            messagesView.followEnd = true
+            messagesView.contentY = Math.max(0, messagesView.contentHeight - messagesView.height)
           }
         }
 
         // An approval is the one thing the popup cannot skip: a turn waiting on
         // one goes nowhere until the person says yes or no.
         BorderSurface {
+          id: permissionSurface
           width: parent.width
           height: permissionColumn.implicitHeight + root.pad * 2
           radius: root.cornerRadius
@@ -418,6 +529,8 @@ Item {
               Button {
                 id: allowButton
                 text: "Allow"
+                focusable: true
+                enabled: root.connected && !root.permissionSending
                 foreground: root.foreground
                 accent: root.accent
                 onClicked: root.answerPermission("allow")
@@ -425,7 +538,9 @@ Item {
 
               Button {
                 text: "Always"
-                tooltipText: "Allow this for the rest of the conversation"
+                focusable: true
+                tooltipText: "Allow this for the rest of the Session"
+                enabled: root.connected && !root.permissionSending
                 foreground: root.foreground
                 accent: root.accent
                 onClicked: root.answerPermission("always")
@@ -433,6 +548,8 @@ Item {
 
               Button {
                 text: "Deny"
+                focusable: true
+                enabled: root.connected && !root.permissionSending
                 foreground: root.urgent
                 accent: root.urgent
                 onClicked: root.answerPermission("deny")
@@ -444,6 +561,7 @@ Item {
         // The question line, in a surface of its own so it reads as one control
         // among the messages rather than as part of them.
         BorderSurface {
+          id: promptSurface
           width: parent.width
           height: promptRow.implicitHeight + Style.spacing.controlPaddingY * 2
           radius: root.cornerRadius
@@ -468,39 +586,96 @@ Item {
               Layout.alignment: Qt.AlignVCenter
             }
 
-            TextField {
-              id: prompt
+            Flickable {
+              id: promptScroll
               Layout.fillWidth: true
-              foreground: root.foreground
-              accent: root.accent
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              placeholderText: "Ask Milo anything…"
-              horizontalPadding: 0
-              verticalPadding: Style.spacing.controlPaddingY / 2
-              background: null
-              // The field owns the two keys: a layer-shell surface is not an active
-              // Qt window, so a window-level shortcut never fires there.
-              onTextChanged: root.query = text
-              // A TextField consumes Return itself, so the popup listens to its own
-              // `accepted` rather than to the key: the latter never sees it.
-              onAccepted: root.ask()
-              Keys.priority: Keys.BeforeItem
-              Keys.onPressed: function(event) {
-                if (event.key === Qt.Key_Escape) {
-                  root.dismiss()
-                  event.accepted = true
-                } else if ((event.key === Qt.Key_Return || event.key === Qt.Key_Enter)
-                  && (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier))) {
-                  root.handOver()
-                  event.accepted = true
+              Layout.preferredHeight: Math.min(prompt.contentHeight, Math.max(prompt.font.pixelSize * 2, root.maxHeight - footer.implicitHeight - (permissionSurface.visible ? permissionSurface.height + root.gap : 0) - Style.spacing.controlPaddingY * 3 - root.gap))
+              contentWidth: width
+              contentHeight: prompt.contentHeight
+              clip: true
+              boundsBehavior: Flickable.StopAtBounds
+
+              function showCursor() {
+                var top = prompt.cursorRectangle.y
+                var bottom = top + prompt.cursorRectangle.height
+                if (top < contentY) contentY = top
+                else if (bottom > contentY + height) contentY = bottom - height
+              }
+
+              TextEdit {
+                id: prompt
+                width: promptScroll.width
+                height: contentHeight
+                color: root.foreground
+                selectionColor: root.accent
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.body
+                wrapMode: TextEdit.Wrap
+                selectByMouse: true
+                onTextChanged: {
+                  root.query = text
+                  root.selectedProject = -1
+                  if (!text.startsWith("@")) root.projectsRequested = false
+                  if (text.startsWith("@") && !root.projectsRequested) {
+                    root.projectsRequested = true
+                    root.send({ type: "projects" })
+                  }
+                }
+                onCursorRectangleChanged: promptScroll.showCursor()
+                Keys.priority: Keys.BeforeItem
+                Keys.onPressed: function(event) {
+                  if (event.key === Qt.Key_Escape) {
+                    root.dismiss()
+                    event.accepted = true
+                  } else if (root.matchingProjects.length > 0 && (event.key === Qt.Key_Down || event.key === Qt.Key_Up)) {
+                    root.selectedProject = event.key === Qt.Key_Down
+                      ? Math.min(root.matchingProjects.length - 1, root.selectedProject + 1)
+                      : Math.max(0, root.selectedProject - 1)
+                    event.accepted = true
+                  } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                    if (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier)) root.handOver()
+                    else if (event.modifiers & Qt.ShiftModifier) return
+                    else if (root.selectedProject >= 0 && root.selectedProject < root.matchingProjects.length) root.selectProject(root.matchingProjects[root.selectedProject])
+                    else root.ask()
+                    event.accepted = true
+                  }
+                }
+
+                Text {
+                  visible: prompt.text === ""
+                  text: "Ask Milo anything…"
+                  color: root.foreground
+                  opacity: 0.5
+                  font: prompt.font
                 }
               }
             }
 
             Button {
+              iconText: "󰏫"
+              tooltipText: "New session"
+              focusable: true
+              visible: thread.count > 0
+              enabled: !root.busy && !root.sending
+              foreground: root.foreground
+              accent: root.accent
+              onClicked: root.newSession()
+            }
+
+            Button {
+              iconText: "󰏌"
+              tooltipText: "Open in Milo"
+              focusable: true
+              enabled: root.connected
+              foreground: root.foreground
+              accent: root.accent
+              onClicked: root.handOver()
+            }
+
+            Button {
               visible: root.busy
               text: "Stop"
+              focusable: true
               foreground: root.foreground
               accent: root.accent
               onClicked: {
@@ -512,9 +687,34 @@ Item {
             Button {
               iconText: "󰅖"
               tooltipText: "Close"
+              focusable: true
               foreground: root.foreground
               accent: root.accent
               onClicked: root.dismiss()
+            }
+          }
+        }
+
+        Column {
+          id: projectSuggestions
+          width: parent.width
+          spacing: root.gap / 2
+          visible: root.matchingProjects.length > 0 && prompt.activeFocus
+
+          Repeater {
+            model: root.matchingProjects
+            Button {
+              required property var modelData
+              required property int index
+              width: parent.width
+              text: modelData.name
+              selected: index === root.selectedProject
+              tooltipText: "Start a session in " + modelData.name
+              foreground: root.foreground
+              accent: root.accent
+              onClicked: {
+                root.selectProject(modelData)
+              }
             }
           }
         }
@@ -523,6 +723,7 @@ Item {
         // floats over the desktop, and text laid straight on whatever is behind it
         // is unreadable.
         BorderSurface {
+          id: footerSurface
           width: parent.width
           height: footer.implicitHeight + Style.spacing.controlPaddingY
           radius: root.cornerRadius
@@ -541,7 +742,7 @@ Item {
             Text {
               textFormat: Text.PlainText
               width: parent.width
-              text: root.line
+              text: root.projectName !== "" ? root.projectName + " · " + root.line : root.line
               color: root.busy ? root.accent : root.foreground
               opacity: 0.85
               font.family: root.fontFamily
@@ -549,19 +750,6 @@ Item {
               elide: Text.ElideRight
             }
 
-            Text {
-              textFormat: Text.PlainText
-              width: parent.width
-              // Only while it is true: at work the popup holds no keyboard, and Escape
-              // there belongs to the window in front.
-              visible: !root.working
-              text: "Esc closes · Ctrl + Enter continues in Milo"
-              color: root.foreground
-              opacity: 0.55
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideRight
-            }
           }
         }
       }

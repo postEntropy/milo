@@ -332,11 +332,14 @@ cannot start is reported with the first thing it said on stderr, which is the li
 A question may open with a project: `@Camera fpv start the service` asks it in Camera fpv's folder,
 opening the work session the Work screen would have opened — the same session, tools and rules, without
 leaving the popup. The mention is the project's name, or its id when two projects share a name, at the
-start of the message; a mention that names none is answered with the projects there are.
+start of the message; typing `@` also offers matching projects, and a mention that names none is
+answered with the projects there are. The active project appears beside the status.
 
-Asked, the popup hands the keyboard back so the machine stays usable; `Enter` asks, `Stop` ends the
-turn, `Esc` closes and `Ctrl+Enter` forks the conversation into the browser. The answer is drawn as
-markdown, each tool call as one line, and a confirmation as an Allow / Always / Deny card. Every
+Asked, the popup hands the keyboard back so the machine stays usable; `Enter` asks, `Shift+Enter`
+adds a line, `Stop` ends the turn, and `Esc` hides the popup without stopping it. Reopening shows the
+same session; the new-session button starts another. `Ctrl+Enter` or the open button opens the same
+session in the browser, even during a turn. The answer is selectable and scrollable Markdown, tool
+activity appears in the status line, and a confirmation is an Allow / Always / Deny card. Every
 colour, font and radius comes from the shell's own theme (`Commons.Color`, `Style`), so a theme swap
 repaints the popup with everything else.
 

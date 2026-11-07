@@ -72,7 +72,7 @@ async function daemonOn(port: number): Promise<void> {
 }
 
 /** A daemon that keeps what it was asked: the HTTP calls and the frames each socket said. */
-async function recordingDaemon(port: number): Promise<{
+async function recordingDaemon(port: number, busy = false, reject = false): Promise<{
   requests: { url: string; body: unknown }[]
   frames: Record<string, unknown>[]
 }> {
@@ -106,7 +106,14 @@ async function recordingDaemon(port: number): Promise<{
         const project = chats.get(String(frame.chatId))
         const where = project ? { project: { id: project, name: project, path: `/tmp/${project}` } } : {}
         socket.send(JSON.stringify({ type: 'ready', sessionId: 'session-1', ...where }))
+        if (busy) socket.send(JSON.stringify({ type: 'state', busy: true }))
       } else if (frame.type === 'send') {
+        if (reject) {
+          socket.send(JSON.stringify({ type: 'send-result', requestId: frame.requestId, ok: false, error: 'Message refused' }))
+          return
+        }
+        socket.send(JSON.stringify({ type: 'turn-start', id: 'turn-1', text: frame.text, requestId: frame.requestId }))
+        socket.send(JSON.stringify({ type: 'send-result', requestId: frame.requestId, ok: true }))
         socket.send(JSON.stringify({ type: 'turn-end', id: 'turn-1', status: 'done' }))
       }
     })
@@ -126,6 +133,73 @@ async function until(check: () => boolean): Promise<void> {
 }
 
 describe('the popup bridge', () => {
+  it('opens the same session in Milo while its turn is running', async () => {
+    const port = await freePort()
+    const daemon = await recordingDaemon(port, true)
+    const { child, next } = bridge(port)
+    await next('ready')
+    await next('state')
+    child.stdin.write(`${JSON.stringify({ type: 'continue' })}\n`)
+    const opened = await next('open')
+    expect(new URL(String(opened.url)).searchParams.get('open')).toBe('session-1')
+    expect(daemon.requests.some((request) => request.url === '/api/fork-session')).toBe(false)
+  }, 20_000)
+
+  it('rebuilds the visible session before replaying a turn after reconnecting', async () => {
+    const port = await freePort()
+    const server = createServer((request, response) => {
+      request.resume()
+      response.writeHead(200).end('{}')
+    })
+    const sockets = new WebSocketServer({ server })
+    let connections = 0
+    sockets.on('connection', (socket) => {
+      connections += 1
+      socket.on('message', (data) => {
+        const frame = JSON.parse(data.toString()) as Record<string, unknown>
+        if (frame.type !== 'hello') return
+        socket.send(JSON.stringify({ type: 'ready', sessionId: 'session-1', activeTurn: { id: 'turn-1', at: 1 }, messages: [{ role: 'user', parts: [{ kind: 'text', text: 'Hello' }] }] }))
+        socket.send(JSON.stringify({ type: 'turn-start', id: 'turn-1', text: 'Hello' }))
+        socket.send(JSON.stringify({ type: 'event', turnId: 'turn-1', event: { type: 'text-delta', delta: 'Working' } }))
+        if (connections === 1) setTimeout(() => socket.close(), 20)
+      })
+    })
+    servers.push(server)
+    await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve))
+    const { reports } = bridge(port)
+
+    await until(() => reports.filter((report) => report.type === 'ready').length === 2)
+    const starts = reports.filter((report) => report.type === 'ready')
+    expect(starts).toMatchObject([
+      { type: 'ready', chatId: expect.any(String), busy: true, messages: [{ role: 'user', text: 'Hello' }] },
+      { type: 'ready', chatId: starts[0]?.chatId, busy: true, messages: [{ role: 'user', text: 'Hello' }] },
+    ])
+    expect(reports.filter((report) => report.type === 'text')).toHaveLength(2)
+  }, 20_000)
+
+  it('reports a refused message instead of treating it as accepted', async () => {
+    const port = await freePort()
+    await recordingDaemon(port, false, true)
+    const { child, next, reports } = bridge(port)
+    await next('ready')
+    child.stdin.write(`${JSON.stringify({ type: 'ask', text: 'Hello' })}\n`)
+    expect(await next('error')).toEqual({ type: 'error', message: 'Message refused' })
+    expect(reports.some((report) => report.type === 'accepted')).toBe(false)
+  }, 20_000)
+
+  it('reconnects a restarted helper to the popup session', async () => {
+    const port = await freePort()
+    const daemon = await recordingDaemon(port)
+    const first = bridge(port)
+    const ready = await first.next('ready')
+    first.child.kill()
+
+    const restarted = bridge(port)
+    restarted.child.stdin.write(`${JSON.stringify({ type: 'resume', chatId: ready.chatId })}\n`)
+    await until(() => daemon.frames.filter((frame) => frame.type === 'hello' && frame.chatId === ready.chatId).length === 2)
+    expect((await restarted.next('ready')).chatId).toBe(ready.chatId)
+  }, 20_000)
+
   it('says the daemon is not running and starts nothing', async () => {
     const port = await freePort()
     const { next } = bridge(port)
@@ -147,7 +221,7 @@ describe('the popup bridge', () => {
 
     await daemonOn(port)
 
-    expect(await next('ready')).toEqual({ type: 'ready' })
+    expect(await next('ready')).toMatchObject({ type: 'ready', chatId: expect.any(String), busy: false, messages: [] })
     expect(reports.some((report) => report.type === 'error')).toBe(false)
   }, 20_000)
 
@@ -165,18 +239,20 @@ describe('the popup bridge', () => {
   it('opens a work session in the project a question names, and asks it there', async () => {
     const port = await freePort()
     const project = { id: 'camera-fpv-1', name: 'Camera fpv', path: '/tmp/camera', createdAt: 1 }
-    const { child, next } = bridge(port, [project])
+    const { child, next, reports } = bridge(port, [project])
     const daemon = await recordingDaemon(port)
 
     await next('ready')
+    expect(daemon.frames.find((frame) => frame.type === 'hello')).toMatchObject({ client: 'spotlight', surface: 'spotlight' })
     child.stdin.write(`${JSON.stringify({ type: 'ask', text: '@Camera fpv start the service' })}\n`)
 
     expect(await next('end')).toMatchObject({ type: 'end' })
+    expect(reports.some((report) => report.type === 'accepted')).toBe(true)
     const created = daemon.requests.find((request) => request.url === '/api/new-session')
     expect(created?.body).toMatchObject({ project: 'camera-fpv-1', surface: 'spotlight' })
     // The mention chose the folder; the session is told the request alone.
-    expect(daemon.frames.filter((frame) => frame.type === 'send')).toEqual([
-      { type: 'send', text: 'start the service' },
+    expect(daemon.frames.filter((frame) => frame.type === 'send')).toMatchObject([
+      { type: 'send', text: 'start the service', requestId: expect.any(String) },
     ])
   }, 20_000)
 
@@ -194,7 +270,7 @@ describe('the popup bridge', () => {
 
     // One session was opened; the second mention only names the folder it is in.
     expect(daemon.requests.filter((request) => request.url === '/api/new-session')).toHaveLength(1)
-    expect(daemon.frames.filter((frame) => frame.type === 'send')).toEqual([
+    expect(daemon.frames.filter((frame) => frame.type === 'send')).toMatchObject([
       { type: 'send', text: 'start the service' },
       { type: 'send', text: 'stop the service' },
     ])

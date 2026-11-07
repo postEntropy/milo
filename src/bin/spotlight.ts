@@ -4,9 +4,9 @@ import process from 'node:process'
 import { createInterface } from 'node:readline'
 import { WebSocket } from 'undici'
 import { loadConfig, readAuth, resolveGatewayToken, saveAuth } from '../core/config/load.js'
-import { matchProjectMention, type Project } from '../core/projects.js'
-import type { ClientFrame, ServerFrame } from '../gateways/web/protocol.js'
-import { PROTOCOL_VERSION } from '../gateways/web/protocol.js'
+import { matchProjectMention, projectViews, type Project } from '../core/projects.js'
+import type { ClientFrame, ServerFrame, TranscriptMessage } from '../gateways/web/protocol.js'
+import { PROTOCOL_VERSION, proseOf } from '../gateways/web/protocol.js'
 import { appUrl, hostForUrl } from '../gateways/web/spotlight.js'
 import { toolDisplayName, toolText } from '../gateways/tool-line.js'
 import { errorMessage } from '../util/errors.js'
@@ -18,25 +18,49 @@ type Command =
   | { type: 'stop' }
   | { type: 'permission'; id: string; decision: 'allow' | 'always' | 'deny' }
   | { type: 'continue' }
+  | { type: 'projects' }
+  | { type: 'resume'; chatId: string }
 
 /** What the panel is told, one JSON object per line. */
 type Report =
   | { type: 'status'; text: string }
-  | { type: 'ready' }
+  | { type: 'ready'; chatId: string; project?: string; busy: boolean; messages: { role: string; text: string }[] }
+  | { type: 'history'; messages: { role: string; text: string }[] }
+  | { type: 'turn-start'; text: string }
+  | { type: 'state'; busy: boolean }
+  | { type: 'accepted' }
+  | { type: 'projects'; projects: { id: string; name: string }[] }
   | { type: 'offline' }
   | { type: 'text'; delta: string }
+  | { type: 'notice'; text: string }
   | { type: 'tool'; text: string; state: 'running' | 'done' | 'failed' }
   | { type: 'permission'; id: string; tool: string; summary: string; expiresAt: number }
   | { type: 'permission-result'; id: string; allowed: boolean }
   | { type: 'end'; status: 'done' | 'stopped' | 'error'; says?: string }
   | { type: 'error'; message: string }
-  | { type: 'fork'; url: string }
+  | { type: 'open'; url: string }
 
 /** What the probe of a running server found. */
 type Probe = 'ok' | 'refused' | 'down'
 
 const PROBE_TIMEOUT_MS = 1200
 const RETRY_MS = 1500
+
+function visibleMessages(message: TranscriptMessage): { role: string; text: string }[] {
+  const files = (message.attachments ?? []).map((file) => `File available in Milo: ${file.name}`)
+  if (message.role === 'user') return [{ role: 'user', text: [proseOf(message), ...files].filter(Boolean).join('\n\n') }]
+  const rows: { role: string; text: string }[] = []
+  for (const [index, part] of message.parts.entries()) {
+    if (part.kind === 'text' && part.text) {
+      const followedByTool = message.parts.slice(index + 1).some((next) => next.kind === 'tool')
+      rows.push({ role: followedByTool ? 'progress' : 'assistant', text: part.text })
+    } else if (part.kind === 'tool' && part.tool.state === 'failed') {
+      rows.push({ role: 'tool', text: `${part.tool.text} failed` })
+    }
+  }
+  if (files.length) rows.push({ role: 'assistant', text: files.join('\n\n') })
+  return rows
+}
 
 /**
  * `milo spotlight` — the process behind the desktop popup.
@@ -68,6 +92,7 @@ class SpotlightBridge {
   private generation = 0
   private connected = false
   private busy = false
+  private pendingRequest: string | null = null
   /**
    * A question waiting for the daemon to greet the chat it belongs to. `resolved`
    * is a request whose project was already chosen: it is said as it is, not read
@@ -145,8 +170,7 @@ class SpotlightBridge {
   }
 
   /**
-   * A fresh question starts in a fresh conversation. The one before is not taken
-   * with it: it stays on disk with the turns it has, to be read where it can be read.
+   * Start a new session; the previous one remains on disk with its turns.
    */
   private reset(): void {
     if (this.busy) {
@@ -158,7 +182,7 @@ class SpotlightBridge {
   }
 
   /**
-   * Binds the popup to a chat. A fresh chat is a fresh conversation; one a work
+   * Binds the popup to a chat. A fresh chat is a fresh session; one a work
    * session was started for over HTTP is already bound to that session by the
    * runtime, so the handshake finds it. `queued` is said as soon as the daemon
    * greets the chat, which is what lets a mention become the turn it names.
@@ -188,7 +212,7 @@ class SpotlightBridge {
     const socket = new WebSocket(this.wsUrl)
     this.socket = socket
     socket.addEventListener('open', () => {
-      socket.send(JSON.stringify({ type: 'hello', version: PROTOCOL_VERSION, chatId, genui: false, surface: 'spotlight' } satisfies ClientFrame))
+      socket.send(JSON.stringify({ type: 'hello', version: PROTOCOL_VERSION, chatId, genui: false, client: 'spotlight', surface: 'spotlight' } satisfies ClientFrame))
     })
     socket.addEventListener('message', (event) => {
       if (generation !== this.generation || typeof event.data !== 'string') return
@@ -210,6 +234,11 @@ class SpotlightBridge {
   private scheduleRetry(): void {
     if (this.stopped || this.retry) return
     this.connected = false
+    if (this.pendingRequest) {
+      this.pendingRequest = null
+      this.report({ type: 'error', message: 'Connection lost before the message was confirmed. Check the session before sending again.' })
+    }
+    this.report({ type: 'status', text: 'Reconnecting…' })
     this.retry = setTimeout(() => {
       this.retry = null
       if (!this.stopped) void this.reconnect()
@@ -223,7 +252,10 @@ class SpotlightBridge {
   }
 
   private sendFrame(frame: ClientFrame): void {
-    if (this.socket?.readyState !== 1) return
+    if (this.socket?.readyState !== 1) {
+      this.report({ type: 'error', message: 'Milo is reconnecting. The action was not sent.' })
+      return
+    }
     this.socket.send(JSON.stringify(frame))
   }
 
@@ -234,7 +266,8 @@ class SpotlightBridge {
       // Where this session works, read from the session rather than remembered: a
       // daemon restarted behind the popup hands back a session that may be elsewhere.
       this.project = frame.project?.id
-      this.report({ type: 'ready' })
+      this.busy = Boolean(frame.activeTurn)
+      this.report({ type: 'ready', chatId: this.chatId, ...(frame.project ? { project: frame.project.name } : {}), busy: this.busy, messages: (frame.messages ?? []).flatMap(visibleMessages) })
       if (this.queued !== null) {
         const { text, resolved } = this.queued
         this.queued = null
@@ -243,8 +276,24 @@ class SpotlightBridge {
       }
       return
     }
+    if (frame.type === 'history') {
+      this.report({ type: 'history', messages: frame.messages.flatMap(visibleMessages) })
+      return
+    }
+    if (frame.type === 'turn-start') {
+      this.busy = true
+      this.report({ type: 'turn-start', text: frame.text })
+      return
+    }
+    if (frame.type === 'send-result' && frame.requestId === this.pendingRequest) {
+      this.pendingRequest = null
+      if (frame.ok) this.report({ type: 'accepted' })
+      else { this.busy = false; this.report({ type: 'error', message: frame.error }) }
+      return
+    }
     if (frame.type === 'state') {
       this.busy = frame.busy
+      this.report({ type: 'state', busy: frame.busy })
       return
     }
     if (frame.type === 'event') {
@@ -252,10 +301,18 @@ class SpotlightBridge {
       if (event.type === 'text-delta') this.report({ type: 'text', delta: event.delta })
       else if (event.type === 'tool-start') this.report({ type: 'tool', text: toolText(event.name, event.args), state: 'running' })
       else if (event.type === 'tool-end') this.report({ type: 'tool', text: toolText(event.name), state: event.isError ? 'failed' : 'done' })
+      else if (event.type === 'error') this.report({ type: 'error', message: event.message })
+      else if (event.type === 'verification' && !event.ok) this.report({ type: 'error', message: event.text })
       return
     }
     if (frame.type === 'permission') {
       this.report({ type: 'permission', id: frame.id, tool: toolDisplayName(frame.request.tool), summary: frame.request.summary, expiresAt: frame.expiresAt })
+      return
+    }
+    if (frame.type === 'command-result') {
+      const files = (frame.attachments ?? []).map((file) => `File available in Milo: ${file.name}`)
+      const text = [frame.reply, ...files].filter(Boolean).join('\n\n')
+      if (text) this.report({ type: 'notice', text })
       return
     }
     if (frame.type === 'permission-result') {
@@ -296,7 +353,7 @@ class SpotlightBridge {
       return
     }
     // The session already works there: the mention only chose the context, and the
-    // words belong to the conversation in front.
+    // words belong to the session in front.
     if (this.project === mention.project.id) {
       this.send(mention.text)
       return
@@ -310,8 +367,13 @@ class SpotlightBridge {
 
   /** Sends the words into the session the popup is bound to. */
   private send(text: string): void {
+    if (!this.connected || this.socket?.readyState !== 1) {
+      this.report({ type: 'error', message: 'Milo is reconnecting. Your message was not sent.' })
+      return
+    }
     this.busy = true
-    this.sendFrame({ type: 'send', text })
+    this.pendingRequest = randomUUID()
+    this.sendFrame({ type: 'send', text, requestId: this.pendingRequest })
   }
 
   /**
@@ -319,7 +381,7 @@ class SpotlightBridge {
    * same session the Work screen starts, with the folder's tools, rules and changes,
    * opened without the list. The session is created over HTTP first, because only a
    * request can bind a chat to a session the handshake has not minted yet; the chat id
-   * is fresh, so the conversation before this one stays where it is.
+   * is fresh, so the session before this one stays where it is.
    */
   private async startInProject(project: Project, text: string): Promise<void> {
     const epoch = this.chatEpoch
@@ -343,19 +405,11 @@ class SpotlightBridge {
   }
 
   /**
-   * The question outgrew the popup: fork it into a session of its own and hand its
-   * address to the browser. The fork is separate, so the popup carrying on with a
-   * fresh conversation cannot take the real one with it.
+   * Open the same session in the browser, including a turn still in progress.
    */
   private async handOver(): Promise<void> {
-    if (this.busy || !this.sessionId) return
-    try {
-      const fork = await this.post<{ id: string }>('fork-session', { chatId: randomUUID(), sessionId: this.sessionId })
-      this.report({ type: 'fork', url: appUrl({ host: this.host, port: this.port, token: this.token, open: fork.id }) })
-      this.reset()
-    } catch (error) {
-      this.complain(errorMessage(error))
-    }
+    if (!this.sessionId) { this.report({ type: 'error', message: 'The session is not connected yet.' }); return }
+    this.report({ type: 'open', url: appUrl({ host: this.host, port: this.port, token: this.token, open: this.sessionId }) })
   }
 
   private async post<T>(action: string, body: Record<string, unknown>): Promise<T> {
@@ -385,6 +439,11 @@ class SpotlightBridge {
     else if (parsed.type === 'stop') this.sendFrame({ type: 'control', action: 'stop' })
     else if (parsed.type === 'permission') this.sendFrame({ type: 'control', action: parsed.decision, id: parsed.id })
     else if (parsed.type === 'continue') void this.handOver()
+    else if (parsed.type === 'resume' && /^[0-9a-f-]{36}$/i.test(parsed.chatId)) this.startChat(parsed.chatId, null)
+    else if (parsed.type === 'projects') {
+      try { this.report({ type: 'projects', projects: projectViews().filter((project) => !project.error).map(({ id, name }) => ({ id, name })) }) }
+      catch (error) { this.report({ type: 'error', message: errorMessage(error) }) }
+    }
   }
 
   private readCommands(): void {

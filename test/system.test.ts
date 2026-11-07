@@ -213,6 +213,15 @@ describe('buildSystemPrompt', () => {
     expect(cli).not.toContain("not on the user's device")
   })
 
+  it('asks for concise, scannable answers in the Spotlight', () => {
+    const base = { base: 'BASE', cwd: '/a', provider: 'p', model: 'm', tools: [], memories: [] }
+    const spotlight = buildSystemPrompt({ ...base, surface: 'spotlight' })
+    expect(spotlight).toContain('the Milo Spotlight popup')
+    expect(spotlight).toContain('lead with the result, keep updates and answers brief')
+    expect(spotlight).toContain('bold and lists')
+    expect(buildSystemPrompt({ ...base, surface: 'web' })).not.toContain('a small popup')
+  })
+
   it('fences remembered text and says it is data, not instructions', () => {
     const prompt = buildSystemPrompt({
       base: 'BASE',

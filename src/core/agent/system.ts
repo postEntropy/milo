@@ -13,7 +13,7 @@ import type { JobFacts } from '../jobs/index.js'
 import { GENUI_SECTION } from '../genui.js'
 import { formatDuration, plural } from '../../util/format.js'
 
-export type SurfaceKind = 'cli' | 'telegram' | 'discord' | 'web' | 'ios'
+export type SurfaceKind = 'cli' | 'telegram' | 'discord' | 'web' | 'ios' | 'spotlight'
 
 const SURFACE_LABEL: Record<SurfaceKind, string> = {
   cli: 'terminal (the Milo CLI chat)',
@@ -21,6 +21,7 @@ const SURFACE_LABEL: Record<SurfaceKind, string> = {
   discord: 'a Discord channel',
   web: 'the Milo web app (a browser chat)',
   ios: 'the Milo iOS app (a chat on a phone)',
+  spotlight: 'the Milo Spotlight popup',
 }
 
 /** The phone draws what the browser draws: one renderer, the same blocks. */
@@ -33,16 +34,17 @@ const SURFACE_FORMATTING: Record<SurfaceKind, string> = {
   discord: 'Markdown renders (bold, italics, code blocks); keep it light',
   web: FULL_MARKDOWN,
   ios: FULL_MARKDOWN,
+  spotlight: 'Markdown renders, including bold and lists; use it sparingly to make key details easy to scan',
 }
 
 /**
  * How long an answer should run, where the surface asks for a length of its own.
- * A phone gives a reply a few lines and no more, so what is said there has to earn
- * each one; the other surfaces hold every kind of turn and take the base style as
- * it stands.
+ * A phone and the Spotlight give a reply little room, so what is said there has to
+ * earn each line; the other surfaces take the base style as it stands.
  */
 const SURFACE_LENGTH: Partial<Record<SurfaceKind, string>> = {
   ios: 'a phone screen — a sentence or two by default, and only expand when the person asks for detail',
+  spotlight: 'a small popup — lead with the result, keep updates and answers brief, and expand when the request needs detail',
 }
 
 /**
