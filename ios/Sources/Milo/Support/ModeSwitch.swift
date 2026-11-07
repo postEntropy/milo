@@ -1,29 +1,54 @@
 import SwiftUI
+import UIKit
 
-/// Chat or Work: the platform's own segmented control, because this is the shape iOS gives
-/// to "two sides of one thing" — one list with two worlds, not a switch of its own invention.
-/// The system draws the raised half, its material, its slide and its contrast in both themes.
-/// The drawer is its one place: it says which half of the session list is drawn, so choosing
-/// the world and reading it are the same control.
+/// Chat or Work, drawn by the same native segmented control in the drawer and the chat.
 struct ModeSwitch: View {
-    /// Whether Work is the half in front.
     let work: Bool
     let onChat: () -> Void
     let onWork: () -> Void
 
     var body: some View {
-        Picker("Chat or Work", selection: Binding(
-            get: { work },
-            set: { next in
-                if next { onWork() } else { onChat() }
-            }
-        )) {
-            Text("Chat").tag(false)
-            Text("Work").tag(true)
+        WorldSegments(work: work, height: 42, onChat: onChat, onWork: onWork)
+            .frame(height: 42)
+            .glassEffect(.regular.interactive(), in: Capsule())
+            .sensoryFeedback(.selection, trigger: work)
+    }
+}
+
+/// Giving UIKit the actual bounds grows the selected segment along with its surface.
+private struct WorldSegments: UIViewRepresentable {
+    let work: Bool
+    let height: CGFloat
+    let onChat: () -> Void
+    let onWork: () -> Void
+
+    func makeUIView(context: Context) -> UISegmentedControl {
+        let control = UISegmentedControl(items: ["Chat", "Work"])
+        control.accessibilityLabel = "Chat or Work"
+        control.addTarget(context.coordinator, action: #selector(Coordinator.changed(_:)), for: .valueChanged)
+        return control
+    }
+
+    func updateUIView(_ control: UISegmentedControl, context: Context) {
+        context.coordinator.parent = self
+        control.selectedSegmentIndex = work ? 1 : 0
+        control.setTitleTextAttributes([.font: UIFont.preferredFont(forTextStyle: .subheadline)], for: .normal)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UISegmentedControl, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? uiView.intrinsicContentSize.width, height: height)
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    @MainActor
+    final class Coordinator: NSObject {
+        var parent: WorldSegments
+        init(_ parent: WorldSegments) { self.parent = parent }
+
+        @objc func changed(_ control: UISegmentedControl) {
+            if control.selectedSegmentIndex == 1 { parent.onWork() }
+            else { parent.onChat() }
         }
-        .pickerStyle(.segmented)
-        .labelsHidden()
-        .glassEffect(.regular.interactive(), in: Capsule())
-        .sensoryFeedback(.selection, trigger: work)
     }
 }

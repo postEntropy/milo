@@ -1,4 +1,33 @@
 import SwiftUI
+import UIKit
+
+private struct StatusBarBlur: UIViewRepresentable {
+    @Environment(\.colorScheme) private var colorScheme
+
+    final class BlurView: UIVisualEffectView {
+        private var animator: UIViewPropertyAnimator?
+        private var style: UIBlurEffect.Style?
+
+        func setStyle(_ next: UIBlurEffect.Style) {
+            guard style != next else { return }
+            animator?.stopAnimation(true)
+            effect = nil
+            style = next
+            let animation = UIViewPropertyAnimator(duration: 1, curve: .linear) {
+                self.effect = UIBlurEffect(style: next)
+            }
+            animation.fractionComplete = 0.1
+            animator = animation
+        }
+    }
+
+    func makeUIView(context: Context) -> BlurView { BlurView() }
+
+    func updateUIView(_ view: BlurView, context: Context) {
+        let style: UIBlurEffect.Style = colorScheme == .dark ? .systemUltraThinMaterialDark : .systemUltraThinMaterialLight
+        view.setStyle(style)
+    }
+}
 
 /// The frames, in the window's own space, of every part of the thread that owns a sideways
 /// drag of its own — a code block, a table, a slider, a chart's scrub. A drag that begins
@@ -202,10 +231,9 @@ struct ChatView: View {
                     .ignoresSafeArea()
                 }
                 .overlay(alignment: .top) {
-                    if !routines && !tasks && !work {
+                    if !routines && !tasks && !work && !model.messages.isEmpty {
                         GeometryReader { geometry in
-                            Rectangle()
-                                .fill(.ultraThinMaterial)
+                            StatusBarBlur()
                                 .mask {
                                     LinearGradient(
                                         stops: [.init(color: .black, location: 0.55), .init(color: .clear, location: 1)],

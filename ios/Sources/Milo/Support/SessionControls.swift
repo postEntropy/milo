@@ -309,7 +309,7 @@ extension MiloClient.State {
     var tone: Color {
         switch self {
         case .refused, .unreadable: return MiloTheme.danger
-        case .connecting, .offline: return MiloTheme.warning
+        case .connecting, .offline: return MiloTheme.danger
         case .online, .idle: return MiloTheme.muted
         }
     }
@@ -349,10 +349,11 @@ struct ConnectionPill: View {
     var body: some View {
         if let state = model.connectionLine {
             let tone = model.connection.tone
-            let content = HStack(spacing: MiloTheme.Space.two) {
+            HStack(spacing: MiloTheme.Space.three) {
                 Image(systemName: model.connection.symbol)
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(tone)
+                    .symbolEffect(.rotate, options: .repeating, isActive: model.connection.waiting)
                 if model.connection.waiting {
                     Glare(text: state, font: MiloTheme.Text.small, tone: tone)
                 } else {
@@ -362,19 +363,16 @@ struct ConnectionPill: View {
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-            }
-            .padding(.horizontal, MiloTheme.Space.three)
-            .padding(.vertical, MiloTheme.Space.two)
-            .glassEffect(.regular.tint(tone.opacity(0.28)), in: Capsule())
-
-            HStack(spacing: 0) {
-                Spacer(minLength: 0)
-                content
                 Button("Reconnect") { model.reconnect() }
-                    .font(MiloTheme.Text.small)
-                    .padding(.leading, MiloTheme.Space.two)
-                Spacer(minLength: 0)
+                    .font(MiloTheme.Text.small.weight(.semibold))
+                    .foregroundStyle(MiloTheme.foreground)
+                    .padding(.horizontal, MiloTheme.Space.three)
+                    .padding(.vertical, MiloTheme.Space.two)
+                    .background(MiloTheme.surface, in: Capsule())
             }
+            .padding(MiloTheme.Space.three)
+            .glassEffect(.regular.tint(tone.opacity(0.12)), in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+            .padding(.top, MiloTheme.Space.two)
             .transition(.opacity)
         }
     }
