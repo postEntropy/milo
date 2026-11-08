@@ -34,6 +34,7 @@ import { Notice, useAutoDismiss, type Report } from './ui/Notice.js'
 import { Select } from './ui/Select.js'
 import { MiloMark } from './ui/MiloMark.js'
 import {
+  COLOR_PALETTE_PRESETS,
   DEFAULT_PALETTE_STATE,
   applyColorPalette,
   effectivePaletteId,
@@ -192,6 +193,7 @@ export default function App() {
   const searchRef = useRef<HTMLInputElement>(null)
   /** The desktop sidebar, folded away; the phone keeps its drawer instead. */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('milo-sidebar') === 'collapsed')
+  const [paletteMenuOpen, setPaletteMenuOpen] = useState(false)
   /**
    * The panel beside the chat: the tabs Milo opened, and whether it is folded away.
    * The tabs are session state and always come back. Whether the column is out is
@@ -1454,7 +1456,9 @@ export default function App() {
     {sidebarOpen && <button className="sidebar-scrim" type="button" aria-label="Close menu" onClick={() => setSidebarOpen(false)} />}
     <aside className="sidebar" aria-label="Main navigation">
       <div className="sidebar-chat-nav">
-        <div className="brand-row"><MiloMark size={30} className="brand-mark" /><span className="brand-name" translate="no">Milo</span><button className="sidebar-toggle" type="button" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><Icon name="panel-left" size={17} /></button></div>
+        <div className="brand-row"><button className="brand-mark-button" type="button" aria-label="Choose colour palette" aria-expanded={paletteMenuOpen} onClick={() => setPaletteMenuOpen((open) => !open)}><MiloMark size={30} className="brand-mark" /></button><span className="brand-name" translate="no">Milo</span><button className="sidebar-toggle" type="button" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><Icon name="panel-left" size={17} /></button>
+          {paletteMenuOpen && <div className="brand-palette-menu" role="menu" aria-label="Colour palette">{COLOR_PALETTE_PRESETS.map((option) => <button key={option.id} type="button" role="menuitemradio" aria-checked={effectivePalette === option.id} className={`brand-palette-option ${effectivePalette === option.id ? 'active' : ''}`} onClick={() => { setPaletteMenuOpen(false); void changePalette(option.id).catch((error: unknown) => setNotice({ text: error instanceof Error ? error.message : 'Could not change colour palette.', error: true })) }}><MiloMark palette={option.id} size={22} /><span>{option.label}{option.id === 'peach' ? ' (Default)' : ''}</span>{effectivePalette === option.id && <Icon name="check" size={15} />}</button>)}</div>}
+        </div>
         {/* The sidebar's one action row, under the brand: start a session, or find one.
             The search folds behind its icon until asked for, taking the row whole. */}
         <div className="sidebar-actions">

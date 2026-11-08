@@ -80,6 +80,26 @@ struct SessionsDrawer: View {
             // this platform puts search on a list's own screen rather than among the list's
             // rows. It is glass, as the drawer's floating controls are.
             HStack(spacing: MiloTheme.Space.two) {
+                Menu {
+                    Picker("Colour palette", selection: Binding(
+                        get: { model.effectivePalette },
+                        set: { palette in Task { await model.setPalette(palette) } }
+                    )) {
+                        ForEach(MiloPaletteId.allCases) { palette in
+                            Label {
+                                Text(palette == .peach ? "\(palette.label) (Default)" : palette.label)
+                            } icon: {
+                                Image(uiImage: MiloMark.menuImage(for: palette, size: 22, trailingSpace: 0))
+                            }
+                            .tag(palette)
+                        }
+                    }
+                } label: {
+                    MiloMark(size: 26)
+                        .contentShape(Rectangle())
+                }
+                .menuStyle(.borderlessButton)
+                .accessibilityLabel("Choose colour palette")
                 Text("Milo")
                     .font(MiloTheme.Text.title)
                     .foregroundStyle(MiloTheme.foreground)
