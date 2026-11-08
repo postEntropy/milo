@@ -6,7 +6,7 @@ import type { PanelRequest } from '../../core/panel.js'
 import type { Message } from '../../core/providers/types.js'
 import { todosFromArgs } from '../../core/todos.js'
 import { rawTurn } from '../raw.js'
-import { drawsToolFailure, toolDraw, toolResult, toolText, type ToolLevel } from '../tool-line.js'
+import { drawsToolFailure, toolDraw, toolResult, toolText, toolInput, type ToolLevel } from '../tool-line.js'
 import type { FrameAttachment, ToolState, TranscriptMessage, TranscriptPart } from './protocol.js'
 
 /** Notes a file a transcript drew and describes it for the browser. */
@@ -151,7 +151,10 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
           const todos = todosFromArgs(part.args)
           if (todos.length > 0) parts.push({ kind: 'todo', items: todos })
           const mark = toolDraw(part.name, part.args, level)
-          if (mark) parts.push({ kind: 'tool', tool: { ...mark, ...endingOf(part.id) } })
+          if (mark) {
+            const input = level === 'full' ? toolInput(part.name, part.args) : ''
+            parts.push({ kind: 'tool', tool: { ...mark, ...(input ? { input } : {}), ...endingOf(part.id) } })
+          }
           else if (drawsToolFailure(part.name) && outcomes.get(part.id)?.failed === true) {
             // The call draws nothing of its own — its result is what the person is
             // looking at — but a failure is still said. Nothing goes wrong in silence.

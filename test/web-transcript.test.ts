@@ -47,7 +47,7 @@ describe('transcriptOf — a turn keeps the order it happened in', () => {
     expect(of(messages).at(-1)?.parts).toEqual([
       { kind: 'reasoning', text: 'reading first' },
       { kind: 'text', text: 'Checking the file.' },
-      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt', state: 'done', result: 'ok' } },
+      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt', input: '{\n  "path": "a.txt"\n}', state: 'done', result: 'ok' } },
       { kind: 'text', text: 'It is fine.' },
     ])
   })
@@ -177,7 +177,7 @@ describe('transcriptOf — the display level is applied the same way the live tu
 
   it('draws the value beside the name, and the result under it, at full detail', () => {
     expect(toolParts(messages, 'full')).toEqual([
-      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt', state: 'done', result: 'ok' } },
+      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt', input: '{\n  "path": "a.txt"\n}', state: 'done', result: 'ok' } },
     ])
   })
 
@@ -199,13 +199,13 @@ describe('transcriptOf — the display level is applied the same way the live tu
 describe('transcriptOf — how a call ended', () => {
   it('says a call failed, which a reload used to hide', () => {
     expect(toolParts(turn({ id: 'c1', name: 'shell_command', args: { command: 'npm test' } }, { isError: true }))).toEqual([
-      { kind: 'tool', tool: { name: 'shell_command', text: 'shell_command npm test', state: 'failed', result: 'ok' } },
+      { kind: 'tool', tool: { name: 'shell_command', text: 'shell_command npm test', input: 'npm test', state: 'failed', result: 'ok' } },
     ])
   })
 
   it('says a call finished when its result came back clean', () => {
     expect(toolParts(turn({ id: 'c1', name: 'grep' }, {}))).toEqual([
-      { kind: 'tool', tool: { name: 'grep', text: 'grep a.txt', state: 'done', result: 'ok' } },
+      { kind: 'tool', tool: { name: 'grep', text: 'grep a.txt', input: '{\n  "path": "a.txt"\n}', state: 'done', result: 'ok' } },
     ])
   })
 
@@ -217,13 +217,13 @@ describe('transcriptOf — how a call ended', () => {
     ]
 
     expect(toolParts(messages)).toEqual([
-      { kind: 'tool', tool: { name: 'grep', text: 'grep x', state: 'done' } },
+      { kind: 'tool', tool: { name: 'grep', text: 'grep x', input: '{\n  "pattern": "x"\n}', state: 'done' } },
     ])
   })
 
   it('says nothing about a call whose result never came, rather than guessing', () => {
     expect(toolParts(turn({ id: 'c1', name: 'grep' }))).toEqual([
-      { kind: 'tool', tool: { name: 'grep', text: 'grep a.txt' } },
+      { kind: 'tool', tool: { name: 'grep', text: 'grep a.txt', input: '{\n  "path": "a.txt"\n}' } },
     ])
   })
 

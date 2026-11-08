@@ -92,6 +92,13 @@ describe('web protocol', () => {
     ])
   })
 
+  it('carries the complete shell command for the opened call', () => {
+    const command = `printf '%s' "${'x'.repeat(200)}"\necho done`
+    output.length = 0
+    displayEvent({ type: 'tool-start', id: '1', name: 'shell_command', args: { command } }, 'turn', { tools: 'full', thinking: 'expanded' }, send as never)
+    expect(output).toMatchObject([{ event: { input: command } }])
+  })
+
   it('carries a change at the level that draws it, and withholds it below', () => {
     const change = [{ path: 'a.ts', additions: 1, deletions: 1, lines: [] }]
     output.length = 0

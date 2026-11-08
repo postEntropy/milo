@@ -18,7 +18,7 @@ export function applyEvent(message: ChatMessage, event: AgentEvent, says?: strin
     // Reasoning deltas do not end a wait — they are what fills it. A tool
     // call is an output of its own, and the wait before it was thinking.
     const waited = message.waitingSince ? Date.now() - message.waitingSince : 0
-    return { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name, event.args), state: 'running' } }], waitingSince: undefined, ...thoughtMsFor(waited, message) }
+    return { ...message, parts: [...message.parts, { kind: 'tool', tool: { name: event.name, text: toolText(event.name, event.args), state: 'running', ...(event.input ? { input: event.input } : {}) } }], waitingSince: undefined, ...thoughtMsFor(waited, message) }
   }
   if (event.type === 'tool-end') {
     // The result is in: the model is thinking again about what to do with it.

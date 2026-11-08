@@ -1,5 +1,5 @@
 import { statusText } from '../../core/sessions/format.js'
-import { drawsToolFailure, toolDraw, toolResult } from '../tool-line.js'
+import { drawsToolFailure, toolDraw, toolResult, toolInput } from '../tool-line.js'
 import type { DisplayConfig } from '../../core/config/schema.js'
 import type { AgentEvent, ServerFrame } from './protocol.js'
 
@@ -39,7 +39,7 @@ export function displayEvent(event: AgentEvent, turnId: string, display: Display
     send({
       type: 'event',
       turnId,
-      event: { ...event, text: mark.text, args: display.tools === 'name' ? undefined : event.args },
+      event: { ...event, text: mark.text, input: display.tools === 'full' ? toolInput(event.name, event.args) : undefined, args: display.tools === 'name' ? undefined : event.args },
     })
     return
   }

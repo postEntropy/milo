@@ -82,7 +82,7 @@ export const SEARCH_PROVIDERS = ['off', 'tavily', 'exa', 'parallel'] as const
 export type AgentEvent =
   | { type: 'text-delta'; delta: string }
   | { type: 'reasoning-delta'; delta: string }
-  | { type: 'tool-start'; id: string; name: string; args: unknown; text?: string }
+  | { type: 'tool-start'; id: string; name: string; args: unknown; text?: string; input?: string }
   | { type: 'tool-end'; id: string; name: string; result: string; isError: boolean; drawFailure?: boolean; change?: FileChange[] }
   | { type: 'todo'; items: TodoItem[] }
   | { type: 'panel'; request: PanelRequest }
@@ -324,6 +324,7 @@ export interface ToolMark {
   name: string
   text: string
   state?: ToolState
+  input?: string
   /**
    * What the call came back with, for the detail under its line — capped where the live
    * turn and a read-back both build it, so the two draw the same thing. Absent rather than

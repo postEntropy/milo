@@ -228,6 +228,17 @@ export function shellCommand(args: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
+/** Full arguments for the opened tool detail, without the line's truncation. */
+export function toolInput(name: string, args: unknown): string {
+  if (args == null) return ''
+  if (name === 'shell_command' && typeof args === 'object') {
+    const command = (args as Record<string, unknown>).command
+    return typeof command === 'string' ? command : ''
+  }
+  if (typeof args === 'string') return args
+  return JSON.stringify(args, null, 2) ?? ''
+}
+
 const GIST_LIMIT = 120
 
 /** How much of what a tool came back with a surface is handed: past this it is the

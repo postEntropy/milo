@@ -744,11 +744,14 @@ struct ToolRow: View {
                 .accessibilityLabel(showingResult ? detailHiddenLabel : detailLabel)
 
                 if showingResult {
+                    if let input = tool.input, !input.isEmpty {
+                        resultBody(input)
+                    }
                     if let change = tool.change, !change.isEmpty {
                         changeBody(change)
                     } else if let result = tool.result, !result.isEmpty {
                         resultBody(result)
-                    } else {
+                    } else if tool.input == nil || tool.input?.isEmpty == true {
                         Text(running ? "Tool is still running." : "No output is available.")
                             .font(MiloTheme.Text.small)
                             .foregroundStyle(MiloTheme.muted)
@@ -883,6 +886,7 @@ struct ToolRow: View {
     /// came back with. A call that wrote draws the change, because the sentence the tool
     /// returned about it says less than the lines do.
     private var hasDetail: Bool {
+        if let input = tool.input, !input.isEmpty { return true }
         if let change = tool.change, !change.isEmpty { return true }
         return !(tool.result?.isEmpty ?? true)
     }

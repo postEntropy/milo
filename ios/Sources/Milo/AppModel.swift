@@ -2689,7 +2689,7 @@ final class AppModel {
         case .reasoningDelta(let delta):
             beganSpeaking()
             append(delta, reasoning: true)
-        case .toolStart(_, let name, let text):
+        case .toolStart(_, let name, let text, let input):
             beganSpeaking()
             // `text` is the server's own line (name and the one value worth showing),
             // the same the read-back transcript carries; the name alone is the fallback.
@@ -2697,7 +2697,7 @@ final class AppModel {
             // for the model's next output is over until the call comes back.
             mutatingLast { message in
                 message.waiting = false
-                message.parts.append(.tool(ToolMark(name: name, text: text ?? name, state: "running")))
+                message.parts.append(.tool(ToolMark(name: name, text: text ?? name, state: "running", input: input)))
             }
         case .toolEnd(_, let name, let isError, let drawFailure, let result, let change):
             mutateLast { parts in

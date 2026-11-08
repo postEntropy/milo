@@ -11,11 +11,11 @@ import { toolBrand, toolLabel, changeTotals } from '../../../src/gateways/tool-l
 import type { FileChange } from '../../../src/core/change.ts'
 import { toolRows } from './tool-runs.js'
 import type { TodoItem, TodoStatus } from '../../../src/core/todos.ts'
-import { toolIconName } from '../ui/tool-icons.js'
 import { attachmentUrl } from '../lib/api.js'
 import { Markdown } from './Markdown.js'
 import { GenUi } from './genui/GenUi.js'
 import { Icon, type IconName } from '../ui/Icons.js'
+import { toolIconName } from '../ui/tool-icons.js'
 import { ImageViewer } from '../ui/ImageViewer.js'
 import { WaitLine } from '../ui/WaitLine.js'
 import { defaultSuggestions, type Suggestion } from './suggestions.js'
@@ -43,44 +43,29 @@ function Attachments({ items }: { items: FrameAttachment[] }) {
 
 /**
  * One call, as a line: the mark, the tool's name, and the one value worth showing.
- *
- * No box. A call is the turn's own activity, not an object sitting in it, and the
- * box it used to be drawn in gave every call the same weight as a paragraph of the
- * answer. The name carries the colour and the value stays quiet, so the eye can
- * find a call by what it was — which is what tells one from another. The dot in the
- * gutter beside it is the call's state, drawn for every call alike, so a lone call
- * is not pushed aside into an empty column.
  */
 function ToolLine({ tool }: { tool: ToolMark }) {
   const [open, setOpen] = useState(false)
   const { state: copied, copy } = useCopy(tool.text)
   const label = copyLabel(copied)
   const brand = toolBrand(tool.name)
-  // The text is the name and its value in one string. Splitting on the name is what
-  // lets the name be loud and the value quiet — and where a line does not begin with
-  // its own name (an MCP tool's display name, most often) the whole of it is the name,
-  // which is the honest reading rather than a guess at where the value starts.
   const name = toolLabel(tool.name, false)
   const value = tool.text.startsWith(name) ? tool.text.slice(name.length).trim() : ''
   const totals = changeTotals(tool.change)
   const change = tool.change && tool.change.length > 0 ? tool.change : null
   const result = tool.result || null
-  const hasDetail = change !== null || result !== null
+  const hasDetail = change !== null || result !== null || !!tool.input
   const canOpen = hasDetail || tool.state === 'running'
-  const line = (
-    <code>
-      <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />{' '}
-      <span className="tool-name">{value ? name : tool.text}</span>
-      {value && <span className="tool-value">{value}</span>}
-      {(totals.additions > 0 || totals.deletions > 0) && (
-        <span className="tool-change-count">
-          {totals.additions > 0 && <span className="plus">+{totals.additions}</span>}
-          {totals.deletions > 0 && <span className="minus">−{totals.deletions}</span>}
-        </span>
-      )}
-      {tool.state === 'failed' && <span className="tool-failed">failed</span>}
-    </code>
-  )
+  const line = <code>
+    <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />{' '}
+    <span className="tool-name">{value ? name : tool.text}</span>
+    {value && <span className="tool-value">{value}</span>}
+    {(totals.additions > 0 || totals.deletions > 0) && <span className="tool-change-count">
+      {totals.additions > 0 && <span className="plus">+{totals.additions}</span>}
+      {totals.deletions > 0 && <span className="minus">−{totals.deletions}</span>}
+    </span>}
+    {tool.state === 'failed' && <span className="tool-failed">failed</span>}
+  </code>
 
   return (
     <div className="tool-call">
@@ -93,9 +78,7 @@ function ToolLine({ tool }: { tool: ToolMark }) {
             aria-label={`${open ? 'Hide' : 'Show'} ${change ? 'the change' : 'the tool result'}`}
             title={open ? (change ? 'Hide the change' : 'Hide tool result') : (change ? 'Show the change' : 'Show tool result')}
             onClick={() => setOpen((current) => !current)}
-          >
-            {line}
-          </button>
+          >{line}</button>
         ) : line}
         <button
           className={`tool-copy-btn${copied === 'failed' ? ' failed' : ''}`}
@@ -108,6 +91,7 @@ function ToolLine({ tool }: { tool: ToolMark }) {
           {copied === 'failed' && <span className="message-tool-label">Copy failed</span>}
         </button>
       </div>
+      {open && tool.input && <ToolResult text={tool.input} />}
       {open && change && <ToolChange files={change} />}
       {open && !change && result && <ToolResult text={result} />}
       {open && !hasDetail && <div className="tool-result tool-running" role="status">{tool.state === 'running' ? 'Tool is still running.' : 'No output is available.'}</div>}
@@ -159,10 +143,7 @@ function ToolResult({ text }: { text: string }) {
 }
 
 /**
- * Calls that came one after another, drawn as one sequence: a thread with a dot
- * per step. The dot is the state — accent on the call running now, filled and
- * quiet on the ones that finished, red on one that failed — so which step is
- * underway is read off the line rather than said again underneath it.
+ * Calls made one after another are steps of one sequence, joined by a thread.
  */
 function ToolRun({ steps }: { steps: Array<{ tool: ToolMark; key: string }> }) {
   return <div className="tool-run">
@@ -494,7 +475,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
           return <Reasoning key={key} text={part.text} thoughtMs={key === firstReasoning ? message.thoughtMs : undefined} open={thinking === 'expanded'} />
         }
         if (part.kind === 'text') return <Markdown key={key} text={part.text} />
-        if (part.kind === 'tool') return <ToolLine key={key} tool={part.tool} />
+        if (part.kind === 'tool') return <ToolRun key={key} steps={[{ tool: part.tool, key }]} />
         if (part.kind === 'ui') return <GenUi key={key} render={part.render} onSend={onSend} />
         if (part.kind === 'verification') return <Verification key={key} ok={part.ok} text={part.text} />
         return <TodoList key={key} items={part.items} />

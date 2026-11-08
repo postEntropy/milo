@@ -116,6 +116,7 @@ struct ToolMark: Decodable, Hashable {
     /// Mutable because a live call is drawn before it has an answer: `tool-start`
     /// arrives running, and `tool-end` names how it ended.
     var state: String?
+    var input: String?
     /// What the call came back with, for the detail under the line. Absent where there is
     /// nothing to show — a call still running, or a level below `full`, where the server
     /// sends it empty. Capped on the server, so what is folded and what is opened are one
@@ -369,7 +370,7 @@ enum PanelInput {
 enum AgentEvent: Decodable {
     case textDelta(String)
     case reasoningDelta(String)
-    case toolStart(id: String, name: String, text: String?)
+    case toolStart(id: String, name: String, text: String?, input: String?)
     case toolEnd(id: String, name: String, isError: Bool, drawFailure: Bool, result: String?, change: [FileChange]?)
     case todo([TodoItem])
     /// The project's checks after a turn that wrote. The words are the core's, so
@@ -395,7 +396,7 @@ enum AgentEvent: Decodable {
     case other
 
     private enum CodingKeys: String, CodingKey {
-        case type, delta, id, name, isError, drawFailure, items, message, render, draft, text, finishReason, result, ok, change
+        case input, type, delta, id, name, isError, drawFailure, items, message, render, draft, text, finishReason, result, ok, change
         case inputTokens, outputTokens, ms, added, removed, compacted
         case folded, tokens, summarized
     }
@@ -416,7 +417,7 @@ enum AgentEvent: Decodable {
         case "tool-start":
             // `text` is the line the server already drew — the phone cannot import
             // the formatter, so it reads the result rather than keeping a copy.
-            self = .toolStart(id: read(.id, ""), name: read(.name, ""), text: readText(.text))
+            self = .toolStart(id: read(.id, ""), name: read(.name, ""), text: readText(.text), input: readText(.input))
         case "tool-end":
             self = .toolEnd(
                 id: read(.id, ""),
