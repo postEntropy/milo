@@ -3,3 +3,7 @@ bundleID: dev.milo.app
 product: Milo
 infoPath: Info.plist
 iconPath: Resources/AppIcon.png
+resources:
+  - Resources/Assets.car
+  - Resources/AppIcon60x60@2x.png
+  - Resources/AppIcon76x76@2x~ipad.png

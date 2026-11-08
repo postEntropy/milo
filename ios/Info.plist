@@ -14,6 +14,26 @@
 	</dict>
 	<key>CFBundleDisplayName</key>
 	<string>Milo</string>
+	<key>CFBundleIcons</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array><string>AppIcon60x60</string></array>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+	</dict>
+	<key>CFBundleIcons~ipad</key>
+	<dict>
+		<key>CFBundlePrimaryIcon</key>
+		<dict>
+			<key>CFBundleIconFiles</key>
+			<array><string>AppIcon60x60</string><string>AppIcon76x76</string></array>
+			<key>CFBundleIconName</key>
+			<string>AppIcon</string>
+		</dict>
+	</dict>
 	<!-- The system runs a background task only where its identifier is declared here, and
 	     one of them is what keeps the phone on a running turn after the screen goes: about
 	     half a minute without it. It must name the identifier `Support/ContinuedTurn.swift`
