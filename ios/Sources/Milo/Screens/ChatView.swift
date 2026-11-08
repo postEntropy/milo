@@ -97,9 +97,6 @@ struct ChatView: View {
     /// The composer's panel, when one is open — raised by the `+` or by a long press on the
     /// send control, drawn over the composer, dismissed by a tap anywhere but itself.
     @State private var menu: ComposerMenu?
-    /// The pickers the panel's attach lines raise: the platform's own chooser for each, over
-    /// this screen, which is where the files come from.
-    @State private var attach: AttachKind?
     /// How tall the composer came out, so the panel opens above it instead of through it.
     /// Read off the composer itself: it grows with the draft and with every strip above the
     /// field, so no constant would place the panel right.
@@ -269,21 +266,21 @@ struct ChatView: View {
                     }
                 }
 
-            // The panel a composer control raised, and the layer that puts it away: a tap
-            // anywhere but the panel closes it, the way the platform's own menu answers a tap
-            // outside. That layer is under the panel and over everything else, so the first
-            // touch after opening is spent closing rather than reaching the thread or the
-            // field behind it.
-            if let open = menu {
-                let alignment: Alignment = open == .running ? .bottomTrailing : .bottomLeading
-                let anchor: UnitPoint = open == .running ? .bottomTrailing : .bottomLeading
+            // The panel a running turn's control raised, and the layer that puts it away: a
+            // tap anywhere but the panel closes it, the way the platform's own menu answers a
+            // tap outside. That layer is under the panel and over everything else, so the
+            // first touch after opening is spent closing rather than reaching the thread or
+            // the field behind it.
+            if menu == .running {
+                let alignment: Alignment = .bottom
+                let anchor: UnitPoint = .bottom
 
                 Color.clear
                     .contentShape(Rectangle())
                     .ignoresSafeArea()
                     .onTapGesture { closeMenu() }
 
-                panel(open)
+                runningPanel
                     .transition(MenuBloom(anchor: anchor))
                     // The composer's own height, and a step of air: the panel stands over
                     // the field rather than covering what is being typed into.
@@ -300,8 +297,8 @@ struct ChatView: View {
         // that dismisses it then cannot animate apart. Opening blooms with a gentle bounce;
         // closing folds straight back into the control.
         .animation(
-            menu != nil ? .spring(duration: 0.35, bounce: 0.18) : .spring(duration: 0.22, bounce: 0),
-            value: menu
+            menu == .running ? .spring(duration: 0.35, bounce: 0.18) : .spring(duration: 0.22, bounce: 0),
+            value: menu == .running
         )
         .sensoryFeedback(.impact(weight: .light, intensity: 0.7), trigger: menu != nil)
         .sensoryFeedback(.impact(weight: .light), trigger: drawer)
@@ -475,9 +472,13 @@ struct ChatView: View {
         .onChange(of: threadOnScreen) { _, visible in model.threadOnScreen = visible }
         .onAppear { model.threadOnScreen = threadOnScreen }
         .sessionRename($renaming)
-        // Where the files come from: the platform's own chooser for each, over this screen —
-        // the same pair a project's own page raises, from `ComposerAttach`.
-        .attachmentPickers(drafts: $drafts, asked: $attach) { message in
+        // Where the files come from: the attachment sheet and the system choosers it opens,
+        // shared with a project's own page through `ComposerAttach`.
+        .attachmentPickers(
+            drafts: $drafts,
+            menu: $menu,
+            onModel: model.sessionProject == nil ? { picker = true } : nil
+        ) { message in
             model.showNote(message)
         }
     }
@@ -990,46 +991,22 @@ struct ChatView: View {
         book.following = true
     }
 
-    /// What a panel says, per control that raises one. Every line carries the mark of what it
-    /// does: a list of words alone is what the platform's own menu draws, and this panel is
-    /// drawn here so it can say more than that.
-    private func panel(_ which: ComposerMenu) -> some View {
-        let rows: [MenuRow]
-        switch which {
-        case .actions:
-            // What belongs to the message being written: the files — one set of rows, from
-            // `ComposerAttach`, so the panel a project's own page raises is this one. The
-            // model's own line is only in the panel on an ordinary chat: a work session
-            // carries it on the composer's bar, and the effort rides with the picker.
-            let modelRow: (() -> Void)? = model.sessionProject == nil ? {
+    /// What a running turn's panel says when raised from the send control.
+    private var runningPanel: some View {
+        MenuPanel(rows: [
+            MenuRow(title: "Steer the running turn", symbol: "arrow.turn.down.right") {
                 closeMenu()
-                self.picker = true
-            } : nil
-            rows = composerActionRows(
-                model: model,
-                modelRow: modelRow,
-                ask: { ask in
-                    closeMenu()
-                    self.attach = ask
-                }
-            )
-        case .running:
-            rows = [
-                MenuRow(title: "Steer the running turn", symbol: "arrow.turn.down.right") {
-                    closeMenu()
-                    send(.steer)
-                },
-                MenuRow(title: "Send after this turn", symbol: "text.append") {
-                    closeMenu()
-                    send(.queue)
-                },
-                MenuRow(title: "Stop the turn", symbol: "stop.fill") {
-                    closeMenu()
-                    model.stop()
-                },
-            ]
-        }
-        return MenuPanel(rows: rows).id(which)
+                send(.steer)
+            },
+            MenuRow(title: "Send after this turn", symbol: "text.append") {
+                closeMenu()
+                send(.queue)
+            },
+            MenuRow(title: "Stop the turn", symbol: "stop.fill") {
+                closeMenu()
+                model.stop()
+            },
+        ])
     }
 
     private var chat: some View {
@@ -1690,6 +1667,7 @@ struct ChatView: View {
                         .offset(y: -(Self.jumpSpan + MiloTheme.Space.two))
                 }
         }
+        .padding(.bottom, MiloTheme.Space.two)
     }
 }
 

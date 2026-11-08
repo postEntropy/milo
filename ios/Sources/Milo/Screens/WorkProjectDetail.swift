@@ -27,12 +27,7 @@ struct ProjectDetail: View {
     /// The files that will ride with those words: picked here, sent with the message that
     /// starts the session, and so read exactly as the chat reads one.
     @State private var drafts: [AttachmentDraft] = []
-    /// Which chooser the `+` asked for, while its panel closes.
-    @State private var attach: AttachKind?
     @State private var menu: ComposerMenu?
-    /// How tall the composer came out, so the panel stands over the field it belongs to
-    /// rather than covering what is being written — the chat's own arrangement.
-    @State private var composerHeight: CGFloat = 0
     @State private var picker = false
     /// Whether the folder's own rules are open in the drawer: asked for from the project's
     /// menu, rather than standing on the page as a section of its own.
@@ -85,13 +80,6 @@ struct ProjectDetail: View {
         VStack(spacing: 0) {
             backendPicker
             starter
-        }
-        // How tall the picker and composer came out, so the `+`'s panel stands over both
-        // rather than through them — the chat's own arrangement.
-        .onGeometryChange(for: CGFloat.self) { proxy in
-            proxy.size.height
-        } action: { _, height in
-            composerHeight = height
         }
     }
 
@@ -243,31 +231,9 @@ struct ProjectDetail: View {
                 .disabled(project == nil)
             }
         }
-        // The panel the `+` raised, and the layer that puts it away: a tap anywhere but the
-        // panel closes it, and the panel stands over the field it belongs to. The same
-        // arrangement the chat draws its own panel with.
-        .overlay {
-            if menu != nil {
-                ZStack(alignment: .bottomLeading) {
-                    Color.clear
-                        .contentShape(Rectangle())
-                        .ignoresSafeArea()
-                        .onTapGesture { menu = nil }
-                    MenuPanel(rows: panelRows)
-                                        .transition(MenuBloom(anchor: .bottomLeading))
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                        .padding(.horizontal, MiloTheme.margin)
-                        .padding(.bottom, composerHeight + MiloTheme.Space.two)
-                }
-            }
-        }
-        .animation(
-            menu != nil ? .spring(duration: 0.35, bounce: 0.18) : .spring(duration: 0.22, bounce: 0),
-            value: menu
-        )
-        // Where the files come from: the platform's own chooser for each, over this page —
-        // the same pair the chat raises.
-        .attachmentPickers(drafts: $drafts, asked: $attach) { message in
+        // Where the files come from: the attachment sheet and the system choosers it opens,
+        // shared with the chat through `ComposerAttach`.
+        .attachmentPickers(drafts: $drafts, menu: $menu) { message in
             model.showNote(message)
         }
         .sheet(isPresented: $picker) { ModelPickerSheet() }
@@ -316,20 +282,6 @@ struct ProjectDetail: View {
                 }
             }
         }
-    }
-
-    /// What the `+`'s panel holds here: the files — one set of rows on every composer. The
-    /// model and its effort are not among them: this composer carries the model on the bar,
-    /// and the picker it opens carries the effort.
-    private var panelRows: [MenuRow] {
-        return composerActionRows(
-            model: model,
-            modelRow: nil,
-            ask: { ask in
-                menu = nil
-                attach = ask
-            }
-        )
     }
 
     /// Which agent runs the Session this page starts. A choice made once, before the Session

@@ -24,8 +24,13 @@
 		<string>dev.milo.app.reply</string>
 	</array>
 	<!-- Scanning the QR `milo pair` draws is how a phone is paired without typing
-	     an address or a code. -->
+	     an address or a code, and the composer's attachment sheet can also take a
+	     photo straight from the camera. -->
 	<key>NSCameraUsageDescription</key>
-	<string>Milo uses the camera to scan the pairing code from `milo pair`.</string>
+	<string>Milo uses the camera to scan the pairing code from `milo pair` and to take photos to attach to a Session.</string>
+	<!-- The attachment sheet shows a strip of recent photos from the library so one
+	     can be added with a single tap. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Milo shows your recent photos so you can attach them to a Session.</string>
 </dict>
 </plist>

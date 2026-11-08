@@ -228,6 +228,7 @@ struct Composer: View {
     /// session it will be said into.
     private var actionsButton: some View {
         Button {
+            focused = false
             menu = menu == .actions ? nil : .actions
         } label: {
             Image(systemName: "plus")
@@ -237,7 +238,7 @@ struct Composer: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle())
-        .accessibilityLabel("More")
+        .accessibilityLabel("Add to session")
     }
 
     /// The way to send, or the control a running turn answers to. The same span as the `+`

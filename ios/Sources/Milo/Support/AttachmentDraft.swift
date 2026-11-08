@@ -9,6 +9,9 @@ struct AttachmentDraft: Identifiable, Hashable {
     let name: String
     let mimeType: String
     let data: Data
+    /// The photo-library identifier when picked from the recent photos strip, so the strip
+    /// reflects which thumbnails are already attached and can toggle them on and off.
+    var assetId: String? = nil
 
     var image: Bool { mimeType.hasPrefix("image/") }
     var size: Int { data.count }
@@ -19,18 +22,19 @@ struct AttachmentDraft: Identifiable, Hashable {
     static let maxBytes = 50 * 1024 * 1024
 }
 
-/// The files picked and not yet sent, above the field: the strip the quoted words take,
-/// one chip per file, each with the control that takes it off. It wears the composer's own
-/// glass, so it stands over the thread the way the field under it does.
+/// The files picked and not yet sent, above the field: a thumbnail with its remove button for
+/// a picture, and a glass chip for any other document.
 struct DraftStrip: View {
     let drafts: [AttachmentDraft]
     let onRemove: (AttachmentDraft) -> Void
 
+    private static let thumbSpan: CGFloat = 68
+
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: MiloTheme.Space.two) {
+            HStack(alignment: .bottom, spacing: MiloTheme.Space.two) {
                 ForEach(drafts) { draft in
-                    chip(draft)
+                    item(draft)
                 }
             }
             .padding(.vertical, MiloTheme.Space.one)
@@ -38,9 +42,38 @@ struct DraftStrip: View {
         .padding(.horizontal, MiloTheme.margin)
     }
 
-    private func chip(_ draft: AttachmentDraft) -> some View {
+    @ViewBuilder
+    private func item(_ draft: AttachmentDraft) -> some View {
+        if draft.image, let picture = UIImage(data: draft.data) {
+            ZStack(alignment: .topTrailing) {
+                Image(uiImage: picture)
+                    .resizable()
+                    .scaledToFill()
+                    .frame(width: Self.thumbSpan, height: Self.thumbSpan)
+                    .clipShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+
+                Button {
+                    onRemove(draft)
+                } label: {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(width: 22, height: 22)
+                        .background(.black.opacity(0.6), in: Circle())
+                        .padding(MiloTheme.Space.one)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressableStyle())
+                .accessibilityLabel("Remove \(draft.name)")
+            }
+        } else {
+            fileChip(draft)
+        }
+    }
+
+    private func fileChip(_ draft: AttachmentDraft) -> some View {
         HStack(spacing: MiloTheme.Space.two) {
-            Image(systemName: draft.image ? "photo" : "doc")
+            Image(systemName: "doc")
                 .font(.system(size: 14))
                 .foregroundStyle(MiloTheme.accent)
             Text(draft.name)

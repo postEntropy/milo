@@ -1,17 +1,9 @@
 import SwiftUI
 
-/// One line of a panel: the mark it wears (when it has one), its words, an optional second
-/// line naming what is currently set, and what a press does — either an action of its own or
-/// a nested list of choices (`children`) opened in the same panel. `chosen` marks the line the
-/// panel's subject is on now.
+/// One line of a panel: the mark it wears, its words, and what a press does.
 struct MenuRow: Identifiable {
     let title: String
-    var subtitle: String? = nil
-    var symbol: String? = nil
-    var mark: AnyView? = nil
-    var chosen = false
-    var disabled = false
-    var children: [MenuRow] = []
+    let symbol: String
     var action: () -> Void = {}
 
     var id: String { title }
@@ -35,119 +27,45 @@ struct MenuBloom: Transition {
 }
 
 /**
- The panel a composer control raises.
+ The panel a running turn's composer control raises.
 
- The platform's own menu is not what this is: it folds the control it came from into itself
- as it opens, which on a control sitting inside the composer reads as the composer turning
- into the menu. This one is drawn over the composer instead, in the platform's own glass,
- with each top-level line's mark in a filled disc and the layer the chat raises under it ready
- to put it away on a tap outside.
-
- A row with `children` opens them inside the same glass card, so the panel grows in place
- rather than stacking a second card over the first.
+ Drawn over the composer in the platform's own glass, with each line's mark in a filled
+ disc and the layer the chat raises under it ready to put it away on a tap outside.
  */
 struct MenuPanel: View {
     let rows: [MenuRow]
-    /// The `id` of the row whose submenu is open. Kept by id rather than by copying its
-    /// children, so a choice made inside the submenu sees the live `chosen` mark move.
-    @State private var submenu: String?
-
-    private var activeParent: MenuRow? {
-        guard let submenu else { return nil }
-        return rows.first { $0.id == submenu && !$0.children.isEmpty }
-    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-            if let parent = activeParent {
-                Button {
-                    withAnimation(.spring(duration: 0.3, bounce: 0.14)) {
-                        submenu = nil
-                    }
-                } label: {
-                    HStack(spacing: MiloTheme.Space.two) {
-                        Image(systemName: "chevron.left")
-                            .font(.system(size: 15, weight: .semibold))
-                        Text(parent.title)
-                            .font(MiloTheme.Text.body)
-                        Spacer(minLength: 0)
-                    }
-                    .foregroundStyle(MiloTheme.muted)
-                    .padding(.horizontal, MiloTheme.Space.one)
-                    .padding(.vertical, MiloTheme.Space.one)
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(PressableStyle())
-
-                ForEach(parent.children) { child in
-                    line(child)
-                }
-            } else {
-                ForEach(rows) { row in
-                    line(row)
-                }
+        VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+            ForEach(rows) { row in
+                line(row)
             }
         }
-        .padding(MiloTheme.Space.four)
-        .frame(width: 268, alignment: .leading)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 32))
-        .sensoryFeedback(.selection, trigger: submenu)
+        .padding(.horizontal, MiloTheme.Space.four)
+        .padding(.vertical, MiloTheme.Space.two)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl + MiloTheme.Space.five))
     }
 
-    /// A line: its mark in the disc when the line carries one, its words, and either the
-    /// chevron that opens its submenu or the tick on the one in use. Filled, as everything
-    /// pressed here is — nothing on this panel wears a border.
+    /// A line: its mark in the disc and its words. Filled, as everything pressed here is —
+    /// nothing on this panel wears a border.
     private func line(_ row: MenuRow) -> some View {
-        Button {
-            if !row.children.isEmpty {
-                withAnimation(.spring(duration: 0.3, bounce: 0.14)) {
-                    submenu = row.id
-                }
-            } else {
-                row.action()
-            }
-        } label: {
+        Button(action: row.action) {
             HStack(spacing: MiloTheme.Space.four) {
-                if let mark = row.mark {
-                    mark
-                        .frame(width: 42, height: 42)
-                        .background(MiloTheme.surfaceWarm, in: Circle())
-                } else if let symbol = row.symbol {
-                    Image(systemName: symbol)
-                        .font(.system(size: 18, weight: .medium))
-                        .foregroundStyle(MiloTheme.foreground)
-                        .frame(width: 42, height: 42)
-                        .background(MiloTheme.surfaceWarm, in: Circle())
-                }
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(row.title)
-                        .font(MiloTheme.Text.body)
-                        .foregroundStyle(MiloTheme.foreground)
-                    if let subtitle = row.subtitle, !subtitle.isEmpty {
-                        Text(subtitle)
-                            .font(MiloTheme.Text.small)
-                            .foregroundStyle(MiloTheme.muted)
-                            .lineLimit(1)
-                    }
-                }
+                Image(systemName: row.symbol)
+                    .font(.system(size: 19, weight: .regular))
+                    .foregroundStyle(MiloTheme.foreground)
+                    .frame(width: 44, height: 44)
+                    .background(.white.opacity(0.10), in: Circle())
+                Text(row.title)
+                    .font(MiloTheme.Text.body.weight(.medium))
+                    .foregroundStyle(MiloTheme.foreground)
                 Spacer(minLength: MiloTheme.Space.two)
-                if !row.children.isEmpty {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(MiloTheme.muted)
-                        .padding(.trailing, MiloTheme.Space.one)
-                } else if row.chosen {
-                    Image(systemName: "checkmark")
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundStyle(MiloTheme.accent)
-                        .padding(.trailing, MiloTheme.Space.one)
-                }
             }
-            .padding(.leading, row.symbol == nil && row.mark == nil ? MiloTheme.Space.one : 0)
-            .padding(.vertical, row.symbol == nil && row.mark == nil ? MiloTheme.Space.two : 0)
+            .padding(.horizontal, MiloTheme.Space.two)
+            .padding(.vertical, MiloTheme.Space.two)
             .contentShape(Rectangle())
         }
         .buttonStyle(PressableStyle())
-        .disabled(row.disabled)
     }
 }
