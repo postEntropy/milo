@@ -158,8 +158,8 @@ struct MessageRow: View {
                 }
                 .padding(.horizontal, MiloTheme.Space.four)
                 .padding(.vertical, MiloTheme.Space.three)
-                .background(MiloTheme.accent, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
-                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+                .background(MiloTheme.accent, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
                 .contextMenu { menu }
             }
         } else {
