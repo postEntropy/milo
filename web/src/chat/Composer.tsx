@@ -554,9 +554,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             disabled={busy}
           />}
           <span className="composer-spacer" />
-          {busy && <>
-            <button className="composer-send-action" type="button" disabled={!draft.trim() && files.length === 0} onClick={() => void submit('queue')} title="Send after the current turn finishes">Queue</button>
-            {!codeSession && <button className="composer-send-action" type="button" disabled={!draft.trim() && files.length === 0} onClick={() => void submit('steer')} title="Send guidance to the running turn">Steer</button>}
+          {busy && (draft.trim() !== '' || files.length > 0) && <>
+            <button className="composer-send-action" type="button" onClick={() => void submit('queue')} title="Send after the current turn finishes"><Icon name="history" size={14} />Queue</button>
+            {!codeSession && <button className="composer-send-action" type="button" onClick={() => void submit('steer')} title="Send guidance to the running turn"><Icon name="reply" size={14} />Steer</button>}
           </>}
           {!codeSession && context && context.budget > 0 && <span className={`composer-context${context.used / context.budget >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.budget.toLocaleString()} tokens — Milo tidies the oldest turns at ${context.budget.toLocaleString()}`}>
             <svg className="composer-context-ring" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
