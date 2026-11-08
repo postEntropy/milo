@@ -6,10 +6,11 @@ struct ModeSwitch: View {
     let work: Bool
     let onChat: () -> Void
     let onWork: () -> Void
+    var height: CGFloat = 42
 
     var body: some View {
-        WorldSegments(work: work, height: 42, onChat: onChat, onWork: onWork)
-            .frame(height: 42)
+        WorldSegments(work: work, height: height, onChat: onChat, onWork: onWork)
+            .frame(height: height)
             .glassEffect(.regular.interactive(), in: Capsule())
             .sensoryFeedback(.selection, trigger: work)
     }

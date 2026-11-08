@@ -25,10 +25,10 @@
   --wait-dim: color-mix(in oklab, var(--muted) 62%, transparent);
   --border: #D8D8DC;
   --border-soft: #E5E5EA;
-  --accent: #C4541C;
-  --accent-on: #FFFFFF;
-  --accent-hover: #A64514;
-  --accent-wash: #F7ECE5;
+  --accent: var(--palette-light-accent, #C25947);
+  --accent-on: var(--palette-light-accent-on, #FFFFFF);
+  --accent-hover: var(--palette-light-accent-hover, #A84A3A);
+  --accent-wash: var(--palette-light-accent-wash, #F8EAE7);
   --secondary: #508080;
   --secondary-hover: #3F6868;
   --success: #587E20;
@@ -143,10 +143,10 @@
   --muted: #8E8E93;
   --border: #38383A;
   --border-soft: #2C2C2E;
-  --accent: #D9703A;
-  --accent-on: #FFFFFF;
-  --accent-hover: #E07D49;
-  --accent-wash: #3A2A20;
+  --accent: var(--palette-dark-accent, #D66B58);
+  --accent-on: var(--palette-dark-accent-on, #FFFFFF);
+  --accent-hover: var(--palette-dark-accent-hover, #E07A68);
+  --accent-wash: var(--palette-dark-accent-wash, #382522);
   --secondary: #80B5B3;
   --secondary-hover: #9AC9C7;
   --success: #8FB457;
@@ -2289,7 +2289,13 @@ textarea.genui-text-input { min-height: 88px; resize: vertical; }
 .message.user .message-prose,
 .message.user .message-prose a,
 .message.user .message-prose strong,
-.message.user .message-prose blockquote { color: #FFE8D3; }
+.message.user .message-prose blockquote { color: var(--accent-on); }
+
+.palette-picker { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: var(--space-4); }
+.palette-option { display: flex; align-items: center; gap: var(--space-4); min-height: var(--control-md); border: 0; border-radius: var(--radius-md); background: var(--surface); padding: var(--space-4) var(--space-5); color: var(--fg); font-size: var(--text-xs); font-weight: 500; text-align: left; transition: background var(--motion-fast), color var(--motion-fast); }
+.palette-option:hover:not(:disabled) { background: var(--border-soft); }
+.palette-option.active { background: var(--accent-wash); color: var(--accent); font-weight: 600; }
+.palette-option-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* A turn still being written: one soft dot under the text that has arrived, the same
    pulse the running session wears, gone the moment the turn ends. */

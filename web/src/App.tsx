@@ -32,7 +32,17 @@ import { SessionBackendMark } from './ui/SessionBackendMark.js'
 import { ConnectionChip } from './ui/ConnectionChip.js'
 import { Notice, useAutoDismiss, type Report } from './ui/Notice.js'
 import { Select } from './ui/Select.js'
-import { miloAvatar } from './ui/milo.js'
+import { MiloMark } from './ui/MiloMark.js'
+import {
+  DEFAULT_PALETTE_STATE,
+  applyColorPalette,
+  effectivePaletteId,
+  readStoredPalette,
+  resolveColorPaletteId,
+  writeStoredPalette,
+  type ColorPaletteId,
+  type PaletteState,
+} from './theme/palettes.js'
 import { projectMark } from './work/marks.js'
 
 type PendingPermission = { id: string; request: PermissionRequest; expiresAt: number }
@@ -197,6 +207,9 @@ export default function App() {
   const [panelNew, setPanelNew] = useState(false)
   const panelTabCount = useRef(0)
   const [theme, setTheme] = useState(() => localStorage.getItem('milo-theme') ?? 'system')
+  const [localPalette, setLocalPalette] = useState<ColorPaletteId>(() => readStoredPalette())
+  const [sharedPalette, setSharedPalette] = useState<PaletteState>(DEFAULT_PALETTE_STATE)
+  const effectivePalette = effectivePaletteId(localPalette, sharedPalette)
   const [notice, setNotice] = useState<Notice | null>(null)
   useAutoDismiss(notice, setNotice)
   /** Bumped to hand the cursor to the composer, e.g. once a new session opens. */
@@ -350,6 +363,36 @@ export default function App() {
     media.addEventListener('change', apply)
     return () => media.removeEventListener('change', apply)
   }, [theme])
+
+  useEffect(() => {
+    applyColorPalette(effectivePalette)
+  }, [effectivePalette])
+
+  const changePalette = useCallback(async (next: ColorPaletteId): Promise<void> => {
+    const resolved = resolveColorPaletteId(next)
+    if (!sharedPalette.sync) {
+      writeStoredPalette(resolved)
+      setLocalPalette(resolved)
+      return
+    }
+    await api('save-config', { config: { palette: { sync: true, palette: resolved } } })
+    setSharedPalette({ sync: true, palette: resolved })
+  }, [sharedPalette.sync])
+
+  const changePaletteSync = useCallback(async (sync: boolean): Promise<void> => {
+    if (sync) {
+      const chosen = effectivePalette
+      await api('save-config', { config: { palette: { sync: true, palette: chosen } } })
+      setSharedPalette({ sync: true, palette: chosen })
+      return
+    }
+    await api('save-config', { config: { palette: { sync: false } } })
+    setSharedPalette((current) => ({ ...current, sync: false }))
+  }, [effectivePalette])
+
+  const syncSharedPalette = useCallback((state: PaletteState): void => {
+    setSharedPalette({ sync: Boolean(state.sync), palette: resolveColorPaletteId(state.palette) })
+  }, [])
 
   /**
    * The screen is in the address bar: a session, the routines, and each settings
@@ -668,6 +711,10 @@ export default function App() {
       return
     }
     if (frame.type === 'routines-changed') { setRoutinesTick((current) => current + 1); return }
+    if (frame.type === 'palette-state') {
+      setSharedPalette({ sync: Boolean(frame.sync), palette: resolveColorPaletteId(frame.palette) })
+      return
+    }
     // A session started or stopped a turn anywhere in the install: the running dot is
     // re-read off the daemon rather than guessed at here.
     if (frame.type === 'sessions-changed') { setWorkTick((current) => current + 1); void refreshSessions(); return }
@@ -1407,7 +1454,7 @@ export default function App() {
     {sidebarOpen && <button className="sidebar-scrim" type="button" aria-label="Close menu" onClick={() => setSidebarOpen(false)} />}
     <aside className="sidebar" aria-label="Main navigation">
       <div className="sidebar-chat-nav">
-        <div className="brand-row"><img className="brand-mark" src={miloAvatar} alt="" /><span className="brand-name" translate="no">Milo</span><button className="sidebar-toggle" type="button" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><Icon name="panel-left" size={17} /></button></div>
+        <div className="brand-row"><MiloMark size={30} className="brand-mark" /><span className="brand-name" translate="no">Milo</span><button className="sidebar-toggle" type="button" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><Icon name="panel-left" size={17} /></button></div>
         {/* The sidebar's one action row, under the brand: start a session, or find one.
             The search folds behind its icon until asked for, taking the row whole. */}
         <div className="sidebar-actions">
@@ -1526,7 +1573,7 @@ export default function App() {
         </div>
       </header>
       {view === 'settings'
-        ? <Settings section={settingsSection} onSection={setSettingsSection} chatId={chatId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} onDirtyChange={noteDirty} />
+        ? <Settings section={settingsSection} onSection={setSettingsSection} chatId={chatId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} palette={effectivePalette} paletteSync={sharedPalette.sync} onPaletteChange={changePalette} onPaletteSyncChange={changePaletteSync} onPaletteStateLoaded={syncSharedPalette} onDirtyChange={noteDirty} />
         : view === 'routines'
         ? <Routines chatId={chatId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : view === 'tasks'

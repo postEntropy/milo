@@ -56,7 +56,7 @@ struct SettingsView: View {
                     category("Permissions", icon: "shield") {
                         PermissionsSettingsView()
                     }
-                    category("Display", icon: "eye") {
+                    category("Appearance", icon: "paintpalette") {
                         DisplaySettingsView(appearance: $appearance)
                     }
                     category("Skills", icon: "sparkles") {
@@ -95,6 +95,7 @@ struct SettingsView: View {
             }
             .task { await model.loadSettings() }
         }
+        .tint(MiloTheme.accent)
         .preferredColorScheme(colorScheme)
     }
 
@@ -303,8 +304,30 @@ private struct DisplaySettingsView: View {
                     Text("Light theme").tag("light")
                     Text("Dark theme").tag("dark")
                 }
+                .tint(MiloTheme.accent)
+                .id("appearance-\(model.effectivePalette.rawValue)")
             } footer: {
                 Text("Applies to this phone only.")
+            }
+
+            Section {
+                Picker("Colour palette", selection: palette) {
+                    ForEach(MiloPaletteId.allCases) { item in
+                        Label {
+                            Text(item == .peach ? "\(item.label) (Default)" : item.label)
+                        } icon: {
+                            Image(uiImage: MiloMark.menuImage(for: item, size: 22))
+                        }
+                        .tag(item)
+                    }
+                }
+                .tint(MiloTheme.accent)
+                .id("palette-\(model.effectivePalette.rawValue)")
+                Toggle("Sync palette across Web and iPhone", isOn: paletteSync)
+            } footer: {
+                Text(model.paletteSync
+                    ? "Shared across the browser and this phone."
+                    : "Applies to this phone unless sync is turned on.")
             }
 
             Section {
@@ -313,11 +336,15 @@ private struct DisplaySettingsView: View {
                         Text(SettingsWording.of(value)).tag(value)
                     }
                 }
+                .tint(MiloTheme.accent)
+                .id("tools-\(model.effectivePalette.rawValue)")
                 Picker("Reasoning", selection: thinking) {
                     ForEach(model.thinkingLevels, id: \.self) { value in
                         Text(SettingsWording.of(value)).tag(value)
                     }
                 }
+                .tint(MiloTheme.accent)
+                .id("thinking-\(model.effectivePalette.rawValue)")
                 Toggle("Tool calls folded", isOn: $foldedTools)
                 Toggle("Interactive widgets (GenUI)", isOn: genui)
             }
@@ -336,7 +363,7 @@ private struct DisplaySettingsView: View {
 
             SettingsErrorSection()
         }
-        .navigationTitle("Display")
+        .navigationTitle("Appearance")
         .navigationBarTitleDisplayMode(.inline)
         // Read without prompting, so a switch left on from an earlier run cannot read
         // as a promise the phone is not allowed to keep.
@@ -347,6 +374,20 @@ private struct DisplaySettingsView: View {
             guard on else { return }
             Task { await model.askToNotify() }
         }
+    }
+
+    private var palette: Binding<MiloPaletteId> {
+        Binding(
+            get: { model.effectivePalette },
+            set: { value in Task { await model.setPalette(value) } }
+        )
+    }
+
+    private var paletteSync: Binding<Bool> {
+        Binding(
+            get: { model.paletteSync },
+            set: { value in Task { await model.setPaletteSync(value) } }
+        )
     }
 
     private var tools: Binding<String> {

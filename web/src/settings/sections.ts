@@ -2,7 +2,7 @@
 export const settingsSections = [
   ['provider', 'cpu', 'Provider & model'], ['keys', 'key', 'API keys'], ['memory', 'database', 'Memory'],
   ['gateways', 'server', 'Gateways'], ['web', 'globe', 'Web'],
-  ['tools', 'settings', 'Tools'], ['permissions', 'shield', 'Permissions'], ['display', 'eye', 'Display'],
+  ['tools', 'settings', 'Tools'], ['permissions', 'shield', 'Permissions'], ['display', 'palette', 'Appearance'],
   ['skills', 'spark', 'Skills'], ['sessions', 'history', 'Sessions'],
 ] as const
 

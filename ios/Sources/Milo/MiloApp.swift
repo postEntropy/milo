@@ -65,6 +65,7 @@ struct RootView: View {
                 ChatView(account: account)
             }
         }
+        .tint(MiloTheme.accent)
         .task { await model.load() }
         // Coming back to the app is when another surface's work is most likely to be
         // waiting: the sessions are re-read on wake, so one started on the computer is

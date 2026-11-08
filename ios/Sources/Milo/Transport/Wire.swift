@@ -5,7 +5,7 @@ import Foundation
  `src/gateways/web/protocol.ts`; the server refuses any other number aloud, so a
  drift between the two is a refusal rather than a mis-drawn chat.
  */
-let miloProtocolVersion = 17
+let miloProtocolVersion = 18
 
 // MARK: - What the app sends
 
@@ -522,6 +522,7 @@ enum ServerFrame: Decodable {
     case plan(Bool)
     case jobs([JobView])
     case suggestions([Idea])
+    case paletteState(sync: Bool, palette: String)
     case routinesChanged
     /// A session's turn began or ended somewhere in the install: re-read the list that
     /// shows it running.
@@ -538,6 +539,7 @@ enum ServerFrame: Decodable {
     private enum CodingKeys: String, CodingKey {
         case type, id, text, turnId, event, request, expiresAt, allowed, status, raw, rawNoOutput, says
         case busy, queued, plan, jobs, items, message, panel, messages, backend, retryPendingId, requestId, ok, error, steered
+        case sync, palette
     }
 
     init(from decoder: Decoder) throws {
@@ -594,6 +596,11 @@ enum ServerFrame: Decodable {
         case "plan": self = .plan(try container.decode(Bool.self, forKey: .plan))
         case "jobs": self = .jobs(try container.decode([JobView].self, forKey: .jobs))
         case "suggestions": self = .suggestions(try container.decode([Idea].self, forKey: .items))
+        case "palette-state":
+            self = .paletteState(
+                sync: try container.decode(Bool.self, forKey: .sync),
+                palette: try container.decode(String.self, forKey: .palette)
+            )
         case "routines-changed": self = .routinesChanged
         case "sessions-changed": self = .sessionsChanged
         case "work-changed": self = .workChanged

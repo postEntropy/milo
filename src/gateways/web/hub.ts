@@ -9,13 +9,13 @@ import { INSTALL_SCOPE, type MemoryScope } from '../../core/memory/index.js'
 import { isImage, mimeFor, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
 import type { PanelRequest } from '../../core/panel.js'
 import { placedProject } from '../../core/projects.js'
-import { readDisplay } from '../../core/config/load.js'
+import { readDisplay, readPalette } from '../../core/config/load.js'
 import { buildCommandContext, handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
 import { rawTurn } from '../raw.js'
 import { COMMAND_CATALOG } from '../command-catalog.js'
-import type { ClientFrame, FrameAttachment, JobView, PanelInput, PanelKind, PanelState, PanelTab, PanelView, PermissionRequest, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
+import type { ClientFrame, FrameAttachment, JobView, PaletteState, PanelInput, PanelKind, PanelState, PanelTab, PanelView, PermissionRequest, SendTarget, ServerFrame, TranscriptMessage } from './protocol.js'
 import { PERMISSION_TIMEOUT_MS, PLAN_APPROVAL, PROTOCOL_VERSION, transcriptChunks } from './protocol.js'
 import { displayEvent, withWords } from './turn.js'
 import { panelsOf, transcriptOf } from './transcript.js'
@@ -305,6 +305,8 @@ export class WebHub {
     }
     if (historyError) client.send({ type: 'error', message: `Could not read this Session's Command Code history: ${historyError}` })
     this.sendState(chatId)
+    const paletteState = readPalette()
+    client.send({ type: 'palette-state', sync: paletteState.sync, palette: paletteState.palette })
     if (chat.session.backend.kind === 'milo' && chat.session.messages.length === 0) this.ensureIdeas()
   }
 
@@ -586,6 +588,17 @@ export class WebHub {
    */
   sessionsChanged(): void {
     const frame: ServerFrame = { type: 'sessions-changed' }
+    for (const chat of this.chats.values()) {
+      for (const client of chat.clients) client.send(frame)
+    }
+  }
+
+  /**
+   * Broadcasts the authoritative palette sync state across every connected
+   * client in every chat of this install.
+   */
+  paletteChanged(state: PaletteState = readPalette()): void {
+    const frame: ServerFrame = { type: 'palette-state', sync: state.sync, palette: state.palette }
     for (const chat of this.chats.values()) {
       for (const client of chat.clients) client.send(frame)
     }

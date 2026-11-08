@@ -623,6 +623,11 @@ struct SettingsOverview: Decodable {
         let genui: Bool?
     }
 
+    struct Palette: Decodable {
+        let sync: Bool?
+        let palette: String?
+    }
+
     struct Permissions: Decodable {
         let mode: String?
         let allow: [String]?
@@ -717,6 +722,7 @@ struct SettingsOverview: Decodable {
         let providers: [String: ProviderConfig]?
         let reasoningEffort: String?
         let display: Display?
+        let palette: Palette?
         let permissions: Permissions?
         let classifier: Classifier?
         let memory: Memory?

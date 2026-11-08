@@ -3,7 +3,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { buildSystemPrompt } from '../src/core/agent/system.js'
+import { COLOR_PALETTES, DEFAULT_COLOR_PALETTE } from '../src/core/color-palettes.js'
 import { PROJECT_ICONS } from '../src/core/project-icons.js'
+import { COLOR_PALETTE_PRESETS } from '../web/src/theme/palettes.js'
 import { findHardcodedRadius, findHardcodedType, findOutlinedControls, findPortugueseCopy, sourceFiles, type Hit } from './conventions.js'
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url))
@@ -129,6 +131,43 @@ describe('a project mark is the same mark on every surface', () => {
     const onPhone = [...swift.matchAll(/id: "([^"]+)", label: "([^"]+)", symbol: "([^"]+)"/g)]
       .map((match) => `${match[1]}:${match[2]}`)
     expect(onPhone).toEqual(PROJECT_ICONS.map((icon) => `${icon.id}:${icon.label}`))
+  })
+
+  it('offers the browser and the phone the same colour palettes and accent values as the core catalog', () => {
+    expect(DEFAULT_COLOR_PALETTE).toBe('peach')
+    expect(COLOR_PALETTES.map((palette) => palette.id)).not.toContain('current')
+    expect(
+      COLOR_PALETTE_PRESETS.map((preset) => `${preset.id}:${preset.label}`),
+    ).toEqual(COLOR_PALETTES.map((palette) => `${palette.id}:${palette.label}`))
+
+    const swift = readFileSync(path.join(repoRoot, 'ios/Sources/Milo/Support/Theme.swift'), 'utf8')
+    expect(swift).toContain('static let defaultPalette: MiloPaletteId = .peach')
+
+    const onPhone = [
+      ...swift.matchAll(
+        /MiloPalettePreset\(id: \.(\w+), label: "([^"]+)", logoTop: 0x([0-9A-Fa-f]{6}), logoBottom: 0x([0-9A-Fa-f]{6}), lightAccent: 0x([0-9A-Fa-f]{6}), darkAccent: 0x([0-9A-Fa-f]{6}), lightAccentOn: 0x([0-9A-Fa-f]{6}), darkAccentOn: 0x([0-9A-Fa-f]{6})\)/g,
+      ),
+    ].map((match) => ({
+      id: match[1],
+      label: match[2],
+      logoColors: [`#${match[3]!.toUpperCase()}`, `#${match[4]!.toUpperCase()}`],
+      lightAccent: `#${match[5]!.toUpperCase()}`,
+      darkAccent: `#${match[6]!.toUpperCase()}`,
+      lightAccentOn: `#${match[7]!.toUpperCase()}`,
+      darkAccentOn: `#${match[8]!.toUpperCase()}`,
+    }))
+
+    expect(onPhone).toEqual(
+      COLOR_PALETTE_PRESETS.map((preset) => ({
+        id: preset.id,
+        label: preset.label,
+        logoColors: [preset.logoColors[0].toUpperCase(), preset.logoColors[1].toUpperCase()],
+        lightAccent: preset.light.accent.toUpperCase(),
+        darkAccent: preset.dark.accent.toUpperCase(),
+        lightAccentOn: preset.light.accentOn.toUpperCase(),
+        darkAccentOn: preset.dark.accentOn.toUpperCase(),
+      })),
+    )
   })
 })
 

@@ -34,7 +34,18 @@ import { browserChromeDir, browserProfilesDir, embedEngineDir, memoryDir, skills
 import { mcpFacts } from '../../core/mcp/servers.js'
 import { toolDisplayName } from '../tool-line.js'
 import { modelNote, shortModel } from '../model-label.js'
-import { CLASSIFIER_BACKENDS, EFFORT_LEVELS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS } from './protocol.js'
+import {
+  CLASSIFIER_BACKENDS,
+  COLOR_PALETTES,
+  EFFORT_LEVELS,
+  PERMISSION_MODES,
+  SEARCH_PROVIDERS,
+  THINKING_LEVELS,
+  TOOL_LEVELS,
+  isColorPaletteId,
+  type PaletteState,
+} from './protocol.js'
+import { colorPaletteNames } from '../../core/color-palettes.js'
 import {
   ConfigSchema,
   DEFAULT_LOCAL_EMBED_MODEL,
@@ -87,11 +98,11 @@ export class WebSettings {
   constructor(
     private readonly runtime: AgentRuntime,
     private readonly cwd: string,
-    files?: { register: RegisterFile },
+    private readonly files?: { register?: RegisterFile; paletteChanged?: (state: PaletteState) => void },
   ) {
     this.email = new WebEmailSettings(runtime)
     this.work = new WebWorkSettings(runtime, cwd)
-    this.routines = new WebRoutineSettings(runtime, files)
+    this.routines = new WebRoutineSettings(runtime, files?.register ? { register: files.register.bind(files) } : undefined)
   }
 
   async handle(action: string, body: Record<string, unknown> = {}): Promise<unknown> {
@@ -273,6 +284,7 @@ export class WebSettings {
         efforts: EFFORT_LEVELS,
         searchProviders: SEARCH_PROVIDERS,
         classifierBackends: CLASSIFIER_BACKENDS,
+        colorPalettes: COLOR_PALETTES,
       },
     }
   }
@@ -298,6 +310,15 @@ export class WebSettings {
       // A `null` clears an optional key (and nullable fields default back to `null`).
       const isPlain = (value: unknown): value is Record<string, unknown> =>
         Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+      if ('palette' in patchConfig) {
+        if (!isPlain(patchConfig.palette)) throw new Error('Expected a palette settings object.')
+        if ('sync' in patchConfig.palette && typeof patchConfig.palette.sync !== 'boolean') {
+          throw new Error('Palette sync must be true or false.')
+        }
+        if ('palette' in patchConfig.palette && !isColorPaletteId(patchConfig.palette.palette)) {
+          throw new Error(`Unknown colour palette "${String(patchConfig.palette.palette)}". Use one of: ${colorPaletteNames()}.`)
+        }
+      }
       const merge = (base: unknown, patch: unknown): unknown => {
         if (!isPlain(patch) || !isPlain(base)) return patch
         const out: Record<string, unknown> = { ...base }
@@ -331,7 +352,14 @@ export class WebSettings {
       // switch the composer and `/provider` reach; no restart.
       if (next.provider !== current.provider) this.runtime.setDefaultProvider(next.provider, next.model)
       else if (next.model !== current.model) this.runtime.setDefaultModel(next.model)
-      return { saved: true }
+      if (
+        'palette' in patchConfig ||
+        next.palette.sync !== current.palette.sync ||
+        next.palette.palette !== current.palette.palette
+      ) {
+        this.files?.paletteChanged?.(next.palette)
+      }
+      return { saved: true, palette: next.palette }
     })
   }
 

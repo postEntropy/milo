@@ -17,6 +17,13 @@ import { usePhone } from '../lib/phone.js'
 import { settingsSections } from './sections.js'
 import { MobileModelSheet } from './MobileModelPicker.js'
 import { DisplayPreview } from './DisplayPreview.js'
+import { MiloMark } from '../ui/MiloMark.js'
+import {
+  COLOR_PALETTES,
+  DEFAULT_COLOR_PALETTE,
+  type ColorPaletteId,
+  type PaletteState,
+} from '../theme/palettes.js'
 import { CLASSIFIER_BACKENDS, PERMISSION_MODES, SEARCH_PROVIDERS, THINKING_LEVELS, TOOL_LEVELS, type ThinkingDisplay } from '@protocol'
 import { GOOGLE_SHORTCUT, GOOGLE_STEPS } from '../../../src/core/google/walkthrough.ts'
 import { chatGptPlanName } from '../../../src/core/chatgpt/plan.ts'
@@ -30,6 +37,7 @@ type SettingsConfig = {
   memory: { keepSaid?: number; recallLimit?: number; derive?: boolean; embedding?: { provider: 'ollama' | 'openrouter'; model?: string; url?: string } }
   sessions: { compactAt: number; contextWindow?: number; maxInputTokens: number; keepTurns: number; compaction: boolean; maxSessions: number; generateTitles: boolean; titleModel?: string }
   display: { tools: 'full' | 'name' | 'off'; thinking: ThinkingDisplay; genui?: boolean }
+  palette?: PaletteState
   gateways: Record<string, { enabled: boolean; allowlist: string[] }>
   web: { enabled: boolean; host: string; port: number }
   google: { enabled: boolean }
@@ -241,7 +249,7 @@ function ChatGptAccount({ status, onChanged }: { status?: ChatGptStatus; onChang
   )
 }
 
-export function Settings({ section, onSection, chatId, sessionId, onClose, onSessionChange, theme, onThemeChange, onDirtyChange }: {
+export function Settings({ section, onSection, chatId, sessionId, onClose, onSessionChange, theme, onThemeChange, palette = DEFAULT_COLOR_PALETTE, paletteSync = false, onPaletteChange, onPaletteSyncChange, onPaletteStateLoaded, onDirtyChange }: {
   /** The open section; null is the index of them, which a phone shows and a wide screen replaces with the first. */
   section: string | null
   onSection(section: string | null): void
@@ -251,6 +259,11 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   onSessionChange(id: string): void
   theme: string
   onThemeChange(theme: string): void
+  palette?: ColorPaletteId
+  paletteSync?: boolean
+  onPaletteChange?(palette: ColorPaletteId): Promise<void> | void
+  onPaletteSyncChange?(sync: boolean): Promise<void> | void
+  onPaletteStateLoaded?(state: PaletteState): void
   /** Told when the draft holds edits, so leaving can ask before dropping them. */
   onDirtyChange?(dirty: boolean): void
 }) {
@@ -262,6 +275,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   const [popular, setPopular] = useState<Array<{ name: string; repo: string; installs?: number; description?: string }>>([])
   const [busy, setBusy] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [paletteSaving, setPaletteSaving] = useState(false)
   const [notice, setNotice] = useState<Notice | null>(null)
   useAutoDismiss(notice, setNotice)
   const [catalog, setCatalog] = useState<ModelInfo[] | null>(null)
@@ -281,8 +295,9 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
       const result = await api<SettingsData>('overview')
       setData(result)
       setDraft(structuredClone(result.config))
+      if (result.config.palette) onPaletteStateLoaded?.(result.config.palette)
     } catch (error) { setNotice({ text: message(error), error: true }) }
-  }, [])
+  }, [onPaletteStateLoaded])
 
   const load = useCallback(async (): Promise<void> => {
     setBusy(true)
@@ -290,12 +305,46 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
       const result = await api<SettingsData>('overview')
       setData(result)
       setDraft(structuredClone(result.config))
+      if (result.config.palette) onPaletteStateLoaded?.(result.config.palette)
       setNotice(null)
     } catch (error) { setNotice({ text: message(error), error: true }) }
     finally { setBusy(false) }
-  }, [])
+  }, [onPaletteStateLoaded])
 
   useEffect(() => { void load() }, [load])
+
+  const selectPalette = useCallback(async (next: ColorPaletteId): Promise<void> => {
+    if (!onPaletteChange) return
+    setPaletteSaving(true)
+    try {
+      await onPaletteChange(next)
+      if (paletteSync) {
+        const nextState: PaletteState = { sync: true, palette: next }
+        setData((cur) => cur ? { ...cur, config: { ...cur.config, palette: nextState } } : cur)
+        setDraft((cur) => cur ? { ...cur, palette: nextState } : cur)
+      }
+      setNotice(null)
+    } catch (error) {
+      setNotice({ text: message(error), error: true })
+    } finally {
+      setPaletteSaving(false)
+    }
+  }, [onPaletteChange, paletteSync])
+
+  const togglePaletteSync = useCallback(async (nextSync: boolean): Promise<void> => {
+    if (!onPaletteSyncChange) return
+    setPaletteSaving(true)
+    try {
+      await onPaletteSyncChange(nextSync)
+      setData((cur) => cur ? { ...cur, config: { ...cur.config, palette: { sync: nextSync, palette: nextSync ? palette : (cur.config.palette?.palette ?? DEFAULT_COLOR_PALETTE) } } } : cur)
+      setDraft((cur) => cur ? { ...cur, palette: { sync: nextSync, palette: nextSync ? palette : (cur.palette?.palette ?? DEFAULT_COLOR_PALETTE) } } : cur)
+      setNotice(null)
+    } catch (error) {
+      setNotice({ text: message(error), error: true })
+    } finally {
+      setPaletteSaving(false)
+    }
+  }, [onPaletteSyncChange, palette])
 
   const job = useJob(() => { void reload() })
 
@@ -841,12 +890,47 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
             </div>
           </Advanced>
         </Section>
-        <Section title="Display" description="Choose what shows in the chat and how much the model thinks." active={current === 'display'}>
+        <Section title="Appearance" description="Choose what shows in the chat and how much the model thinks." active={current === 'display'}>
           <DisplayPreview tools={draft.display.tools} thinking={draft.display.thinking} />
           <div className="form-grid">
             <Field label="Appearance"><Select label="Appearance" value={theme} choices={[{ value: 'system', label: 'System theme' }, { value: 'light', label: 'Light theme' }, { value: 'dark', label: 'Dark theme' }]} onChange={onThemeChange} /><small>Applies to this browser only.</small></Field>
             <Field label="Tool detail"><Select label="Tool detail" value={draft.display.tools} choices={TOOL_LEVELS.map((value) => ({ value, label: TOOL_DETAIL_LABELS[value] }))} onChange={(next) => update(['display', 'tools'], next)} /></Field>
             <Field label="Reasoning"><Select label="Reasoning" value={draft.display.thinking} choices={THINKING_LEVELS.map((value) => ({ value, label: REASONING_LABELS[value] }))} onChange={(next) => update(['display', 'thinking'], next)} /></Field>
+            <Field className="full" label="Colour palette">
+              <div className="palette-picker" role="radiogroup" aria-label="Colour palette">
+                {COLOR_PALETTES.map((option) => (
+                  <button
+                    key={option.id}
+                    type="button"
+                    className={`palette-option ${palette === option.id ? 'active' : ''}`}
+                    aria-pressed={palette === option.id}
+                    disabled={paletteSaving}
+                    onClick={() => void selectPalette(option.id)}
+                  >
+                    <MiloMark palette={option.id} size={24} />
+                    <span className="palette-option-name">{option.label}{option.id === DEFAULT_COLOR_PALETTE ? ' (Default)' : ''}</span>
+                  </button>
+                ))}
+              </div>
+              <small>{paletteSync ? 'Shared between Web and iPhone.' : 'Applies to this browser while sync is off. Peach is the default.'}</small>
+            </Field>
+          </div>
+          <div className="toggle-row">
+            <div className="toggle-text">
+              <span className="toggle-label">Sync palette across Web and iPhone</span>
+              <small>{paletteSync ? 'On — choosing a palette updates both surfaces.' : 'Off by default — this browser and your iPhone each keep their own palette.'}</small>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={paletteSync}
+              aria-label="Sync palette across Web and iPhone"
+              disabled={paletteSaving}
+              className={`switch ${paletteSync ? 'is-on' : ''}`}
+              onClick={() => void togglePaletteSync(!paletteSync)}
+            >
+              <span className="switch-knob" />
+            </button>
           </div>
           <div className="toggle-row">
             <div className="toggle-text">

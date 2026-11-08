@@ -56,6 +56,10 @@ export const CONFIG_NOTES: Record<string, string> = {
   'display.tools': 'full, name or off — how much of each tool call is shown.',
   'display.thinking': "expanded or collapsed — whether the model's reasoning opens under the question or sits folded there, a click away. Display only.",
 
+  palette: 'The accent colour and mark on the browser and phone.',
+  'palette.sync': 'true shares one palette between the browser and the phone; false keeps each on its own.',
+  'palette.palette': 'The shared palette when sync is on: peach by default.',
+
   gateways: 'The chat surfaces. The browser chat is served by `milo serve` and lives under `web`.',
   web: 'The browser chat: whether it is served, and where it listens.',
   google: 'Google (Gmail and Drive): off unless asked for. Connect with `milo google connect`.',

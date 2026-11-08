@@ -1,6 +1,13 @@
 import { z } from 'zod'
 import { REASONING_EFFORTS, DEFAULT_REASONING_EFFORT } from '../providers/types.js'
 import { GoogleAccessSchema } from '../google/tiers.js'
+import {
+  COLOR_PALETTE_IDS,
+  DEFAULT_COLOR_PALETTE,
+  DEFAULT_PALETTE_STATE,
+  type ColorPaletteId,
+  type PaletteState,
+} from '../color-palettes.js'
 
 export const WireSchema = z.enum(['openai', 'anthropic', 'responses', 'auto'])
 export type WireInput = z.infer<typeof WireSchema>
@@ -291,6 +298,17 @@ export type DisplayConfig = z.infer<typeof DisplaySchema>
 
 export const DEFAULT_DISPLAY: DisplayConfig = { tools: 'full', thinking: 'expanded' }
 
+export const ColorPaletteSchema = z.enum(COLOR_PALETTE_IDS)
+export type { ColorPaletteId, PaletteState }
+
+export const PaletteConfigSchema = z.object({
+  sync: z.boolean().default(false),
+  palette: ColorPaletteSchema.default(DEFAULT_COLOR_PALETTE),
+})
+export type PaletteConfig = z.infer<typeof PaletteConfigSchema>
+
+export const DEFAULT_PALETTE: PaletteConfig = DEFAULT_PALETTE_STATE
+
 /**
  * The browser Milo drives. Off until it is turned on, like every other optional
  * capability — and off also means the tools are not registered at all, so the
@@ -455,6 +473,7 @@ export const ConfigSchema = z.object({
   history: HistorySchema.default(DEFAULT_HISTORY),
   traces: TracesSchema.default(DEFAULT_TRACES),
   display: DisplaySchema.default(DEFAULT_DISPLAY),
+  palette: PaletteConfigSchema.default(DEFAULT_PALETTE),
   gateways: z.record(z.string(), GatewaySchema).default({}),
   web: WebSchema.default(DEFAULT_WEB),
   permissions: PermissionsSchema.default(DEFAULT_PERMISSIONS),

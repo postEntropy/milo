@@ -40,6 +40,7 @@ const loadedConfig = (
     history: { windowDays: 365 },
     traces: { enabled: true },
     display: { tools: 'full', thinking: 'expanded' },
+    palette: { sync: false, palette: 'peach' },
     reasoningEffort: 'medium',
     google: { enabled: false },
     gateways: {},

@@ -144,4 +144,25 @@ describe('web protocol', () => {
     const frame: ServerFrame = { type: 'plan', plan: true }
     expect(frame).toEqual({ type: 'plan', plan: true })
   })
+
+  it('speaks protocol version 18 and carries the shared palette state frame', () => {
+    expect(PROTOCOL_VERSION).toBe(18)
+    expect(
+      helloVersion({
+        type: 'hello',
+        version: 18,
+        chatId: 'e76b3fc7-f93d-4ee2-a1d8-1cc6e7e7ab92',
+      }),
+    ).toBe(PROTOCOL_VERSION)
+    expect(
+      helloVersion({
+        type: 'hello',
+        version: 17,
+        chatId: 'e76b3fc7-f93d-4ee2-a1d8-1cc6e7e7ab92',
+      }),
+    ).toBe(17)
+
+    const frame: ServerFrame = { type: 'palette-state', sync: true, palette: 'ocean' }
+    expect(frame).toEqual({ type: 'palette-state', sync: true, palette: 'ocean' })
+  })
 })

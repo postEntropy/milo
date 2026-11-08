@@ -28,13 +28,20 @@ vi.mock('../src/core/skills/sources.js', () => ({
 }))
 
 const { WebSettings } = await import('../src/gateways/web/settings.js')
+const { WebHub } = await import('../src/gateways/web/hub.js')
 const { createMcpServers } = await import('../src/core/mcp/servers.js')
 const { mcpFile } = await import('../src/core/config/paths.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { placeProject } = await import('../src/core/projects.js')
-const { saveAuth, readConfig } = await import('../src/core/config/load.js')
+const { saveAuth, readConfig, readPalette } = await import('../src/core/config/load.js')
 const { fileHistory } = await import('../src/core/history.js')
-const { CLASSIFIER_BACKENDS } = await import('../src/gateways/web/protocol.js')
+const { CLASSIFIER_BACKENDS, COLOR_PALETTES, resolveColorPaletteId } = await import('../src/gateways/web/protocol.js')
+const {
+  applyColorPalette,
+  effectivePaletteId,
+  readStoredPalette,
+  writeStoredPalette,
+} = await import('../web/src/theme/palettes.js')
 
 const CHAT = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee'
 
@@ -1462,5 +1469,170 @@ describe('the Work screen’s projects', () => {
     await expect(settings.handle('project-rules', { id: 'calm-otter-9' })).rejects.toThrow(
       'No project with the id calm-otter-9.',
     )
+  })
+})
+
+describe('web Settings colour palette and sync', () => {
+  it('defaults to Peach with sync off, and resolves missing or invalid local IDs to Peach', async () => {
+    writeConfig()
+    const settings = new WebSettings(build(), home)
+    const overview = (await settings.handle('overview')) as {
+      config: { palette: { sync: boolean; palette: string } }
+      options: { colorPalettes: Array<{ id: string; label: string }> }
+    }
+
+    expect(overview.config.palette).toEqual({ sync: false, palette: 'peach' })
+    expect(readPalette()).toEqual({ sync: false, palette: 'peach' })
+    expect(overview.options.colorPalettes).toEqual([...COLOR_PALETTES])
+    expect(overview.options.colorPalettes).toHaveLength(13)
+
+    expect(resolveColorPaletteId(undefined)).toBe('peach')
+    expect(resolveColorPaletteId(null)).toBe('peach')
+    expect(resolveColorPaletteId('current')).toBe('peach')
+    expect(resolveColorPaletteId('invented')).toBe('peach')
+    expect(resolveColorPaletteId('lagoon')).toBe('lagoon')
+
+    const store = new Map<string, string>()
+    const storage = {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        store.set(key, value)
+      },
+    }
+    expect(readStoredPalette(storage)).toBe('peach')
+    store.set('milo-palette', 'not-a-palette')
+    expect(readStoredPalette(storage)).toBe('peach')
+    writeStoredPalette('berry', storage)
+    expect(readStoredPalette(storage)).toBe('berry')
+  })
+
+  it('validates palette saves and leaves the stored state untouched when a write is refused', async () => {
+    writeConfig()
+    const runtime = build()
+    const hub = new WebHub(runtime, home)
+    const settings = new WebSettings(runtime, home, hub)
+    const frames: unknown[] = []
+    await hub.connect({ send: (frame) => frames.push(frame) }, CHAT)
+    frames.length = 0
+
+    await expect(
+      settings.handle('save-config', { config: { palette: { sync: true, palette: 'current' } } }),
+    ).rejects.toThrow('Unknown colour palette "current".')
+    await expect(
+      settings.handle('save-config', { config: { palette: { sync: 'yes' } } }),
+    ).rejects.toThrow('Palette sync must be true or false.')
+    await expect(
+      settings.handle('save-config', { config: { palette: 'peach' } }),
+    ).rejects.toThrow('Expected a palette settings object.')
+
+    expect(readPalette()).toEqual({ sync: false, palette: 'peach' })
+    expect(frames).toEqual([])
+  })
+
+  it('sends the authoritative palette state on connect and broadcasts changes across all connected chats', async () => {
+    writeConfig()
+    const runtime = build()
+    const hub = new WebHub(runtime, home)
+    const settings = new WebSettings(runtime, home, hub)
+
+    const chatA = '11111111-1111-4111-8111-111111111111'
+    const chatB = '22222222-2222-4222-8222-222222222222'
+    const framesA: Array<{ type: string; sync?: boolean; palette?: string }> = []
+    const framesB: Array<{ type: string; sync?: boolean; palette?: string }> = []
+
+    await hub.connect({ send: (frame) => framesA.push(frame) }, chatA)
+    await hub.connect({ send: (frame) => framesB.push(frame) }, chatB)
+
+    expect(framesA).toContainEqual({ type: 'palette-state', sync: false, palette: 'peach' })
+    expect(framesB).toContainEqual({ type: 'palette-state', sync: false, palette: 'peach' })
+    framesA.length = 0
+    framesB.length = 0
+
+    await settings.handle('save-config', {
+      config: { palette: { sync: true, palette: 'ocean' } },
+    })
+
+    expect(readPalette()).toEqual({ sync: true, palette: 'ocean' })
+    expect(framesA).toEqual([{ type: 'palette-state', sync: true, palette: 'ocean' }])
+    expect(framesB).toEqual([{ type: 'palette-state', sync: true, palette: 'ocean' }])
+
+    // A client reconnecting later receives the fresh authoritative state on connect.
+    const framesReconnect: Array<{ type: string; sync?: boolean; palette?: string }> = []
+    await hub.connect({ send: (frame) => framesReconnect.push(frame) }, chatA)
+    expect(framesReconnect).toContainEqual({ type: 'palette-state', sync: true, palette: 'ocean' })
+  })
+
+  it('adopts the initiating client palette when enabling sync, updates both while synced, and restores each local palette when disabled', async () => {
+    writeConfig()
+    const runtime = build()
+    const hub = new WebHub(runtime, home)
+    const settings = new WebSettings(runtime, home, hub)
+
+    let shared = readPalette()
+    const webLocal = 'forest' as const
+    const phoneLocal = 'cherry' as const
+
+    // With sync off, each client displays its own local palette.
+    expect(effectivePaletteId(webLocal, shared)).toBe('forest')
+    expect(effectivePaletteId(phoneLocal, shared)).toBe('cherry')
+
+    // Enabling sync from the browser writes sync: true and the browser's currently displayed palette.
+    await settings.handle('save-config', {
+      config: { palette: { sync: true, palette: effectivePaletteId(webLocal, shared) } },
+    })
+    shared = readPalette()
+    expect(shared).toEqual({ sync: true, palette: 'forest' })
+    expect(effectivePaletteId(webLocal, shared)).toBe('forest')
+    expect(effectivePaletteId(phoneLocal, shared)).toBe('forest')
+
+    // Choosing a palette on the phone while synced updates the shared palette for both clients
+    // without overwriting either client's retained local preference.
+    await settings.handle('save-config', {
+      config: { palette: { sync: true, palette: 'violet' } },
+    })
+    shared = readPalette()
+    expect(shared).toEqual({ sync: true, palette: 'violet' })
+    expect(effectivePaletteId(webLocal, shared)).toBe('violet')
+    expect(effectivePaletteId(phoneLocal, shared)).toBe('violet')
+
+    // A failed shared write leaves the effective selection unchanged.
+    await expect(
+      settings.handle('save-config', {
+        config: { palette: { sync: true, palette: 'invalid-id' } },
+      }),
+    ).rejects.toThrow('Unknown colour palette "invalid-id".')
+    shared = readPalette()
+    expect(effectivePaletteId(webLocal, shared)).toBe('violet')
+    expect(effectivePaletteId(phoneLocal, shared)).toBe('violet')
+
+    // Disabling sync writes only sync: false; each client resumes its retained local palette.
+    await settings.handle('save-config', {
+      config: { palette: { sync: false } },
+    })
+    shared = readPalette()
+    expect(shared).toEqual({ sync: false, palette: 'violet' })
+    expect(effectivePaletteId(webLocal, shared)).toBe('forest')
+    expect(effectivePaletteId(phoneLocal, shared)).toBe('cherry')
+  })
+
+  it('applies palette CSS custom properties without touching the light or dark theme attribute', () => {
+    const props = new Map<string, string>()
+    const root = {
+      dataset: { theme: 'dark' } as Record<string, string | undefined>,
+      style: {
+        setProperty: (name: string, value: string) => {
+          props.set(name, value)
+        },
+      },
+    }
+
+    const applied = applyColorPalette('mint', root)
+    expect(applied.id).toBe('mint')
+    expect(root.dataset.palette).toBe('mint')
+    expect(root.dataset.theme).toBe('dark')
+    expect(props.get('--milo-mark-top')).toBe('#3D9B83')
+    expect(props.get('--milo-mark-bottom')).toBe('#83CBB0')
+    expect(props.get('--palette-light-accent')).toBe('#2B7A65')
+    expect(props.get('--palette-dark-accent')).toBe('#3B947C')
   })
 })

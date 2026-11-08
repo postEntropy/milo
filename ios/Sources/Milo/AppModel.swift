@@ -1673,6 +1673,24 @@ final class AppModel {
     private(set) var toolDisplay = "full"
     private(set) var thinking = "expanded"
     private(set) var genui = true
+    private static let localPaletteKey = "milo-palette"
+    private(set) var localPalette: MiloPaletteId = MiloPaletteId.resolve(UserDefaults.standard.string(forKey: "milo-palette"))
+    private(set) var paletteSync = false
+    private(set) var sharedPalette: MiloPaletteId = .defaultPalette
+
+    var effectivePalette: MiloPaletteId {
+        paletteSync ? sharedPalette : localPalette
+    }
+
+    private func applyEffectivePalette() {
+        MiloTheme.activePalette = effectivePalette
+    }
+
+    private func applySharedPaletteState(sync: Bool, palette: String?) {
+        paletteSync = sync
+        sharedPalette = MiloPaletteId.resolve(palette)
+        applyEffectivePalette()
+    }
 
     // Keys, and the edges of the install
     private(set) var auth: SettingsOverview.Auth?
@@ -1745,6 +1763,9 @@ final class AppModel {
             toolDisplay = overview.config?.display?.tools ?? "full"
             thinking = overview.config?.display?.thinking ?? "expanded"
             genui = overview.config?.display?.genui ?? true
+            if let palette = overview.config?.palette {
+                applySharedPaletteState(sync: palette.sync ?? false, palette: palette.palette)
+            }
 
             auth = overview.auth
             presets = overview.presets ?? []
@@ -1843,6 +1864,35 @@ final class AppModel {
         guard await write({ try await MiloApi.saveConfig($0, ["display": ["genui": value]]) })
         else { return }
         genui = value
+    }
+
+    func setPalette(_ value: MiloPaletteId) async {
+        if !paletteSync {
+            UserDefaults.standard.set(value.rawValue, forKey: Self.localPaletteKey)
+            localPalette = value
+            applyEffectivePalette()
+            return
+        }
+        guard await write({ try await MiloApi.saveConfig($0, ["palette": ["sync": true, "palette": value.rawValue]]) })
+        else { return }
+        sharedPalette = value
+        applyEffectivePalette()
+    }
+
+    func setPaletteSync(_ sync: Bool) async {
+        if sync {
+            let chosen = effectivePalette
+            guard await write({ try await MiloApi.saveConfig($0, ["palette": ["sync": true, "palette": chosen.rawValue]]) })
+            else { return }
+            paletteSync = true
+            sharedPalette = chosen
+            applyEffectivePalette()
+            return
+        }
+        guard await write({ try await MiloApi.saveConfig($0, ["palette": ["sync": false]]) })
+        else { return }
+        paletteSync = false
+        applyEffectivePalette()
     }
 
     // MARK: - Keys and the edges of the install
@@ -2596,6 +2646,8 @@ final class AppModel {
             note = Note(message)
         case .suggestions(let items):
             ideas = items
+        case .paletteState(let sync, let palette):
+            applySharedPaletteState(sync: sync, palette: palette)
         case .jobs(let running):
             jobs = running
         case .routinesChanged:

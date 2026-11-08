@@ -11,7 +11,30 @@ import { SESSION_SURFACES, type SessionBackendView, type SessionSurface } from '
 import type { CommandEntry } from '../command-catalog.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
 export type { PermissionRequest } from '../../core/tools/permission.js'
+import {
+  COLOR_PALETTES,
+  COLOR_PALETTE_IDS,
+  DEFAULT_COLOR_PALETTE,
+  DEFAULT_PALETTE_STATE,
+  isColorPaletteId,
+  resolveColorPaletteId,
+  type ColorPaletteId,
+  type ColorPaletteOption,
+  type PaletteState,
+} from '../../core/color-palettes.js'
+export {
+  COLOR_PALETTES,
+  COLOR_PALETTE_IDS,
+  DEFAULT_COLOR_PALETTE,
+  DEFAULT_PALETTE_STATE,
+  isColorPaletteId,
+  resolveColorPaletteId,
+  type ColorPaletteId,
+  type ColorPaletteOption,
+  type PaletteState,
+}
 
+// 18: the daemon sends the authoritative palette sync state on connect and after changes.
 // 17: a turn identifies the submitted message that started it.
 // 16: clients wait for a send-result before clearing the message they just sent.
 // 15: Command Code model changes are session controls, and the model rides in the
@@ -39,7 +62,7 @@ export type { PermissionRequest } from '../../core/tools/permission.js'
 // is what the version is for. 8 made the handshake's `genui` a flag again: there is
 // one way a turn draws, so a page naming a transport named something that no longer
 // exists.
-export const PROTOCOL_VERSION = 17
+export const PROTOCOL_VERSION = 18
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
@@ -281,6 +304,8 @@ export type ServerFrame =
   | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error'; raw?: string; rawNoOutput?: string; says?: string }
   | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; attachments?: FrameAttachment[]; actions?: ActionRow[]; messageId?: string; cards?: SessionCardItem[]; routine?: RoutineDelivery }
   | { type: 'state'; busy: boolean; queued: number }
+  /** The install-wide accent palette sync state, sent on connect and after any shared write. */
+  | { type: 'palette-state'; sync: boolean; palette: ColorPaletteId }
   /** A routine ran somewhere in this install: re-read whatever shows the history. */
   | { type: 'routines-changed' }
   /** A session's turn began or ended here: re-read the list that shows it running. */

@@ -125,7 +125,8 @@ struct SessionsDrawer: View {
                     onWork: {
                         workList = true
                         onWorkWorld()
-                    }
+                    },
+                    height: 32
                 )
                 .padding(.horizontal, MiloTheme.Space.three)
             }

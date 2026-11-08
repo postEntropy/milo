@@ -14,12 +14,14 @@ import {
   AuthSchema,
   ConfigSchema,
   DEFAULT_DISPLAY,
+  DEFAULT_PALETTE,
   emptyAuth,
   type Auth,
   type ClassifierBackend,
   type ClassifierConfig,
   type Config,
   type DisplayConfig,
+  type PaletteConfig,
   type ProviderEntry,
 } from './schema.js'
 
@@ -162,6 +164,14 @@ export function setProvider(id: string, model: string): void {
  */
 export function readDisplay(): DisplayConfig {
   return readConfigOrNull()?.display ?? DEFAULT_DISPLAY
+}
+
+/**
+ * The shared accent palette and whether sync is on. Falls back to Peach with
+ * sync off when the file does not exist yet or cannot be read.
+ */
+export function readPalette(): PaletteConfig {
+  return readConfigOrNull()?.palette ?? DEFAULT_PALETTE
 }
 
 /**
