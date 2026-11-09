@@ -27,7 +27,7 @@ Title | the message the person would send | sf:the-icon-name
 
 A title is a few words at most — "Investigate the deploy failure", "Tidy the memory list". After the first pipe comes the sentence the assistant will receive: specific and short, in the language of the person's own work. The line ends with "sf:" and the name of an SF Symbol — an Apple system icon such as "envelope", "checklist" or "chart.line.uptrend.xyaxis" — the one you think fits the idea and looks best beside it.
 
-Ground every idea in the notes and the recent session titles you are given, and in nothing else. Never invent a file, a project or a fact that is not there. If nothing is worth offering, answer with exactly NONE. No preamble, no numbering, no blank lines.`
+Use the notes and recent sessions as context to propose useful, distinct next steps the person has not already asked for. Do not repeat or rephrase a past request, even if it appears as a session title. A related follow-up is welcome when it adds a genuinely different action; do not assume a past task failed or remains unfinished. Use session summaries when available to understand what has already been done. Never invent a file, a project or a fact that is not there. If no fresh idea is worth offering, answer with exactly NONE. No preamble, no numbering, no blank lines.`
 
 /** One card the welcome screen may draw from a generated idea. */
 export interface Idea {
@@ -167,9 +167,11 @@ function groundingText(input: IdeaInput): string {
   const notes = input.notes.slice(0, GROUNDING_NOTES)
   const lines: string[] = []
   if (notes.length > 0) lines.push('What is known about the person:', ...notes.map((note) => `- ${note}`))
-  const titles = input.sessions
-    .map((session) => (session.title || session.preview || session.recap || '').trim())
-    .filter((title) => title.length > 0)
-  if (titles.length > 0) lines.push('', 'Recent sessions:', ...titles.map((title) => `- ${title}`))
+  const sessions = input.sessions.map((session) => {
+    const title = (session.title || session.preview || session.recap || '').trim()
+    const recap = session.recap?.trim()
+    return recap && recap !== title ? `- ${title}\n  Summary: ${recap}` : title ? `- ${title}` : ''
+  }).filter(Boolean)
+  if (sessions.length > 0) lines.push('', 'Recent sessions (past requests, not suggestions to repeat):', ...sessions)
   return lines.join('\n')
 }

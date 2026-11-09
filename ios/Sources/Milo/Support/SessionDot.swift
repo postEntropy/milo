@@ -18,25 +18,40 @@ struct SessionDot: View {
     var size: CGFloat = 7
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var dimmed = false
+    @State private var pulsing = false
 
     var body: some View {
-        Circle()
-            .fill(MiloTheme.accent)
-            .frame(width: size, height: size)
-            .opacity(dimmed ? 0.45 : 1)
-            .animation(pulse, value: dimmed)
-            .onAppear { dimmed = state == .running && !reduceMotion }
-            .onChange(of: state) { _, next in dimmed = next == .running && !reduceMotion }
-            .accessibilityLabel(state == .running ? "Running" : "Unread")
-    }
-
-    /// The breath the running dot takes: slow, endless, and none at all when motion is
-    /// reduced — the still dot is then the only difference between the two states.
-    private var pulse: Animation? {
-        state == .running && !reduceMotion
-            ? .easeInOut(duration: 1.8).repeatForever(autoreverses: true)
-            : nil
+        ZStack {
+            if state == .running && !reduceMotion {
+                Circle()
+                    .fill(MiloTheme.accent.opacity(0.35))
+                    .frame(width: size * 1.8, height: size * 1.8)
+                    .scaleEffect(pulsing ? 1.3 : 0.8)
+                    .opacity(pulsing ? 0 : 0.8)
+            }
+            Circle()
+                .fill(MiloTheme.accent)
+                .frame(width: size, height: size)
+                .scaleEffect(state == .running && !reduceMotion ? (pulsing ? 1.05 : 0.95) : 1)
+        }
+        .frame(width: size * 1.8, height: size * 1.8)
+        .onAppear {
+            if state == .running && !reduceMotion {
+                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                    pulsing = true
+                }
+            }
+        }
+        .onChange(of: state) { _, next in
+            if next == .running && !reduceMotion {
+                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: true)) {
+                    pulsing = true
+                }
+            } else {
+                pulsing = false
+            }
+        }
+        .accessibilityLabel(state == .running ? "Running" : "Unread")
     }
 }
 

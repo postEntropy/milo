@@ -744,19 +744,10 @@ struct ToolRow: View {
                 .accessibilityLabel(showingResult ? detailHiddenLabel : detailLabel)
 
                 if showingResult {
-                    if let input = tool.input, !input.isEmpty {
-                        resultBody(input)
-                    }
                     if let change = tool.change, !change.isEmpty {
                         changeBody(change)
-                    } else if let result = tool.result, !result.isEmpty {
-                        resultBody(result)
-                    } else if tool.input == nil || tool.input?.isEmpty == true {
-                        Text(running ? "Tool is still running." : "No output is available.")
-                            .font(MiloTheme.Text.small)
-                            .foregroundStyle(MiloTheme.muted)
-                            .padding(.leading, 22)
-                            .accessibilityAddTraits(.isStaticText)
+                    } else {
+                        toolDetailBody(input: tool.input, output: tool.result)
                     }
                 }
             } else {
@@ -865,22 +856,35 @@ struct ToolRow: View {
         .padding(.leading, 22)
     }
 
-    /// What the call came back with, whole, once the call is pressed: set past the mark's
-    /// own column so it lines up with the name it belongs to rather than with the mark.
-    /// Capped on the server, so the whole record still lives in the turn's Copy raw.
-    private func resultBody(_ result: String) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            Text(result)
-                .font(MiloTheme.Text.mono)
-                .foregroundStyle(MiloTheme.foreground2)
-                .textSelection(.enabled)
-                .padding(MiloTheme.Space.three)
+    /// The call's input and output share one full-width transcript, with the output quiet.
+    private func toolDetailBody(input: String?, output: String?) -> some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+            if let input, !input.isEmpty {
+                Text(isShellCommand ? "$ \(input)" : input)
+                    .foregroundStyle(MiloTheme.foreground)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let output, !output.isEmpty {
+                Text(output)
+                    .foregroundStyle(MiloTheme.muted)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else if running {
+                Text("Tool is still running.")
+                    .foregroundStyle(MiloTheme.muted)
+            } else if input == nil || input?.isEmpty == true {
+                Text("No output is available.")
+                    .foregroundStyle(MiloTheme.muted)
+            }
         }
+        .font(MiloTheme.Text.mono)
+        .textSelection(.enabled)
+        .padding(MiloTheme.Space.three)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(MiloTheme.surfaceWarm, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
         .marksSidewaysDrag()
-        .padding(.leading, 22)
     }
+
+    private var isShellCommand: Bool { tool.name == "shell_command" }
 
     /// Whether there is anything under the call to open: the lines it changed, or what it
     /// came back with. A call that wrote draws the change, because the sentence the tool

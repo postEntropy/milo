@@ -106,7 +106,8 @@ struct SessionsDrawer: View {
                 Spacer(minLength: 0)
                 if canSearch {
                     Button {
-                        withAnimation(.smooth(duration: 0.22)) { searchOpen = true }
+                        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { searchOpen = true }
                     } label: {
                         Image(systemName: "magnifyingglass")
                             .font(.system(size: 15, weight: .semibold))
@@ -187,13 +188,13 @@ struct SessionsDrawer: View {
     /// first — a work session works in one, and the menu is where it is chosen, with no
     /// caret to spend the row's room on — and adding the folder, as a mark-only control
     /// because its name is said on the page the press opens.
-    /// New session keeps neutral glass, leaving the accent for selection and send.
+    /// The session action carries the active palette on both sides of the list.
     private var controls: some View {
         // One glass surface per control, held in the drawer's container, so switching sides
         // morphs the strip rather than replacing it: the session keeps its capsule and the
         // folder's skin melts out beside it, the way the platform's own glass rearranges.
-        GlassEffectContainer(spacing: MiloTheme.Space.three) {
-            HStack(spacing: MiloTheme.Space.three) {
+        GlassEffectContainer(spacing: MiloTheme.Space.two) {
+            HStack(spacing: MiloTheme.Space.two) {
                 if workList {
                     if !startableProjects.isEmpty {
                         Menu {
@@ -205,25 +206,26 @@ struct SessionsDrawer: View {
                                 }
                             }
                         } label: {
-                            HStack(spacing: MiloTheme.Space.two) {
+                            HStack(spacing: MiloTheme.Space.one + 2) {
                                 Image(systemName: "plus")
-                                    .font(.system(size: 16, weight: .semibold))
+                                    .font(.system(size: 15, weight: .semibold))
                                 Text("New session")
                                     .font(MiloTheme.Text.base)
                             }
-                            .foregroundStyle(MiloTheme.foreground)
-                            .padding(.horizontal, MiloTheme.Space.five)
+                            .foregroundStyle(MiloTheme.accentOn)
+                            .padding(.horizontal, MiloTheme.Space.four)
                             .frame(height: Self.controlSpan)
+                            .background(MiloTheme.accent, in: Capsule())
                             .contentShape(Capsule())
                         }
-                        .glassEffect(.regular.interactive(), in: Capsule())
+                        .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
                         .glassEffectID("new-session", in: footerGlass)
                         .accessibilityLabel("New session in a project")
                     }
 
                     Button { onNewProject() } label: {
                         Image(systemName: "folder.badge.plus")
-                            .font(.system(size: 19, weight: .semibold))
+                            .font(.system(size: 18, weight: .semibold))
                             .foregroundStyle(MiloTheme.foreground)
                             .frame(width: Self.controlSpan, height: Self.controlSpan)
                     }
@@ -238,18 +240,19 @@ struct SessionsDrawer: View {
                             Text("New session")
                                 .font(MiloTheme.Text.base)
                         }
-                        .foregroundStyle(MiloTheme.foreground)
+                        .foregroundStyle(MiloTheme.accentOn)
                         .padding(.horizontal, MiloTheme.Space.five)
                         .frame(height: Self.controlSpan)
+                        .background(MiloTheme.accent, in: Capsule())
                         .contentShape(Capsule())
                     }
-                    .glassEffect(.regular.interactive(), in: Capsule())
+                    .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
                     .glassEffectID("new-session", in: footerGlass)
                 }
 
                 Button { onSettings() } label: {
                     Image(systemName: "gearshape")
-                        .font(.system(size: 22, weight: .semibold))
+                        .font(.system(size: 20, weight: .semibold))
                         .foregroundStyle(MiloTheme.foreground)
                         .frame(width: Self.controlSpan, height: Self.controlSpan)
                 }
@@ -259,7 +262,7 @@ struct SessionsDrawer: View {
             }
             .animation(.smooth(duration: 0.3), value: workList)
         }
-        .padding(.trailing, MiloTheme.Space.four)
+        .padding(.trailing, MiloTheme.Space.three)
         .padding(.bottom, MiloTheme.Space.four)
     }
 
@@ -275,7 +278,7 @@ struct SessionsDrawer: View {
             HStack(spacing: MiloTheme.Space.two) {
                 Image(systemName: symbol)
                     .font(MiloTheme.Text.body)
-                    .foregroundStyle(selected ? MiloTheme.accent : MiloTheme.muted)
+                    .foregroundStyle(MiloTheme.foreground)
                     .frame(width: MiloTheme.Space.six)
                 Text(title)
                     .font(MiloTheme.Text.body.weight(.medium))
@@ -367,12 +370,22 @@ struct SessionsDrawer: View {
                 .submitLabel(.search)
                 .focused($searching)
                 .onAppear { searching = true }
+            if !query.isEmpty {
+                Button {
+                    query = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                }
+                .accessibilityLabel("Clear text")
+            }
             Button {
-                withAnimation(.smooth(duration: 0.22)) { closeSearch() }
+                withAnimation(.spring(response: 0.28, dampingFraction: 0.84)) { closeSearch() }
             } label: {
-                Image(systemName: "xmark.circle.fill")
-                    .font(MiloTheme.Text.small)
-                    .foregroundStyle(MiloTheme.muted)
+                Text("Cancel")
+                    .font(MiloTheme.Text.small.weight(.medium))
+                    .foregroundStyle(MiloTheme.accent)
             }
             .accessibilityLabel("Close search")
         }
@@ -382,7 +395,7 @@ struct SessionsDrawer: View {
         // control while it is up, not a filled line laid under the switch.
         .glassEffect(.regular, in: Capsule())
         .padding(.horizontal, MiloTheme.Space.three)
-        .transition(.opacity)
+        .transition(.opacity.combined(with: .scale(scale: 0.96)))
     }
 
     /// The list the way the browser buckets it: how recent, newest group first, with the
@@ -408,9 +421,9 @@ struct SessionsDrawer: View {
     }
 
     @ViewBuilder private var chatListRows: some View {
-        if groups.isEmpty, searched {
-            Text("No sessions found.")
-                .font(MiloTheme.Text.base)
+        if searched {
+            Text(filtered.isEmpty ? "No sessions found." : (filtered.count == 1 ? "1 session found" : "\(filtered.count) sessions found"))
+                .font(MiloTheme.Text.meta.weight(.medium))
                 .foregroundStyle(MiloTheme.muted)
                 .padding(.horizontal, MiloTheme.Space.three)
                 .padding(.top, MiloTheme.Space.two)
@@ -461,9 +474,10 @@ struct SessionsDrawer: View {
     }
 
     @ViewBuilder private var workListRows: some View {
-        if workGroups.isEmpty, searched {
-            Text("No sessions found.")
-                .font(MiloTheme.Text.base)
+        if searched {
+            let totalMatching = workGroups.reduce(0) { $0 + $1.sessions.count }
+            Text(totalMatching == 0 ? "No sessions found." : (totalMatching == 1 ? "1 session found" : "\(totalMatching) sessions found"))
+                .font(MiloTheme.Text.meta.weight(.medium))
                 .foregroundStyle(MiloTheme.muted)
                 .padding(.horizontal, MiloTheme.Space.three)
                 .padding(.top, MiloTheme.Space.two)

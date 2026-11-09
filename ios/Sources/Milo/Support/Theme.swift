@@ -43,6 +43,7 @@ struct MiloPalettePreset: Sendable {
     let darkAccent: UInt32
     let lightAccentOn: UInt32
     let darkAccentOn: UInt32
+    let userBubbleText: UInt32
 
     var accentColor: Color {
         Color.milo(light: lightAccent, dark: darkAccent)
@@ -53,19 +54,19 @@ struct MiloPalettePreset: Sendable {
     }
 
     static let all: [MiloPalettePreset] = [
-        MiloPalettePreset(id: .terracotta, label: "Terracotta", logoTop: 0xA83F1F, logoBottom: 0xD66A3A, lightAccent: 0xA83F1F, darkAccent: 0xCC5A32, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
-        MiloPalettePreset(id: .tangerine, label: "Tangerine", logoTop: 0xE94B0C, logoBottom: 0xFF9A28, lightAccent: 0xC8430C, darkAccent: 0xDF5B20, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
-        MiloPalettePreset(id: .apricot, label: "Apricot", logoTop: 0xD96B36, logoBottom: 0xE9AF56, lightAccent: 0xBD5828, darkAccent: 0xD46D3A, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
-        MiloPalettePreset(id: .peach, label: "Peach", logoTop: 0xD96D5A, logoBottom: 0xF3B18F, lightAccent: 0xC25947, darkAccent: 0xD66B58, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
-        MiloPalettePreset(id: .forest, label: "Forest", logoTop: 0x315C3B, logoBottom: 0x73A66A, lightAccent: 0x315C3B, darkAccent: 0x4B8354, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
-        MiloPalettePreset(id: .mint, label: "Mint", logoTop: 0x3D9B83, logoBottom: 0x83CBB0, lightAccent: 0x2B7A65, darkAccent: 0x3B947C, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
-        MiloPalettePreset(id: .lime, label: "Lime", logoTop: 0x799B22, logoBottom: 0xC0D64F, lightAccent: 0x5E7A18, darkAccent: 0x759624, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
-        MiloPalettePreset(id: .cherry, label: "Cherry", logoTop: 0xC5294C, logoBottom: 0xF07551, lightAccent: 0xBD284A, darkAccent: 0xD44260, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
-        MiloPalettePreset(id: .rose, label: "Rose", logoTop: 0xB84F72, logoBottom: 0xE9949C, lightAccent: 0xAE476A, darkAccent: 0xC96082, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
-        MiloPalettePreset(id: .ocean, label: "Ocean", logoTop: 0x318EA8, logoBottom: 0x58B8A0, lightAccent: 0x27748B, darkAccent: 0x388EA6, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
-        MiloPalettePreset(id: .lagoon, label: "Lagoon", logoTop: 0x3479C4, logoBottom: 0x54C6C0, lightAccent: 0x2B68AD, darkAccent: 0x4282C8, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
-        MiloPalettePreset(id: .berry, label: "Berry", logoTop: 0x8F59B8, logoBottom: 0xD85D85, lightAccent: 0x814CA8, darkAccent: 0x9B65C2, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
-        MiloPalettePreset(id: .violet, label: "Violet", logoTop: 0x6357B8, logoBottom: 0xC16BC4, lightAccent: 0x5A4EAD, darkAccent: 0x7668C9, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF),
+        MiloPalettePreset(id: .terracotta, label: "Terracotta", logoTop: 0xA83F1F, logoBottom: 0xD66A3A, lightAccent: 0xA83F1F, darkAccent: 0xCC5A32, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xF6D5C7),
+        MiloPalettePreset(id: .tangerine, label: "Tangerine", logoTop: 0xE94B0C, logoBottom: 0xFF9A28, lightAccent: 0xC8430C, darkAccent: 0xDF5B20, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xFFE0C2),
+        MiloPalettePreset(id: .apricot, label: "Apricot", logoTop: 0xD96B36, logoBottom: 0xE9AF56, lightAccent: 0xBD5828, darkAccent: 0xD46D3A, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xF9DFC8),
+        MiloPalettePreset(id: .peach, label: "Peach", logoTop: 0xD96D5A, logoBottom: 0xF3B18F, lightAccent: 0xC25947, darkAccent: 0xD66B58, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xFFE8D3),
+        MiloPalettePreset(id: .forest, label: "Forest", logoTop: 0x315C3B, logoBottom: 0x73A66A, lightAccent: 0x315C3B, darkAccent: 0x4B8354, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xDBEBDD),
+        MiloPalettePreset(id: .mint, label: "Mint", logoTop: 0x3D9B83, logoBottom: 0x83CBB0, lightAccent: 0x2B7A65, darkAccent: 0x3B947C, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xD9F0E9),
+        MiloPalettePreset(id: .lime, label: "Lime", logoTop: 0x799B22, logoBottom: 0xC0D64F, lightAccent: 0x5E7A18, darkAccent: 0x759624, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xEEF3D4),
+        MiloPalettePreset(id: .cherry, label: "Cherry", logoTop: 0xC5294C, logoBottom: 0xF07551, lightAccent: 0xBD284A, darkAccent: 0xD44260, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xF7D6DE),
+        MiloPalettePreset(id: .rose, label: "Rose", logoTop: 0xB84F72, logoBottom: 0xE9949C, lightAccent: 0xAE476A, darkAccent: 0xC96082, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xF5D9E4),
+        MiloPalettePreset(id: .ocean, label: "Ocean", logoTop: 0x318EA8, logoBottom: 0x58B8A0, lightAccent: 0x27748B, darkAccent: 0x388EA6, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xD8EFF3),
+        MiloPalettePreset(id: .lagoon, label: "Lagoon", logoTop: 0x3479C4, logoBottom: 0x54C6C0, lightAccent: 0x2B68AD, darkAccent: 0x4282C8, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xD9EBFC),
+        MiloPalettePreset(id: .berry, label: "Berry", logoTop: 0x8F59B8, logoBottom: 0xD85D85, lightAccent: 0x814CA8, darkAccent: 0x9B65C2, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xEBDDFA),
+        MiloPalettePreset(id: .violet, label: "Violet", logoTop: 0x6357B8, logoBottom: 0xC16BC4, lightAccent: 0x5A4EAD, darkAccent: 0x7668C9, lightAccentOn: 0xFFFFFF, darkAccentOn: 0xFFFFFF, userBubbleText: 0xE8E0FC),
     ]
 
     private static let byId: [MiloPaletteId: MiloPalettePreset] = Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
@@ -133,7 +134,7 @@ enum MiloTheme {
     /// On top of an accent fill — the send control and the primary button.
     static var accentOn: Color { paletteStore.active.preset.accentOnColor }
     /// The words in the person's message, paired with the active accent fill.
-    static var userBubbleText: Color { paletteStore.active.preset.accentOnColor }
+    static var userBubbleText: Color { Color.hex(paletteStore.active.preset.userBubbleText) }
     static let secondary = Color.milo(light: 0x508080, dark: 0x6FA3A3)
     static let success = Color.milo(light: 0x587E20, dark: 0x7FA83F)
     /// The green a control is filled with, lighter than the `success` a status dot is read

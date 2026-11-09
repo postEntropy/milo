@@ -35,6 +35,7 @@ export interface ColorPalettePreset {
   id: ColorPaletteId
   label: string
   logoColors: readonly [string, string]
+  userBubbleText: string
   light: PaletteRoleTokens
   dark: PaletteRoleTokens
 }
@@ -44,6 +45,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'terracotta',
     label: 'Terracotta',
     logoColors: ['#A83F1F', '#D66A3A'],
+    userBubbleText: '#F6D5C7',
     light: {
       accent: '#A83F1F',
       accentOn: '#FFFFFF',
@@ -61,6 +63,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'tangerine',
     label: 'Tangerine',
     logoColors: ['#E94B0C', '#FF9A28'],
+    userBubbleText: '#FFE0C2',
     light: {
       accent: '#C8430C',
       accentOn: '#FFFFFF',
@@ -78,6 +81,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'apricot',
     label: 'Apricot',
     logoColors: ['#D96B36', '#E9AF56'],
+    userBubbleText: '#F9DFC8',
     light: {
       accent: '#BD5828',
       accentOn: '#FFFFFF',
@@ -95,6 +99,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'peach',
     label: 'Peach',
     logoColors: ['#D96D5A', '#F3B18F'],
+    userBubbleText: '#FFE8D3',
     light: {
       accent: '#C25947',
       accentOn: '#FFFFFF',
@@ -112,6 +117,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'forest',
     label: 'Forest',
     logoColors: ['#315C3B', '#73A66A'],
+    userBubbleText: '#DBEBDD',
     light: {
       accent: '#315C3B',
       accentOn: '#FFFFFF',
@@ -129,6 +135,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'mint',
     label: 'Mint',
     logoColors: ['#3D9B83', '#83CBB0'],
+    userBubbleText: '#D9F0E9',
     light: {
       accent: '#2B7A65',
       accentOn: '#FFFFFF',
@@ -146,6 +153,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'lime',
     label: 'Lime',
     logoColors: ['#799B22', '#C0D64F'],
+    userBubbleText: '#EEF3D4',
     light: {
       accent: '#5E7A18',
       accentOn: '#FFFFFF',
@@ -163,6 +171,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'cherry',
     label: 'Cherry',
     logoColors: ['#C5294C', '#F07551'],
+    userBubbleText: '#F7D6DE',
     light: {
       accent: '#BD284A',
       accentOn: '#FFFFFF',
@@ -180,6 +189,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'rose',
     label: 'Rose',
     logoColors: ['#B84F72', '#E9949C'],
+    userBubbleText: '#F5D9E4',
     light: {
       accent: '#AE476A',
       accentOn: '#FFFFFF',
@@ -197,6 +207,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'ocean',
     label: 'Ocean',
     logoColors: ['#318EA8', '#58B8A0'],
+    userBubbleText: '#D8EFF3',
     light: {
       accent: '#27748B',
       accentOn: '#FFFFFF',
@@ -214,6 +225,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'lagoon',
     label: 'Lagoon',
     logoColors: ['#3479C4', '#54C6C0'],
+    userBubbleText: '#D9EBFC',
     light: {
       accent: '#2B68AD',
       accentOn: '#FFFFFF',
@@ -231,6 +243,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'berry',
     label: 'Berry',
     logoColors: ['#8F59B8', '#D85D85'],
+    userBubbleText: '#EBDDFA',
     light: {
       accent: '#814CA8',
       accentOn: '#FFFFFF',
@@ -248,6 +261,7 @@ export const COLOR_PALETTE_PRESETS: readonly ColorPalettePreset[] = [
     id: 'violet',
     label: 'Violet',
     logoColors: ['#6357B8', '#C16BC4'],
+    userBubbleText: '#E8E0FC',
     light: {
       accent: '#5A4EAD',
       accentOn: '#FFFFFF',
@@ -323,6 +337,7 @@ export function applyColorPalette(
     root.style.setProperty('--palette-dark-accent-wash', preset.dark.accentWash)
     root.style.setProperty('--milo-mark-top', preset.logoColors[0])
     root.style.setProperty('--milo-mark-bottom', preset.logoColors[1])
+    root.style.setProperty('--palette-user-bubble-text', preset.userBubbleText)
   }
   return preset
 }

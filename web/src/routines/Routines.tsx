@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { PermissionRequest, SendTarget, ThinkingDisplay, TranscriptMessage } from '@protocol'
 import { api } from '../lib/api.js'
 import type { ConnectionState } from '../lib/connection.js'
@@ -58,6 +58,7 @@ type RunEntry = { id: string; at: number }
 
 /** How many runs a page of the history holds; the rest arrive as the list scrolls. */
 const RUN_PAGE = 20
+const RECENT_OUTPUTS = { phone: 4, web: 8 }
 
 /** One run as the front page's timeline lists it, across every routine. */
 type FeedEntry = { id: string; runId: string; routine: string; at: number; answer: string }
@@ -201,7 +202,6 @@ export function Routines({ chatId, chat, tick }: { chatId: string; chat: Routine
   // On a phone, or before there are routines to split beside a detail pane, the
   // screen is a single column that pushes one level in.
   if (phone || routines === null || (routines.length === 0 && !composing)) {
-    if (composing) return <NewRoutine key={initialAsk} chatId={chatId} chat={chat} initialAsk={initialAsk} onBack={close} />
     if (selected) return <RoutineDetail
       key={selected.id}
       routine={selected}
@@ -222,6 +222,8 @@ export function Routines({ chatId, chat, tick }: { chatId: string; chat: Routine
       onRetry={() => { setNotice(null); void refresh() }}
       onRun={runNow}
       onToggle={toggle}
+      feedLimit={phone ? RECENT_OUTPUTS.phone : RECENT_OUTPUTS.web}
+      drawer={composing ? <NewRoutine key={initialAsk} chatId={chatId} chat={chat} initialAsk={initialAsk} onBack={close} /> : null}
     />
   }
 
@@ -241,29 +243,30 @@ export function Routines({ chatId, chat, tick }: { chatId: string; chat: Routine
       <div className="panel-count"><strong>{enabled}</strong><span>active</span><span className="panel-count-divider" /><strong>{routines.length}</strong><span>total</span></div>
       {feed.length > 0 && (activeRoutine !== undefined || composing) && <button className="workspace-rail-link" type="button" onClick={close}>Recent outputs</button>}
     </div>}
-    <RoutineCards
-      routines={routines}
-      activeId={activeRoutine?.id ?? null}
-      onSelect={(id) => {
-        setComposing(false)
-        setOpenedRun(null)
-        setRoutineId(id)
-      }}
-      onRun={runNow}
-      onToggle={toggle}
-    />
+    {routines.some((routine) => !routine.finished) && <>
+      <h3 className="routine-group-title">Your routines</h3>
+      <RoutineCards
+        routines={routines.filter((routine) => !routine.finished)}
+        activeId={activeRoutine?.id ?? null}
+        onSelect={(id) => {
+          setComposing(false)
+          setOpenedRun(null)
+          setRoutineId(id)
+        }}
+        onRun={runNow}
+        onToggle={toggle}
+      />
+    </>}
+    {routines.some((routine) => routine.finished) && <section className="routine-finished" aria-labelledby="routine-finished-title">
+      <h3 id="routine-finished-title" className="routine-group-title">Finished</h3>
+      <RoutineCards routines={routines.filter((routine) => routine.finished)} activeId={activeRoutine?.id ?? null} onSelect={(id) => { setComposing(false); setOpenedRun(null); setRoutineId(id) }} onRun={runNow} onToggle={toggle} />
+    </section>}
   </>
 
-  return <SplitWorkspace label="Routines" rail={rail}>
+  return <>
+  <SplitWorkspace label="Routines" rail={rail}>
     <Notice notice={notice} onDismiss={() => setNotice(null)} />
-    {composing ? <NewRoutine
-      key={initialAsk}
-      chatId={chatId}
-      chat={chat}
-      initialAsk={initialAsk}
-      onBack={close}
-      inSplit
-    /> : activeRoutine ? <RoutineDetail
+    {activeRoutine ? <RoutineDetail
       key={activeRoutine.id}
       routine={activeRoutine}
       chat={chat}
@@ -275,8 +278,11 @@ export function Routines({ chatId, chat, tick }: { chatId: string; chat: Routine
       feed={feed}
       onOpen={(id, runId) => { setComposing(false); setOpenedRun(runId); setRoutineId(id) }}
       inSplit
+      limit={RECENT_OUTPUTS.web}
     />}
   </SplitWorkspace>
+  {composing && <NewRoutine key={initialAsk} chatId={chatId} chat={chat} initialAsk={initialAsk} onBack={close} inSplit />}
+  </>
 }
 
 function RoutineCards({
@@ -320,16 +326,21 @@ function RoutineFeedSection({
   feed,
   onOpen,
   inSplit,
+  limit,
 }: {
   feed: FeedEntry[]
   onOpen(id: string, runId: string): void
   inSplit?: boolean
+  limit: number
 }) {
+  const [showAll, setShowAll] = useState(false)
+  const visibleFeed = showAll ? feed : feed.slice(0, limit)
   const list = <div className="routine-feed-list">
-    {feed.map((entry) => <button className="routine-feed-row" key={entry.runId} type="button" onClick={() => onOpen(entry.id, entry.runId)}>
+    {visibleFeed.map((entry) => <button className="routine-feed-row" key={entry.runId} type="button" onClick={() => onOpen(entry.id, entry.runId)}>
       <span className="routine-feed-head"><strong>{entry.routine}</strong><span className="routine-feed-when">{formatWhen(entry.at, 'absolute')}</span></span>
       <span className="routine-feed-text">{entry.answer || 'No words — the run sent a file.'}</span>
     </button>)}
+    {feed.length > limit && <button className="button routine-feed-more" type="button" onClick={() => setShowAll((value) => !value)}>{showAll ? 'Show fewer' : `Show all ${feed.length}`}</button>}
   </div>
   if (inSplit) {
     return <Panel
@@ -361,6 +372,8 @@ function RoutineList({
   onRetry,
   onRun,
   onToggle,
+  feedLimit,
+  drawer,
 }: {
   /** Null until the list has been read once: "none" and "not yet" are not the same. */
   routines: RoutineSummary[] | null
@@ -374,9 +387,12 @@ function RoutineList({
   onRetry(): void
   onRun(id: string): void
   onToggle(id: string, enabled: boolean): void
+  feedLimit: number
+  drawer: ReactNode
 }) {
   const enabled = routines?.filter((routine) => routine.enabled).length ?? 0
-  return <Panel
+  return <>
+  <Panel
     notice={notice}
     onDismiss={onDismiss}
     head={<PageHeader
@@ -409,9 +425,20 @@ function RoutineList({
           </button>)}
         </div>
       </div>
-      : <RoutineCards routines={routines} activeId={null} onSelect={onSelect} onRun={onRun} onToggle={onToggle} />}
-    {feed.length > 0 && <RoutineFeedSection feed={feed} onOpen={onOpen} />}
+      : <>
+        {routines.some((routine) => !routine.finished) && <>
+          <h3 className="routine-group-title">Your routines</h3>
+          <RoutineCards routines={routines.filter((routine) => !routine.finished)} activeId={null} onSelect={onSelect} onRun={onRun} onToggle={onToggle} />
+        </>}
+        {routines.some((routine) => routine.finished) && <section className="routine-finished" aria-labelledby="routine-finished-title">
+          <h3 id="routine-finished-title" className="routine-group-title">Finished</h3>
+          <RoutineCards routines={routines.filter((routine) => routine.finished)} activeId={null} onSelect={onSelect} onRun={onRun} onToggle={onToggle} />
+        </section>}
+      </>}
+    {feed.length > 0 && <RoutineFeedSection feed={feed} onOpen={onOpen} limit={feedLimit} />}
   </Panel>
+  {drawer}
+  </>
 }
 
 function RoutineDetail({
@@ -640,8 +667,11 @@ function NewRoutine({ chatId, chat, initialAsk = '', onBack, inSplit }: { chatId
   /** What has been asked here and answered here: nothing until the first ask. */
   const thread = createdFrom === null ? [] : chat.messages.slice(createdFrom)
 
-  return <Panel inSplit={inSplit} head={<PageHeader
-    back={!inSplit ? <button className="settings-back" type="button" onClick={onBack}><Icon name="arrow-left" /><span>Routines</span></button> : undefined}
+  return <div className="routine-drawer-layer">
+  <button className="routine-drawer-scrim" type="button" aria-label="Close new routine" onClick={onBack} />
+  <div className="routine-drawer">
+  <Panel inSplit={inSplit} head={<PageHeader
+    back={<button className="settings-back" type="button" onClick={onBack}><Icon name="x" /><span>Close</span></button>}
     title="New routine"
     description="Describe the task and schedule. Milo will turn your request into a routine."
   />}>
@@ -691,4 +721,6 @@ function NewRoutine({ chatId, chat, initialAsk = '', onBack, inSplit }: { chatId
       </article>}
     </div>}
   </Panel>
+  </div>
+  </div>
 }

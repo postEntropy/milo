@@ -48,6 +48,7 @@ private struct WorldSegments: UIViewRepresentable {
         init(_ parent: WorldSegments) { self.parent = parent }
 
         @objc func changed(_ control: UISegmentedControl) {
+            UIImpactFeedbackGenerator(style: .light).impactOccurred()
             if control.selectedSegmentIndex == 1 { parent.onWork() }
             else { parent.onChat() }
         }

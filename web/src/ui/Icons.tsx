@@ -29,6 +29,7 @@ const paths = {
   spark: <><path d="m12 3 1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6Z" /><path d="m19 15 .7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7Z" /></>,
   history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 4v4h4m5 0v4l3 2" /></>,
   menu: <><path d="M4 7h16M4 12h16M4 17h16" /></>,
+  ellipsis: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,
   copy: <><rect x="9" y="9" width="11" height="11" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></>,
   file: <><path d="M6 3h8l4 4v14H6zM14 3v4h4" /></>,
   terminal: <><rect x="4" y="5" width="16" height="14" rx="2" /><path d="m8 10 2.5 2.5L8 15m5 0h3" /></>,
