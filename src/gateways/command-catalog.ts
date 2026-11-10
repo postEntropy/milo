@@ -47,7 +47,7 @@ export const COMMAND_CATALOG: CommandEntry[] = [
     hint: 'write this session out as a file, tool calls and reasoning included',
   },
   { name: 'skills', hint: 'the skills installed, and where they live' },
-  { name: 'memory', usage: ' [forget <id>]', hint: 'what Milo keeps, and how to drop one of them' },
+  { name: 'memory', usage: ' [search <words> | page <number> | edit <id> <text> | forget <id>]', hint: 'inspect and correct notes' },
   { name: 'clear', hint: 'forget this session' },
   { name: 'status', hint: 'permission mode and display settings' },
   { name: 'stop', hint: 'stop the turn running now, and anything queued behind it' },

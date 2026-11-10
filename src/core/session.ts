@@ -12,7 +12,7 @@ import type { BrowserFacts } from './browser/index.js'
 import type { GoogleState } from './google/state.js'
 import type { McpFacts } from './mcp/servers.js'
 import type { HistoryEntry, HistoryWriter } from './history.js'
-import { deriveFacts } from './memory/derive.js'
+import { deriveFacts, reviewRememberDuplicates } from './memory/derive.js'
 import { scopeKey, DEFAULT_RECALL_LIMIT, type Memory, type MemoryInput, type MemoryItem, type MemoryScope } from './memory/index.js'
 import type { SkillSummary } from './skills/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
@@ -1051,7 +1051,17 @@ export class Session {
     }
     // Read through `this.scope` at call time: a gateway can rebind the session
     // to another conversation while it is running.
-    const remember = (items: MemoryInput[]) => memory.remember(this.scope, items)
+    const remember = async (items: MemoryInput[]) => {
+      try {
+        const existing = await this.allMemories()
+        const unique = await reviewRememberDuplicates({ provider, model, person: input, messages: [], signal: abort }, items, existing)
+        if (unique === null) return { ok: false as const, error: 'Could not check the notes for duplicates. Try again.' }
+        if (unique.length) await memory.remember(this.scope, unique.map((item) => ({ ...item, preserveDistinct: existing.length > 0 })))
+        return { ok: true as const, processed: unique.length, duplicates: items.length - unique.length }
+      } catch (error) {
+        return { ok: false as const, error: `Could not save the notes: ${errorMessage(error)}` }
+      }
+    }
     const recall = (query: string, options?: { limit?: number }) =>
       this.recallSessions(query, options)
     // What the `memories` tool reads and drops: the list `/memory` shows, and the
@@ -1059,7 +1069,8 @@ export class Session {
     // that matched nothing come back so the tool can say so rather than claim a
     // deletion that never happened.
     const memories = {
-      list: (opts?: { limit?: number; offset?: number }) => memory.list(this.scope, opts),
+      list: (opts?: { limit?: number; offset?: number; query?: string }) => memory.list(this.scope, opts),
+      update: (id: string, text: string) => memory.update(this.scope, id, text),
       forget: async (ids: string[]) => {
         const forgotten: string[] = []
         const unknown: string[] = []
@@ -1547,6 +1558,7 @@ export class Session {
         // The fact has to stand on what the person said; the answer is only
         // context for reading it.
         person: input,
+        existing: () => this.allMemories(),
         messages: [
           { role: 'user', content: [{ type: 'text', text: input }] },
           { role: 'assistant', content: [{ type: 'text', text: answer }] },
@@ -1555,12 +1567,18 @@ export class Session {
       if (facts.length === 0) return
       await this.options.memory.remember(
         this.scope,
-        facts.map((text) => ({ text, tags: ['derived'], kind: 'fact' as const })),
+        facts.map((fact) => ({ text: fact.text, preserveDistinct: true, tags: ['derived'], ...(fact.quote ? { source: { session: this.id, quote: fact.quote } } : {}) })),
       )
     } catch (error) {
       // Never the turn's problem: it answered already, and what it said is kept.
       logWarn(`could not keep the facts of a turn: ${errorMessage(error)}`)
     }
+  }
+
+  private async allMemories(): Promise<MemoryItem[]> {
+    // One query gives the comparison a consistent snapshot even if another
+    // session saves a note while the review is being prepared.
+    return this.options.memory.list(this.scope, { limit: Number.MAX_SAFE_INTEGER })
   }
 
   /** Waits for the background model calls still in flight. No turn ever waits on one. */
@@ -1755,8 +1773,12 @@ export class Session {
   }
 
   /** What this install keeps, newest first with facts ahead of turns. */
-  async memories(limit?: number): Promise<MemoryItem[]> {
-    return this.options.memory.list(this.scope, { limit })
+  async memories(limit?: number, query?: string, offset?: number): Promise<MemoryItem[]> {
+    return this.options.memory.list(this.scope, { limit, query, offset })
+  }
+
+  async updateMemory(id: string, text: string) {
+    return this.options.memory.update(this.scope, id, text)
   }
 
   /** Drops one note by id, or by the front of one. False when nothing matched. */

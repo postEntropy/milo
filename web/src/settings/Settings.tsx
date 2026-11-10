@@ -53,7 +53,7 @@ type SettingsConfig = {
 }
 type Skill = { name: string; description: string; origin?: string; installedAt?: string }
 type MemoryStats = { backend: string; location: string; scopes: number; facts: number; bytes: number }
-type Note = { id: string; text: string; createdAt: number; tags?: string[] }
+type Note = { id: string; text: string; createdAt: number; source?: { session: string; quote: string } }
 type Browser = { id: string; name: string; path: string; version: string | null }
 type Profile = { id: string; name: string; dir: string; bytes: number }
 /** The access level a grant was made at, as the server names and describes it. */
@@ -249,7 +249,7 @@ function ChatGptAccount({ status, onChanged }: { status?: ChatGptStatus; onChang
   )
 }
 
-export function Settings({ section, onSection, chatId, sessionId, onClose, onSessionChange, theme, onThemeChange, palette = DEFAULT_COLOR_PALETTE, paletteSync = false, onPaletteChange, onPaletteSyncChange, onPaletteStateLoaded, onDirtyChange }: {
+export function Settings({ section, onSection, chatId, sessionId, onClose, onSessionChange, onOpenSession, theme, onThemeChange, palette = DEFAULT_COLOR_PALETTE, paletteSync = false, onPaletteChange, onPaletteSyncChange, onPaletteStateLoaded, onDirtyChange }: {
   /** The open section; null is the index of them, which a phone shows and a wide screen replaces with the first. */
   section: string | null
   onSection(section: string | null): void
@@ -257,6 +257,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   sessionId: string
   onClose(): void
   onSessionChange(id: string): void
+  onOpenSession(id: string): void
   theme: string
   onThemeChange(theme: string): void
   palette?: ColorPaletteId
@@ -282,7 +283,13 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   /** The provider whose models the picker is showing; null means the draft's own. */
   const [browsing, setBrowsing] = useState<string | null>(null)
   const [editingSecret, setEditingSecret] = useState<string | null>(null)
+  const noteRequest = useRef(0)
   const [notes, setNotes] = useState<Note[] | null>(null)
+  const [noteQuery, setNoteQuery] = useState('')
+  const [noteOffset, setNoteOffset] = useState(0)
+  const [notesMore, setNotesMore] = useState(false)
+  const [editingNote, setEditingNote] = useState<string | null>(null)
+  const [noteText, setNoteText] = useState('')
   const [mcp, setMcp] = useState<McpReport | null>(null)
   const [browsers, setBrowsers] = useState<Browser[] | null>(null)
   const [profiles, setProfiles] = useState<Profile[] | null>(null)
@@ -349,9 +356,10 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
   const job = useJob(() => { void reload() })
 
   const refreshNotes = useCallback(async (): Promise<void> => {
-    try { setNotes((await api<{ notes: Note[] }>('memory-notes')).notes) }
-    catch (error) { setNotice({ text: message(error), error: true }) }
-  }, [])
+    const request = ++noteRequest.current
+    try { const page = await api<{ notes: Note[]; hasMore: boolean }>('memory-notes', { query: noteQuery, offset: noteOffset }); if (request === noteRequest.current) { setNotes(page.notes); setNotesMore(page.hasMore) } }
+    catch (error) { if (request === noteRequest.current) setNotice({ text: message(error), error: true }) }
+  }, [noteQuery, noteOffset])
 
   useEffect(() => { if (current === 'memory') void refreshNotes() }, [current, refreshNotes])
 
@@ -577,6 +585,11 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
     catch (error) { setNotice({ text: message(error), error: true }) }
   }
 
+  async function saveNote(id: string): Promise<void> {
+    try { await api('update-note', { id, text: noteText }); setEditingNote(null); await refreshNotes() }
+    catch (error) { setNotice({ text: message(error), error: true }) }
+  }
+
   async function startJob(kind: string, body: Record<string, unknown> = {}): Promise<void> {
     job.clear()
     try { await job.run(kind, body) }
@@ -758,9 +771,16 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
 
           <h3 className="section-label" style={{ paddingInline: 0 }}>Notes</h3>
           {data.memoryStats && <p className="panel-note">{data.memoryStats.facts} fact{data.memoryStats.facts === 1 ? '' : 's'} · {humanSize(data.memoryStats.bytes)} · {data.memoryStats.location}</p>}
+          <p className="panel-note">Editing or forgetting a note does not erase past messages, which may still be recalled.</p>
+          <Field label="Search notes"><input type="search" value={noteQuery} onChange={(event) => { setNoteQuery(event.target.value); setNoteOffset(0) }} /></Field>
           {notes === null ? <p className="list-empty">Reading…</p>
-            : notes.length === 0 ? <p className="list-empty">Nothing is remembered yet.</p>
-            : notes.map((note) => <div className="entry-row" key={note.id}><div><div className="secret-name">{note.text}</div><div className="secret-state">{formatWhen(note.createdAt)} · {note.id.slice(0, 8)}</div></div><button className="button danger" type="button" onClick={() => void forgetNote(note.id)}>Forget</button></div>)}
+            : notes.length === 0 ? <p className="list-empty">{noteQuery ? 'No notes match your search.' : 'Nothing is remembered yet.'}</p>
+            : notes.map((note) => <div className="entry-row" key={note.id}><div>
+              {editingNote === note.id ? <><textarea aria-label="Note text" value={noteText} onChange={(event) => setNoteText(event.target.value)} /><div><button className="button" type="button" onClick={() => void saveNote(note.id)}>Save</button> <button className="button" type="button" onClick={() => setEditingNote(null)}>Cancel</button></div></> : <div className="secret-name">{note.text}</div>}
+              <div className="secret-state">Last said {formatWhen(note.createdAt)} · {note.id.slice(0, 8)}</div>
+              {note.source ? <div className="secret-state">Source: “{note.source.quote}” <button className="button" type="button" onClick={() => onOpenSession(note.source!.session)}>Open Session</button></div> : <div className="secret-state">Source unavailable</div>}
+            </div><div className="row-actions"><button className="button button-icon" type="button" title="Edit note" aria-label="Edit note" onClick={() => { setEditingNote(note.id); setNoteText(note.text) }}><Icon name="edit" size={16} /></button><button className="button button-icon" type="button" title="Forget note" aria-label="Forget note" onClick={() => void forgetNote(note.id)}><Icon name="trash" size={16} /></button></div></div>)}
+          {(noteOffset > 0 || notesMore) && <div><button className="button" type="button" disabled={noteOffset === 0} onClick={() => setNoteOffset(Math.max(0, noteOffset - 50))}>Previous</button> <button className="button" type="button" disabled={!notesMore} onClick={() => setNoteOffset(noteOffset + 50)}>Next</button></div>}
         </Section>
         <Section title="Gateways" description="Optional chat channels; tokens are stored locally." active={current === 'gateways'}>
           {(['telegram', 'discord'] as const).map((gateway) => <div key={gateway}>

@@ -138,8 +138,9 @@ export class WebSettings {
       case 'remove-skill': return this.remove(body)
       case 'context-budget': return { budget: await this.runtime.contextBudget() }
       case 'history-search': return this.historySearch(body)
-      case 'memory-notes': return this.memoryNotes()
+      case 'memory-notes': return this.memoryNotes(body)
       case 'forget-note': return this.forgetNote(body)
+      case 'update-note': return this.updateNote(body)
       case 'routines': return this.routines.listRoutines()
       case 'task-lists': return readTaskLists()
       case 'task-list-action': return this.taskListAction(body)
@@ -686,17 +687,26 @@ export class WebSettings {
     }
   }
 
-  private async memoryNotes(): Promise<unknown> {
-    return {
-      notes: await this.runtime.memory.list(INSTALL_SCOPE, { limit: 200 }),
-      stats: memoryStatus(memoryDir()),
-    }
+  private async memoryNotes(body: Record<string, unknown>): Promise<unknown> {
+    const query = typeof body.query === 'string' ? body.query.trim() : ''
+    const offset = typeof body.offset === 'number' && Number.isSafeInteger(body.offset) && body.offset >= 0 ? body.offset : 0
+    const page = await this.runtime.memory.list(INSTALL_SCOPE, { limit: 51, offset, query })
+    return { notes: page.slice(0, 50), hasMore: page.length > 50 }
   }
 
   private async forgetNote(body: Record<string, unknown>): Promise<unknown> {
     const id = typeof body.id === 'string' ? body.id.trim() : ''
     if (!id) throw new Error('A note id is required.')
-    return { removed: await this.runtime.memory.forget(INSTALL_SCOPE, id) }
+    if (!await this.runtime.memory.forget(INSTALL_SCOPE, id)) throw new Error('No unique note matches that id.')
+    return { removed: true }
+  }
+
+  private async updateNote(body: Record<string, unknown>): Promise<unknown> {
+    const id = typeof body.id === 'string' ? body.id : ''
+    const text = typeof body.text === 'string' ? body.text : ''
+    const result = await this.runtime.memory.update(INSTALL_SCOPE, id, text)
+    if (!result.ok) throw new Error(result.error)
+    return result
   }
 
   private async browsers(): Promise<unknown> {

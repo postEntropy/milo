@@ -42,7 +42,9 @@ struct SettingsView: View {
                         ApiKeysSettingsView()
                     }
                     category("Memory", icon: "cylinder") {
-                        MemorySettingsView()
+                        MemorySettingsView(onOpenSession: { id in
+                            Task { if await model.resume(id) { dismiss() } }
+                        })
                     }
                     category("Gateways", icon: "server.rack") {
                         GatewaysSettingsView()
@@ -415,8 +417,13 @@ private struct DisplaySettingsView: View {
 // MARK: - Memory
 
 private struct MemorySettingsView: View {
+    let onOpenSession: (String) -> Void
     @Environment(AppModel.self) private var model
     @State private var recallLimitText = ""
+    @State private var noteQuery = ""
+    @State private var noteOffset = 0
+    @State private var editingNote: MemoryNote?
+    @State private var noteText = ""
     @FocusState private var recallFocused: Bool
 
     var body: some View {
@@ -481,26 +488,48 @@ private struct MemorySettingsView: View {
             SetupJobSection()
 
             Section {
+                TextField("Search notes", text: $noteQuery)
+                    .onChange(of: noteQuery) { _, _ in noteOffset = 0 }
                 if let notes = model.memoryNotes {
                     if notes.isEmpty {
-                        Text("Nothing is remembered yet.")
+                        Text(noteQuery.isEmpty ? "Nothing is remembered yet." : "No notes match your search.")
                             .foregroundStyle(MiloTheme.muted)
                     } else {
                         ForEach(notes) { note in
                             VStack(alignment: .leading, spacing: 4) {
                                 Text(note.text)
                                     .font(MiloTheme.Text.body)
+                                if let source = note.source {
+                                    Text("Source: “\(source.quote)”")
+                                        .font(MiloTheme.Text.small)
+                                        .foregroundStyle(MiloTheme.muted)
+                                    Button("Open Session") { onOpenSession(source.session) }
+                                        .font(MiloTheme.Text.small)
+                                } else {
+                                    Text("Source unavailable")
+                                        .font(MiloTheme.Text.small)
+                                        .foregroundStyle(MiloTheme.muted)
+                                }
                                 HStack {
-                                    Text("\(RelativeTime.when(note.createdAt)) · \(String(note.id.prefix(8)))")
+                                    Text("Last said \(RelativeTime.when(note.createdAt)) · \(String(note.id.prefix(8)))")
                                         .font(MiloTheme.Text.small)
                                         .foregroundStyle(MiloTheme.muted)
                                     Spacer()
-                                    Button("Forget", role: .destructive) {
+                                    MiloIconButton(systemName: "pencil", size: 14, span: 40, glass: true) {
+                                        noteText = note.text
+                                        editingNote = note
+                                    }
+                                    .accessibilityLabel("Edit note")
+                                    .help("Edit note")
+                                    MiloIconButton(systemName: "trash", size: 14, span: 40, glass: true) {
                                         Task { await model.forgetMemoryNote(note.id) }
                                     }
-                                    .font(MiloTheme.Text.small)
-                                    .buttonStyle(.borderless)
+                                    .accessibilityLabel("Forget note")
+                                    .help("Forget note")
                                 }
+                                .font(MiloTheme.Text.small)
+                                .foregroundStyle(MiloTheme.muted)
+                                .buttonStyle(.borderless)
                             }
                             .padding(.vertical, 2)
                             .swipeActions(edge: .trailing) {
@@ -514,11 +543,23 @@ private struct MemorySettingsView: View {
                     Text("Reading…")
                         .foregroundStyle(MiloTheme.muted)
                 }
+                if noteOffset > 0 || model.memoryNotesMore {
+                    HStack {
+                        Button("Previous") { noteOffset = max(0, noteOffset - 50) }.disabled(noteOffset == 0)
+                        Spacer()
+                        Button("Next") { noteOffset += 50 }.disabled(!model.memoryNotesMore)
+                    }
+                }
             } header: {
-                Text("Notes")
-            } footer: {
                 if let stats = model.memoryStats {
-                    Text("\(stats.facts) fact\(stats.facts == 1 ? "" : "s") · \(SettingsWording.bytes(stats.bytes)) · \(stats.location)")
+                    Text("Notes · \(stats.facts)")
+                } else {
+                    Text("Notes")
+                }
+            } footer: {
+                Text("Editing or forgetting a note does not erase past messages, which may still be recalled.")
+                if let stats = model.memoryStats {
+                    Text("\(SettingsWording.bytes(stats.bytes)) · \(stats.location)")
                 }
             }
 
@@ -546,7 +587,22 @@ private struct MemorySettingsView: View {
         .onChange(of: recallFocused) { _, focused in
             if !focused { commitRecallLimit() }
         }
-        .task { await model.loadMemoryNotes() }
+        .task(id: "\(noteQuery)\u{0}\(noteOffset)") {
+            await model.loadMemoryNotes(query: noteQuery, offset: noteOffset)
+        }
+        .alert("Edit note", isPresented: Binding(get: { editingNote != nil }, set: { if !$0 { editingNote = nil } })) {
+            TextField("Note", text: $noteText)
+            Button("Cancel", role: .cancel) { editingNote = nil }
+            Button("Save") {
+                guard let note = editingNote else { return }
+                Task {
+                    if await model.updateMemoryNote(note.id, text: noteText) {
+                        editingNote = nil
+                        await model.loadMemoryNotes(query: noteQuery, offset: noteOffset)
+                    }
+                }
+            }
+        }
     }
 
     private var derive: Binding<Bool> {

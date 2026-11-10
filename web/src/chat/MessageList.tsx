@@ -329,7 +329,7 @@ export function MessageList({
 
   return <>
     <div className={`thread-inner${messages[0]?.loaded ? ' is-opened' : ''}`} aria-live="polite" aria-relevant="additions text">
-      {visibleMessages.map((message) => (
+      {visibleMessages.map((message, index) => (
         <MessageRow
           key={message.id}
           message={message}
@@ -343,7 +343,7 @@ export function MessageList({
           onRegenerate={onRegenerate}
           onDismissPending={onDismissPending}
           onRestorePending={onRestorePending}
-          onQuote={onQuote}
+          onQuote={index === visibleMessages.length - 1 ? undefined : onQuote}
           onSend={onPrompt}
           regenPrompt={message.id === regen?.id ? regen.prompt : undefined}
           regenUpToTurn={message.id === regen?.id ? regen.upToTurn : undefined}

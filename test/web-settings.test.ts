@@ -250,6 +250,32 @@ describe('web Settings secret handling', () => {
 })
 
 describe('web Settings memory notes', () => {
+  it('passes the search and page to memory and reports whether another page exists', async () => {
+    writeConfig()
+    const calls: unknown[] = []
+    const settings = new WebSettings(build({
+      list: async (_scope: unknown, opts: unknown) => { calls.push(opts); return Array.from({ length: 51 }, (_, i) => ({ ...NOTE, id: String(i) })) },
+    }), home)
+    const page = await settings.handle('memory-notes', { query: 'editor', offset: 50 }) as { notes: unknown[]; hasMore: boolean }
+    expect(calls).toEqual([{ limit: 51, offset: 50, query: 'editor' }])
+    expect(page.notes).toHaveLength(50)
+    expect(page.hasMore).toBe(true)
+  })
+
+  it('propagates the outcome of a note correction and a missing note', async () => {
+    writeConfig()
+    const edits: unknown[] = []
+    const settings = new WebSettings(build({
+      update: async (_scope: unknown, id: string, text: string) => {
+        edits.push([id, text])
+        return id === NOTE.id ? { ok: true } : { ok: false, error: 'No unique note matches that id.' }
+      },
+    }), home)
+    expect(await settings.handle('update-note', { id: NOTE.id, text: 'prefers spaces' })).toEqual({ ok: true })
+    expect(edits).toEqual([[NOTE.id, 'prefers spaces']])
+    await expect(settings.handle('update-note', { id: 'missing', text: 'x' })).rejects.toThrow('No unique note')
+    await expect(settings.handle('forget-note', { id: 'missing' })).rejects.toThrow('No unique note')
+  })
   it('lists the notes and forgets one', async () => {
     writeConfig()
     const forgotten: string[] = []

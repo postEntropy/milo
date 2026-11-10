@@ -69,6 +69,70 @@ describe('recall by meaning', () => {
     wordsOnly.close()
   })
 
+  it('tries meaning after trimming a full list of partial keyword matches', async () => {
+    const embedder = fakeEmbedder()
+    const memory = new SqliteMemory({ dir: tempDir(), embedder })
+    try {
+      await memory.remember(scope, [
+        { text: 'Meu editor e o Neovim.' },
+        { text: 'A tag de release e a v0.1.0.' },
+        { text: 'O codigo da release passou na revisao.' },
+      ])
+      await memory.whenEmbedded()
+      embedder.calls.length = 0
+      const hits = await memory.recall(scope, 'qual tag de release uso pra codar?', { limit: 2 })
+      expect(hits.map((hit) => hit.text)).toEqual([
+        'A tag de release e a v0.1.0.',
+        'Meu editor e o Neovim.',
+      ])
+      expect(embedder.calls).toEqual([['qual tag de release uso pra codar?']])
+    } finally {
+      memory.close()
+    }
+  })
+
+  it('does not let lexical duplicates consume the semantic candidate window', async () => {
+    const embedder: Embedder = {
+      model: 'candidate-window',
+      async embed(texts) {
+        return texts.map((text) => Float32Array.from(
+          text.includes('Neovim') ? [0.8, 0.6] : text.includes('Emacs') ? [0.6, 0.8] : [1, 0],
+        ))
+      },
+    }
+    const memory = new SqliteMemory({ dir: tempDir(), embedder })
+    try {
+      await memory.remember(scope, [
+        { text: 'A tag de release sai na sexta.' },
+        { text: 'O teste da release passou.' },
+        { text: 'Meu editor e o Neovim.' },
+        { text: 'Minha IDE e o Emacs.' },
+      ])
+      await memory.whenEmbedded()
+      expect((await memory.recall(scope, 'tag release codar', { limit: 3 })).map((hit) => hit.text)).toEqual([
+        'A tag de release sai na sexta.',
+        'Meu editor e o Neovim.',
+        'Minha IDE e o Emacs.',
+      ])
+    } finally {
+      memory.close()
+    }
+  })
+
+  it('skips the embedding request when retained keyword matches fill the reply', async () => {
+    const embedder = fakeEmbedder()
+    const memory = new SqliteMemory({ dir: tempDir(), embedder })
+    try {
+      await memory.remember(scope, [{ text: 'Meu editor e o Neovim.' }])
+      await memory.whenEmbedded()
+      embedder.calls.length = 0
+      expect((await memory.recall(scope, 'qual editor?', { limit: 1 }))[0]?.text).toContain('Neovim')
+      expect(embedder.calls).toEqual([])
+    } finally {
+      memory.close()
+    }
+  })
+
   it('keeps the words working on their own', async () => {
     const memory = new SqliteMemory({ dir: tempDir(), embedder: fakeEmbedder() })
     await memory.remember(scope, [{ text: 'A tag de release e a v0.1.0.' }])

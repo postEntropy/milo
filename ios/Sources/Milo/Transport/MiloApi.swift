@@ -491,9 +491,12 @@ enum MiloApi {
 
     // MARK: - Memory, Tools & Skills
 
-    static func memoryNotes(_ account: Account) async throws -> [MemoryNote] {
-        struct Page: Decodable { let notes: [MemoryNote]? }
-        return try await call("memory-notes", account: account, as: Page.self).notes ?? []
+    static func memoryNotes(_ account: Account, query: String, offset: Int) async throws -> MemoryPage {
+        try await call("memory-notes", ["query": query, "offset": offset], account: account, as: MemoryPage.self)
+    }
+
+    static func updateNote(_ account: Account, id: String, text: String) async throws {
+        _ = try await call("update-note", ["id": id, "text": text], account: account, as: Ack.self)
     }
 
     static func forgetNote(_ account: Account, id: String) async throws {
@@ -774,10 +777,17 @@ struct MemoryStats: Decodable, Equatable {
     let location: String
 }
 
+struct MemoryPage: Decodable {
+    let notes: [MemoryNote]
+    let hasMore: Bool
+}
+
 struct MemoryNote: Decodable, Identifiable, Equatable {
+    struct Source: Decodable, Equatable { let session: String; let quote: String }
     let id: String
     let text: String
     let createdAt: Double
+    let source: Source?
 }
 
 struct InstalledSkill: Decodable, Identifiable, Equatable {

@@ -365,6 +365,7 @@ describe('Session', () => {
   it('answers from as many notes as the install asks for', async () => {
     const limits: (number | undefined)[] = []
     const memory: Memory = {
+      update: async () => ({ ok: true }),
       remember: async () => {},
       recall: async (_scope, _query, opts) => {
         limits.push(opts?.limit)

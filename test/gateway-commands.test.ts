@@ -126,6 +126,7 @@ describe('/memory', () => {
 
     expect(forgotten).toEqual(['aaaa1111'])
     expect(result.reply).toContain('Forgotten')
+    expect(result.reply).toContain('Past messages remain in history')
   })
 
   it('does not pretend a note that matches nothing was dropped', async () => {

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { deriveFacts } from '../src/core/memory/derive.js'
+import { deriveFacts as deriveWithSources, reviewRememberDuplicates, type DeriveOptions } from '../src/core/memory/derive.js'
+
+const deriveFacts = async (options: DeriveOptions): Promise<string[]> => (await deriveWithSources(options)).map((fact) => fact.text)
 import type { ChatRequest, Provider, ReasoningEffort, StreamEvent } from '../src/core/providers/types.js'
 
 const person = 'meu editor e o Neovim, e prefiro bullet points'
@@ -19,13 +21,48 @@ class ScriptedProvider implements Provider {
   constructor(private readonly scripts: StreamEvent[][]) {}
 
   async *stream(): AsyncGenerator<StreamEvent> {
-    const script = this.scripts[this.calls] ?? [{ type: 'done', finishReason: 'stop' as const }]
+    const script = this.scripts[this.calls] ?? answered('KEEP 1\nKEEP 2')
     this.calls += 1
     for (const event of script) yield event
   }
 }
 
 describe('deriveFacts', () => {
+  it('sends existing notes to the review and keeps a correction when the reviewer distinguishes it', async () => {
+    const existing = [{ id: 'old', text: 'My editor is Vim', createdAt: 1 }]
+    let observed = ''
+    let calls = 0
+    const provider: Provider = {
+      id: 'comparison',
+      async *stream(req): AsyncGenerator<StreamEvent> {
+        calls++
+        if (calls === 1) yield { type: 'text', delta: 'My editor is Emacs\tmy editor is Emacs' }
+        else {
+          observed = JSON.stringify(req.messages)
+          yield { type: 'text', delta: 'KEEP 1' }
+        }
+      },
+    }
+    const result = await deriveWithSources({ provider, model: 'm', person: 'my editor is Emacs', messages: turn, existing: async () => existing })
+    expect(result.map((item) => item.text)).toEqual(['My editor is Emacs'])
+    expect(observed).toContain('My editor is Vim')
+  })
+
+  it('checks explicit remember requests and reports a failed comparison', async () => {
+    const existing = [{ id: 'old', text: 'I use Vim', createdAt: 1 }]
+    const items = [{ text: 'Vim is my editor' }, { text: 'My editor is Emacs now' }]
+    const opts = { provider: new ScriptedProvider([answered('KEEP 2')]), model: 'm', person: 'Remember this', messages: turn }
+    expect(await reviewRememberDuplicates(opts, items, existing)).toEqual([items[1]])
+    expect(await reviewRememberDuplicates({ ...opts, provider: new ScriptedProvider([answered('unclear')]) }, items, existing)).toBeNull()
+  })
+  it('keeps the exact supporting quote and does not invent a quote for a normalized match', async () => {
+    const exact = new ScriptedProvider([answered('Uses Neovim\tmy editor is Neovim')])
+    expect(await deriveWithSources({ provider: exact, model: 'm', person: 'my editor is Neovim', messages: turn }))
+      .toEqual([{ text: 'Uses Neovim', quote: 'my editor is Neovim' }])
+    const normalized = new ScriptedProvider([answered('Uses Neovim\tMY EDITOR IS NEOVIM')])
+    expect(await deriveWithSources({ provider: normalized, model: 'm', person: 'my editor is Neovim', messages: turn }))
+      .toEqual([{ text: 'Uses Neovim' }])
+  })
   it('reads one fact per line, bullets and blank lines aside', async () => {
     const provider = new ScriptedProvider([
       answered(
@@ -39,12 +76,31 @@ describe('deriveFacts', () => {
     ])
   })
 
+  it('keeps only candidates explicitly approved by the independent review', async () => {
+    const provider = new ScriptedProvider([
+      answered('Uses Neovim\tmy editor is Neovim\nThe site builds\tthe site builds'),
+      answered('KEEP 1'),
+    ])
+    expect(await deriveFacts({ provider, model: 'm', person: 'my editor is Neovim; the site builds', messages: turn }))
+      .toEqual(['Uses Neovim'])
+  })
+
+  it('keeps nothing if the review is missing or malformed', async () => {
+    const provider = new ScriptedProvider([answered('Uses Neovim\tmy editor is Neovim'), answered('yes, keep it')])
+    expect(await deriveFacts({ provider, model: 'm', person: 'my editor is Neovim', messages: turn })).toEqual([])
+  })
+
+  it('rejects review output containing commentary even alongside an approval', async () => {
+    const provider = new ScriptedProvider([answered('Uses Neovim\tmy editor is Neovim'), answered('KEEP 1\nThis seems useful.')])
+    expect(await deriveFacts({ provider, model: 'm', person: 'my editor is Neovim', messages: turn })).toEqual([])
+  })
+
   it('reads NONE as a turn with nothing worth keeping', async () => {
     const provider = new ScriptedProvider([answered('NONE')])
     expect(await deriveFacts({ provider, model: 'm', person, messages: turn })).toEqual([])
   })
 
-  it('keeps at most five facts from one turn', async () => {
+  it('keeps at most two facts from one turn', async () => {
     const said = Array.from({ length: 9 }, (_, i) => `fato numero ${i}`).join(', ')
     const provider = new ScriptedProvider([
       answered(
@@ -52,7 +108,7 @@ describe('deriveFacts', () => {
       ),
     ])
     expect(await deriveFacts({ provider, model: 'm', person: said, messages: turn })).toHaveLength(
-      5,
+      2,
     )
   })
 
@@ -110,7 +166,7 @@ describe('deriveFacts', () => {
       async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
         asked.push(req.reasoningEffort)
         if (req.reasoningEffort) throw new Error('unknown field: reasoning_effort')
-        yield { type: 'text', delta: 'a versao atual e a 1\ta versao atual e a 1' }
+        yield { type: 'text', delta: req.system?.startsWith('Review candidate') ? 'KEEP 1' : 'a versao atual e a 1\ta versao atual e a 1' }
         yield { type: 'done', finishReason: 'stop' }
       },
     }
@@ -120,7 +176,7 @@ describe('deriveFacts', () => {
     expect(
       await deriveFacts({ provider, model: 'm', person: 'a versao atual e a 1', messages: turn }),
     ).toEqual(['a versao atual e a 1'])
-    expect(asked).toEqual(['low', undefined])
+    expect(asked).toEqual(['low', undefined, 'low', undefined])
   })
 
   it('keeps nothing, and does not throw, when the provider fails outright', async () => {

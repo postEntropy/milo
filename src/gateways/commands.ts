@@ -73,7 +73,8 @@ export interface CommandContext {
   /** The skills installed on this machine, for `/skills`. */
   skills?: () => SkillSummary[]
   /** What this install remembers, for `/memory`. */
-  memories?: (limit?: number) => Promise<MemoryItem[]>
+  memories?: (limit?: number, query?: string, offset?: number) => Promise<MemoryItem[]>
+  updateMemory?: (id: string, text: string) => Promise<{ ok: true } | { ok: false; error: string }>
   /** Drops one remembered note, by id or the front of one. */
   forgetMemory?: (id: string) => Promise<boolean>
   /** Set when this surface may not read or drop memories; used as the reply. */
@@ -326,7 +327,8 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
     jobs: () => runtime.jobs?.list(session.id) ?? [],
     killJob: (id) => runtime.jobs?.kill(id, session.id) ?? false,
     compactSession: () => session.compact(signal),
-    memories: (limit) => session.memories(limit),
+    memories: (limit, query, offset) => session.memories(limit, query, offset),
+    updateMemory: (id, text) => session.updateMemory(id, text),
     forgetMemory: (id) => session.forget(id),
     memoryLocked: memoryLockMessage(lock),
   }
@@ -343,10 +345,10 @@ export function formatMemoryList(notes: MemoryItem[]): string {
     // moment there is no telling a stale one from one from this morning. It is
     // when the note was last said, which is also what recall orders by.
     ...notes.map(
-      (note) => `${shortId(note.id)}  ${formatWhen(note.createdAt)}  ${note.text}`,
+      (note) => `${shortId(note.id)}  ${formatWhen(note.createdAt)}  ${note.text}\n  ${note.source ? `Source: “${note.source.quote}” · Session ${note.source.session}` : 'Source unavailable'}`,
     ),
     '',
-    `Dropping one: /memory forget <id> — the first ${MEMORY_ID_CHARS} characters are enough.`,
+    `Edit: /memory edit <id> <text> · Forget: /memory forget <id> — the first ${MEMORY_ID_CHARS} characters are enough.`,
   ].join('\n')
 }
 
@@ -650,25 +652,31 @@ export async function handleCommand(
         return { handled: true, reply: 'Memory is not available on this surface.' }
       }
       const asked = argument.trim()
-      if (asked && !/^forget\b/i.test(asked)) {
-        return { handled: true, reply: 'Usage: /memory [forget <id>]. Run /memory to list notes.' }
-      }
+      const usage = 'Usage: /memory [search <words> | page <number> | edit <id> <text> | forget <id>].'
       if (/^forget\b/i.test(asked)) {
         const id = asked.replace(/^forget\b/i, '').trim()
-        if (!id) {
-          return { handled: true, reply: 'Usage: /memory forget <id>. The ids come from /memory.' }
-        }
+        if (!id) return { handled: true, reply: 'Usage: /memory forget <id>. The ids come from /memory.' }
         const removed = (await context.forgetMemory?.(id)) ?? false
-        return {
-          handled: true,
-          reply: removed
-            ? `Forgotten: ${id} — it is out of recall from the next question on.`
-            : `Nothing matches "${id}". Run /memory for the ids.`,
-        }
+        return { handled: true, reply: removed ? `Forgotten: ${id}. Past messages remain in history and may still be recalled.` : `Nothing matches "${id}". Run /memory for the ids.` }
       }
-      // Twelve, not the whole store: a chat is read on a phone, and the rest is
-      // reachable by forgetting a few first.
-      return { handled: true, reply: formatMemoryList(await context.memories(12)) }
+      if (/^edit\b/i.test(asked)) {
+        const match = asked.match(/^edit\s+(\S+)\s+([\s\S]+)$/i)
+        if (!match) return { handled: true, reply: usage }
+        if (!context.updateMemory) return { handled: true, reply: 'Editing memory is not available on this surface.' }
+        const result = await context.updateMemory(match[1]!, match[2]!)
+        return { handled: true, reply: result.ok ? 'Note updated.' : result.error }
+      }
+      const search = asked.match(/^search\s+(.+?)(?:\s+--page\s+([1-9]\d*))?$/i)
+      const page = asked.match(/^page\s+([1-9]\d*)$/i)
+      if (asked && !search && !page) return { handled: true, reply: usage }
+      const pageNumber = Number(page?.[1] ?? search?.[2] ?? 1)
+      const offset = (pageNumber - 1) * 12
+      const notes = await context.memories(13, search?.[1], offset)
+      if (notes.length === 0 && search) return { handled: true, reply: 'No notes match your search.' }
+      if (notes.length === 0 && offset > 0) return { handled: true, reply: 'No notes on that page.' }
+      const next = search ? `/memory search ${search[1]} --page ${pageNumber + 1}` : `/memory page ${pageNumber + 1}`
+      return { handled: true, reply: `${formatMemoryList(notes.slice(0, 12))}${notes.length > 12 ? `\nMore notes: ${next}` : ''}` }
+
     }
 
     case 'export': {

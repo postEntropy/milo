@@ -1714,6 +1714,8 @@ final class AppModel {
     private(set) var memoryEmbedding: SettingsOverview.Embedding?
     private(set) var memoryStats: MemoryStats?
     private(set) var memoryNotes: [MemoryNote]?
+    private(set) var memoryNotesMore = false
+    private var memoryNotesRequest = 0
 
     // Tools
     private(set) var searchProvider = "off"
@@ -2116,11 +2118,17 @@ final class AppModel {
         memoryEmbedding = nil
     }
 
-    func loadMemoryNotes() async {
+    func loadMemoryNotes(query: String = "", offset: Int = 0) async {
         guard let account else { return }
+        memoryNotesRequest += 1
+        let request = memoryNotesRequest
         do {
-            memoryNotes = try await MiloApi.memoryNotes(account)
+            let page = try await MiloApi.memoryNotes(account, query: query, offset: offset)
+            guard request == memoryNotesRequest else { return }
+            memoryNotes = page.notes
+            memoryNotesMore = page.hasMore
         } catch {
+            guard request == memoryNotesRequest else { return }
             settingsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
     }
@@ -2129,6 +2137,10 @@ final class AppModel {
         guard await write({ try await MiloApi.forgetNote($0, id: id) }) else { return }
         memoryNotes?.removeAll { $0.id == id }
         await loadSettings()
+    }
+
+    func updateMemoryNote(_ id: String, text: String) async -> Bool {
+        await write({ try await MiloApi.updateNote($0, id: id, text: text) })
     }
 
     func setSearchProvider(_ value: String) async {

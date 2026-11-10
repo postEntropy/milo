@@ -1600,7 +1600,7 @@ export default function App() {
         </div>
       </header>
       {view === 'settings'
-        ? <Settings section={settingsSection} onSection={setSettingsSection} chatId={chatId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} theme={theme} onThemeChange={setTheme} palette={effectivePalette} paletteSync={sharedPalette.sync} onPaletteChange={changePalette} onPaletteSyncChange={changePaletteSync} onPaletteStateLoaded={syncSharedPalette} onDirtyChange={noteDirty} />
+        ? <Settings section={settingsSection} onSection={setSettingsSection} chatId={chatId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} onOpenSession={(id) => void openSession(id)} theme={theme} onThemeChange={setTheme} palette={effectivePalette} paletteSync={sharedPalette.sync} onPaletteChange={changePalette} onPaletteSyncChange={changePaletteSync} onPaletteStateLoaded={syncSharedPalette} onDirtyChange={noteDirty} />
         : view === 'routines'
         ? <Routines chatId={chatId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : view === 'tasks'

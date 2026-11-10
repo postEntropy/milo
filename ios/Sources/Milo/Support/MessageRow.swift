@@ -57,6 +57,8 @@ struct MessageRow: View {
     /// the first keeps the head, the last keeps the foot.
     var head = true
     var foot = true
+    /// A whole-message quote is useful on an earlier answer; the latest one is already in context.
+    var canQuoteMessage = true
     @Environment(AppModel.self) private var model
 
     /// The answer's thinking, when it thought at all. Read off the parts rather than the
@@ -235,7 +237,7 @@ struct MessageRow: View {
                     // nothing to copy. A routine's delivery is not a turn: there is
                     // nothing here to quote, fork or ask again.
                     if foot, !message.streaming, !message.prose.isEmpty, message.routine == nil {
-                        MessageToolbar(message: message, turn: turn, regenerate: regenerate, onQuote: onQuote, readOnly: readOnly)
+                        MessageToolbar(message: message, turn: turn, regenerate: regenerate, onQuote: onQuote, readOnly: readOnly, canQuoteMessage: canQuoteMessage)
                     }
                 }
                 // The buttons a command drew, under its cards or its words: the pages of
@@ -324,6 +326,7 @@ struct MessageToolbar: View {
     let onQuote: (String) -> Void
     /// A message read back rather than answered: only Copy is offered.
     var readOnly = false
+    var canQuoteMessage = true
     @Environment(AppModel.self) private var model
     @State private var copied = false
 
@@ -342,7 +345,7 @@ struct MessageToolbar: View {
             }
             // The answer whole, to answer. The browser keeps this a press deeper, in the
             // message's own menu; a phone has the room, and one press is what it has.
-            if !readOnly {
+            if !readOnly, canQuoteMessage {
                 control("text.quote", label: "Quote") { onQuote(message.prose) }
             }
             if let regenerate {

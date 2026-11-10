@@ -1065,7 +1065,8 @@ struct ChatView: View {
                                     },
                                     groups: piece.groups,
                                     head: piece.head,
-                                    foot: piece.foot
+                                    foot: piece.foot,
+                                    canQuoteMessage: index < threadPieces.count - 1
                                 )
                                 // The pieces of one turn sit a step apart, and a turn stands
                                 // a longer step from the one before it: the rhythm the rows

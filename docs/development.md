@@ -13,7 +13,9 @@ npm run bench:jev       # classifier latency (needs COMMANDCODE_API_KEY, or a lo
 npm run bench:genui     # the generated-interface evaluator
 npm run bench:browser   # what the browser toolset costs (needs a browser)
 npm run bench:memory    # what recall costs
-npm run eval:memory     # what recall gets right (add --semantic for the local engine)
+npm run eval:memory     # what recall gets right (add --semantic for the configured embedder)
+npm run eval:memory -- --stress   # difficult evidence cases; --json includes expected and returned notes
+npm run eval:derive     # extraction and review through the configured chat model; synthetic exchanges
 npm run eval:mem0       # the same set through mem0, verbatim and with its pipeline
 npm run check:browser   # that every verb in it works (needs a browser)
 ```
@@ -23,6 +25,8 @@ and a smoke run of each bundled entry point on every push and pull request; a se
 session-store tests on Windows and macOS, because the lease is a filesystem claim. One trap worth
 knowing: with `NODE_ENV=production` exported in your shell, npm treats every install as `--omit=dev`
 and **prunes the toolchain** — `tsc`, `vitest` and `tsup` disappear. Recover with `npm ci --include=dev`.
+
+See [Memory evaluation](memory-evaluation.md) for the scope, failure cases and reproduction commands.
 
 ## Source layout
 

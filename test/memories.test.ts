@@ -21,6 +21,7 @@ function contextWithStore(
       cwd: process.cwd(),
       signal: new AbortController().signal,
       memories: {
+        update: async () => ({ ok: true }),
         list: async (opts) => {
           const offset = opts?.offset ?? 0
           return stored.slice(offset, offset + (opts?.limit ?? DEFAULT_LIST_LIMIT))
@@ -83,6 +84,21 @@ describe('memories', () => {
     expect(result.content).toBe('Nothing is remembered yet.')
   })
 
+  it('reports an empty search without saying memory is empty', async () => {
+    const { ctx } = contextWithStore([])
+    const result = await memoriesTool.execute({ query: 'absent' }, ctx)
+    expect(result.content).toBe('No notes match that search.')
+  })
+
+  it('edits a note using its id and replacement text', async () => {
+    const { ctx } = contextWithStore()
+    const edits: string[][] = []
+    ctx.memories!.update = async (id, text) => { edits.push([id, text]); return { ok: true } }
+    expect((await memoriesTool.execute({ action: 'edit', ids: ['a1b2c3d4'], text: 'Uses Emacs' }, ctx)).content).toBe('Note updated.')
+    expect(edits).toEqual([['a1b2c3d4', 'Uses Emacs']])
+    expect((await memoriesTool.execute({ action: 'edit', ids: ['a', 'b'], text: 'x' }, ctx)).isError).toBe(true)
+  })
+
   it('forgets the notes whose ids it is given', async () => {
     const { ctx, asked } = contextWithStore()
 
@@ -91,7 +107,8 @@ describe('memories', () => {
       ctx,
     )
 
-    expect(result.content).toBe('Forgot 2 note(s).')
+    expect(result.content).toContain('Forgot 2 note(s).')
+    expect(result.content).toContain('Past messages remain in history')
     expect(asked).toEqual([['a1b2c3d4', 'e5f6a7b8']])
   })
 
@@ -139,6 +156,7 @@ describe('memories', () => {
     expect(await policy.decide(memoriesTool, { action: 'list' })).toBe('allow')
     expect(await policy.decide(memoriesTool, {})).toBe('allow')
     expect(await policy.decide(memoriesTool, { action: 'forget', ids: ['x'] })).toBe('ask')
+    expect(await policy.decide(memoriesTool, { action: 'edit', ids: ['x'], text: 'corrected' })).toBe('ask')
   })
 
   it('keeps itself apart from `recall`, which looks up a conversation', () => {

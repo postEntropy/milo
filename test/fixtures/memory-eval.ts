@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { performance } from 'node:perf_hooks'
@@ -102,7 +102,7 @@ export const TURNS: string[] = [
 
 export interface Question {
   query: string
-  /** The exact texts that answer it — one of them is enough. */
+  /** The exact evidence texts expected in the reply. */
   answers: string[]
 }
 
@@ -308,7 +308,7 @@ export function scoreReply(
   answers: string[],
 ): { precision: number; recall: number; mrr: number } {
   const wanted = new Set(answers.map(normalize))
-  const returned = recalled.map(normalize)
+  const returned = [...new Set(recalled.map(normalize))]
   const hits = returned.filter((text) => wanted.has(text)).length
 
   const first = returned.findIndex((text) => wanted.has(text))
@@ -475,10 +475,11 @@ export async function seedEvalStore(options: SeedOptions = {}): Promise<SeededSt
 
   return {
     memory: installMemory(facts, turns),
-    facts: NOTES.length,
+    facts: (await facts.list(INSTALL_SCOPE, { limit: Number.MAX_SAFE_INTEGER })).length,
     close: () => {
       facts.close()
       turns?.close()
+      if (!options.dir) rmSync(dir, { recursive: true, force: true })
     },
   }
 }

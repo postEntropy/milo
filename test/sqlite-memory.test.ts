@@ -17,6 +17,81 @@ function open(dir = tempDir()) {
 }
 
 describe('SqliteMemory', () => {
+  it('searches and pages the stored notes and keeps their source', async () => {
+    const { memory } = open()
+    const scope = { gateway: 'cli', chatId: 'source' }
+    await memory.remember(scope, [
+      { text: 'My editor is Neovim', source: { session: 'session-1', quote: 'I use Neovim' } },
+      { text: 'My shell is fish' },
+    ])
+    const found = await memory.list(scope, { query: 'neovim', limit: 1 })
+    expect(found).toHaveLength(1)
+    expect(found[0]?.source).toEqual({ session: 'session-1', quote: 'I use Neovim' })
+    await memory.update(scope, found[0]!.id, found[0]!.text)
+    expect((await memory.list(scope, { query: 'neovim' }))[0]?.source).toEqual(found[0]?.source)
+    expect(await memory.list(scope, { query: 'neovim', offset: 1 })).toEqual([])
+    expect((await memory.list(scope, { query: 'my edi' }))[0]?.text).toBe('My editor is Neovim')
+    expect(await memory.list(scope, { query: 'my fish' })).toHaveLength(1)
+    expect(await memory.list(scope, { query: 'editor fish' })).toEqual([])
+    expect(await memory.list(scope, { query: '***' })).toEqual([])
+  })
+
+  it('adds a source when an unsourced note is repeated exactly', async () => {
+    const { memory } = open()
+    const scope = { gateway: 'cli', chatId: 'repeated-source' }
+    await memory.remember(scope, [{ text: 'Uses Neovim on Linux' }])
+    await memory.remember(scope, [{ text: 'Uses Neovim', source: { session: 'short', quote: 'Neovim' } }])
+    expect((await memory.list(scope))[0]?.source).toBeUndefined()
+    await memory.remember(scope, [{ text: 'Uses Neovim on Linux', source: { session: 'full', quote: 'Neovim on Linux' } }])
+    expect((await memory.list(scope))[0]?.source).toEqual({ session: 'full', quote: 'Neovim on Linux' })
+  })
+
+  it('corrects a note without changing its id and updates recall', async () => {
+    const { memory } = open()
+    const scope = { gateway: 'cli', chatId: 'edit' }
+    await memory.remember(scope, [{ text: 'My editor is Neovim', source: { session: 's', quote: 'Neovim' } }])
+    const [note] = await memory.list(scope)
+    expect(await memory.update(scope, note!.id, 'My editor is Emacs')).toEqual({ ok: true })
+    const [corrected] = await memory.list(scope, { query: 'emacs' })
+    expect(corrected?.id).toBe(note!.id)
+    expect(corrected?.source).toBeUndefined()
+    expect(await memory.list(scope, { query: 'neovim' })).toEqual([])
+    expect((await memory.recall(scope, 'Emacs'))[0]?.text).toBe('My editor is Emacs')
+    expect((await memory.update(scope, note!.id, ' ')).ok).toBe(false)
+  })
+
+  it('refuses to replace a note with the text of another note', async () => {
+    const { memory } = open()
+    const scope = { gateway: 'cli', chatId: 'duplicate' }
+    await memory.remember(scope, [{ text: 'My editor is Neovim' }, { text: 'My shell is fish' }])
+    const notes = await memory.list(scope)
+    expect((await memory.update(scope, notes[0]!.id, notes[1]!.text)).ok).toBe(false)
+    expect(await memory.list(scope)).toHaveLength(2)
+  })
+  it('preserves a semantically reviewed addition instead of folding it by shared words', async () => {
+    const { memory } = open()
+    const scope = { gateway: 'cli', chatId: 'distinct' }
+    await memory.remember(scope, [{ text: 'Uses Omarchy on Linux' }])
+    await memory.remember(scope, [{ text: 'Uses Omarchy on Linux at work', preserveDistinct: true }])
+    expect(await memory.list(scope)).toHaveLength(2)
+    await memory.remember(scope, [{ text: 'Uses Omarchy on Linux at work', preserveDistinct: true }])
+    expect(await memory.list(scope)).toHaveLength(2)
+    memory.close()
+  })
+
+  it('checks older notes beyond the first two hundred when folding a repeated fact', async () => {
+    const { memory, dir } = open()
+    const scope = { gateway: 'cli', chatId: 'old' }
+    const seed = new (loadSqlite().DatabaseSync)(sqliteMemoryFile(dir))
+    const insert = seed.prepare('insert into memories (uid, scope, text, tags, created_at, hash) values (?, ?, ?, ?, ?, ?)')
+    insert.run('old-fact', 'cli:old', 'Uses Omarchy Linux', '[]', 1, 'old-hash')
+    for (let i = 0; i < 201; i++) insert.run(`new-${i}`, 'cli:old', `Unrelated item ${i}`, '[]', i + 2, `hash-${i}`)
+    seed.close()
+    await memory.remember(scope, [{ text: 'Linux Omarchy uses' }])
+    expect(await memory.list(scope, { limit: Number.MAX_SAFE_INTEGER })).toHaveLength(202)
+    memory.close()
+  })
+
   it('remembers and recalls by keyword overlap', async () => {
     const { memory } = open()
     const scope = { gateway: 'cli', chatId: 't1' }
@@ -405,6 +480,24 @@ describe('the sweep', () => {
 
     const notes = await memory.list(scope)
     expect(notes.map((note) => note.text)).toEqual(['Renato prefere bullet points mesmo'])
+    memory.close()
+  })
+
+  it('keeps the source belonging to the richer note when it folds duplicates', async () => {
+    const dir = tempDir()
+    const memory = new SqliteMemory({ dir })
+    const { DatabaseSync } = loadSqlite()
+    const seed = new DatabaseSync(sqliteMemoryFile(dir))
+    seed.exec(`
+      insert into memories (uid, scope, text, tags, created_at, hash, source_session, source_quote) values
+        ('u1', 'local:install', 'Uses Neovim', '[]', 1, 'h1', 'old', 'Neovim'),
+        ('u2', 'local:install', 'Uses Neovim on Linux', '[]', 2, 'h2', 'new', 'Neovim on Linux');
+    `)
+    seed.close()
+    expect(await memory.prune(scope)).toEqual({ dropped: 0, folded: 1 })
+    const [note] = await memory.list(scope)
+    expect(note?.text).toBe('Uses Neovim on Linux')
+    expect(note?.source).toEqual({ session: 'new', quote: 'Neovim on Linux' })
     memory.close()
   })
 

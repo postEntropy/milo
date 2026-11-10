@@ -9,6 +9,7 @@ const STOPWORDS = new Set([
   // The filler of a sentence, in English and in Portuguese.
   'the', 'a', 'an', 'and', 'or', 'but', 'to', 'of', 'in', 'on', 'for', 'is', 'are', 'was',
   'were', 'be', 'been', 'it', 'this', 'that', 'with', 'as', 'at', 'by', 'from', 'i', 'you',
+  'my', 'your', 'our', 'me', 'what', 'which', 'who', 'when', 'where', 'how', 'why', 'do', 'does', 'did',
   'o', 'a', 'os', 'as', 'um', 'uma', 'de', 'do', 'da', 'e', 'ou', 'que', 'em', 'no', 'na',
   'para', 'por', 'com', 'se', 'meu', 'minha', 'eu', 'voce', 'você', 'é',
   // What makes a question a question. They are in every question and in almost
@@ -36,6 +37,8 @@ const STOPWORDS = new Set([
 export function words(text: string): string[] {
   return text
     .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
     .split(/[^\p{L}\p{N}]+/u)
     // Two characters, not three: `rm`, `go`, `io` and `db` are exactly the kind
     // of term a question about a project turns on, and dropping them meant a

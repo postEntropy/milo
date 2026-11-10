@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { INSTALL_SCOPE } from '../src/core/memory/types.js'
-import { NOTES, runEval, seedEvalStore } from './fixtures/memory-eval.js'
+import { NOTES, runEval, scoreReply, seedEvalStore } from './fixtures/memory-eval.js'
+import { stressRecall } from './fixtures/memory-stress.js'
 
 /**
  * The eval set as a floor, so a change that makes recall worse fails here
@@ -37,6 +38,15 @@ async function evaluate(coverage: boolean) {
 }
 
 describe('recall quality', () => {
+  it('keeps accented evidence and the facts needed to compare a correction', async () => {
+    const results = await stressRecall()
+    for (const result of results.slice(0, 5)) expect(result.passed, result.name).toBe(true)
+  })
+
+  it('counts repeated evidence once when scoring recall', () => {
+    expect(scoreReply(['Same fact', 'same fact'], ['Same fact']).recall).toBe(1)
+  })
+
   it('finds the note that answers, and answers nothing when nothing does', async () => {
     const metrics = await evaluate(true)
 

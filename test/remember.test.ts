@@ -13,6 +13,7 @@ function contextWithSink(): { ctx: ToolContext; saved: MemoryInput[] } {
       signal: new AbortController().signal,
       remember: async (items) => {
         saved.push(...items)
+        return { ok: true, processed: items.length, duplicates: 0 }
       },
     },
   }
@@ -28,10 +29,20 @@ describe('remember', () => {
     )
 
     expect(result.isError).toBeFalsy()
-    expect(result.content).toBe('Remembered 1 fact(s).')
+    expect(result.content).toBe('Saved or updated 1 fact(s).')
     expect(saved).toEqual([
       { text: 'Renato prefers tabs over spaces', tags: ['assistant'], kind: 'fact' },
     ])
+  })
+
+  it('does not claim to save a duplicate or a failed comparison', async () => {
+    const { ctx } = contextWithSink()
+    ctx.remember = async () => ({ ok: true, processed: 0, duplicates: 1 })
+    expect((await rememberTool.execute({ facts: ['already known'] }, ctx)).content).toContain('already covered')
+    ctx.remember = async () => ({ ok: false, error: 'Could not check the notes for duplicates. Try again.' })
+    const failed = await rememberTool.execute({ facts: ['new fact'] }, ctx)
+    expect(failed.isError).toBe(true)
+    expect(failed.content).toContain('Could not check')
   })
 
   it('saves a batch in one call', async () => {
@@ -49,7 +60,7 @@ describe('remember', () => {
     const result = await rememberTool.execute({ facts: ['  spaced  ', '   '] }, ctx)
 
     expect(saved.map((item) => item.text)).toEqual(['spaced'])
-    expect(result.content).toBe('Remembered 1 fact(s).')
+    expect(result.content).toBe('Saved or updated 1 fact(s).')
   })
 
   it('refuses when every fact is blank', async () => {

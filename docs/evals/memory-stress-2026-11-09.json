@@ -1,0 +1,367 @@
+{
+  "date": "2026-11-09",
+  "embedder": "nvidia/nemotron-3-embed-1b:free",
+  "provider": "openrouter",
+  "embeddingFailures": 0,
+  "scope": "Retrieval evidence only; not end-to-end answer accuracy or an external benchmark.",
+  "rows": [
+    {
+      "config": "keyword + coverage",
+      "passed": 9,
+      "total": 12,
+      "results": [
+        {
+          "name": "accented evidence competes with an unaccented distractor",
+          "query": "qual minha restricao alimentar sobre camarao?",
+          "expected": [
+            "Minha restrição alimentar é não comer camarão."
+          ],
+          "returned": [
+            "Minha restrição alimentar é não comer camarão."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "decomposed accents reach the same evidence",
+          "query": "qual minha restrição alimentar sobre camarão?",
+          "expected": [
+            "Minha restrição alimentar é não comer camarão."
+          ],
+          "returned": [
+            "Minha restrição alimentar é não comer camarão."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "a correction keeps both pieces of evidence available",
+          "query": "How did my editor change from January to March?",
+          "expected": [
+            "My editor was Neovim in January.",
+            "My editor is now Emacs since March."
+          ],
+          "returned": [
+            "My editor was Neovim in January.",
+            "My editor is now Emacs since March."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "a negation survives beside its earlier value",
+          "query": "What did I say about coffee and sugar?",
+          "expected": [
+            "I drink coffee with sugar.",
+            "I no longer drink coffee with sugar."
+          ],
+          "returned": [
+            "I drink coffee with sugar.",
+            "I no longer drink coffee with sugar."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "two constraints can be recalled together",
+          "query": "What are my keyboard constraints?",
+          "expected": [
+            "My keyboard must support Colemak.",
+            "My keyboard must have split halves."
+          ],
+          "returned": [
+            "My keyboard must support Colemak.",
+            "My keyboard must have split halves."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "an unknown personal fact shares a topic with known facts",
+          "query": "When is my sister Ana birthday?",
+          "expected": [],
+          "returned": [
+            "My sister Ana plays tennis.",
+            "My sister Ana lives in Recife."
+          ],
+          "precision": 0,
+          "recall": 0,
+          "mrr": 0,
+          "passed": false
+        },
+        {
+          "name": "an unknown project value shares its entity with known values",
+          "query": "What is the Atlas deployment password?",
+          "expected": [],
+          "returned": [
+            "The Atlas deployment uses Docker.",
+            "The Atlas deployment runs on Friday."
+          ],
+          "precision": 0,
+          "recall": 0,
+          "mrr": 0,
+          "passed": false
+        },
+        {
+          "name": "a paraphrase uses a different vocabulary",
+          "query": "What is my hobby?",
+          "expected": [
+            "I play guitar every weekend."
+          ],
+          "returned": [],
+          "precision": 0,
+          "recall": 0,
+          "mrr": 0,
+          "passed": false
+        },
+        {
+          "name": "a question switches languages",
+          "query": "Which keyboard layout do I use?",
+          "expected": [
+            "Meu teclado é um Corne com layout Colemak."
+          ],
+          "returned": [
+            "Meu teclado é um Corne com layout Colemak."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "history supplies a decision that was never saved as a fact",
+          "query": "What did we choose for the archive?",
+          "expected": [
+            "We chose SQLite for the archive."
+          ],
+          "returned": [
+            "We chose SQLite for the archive."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "history joins evidence from different sessions and gateways",
+          "query": "What does the archive require?",
+          "expected": [
+            "The archive requires offline access.",
+            "The archive requires encrypted backups."
+          ],
+          "returned": [
+            "The archive requires encrypted backups.",
+            "The archive requires offline access."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "an unrelated question has no evidence",
+          "query": "What is the capital of Iceland?",
+          "expected": [],
+          "returned": [],
+          "precision": 0,
+          "recall": 0,
+          "mrr": 0,
+          "passed": true
+        }
+      ]
+    },
+    {
+      "config": "semantic + coverage",
+      "passed": 6,
+      "total": 12,
+      "results": [
+        {
+          "name": "accented evidence competes with an unaccented distractor",
+          "query": "qual minha restricao alimentar sobre camarao?",
+          "expected": [
+            "Minha restrição alimentar é não comer camarão."
+          ],
+          "returned": [
+            "Minha restrição alimentar é não comer camarão."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "decomposed accents reach the same evidence",
+          "query": "qual minha restrição alimentar sobre camarão?",
+          "expected": [
+            "Minha restrição alimentar é não comer camarão."
+          ],
+          "returned": [
+            "Minha restrição alimentar é não comer camarão."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "a correction keeps both pieces of evidence available",
+          "query": "How did my editor change from January to March?",
+          "expected": [
+            "My editor was Neovim in January.",
+            "My editor is now Emacs since March."
+          ],
+          "returned": [
+            "My editor was Neovim in January.",
+            "My editor is now Emacs since March."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "a negation survives beside its earlier value",
+          "query": "What did I say about coffee and sugar?",
+          "expected": [
+            "I drink coffee with sugar.",
+            "I no longer drink coffee with sugar."
+          ],
+          "returned": [
+            "I drink coffee with sugar.",
+            "I no longer drink coffee with sugar."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "two constraints can be recalled together",
+          "query": "What are my keyboard constraints?",
+          "expected": [
+            "My keyboard must support Colemak.",
+            "My keyboard must have split halves."
+          ],
+          "returned": [
+            "My keyboard must support Colemak.",
+            "My keyboard must have split halves.",
+            "My monitor supports HDR."
+          ],
+          "precision": 0.6666666666666666,
+          "recall": 1,
+          "mrr": 1,
+          "passed": false
+        },
+        {
+          "name": "an unknown personal fact shares a topic with known facts",
+          "query": "When is my sister Ana birthday?",
+          "expected": [],
+          "returned": [
+            "My sister Ana plays tennis.",
+            "My sister Ana lives in Recife."
+          ],
+          "precision": 0,
+          "recall": 0,
+          "mrr": 0,
+          "passed": false
+        },
+        {
+          "name": "an unknown project value shares its entity with known values",
+          "query": "What is the Atlas deployment password?",
+          "expected": [],
+          "returned": [
+            "The Atlas deployment uses Docker.",
+            "The Atlas deployment runs on Friday."
+          ],
+          "precision": 0,
+          "recall": 0,
+          "mrr": 0,
+          "passed": false
+        },
+        {
+          "name": "a paraphrase uses a different vocabulary",
+          "query": "What is my hobby?",
+          "expected": [
+            "I play guitar every weekend."
+          ],
+          "returned": [
+            "I play guitar every weekend.",
+            "My editor is Neovim."
+          ],
+          "precision": 0.5,
+          "recall": 1,
+          "mrr": 1,
+          "passed": false
+        },
+        {
+          "name": "a question switches languages",
+          "query": "Which keyboard layout do I use?",
+          "expected": [
+            "Meu teclado é um Corne com layout Colemak."
+          ],
+          "returned": [
+            "Meu teclado é um Corne com layout Colemak.",
+            "Meu editor é o Neovim."
+          ],
+          "precision": 0.5,
+          "recall": 1,
+          "mrr": 1,
+          "passed": false
+        },
+        {
+          "name": "history supplies a decision that was never saved as a fact",
+          "query": "What did we choose for the archive?",
+          "expected": [
+            "We chose SQLite for the archive."
+          ],
+          "returned": [
+            "We chose SQLite for the archive."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "history joins evidence from different sessions and gateways",
+          "query": "What does the archive require?",
+          "expected": [
+            "The archive requires offline access.",
+            "The archive requires encrypted backups."
+          ],
+          "returned": [
+            "The archive requires encrypted backups.",
+            "The archive requires offline access."
+          ],
+          "precision": 1,
+          "recall": 1,
+          "mrr": 1,
+          "passed": true
+        },
+        {
+          "name": "an unrelated question has no evidence",
+          "query": "What is the capital of Iceland?",
+          "expected": [],
+          "returned": [
+            "My editor is Neovim.",
+            "I play guitar every weekend."
+          ],
+          "precision": 0,
+          "recall": 0,
+          "mrr": 0,
+          "passed": false
+        }
+      ]
+    }
+  ]
+}

@@ -14,7 +14,7 @@ import type { TodoItem } from '../todos.js'
  * through the context because the memory instance and its scope belong to the
  * session, not to the registry that builds the tools.
  */
-export type RememberFn = (items: MemoryInput[]) => Promise<void>
+export type RememberFn = (items: MemoryInput[]) => Promise<{ ok: true; processed: number; duplicates: number } | { ok: false; error: string }>
 
 /** The same, for looking a past session back up by what it was about. */
 export type RecallFn = (query: string, opts?: { limit?: number }) => Promise<SessionSummary[]>
@@ -28,7 +28,8 @@ export type RecallFn = (query: string, opts?: { limit?: number }) => Promise<Ses
  * deletion that never happened.
  */
 export interface MemoryAdmin {
-  list(opts?: { limit?: number; offset?: number }): Promise<MemoryItem[]>
+  list(opts?: { limit?: number; offset?: number; query?: string }): Promise<MemoryItem[]>
+  update(id: string, text: string): Promise<{ ok: true } | { ok: false; error: string }>
   forget(ids: string[]): Promise<{ forgotten: string[]; unknown: string[] }>
 }
 

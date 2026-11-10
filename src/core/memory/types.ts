@@ -26,13 +26,17 @@ export function readScope(value: unknown): MemoryScope | undefined {
 
 export interface MemoryInput {
   text: string
+  /** The semantic review found a difference; do not fold it by word overlap. */
+  preserveDistinct?: boolean
   tags?: string[]
+  source?: { session: string; quote: string }
 }
 
 export interface MemoryItem {
   id: string
   text: string
   createdAt: number
+  source?: { session: string; quote: string }
   tags?: string[]
   /**
    * 1 is the best match for the query, and it decreases from there. Comparable
@@ -58,12 +62,14 @@ export interface Memory {
    * What is kept, newest first — what `/memory` shows. `offset` skips that many,
    * so a caller can read the store a page at a time rather than all at once.
    */
-  list(scope: MemoryScope, opts?: { limit?: number; offset?: number }): Promise<MemoryItem[]>
+  list(scope: MemoryScope, opts?: { limit?: number; offset?: number; query?: string }): Promise<MemoryItem[]>
   /**
    * Drops one note. A full id, or as much of the front of one as stays
    * unambiguous; false when nothing was removed.
    */
   forget(scope: MemoryScope, id: string): Promise<boolean>
+  /** Corrects one note, preserving its identity. */
+  update(scope: MemoryScope, id: string, text: string): Promise<{ ok: true } | { ok: false; error: string }>
   /**
    * Sweeps one scope: drops the notes the admission gate would refuse today, and
    * folds the notes that are the same fact in another wording. Nothing is dropped

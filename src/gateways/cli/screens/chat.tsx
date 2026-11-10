@@ -34,7 +34,7 @@ import { formatTokens } from '../../../util/format.js'
 import { buildSessionsList } from '../../actions.js'
 import {
   compactReply,
-  formatMemoryList,
+  handleCommand,
   handleTurnControl,
   jobsReply,
   parseForkArgument,
@@ -124,7 +124,7 @@ const HELP_TEXT = [
   '/stats — numbers for the current session',
   '/jobs — the background jobs, and how they are doing',
   '/skills — the skills installed, and where they live',
-  '/memory [forget <id>] — what Milo keeps, and how to drop one of them',
+  '/memory [search <words> | page <number> | edit <id> <text> | forget <id>] — inspect and correct notes',
   '/clear — forget this session',
   '/compact — fold the oldest turns into the summary now',
   '/stop — stop the turn running now, and anything queued behind it',
@@ -458,26 +458,12 @@ export function ChatScreen({
         break
       case 'memory': {
         const session = await runtime.getSession(scope)
-        const asked = argument.trim()
-        if (asked && !/^forget\b/i.test(asked)) {
-          push({ kind: 'info', text: 'Usage: /memory [forget <id>]. Run /memory to list notes.' })
-          break
-        }
-        if (/^forget\b/i.test(asked)) {
-          const id = asked.replace(/^forget\b/i, '').trim()
-          if (!id) {
-            push({ kind: 'info', text: 'Usage: /memory forget <id>. The ids come from /memory.' })
-            break
-          }
-          push({
-            kind: 'info',
-            text: (await session.forget(id))
-              ? `Forgotten: ${id} — it is out of recall from the next question on.`
-              : `Nothing matches "${id}". Run /memory for the ids.`,
-          })
-          break
-        }
-        push({ kind: 'info', text: formatMemoryList(await session.memories(20)) })
+        const result = await handleCommand(`/memory ${argument}`, {
+          memories: (limit, query, offset) => session.memories(limit, query, offset),
+          forgetMemory: (id) => session.forget(id),
+          updateMemory: (id, text) => session.updateMemory(id, text),
+        })
+        if (result.handled && result.reply) push({ kind: 'info', text: result.reply })
         break
       }
       case 'resume': {

@@ -116,6 +116,8 @@ interface Row {
   text: string
   createdAt: number
   tags: string
+  sourceSession?: string | null
+  sourceQuote?: string | null
 }
 
 interface VectorRow extends Row {
@@ -185,6 +187,11 @@ export class SqliteMemory implements Memory {
     this.db.exec('pragma busy_timeout = 5000')
     this.db.exec(SCHEMA)
     this.addVectorColumn()
+    this.transaction(() => {
+      const columns = this.db.prepare('pragma table_info(memories)').all() as unknown as { name: string }[]
+      if (!columns.some((column) => column.name === 'source_session')) this.db.exec('alter table memories add column source_session text')
+      if (!columns.some((column) => column.name === 'source_quote')) this.db.exec('alter table memories add column source_quote text')
+    })
     tightenDb(this.location)
 
     this.insertStmt = this.db.prepare(`
@@ -197,20 +204,19 @@ export class SqliteMemory implements Memory {
     // recency still works.
     this.selectStmt = this.db.prepare(RECALL_SQL)
     this.listStmt = this.db.prepare(`
-      select uid, text, created_at as createdAt, tags
+      select uid, text, created_at as createdAt, tags, source_session as sourceSession, source_quote as sourceQuote
         from memories
        where scope = ?
        order by created_at desc, id desc
        limit ? offset ?
     `)
     this.forgetStmt = this.db.prepare('delete from memories where uid = ? and scope = ?')
-    // Bounded: this is the comparison set for a fact about to be written, and a
-    // store cannot grow a fact layer big enough for a full scan to matter.
+    // Compare against the whole scope, including older notes. Exact and lexical
+    // duplicates must not reappear just because the store has grown.
     this.factTextStmt = this.db.prepare(
       `select uid, text from memories
         where scope = ?
-        order by created_at desc, id desc
-        limit 200`,
+        order by created_at desc, id desc`,
     )
     this.touchStmt = this.db.prepare('update memories set created_at = ? where uid = ? and scope = ?')
     // The same fact said again at more length: the kept row takes the richer
@@ -229,7 +235,7 @@ export class SqliteMemory implements Memory {
          from memories
         where scope = ? and vector is not null`,
     )
-    this.setVectorStmt = this.db.prepare('update memories set vector = ? where uid = ?')
+    this.setVectorStmt = this.db.prepare('update memories set vector = ? where uid = ? and text = ?')
 
     this.migrate()
     this.unify()
@@ -292,7 +298,7 @@ export class SqliteMemory implements Memory {
    * that cost the answer its place.
    *
    * The words going first is also what makes meaning affordable. The reply is
-   * asked of the embedder **only when the words did not fill it**, so a question
+   * asked of the embedder **only when the retained word matches did not fill it**, so a question
    * the index can answer costs no request at all — measured at 0.2 ms against
    * 433 ms for a round trip to a hosted model, paid before every turn otherwise.
    * It is the same rule the two halves of recall already follow: what was said
@@ -325,23 +331,20 @@ export class SqliteMemory implements Memory {
       byMeaningOnly: false,
     }))
 
-    // Only the embedder is skipped here, never the trim: a question the words
-    // already fill is still mostly notes that share a word.
-    if (lexical.length < limit) {
+    // Count the notes that survive coverage, not the noisy matches it removes.
+    const covered = this.coverage ? keepCovered(candidates, text) : candidates
+    if (covered.length < limit) {
       const vector = await this.queryVector(text)
       if (vector) {
         const seen = new Set(lexical.map((row) => row.uid))
-        for (const row of this.nearest(key, vector, limit)) {
+        for (const row of this.nearest(key, vector, limit + lexical.length)) {
           if (seen.has(row.uid)) continue
-          candidates.push({ item: row, text: row.text, byMeaningOnly: true })
+          covered.push({ item: row, text: row.text, byMeaningOnly: true })
         }
       }
     }
 
-    if (!this.coverage) return candidates.slice(0, limit).map((entry) => entry.item)
-    return keepCovered(candidates, text)
-      .slice(0, limit)
-      .map((entry) => entry.item)
+    return covered.slice(0, limit).map((entry) => entry.item)
   }
 
   /** The notes closest to the query, by cosine, best first. */
@@ -383,7 +386,7 @@ export class SqliteMemory implements Memory {
           const vector = vectors[index]
           // A vector with nothing in it is left off entirely: stored, it would
           // put the note in every ranking with a score of zero.
-          if (vector && !isNoise(vector)) this.setVectorStmt.run(toBlob(vector), row.uid)
+          if (vector && !isNoise(vector)) this.setVectorStmt.run(toBlob(vector), row.uid, row.text)
         })
       })
       return true
@@ -399,7 +402,7 @@ export class SqliteMemory implements Memory {
       // tried again one note at a time: what it will not take is marked and left
       // behind rather than blocking the rest of the store on every run.
       if (rows.length === 1) {
-        this.markUnusable(rows[0]!.uid)
+        this.markUnusable(rows[0]!.uid, rows[0]!.text)
         return true
       }
       for (const row of rows) await this.embedRows([row])
@@ -412,8 +415,8 @@ export class SqliteMemory implements Memory {
    * "no vector" everywhere — the similarity query filters by width — so the
    * fill-in stops offering this note and moves on to the rest of the store.
    */
-  private markUnusable(uid: string): void {
-    this.setVectorStmt.run(new Uint8Array(0), uid)
+  private markUnusable(uid: string, text: string): void {
+    this.setVectorStmt.run(new Uint8Array(0), uid, text)
   }
 
   /**
@@ -515,26 +518,46 @@ export class SqliteMemory implements Memory {
     if (this.debug) console.error('[memory] dropped the copied turns; recall reads the history now')
   }
 
-  async list(scope: MemoryScope, opts?: { limit?: number; offset?: number }): Promise<MemoryItem[]> {
-    try {
-      const rows = this.listStmt.all(
-        scopeKey(scope),
-        opts?.limit ?? DEFAULT_LIST_LIMIT,
-        opts?.offset ?? 0,
-      ) as unknown as Row[]
-      return rows.map((row) => ({
-        id: row.uid,
-        text: row.text,
-        createdAt: row.createdAt,
-        tags: parseTags(row.tags),
-      }))
-    } catch (error) {
-      // A store that cannot be read answers nothing rather than taking down the
-      // screen that asked — but it says why, so an empty list is never mistaken
-      // for an install with nothing remembered.
-      logWarn(`could not list memory: ${errorMessage(error)}`)
-      return []
-    }
+  async list(scope: MemoryScope, opts?: { limit?: number; offset?: number; query?: string }): Promise<MemoryItem[]> {
+    const query = opts?.query?.trim()
+    // Browsing is a literal search, not recall: even short words and stopwords
+    // are meaningful when the person is looking for a particular note.
+    const terms = query?.normalize('NFC').match(/[\p{L}\p{N}]+/gu) ?? []
+    const match = terms.map((term) => `"${term}"*`).join(' AND ')
+    if (query && !match) return []
+    const rows = (match
+      ? this.db.prepare(`select m.uid, m.text, m.created_at as createdAt, m.tags, m.source_session as sourceSession, m.source_quote as sourceQuote
+          from memories_fts cross join memories m on m.id = memories_fts.rowid
+          where memories_fts match ? and m.scope = ?
+          order by m.created_at desc, m.id desc limit ? offset ?`)
+          .all(match, scopeKey(scope), opts?.limit ?? DEFAULT_LIST_LIMIT, opts?.offset ?? 0)
+      : this.listStmt.all(scopeKey(scope), opts?.limit ?? DEFAULT_LIST_LIMIT, opts?.offset ?? 0)) as unknown as Row[]
+    return rows.map((row) => ({ id: row.uid, text: row.text, createdAt: row.createdAt, tags: parseTags(row.tags), ...(row.sourceSession && row.sourceQuote ? { source: { session: row.sourceSession, quote: row.sourceQuote } } : {}) }))
+  }
+
+  async update(scope: MemoryScope, id: string, text: string): Promise<{ ok: true } | { ok: false; error: string }> {
+    const key = scopeKey(scope)
+    const wanted = id.trim()
+    const corrected = text.trim()
+    if (!/^[0-9a-f-]{4,36}$/i.test(wanted)) return { ok: false, error: 'Invalid note id.' }
+    if (!corrected) return { ok: false, error: 'A note cannot be empty.' }
+    const changed = this.transaction(() => {
+      const matches = this.db.prepare('select uid, text from memories where scope = ? and uid like ? limit 2')
+        .all(key, `${wanted}%`) as unknown as { uid: string; text: string }[]
+      if (matches.length !== 1) return { ok: false as const, error: 'No unique note matches that id.' }
+      const uid = matches[0]!.uid
+      if (matches[0]!.text === corrected) return { ok: true as const, uid, unchanged: true }
+      const duplicate = this.db.prepare('select uid from memories where scope = ? and hash = ? and uid != ?')
+        .get(key, hashOf(corrected), uid)
+      if (duplicate) return { ok: false as const, error: 'Another note already has that text.' }
+      this.db.prepare('update memories set text = ?, hash = ?, created_at = ?, vector = null, source_session = null, source_quote = null where uid = ? and scope = ?')
+        .run(corrected, hashOf(corrected), Date.now(), uid, key)
+      return { ok: true as const, uid }
+    })
+    if (!changed.ok) return changed
+    const uid = changed.uid
+    if (!changed.unchanged) await this.embedRows([{ uid, text: corrected }])
+    return { ok: true }
   }
 
   /**
@@ -576,12 +599,12 @@ export class SqliteMemory implements Memory {
       counts = this.transaction(() => {
         const rows = this.db
           .prepare(
-            `select uid, text, created_at as createdAt
+            `select uid, text, created_at as createdAt, source_session as sourceSession, source_quote as sourceQuote
                from memories
               where scope = ?
               order by created_at asc, id asc`,
           )
-          .all(key) as unknown as { uid: string; text: string; createdAt: number }[]
+          .all(key) as unknown as { uid: string; text: string; createdAt: number; sourceSession: string | null; sourceQuote: string | null }[]
 
         // What has survived so far, oldest first, so a duplicate folds into the
         // note that was already there rather than the other way round.
@@ -610,6 +633,8 @@ export class SqliteMemory implements Memory {
             // The richer telling wins; the survivor's text is upgraded to it and
             // it is re-embedded below.
             this.retextStmt.run(row.text, hashOf(row.text), row.createdAt, match.uid, key)
+            this.db.prepare('update memories set source_session = ?, source_quote = ? where uid = ?')
+              .run(row.sourceSession, row.sourceQuote, match.uid)
             match.words = words
             upgraded.push({ uid: match.uid, text: row.text })
           }
@@ -660,17 +685,28 @@ export class SqliteMemory implements Memory {
 
       const at = item.createdAt ?? Date.now()
       // A durable fact said again in other words is one fact, not two.
-      const same = this.sameFact(scope, item.text)
+      // A semantic review can recognize a correction the word-set comparison
+      // cannot. Respect that decision, while still collapsing exactly equal text.
+      const exact = item.preserveDistinct
+        ? this.db.prepare('select uid from memories where scope = ? and hash = ?').get(scope, hashOf(item.text)) as { uid: string } | undefined
+        : undefined
+      const same = item.preserveDistinct ? (exact ? { uid: exact.uid, upgrade: false } : null) : this.sameFact(scope, item.text)
       if (same) {
         if (same.upgrade) {
           // The new telling is the richer one: the note is upgraded to it, and
           // its vector is dropped so the embed pass rebuilds it for the new text.
           this.retextStmt.run(item.text, hashOf(item.text), at, same.uid, scope)
+          this.db.prepare('update memories set source_session = ?, source_quote = ? where uid = ?')
+            .run(item.source?.session ?? null, item.source?.quote ?? null, same.uid)
           written.push({ uid: same.uid, text: item.text })
         } else {
           // Reinforced: it is the same fact, so recency follows the new telling
           // and the row that stays is the one already held.
           this.touchStmt.run(at, same.uid, scope)
+          // Only the exact same note can inherit this source. A shorter
+          // repetition may not support the richer text already kept.
+          if (item.source) this.db.prepare('update memories set source_session = ?, source_quote = ? where uid = ? and scope = ? and text = ?')
+            .run(item.source.session, item.source.quote, same.uid, scope, item.text)
         }
         continue
       }
@@ -684,6 +720,7 @@ export class SqliteMemory implements Memory {
         at,
         hashOf(item.text),
       )
+      if (item.source) this.db.prepare('update memories set source_session = ?, source_quote = ? where uid = ?').run(item.source.session, item.source.quote, uid)
       written.push({ uid, text: item.text })
     }
     return written

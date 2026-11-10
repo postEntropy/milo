@@ -13,6 +13,7 @@ import {
   seedEvalStore,
   type Metrics,
 } from '../test/fixtures/memory-eval.js'
+import { stressRecall } from '../test/fixtures/memory-stress.js'
 
 /**
  * What recall costs in answers, not only in milliseconds.
@@ -31,12 +32,20 @@ import {
  *   npm run eval:memory
  *   npm run eval:memory -- --semantic
  *   npm run eval:memory -- --no-coverage
+ *   npm run eval:memory -- --stress --json
  *
  * A free embedding model takes twenty requests a minute and the set is about
  * eighty, so that run needs `MILO_EVAL_PACE_MS=3200` to complete at all. The
  * pause is taken between questions, outside the measured call.
  */
 const args = new Set(process.argv.slice(2))
+const validArgs = new Set(['--semantic', '--no-coverage', '--json', '--stress', '--coverage-only'])
+for (const arg of args) {
+  if (!validArgs.has(arg)) throw new Error(`Unknown argument ${arg}. Valid arguments: ${[...validArgs].join(', ')}`)
+}
+if (args.has('--coverage-only') && args.has('--no-coverage')) {
+  throw new Error('Choose either --coverage-only or --no-coverage')
+}
 const wantSemantic = args.has('--semantic')
 const wantCoverage = !args.has('--no-coverage')
 const asJson = args.has('--json')
@@ -46,6 +55,8 @@ interface Row extends Metrics {
 }
 
 const rows: Row[] = []
+const stressRows: { config: string; passed: number; total: number; results: Awaited<ReturnType<typeof stressRecall>> }[] = []
+const report = (message: string) => asJson ? console.error(message) : console.log(message)
 
 /**
  * How long to wait after each question, for a model that is rate-limited.
@@ -58,6 +69,7 @@ const rows: Row[] = []
  * `MILO_EVAL_PACE_MS=3200` spends about five minutes on the set and is honest.
  */
 const PACE_MS = Number(process.env.MILO_EVAL_PACE_MS ?? 0)
+if (!Number.isFinite(PACE_MS) || PACE_MS < 0) throw new Error('MILO_EVAL_PACE_MS must be a nonnegative number')
 
 /**
  * Wraps an embedder to count what it refuses.
@@ -88,27 +100,45 @@ function watch(embedder: Embedder) {
 /** One configuration, measured on its own store so nothing leaks between them. */
 async function measure(config: string, options: { embedder?: Embedder; coverage: boolean }) {
   const watched = options.embedder ? watch(options.embedder) : null
+  if (args.has('--stress')) {
+    const results = await stressRecall({ embedder: watched?.embedder, coverage: options.coverage, pauseMs: PACE_MS })
+    if (watched && watched.state.failures > 0) throw new Error(`${config}: embedding calls failed; stress results withheld`)
+    const row = { config, passed: results.filter((result) => result.passed).length, total: results.length, results }
+    stressRows.push(row)
+    if (!asJson) {
+      console.log(`  ${config}: ${row.passed}/${row.total} cases returned exactly the expected evidence`)
+      for (const result of results) {
+        console.log(`    ${result.passed ? 'PASS' : 'FAIL'} ${result.name}`)
+        if (!result.passed) console.log(JSON.stringify({ query: result.query, expected: result.expected, returned: result.returned }))
+      }
+    }
+    return
+  }
   const seeded = await seedEvalStore({
     embedder: watched?.embedder,
     memory: { coverage: options.coverage },
   })
-  if (seeded.facts !== NOTES.length) {
-    // A `sameFact` collapse would quietly shrink the set, and every number below
-    // would be measured against notes that are not there.
-    throw new Error(`seeded ${NOTES.length} notes but the store kept ${seeded.facts}`)
-  }
+  let metrics: Metrics
+  try {
+    if (seeded.facts !== NOTES.length) {
+      // A `sameFact` collapse would quietly shrink the set, and every number below
+      // would be measured against notes that are not there.
+      throw new Error(`seeded ${NOTES.length} notes but the store kept ${seeded.facts}`)
+    }
 
-  const metrics = await runEval(
-    (query, limit) => seeded.memory.recall(INSTALL_SCOPE, query, { limit }),
-    EVAL_LIMIT,
-    { pauseMs: PACE_MS },
-  )
-  seeded.close()
+    metrics = await runEval(
+      (query, limit) => seeded.memory.recall(INSTALL_SCOPE, query, { limit }),
+      EVAL_LIMIT,
+      { pauseMs: PACE_MS },
+    )
+  } finally {
+    seeded.close()
+  }
 
   if (watched && watched.state.failures > 0) {
     // Not a row. With the model refusing, recall answers from words — which is
     // the right thing for a turn and the wrong thing to print as `semantic`.
-    console.log(
+    report(
       `  ${config.padEnd(22)} NOT measured — ${watched.state.failures} of ${watched.state.calls} embedding calls failed`,
     )
     return
@@ -129,17 +159,17 @@ function print(row: Row): void {
   )
 }
 
-console.log(`\nrecall eval — ${NOTES.length} notes, ${EVAL_LIMIT} per reply\n`)
+report(args.has('--stress') ? '\nrecall stress eval — isolated evidence cases\n' : `\nrecall eval — ${NOTES.length} notes, ${EVAL_LIMIT} per reply\n`)
 
-console.log('keyword')
-await measure('keyword', { coverage: false })
+report('keyword')
+if (!args.has('--coverage-only')) await measure('keyword', { coverage: false })
 if (wantCoverage) await measure('keyword + coverage', { coverage: true })
 
 if (wantSemantic) {
   const loaded = loadConfig()
   const embedding = loaded?.config.memory.embedding
   if (!loaded || !embedding) {
-    console.log('\nsemantic — skipped: no embedder in the config (milo setup → Memory)')
+    report('\nsemantic — skipped: no embedder in the config (milo setup → Memory)')
   } else {
     const local = embedding.provider === 'ollama'
     const url = embedding.url ?? OLLAMA_URL
@@ -147,19 +177,19 @@ if (wantSemantic) {
     // would quietly be the keyword rows again — a misleading table is worse than
     // a missing one. A hosted one is nobody's process to check.
     if (local && !(await engineAnswers(url))) {
-      console.log(`\nsemantic — skipped: nothing answers at ${url} (start one with \`milo setup\`)`)
+      report(`\nsemantic — skipped: nothing answers at ${url} (start one with \`milo setup\`)`)
     } else {
       const embedder = embedderFor(embedding, embeddingKey(loaded.config, readAuth()))
       if (!embedder) {
-        console.log('\nsemantic — skipped: the configured embedder has no key')
+        report('\nsemantic — skipped: the configured embedder has no key')
       } else {
-        console.log(`\nsemantic — ${embedder.model} (${embedding.provider})`)
-        await measure('semantic', { embedder, coverage: false })
+        report(`\nsemantic — ${embedder.model} (${embedding.provider})`)
+        if (!args.has('--coverage-only')) await measure('semantic', { embedder, coverage: false })
         if (wantCoverage) await measure('semantic + coverage', { embedder, coverage: true })
       }
     }
   }
 }
 
-if (asJson) console.log(JSON.stringify(rows, null, 2))
-else console.log('\n`no-answer` is the share of questions nothing answers that returned notes anyway.\n')
+if (asJson) console.log(JSON.stringify(args.has('--stress') ? stressRows : rows, null, 2))
+else if (!args.has('--stress')) console.log('\n`no-answer` is the share of questions nothing answers that returned notes anyway.\n')

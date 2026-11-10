@@ -19,6 +19,17 @@ twice is one row; a turn collapses to the newest telling, with the verbatim hist
 The `remember` tool is the deliberate half, and the end of a turn is read for facts as well. A derived
 fact has to stand on the person's own words — it carries a verbatim quote from their message, and a
 line that cannot quote them is dropped, so the answer is context for reading it, never the source.
+Automatic extraction then asks the model to review its candidates independently against the full
+list of saved notes and keeps at most two that the review explicitly accepts. The review treats a
+correction as a distinct fact and skips a candidate only when an existing note already covers it; an unavailable or malformed review keeps none. This is a second
+model call only when there are candidates, with its own latency and cost. It sends the saved notes
+to the same provider used for extraction, which can increase the request size. It reduces noise but cannot
+guarantee a judgment is correct. The separate `remember` tool compares requested facts with the
+same full list for duplicates but does not apply the automatic extraction's quality filter. A failed or
+unreadable comparison reports an error rather than claiming to have saved the note. The tool is reserved
+by its instructions for explicit requests to remember; that instruction is not a technical guarantee
+that a model will obey it. The comparison is a snapshot: concurrent turns can still race, while the
+store itself checks all notes for lexical duplicates at the time of writing.
 
 ## Recall by meaning, off by default
 
@@ -51,3 +62,18 @@ remembered line, a compaction summary and `web_search` snippets all arrive fence
 
 `milo setup` → **Memory** shows what is actually in the store — facts, turns, size and where it lives,
 with the recall-by-meaning line.
+
+## Inspecting and correcting notes
+
+Settings → Memory on the web and phone lists notes in pages and searches the facts by their words.
+Each note can be edited or forgotten. A correction preserves its id, refreshes the search index,
+and clears its old source because the corrected text no longer necessarily says the same thing.
+New automatically derived facts keep the supporting words and session id; older facts and facts
+without a recorded source say the source is unavailable. The date is when the fact was last said or corrected,
+not necessarily when it was first saved.
+
+On every chat surface `/memory` lists notes, `/memory search <words>` searches,
+`/memory page <number>` pages the list (`/memory search <words> --page <number>` pages search results), `/memory edit <id> <text>` corrects one and
+`/memory forget <id>` removes one. The `memories` tool can search, list, edit and forget the same
+notes; editing and forgetting through the agent ask for permission. Editing or forgetting a note does
+not remove the original words from the history log or a Session, and those words can still be recalled.

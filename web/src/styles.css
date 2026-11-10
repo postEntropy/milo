@@ -1133,6 +1133,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .button { display: inline-flex; flex: none; min-height: var(--control-lg); align-items: center; justify-content: center; gap: var(--space-4); border: 0; border-radius: var(--radius-md); background: var(--surface-warm); padding: var(--space-4) var(--space-7); color: var(--fg-2); font-size: var(--text-sm); font-weight: 500; transition: background var(--motion-fast), transform var(--motion-fast) var(--ease-standard); }
 .list-empty .button { margin-top: var(--space-5); }
 .button:hover { background: var(--border-soft); }
+.button-icon { width: var(--control-lg); padding: 0; }
 .button:active { transform: translateY(1px); }
 .button:disabled { transform: none; }
 .button.primary { background: var(--accent); color: var(--accent-on); }

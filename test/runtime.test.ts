@@ -473,7 +473,7 @@ describe('AgentRuntime close', () => {
         // The turn answers first; the extraction of what to keep from it is the
         // call after, and the one held open here.
         if (call > 1) await extractionGate
-        yield { type: 'text', delta: call > 1 ? 'Meu editor e o Neovim.\teu uso o Neovim' : 'ok' }
+        yield { type: 'text', delta: call === 1 ? 'ok' : call === 2 ? 'Meu editor e o Neovim.\teu uso o Neovim' : 'KEEP 1' }
         yield { type: 'done', finishReason: 'stop' }
       },
     }
