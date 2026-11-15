@@ -26,7 +26,7 @@ const WHEEL_KEYS: Record<number, string> = {
 
 /** A mouse event that a write boundary cut in half, waiting to be finished. */
 // biome-ignore lint/suspicious/noControlCharactersInRegex: the same escape byte, held while it is incomplete
-const PARTIAL = /^\u001b\[<\d*(;\d*(;\d*)?)?$/
+const PARTIAL = /\u001b\[<\d*(;\d*(;\d*)?)?$/
 
 export interface WheelTranslation {
   /** What to hand on to the app: everything that is not a mouse event. */
@@ -58,7 +58,10 @@ export function translateWheel(chunk: string, carry = ''): WheelTranslation {
   }
 
   const rest = input.slice(at)
-  if (PARTIAL.test(rest)) return { text, carry: rest }
+  const partial = PARTIAL.exec(rest)
+  if (partial) {
+    return { text: text + rest.slice(0, partial.index), carry: partial[0] }
+  }
   return { text: text + rest, carry: '' }
 }
 
