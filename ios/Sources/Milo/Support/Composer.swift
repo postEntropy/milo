@@ -311,7 +311,7 @@ struct Composer: View {
                 if canSend {
                     Button { menu = .running } label: {
                         Image(systemName: "ellipsis")
-                            .frame(width: 44, height: 44)
+                            .frame(width: 36, height: 36)
                     }
                     .buttonStyle(PressableStyle())
                     .accessibilityLabel("Turn actions")
@@ -322,8 +322,8 @@ struct Composer: View {
         } else {
             MiloIconButton(
                 systemName: "paperplane.fill",
-                size: 16,
-                span: 44,
+                size: 17,
+                span: 36,
                 primary: true,
                 disabled: !canSend,
                 action: { send(.queue) }
@@ -502,18 +502,18 @@ struct Composer: View {
     /// turn rather than opening a new one — the same mark the panel names that line with.
     private var steerGlyph: some View {
         Image(systemName: "arrow.turn.down.right")
-            .font(.system(size: 16, weight: .semibold))
+            .font(.system(size: 17, weight: .semibold))
             .foregroundStyle(MiloTheme.accentOn)
-            .frame(width: 44, height: 44)
+            .frame(width: 36, height: 36)
             .background(Circle().fill(MiloTheme.accent))
     }
 
     /// A quiet fill — the accent stays on the one thing to press when nothing runs.
     private var stopGlyph: some View {
         Image(systemName: "stop.fill")
-            .font(.system(size: 16, weight: .semibold))
+            .font(.system(size: 15, weight: .semibold))
             .foregroundStyle(MiloTheme.foreground)
-            .frame(width: 44, height: 44)
+            .frame(width: 36, height: 36)
             .background(Circle().fill(MiloTheme.surface))
     }
 }
