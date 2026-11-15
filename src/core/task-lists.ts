@@ -83,7 +83,7 @@ export type TaskListAction =
   | { action: 'create'; name: string }
   | { action: 'show'; name: string }
   | { action: 'add'; name: string; item: string }
-  | { action: 'complete' | 'remove'; name: string; itemId: string }
+  | { action: 'complete' | 'reopen' | 'remove'; name: string; itemId: string }
   | { action: 'delete'; name: string }
   | { action: 'rename'; name: string; newName: string }
 
@@ -127,10 +127,10 @@ export async function manageTaskLists(input: TaskListAction): Promise<string> {
     const index = list.items.findIndex((item) => item.id === input.itemId || item.id.startsWith(input.itemId))
     if (index < 0) return { result: `No task "${input.itemId}" in "${list.name}".` }
     const [item] = list.items.splice(index, 1)
-    if (input.action === 'complete') {
-      item.completed = true
+    if (input.action === 'complete' || input.action === 'reopen') {
+      item.completed = input.action === 'complete'
       list.items.splice(index, 0, item)
-      return { result: `Completed "${item.content}" in "${list.name}".`, write: true }
+      return { result: `${item.completed ? 'Completed' : 'Reopened'} "${item.content}" in "${list.name}".`, write: true }
     }
     return { result: `Removed "${item.content}" from "${list.name}".`, write: true }
   })

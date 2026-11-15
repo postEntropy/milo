@@ -21,13 +21,17 @@ describe('persistent task lists', () => {
     expect(await manageTaskLists({ action: 'list' })).toBe('Milo (0 open)\nHome (0 open)')
   })
 
-  it('adds, shows, completes and removes tasks in the selected list', async () => {
+  it('adds, completes, reopens and removes tasks without changing their identity', async () => {
     const added = await manageTaskLists({ action: 'add', name: 'mIlO', item: 'Ship task lists' })
     const id = added.match(/\[([a-f0-9-]{8})\]/)?.[1]
     expect(id).toBeTruthy()
     expect(await manageTaskLists({ action: 'show', name: 'Milo' })).toContain('[ ]')
     expect(await manageTaskLists({ action: 'complete', name: 'Milo', itemId: id! })).toContain('Completed')
     expect(await manageTaskLists({ action: 'list' })).toContain('Milo (0 open)')
+    const completed = readTaskLists()[0]!.items[0]!
+    expect(await manageTaskLists({ action: 'reopen', name: 'Milo', itemId: id! })).toContain('Reopened')
+    expect(readTaskLists()[0]!.items[0]).toEqual({ ...completed, completed: false })
+    expect(await manageTaskLists({ action: 'list' })).toContain('Milo (1 open)')
     expect(await manageTaskLists({ action: 'remove', name: 'Milo', itemId: id! })).toContain('Removed')
     expect(readTaskLists()[0]?.items).toEqual([])
   })

@@ -327,7 +327,7 @@ function TaskListDetail({
         </section>}
         {completed.length > 0 && <section className="tasklist-group">
           <h3 className="section-label">Completed <span>{completed.length}</span></h3>
-          {completed.map((item) => <TaskRow key={item.id} item={item} saving={saving} onRemove={() => void onAct({ action: 'remove', name: list.name, itemId: item.id })} />)}
+          {completed.map((item) => <TaskRow key={item.id} item={item} saving={saving} onComplete={() => void onAct({ action: 'reopen', name: list.name, itemId: item.id })} onRemove={() => void onAct({ action: 'remove', name: list.name, itemId: item.id })} />)}
         </section>}
       </div>}
   </Panel>
@@ -336,7 +336,7 @@ function TaskListDetail({
 /** One task: the box that closes it, its own words, and the way to drop it. */
 function TaskRow({ item, saving, onComplete, onRemove }: { item: TaskItem; saving: boolean; onComplete?(): void; onRemove(): void }) {
   return <div className={`tasklist-row ${item.completed ? 'completed' : ''}`}>
-    <button className="tasklist-check" type="button" disabled={saving || item.completed} aria-label={item.completed ? 'Completed' : `Complete ${item.content}`} onClick={onComplete}>{item.completed && <Icon name="check" size={13} />}</button>
+    <button className="tasklist-check" type="button" disabled={saving} aria-label={item.completed ? `Reopen ${item.content}` : `Complete ${item.content}`} onClick={onComplete}>{item.completed && <Icon name="check" size={13} />}</button>
     <span className="tasklist-row-text">{item.content}</span>
     <button className="icon-button tasklist-row-remove" type="button" title="Remove task" aria-label={`Remove ${item.content}`} disabled={saving} onClick={onRemove}><Icon name="trash" size={14} /></button>
   </div>
