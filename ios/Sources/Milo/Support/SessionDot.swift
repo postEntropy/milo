@@ -30,7 +30,10 @@ struct SessionDot: View {
                     .opacity(pulsing ? 0 : 0.8)
             }
             Circle()
-                .fill(MiloTheme.accent)
+                .fill(state == .running && reduceMotion ? Color.clear : MiloTheme.accent)
+                .overlay {
+                    if state == .running && reduceMotion { Circle().stroke(MiloTheme.accent, lineWidth: 2) }
+                }
                 .frame(width: size, height: size)
                 .scaleEffect(state == .running && !reduceMotion ? (pulsing ? 1.05 : 0.95) : 1)
         }

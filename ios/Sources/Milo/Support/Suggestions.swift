@@ -33,6 +33,7 @@ struct Suggestion: Identifiable, Hashable {
     /// model chose for a generated idea.
     let symbol: String
     let title: String
+    let detail: String
     let act: Act
 
     /// The title is what tells two lines apart, and the builder keeps them unique — so
@@ -45,45 +46,61 @@ let defaultSuggestions: [Suggestion] = [
     Suggestion(
         symbol: Suggestion.Mark.mail.symbol,
         title: "Triage my inbox",
+        detail: "Say what actually needs an answer",
         act: .send("Go through my inbox and tell me what actually needs me.")
     ),
     Suggestion(
         symbol: Suggestion.Mark.listCheck.symbol,
         title: "Plan today",
+        detail: "Shape what is open into a short list",
         act: .send("Look at my task lists and help me plan today.")
     ),
     Suggestion(
         symbol: Suggestion.Mark.`repeat`.symbol,
         title: "Set up a routine",
+        detail: "Put a job on a schedule",
         act: .send("Help me set up a routine that runs on a schedule.")
     ),
     Suggestion(
         symbol: Suggestion.Mark.file.symbol,
         title: "Summarize a file",
+        detail: "Read a document back in plain words",
         act: .send("Help me summarize a file in this project.")
     ),
 ]
 
-/// The lines the welcome screen draws, from what is actually here: the last
-/// conversation, opened again with one press, and the ideas the model drew from what
-/// Milo knows. One recent session, not several — the rest of the drawer is a press
-/// away, so the screen spends its slots on what is new rather than listing what is
-/// already in front of the person. Ideas take the slots the standing four would hold,
-/// and the standing four pad a shorter list, so the screen is never bare and never two
-/// lines of the same thing.
-func buildSuggestions(sessions: [SessionSummary], ideas: [Idea], currentId: String) -> [Suggestion] {
+/// The cards the welcome screen draws, from what is actually here: the last
+/// Session, opened again with one press, and the ideas the model drew from what
+/// Milo knows.
+func buildSuggestions(
+    sessions: [SessionSummary],
+    ideas: [Idea],
+    currentId: String
+) -> [Suggestion] {
     var lines: [Suggestion] = []
 
     for session in sessions {
         if lines.count >= 1 { break }
         if session.id == currentId || session.messageCount == 0 { continue }
-        lines.append(Suggestion(symbol: Suggestion.Mark.history.symbol, title: session.label, act: .resume(session.id)))
+        lines.append(
+            Suggestion(
+                symbol: Suggestion.Mark.history.symbol,
+                title: session.label,
+                detail: "Pick up where you left off",
+                act: .resume(session.id)
+            )
+        )
     }
 
     // A generated idea wears the SF Symbol the model chose for it, and the standing
     // spark when it named none.
     let drawn = ideas.map {
-        Suggestion(symbol: $0.symbol ?? Suggestion.Mark.spark.symbol, title: $0.title, act: .send($0.prompt))
+        Suggestion(
+            symbol: $0.symbol ?? Suggestion.Mark.spark.symbol,
+            title: $0.title,
+            detail: $0.prompt,
+            act: .send($0.prompt)
+        )
     }
 
     for fallback in drawn + defaultSuggestions {

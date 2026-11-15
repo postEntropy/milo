@@ -19,6 +19,7 @@ struct SettingsView: View {
     /// because the whole sheet follows it; the Display page edits the same value through
     /// a binding rather than reading the key a second time.
     @AppStorage("appearance") private var appearance = "system"
+    @State private var confirmUnpair = false
 
     private var colorScheme: ColorScheme? {
         switch appearance {
@@ -78,10 +79,15 @@ struct SettingsView: View {
 
                 Section {
                     Button("Unpair this phone", role: .destructive) {
-                        model.unpair()
-                        dismiss()
+                        confirmUnpair = true
                     }
                 }
+            }
+            .confirmationDialog("Unpair this phone?", isPresented: $confirmUnpair, titleVisibility: .visible) {
+                Button("Unpair", role: .destructive) { model.unpair(); dismiss() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("You will need a new pairing code to reconnect. The daemon and its history stay on the host.")
             }
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.inline)

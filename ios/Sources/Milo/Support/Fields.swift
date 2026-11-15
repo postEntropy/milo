@@ -22,8 +22,7 @@ struct MiloField: View {
                 .foregroundStyle(MiloTheme.foreground)
                 .padding(.horizontal, MiloTheme.Space.five)
                 .padding(.vertical, MiloTheme.Space.three)
-                .background(MiloTheme.surface, in: Capsule())
-                .overlay(Capsule().stroke(MiloTheme.borderSoft, lineWidth: 1))
+                .glassEffect(.regular, in: Capsule())
         }
     }
 }

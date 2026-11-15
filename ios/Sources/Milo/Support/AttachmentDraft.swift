@@ -58,7 +58,7 @@ struct DraftStrip: View {
                     Image(systemName: "xmark")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundStyle(.white)
-                        .frame(width: 22, height: 22)
+                        .frame(width: 44, height: 44)
                         .background(.black.opacity(0.6), in: Circle())
                         .padding(MiloTheme.Space.one)
                         .contentShape(Rectangle())
@@ -88,7 +88,7 @@ struct DraftStrip: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(MiloTheme.muted)
-                    .frame(width: 22, height: 22)
+                    .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("Remove \(draft.name)")

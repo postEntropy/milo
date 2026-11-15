@@ -105,7 +105,11 @@ private struct TaskListIndex: View {
                         .font(MiloTheme.Text.title)
                         .foregroundStyle(MiloTheme.foreground)
 
-                    if model.taskLists.isEmpty {
+                    if model.taskLists.isEmpty, model.taskListsError != nil {
+                        Button("Try again") { Task { await model.refreshTaskLists() } }
+                            .buttonStyle(.glass)
+                            .disabled(model.taskListsLoading)
+                    } else if model.taskLists.isEmpty {
                         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
                             Image(systemName: model.taskListsLoading ? "hourglass" : "checklist")
                                 .font(.system(size: 22, weight: .medium))
@@ -414,7 +418,9 @@ private struct TaskListDetail: View {
                                         TaskRow(
                                             item: item,
                                             disabled: model.taskListsSaving,
-                                            onComplete: nil,
+                                            onComplete: {
+                                                Task { await model.reopenTaskItem(listName: list.name, itemId: item.id) }
+                                            },
                                             onRemove: {
                                                 Task { await model.removeTaskItem(listName: list.name, itemId: item.id) }
                                             }
@@ -527,12 +533,13 @@ private struct TaskRow: View {
     let disabled: Bool
     let onComplete: (() -> Void)?
     let onRemove: () -> Void
+    @State private var removing = false
 
     var body: some View {
         HStack(alignment: .top, spacing: MiloTheme.Space.three) {
-            if let onComplete, !item.completed {
+            if let onComplete {
                 Button(action: onComplete) {
-                    Image(systemName: "circle")
+                    Image(systemName: item.completed ? "checkmark.circle.fill" : "circle")
                         .font(.system(size: 20, weight: .regular))
                         .foregroundStyle(MiloTheme.muted)
                         .frame(width: 28, height: 28)
@@ -540,7 +547,7 @@ private struct TaskRow: View {
                 }
                 .buttonStyle(PressableStyle())
                 .disabled(disabled)
-                .accessibilityLabel("Complete \(item.content)")
+                .accessibilityLabel("\(item.completed ? "Reopen" : "Complete") \(item.content)")
             } else {
                 Image(systemName: "checkmark.circle.fill")
                     .font(.system(size: 20, weight: .medium))
@@ -562,7 +569,7 @@ private struct TaskRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.top, 2)
 
-            Button(action: onRemove) {
+            Button { removing = true } label: {
                 Image(systemName: "trash")
                     .font(.system(size: 14, weight: .medium))
                     .foregroundStyle(MiloTheme.muted)
@@ -575,12 +582,16 @@ private struct TaskRow: View {
         }
         .padding(MiloTheme.Space.three)
         .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .confirmationDialog("Remove this task?", isPresented: $removing, titleVisibility: .visible) {
+            Button("Remove task", role: .destructive, action: onRemove)
+            Button("Cancel", role: .cancel) {}
+        } message: { Text(item.content) }
         .contextMenu {
             menuItem("Copy", "doc.on.doc") { UIPasteboard.general.string = item.content }
-            if let onComplete, !item.completed {
-                menuItem("Complete", "checkmark.circle", disabled: disabled, action: onComplete)
+            if let onComplete {
+                menuItem(item.completed ? "Reopen" : "Complete", "checkmark.circle", disabled: disabled, action: onComplete)
             }
-            Button(role: .destructive, action: onRemove) {
+            Button(role: .destructive, action: { removing = true }) {
                 Label("Remove", systemImage: "trash")
             }
             .tint(Color(.systemRed))

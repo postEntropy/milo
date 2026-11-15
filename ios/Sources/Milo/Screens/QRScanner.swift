@@ -8,10 +8,14 @@ import SwiftUI
  */
 struct QRScanner: UIViewControllerRepresentable {
     let onCode: (String) -> Void
+    let onError: (String) -> Void
+    let onReady: () -> Void
 
     func makeUIViewController(context: Context) -> ScannerController {
         let controller = ScannerController()
         controller.onCode = onCode
+        controller.onError = onError
+        controller.onReady = onReady
         return controller
     }
 
@@ -19,7 +23,20 @@ struct QRScanner: UIViewControllerRepresentable {
 
     final class ScannerController: UIViewController, AVCaptureMetadataOutputObjectsDelegate {
         var onCode: ((String) -> Void)?
-        private let session = AVCaptureSession()
+        var onError: ((String) -> Void)?
+        var onReady: (() -> Void)?
+        // Only start/stop leave the main actor; their queue preserves ordering.
+        private final class CaptureRunner: @unchecked Sendable {
+            let session = AVCaptureSession()
+            private let queue = DispatchQueue(label: "milo.qr.capture")
+            func start(_ completed: @escaping @Sendable (Bool) -> Void) {
+                queue.async { self.session.startRunning(); completed(self.session.isRunning) }
+            }
+            func stop() { queue.async { self.session.stopRunning() } }
+        }
+        private let runner = CaptureRunner()
+        private var session: AVCaptureSession { runner.session }
+        private var visible = true
         private var preview: AVCaptureVideoPreviewLayer?
         private var read = false
 
@@ -27,13 +44,31 @@ struct QRScanner: UIViewControllerRepresentable {
             super.viewDidLoad()
             view.backgroundColor = .black
 
+            Task { [weak self] in
+                let allowed = await AVCaptureDevice.requestAccess(for: .video)
+                guard let self, self.visible else { return }
+                guard allowed else {
+                    self.onError?("Camera access is unavailable. Allow Camera in Settings or enter the pairing address and code manually.")
+                    return
+                }
+                self.configure()
+            }
+        }
+
+        private func configure() {
             guard let device = AVCaptureDevice.default(for: .video),
                   let input = try? AVCaptureDeviceInput(device: device),
-                  session.canAddInput(input) else { return }
+                  session.canAddInput(input) else {
+                onError?("Could not open the camera. Enter the pairing address and code manually.")
+                return
+            }
             session.addInput(input)
 
             let output = AVCaptureMetadataOutput()
-            guard session.canAddOutput(output) else { return }
+            guard session.canAddOutput(output) else {
+                onError?("Could not configure QR scanning. Enter the pairing address and code manually.")
+                return
+            }
             session.addOutput(output)
             output.setMetadataObjectsDelegate(self, queue: .main)
             output.metadataObjectTypes = [.qr]
@@ -44,9 +79,13 @@ struct QRScanner: UIViewControllerRepresentable {
             view.layer.addSublayer(layer)
             preview = layer
 
-            // Starting the session blocks while the camera comes up. It is a
-            // short wait, once, on a screen whose whole purpose is the camera.
-            session.startRunning()
+            runner.start { [weak self] running in
+                Task { @MainActor in
+                    guard let self, self.visible else { return }
+                    if running { self.onReady?() }
+                    else { self.onError?("The camera could not start. Try again or enter the address and code manually.") }
+                }
+            }
         }
 
         override func viewDidLayoutSubviews() {
@@ -56,7 +95,8 @@ struct QRScanner: UIViewControllerRepresentable {
 
         override func viewWillDisappear(_ animated: Bool) {
             super.viewWillDisappear(animated)
-            session.stopRunning()
+            visible = false
+            runner.stop()
         }
 
         /// Called on the main queue, which is the queue the output was given.
@@ -71,7 +111,7 @@ struct QRScanner: UIViewControllerRepresentable {
                 // start a second claim.
                 guard !read else { return }
                 read = true
-                session.stopRunning()
+                runner.stop()
                 onCode?(code)
             }
         }
@@ -82,13 +122,17 @@ struct QRScanner: UIViewControllerRepresentable {
 struct QRScannerSheet: View {
     let onCode: (String) -> Void
     @Environment(\.dismiss) private var dismiss
+    @State private var error: String?
+    @State private var starting = true
+    @State private var scannerID = UUID()
 
     var body: some View {
         ZStack(alignment: .top) {
-            QRScanner { code in
+            QRScanner(onCode: { code in
                 onCode(code)
                 dismiss()
-            }
+            }, onError: { error = $0; starting = false }, onReady: { starting = false })
+            .id(scannerID)
             .ignoresSafeArea()
 
             VStack(spacing: MiloTheme.Space.three) {
@@ -99,8 +143,21 @@ struct QRScannerSheet: View {
                             .font(.system(size: 15, weight: .semibold))
                             .frame(width: 36, height: 36)
                     }
+                    .accessibilityLabel("Close scanner")
                     .buttonStyle(.glass)
                     .tint(MiloTheme.foreground)
+                }
+                if starting { ProgressView("Starting camera…").padding().background(MiloTheme.background, in: Capsule()) }
+                if let error {
+                    Text(error)
+                        .font(MiloTheme.Text.body)
+                        .padding()
+                        .background(MiloTheme.background, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                    Button("Try again") { self.error = nil; starting = true; scannerID = UUID() }.buttonStyle(.glass)
+                    Button("Enter address and code") { dismiss() }.buttonStyle(.glass)
+                    Button("Open Settings") {
+                        if let url = URL(string: UIApplication.openSettingsURLString) { UIApplication.shared.open(url) }
+                    }.buttonStyle(.glass)
                 }
                 Text("Point the camera at the QR `milo pair` printed.")
                     .font(MiloTheme.Text.small)

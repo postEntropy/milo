@@ -35,6 +35,9 @@ struct ModelPickerSheet: View {
                 }
 
                 Section("Model") {
+                    if let error = model.modelApplyError {
+                        Text(error).foregroundStyle(MiloTheme.danger)
+                    }
                     if model.modelsLoading {
                         HStack(spacing: MiloTheme.Space.two) {
                             ProgressView().controlSize(.small)
@@ -44,8 +47,7 @@ struct ModelPickerSheet: View {
                     ForEach(matches) { entry in
                         Button {
                             Task {
-                                await model.choose(entry.id, from: provider)
-                                dismiss()
+                                if await model.choose(entry.id, from: provider) { dismiss() }
                             }
                         } label: {
                             HStack(spacing: MiloTheme.Space.two) {
@@ -63,7 +65,7 @@ struct ModelPickerSheet: View {
                                     }
                                 }
                                 Spacer(minLength: MiloTheme.Space.two)
-                                if entry.id == model.modelName {
+                                if entry.id == model.modelName && provider == model.providerId {
                                     Image(systemName: "checkmark").foregroundStyle(MiloTheme.accent)
                                 }
                             }
@@ -96,17 +98,19 @@ struct ModelPickerSheet: View {
                     .background(.bar)
                 }
             }
+            .disabled(model.modelApplying)
+            .interactiveDismissDisabled(model.modelApplying)
             .navigationTitle("Model")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
+                    Button("Done") { dismiss() }.disabled(model.modelApplying)
                 }
             }
         }
         .task {
             await model.openPicker()
-            provider = model.providerId
+            provider = model.catalogProvider
             // The slider's stops are the settings read's own list, so the picker asks for
             // them here when the sheet is the first thing opened.
             if model.efforts.isEmpty { await model.loadSettings() }
@@ -116,6 +120,7 @@ struct ModelPickerSheet: View {
     /// What the Model section draws: the whole catalog, or the part of it the field is
     /// asking for — the same three words the browser filters on.
     private var matches: [ModelInfo] {
+        guard !model.modelsLoading, provider == model.catalogProvider else { return [] }
         let needle = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !needle.isEmpty else { return model.models }
         return model.models.filter {
