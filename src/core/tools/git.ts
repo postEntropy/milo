@@ -1,7 +1,10 @@
 import { execFile } from 'node:child_process'
+import { stat } from 'node:fs/promises'
+import path from 'node:path'
 import { z } from 'zod'
-import type { Tool, ToolResult } from './types.js'
+import type { Tool, ToolContext, ToolResult } from './types.js'
 import { clipMiddle } from './output.js'
+import { canonicalToolPath, isInsideFolder, resolveScopedPath } from './walk.js'
 
 const MAX_OUTPUT = 20_000
 const DEFAULT_LOG_LIMIT = 20
@@ -63,16 +66,82 @@ export function runGit(
   })
 }
 
-function render(result: { code: number; body: string } | { failed: string }): ToolResult {
+function render(result: { code: number; body: string } | { failed: string }, cwd?: string): ToolResult {
   if ('failed' in result) return { content: result.failed, isError: true }
   const body = clipMiddle(result.body || '(no output)', MAX_OUTPUT)
-  return { content: `exit ${result.code}\n${body}`, isError: result.code !== 0 }
+  const hint =
+    result.code === 128 && cwd && /not a git repository/i.test(result.body)
+      ? `\nRan in: ${cwd}. Pass \`repo\` (or use \`shell_command\` if needed) when the repository is elsewhere.`
+      : ''
+  return { content: `exit ${result.code}\n${body}${hint}`, isError: result.code !== 0 }
+}
+
+/**
+ * Resolve an explicit `repo` directory, enforcing the project boundary when set.
+ * Returns `{ ok: true, cwd }` or an error string suitable for returning directly to the model.
+ */
+async function resolveRepoDir(
+  ctx: Pick<ToolContext, 'cwd' | 'confineTo'>,
+  rawRepo?: string,
+): Promise<{ ok: true; cwd: string } | { ok: false; error: string }> {
+  const trimmed = rawRepo?.trim()
+  if (!trimmed) return { ok: true, cwd: ctx.cwd }
+  const scoped = resolveScopedPath(ctx.cwd, trimmed, ctx.confineTo)
+  if (!scoped.ok) return scoped
+  try {
+    const info = await stat(scoped.path)
+    if (!info.isDirectory()) return { ok: false, error: `Not a directory: ${trimmed}` }
+    return { ok: true, cwd: scoped.path }
+  } catch {
+    return { ok: false, error: `Repository directory not found: ${trimmed}` }
+  }
+}
+
+/**
+ * When `repo` is omitted in a session outside a git repo (or when `path` targets
+ * another repo in an unconfined session), derive git's working directory from `path`
+ * so `git(action: 'status', path: '/other/repo')` works instead of failing in `ctx.cwd`.
+ */
+async function resolveReadTarget(
+  ctx: Pick<ToolContext, 'cwd' | 'confineTo' | 'signal'>,
+  rawRepo: string | undefined,
+  rawPath: string | undefined,
+): Promise<{ ok: true; cwd: string; targetPath?: string } | { ok: false; error: string }> {
+  if (rawRepo?.trim()) {
+    const repo = await resolveRepoDir(ctx, rawRepo)
+    if (!repo.ok) return repo
+    if (!rawPath?.trim()) return { ok: true, cwd: repo.cwd }
+    const scoped = resolveScopedPath(repo.cwd, rawPath, ctx.confineTo)
+    if (!scoped.ok) return scoped
+    return { ok: true, cwd: repo.cwd, targetPath: path.relative(repo.cwd, scoped.path) || '.' }
+  }
+
+  if (!rawPath?.trim()) return { ok: true, cwd: ctx.cwd }
+  const scoped = resolveScopedPath(ctx.cwd, rawPath, ctx.confineTo)
+  if (!scoped.ok) return scoped
+
+  const top = await runGit(ctx.cwd, ['rev-parse', '--show-toplevel'], ctx.signal)
+  if (!('failed' in top) && top.code === 0) {
+    const topRoot = canonicalToolPath(ctx.cwd, top.body.split('\n', 1)[0])
+    if (isInsideFolder(scoped.path, topRoot)) {
+      return { ok: true, cwd: ctx.cwd, targetPath: rawPath.trim() }
+    }
+  }
+
+  try {
+    const info = await stat(scoped.path)
+    if (info.isDirectory()) return { ok: true, cwd: scoped.path, targetPath: '.' }
+    return { ok: true, cwd: path.dirname(scoped.path), targetPath: path.basename(scoped.path) }
+  } catch {
+    return { ok: true, cwd: ctx.cwd, targetPath: rawPath.trim() }
+  }
 }
 
 const readSchema = z.object({
   action: z
     .enum(['status', 'diff', 'log', 'show', 'blame'])
     .describe('Which read to run: the working tree (status), changes (diff), history (log, show) or line authorship (blame).'),
+  repo: z.string().optional().describe('Repository directory to read (defaults to the session working directory).'),
   path: z.string().optional().describe('A file or directory the read is about (status, diff, log, blame).'),
   ref: z.string().optional().describe('A revision — a branch, tag or commit (diff, log, show, blame).'),
   staged: z.boolean().optional().describe('diff: show what is staged (--cached) rather than the working tree.'),
@@ -90,11 +159,11 @@ type ReadAction = GitArgs['action']
  * back to a default without saying so.
  */
 const READ_ARGS: Record<ReadAction, readonly string[]> = {
-  status: ['path'],
-  diff: ['path', 'ref', 'staged'],
-  log: ['path', 'ref', 'limit'],
-  show: ['ref'],
-  blame: ['path', 'ref'],
+  status: ['repo', 'path'],
+  diff: ['repo', 'path', 'ref', 'staged'],
+  log: ['repo', 'path', 'ref', 'limit'],
+  show: ['repo', 'ref'],
+  blame: ['repo', 'path', 'ref'],
 }
 
 /** The reads, spelled once so a new action cannot be added to one place only. */
@@ -103,13 +172,13 @@ const ACTIONS: ReadAction[] = ['status', 'diff', 'log', 'show', 'blame']
 export const gitTool: Tool<GitArgs> = {
   name: 'git',
   description:
-    'Read a git repository: the working tree (`status`), changes (`diff`), history (`log`, `show`) or who last changed a line (`blame`). Read-only, so it never asks. Commits are made with `git_commit`.',
+    'Read a git repository: the working tree (`status`), changes (`diff`), history (`log`, `show`) or who last changed a line (`blame`). Runs in `repo` (or the session directory when omitted). Read-only, so it never asks. Commits are made with `git_commit`.',
   schema: readSchema,
   readOnly: true,
   async execute(args, ctx) {
     const { action } = args
     const allowed = READ_ARGS[action]
-    for (const key of ['path', 'ref', 'staged', 'limit'] as const) {
+    for (const key of ['repo', 'path', 'ref', 'staged', 'limit'] as const) {
       if (args[key] !== undefined && !allowed.includes(key)) {
         const takes = allowed.length > 0 ? allowed.join(', ') : 'no extra arguments'
         return {
@@ -122,7 +191,10 @@ export const gitTool: Tool<GitArgs> = {
       return { content: "git blame needs a path — git(action: 'blame', path: '<file>').", isError: true }
     }
 
-    const path = args.path?.trim() || undefined
+    const target = await resolveReadTarget(ctx, args.repo, args.path)
+    if (!target.ok) return { content: target.error, isError: true }
+
+    const { cwd: gitCwd, targetPath: gitPath } = target
     const requestedRef = args.ref?.trim() || undefined
     // Resolve user supplied revisions to an object id before passing them to
     // another Git command. Besides rejecting invalid revisions, this prevents
@@ -130,38 +202,39 @@ export const gitTool: Tool<GitArgs> = {
     // `--end-of-options` boundary also protects rev-parse itself.
     let ref = requestedRef
     if (requestedRef) {
-      const resolved = await runGit(ctx.cwd, ['rev-parse', '--verify', '--end-of-options', `${requestedRef}^{object}`], ctx.signal)
+      const resolved = await runGit(gitCwd, ['rev-parse', '--verify', '--end-of-options', `${requestedRef}^{object}`], ctx.signal)
       if ('failed' in resolved) return { content: resolved.failed, isError: true }
-      if (resolved.code !== 0) return render(resolved)
+      if (resolved.code !== 0) return render(resolved, gitCwd)
       ref = resolved.body.split('\n', 1)[0]
     }
     const argv: string[] = (() => {
       switch (action) {
         case 'status':
-          return ['status', '--short', '--branch', ...(path ? ['--', path] : [])]
+          return ['status', '--short', '--branch', ...(gitPath ? ['--', gitPath] : [])]
         case 'diff':
-          return ['diff', ...(args.staged ? ['--cached'] : []), ...(ref ? [ref] : []), ...(path ? ['--', path] : [])]
+          return ['diff', ...(args.staged ? ['--cached'] : []), ...(ref ? [ref] : []), ...(gitPath ? ['--', gitPath] : [])]
         case 'log':
           return [
             'log',
             '--oneline',
             `--max-count=${Math.min(args.limit ?? DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT)}`,
             ...(ref ? [ref] : []),
-            ...(path ? ['--', path] : []),
+            ...(gitPath ? ['--', gitPath] : []),
           ]
         case 'show':
           return ['show', ref ?? 'HEAD']
         case 'blame':
-          return ['blame', ...(ref ? [ref] : []), '--', path as string]
+          return ['blame', ...(ref ? [ref] : []), '--', gitPath as string]
       }
     })()
 
-    return render(await runGit(ctx.cwd, argv, ctx.signal))
+    return render(await runGit(gitCwd, argv, ctx.signal), gitCwd)
   },
 }
 
 const commitSchema = z.object({
   message: z.string().describe('The commit message. Required — a commit with no message is refused.'),
+  repo: z.string().optional().describe('Repository directory to commit in (defaults to the session working directory).'),
   files: z.array(z.string()).optional().describe('Paths to stage before committing.'),
   all: z.boolean().optional().describe('Stage every tracked change (git commit -a) instead of naming files.'),
 })
@@ -185,15 +258,25 @@ export const gitCommitTool: Tool<GitCommitArgs> = {
       return { content: '`files` was empty — name at least one path, or use `all`.', isError: true }
     }
 
-    if (files.length > 0) {
-      const staged = await runGit(ctx.cwd, ['add', '--', ...files], ctx.signal)
+    const repo = await resolveRepoDir(ctx, args.repo)
+    if (!repo.ok) return { content: repo.error, isError: true }
+
+    const scopedFiles: string[] = []
+    for (const file of files) {
+      const scoped = resolveScopedPath(repo.cwd, file, ctx.confineTo)
+      if (!scoped.ok) return { content: scoped.error, isError: true }
+      scopedFiles.push(path.relative(repo.cwd, scoped.path) || '.')
+    }
+
+    if (scopedFiles.length > 0) {
+      const staged = await runGit(repo.cwd, ['add', '--', ...scopedFiles], ctx.signal)
       if ('failed' in staged) return { content: staged.failed, isError: true }
       if (staged.code !== 0) {
         return { content: `Could not stage ${files.join(', ')}:\n${clipMiddle(staged.body, MAX_OUTPUT)}`, isError: true }
       }
     }
 
-    const result = await runGit(ctx.cwd, ['commit', ...(args.all ? ['-a'] : []), '-m', message], ctx.signal)
-    return render(result)
+    const result = await runGit(repo.cwd, ['commit', ...(args.all ? ['-a'] : []), '-m', message], ctx.signal)
+    return render(result, repo.cwd)
   },
 }

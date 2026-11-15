@@ -214,7 +214,7 @@ function canonicalExisting(target: string): string {
   }
 }
 
-function isInsideFolder(target: string, folder: string): boolean {
+export function isInsideFolder(target: string, folder: string): boolean {
   const from = path.resolve(folder)
   const to = path.resolve(target)
   if (to === from) return true

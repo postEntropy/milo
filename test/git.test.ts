@@ -109,8 +109,45 @@ describe('git', () => {
       const result = await gitTool.execute({ action: 'status' }, { cwd: plain, signal })
       expect(result.isError).toBe(true)
       expect(result.content).toContain('exit 128')
+      expect(result.content).toContain(plain)
     } finally {
       await rm(plain, { recursive: true, force: true })
+    }
+  })
+
+  it('reads another repository through repo or path when the session is outside a repo', async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), 'milo-outside-'))
+    try {
+      const byRepo = await gitTool.execute({ action: 'show', repo: dir, ref: 'HEAD' }, { cwd: outside, signal })
+      expect(byRepo.isError).toBeFalsy()
+      expect(byRepo.content).toContain('first commit')
+
+      const byDirPath = await gitTool.execute({ action: 'log', path: dir }, { cwd: outside, signal })
+      expect(byDirPath.isError).toBeFalsy()
+      expect(byDirPath.content).toContain('first commit')
+
+      const byFilePath = await gitTool.execute(
+        { action: 'blame', path: path.join(dir, 'a.txt') },
+        { cwd: outside, signal },
+      )
+      expect(byFilePath.isError).toBeFalsy()
+      expect(byFilePath.content).toContain('Milo Test')
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses reading a repository outside the confined project folder', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'milo-confined-'))
+    try {
+      const result = await gitTool.execute(
+        { action: 'status', repo: dir },
+        { cwd: project, confineTo: project, signal },
+      )
+      expect(result.isError).toBe(true)
+      expect(result.content).toContain('outside')
+    } finally {
+      await rm(project, { recursive: true, force: true })
     }
   })
 
@@ -178,6 +215,28 @@ describe('git_commit', () => {
     const result = await gitCommitTool.execute({ message: 'x', files: ['a.txt'], all: true }, ctx())
     expect(result.isError).toBe(true)
     expect(result.content).toContain('either')
+  })
+
+  it('commits in another repository through repo and refuses escaping confineTo', async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), 'milo-gitc-out-'))
+    try {
+      await writeFile(path.join(dir, 'a.txt'), 'fourth\n')
+      const ok = await gitCommitTool.execute(
+        { message: 'fourth commit', repo: dir, files: ['a.txt'] },
+        { cwd: outside, signal },
+      )
+      expect(ok.isError).toBeFalsy()
+      expect(log()).toContain('fourth commit')
+
+      const blocked = await gitCommitTool.execute(
+        { message: 'blocked', repo: dir, all: true },
+        { cwd: outside, confineTo: outside, signal },
+      )
+      expect(blocked.isError).toBe(true)
+      expect(blocked.content).toContain('outside')
+    } finally {
+      await rm(outside, { recursive: true, force: true })
+    }
   })
 
   it('is not read-only, so the policy asks before it runs', () => {
