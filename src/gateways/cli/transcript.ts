@@ -1,6 +1,7 @@
-import { theme, type ThemeColor } from './theme.js'
-import { toolDisplayName, toolIcon } from '../tool-line.js'
+import type { FileChange } from '../../core/change.js'
 import { todoMark, type TodoItem } from '../../core/todos.js'
+import { changeCounts, toolDisplayName, toolIcon, toolInput } from '../tool-line.js'
+import { theme, type ThemeColor, type TuiTheme } from './theme.js'
 
 export type LineColor = ThemeColor
 
@@ -31,7 +32,17 @@ export interface Line {
 export type Item =
   | { kind: 'user'; text: string }
   | { kind: 'assistant'; text: string }
-  | { kind: 'tool'; name: string; detail: string; ok: boolean; counts?: string }
+  | {
+      kind: 'tool'
+      name: string
+      detail: string
+      ok: boolean
+      counts?: string
+      args?: unknown
+      result?: string
+      change?: FileChange[]
+      expanded?: boolean
+    }
   | { kind: 'error'; text: string }
   | { kind: 'info'; text: string }
   /**
@@ -56,6 +67,38 @@ export type Item =
    * the core's wording, the same block every surface draws.
    */
   | { kind: 'verification'; ok: boolean; text: string }
+  /** A generated UI summary card in the terminal transcript. */
+  | { kind: 'ui'; title?: string; summary: string }
+  /** A muted notice describing a panel action. */
+  | { kind: 'panel'; detail: string }
+  /** A mid-turn steering note handed to the running turn. */
+  | { kind: 'steer'; text: string }
+
+const MAX_EXPANDED_ARGS_LINES = 12
+const MAX_EXPANDED_RESULT_LINES = 16
+const MAX_EXPANDED_DIFF_LINES = 30
+
+interface CachedItem {
+  width: number
+  themeKey: string
+  expanded: boolean
+  lines: Line[]
+}
+
+const itemCache = new WeakMap<Item, CachedItem>()
+
+function themeSignature(activeTheme: TuiTheme): string {
+  return [
+    activeTheme.accent,
+    activeTheme.secondary,
+    activeTheme.success,
+    activeTheme.warning,
+    activeTheme.danger,
+    activeTheme.muted,
+    activeTheme.surface,
+    activeTheme.surfaceText,
+  ].join('|')
+}
 
 export function wrapText(text: string, width: number): string[] {
   const limit = Math.max(1, width)
@@ -85,115 +128,277 @@ export function wrapText(text: string, width: number): string[] {
   return out.length > 0 ? out : ['']
 }
 
-export function buildLines(items: Item[], width: number): Line[] {
+export function buildLines(items: Item[], width: number, activeTheme: TuiTheme = theme): Line[] {
   const lines: Line[] = []
-  const push = (text: string, style?: Partial<Line>) => lines.push({ text, ...style })
+  const key = themeSignature(activeTheme)
 
   items.forEach((item, index) => {
     // Consecutive tool calls are one burst of work, not two paragraphs.
     const previous = items[index - 1]
-    if (index > 0 && !(item.kind === 'tool' && previous?.kind === 'tool')) push('')
-    switch (item.kind) {
-      case 'user': {
-        // The person's words in a filled stripe, like the composer: what is theirs
-        // is one band, and its own surface delimits it rather than a rule. The
-        // prefix is part of the stripe, so the wrap leaves room for it — the fill
-        // itself spans the column, so no padding is needed to reach the edge.
-        for (const [lineIndex, text] of wrapText(item.text, width - 2).entries()) {
-          const prefix = lineIndex === 0 ? '› ' : '  '
-          push(`${prefix}${text}`, {
-            color: theme.surfaceText,
-            background: theme.surface,
-          })
-        }
-        break
+    if (index > 0 && !(item.kind === 'tool' && previous?.kind === 'tool')) {
+      lines.push({ text: '' })
+    }
+
+    const expanded = item.kind === 'tool' ? Boolean(item.expanded) : false
+    const cached = itemCache.get(item)
+    if (cached && cached.width === width && cached.themeKey === key && cached.expanded === expanded) {
+      lines.push(...cached.lines)
+      return
+    }
+
+    const rendered = renderItem(item, width, activeTheme)
+    itemCache.set(item, { width, themeKey: key, expanded, lines: rendered })
+    lines.push(...rendered)
+  })
+
+  return lines
+}
+
+function renderItem(item: Item, width: number, activeTheme: TuiTheme): Line[] {
+  const lines: Line[] = []
+  const push = (text: string, style?: Partial<Line>) => lines.push({ text, ...style })
+
+  switch (item.kind) {
+    case 'user': {
+      // The person's words in a filled stripe, like the composer: what is theirs
+      // is one band, and its own surface delimits it rather than a rule. The
+      // prefix is part of the stripe, so the wrap leaves room for it — the fill
+      // itself spans the column, so no padding is needed to reach the edge.
+      for (const [lineIndex, text] of wrapText(item.text, width - 2).entries()) {
+        const prefix = lineIndex === 0 ? '› ' : '  '
+        push(`${prefix}${text}`, {
+          color: activeTheme.surfaceText,
+          background: activeTheme.surface,
+        })
       }
-      case 'assistant':
-        lines.push(...markdownLines(item.text, width))
-        break
-      case 'tool': {
-        // The same shape as the chat surfaces: icon, name, and the one value
-        // worth showing — no JSON dump, and nothing when there is nothing
-        // (`/tools name`).
-        const name = toolDisplayName(item.name)
-        // How much the call moved, in the same two tones the chat and browser count a
-        // write with. The terminal has no colour pair per segment, so the numbers ride
-        // the muted line they belong to.
-        const call = [item.detail ? `${name} ${item.detail}` : name, item.counts]
-          .filter(Boolean)
-          .join(' ')
-        const head = item.ok ? toolIcon(item.name) : '✗'
-        for (const text of wrapText(`${head} ${call}`, width)) {
+      break
+    }
+    case 'assistant':
+      lines.push(...markdownLines(item.text, width, activeTheme))
+      break
+    case 'tool': {
+      // The same shape as the chat surfaces: icon, name, and the one value
+      // worth showing — no JSON dump, and nothing when there is nothing
+      // (`/tools name`).
+      const name = toolDisplayName(item.name)
+      // How much the call moved, in the same two tones the chat and browser count a
+      // write with. The terminal has no colour pair per segment, so the numbers ride
+      // the muted line they belong to.
+      const call = [item.detail ? `${name} ${item.detail}` : name, item.counts]
+        .filter(Boolean)
+        .join(' ')
+      const head = item.ok ? toolIcon(item.name) : '✗'
+      for (const text of wrapText(`${head} ${call}`, width)) {
+        push(text, {
+          color: item.ok ? activeTheme.muted : activeTheme.danger,
+          segments: boldName(text, name),
+        })
+      }
+      if (item.expanded) {
+        lines.push(...expandedToolLines(item, width, activeTheme))
+      }
+      break
+    }
+    case 'error':
+      for (const text of wrapText(`error: ${item.text}`, width)) push(text, { color: activeTheme.danger })
+      break
+    case 'info':
+      // Legible, not dim: this is what a command answered, and on a light
+      // theme the faint variants of a palette are the first thing to vanish.
+      for (const text of wrapText(item.text, width)) push(text, { color: activeTheme.muted })
+      break
+    case 'reasoning': {
+      for (const text of wrapText(item.header, width)) {
+        if (item.header.trim()) push(text, { dim: true })
+      }
+      if (item.text.trim()) {
+        // Indented, so the thinking reads as a note under the question rather
+        // than as the start of the answer.
+        for (const text of wrapText(item.text, width - 2)) {
+          push(`  ${text}`, { color: activeTheme.muted })
+        }
+      }
+      break
+    }
+    case 'fields': {
+      // The labels are one column, so the eye lands on the values; and a value
+      // long enough to wrap hangs under itself rather than under the next
+      // label, where it would read as that label's.
+      const labelWidth = Math.max(0, ...item.rows.map((row) => row.label.length))
+      const indent = ' '.repeat(labelWidth + 2)
+      for (const row of item.rows) {
+        const label = row.label.padEnd(labelWidth)
+        wrapText(row.value, Math.max(8, width - labelWidth - 2)).forEach((text, lineIndex) => {
+          if (lineIndex > 0) {
+            lines.push({ text: `${indent}${text}`, color: activeTheme.muted })
+            return
+          }
+          lines.push({
+            text: `${label}  ${text}`,
+            segments: [{ text: label, color: activeTheme.muted }, { text: `  ${text}` }],
+          })
+        })
+      }
+      break
+    }
+    case 'todo': {
+      for (const todo of item.items) {
+        const color =
+          todo.status === 'completed'
+            ? activeTheme.success
+            : todo.status === 'in_progress'
+              ? activeTheme.accent
+              : activeTheme.muted
+        for (const text of wrapText(`${todoMark(todo.status)} ${todo.content}`, width)) push(text, { color })
+      }
+      break
+    }
+    case 'verification': {
+      // The first line is the verdict and wears the colour; the detail under it
+      // is the failing command's own output, muted so it does not read as a
+      // second verdict.
+      for (const [index, line] of item.text.split('\n').entries()) {
+        for (const text of wrapText(line, width)) {
+          push(text, { color: index === 0 ? (item.ok ? activeTheme.success : activeTheme.danger) : activeTheme.muted })
+        }
+      }
+      break
+    }
+    case 'ui': {
+      const title = item.title?.trim()
+      if (title) {
+        for (const text of wrapText(`◆ ${title}`, width)) {
           push(text, {
-            color: item.ok ? theme.muted : theme.danger,
-            segments: boldName(text, name),
+            color: activeTheme.secondary,
+            segments: [{ text, bold: true, color: activeTheme.secondary }],
           })
         }
-        break
-      }
-      case 'error':
-        for (const text of wrapText(`error: ${item.text}`, width)) push(text, { color: theme.danger })
-        break
-      case 'info':
-        // Legible, not dim: this is what a command answered, and on a light
-        // theme the faint variants of a palette are the first thing to vanish.
-        for (const text of wrapText(item.text, width)) push(text, { color: theme.muted })
-        break
-      case 'reasoning': {
-        for (const text of wrapText(item.header, width)) {
-          if (item.header.trim()) push(text, { dim: true })
-        }
-        if (item.text.trim()) {
-          // Indented, so the thinking reads as a note under the question rather
-          // than as the start of the answer.
-          for (const text of wrapText(item.text, width - 2)) {
-            push(`  ${text}`, { color: theme.muted })
+        if (item.summary.trim()) {
+          for (const text of wrapText(item.summary, Math.max(1, width - 2))) {
+            push(`  ${text}`, { color: activeTheme.muted })
           }
         }
-        break
+      } else {
+        for (const text of wrapText(`◆ ${item.summary}`, width)) {
+          push(text, { color: activeTheme.muted })
+        }
       }
-      case 'fields': {
-        // The labels are one column, so the eye lands on the values; and a value
-        // long enough to wrap hangs under itself rather than under the next
-        // label, where it would read as that label's.
-        const labelWidth = Math.max(0, ...item.rows.map((row) => row.label.length))
-        const indent = ' '.repeat(labelWidth + 2)
-        for (const row of item.rows) {
-          const label = row.label.padEnd(labelWidth)
-          wrapText(row.value, Math.max(8, width - labelWidth - 2)).forEach((text, lineIndex) => {
-            if (lineIndex > 0) {
-              lines.push({ text: `${indent}${text}`, color: theme.muted })
-              return
-            }
-            lines.push({
-              text: `${label}  ${text}`,
-              segments: [{ text: label, color: theme.muted }, { text: `  ${text}` }],
-            })
+      break
+    }
+    case 'panel':
+      for (const text of wrapText(item.detail, width)) push(text, { color: activeTheme.muted })
+      break
+    case 'steer': {
+      const prefix = '↳ steered: '
+      const innerWidth = Math.max(1, width - prefix.length)
+      const hang = ' '.repeat(prefix.length)
+      wrapText(item.text, innerWidth).forEach((text, lineIndex) => {
+        if (lineIndex === 0) {
+          push(`${prefix}${text}`, {
+            color: activeTheme.muted,
+            segments: [
+              { text: prefix, color: activeTheme.secondary },
+              { text, color: activeTheme.muted },
+            ],
           })
+        } else {
+          push(`${hang}${text}`, { color: activeTheme.muted })
         }
-        break
-      }
-      case 'todo': {
-        for (const todo of item.items) {
-          const color =
-            todo.status === 'completed' ? theme.success : todo.status === 'in_progress' ? theme.accent : theme.muted
-          for (const text of wrapText(`${todoMark(todo.status)} ${todo.content}`, width)) push(text, { color })
-        }
-        break
-      }
-      case 'verification': {
-        // The first line is the verdict and wears the colour; the detail under it
-        // is the failing command's own output, muted so it does not read as a
-        // second verdict.
-        for (const [index, line] of item.text.split('\n').entries()) {
-          for (const text of wrapText(line, width)) {
-            push(text, { color: index === 0 ? (item.ok ? theme.success : theme.danger) : theme.muted })
+      })
+      break
+    }
+  }
+
+  return lines
+}
+
+function expandedToolLines(item: Extract<Item, { kind: 'tool' }>, width: number, activeTheme: TuiTheme): Line[] {
+  const lines: Line[] = []
+  const innerWidth = Math.max(1, width - 2)
+
+  if (item.args !== undefined) {
+    const formatted = toolInput(item.name, item.args)
+    if (formatted.trim()) {
+      const rawLines = formatted.split('\n')
+      let count = 0
+      let truncated = false
+      for (const raw of rawLines) {
+        for (const piece of hardChunks(raw, innerWidth)) {
+          if (count >= MAX_EXPANDED_ARGS_LINES) {
+            truncated = true
+            break
           }
+          lines.push({ text: `  ${piece}`, color: activeTheme.muted })
+          count += 1
         }
-        break
+        if (truncated) break
+      }
+      if (truncated) {
+        lines.push({ text: '  … (args truncated)', color: activeTheme.muted, dim: true })
       }
     }
-  })
+  }
+
+  if (item.change?.length) {
+    let diffCount = 0
+    let diffTruncated = false
+    for (const file of item.change) {
+      if (diffCount >= MAX_EXPANDED_DIFF_LINES) {
+        diffTruncated = true
+        break
+      }
+      const counts = changeCounts([file])
+      const header = counts ? `${file.path} (${counts})` : file.path
+      for (const piece of wrapText(header, innerWidth)) {
+        lines.push({ text: `  ${piece}`, color: activeTheme.secondary })
+      }
+      const contentWidth = Math.max(1, width - 4)
+      for (const entry of file.lines) {
+        if (diffCount >= MAX_EXPANDED_DIFF_LINES) {
+          diffTruncated = true
+          break
+        }
+        diffCount += 1
+        const sign = entry.kind === 'add' ? '+ ' : entry.kind === 'remove' ? '- ' : '  '
+        const color =
+          entry.kind === 'add'
+            ? activeTheme.success
+            : entry.kind === 'remove'
+              ? activeTheme.danger
+              : activeTheme.muted
+        for (const [pieceIndex, piece] of hardChunks(entry.text, contentWidth).entries()) {
+          const prefix = pieceIndex === 0 ? `  ${sign}` : '    '
+          lines.push({ text: `${prefix}${piece}`, color })
+        }
+      }
+      if (file.truncated && !diffTruncated) {
+        lines.push({ text: '  … (diff truncated)', color: activeTheme.muted, dim: true })
+      }
+    }
+    if (diffTruncated) {
+      lines.push({ text: '  … (diff truncated)', color: activeTheme.muted, dim: true })
+    }
+  }
+
+  if (item.result?.trim()) {
+    const rawLines = item.result.replace(/\s+$/, '').split('\n')
+    let count = 0
+    let truncated = false
+    for (const raw of rawLines) {
+      for (const piece of wrapText(raw, innerWidth)) {
+        if (count >= MAX_EXPANDED_RESULT_LINES) {
+          truncated = true
+          break
+        }
+        lines.push({ text: `  ${piece}`, color: activeTheme.muted })
+        count += 1
+      }
+      if (truncated) break
+    }
+    if (truncated) {
+      lines.push({ text: '  … (result truncated)', color: activeTheme.muted, dim: true })
+    }
+  }
 
   return lines
 }
@@ -214,24 +419,33 @@ function boldName(text: string, name: string): LineSegment[] {
 }
 
 /**
- * Markdown as far as the terminal goes: fenced code blocks (markers gone, the
- * code kept as it was written), inline code, bold and headings. Tables and
- * nested lists are left as the plain text they are — the CLI is told to avoid
- * them, and half-rendering them reads worse than not trying.
+ * Markdown as far as the terminal goes: fenced code blocks (optional language
+ * label, code kept as it was written), inline code, bold, headings, unordered
+ * and ordered lists with hanging indents, and blockquotes.
  */
-function markdownLines(text: string, width: number): Line[] {
+function markdownLines(text: string, width: number, activeTheme: TuiTheme): Line[] {
   const lines: Line[] = []
   let inFence = false
 
   for (const source of text.split('\n')) {
-    if (/^\s*```/.test(source)) {
-      inFence = !inFence
+    if (!inFence) {
+      const open = /^\s*```(.*)$/.exec(source)
+      if (open) {
+        inFence = true
+        const lang = open[1]!.trim()
+        if (lang) {
+          lines.push({ text: lang, color: activeTheme.muted, dim: true })
+        }
+        continue
+      }
+    } else if (/^\s*```\s*$/.test(source)) {
+      inFence = false
       continue
     }
 
     if (inFence) {
       for (const piece of hardChunks(source, width)) {
-        lines.push({ text: piece, color: theme.muted })
+        lines.push({ text: piece, color: activeTheme.muted })
       }
       continue
     }
@@ -241,8 +455,26 @@ function markdownLines(text: string, width: number): Line[] {
       continue
     }
 
+    const quote = /^\s*>\s?(.*)$/.exec(source)
+    if (quote) {
+      renderQuoteLine(quote[1]!, width, activeTheme, lines)
+      continue
+    }
+
+    const unordered = /^(\s*)[-*]\s+(.*)$/.exec(source)
+    if (unordered) {
+      renderListLine(`${unordered[1]!}• `, unordered[2]!, width, activeTheme, lines)
+      continue
+    }
+
+    const ordered = /^(\s*)(\d+\.)\s+(.*)$/.exec(source)
+    if (ordered) {
+      renderListLine(`${ordered[1]!}${ordered[2]!} `, ordered[3]!, width, activeTheme, lines)
+      continue
+    }
+
     const heading = /^#{1,6}\s+(.*)$/.exec(source)
-    const segments = inlineSegments(heading ? heading[1]! : source)
+    const segments = inlineSegments(heading ? heading[1]! : source, activeTheme)
     if (heading) for (const segment of segments) segment.bold = true
 
     for (const styled of wrapSegments(segments, width)) {
@@ -255,8 +487,44 @@ function markdownLines(text: string, width: number): Line[] {
   return lines.length > 0 ? lines : [{ text: '' }]
 }
 
+function renderQuoteLine(body: string, width: number, activeTheme: TuiTheme, lines: Line[]): void {
+  const marker = '▎ '
+  if (body.trim() === '') {
+    lines.push({ text: '▎', color: activeTheme.secondary })
+    return
+  }
+  const innerWidth = Math.max(1, width - marker.length)
+  const segments = inlineSegments(body, activeTheme)
+  for (const styled of wrapSegments(segments, innerWidth)) {
+    const bodyText = styled.map((segment) => segment.text).join('')
+    const bodySegments = styled.map((segment) => (segment.color ? segment : { ...segment, color: activeTheme.muted }))
+    lines.push({
+      text: `${marker}${bodyText}`,
+      segments: [{ text: marker, color: activeTheme.secondary }, ...bodySegments],
+    })
+  }
+}
+
+function renderListLine(marker: string, body: string, width: number, activeTheme: TuiTheme, lines: Line[]): void {
+  const hang = ' '.repeat(marker.length)
+  const innerWidth = Math.max(1, width - marker.length)
+  const segments = inlineSegments(body, activeTheme)
+  wrapSegments(segments, innerWidth).forEach((styled, lineIndex) => {
+    const text = styled.map((segment) => segment.text).join('')
+    if (lineIndex === 0) {
+      lines.push({
+        text: `${marker}${text}`,
+        segments: [{ text: marker, color: activeTheme.muted }, ...styled],
+      })
+      return
+    }
+    const plain = styled.every((segment) => !segment.bold && !segment.color)
+    lines.push(plain ? { text: `${hang}${text}` } : { text: `${hang}${text}`, segments: [{ text: hang }, ...styled] })
+  })
+}
+
 /** `**bold**` and `` `code` `` — the two a terminal answer reaches for. */
-function inlineSegments(text: string): LineSegment[] {
+function inlineSegments(text: string, activeTheme: TuiTheme): LineSegment[] {
   const segments: LineSegment[] = []
   let last = 0
 
@@ -266,7 +534,7 @@ function inlineSegments(text: string): LineSegment[] {
     segments.push(
       bold !== undefined
         ? { text: bold, bold: true }
-        : { text: match[2]!, color: theme.success },
+        : { text: match[2]!, color: activeTheme.success },
     )
     last = match.index + match[0].length
   }
