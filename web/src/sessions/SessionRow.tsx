@@ -24,12 +24,12 @@ export function SessionMark({ running, unread }: { running?: boolean; unread?: b
 }
 
 /**
- * A session row, wherever a list draws one: the drawer, and the sessions a project's page
- * and the Work index hold. One declaration, so the name, the second line, the running dot
- * and the actions under the dots cannot drift between the surfaces.
+ * A session row, wherever a list draws one in the drawer. One declaration, so the
+ * name, the second line, the running dot and the actions under the dots cannot drift.
  */
 export function SessionRow({
   session,
+  projectName,
   active,
   onClick,
   onRename,
@@ -38,6 +38,7 @@ export function SessionRow({
   onDelete,
 }: {
   session: SessionSummary
+  projectName?: string
   active: boolean
   onClick(): void
   onRename(id: string, title: string): Promise<void>
@@ -108,7 +109,7 @@ export function SessionRow({
               {session.surface === 'spotlight' && <span className="session-surface">Spotlight</span>}
             </span>
             <span className="session-preview-row">
-              <span className="session-preview">{sessionMeta(session)}</span>
+              <span className="session-preview">{projectName ? `${sessionMeta(session)} · ${projectName}` : sessionMeta(session)}</span>
               {session.backend?.kind === 'command-code' && <span
                 className={`session-backend-label ${session.backend.state === 'error' ? 'needs-recovery' : ''}`}
                 role="img"

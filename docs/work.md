@@ -1,181 +1,49 @@
-# Work
+# Session folders
 
-Work is Milo's code workspace: one half of the session list in the web app and on the phone,
-where a project's folder is the subject. It is a **place**, not a second system — the sessions
-are the ordinary ones, with the folder they run in changed.
+All Sessions share one list, whether or not they work in a folder. A folder is optional
+Session context. Choosing a directory does not require a separate project setup screen.
+The host remembers selected folders in the existing projects registry for reuse.
 
-## The shape
+## Choosing a folder
 
-- A **project** is a folder on the machine Milo runs on, registered in `~/.milo/projects.json`:
-  an id, a name and a path, nothing else.
-- A **work session** is an ordinary session whose working directory is the project's folder.
-  Tools, the subagent, the prompt and permission decisions all read from there.
-- The session list is split in two by the **Chat | Work** switch at its head. Chat holds the
-  sessions working in Milo's own folder, grouped by day; Work holds the projects, each with
-  its newest sessions under it. A session belongs to the side its project is on. A session
-  whose project was removed from the list is a **chat** — it is a session with no project to
-  be in, and counting it as work would take it out of both lists. Until the projects have
-  been read once, a session naming one is treated as work rather than shown under the wrong
-  roof.
-- Each side has a home. Chat goes back to the last chat, or starts one. Work goes back to the
-  last work session, or to the project index. Pressing the side already in front goes up to
-  that home, which for Work is the projects.
-- The Work side of the list draws a project's newest sessions — three of them, with any
-  running or unread session always among them — and **All N sessions** opens the page for
-  the rest. A project with no sessions is only its own row.
-- The Work screen itself has two levels: the projects, and one project's own page.
-- The index draws each project as a disclosure. Expanded by default, it holds the project's
-  newest sessions, three of them plus anything running or unread; the chevron at the card's
-  edge folds them; the card itself opens the page, and the sessions sit in the card's own
-  body rather than in rows of their own, opening and folding with a short animation. What was
-  folded stays folded on that client, web and phone alike. A project with no sessions has
-  nothing to fold: it stays shut and carries no chevron, and its count says zero.
-- On the phone the switch sits in the drawer and opens on the world of the session in front.
-  Choosing a side moves the card behind the drawer to where that world begins, while the list
-  stays in front: swiping the drawer away lands where the switch said it would. Rows open
-  their own place — a chat, a work session, or a project's page.
-- The switch is the platform's own segmented control — the shape iOS gives "two sides of one
-  list" — full width over the rows. The welcome does not offer it: a chat starts there, and
-  the drawer is where the two worlds are chosen.
-- The drawer's search folds behind a glass magnifier in its title row. Asked for, the field
-  takes the switch's row and the cursor; closing it gives the list back whole.
-- Routines and Task lists are pages, not sides of the switch, and neither world owns them:
-  they sit *above* it, so the switch never narrows them and the list below is only ever
-  sessions.
-- A project opened from the drawer is the **whole** of Work:
-  there is no index under it, because the index was never opened. Its way out is the sessions
-  it was come from, and the bar carries that way in its leading place. A project pushed from
-  the index is a level of that screen and keeps the platform's back to the list.
-- **New session** starts in the world the session in front works in: a chat from a chat, and
-  a session in the same project from a work session — the topbar's `+`, ⌘K and the composer's
-  control all follow it, because a chat cannot be where the next session belongs.
-- In the drawer's Work side both acts are there: **New session** opens the list's projects and
-  starts in the one chosen; **New project** sits beside it as a mark-only control and raises
-  the folder picker on the index. A project's own page still starts a session in it — the
-  composer there is the same act.
+The Session's Folder control offers direct host-folder browsing, a path, recent folders,
+and Clear folder. `/folder <path>` performs the same operation from CLI, Telegram, Discord,
+web or iPhone; `/folder` shows the current context and `/folder none` clears it.
 
-## The project's page
+Selection preserves the Session ID and transcript. It is refused while the Session is
+busy or has a running background job. The change is recorded in the transcript and applies
+to subsequent tools, commands, the code manual and folder instructions. Old permission
+approvals are cleared. Another process adopts saved directory context before its next turn.
+A missing or unreadable folder is reported explicitly, never silently replaced.
 
-- **Sessions** that ran there, newest first, with the running mark.
-- **New session here** — the first-message composer starts a Session in that folder. Milo is
-  selected by default; Command Code can be selected there before sending. The first words may
-  also ask the agent to write the folder's rules.
-- **Build or Plan** — the composer's mode switch. Build works in the folder. Plan keeps
-  the tools that read and proposes a change; the write tools are out of the catalog and
-  the permission gate refuses them anyway. **Approve plan** leaves Plan and starts the
-  build turn with the plan as the turn before it.
-- **One agent backend per Session** — Milo is the default for Chat. Command Code is available
-  only when starting a Session in a registered Work project, selected in the project's first-
-  message composer before the Session exists. The project title shows that pending choice; it
-  does not set a project-wide backend. Existing Sessions keep their backend when resumed, and
-  older sessions without a backend field remain Milo Sessions. There is no separate Agents panel.
-- **Command Code Sessions** — when selected, Herdr starts one headless Command Code turn per
-  message and resumes the same native thread by its ID. The chat transcript is projected from
-  Command Code's native JSONL; Milo does not persist a second transcript. New turns show a busy
-  state while Herdr runs and appear in the transcript when Command Code commits them. A pending
-  message is kept as a recoverable intent; an empty Herdr list does not clear it or trigger an
-  automatic retry.
-- Command Code runs with `--yolo` and its own tools; Milo's Plan mode, per-tool permissions,
-  sandbox and model selection do not apply. The CLI reads its own project instructions, not
-  Milo's installed prompt. The Command Code mark in an active Session's header opens the access
-  details; creating a Session does not show a warning. Messages live in Command Code's native
-  history, and Herdr may also retain the command arguments. Herdr and Command Code must be
-  installed separately.
-- Removing a Milo Session stops an active Herdr turn and removes the Milo link, but leaves
-  Command Code's native history intact. A project cannot be moved or removed while a Command
-  Code Session still refers to it; remove the Milo link first.
-- **Rules** — whether the folder carries an `AGENTS.md` (`present`, `absent`, or `unreadable`
-  with the reason). The file's text is not shown here; it is read in Files. A folder with no
-  rules offers one control that starts a session told to write them.
-- **Changes** — the working tree read through git: files, hunks, additions and deletions.
-  A folder that is not a repository, or one with no commit yet, says so and offers the one
-  action that records a first state. Untracked, binary and permission-only files say why
-  there is no hunk to draw.
-- **Files** — the tree of the folder, read-only. A file rises in the same drawer a changed
-  file's hunks do, and opens one page at a time, cut where the agent's own reader cuts it.
+## Starting and inspecting
 
-## What Work is not
+New session remains the primary action. Its recent-folder menu can create a Session in a
+remembered directory, using Milo or an available Command Code backend. Existing Sessions
+retain their backend, folder and history. No transcript migration is required.
 
-- No editor. The person edits in their own editor; the agent edits through its tools. The
-  Work side reads.
-- No second store. Projects and sessions are the install's, and the same session list feeds
-  every surface.
-- No per-project model, instructions or permission configuration beyond `AGENTS.md` — or
-  `CLAUDE.md` when the folder carries that name instead.
-- A surface of the web app and the phone. Telegram and Discord are not Work and will not
-  be: their session list names a session's project and that is the whole of it. The CLI
-  manages projects with `milo projects`, and works in one with `milo --project <ref>` or
-  `milo run --project <ref>` — the same session and the same folder, without the list.
-  The desktop popup works in one the same way, in one act: a question that begins
-  `@<project>` opens a work session there and asks it, so the folder is chosen in the
-  line being written rather than on a screen. A question already in that project keeps
-  its session; naming another one starts a new session there, and the one before stays
-  on disk.
+The folder name in a Session opens Files, Changes and Rules. These inspect the host folder;
+there is no editor. Git remains the source of truth for changes. An unavailable repository,
+unreadable rules or truncated listing must be explained with an appropriate recovery path.
+Rules are read from AGENTS.md, or CLAUDE.md when appropriate, by the shared instruction reader.
 
-## Behaviour
+## Native backends
 
-- One implementation per behaviour: `src/core/work.ts` (tree and file pages),
-  `src/core/work-diff.ts` (git changes and the first state) and
-  `src/core/agent/instructions.ts` (the folder's rules). The screens draw the shape those
-  return; they do not parse git or the folder themselves. A session is drawn by one row per
-  client — `web/src/sessions/SessionRow.tsx`, and the phone's `SessionRow` with the actions
-  from `Support/SessionControls.swift` — so the drawer, the index and a project's page cannot
-  disagree about a session's name, its second line or what it answers to. Which side a
-  session belongs to, and which sessions stay in a project's short list, are decided once by
-  `src/core/work-sessions.ts` and sent on each summary as `work`, `workInline` and `searchText`.
-  The clients draw those facts. A search shows every matching session, including ones outside
-  the short list. The switch itself is one control on the phone (`Support/ModeSwitch.swift`),
-  in the drawer.
-- Git is the source of truth for changes. A folder that is not a repository is answered as
-  that — never as an empty change list that would read as "nothing changed".
-- Paths read by the Work file browser are confined to the project's folder, and every refusal
-  names what was wrong. An external agent is a separate process and is not confined by Milo.
-- The model may delegate a broad read to a subagent on its own initiative here; outside a
-  project, delegation waits to be asked. The subagent works in the same folder and carries
-  the same rules.
-- The page re-reads while a turn writes (`work-changed`, held to one frame per second) and
-  again when a turn ends (`sessions-changed`).
-- A folder that is gone is named as gone; a session started there would not work.
-- A session carries one mark at its row's edge, never two: it **breathes** while a turn
-  runs there and stands **still** when the session moved after the person last looked at it.
-  Running outranks unread. The project's card wears the same mark when any of its sessions
-  is running or unread, because its rows may be folded shut.
-- The unread mark is counted from a watermark the install keeps in
-  `~/.milo/session-seen.json`, one moment per session — not from the transcript, which
-  cannot say when the person read it. Opening or resuming a session is a look, and so is
-  the start of a turn. The **end** of a turn is a look only where the answer is handed
-  over whole: a terminal, a chat with a push behind it. The browser and the phone decide
-  for themselves, writing the look when the answer lands while the thread is still the
-  screen showing — leaving the chat before the reply arrives is what leaves it unread.
-  A delivery with nobody looking (a routine's answer into a web chat no tab has open)
-  does the same.
-- Language, controls and vocabulary follow `AGENTS.md`.
+Command Code runs with its own tools, permissions and native history under Herdr. Its
+folder is fixed for the native Session; choose New session in another folder to change it.
+Milo's Plan mode and permission policy do not apply to Command Code. Removing its Milo
+link does not remove native history. Existing external Sessions stay discoverable in the
+same unified list.
 
-## Deliberately later
+## Shared implementation
 
-- Rules per subfolder. `AGENTS.md` (or `CLAUDE.md`) is read at the project's root; a rule
-  that follows a monorepo's packages needs the path the turn is touching first.
-- MCP per project — an external tool server stays the install's.
-- An editor in the Work side.
+- `src/core/projects.ts`: remembered host folders and validation.
+- `src/core/runtime.ts`: automatic folder registration/reuse and Session selection.
+- `src/core/session.ts`: leased context changes, notices, approval reset and cross-process adoption.
+- `src/core/agent/instructions.ts`: install and folder rules.
+- `src/core/work.ts`, `src/core/work-diff.ts`: shared inspection operations.
+- `src/gateways/commands.ts`: shared `/folder` command.
+- `src/gateways/web/settings.ts`: authenticated Session folder action.
 
-## Code map
-
-| Concern | Where |
-| --- | --- |
-| Projects on disk | `src/core/projects.ts`, `~/.milo/projects.json` |
-| A project named in the popup's question | `src/core/projects.ts` (`matchProjectMention`), `src/bin/spotlight.ts` |
-| Folder tree and file pages | `src/core/work.ts` |
-| Changes and first state | `src/core/work-diff.ts` |
-| Project rules | `src/core/agent/instructions.ts` |
-| Session backend selection and Command Code driver | `src/core/sessions/types.ts`, `src/core/command-code-session.ts`, `src/core/command-code-history.ts`, `web/src/work/Work.tsx`, `ios/Sources/Milo/Screens/WorkProjectDetail.swift`, `ios/Sources/Milo/Support/Composer.swift` |
-| Plan / Build | `src/core/agent/system.ts` (`PLAN_SECTION`), `src/core/tools/permission.ts` (`withPlan`, `isPlanTool`) |
-| Daemon actions | `src/gateways/web/settings.ts` (`projects`, `project-*`) |
-| The Chat \| Work switch | `web/src/App.tsx`, `ios/Sources/Milo/Support/ModeSwitch.swift` |
-| Session Work placement and short-list visibility | `src/core/work-sessions.ts` |
-| Work side of the web list | `web/src/sessions/WorkList.tsx`, `web/src/sessions/scopes.ts` |
-| Work screen | `web/src/work/Work.tsx`, `web/src/App.tsx` (`/work`) |
-| A session row | `web/src/sessions/SessionRow.tsx`, `ios/Sources/Milo/Support/SessionControls.swift` (`SessionRow`) |
-| Phone screen | `ios/Sources/Milo/Screens/WorkView.swift`, `ios/Sources/Milo/Screens/SessionsDrawer.swift` |
-| CLI | `src/bin/projects.ts` |
-| A session's project | `src/core/runtime.ts` (`adopt`), `src/core/sessions/` |
-| A session's unread mark | `src/core/sessions/seen.ts`, `~/.milo/session-seen.json` |
+Legacy project IDs remain internal references. The old Chat/Work split is superseded by
+optional folders on ordinary Sessions. The CLI's project references remain compatible.

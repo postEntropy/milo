@@ -1,4 +1,5 @@
 import path from 'node:path'
+import { readFile } from 'node:fs/promises'
 import {
   mutateConfig,
   saveSecret as coreSaveSecret,
@@ -98,7 +99,12 @@ export class WebSettings {
   constructor(
     private readonly runtime: AgentRuntime,
     private readonly cwd: string,
-    private readonly files?: { register?: RegisterFile; paletteChanged?: (state: PaletteState) => void },
+    private readonly files?: {
+      register?: RegisterFile
+      paletteChanged?: (state: PaletteState) => void
+      sessionsChanged?: () => void
+      projectUpdated?: (id?: string) => void
+    },
   ) {
     this.email = new WebEmailSettings(runtime)
     this.work = new WebWorkSettings(runtime, cwd)
@@ -123,6 +129,11 @@ export class WebSettings {
       case 'sessions': return this.work.sessionSummaries()
       case 'session-backends': return this.runtime.sessionBackends()
       case 'new-session': return this.newSession(body)
+      case 'session-folder': {
+        if (body.path !== null && typeof body.path !== 'string') throw new Error('Enter a folder path, or null to clear it.')
+        await this.runtime.setSessionFolder(sessionId(body.id), body.path)
+        return { changed: true }
+      }
       case 'resume-session': return this.resumeSession(body)
       case 'fork-session': return this.forkSession(body)
       case 'clear-session': return this.clearSession(body)
@@ -145,7 +156,14 @@ export class WebSettings {
       case 'task-lists': return readTaskLists()
       case 'task-list-action': return this.taskListAction(body)
       case 'projects': return this.work.projects()
-      case 'project-action': return this.work.projectAction(body)
+      case 'project-action': {
+        const result = await this.work.projectAction(body)
+        if (body.action === 'update' || body.action === 'remove') {
+          this.files?.projectUpdated?.(typeof body.id === 'string' ? body.id : undefined)
+        }
+        this.files?.sessionsChanged?.()
+        return result
+      }
       case 'browse-folders': return browseFolders(optionalText(body.path), { cwd: this.cwd })
       case 'folder-create': return this.work.folderCreate(body)
       case 'project-tree': return this.work.projectTree(body)
@@ -260,6 +278,7 @@ export class WebSettings {
       // visible when the screen opens rather than only when it is asked about.
       mcp: this.mcpReport(),
       live: {
+        provider: this.runtime.provider.id,
         model: this.runtime.model,
         effort: this.runtime.reasoningEffort,
         permissionMode: this.runtime.permissions?.mode ?? 'ask',
@@ -666,7 +685,9 @@ export class WebSettings {
   private async export(body: Record<string, unknown>): Promise<unknown> {
     const id = sessionId(body.id)
     const summary = (await this.runtime.listSessions()).find((item) => item.id === id)
-    return writeSessionExport({ id, title: summary?.title, format: body.format === 'json' ? 'json' : 'md' })
+    const exported = await writeSessionExport({ id, title: summary?.title, format: body.format === 'json' ? 'json' : 'md' })
+    if (!exported || body.download !== true) return exported
+    return { ...exported, name: path.basename(exported.path), content: await readFile(exported.path, 'utf8') }
   }
 
   /**

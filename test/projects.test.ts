@@ -10,6 +10,7 @@ process.env.MILO_HOME = home
 const {
   addProject,
   byRecentUse,
+  extractProjectMentions,
   findProject,
   matchProjectMention,
   MAX_PROJECTS,
@@ -371,5 +372,24 @@ describe('placedProject', () => {
 
   it('answers nothing when the record is gone altogether', () => {
     expect(placedProject(placeProject('no-such-1'))).toBeUndefined()
+  })
+})
+
+describe('extractProjectMentions', () => {
+  it('extracts remembered project mentions anywhere in the message in order', async () => {
+    const miloDir = folder('milo')
+    const siteDir = folder('site')
+    const milo = await addProject({ path: miloDir, name: 'Milo' })
+    const site = await addProject({ path: siteDir, name: 'Site' })
+    if (!milo.ok || !site.ok) throw new Error('projects were not added')
+
+    const found = extractProjectMentions('Compare @Milo with @Site and @Milo again')
+    expect(found.map((project) => project.id)).toEqual([milo.project.id, site.project.id])
+  })
+
+  it('resolves existing directory paths prefixed with @/', () => {
+    const dir = folder('direct-dir')
+    const found = extractProjectMentions(`Check @${dir} for recent changes`)
+    expect(found.map((project) => project.path)).toEqual([dir])
   })
 })

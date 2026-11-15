@@ -1,14 +1,10 @@
 import SwiftUI
 
-enum SessionRowStyle {
-    case work
-    case drawer(current: Bool)
-}
-
 struct SessionRow: View {
+    @Environment(AppModel.self) private var model
     let session: SessionSummary
     @Binding var renaming: String?
-    let style: SessionRowStyle
+    let current: Bool
     let onOpen: () -> Void
 
     var body: some View {
@@ -35,6 +31,12 @@ struct SessionRow: View {
                         .font(MiloTheme.Text.meta.monospacedDigit())
                         .foregroundStyle(MiloTheme.muted)
                         .lineLimit(1)
+                    if let project = session.project {
+                        Text(model.projects.first { $0.id == project }?.name ?? "Folder")
+                            .font(MiloTheme.Text.meta)
+                            .foregroundStyle(MiloTheme.muted)
+                            .lineLimit(1)
+                    }
                     if session.backend?.kind == "command-code" {
                         SessionBackendMark(backend: "command-code", size: 16)
                     }
@@ -43,10 +45,10 @@ struct SessionRow: View {
             Spacer(minLength: MiloTheme.Space.two)
             SessionMark(running: session.running, unread: session.unread)
         }
-        .padding(.horizontal, horizontalPadding)
+        .padding(.horizontal, MiloTheme.Space.three)
         .padding(.vertical, MiloTheme.Space.three)
         .background {
-            if case .drawer(let current) = style, current {
+            if current {
                 RoundedRectangle(cornerRadius: MiloTheme.Radius.md).fill(MiloTheme.surfaceRaised)
             }
         }
@@ -59,15 +61,6 @@ struct SessionRow: View {
         .sessionMenu(session, renaming: $renaming)
     }
 
-    private var current: Bool {
-        if case .drawer(let selected) = style { return selected }
-        return false
-    }
-
-    private var horizontalPadding: CGFloat {
-        if case .drawer = style { return MiloTheme.Space.three }
-        return MiloTheme.Space.four
-    }
 }
 
 extension SessionSummary {
@@ -141,20 +134,22 @@ private struct SessionMenu: ViewModifier {
     /// be made.
     @State private var peek: [PeekLine]?
     @State private var peekError: String?
+    @State private var destruction: Bool?
 
     @Environment(AppModel.self) private var model
 
     func body(content: Content) -> some View {
         content
             // Read as the row comes up, and read again whenever the session moves.
+            .sessionDestruction(session.id, pending: $destruction)
             .task(id: session.updatedAt) { await read() }
             .contextMenu {
                 sessionActions(
                     onRename: { renaming = session.id },
                     onExport: session.backend?.kind == "command-code" ? nil : { Task { await model.export(session.id) } },
                     onCopy: { model.copyId(session.id) },
-                    onClear: session.id == model.sessionId && session.backend?.kind != "command-code" ? { Task { await model.clear() } } : nil,
-                    onDelete: { Task { await model.delete(session.id) } }
+                    onClear: session.id == model.sessionId && session.backend?.kind != "command-code" ? { destruction = false } : nil,
+                    onDelete: { destruction = true }
                 )
             } preview: {
                 SessionPeek(session: session, lines: peek, error: peekError)
@@ -418,5 +413,44 @@ extension View {
     /// Lets a surface offer renaming by naming the session, and hold nothing else.
     func sessionRename(_ id: Binding<String?>) -> some View {
         modifier(SessionRename(id: id))
+    }
+}
+
+
+/// The same destructive-action review wherever a Session offers its menu.
+private struct SessionDestruction: ViewModifier {
+    let id: String
+    @Binding var pending: Bool?
+    @Environment(AppModel.self) private var model
+
+    func body(content: Content) -> some View {
+        let deleting = pending == true
+        let session = model.sessions.first { $0.id == id }
+        let name = session?.title ?? session?.preview ?? id
+        content.confirmationDialog(
+            deleting ? "Delete Session “\(name)”?" : "Clear transcript for “\(name)”?" ,
+            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button(deleting ? "Delete Session" : "Clear transcript", role: .destructive) {
+                pending = nil
+                Task {
+                    if deleting { await model.delete(id) }
+                    else if model.sessionId == id { await model.clear() }
+                    else { model.showNote("The Session changed. Open its menu to clear it.") }
+                }
+            }
+            Button("Cancel", role: .cancel) { pending = nil }
+        } message: {
+            Text(deleting
+                 ? "This removes the Session from Milo. It cannot be restored here. Command Code's native history, if any, stays on the host."
+                 : "This clears the Session transcript. It cannot be restored here.")
+        }
+    }
+}
+
+extension View {
+    func sessionDestruction(_ id: String, pending: Binding<Bool?>) -> some View {
+        modifier(SessionDestruction(id: id, pending: pending))
     }
 }

@@ -523,6 +523,8 @@ enum ServerFrame: Decodable {
     case jobs([JobView])
     case suggestions([Idea])
     case paletteState(sync: Bool, palette: String)
+    /// The Session's folder changed: every open screen on that Session updates to match.
+    case sessionFolder(Project?)
     case routinesChanged
     /// A session's turn began or ended somewhere in the install: re-read the list that
     /// shows it running.
@@ -539,7 +541,7 @@ enum ServerFrame: Decodable {
     private enum CodingKeys: String, CodingKey {
         case type, id, text, turnId, event, request, expiresAt, allowed, status, raw, rawNoOutput, says
         case busy, queued, plan, jobs, items, message, panel, messages, backend, retryPendingId, requestId, ok, error, steered
-        case sync, palette
+        case sync, palette, project
     }
 
     init(from decoder: Decoder) throws {
@@ -601,6 +603,8 @@ enum ServerFrame: Decodable {
                 sync: try container.decode(Bool.self, forKey: .sync),
                 palette: try container.decode(String.self, forKey: .palette)
             )
+        case "session-folder":
+            self = .sessionFolder(try container.decodeIfPresent(Project.self, forKey: .project))
         case "routines-changed": self = .routinesChanged
         case "sessions-changed": self = .sessionsChanged
         case "work-changed": self = .workChanged

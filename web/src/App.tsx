@@ -15,7 +15,6 @@ import { buildSuggestions } from './chat/suggestions.js'
 import { Permissions } from './chat/Permissions.js'
 import { Routines } from './routines/Routines.js'
 import { TaskLists } from './tasks/TaskLists.js'
-import { Work } from './work/Work.js'
 import { Email } from './email/Email.js'
 import { Settings } from './settings/Settings.js'
 import { settingsSectionFromPath } from './settings/sections.js'
@@ -23,15 +22,11 @@ import { Panel } from './panel/Panel.js'
 import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, ThinkingDisplay } from '@protocol'
 import { SessionRow } from './sessions/SessionRow.js'
 import type { SessionSummary } from './sessions/types.js'
-import type { SessionBackendKind, SessionBackendView } from '../../src/core/sessions/types.js'
-import { chatSessions, isWorkSession } from './sessions/scopes.js'
-import { WorkList } from './sessions/WorkList.js'
+import { chatSessions } from './sessions/scopes.js'
 import type { ProjectView } from '../../src/core/projects.ts'
 import { Icon } from './ui/Icons.js'
-import { SessionBackendMark } from './ui/SessionBackendMark.js'
 import { ConnectionChip } from './ui/ConnectionChip.js'
 import { Notice, useAutoDismiss, type Report } from './ui/Notice.js'
-import { Select } from './ui/Select.js'
 import { MiloMark } from './ui/MiloMark.js'
 import {
   COLOR_PALETTE_PRESETS,
@@ -44,7 +39,6 @@ import {
   type ColorPaletteId,
   type PaletteState,
 } from './theme/palettes.js'
-import { projectMark } from './work/marks.js'
 
 type PendingPermission = { id: string; request: PermissionRequest; expiresAt: number }
 type PendingMessage = { id: string; session: string; text: string; fileNames: string[]; at: number; state: 'sending' | 'queued' | 'failed'; detail?: string }
@@ -110,8 +104,6 @@ export default function App() {
     setPendingMessages(next)
   }, [])
   const [sessions, setSessions] = useState<SessionSummary[]>([])
-  /** The project this session works in, as the server resolved it for this connection. */
-  const [project, setProject] = useState<ProjectView | null>(null)
   /** Ideas the model drew for the empty home; null until they arrive. */
   const [ideas, setIdeas] = useState<{ title: string; prompt: string }[] | null>(null)
   /** The budget the request is measured against, for the meter; null until read. */
@@ -131,49 +123,17 @@ export default function App() {
   const [pendingPermission, setPendingPermission] = useState<PendingPermission | null>(null)
   /** Counts finished turns: the routines screen re-reads its list when one ends. */
   const [turnEnds, setTurnEnds] = useState(0)
-  /**
-   * Counts the times the daemon said to re-read a folder: a session anywhere in the install
-   * beginning or ending a turn, or a step in one that may have changed what is on disk. The
-   * Work screen re-reads a folder's tree, changes and rules on it — the same signal that
-   * moves the running dot beside a session, and the same news from the one place every turn
-   * goes through.
-   */
-  const [workTick, setWorkTick] = useState(0)
-  /**
-   * The install's projects, read here once: the drawer's Work list groups sessions by
-   * them, and the Work screen draws them. One read, so the two cannot disagree about
-   * which project a session works in.
-   */
+  /** Remembered folders across this install, ordered by most recent use. */
   const [projects, setProjects] = useState<ProjectView[] | null>(null)
-  /** Why the projects could not be read; null once they have been. */
-  const [projectsError, setProjectsError] = useState<string | null>(null)
-  /** Set by the drawer's New project, answered by the Work screen raising its folder picker. */
-  const [pickProject, setPickProject] = useState(false)
-  const clearPickProject = useCallback((): void => setPickProject(false), [])
   /** Bumped when the server says a routine ran, so the history on screen re-reads. */
   const [routinesTick, setRoutinesTick] = useState(0)
   const [thinking, setThinking] = useState<ThinkingDisplay>('expanded')
   const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium')
   const [identity, setIdentity] = useState({ provider: 'milo', providerName: 'Milo', model: '' })
-  const [sessionBackend, setSessionBackend] = useState<SessionBackendView>({ kind: 'milo' })
-  const [commandCodeInfoOpen, setCommandCodeInfoOpen] = useState(false)
-  const commandCodeInfoRef = useRef<HTMLDivElement>(null)
-  const sessionBackendRef = useRef(sessionBackend)
   const [connection, setConnection] = useState<ConnectionStatus>({ state: 'connecting' })
   const [view, setViewRaw] = useState<View>(() => viewFromPath(location.pathname))
   /** The screen in front, for callbacks that outlive this render. */
   const viewRef = useRef<View>(view)
-  /**
-   * The project Work should open on top of its index — set when the session's own
-   * project is pressed, and cleared whenever Work is entered any other way.
-   */
-  const [workProject, setWorkProject] = useState<string | null>(null)
-  /**
-   * Where each side of the drawer's switch was left, by session id: the two lists are the
-   * two worlds, and the switch goes back to the one last read. Kept for this page only —
-   * a reload reconnects to `milo-chat`, and the switch follows that session.
-   */
-  const places = useRef<{ chat: string; work: string }>({ chat: '', work: '' })
   /** The Email screen's place within its own path: null inbox, `new` compose, else a thread. */
   const [emailRoute, setEmailRoute] = useState<string | null>(() => emailRouteFromPath(location.pathname))
   /** Mail that arrived since the person last looked at the inbox, for the Email tab's badge. */
@@ -457,23 +417,13 @@ export default function App() {
       const next = await api<ProjectView[]>('projects')
       if (mine !== projectsSeq.current) return
       setProjects(next)
-      setProjectsError(null)
     } catch (error) {
       if (mine !== projectsSeq.current) return
-      setProjectsError(message(error))
+      setNotice({ text: message(error), error: true })
     }
   }, [])
 
-  // The projects change when one is added, renamed or removed anywhere in the install:
-  // the same signal that re-reads Work's folder re-reads the list the drawer groups by.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: workTick is a change signal only
-  useEffect(() => { void refreshProjects() }, [refreshProjects, workTick])
-
-  /** Asking again, which drops the old reason first: the list shows it is reading. */
-  const retryProjects = useCallback((): void => {
-    setProjectsError(null)
-    void refreshProjects()
-  }, [refreshProjects])
+  useEffect(() => { void refreshProjects() }, [refreshProjects])
 
   const refreshSessions = useCallback(async (): Promise<void> => {
     const mine = ++sessionsSeq.current
@@ -491,22 +441,6 @@ export default function App() {
       if (mine === sessionsSeq.current) fail(error)
     }
   }, [fail])
-
-  useEffect(() => {
-    if (!commandCodeInfoOpen) return
-    const dismissOutside = (event: PointerEvent): void => {
-      if (event.target instanceof Node && !commandCodeInfoRef.current?.contains(event.target)) setCommandCodeInfoOpen(false)
-    }
-    const dismissEscape = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setCommandCodeInfoOpen(false)
-    }
-    document.addEventListener('pointerdown', dismissOutside)
-    document.addEventListener('keydown', dismissEscape)
-    return () => {
-      document.removeEventListener('pointerdown', dismissOutside)
-      document.removeEventListener('keydown', dismissEscape)
-    }
-  }, [commandCodeInfoOpen])
 
   // Project membership is part of the daemon's session summaries, so refresh both
   // together whenever the registered project list changes.
@@ -533,8 +467,8 @@ export default function App() {
 
   /**
    * What lands in the open session — the answer, or a delivery — is read only when the
-   * chat is the screen showing. Away from it (the Work tab, Settings, another session)
-   * it lands unread, which is the whole point of the mark.
+   * chat is the screen showing. Away from it (the folder inspector, Settings, another
+   * session) it lands unread, which is the whole point of the mark.
    */
   const markSeenOnChat = useCallback((id: string): void => {
     if (viewRef.current !== 'chat') return
@@ -543,12 +477,6 @@ export default function App() {
 
   useEffect(() => { sessionIdRef.current = sessionId }, [sessionId])
   useEffect(() => { viewRef.current = view }, [view])
-
-  // A New project that could not reach the Work screen — unsaved settings, a confirm
-  // declined — is dropped instead of raising the picker the next time Work is opened.
-  useEffect(() => {
-    if (pickProject && view !== 'work') setPickProject(false)
-  }, [pickProject, view])
 
   // Coming back to the tab is looking at what is already on it.
   useEffect(() => {
@@ -606,7 +534,6 @@ export default function App() {
       socket.close()
       setMessages([])
       setPanel(null)
-      setProject(null)
       setSessionId(res.id)
       setChatId(nextChatId)
       setView('chat')
@@ -664,25 +591,14 @@ export default function App() {
       setQueued(0)
       setConnection({ state: 'online' })
       setSessionId(frame.sessionId)
-      setCommandCodeInfoOpen(false)
       // It is on the screen now, wherever it was opened from.
       markSeen(frame.sessionId)
       setThinking(frame.thinking)
       if (frame.effort) setEffort(frame.effort)
       setIdentity({ provider: frame.provider, providerName: frame.providerName, model: frame.model })
-      const nextBackend = frame.backend ?? { kind: 'milo' }
-      sessionBackendRef.current = nextBackend
-      setSessionBackend(nextBackend)
-      if (frame.backend?.kind === 'command-code' && frame.backend.error) {
-        setNotice({ text: frame.backend.error, error: true })
-      }
       // What the panel was left showing, resolved by the server from the session's
       // own history, so a reload comes back to the same view.
       setPanel(frame.panel ?? null)
-      setProject(frame.project ?? null)
-      // The drawer's switch is the two worlds, and this is where the session in front is
-      // remembered for the one it belongs to.
-      places.current[frame.project ? 'work' : 'chat'] = frame.sessionId
       setPlan(frame.plan ?? false)
       // A reload joins the plan where it stands; a new proposal is what earns approval.
       setPlanSince(frame.messages.length)
@@ -740,13 +656,7 @@ export default function App() {
       setSharedPalette({ sync: Boolean(frame.sync), palette: resolveColorPaletteId(frame.palette) })
       return
     }
-    // A session started or stopped a turn anywhere in the install: the running dot is
-    // re-read off the daemon rather than guessed at here.
-    if (frame.type === 'sessions-changed') { setWorkTick((current) => current + 1); void refreshSessions(); return }
-    // A step somewhere may have changed what is on disk. The Work screen re-reads the folder
-    // it is showing — and only it: the rest of the app has nothing to re-read, and the tick
-    // reaches nothing else.
-    if (frame.type === 'work-changed') { setWorkTick((current) => current + 1); return }
+    if (frame.type === 'sessions-changed') { void refreshSessions(); return }
     if (frame.type === 'panel') {
       // Milo shows something and the panel opens itself — that is the "here, look
       // at this". A resolved `null` is the model taking it down.
@@ -755,11 +665,6 @@ export default function App() {
       return
     }
     if (frame.type === 'suggestions') { setIdeas(frame.items); return }
-    if (frame.type === 'session-backend') {
-      sessionBackendRef.current = frame.backend
-      setSessionBackend(frame.backend)
-      return
-    }
     if (frame.type === 'state') { setBusy(frame.busy); setQueued(frame.queued); return }
     if (frame.type === 'jobs') { setJobs(frame.jobs); return }
     if (frame.type === 'turn-start') {
@@ -772,15 +677,8 @@ export default function App() {
       // message carries it, so the line appears where the reply will.
       const now = Date.now()
       setMessages((current) => {
-        const currentBackend = sessionBackendRef.current
-        const pending = frame.retryPendingId && currentBackend.kind === 'command-code' && currentBackend.pendingTurn?.id === frame.retryPendingId
-          ? currentBackend.pendingTurn
-          : undefined
-        const alreadyVisible = pending && current.slice(pending.baseMessageCount).some((message) =>
-          message.role === 'user' && message.parts.filter((part) => part.kind === 'text').map((part) => part.text).join('') === frame.text,
-        )
-        const user = alreadyVisible ? [] : [{ id: `user-${frame.id}`, role: 'user' as const, parts: [{ kind: 'text' as const, text: frame.text }], at: now }]
-        return [...current, ...user, { id: frame.id, role: 'assistant', parts: [], waitingSince: now, at: now }]
+        const user = { id: `user-${frame.id}`, role: 'user' as const, parts: [{ kind: 'text' as const, text: frame.text }], at: now }
+        return [...current, user, { id: frame.id, role: 'assistant', parts: [], waitingSince: now, at: now }]
       })
       setBusy(true)
       return
@@ -861,8 +759,6 @@ export default function App() {
   }, [refreshSessions, markSeen, markSeenOnChat, changePending])
 
   const newChat = useCallback(async (
-    backend: SessionBackendKind = 'milo',
-    confirmed = false,
     context: NewSessionContext = {},
   ): Promise<boolean> => {
     editingTurn.current = null
@@ -873,20 +769,14 @@ export default function App() {
     try {
       const session = await api<{ id: string }>('new-session', {
         chatId: nextChatId,
-        backend,
-        confirmed,
-        ...(context.project ? { project: context.project } : {}),
+        backend: 'milo',
         ...(context.plan ? { plan: true } : {}),
       })
       socket.close()
       setMessages([])
       setPanel(null)
-      setProject(null)
       setPlan(false)
       setSessionId(session.id)
-      const nextBackend: SessionBackendView = backend === 'command-code' ? { kind: backend, state: 'waiting' } : { kind: 'milo' }
-      sessionBackendRef.current = nextBackend
-      setSessionBackend(nextBackend)
       setView('chat')
       setSidebarOpen(false)
       setChatId(nextChatId)
@@ -898,23 +788,7 @@ export default function App() {
     }
   }, [socket, fail, setView])
 
-  const startWorkSession = useCallback((
-    project: string,
-    firstMessage: string,
-    backend: SessionBackendKind,
-    confirmed: boolean,
-  ): Promise<boolean> => newChat(backend, confirmed, { project, firstMessage }), [newChat])
-
-  const newSessionHere = useCallback((): Promise<boolean> => {
-    const project = sessions.find((session) => session.id === sessionId)?.project
-    if (project) {
-      setWorkProject(project)
-      setView('work')
-      setSidebarOpen(false)
-      return Promise.resolve(true)
-    }
-    return newChat()
-  }, [sessions, sessionId, newChat, setView])
+  const newSessionHere = useCallback((): Promise<boolean> => newChat(), [newChat])
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: these are re-render triggers, not closure values — the list has already grown by the time this runs, and the scroll follows the rendered height
   useEffect(() => {
@@ -1138,7 +1012,6 @@ export default function App() {
       socket.close()
       setMessages([])
       setPanel(null)
-      setProject(null)
       setSessionId(id)
       setChatId(nextChatId)
       setView('chat')
@@ -1164,64 +1037,6 @@ export default function App() {
   }, [openSession])
 
   const currentSession = sessions.find((session) => session.id === sessionId)
-  /** The projects a session can start in: a folder that is gone is read on its page. */
-  const startableProjects = (projects ?? []).filter((project) => project.error === undefined)
-  /**
-   * Which half of the session list is in front: the Work screen itself, or a session
-   * working in a project. Every other screen keeps the mode of the session behind it. The
-   * list's own record counts as well as the resolved project, so opening a session that is
-   * in a project does not flash the chats while its handshake lands.
-   */
-  const mode: 'chat' | 'work' = view === 'work'
-    || project !== null
-    || (currentSession !== undefined && isWorkSession(currentSession))
-    ? 'work'
-    : 'chat'
-
-  /**
-   * The drawer's Chat | Work switch, which picks the world rather than a page. The
-   * session in front is kept when it already belongs to that world; otherwise the one
-   * that side was left on; otherwise that side's own home — a fresh chat, or the Work
-   * index. Pressing the side already in front goes up to that home: the Work index for
-   * Work, and for Chat the chat itself, which is where it already is.
-   */
-  const switchTo = useCallback((next: 'chat' | 'work'): void => {
-    setSidebarOpen(false)
-    if (next === 'work') {
-      if (mode === 'work') {
-        setWorkProject(null)
-        if (view !== 'work') setView('work')
-        return
-      }
-      const left = sessions.find((session) => session.id === places.current.work)
-      if (left && isWorkSession(left)) { void openSession(left.id); return }
-      setWorkProject(null)
-      setView('work')
-      return
-    }
-    if (mode === 'chat') {
-      if (view !== 'chat') setView('chat')
-      return
-    }
-    const left = sessions.find((session) => session.id === places.current.chat)
-    if (left && !isWorkSession(left)) { void openSession(left.id); return }
-    void newChat()
-  }, [mode, view, sessions, setView, openSession, newChat])
-
-  /**
-   * The Chat | Work switch, drawn by the drawer and, on a Session that has not begun and on the
-   * Work index, at the top of the page — one control in two places, so the world is chosen where
-   * the app opens.
-   */
-  const renderModeSwitch = (className: string) => (
-    <fieldset className={className} data-mode={mode}>
-      <legend className="sr-only">Session lists</legend>
-      <button className={mode === 'chat' ? 'on' : ''} type="button" aria-pressed={mode === 'chat'} onClick={() => switchTo('chat')}>Chat</button>
-      <button className={mode === 'work' ? 'on' : ''} type="button" aria-pressed={mode === 'work'} onClick={() => switchTo('work')}>Work</button>
-    </fieldset>
-  )
-  const modeSwitch = renderModeSwitch('session-mode')
-  const atHome = view === 'chat' ? messages.length === 0 && project === null : view === 'work' && workProject === null
   const forkSession = useCallback(async (upToTurn: number): Promise<void> => {
     if (!sessionId) return
     editingTurn.current = null
@@ -1237,7 +1052,6 @@ export default function App() {
       socket.close()
       setMessages([])
       setPanel(null)
-      setProject(null)
       setSessionId(res.id)
       setChatId(nextChatId)
       setView('chat')
@@ -1406,16 +1220,8 @@ export default function App() {
     } catch (error) { fail(error) }
   }, [fail])
 
-  const changeCommandCodeModel = useCallback((model: string): void => {
-    try {
-      socket.send({ type: 'control', action: 'set-command-code-model', model })
-    } catch (error) { fail(error) }
-  }, [socket, fail])
-
   const chatList = chatSessions(sessions, search)
   const sessionGroups = groupSessions(chatList)
-  // The welcome offers what is left of the Chat side: a work session belongs to Work, and
-  // opening one from here would carry the person out of the list they are looking at.
   const suggestions = useMemo(
     () => buildSuggestions({ sessions: chatSessions(sessions), ideas, currentId: sessionId }),
     [sessions, ideas, sessionId],
@@ -1442,32 +1248,14 @@ export default function App() {
     messages.length > planSince &&
     lastMessage?.role === 'assistant' &&
     lastMessage.parts.some((part) => part.kind === 'text' && part.text.trim() !== '')
-  const pendingCodeTurn = sessionBackend.kind === 'command-code' ? sessionBackend.pendingTurn : undefined
-  const pendingCodeMessageVisible = pendingCodeTurn
-    ? messages.slice(pendingCodeTurn.baseMessageCount).some((message) =>
-      message.role === 'user' && message.parts.filter((part) => part.kind === 'text').map((part) => part.text).join('') === pendingCodeTurn.input,
-    )
-    : false
 
   /** The main chat's thread: prose, tools, the plan and anything the model drew. */
   const thread = <>
-    {pendingCodeTurn && !busy && <section className="command-code-recovery" role="status">
-      <div className="command-code-recovery-copy">
-        <strong>Command Code has not confirmed this turn.</strong>
-        <span>{pendingCodeMessageVisible ? 'The message is in native history, but the answer did not finish.' : 'The message may still be running or may not have reached native history.'}</span>
-        {!pendingCodeMessageVisible && <blockquote>{pendingCodeTurn.input}</blockquote>}
-      </div>
-      <button type="button" className="button" onClick={() => {
-        if (window.confirm('Retry this pending Command Code turn? It may duplicate the request if the first run is still starting.')) {
-          socket.send({ type: 'control', action: 'retry-command-code', id: pendingCodeTurn.id, confirmed: true })
-        }
-      }}>Retry pending turn</button>
-    </section>}
     <MessageList messages={[...messages, ...pendingMessages.filter((item) => item.session === (sessionId || chatId)).map((item): ChatMessage => ({
       id: item.id, role: 'user', at: item.at,
       parts: [{ kind: 'text', text: [item.text, item.fileNames.length ? `Attached: ${item.fileNames.join(', ')}` : ''].filter(Boolean).join('\n') }],
       delivery: { state: item.state, detail: item.detail },
-    }))]} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={sessionBackend.kind === 'milo' ? forkSession : undefined} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} onRestorePending={(id) => {
+    }))]} thinking={thinking} busy={busy} onPrompt={send} onAction={handleAction} onFork={forkSession} onQuote={quoteIntoComposer} onEdit={editMessage} onRegenerate={regenerate} onRestorePending={(id) => {
       const item = pendingMessagesRef.current.find((entry) => entry.id === id)
       if (!item || !composerRef.current?.restore(item.text, pendingFiles.current.get(id) ?? [])) return
       try { changePending((items) => items.filter((entry) => entry.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) }
@@ -1490,18 +1278,7 @@ export default function App() {
             <input ref={searchRef} aria-label="Search sessions" placeholder="Search sessions" value={search} onChange={(event) => setSearch(event.target.value)} />
             <button className="sidebar-search-close" type="button" aria-label="Close search" onClick={closeSearch}><Icon name="x" size={15} /></button>
           </div>
-          {mode === 'work' ? <>
-            {!searchOpen && startableProjects.length > 0 && <Select
-              value=""
-              choices={startableProjects.map((project) => ({ value: project.id, label: project.name }))}
-              onChange={(project) => { setWorkProject(project); setView('work'); setSidebarOpen(false) }}
-              label="New session in a project"
-              icon="plus"
-              triggerLabel="New session"
-              note="No projects yet"
-            />}
-            <button className={`sidebar-new-project ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New project" aria-label="New project" onClick={() => { setWorkProject(null); setView('work'); setPickProject(true); setSidebarOpen(false) }}><Icon name="folder-plus" size={18} /></button>
-          </> : <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /><span className="new-chat-label">New session</span></button>}
+          <button className={`new-chat ${searchOpen ? 'is-hidden' : ''}`} type="button" title="New session (⌘K)" aria-label="New session" onClick={() => void newChat()}><Icon name="plus" size={18} /><span className="new-chat-label">New session</span></button>
           <button className="sidebar-search-toggle" type="button" title="Search sessions" aria-label="Search sessions" aria-expanded={searchOpen} onClick={() => setSearchOpen((open) => !open)}><Icon name="search" size={18} /></button>
         </div>
         <div className="sidebar-pad">
@@ -1510,35 +1287,16 @@ export default function App() {
           <button className={`sidebar-tab ${view === 'email' ? 'active' : ''}`} type="button" onClick={() => { setEmailRoute(null); setView(view === 'email' ? 'chat' : 'email'); setSidebarOpen(false) }}><Icon name="mail" size={18} /><span>Email</span>{mailUnread !== null && mailUnread.count > 0 && <span className="sidebar-badge">{mailUnread.more ? `${mailUnread.count}+` : mailUnread.count}</span>}</button>
         </div>
         <div className="session-region">
-          {/* The two halves of the list: the sessions that work in Milo's own folder, and
-              the ones that work in a project. The switch says whose list this is, and Work
-              is no longer a fourth page beside Routines — it is the other half of this one. */}
-          {modeSwitch}
-          <nav className="session-list" aria-label={mode === 'work' ? 'Work sessions' : 'Chat sessions'}>
-            {mode === 'chat' ? <>
-              {historyHits && historyHits.length > 0 && <div className="history-hits">
-                <div className="section-label">In past turns</div>
-                {historyHits.map((hit) => <button className="history-hit" key={`${hit.session}-${hit.at}-${hit.text.slice(0, 32)}`} type="button" title={hit.session} onClick={() => void openSession(hit.session)}>
-                  <span className="history-hit-text">{hit.text || `${hit.kind} turn`}</span>
-                  <span className="history-hit-where">{hit.kind} · {hit.session}</span>
-                </button>)}
-              </div>}
-              {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} onRename={renameSession} onExport={exportSession} onCopy={copySessionId} onDelete={deleteSession} />)}</div>)}
-              {chatList.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
-            </> : <WorkList
-              projects={projects}
-              loadError={projectsError}
-              sessions={sessions}
-              activeId={sessionId}
-              query={search}
-              onRetry={retryProjects}
-              onOpenProject={(id) => { setWorkProject(id); setView('work'); setSidebarOpen(false) }}
-              onOpenSession={(id) => void openSession(id)}
-              onRename={renameSession}
-              onExport={exportSession}
-              onCopy={copySessionId}
-              onDelete={deleteSession}
-            />}
+          <nav className="session-list" aria-label="Sessions">
+            {historyHits && historyHits.length > 0 && <div className="history-hits">
+              <div className="section-label">In past turns</div>
+              {historyHits.map((hit) => <button className="history-hit" key={`${hit.session}-${hit.at}-${hit.text.slice(0, 32)}`} type="button" title={hit.session} onClick={() => void openSession(hit.session)}>
+                <span className="history-hit-text">{hit.text || `${hit.kind} turn`}</span>
+                <span className="history-hit-where">{hit.kind} · {hit.session}</span>
+              </button>)}
+            </div>}
+            {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} onRename={renameSession} onExport={exportSession} onCopy={copySessionId} onDelete={deleteSession} />)}</div>)}
+            {chatList.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
           </nav>
         </div>
         <div className="sidebar-foot">
@@ -1551,46 +1309,7 @@ export default function App() {
       <header className="topbar">
         <button className="mobile-menu" type="button" aria-label="Open menu" onClick={() => setSidebarOpen(true)}><Icon name="menu" /></button>
         <button className="sidebar-expand" type="button" aria-label="Show sidebar" title="Show sidebar" onClick={() => setSidebarCollapsed(false)}><Icon name="panel-left" size={17} /></button>
-        {/* The bar names the chat alone: every other screen wears its own heading below,
-            and the bar saying it again was a second naming. The chat has no such heading,
-            so the name of the session it is showing lives here — and, on a phone, this is
-            the only place that names it. */}
-        {atHome && renderModeSwitch('session-mode topbar-mode')}
         <div className="topbar-title">{view === 'chat' && <>
-          {/* The project over the name: a session in one is work in a place, and which place
-              is the first thing to know about it — said even before the first word, with the
-              mark the project wears (a folder until another one is chosen). A project whose
-              folder has gone says so rather than reading as workable. Pressing it opens that
-              project's own page in Work. */}
-          {project && <div className={`topbar-project-group${sessionBackend.kind === 'command-code' ? ' with-backend' : ''}`}>
-            <button
-              className={`topbar-project ${project.error ? 'gone' : ''}`}
-              type="button"
-              title={project.error ?? `Open ${project.name}`}
-              aria-label={project.error ? `Project: ${project.name}, ${project.error}` : `Open the ${project.name} project`}
-              onClick={() => { setWorkProject(project.id); setView('work'); setSidebarOpen(false) }}
-            >
-              <Icon name={projectMark(project.icon)} size={12} /> <span>{project.name}</span>
-            </button>
-            {sessionBackend.kind === 'command-code' && <div className="topbar-backend-wrap" ref={commandCodeInfoRef}>
-              <button
-                className="topbar-backend-info"
-                type="button"
-                title="Command Code access details"
-                aria-label="Command Code access details"
-                aria-expanded={commandCodeInfoOpen}
-                onClick={() => setCommandCodeInfoOpen((open) => !open)}
-              ><SessionBackendMark backend="command-code" size={18} /></button>
-              {commandCodeInfoOpen && <section className="topbar-backend-popover" role="dialog" aria-label="Command Code access details">
-                <header className="topbar-backend-popover-head">
-                  <SessionBackendMark backend="command-code" size={18} />
-                  <strong>Command Code</strong>
-                  <button className="topbar-backend-close" type="button" aria-label="Close Command Code access details" onClick={() => setCommandCodeInfoOpen(false)}><span aria-hidden="true">×</span></button>
-                </header>
-                <p>Command Code uses its own tools and --yolo permissions, not Milo's per-tool approvals. It can edit files and run shell commands outside {project.path}. Its native history and Herdr run record retain this Session activity.</p>
-              </section>}
-            </div>}
-          </div>}
           {messages.length > 0 && <h1>{currentSession ? currentSession.label : 'New session'}</h1>}
         </>}</div>
         <div className="topbar-actions">
@@ -1605,33 +1324,13 @@ export default function App() {
         ? <Routines chatId={chatId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
-        : view === 'work'
-        ? <Work
-          tick={workTick}
-          projects={projects}
-          loadError={projectsError}
-          pickProject={pickProject}
-          sessions={sessions}
-          sessionId={sessionId}
-          projectId={workProject}
-          onProject={setWorkProject}
-          onProjects={setProjects}
-          onRetry={retryProjects}
-          onPicked={clearPickProject}
-          onOpenSession={(id) => void openSession(id)}
-          onStartSession={startWorkSession}
-          onRenameSession={renameSession}
-          onExportSession={exportSession}
-          onCopySessionId={copySessionId}
-          onDeleteSession={deleteSession}
-        />
         : view === 'chat'
         ? <section className="chat-view">
           <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>{thread}</div>
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock" ref={composerDockRef}>
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} sessionBackend={sessionBackend.kind} provider={identity.provider} providerName={identity.providerName} draftKey={sessionId || chatId} pendingDraftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={Boolean(project) && sessionBackend.kind === 'milo'} commandCodeModel={sessionBackend.kind === 'command-code' ? sessionBackend.model : undefined} onCommandCodeModelChange={changeCommandCodeModel} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); socket.send({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => socket.send({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
+            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} folders={projects ?? []} provider={identity.provider} providerName={identity.providerName} draftKey={sessionId || chatId} pendingDraftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={true} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); socket.send({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => socket.send({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
           </div>
         </section>
         : null}

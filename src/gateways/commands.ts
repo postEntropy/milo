@@ -66,6 +66,10 @@ export interface CommandContext {
   resumeSession?: (id: string) => Promise<boolean>
   /** Forks the current session or a named one into a new session. */
   forkSession?: (id?: string, options?: { upToTurn?: number }) => Promise<{ id: string } | null>
+  /** Current working folder path for this session, or null when using the default directory. */
+  sessionFolder?: () => string | null
+  /** Chooses or clears the working folder for this session; returns the resolved path or null. */
+  setSessionFolder?: (folder: string | null) => Promise<string | null>
   listSessions?: () => Promise<SessionSummary[]>
   sessionStats?: () => SessionStats | Promise<SessionStats>
   /** Folds the oldest turns into the summary now, rather than when the budget forces it. */
@@ -318,6 +322,11 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
       const id = targetId ?? (await runtime.getSession(scope)).id
       const forked = await runtime.forkSession(scope, id, opts)
       return forked ? { id: forked.id } : null
+    },
+    sessionFolder: () => (session.project?.ok ? session.project.project.path : null),
+    setSessionFolder: async (folder) => {
+      await runtime.setSessionFolder(session.id, folder)
+      return session.project?.ok ? session.project.project.path : null
     },
     listSessions: () => runtime.listSessions(),
     skills: () => runtime.skills,
@@ -619,6 +628,31 @@ export async function handleCommand(
       return {
         handled: true,
         reply: `Branched into new session: ${result.id}. /sessions to list, /resume ${result.id} to come back.`,
+      }
+    }
+
+    case 'folder': {
+      if (context.sessionLocked) return { handled: true, reply: context.sessionLocked }
+      if (!context.setSessionFolder) {
+        return { handled: true, reply: 'Session folder selection is not available on this surface.' }
+      }
+      const asked = argument.trim()
+      if (!asked) {
+        const current = context.sessionFolder?.() ?? null
+        return {
+          handled: true,
+          reply: `Session folder: ${current ?? 'Default directory'}. Use /folder <path|none>`,
+        }
+      }
+      try {
+        const target = asked.toLowerCase() === 'none' ? null : asked
+        const landed = await context.setSessionFolder(target)
+        return {
+          handled: true,
+          reply: landed ? `Session folder: ${landed}.` : 'Session folder: Default directory.',
+        }
+      } catch (error) {
+        return { handled: true, reply: errorMessage(error) }
       }
     }
 

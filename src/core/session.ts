@@ -28,9 +28,9 @@ import { runAgent, type RunTrace } from './agent/loop.js'
 import type { TraceWriter } from './traces.js'
 import { runSubagent } from './agent/subagent.js'
 import { buildSystemPrompt, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
-import type { Project, ProjectPlacement } from './projects.js'
+import { extractProjectMentions, type Project, type ProjectPlacement } from './projects.js'
 import { verificationText, type VerificationResult } from './verification.js'
-import type { ProjectInstructions } from './agent/instructions.js'
+import { readProjectInstructions, type ProjectInstructions } from './agent/instructions.js'
 import type { ClientKind } from './client.js'
 import type { CommandCodeSessionDriver, NativeSessionHistory, NativeSessionTurn } from './session-backend.js'
 import {
@@ -157,6 +157,8 @@ export interface SessionOptions {
    * cannot be found. Absent on a session with no project.
    */
   project?: ProjectPlacement
+  /** Refreshes directory context when another surface changes the saved folder. */
+  resolveFolder?: (id?: string) => Pick<SessionOptions, 'cwd' | 'project' | 'instructions'>
   /**
    * The rules of the session's project folder, read once per prompt like the skills:
    * its own `AGENTS.md`, or why there is none to carry. A getter rather than the
@@ -655,6 +657,45 @@ export class Session {
     }
   }
 
+  /** Refreshes folder metadata and instructions when the remembered project is updated or removed. */
+  refreshFolder(): void {
+    if (!this.options.resolveFolder) return
+    Object.assign(this.options, this.options.resolveFolder(this.record.project))
+  }
+
+  /** Changes context without changing Session identity or its transcript. */
+  async setFolder(project?: string): Promise<boolean> {
+    if (this.busy) throw new Error('Wait for the Session to finish before changing its folder.')
+    const lease = await this.store.tryAcquire(this.id)
+    if (!lease) throw new Error('Wait for the Session to finish before changing its folder.')
+    try {
+      if (!lease.latest) throw new Error(`Session ${this.id} was not found.`)
+      this.adoptLatest(lease.latest)
+      if (this.record.project === project) return false
+      if (this.record.backend?.kind === 'command-code') {
+        throw new Error('A Command Code Session keeps its native folder. Start a new Session to use another folder.')
+      }
+      const context = this.options.resolveFolder?.(project)
+      if (!context) throw new Error('Folder selection is unavailable in this runtime.')
+      if (context.project && !context.project.ok) throw new Error(context.project.error)
+      const text = project ? `Session folder changed to ${context.cwd}. Future actions use this folder and its rules.` : 'Session folder cleared. Future actions use the default directory.'
+      const next = {
+        ...this.record,
+        project,
+        updatedAt: Date.now(),
+        version: this.baseVersion + 1,
+        messages: [...this.messages, { role: 'assistant' as const, at: Date.now(), content: [{ type: 'text' as const, text }] }],
+      }
+      await this.store.save(next, this.baseVersion)
+      this.adoptLatest(next)
+      this.approved.clear()
+      this.setPlan(false)
+      return true
+    } finally {
+      await lease.release()
+    }
+  }
+
   async setCommandCodeModel(model: string): Promise<void> {
     const lease = await this.store.acquire(this.id)
     try {
@@ -802,11 +843,18 @@ export class Session {
       system,
       registry,
       memory,
-      cwd,
+      cwd: sessionCwd,
       maxSteps,
       temperature,
       permissionPolicy,
     } = this.options
+    const mentionedFolders = !opts?.notice && input.includes('@') ? extractProjectMentions(input) : []
+    const turnFolder = mentionedFolders[0]
+    const cwd = turnFolder?.path ?? sessionCwd
+    const turnProject: ProjectPlacement | undefined = turnFolder ? { ok: true, project: turnFolder } : this.options.project
+    const turnInstructions = turnFolder
+      ? readProjectInstructions({ ok: true, project: turnFolder })
+      : this.options.instructions?.()
     const startedAt = Date.now()
     const needsVisionModel = Boolean(opts?.images?.length && !opts.imagesForDisplayOnly && this.options.mediaModels?.vision)
     const model = opts?.model ?? (needsVisionModel ? this.options.mediaModels?.vision : undefined) ?? this.options.model
@@ -893,7 +941,7 @@ export class Session {
         : undefined
     // The catalog is what the model reads, so the one rule that depends on where
     // the turn works is said there: in a project, delegation is the model's call.
-    const inProject = this.options.project?.ok === true
+    const inProject = turnProject?.ok === true
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
       .filter((tool) => tool.name !== 'panel' || canPanel(surface))
       .filter((tool) => tool.name !== 'read_attachment' || Boolean(this.record.attachments?.length || opts?.documents?.length || opts?.images?.some((image) => !image.derivedFromDocument)))
@@ -915,12 +963,12 @@ export class Session {
       surface,
       routine: this.scope.gateway === ROUTINE_GATEWAY,
       cwd,
-      // Which project this session is working in, when it has one: the turn is
+      // Which project this turn is working in, when mentioned or set: the turn is
       // told what it is working on, not only where the folder is.
-      project: this.options.project,
-      // The project's own rules, read per turn: the folder a session works in says
+      project: turnProject,
+      // The project's own rules, read per turn: the folder a turn works in says
       // how it is to be worked in, and an edit to that file lands on the next turn.
-      instructions: this.options.instructions?.(),
+      instructions: turnInstructions,
       // The install's own rules, above the folder's: read per turn for the same
       // reason, so a rule written into `~/.milo/AGENTS.md` lands on the next one.
       ownInstructions: this.options.ownInstructions?.(),
@@ -1129,7 +1177,7 @@ export class Session {
           signal: abort,
           // A project's folder is the boundary for writes: the session was pointed
           // at it, so changing something outside it is not this turn's business.
-          confineTo: this.options.project?.ok ? this.options.project.project.path : undefined,
+          confineTo: turnProject?.ok ? turnProject.project.path : undefined,
           sandbox: this.options.sandbox,
           attachments: () => this.record.attachments ?? [],
           inspectAttachmentImage,
@@ -1154,14 +1202,14 @@ export class Session {
               skills: this.options.skills?.(),
               // The same rules the parent's prompt carries: a delegated task works in
               // the same folder, and must follow the same conventions it keeps.
-              instructions: this.options.instructions?.(),
+              instructions: turnInstructions,
               ownInstructions: this.options.ownInstructions?.(),
               // The same boundary and the same box: a delegated write lands in the
               // same folder, and its commands are contained the same way.
-              confineTo: this.options.project?.ok ? this.options.project.project.path : undefined,
+              confineTo: turnProject?.ok ? turnProject.project.path : undefined,
               sandbox: this.options.sandbox,
               // The same project, so a delegated task carries the same code brief.
-              project: this.options.project,
+              project: turnProject,
               // The same live state the parent's prompt carries, so a delegated
               // task can answer about the browser, the servers and Google too.
               browser: this.browserFacts(),
@@ -1609,6 +1657,11 @@ export class Session {
     // In place, not reassigned: Milo's transcript is the record's array. A Command Code
     // Session instead holds a read-only projection of its native transcript in memory.
     if (latest.backend?.kind !== 'command-code') this.messages.splice(0, this.messages.length, ...latest.messages)
+    if (this.record.project !== latest.project) {
+      this.record.project = latest.project
+      if (this.options.resolveFolder) Object.assign(this.options, this.options.resolveFolder(latest.project))
+      this.approved.clear()
+    }
     this.record.backend = latest.backend
     this.summary = latest.summary
     this.record.title = latest.title ?? this.record.title

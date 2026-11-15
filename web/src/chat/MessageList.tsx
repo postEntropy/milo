@@ -15,6 +15,7 @@ import { attachmentUrl } from '../lib/api.js'
 import { Markdown } from './Markdown.js'
 import { GenUi } from './genui/GenUi.js'
 import { Icon, type IconName } from '../ui/Icons.js'
+import { MiloMark } from '../ui/MiloMark.js'
 import { toolIconName } from '../ui/tool-icons.js'
 import { ImageViewer } from '../ui/ImageViewer.js'
 import { WaitLine } from '../ui/WaitLine.js'
@@ -284,24 +285,31 @@ export function MessageList({
 }) {
   if (messages.length === 0) return (
     <section className="empty-state" aria-labelledby="welcome-title">
+      <div className="welcome-mark" aria-hidden="true">
+        <MiloMark size={34} />
+      </div>
       <h1 id="welcome-title">What’s on your mind?</h1>
       <p className="welcome-description">Let’s make something of it.</p>
       {/* Remounted when the ideas take over from the standing four, so the chips
           fade in rather than the set jumping in place. */}
       <div className="suggestion-grid" key={hasIdeas ? 'ideas' : 'standing'}>
-        {(suggestions ?? defaultSuggestions).map((item) => (
-          <button
-            className="suggestion"
-            key={item.title}
-            type="button"
-            title={item.detail}
-            onClick={() => (item.action ? onAction?.(item.action) : onPrompt?.(item.prompt ?? ''))}
-          >
-            <span className="suggestion-icon"><Icon name={item.icon} size={20} /></span>
-            <span className="suggestion-title">{item.title}</span>
-            <Icon className="suggestion-arrow" name="chevron" size={16} />
-          </button>
-        ))}
+        {(suggestions ?? defaultSuggestions).map((item) => {
+          const isResume = Boolean(item.action?.startsWith('resume:'))
+          return (
+            <button
+              className={`suggestion ${isResume ? 'is-resume' : ''}`}
+              key={item.title}
+              type="button"
+              onClick={() => (item.action ? onAction?.(item.action) : onPrompt?.(item.prompt ?? ''))}
+            >
+              <span className="suggestion-icon"><Icon name={item.icon} size={16} /></span>
+              <span className="suggestion-copy">
+                <span className="suggestion-title">{item.title}</span>
+                <span className="suggestion-detail">{item.detail}</span>
+              </span>
+            </button>
+          )
+        })}
       </div>
     </section>
   )

@@ -48,7 +48,7 @@ On the first run an onboarding wizard asks for a provider, API key and model, an
   stays and the turn reads *stopped*, not an error. With nothing running, it exits.
 - `↑`/`↓` walk back and forward through what was sent, kept in `~/.milo/input-history.json` — the input
   line history, a different thing from the turn log the model can search (see [History](docs/history.md)).
-- `/new`, `/resume`, `/fork`, `/clear`, `/model`, `/provider`, `/setup` and `/compact` are refused while a
+- `/new`, `/resume`, `/fork`, `/folder`, `/clear`, `/model`, `/provider`, `/setup` and `/compact` are refused while a
   turn runs.
 - A turn that takes a second or more to produce output shows `✻ Thought for 8.2s` — or
   `✻ Thought for 12s (4.2s compacting)` when a summary call ran first — measured from the question to
@@ -67,8 +67,8 @@ On the first run an onboarding wizard asks for a provider, API key and model, an
   (see [The agent](docs/agent.md#what-a-turn-is-told)).
 - `~/.milo/auth.json` — API keys, bot tokens and the Google grant (`0600`).
 - `~/.milo/input-history.json` — what was typed at the CLI's prompt, for `↑`/`↓`.
-- `~/.milo/projects.json` — the folders Work lists, each an id, a name and a path
-  (see [Work](docs/work.md)).
+- `~/.milo/projects.json` — remembered Session folders, each with an id, name and path
+  (see [Session folders](docs/work.md)).
 - `~/.milo/task-lists.json` — the named task lists, shared by every session
   (see [Task lists](docs/sessions.md#task-lists)).
 - `~/.milo/routines.json` — the prompts Milo runs on a timer (see [Routines](docs/routines.md)).
@@ -142,9 +142,9 @@ runs the HTTP + WebSocket server both talk to, so a phone paired to it (see [iOS
 sessions, tools and memory as the browser. The **Telegram** and **Discord** bots are optional — off
 unless you turn them on — and are that same core reached one more way.
 
-A session can be pointed at a registered project, so its tools and its prompt work in that
-folder: `milo --project <id|name|folder>` opens the chat there, and `--cwd <folder>` does the
-same for a folder that is not in the list.
+A session can work in any host folder — selected inside the session or remembered in
+`~/.milo/projects.json`: `milo --project <id|name|folder>` opens the chat there, and
+`--cwd <folder>` does the same for a folder that is not in the list.
 
 ### One turn, no chat
 
@@ -207,8 +207,8 @@ The chat is the terminal's turn model: messages stream in, reasoning folds under
 lines appear as they run, a confirmation is an Allow/Deny card, `Enter` queues and `Ctrl+Enter` steers,
 and `/` opens the command palette. Export and Clear sit in the top bar; sessions can be searched,
 resumed and deleted. **Task lists** is a view of its own, showing the lists the `task_lists` tool keeps.
-**Work** is the code workspace: the registered projects, one project's sessions, its files, its git
-changes and its rules, with a session started in that folder (see [Work](docs/work.md)). **Email** is
+Any session can also choose or clear a host folder directly from the chat bar (and inspect its files,
+git changes and rules, or start in a recent folder; see [Session folders](docs/work.md)). **Email** is
 the connected inbox — read, search, label, summarize and answer, as far as the Google grant allows
 (see [Google](docs/google.md)).
 
@@ -265,8 +265,8 @@ starts a new session; the **model picker** is searched by slug, display name and
 label. **Routines** is a page of its own — run one now, pause or remove it, and read its run history as
 the same thread the chat draws — with a **local reminder** set at each routine's next fire times,
 because a closed phone cannot be reached any other way. **Task lists** is a page of its own, showing the
-lists the `task_lists` tool keeps, and **Work** draws the projects, a folder's files, changes and rules,
-and starts a session there. **Settings** draws the install's own — the model, the theme and the GenUI
+lists the `task_lists` tool keeps, and any session can choose a folder from the chat bar to inspect
+its files, git changes and rules or start another session there. **Settings** draws the install's own — the model, the theme and the GenUI
 toggle, memory, tools and web search, the skills, the MCP servers, the permission mode, the
 connections, the reply notice, the daemon and Unpair. The **Panel** sits beside the chat: the `panel`
 tool shows a document, a PDF, an HTML page or the **live browser** Milo is driving, and it is
@@ -330,7 +330,7 @@ helper — NDJSON over stdio, because QML has no WebSocket — and restarts it i
 cannot start is reported with the first thing it said on stderr, which is the line worth reading.
 
 A question may open with a project: `@Camera fpv start the service` asks it in Camera fpv's folder,
-opening the work session the Work screen would have opened — the same session, tools and rules, without
+opening a Session in that folder — the same tools and rules, without
 leaving the popup. The mention is the project's name, or its id when two projects share a name, at the
 start of the message; typing `@` also offers matching projects, and a mention that names none is
 answered with the projects there are. The active project appears beside the status.
@@ -404,7 +404,7 @@ for everyone else, and a blocked sender is told their own id. `milo setup` → G
 token → access → enable. The allowlist is read when `milo serve` starts, so restart it after changing
 it.
 
-Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/fork`, `/stats`, `/jobs`,
+Commands typed in the chat: `/help`, `/new`, `/sessions`, `/resume`, `/fork`, `/folder [path|none]`, `/stats`, `/jobs`,
 `/compact`, `/export`, `/skills`, `/memory`, `/mode ask|auto|yolo`, `/yolo`, `/tools full|name|off`,
 `/thinking expanded|collapsed`, `/effort low|medium|high`, `/provider [id]`, `/model [id]`, `/clear`,
 `/status`.
@@ -449,7 +449,7 @@ The deep reference lives in `docs/`:
 | [MCP servers](docs/mcp.md) | Calling tools that live in an external server, over stdio. |
 | [Routines](docs/routines.md) | Prompts Milo runs on a timer and delivers to a chat. |
 | [Sessions](docs/sessions.md) | Sessions, task lists and compaction. |
-| [Work](docs/work.md) | Projects, a folder's files, changes and rules, and Plan/Build. |
+| [Session folders](docs/work.md) | Session folders, recent folders, files, changes, rules, and Plan/Build. |
 | [The agent](docs/agent.md) | What a turn is told: persona, family, code manual, rules and verification. |
 | [History](docs/history.md) | The history log, taking a session out, and the execution log. |
 | [Memory](docs/memory.md) | The store, recall by meaning, and the migration off the old JSON store. |

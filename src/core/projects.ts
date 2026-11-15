@@ -271,6 +271,61 @@ export function matchProjectMention(
   return { kind: 'project', project, text: rest.slice(longest).replace(/^[\s,;:]+/, '') }
 }
 
+/**
+ * Extracts `@<folder>` mentions anywhere in a message in order of appearance,
+ * matching remembered projects (by name or id) as well as existing directory paths
+ * prefixed with `@/` or `@~/`.
+ */
+export function extractProjectMentions(
+  text: string,
+  projects: readonly Project[] = readProjects(),
+): Project[] {
+  if (!text.includes('@')) return []
+  const candidates = projects
+    .flatMap((project) => [project.name, project.id].map((token) => ({ project, token: token.trim() })))
+    .filter(({ token }) => token !== '')
+    .sort((a, b) => b.token.length - a.token.length)
+
+  const seen = new Set<string>()
+  const found: Project[] = []
+  const pattern = /(?:^|[\s([{"'])@/g
+  for (const match of text.matchAll(pattern)) {
+    const atIndex = match.index! + match[0].length - 1
+    const rest = text.slice(atIndex + 1)
+    if (!rest) continue
+
+    const matched = candidates.filter(({ token }) => beginsWith(rest, token))
+    if (matched.length > 0) {
+      const longest = matched[0]!.token.length
+      const best = matched.filter(({ token }) => token.length === longest)
+      const distinct = [...new Map(best.map((entry) => [entry.project.id, entry.project])).values()]
+      if (distinct.length === 1) {
+        const project = distinct[0]!
+        if (!seen.has(project.path)) {
+          seen.add(project.path)
+          found.push(project)
+        }
+        continue
+      }
+    }
+
+    const token = rest.split(/[\s,;:)>"']/, 1)[0] ?? ''
+    if (token.startsWith('/') || token.startsWith('~/')) {
+      const resolved = resolveToolPath(process.cwd(), token)
+      try {
+        if (statSync(resolved).isDirectory() && !seen.has(resolved)) {
+          seen.add(resolved)
+          const name = basename(resolved) || resolved
+          found.push({ id: name, name, path: resolved, createdAt: Date.now() })
+        }
+      } catch {
+        // Non-existent path mention: leave as plain text.
+      }
+    }
+  }
+  return found
+}
+
 /** Whether `token` starts `text` and stops where the request begins. */
 function beginsWith(text: string, token: string): boolean {
   if (text.length < token.length) return false
@@ -419,7 +474,7 @@ async function changeProjects<T>(
  * accepts a path it cannot work in, because a project that points nowhere is a
  * session that fails later, somewhere else, with no idea why.
  */
-export async function addProject(input: NewProject): Promise<ProjectOutcome> {
+export async function addProject(input: NewProject, options?: { reuseFolder?: boolean }): Promise<ProjectOutcome> {
   if (!input.path.trim()) return { ok: false, error: 'a project needs a folder' }
   const iconProblem = projectIconProblem(input.icon)
   if (iconProblem) return { ok: false, error: iconProblem }
@@ -428,6 +483,8 @@ export async function addProject(input: NewProject): Promise<ProjectOutcome> {
   if (problem) return { ok: false, error: problem }
   const name = input.name?.trim() || basename(folder)
   return changeProjects<ProjectOutcome>((projects) => {
+    const existing = projects.find((project) => project.path === folder)
+    if (existing && options?.reuseFolder) return { result: { ok: true, project: existing } }
     if (projects.length >= MAX_PROJECTS) {
       return { result: { ok: false, error: `at most ${MAX_PROJECTS} projects — remove one first` } }
     }

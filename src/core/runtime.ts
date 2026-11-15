@@ -1,3 +1,4 @@
+import { resolveToolPath } from './tools/walk.js'
 import type { MediaModelsConfig, SessionsConfig } from './config/schema.js'
 import type { BrowserSession } from './browser/index.js'
 import type { JobManager } from './jobs/index.js'
@@ -14,7 +15,7 @@ import type { Skill, SkillLibrary } from './skills/index.js'
 import type { PermissionPolicy } from './tools/index.js'
 import type { RoutineStore, ToolRegistry } from './tools/index.js'
 import { ROUTINE_GATEWAY } from './routines.js'
-import { withProjectPlacement as lockProjectPlacement, type Project, type ProjectLookup, type ProjectPlacement } from './projects.js'
+import { addProject, placeProject, withProjectPlacement as lockProjectPlacement, type Project, type ProjectLookup, type ProjectPlacement } from './projects.js'
 import type { VerificationResult } from './verification.js'
 import type { ProjectInstructions } from './agent/instructions.js'
 import { Session } from './session.js'
@@ -205,6 +206,8 @@ export class AgentRuntime {
   private readonly turnListeners = new Set<() => void>()
   /** Told when a turn here may have changed what is on disk; see `onWorkChanged`. */
   private readonly workListeners = new Set<() => void>()
+  /** Told when a session's working folder changed; see `onSessionFolderChanged`. */
+  private readonly folderListeners = new Set<(sessionId: string, project?: ProjectPlacement) => void>()
 
   constructor(options: RuntimeOptions) {
     this.options = options
@@ -373,6 +376,16 @@ export class AgentRuntime {
     for (const listener of this.workListeners) listener()
   }
 
+  /** Told when a Session's working folder changes; the detach returned stops it. */
+  onSessionFolderChanged(listener: (sessionId: string, project?: ProjectPlacement) => void): () => void {
+    this.folderListeners.add(listener)
+    return () => this.folderListeners.delete(listener)
+  }
+
+  private announceFolder(sessionId: string, project?: ProjectPlacement): void {
+    for (const listener of this.folderListeners) listener(sessionId, project)
+  }
+
   /**
    * The conversations a person can open. A routine's own runs are sessions too,
    * but nobody talks in them: they are what a routine produced, read in the
@@ -435,6 +448,32 @@ export class AgentRuntime {
    */
   async loadSession(id: string): Promise<SessionRecord | null> {
     return this.store.load(id)
+  }
+
+  /** Folder selection is shared by every surface; registration is automatic. */
+  async setSessionFolder(id: string, folder: string | null): Promise<void> {
+    const record = await this.store.load(id)
+    if (!record) throw new Error(`Session ${id} was not found.`)
+    const session = this.cache.get(id) ?? this.adopt(record, record.scope ?? { gateway: 'cli', chatId: id })
+    if (session.busy || await this.store.busy(id)) throw new Error('Wait for the Session to finish before changing its folder.')
+    if (this.jobs?.list(id).some((job) => job.state === 'running')) throw new Error('Stop this Session’s background jobs before changing its folder.')
+    if (record.backend?.kind === 'command-code') throw new Error('A Command Code Session keeps its native folder. Start a new Session to use another folder.')
+    let changed = false
+    if (folder === null) {
+      changed = await session.setFolder()
+    } else {
+      if (!folder.trim()) throw new Error('Enter a folder path, or use none to clear it.')
+      const remembered = await addProject({ path: resolveToolPath(this.options.cwd, folder) }, { reuseFolder: true })
+      if (!remembered.ok) throw new Error(remembered.error)
+      changed = await lockProjectPlacement(remembered.project.id, async (placement) => {
+        if (!placement.ok) throw new Error(placement.error)
+        return session.setFolder(remembered.project.id)
+      })
+    }
+    if (changed) {
+      this.announceTurn()
+      this.announceFolder(session.id, session.project)
+    }
   }
 
   async setCommandCodeModel(id: string, model: string): Promise<void> {
@@ -781,7 +820,7 @@ export class AgentRuntime {
     // has gone is carried as the reason, so the turn says so rather than working
     // somewhere else in silence.
     const placement =
-      this.options.project && record.project ? this.options.project(record.project) : undefined
+      record.project ? (this.options.project ?? placeProject)(record.project) : undefined
     const session = new Session({
       scope,
       provider: this.options.provider,
@@ -794,6 +833,14 @@ export class AgentRuntime {
       memory: this.options.memory,
       cwd: placement?.ok ? placement.project.path : this.options.cwd,
       project: placement,
+      resolveFolder: (id) => {
+        const current = id ? (this.options.project ?? placeProject)(id) : undefined
+        return {
+          cwd: current?.ok ? current.project.path : this.options.cwd,
+          project: id ? current ?? { ok: false, id, error: `No folder with id ${id}.` } : undefined,
+          instructions: this.options.instructions ? () => this.options.instructions!(current) : undefined,
+        }
+      },
       // Read per turn, like the skills: the rules of the folder this session works
       // in, so an edit to that file lands on the next turn without a restart.
       instructions: this.options.instructions ? () => this.options.instructions!(placement) : undefined,

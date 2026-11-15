@@ -140,7 +140,7 @@ const HELP_TEXT = [
  * transcript it is writing into, or take over the screen its output goes to —
  * so they would fight the turn rather than wait behind it.
  */
-const BLOCKED_WHILE_BUSY = new Set(['new', 'resume', 'fork', 'clear', 'model', 'provider', 'setup', 'compact'])
+const BLOCKED_WHILE_BUSY = new Set(['new', 'resume', 'fork', 'clear', 'model', 'provider', 'setup', 'compact', 'folder'])
 
 /**
  * How many sent lines the arrows walk back through. Kept in memory, for this

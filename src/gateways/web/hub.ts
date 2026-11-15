@@ -8,7 +8,7 @@ import type { SessionSurface } from '../../core/sessions/types.js'
 import { INSTALL_SCOPE, type MemoryScope } from '../../core/memory/index.js'
 import { isImage, mimeFor, type OutgoingFile, type OutgoingMessage } from '../../core/outgoing.js'
 import type { PanelRequest } from '../../core/panel.js'
-import { placedProject } from '../../core/projects.js'
+import { placedProject, type ProjectPlacement } from '../../core/projects.js'
 import { readDisplay, readPalette } from '../../core/config/load.js'
 import { buildCommandContext, handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
 import { PendingDecisions } from '../pending.js'
@@ -192,6 +192,9 @@ export class WebHub {
   /** Stops the work subscription on the way out; see the constructor. */
   private detachWork: (() => void) | null = null
 
+  /** Stops the session folder subscription on the way out; see the constructor. */
+  private detachFolder: (() => void) | null = null
+
   /** When the last `work-changed` went out, for the floor above; 0 before the first. */
   private workChangedAt = 0
 
@@ -215,6 +218,11 @@ export class WebHub {
     // And a step that may have changed a folder: a screen drawing one re-reads it while the
     // turn is still running, which is the whole of what makes a long turn watchable.
     this.detachWork = this.runtime.onWorkChanged(() => this.workChanged())
+    // And a Session whose working folder changed: every open screen watching it updates.
+    this.detachFolder =
+      this.runtime.onSessionFolderChanged?.((sessionId, placement) => {
+        this.sessionFolderChanged(sessionId, placement)
+      }) ?? null
   }
 
   async connect(client: WebClient, chatId: string, genui?: boolean, clientKind?: ClientKind, surface?: SessionSurface): Promise<void> {
@@ -523,6 +531,8 @@ export class WebHub {
     this.detachSessions = null
     this.detachWork?.()
     this.detachWork = null
+    this.detachFolder?.()
+    this.detachFolder = null
   }
 
   stageUpload(file: IncomingFile): string {
@@ -590,6 +600,41 @@ export class WebHub {
     const frame: ServerFrame = { type: 'sessions-changed' }
     for (const chat of this.chats.values()) {
       for (const client of chat.clients) client.send(frame)
+    }
+  }
+
+  /**
+   * Synchronizes a Session's updated working folder (and cleared Plan state) across
+   * every open client attached to that Session.
+   */
+  private sessionFolderChanged(sessionId: string, placement?: ProjectPlacement): void {
+    const project = placement ? placedProject(placement) ?? null : null
+    for (const chat of this.chatsOf(sessionId)) {
+      chat.session.refreshFolder()
+      chat.session.setPlan(false)
+      for (const client of chat.clients) {
+        client.send({ type: 'session-folder', project })
+        client.send({ type: 'plan', plan: false })
+      }
+    }
+  }
+
+  /**
+   * Propagates remembered folder renames, icon changes, or removals to any active
+   * Session currently pointing at `projectId`.
+   */
+  projectUpdated(projectId?: string): void {
+    if (!projectId) return
+    for (const chat of this.chats.values()) {
+      const current = chat.session.project
+      const currentId = current?.ok ? current.project.id : current?.id
+      if (currentId !== projectId) continue
+      chat.session.refreshFolder()
+      const next = chat.session.project
+      const project = next ? placedProject(next) ?? null : null
+      for (const client of chat.clients) {
+        client.send({ type: 'session-folder', project })
+      }
     }
   }
 

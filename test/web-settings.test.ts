@@ -1662,3 +1662,18 @@ describe('web Settings colour palette and sync', () => {
     expect(props.get('--palette-dark-accent')).toBe('#3B947C')
   })
 })
+
+describe('Session export delivery', () => {
+  it('returns the generated file contents only when a client requests a download', async () => {
+    writeConfig()
+    fileHistory.append([{ at: new Date().toISOString(), session: 'calm-otter-7', scope: 'web:test', kind: 'user', text: 'Keep this exported text.' }])
+    const settings = new WebSettings(build({}), home)
+    const hosted = await settings.handle('export', { id: 'calm-otter-7', format: 'md' }) as { path: string; content?: string }
+    expect(hosted.content).toBeUndefined()
+    const downloaded = await settings.handle('export', { id: 'calm-otter-7', format: 'md', download: true }) as { path: string; name: string; content: string }
+    expect(downloaded.name).toBe(path.basename(downloaded.path))
+    expect(downloaded.content).toBe(readFileSync(downloaded.path, 'utf8'))
+    expect(downloaded.content).toContain('Keep this exported text.')
+    expect(await settings.handle('export', { id: 'never-ran-1', download: true })).toBeNull()
+  })
+})

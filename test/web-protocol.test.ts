@@ -140,6 +140,11 @@ describe('web protocol', () => {
     expect(frame).toEqual({ type: 'sessions-changed' })
   })
 
+  it('carries the additive session-folder frame to update connected screens live', () => {
+    const cleared: ServerFrame = { type: 'session-folder', project: null }
+    expect(cleared).toEqual({ type: 'session-folder', project: null })
+  })
+
   it('carries the session plan state as its own frame', () => {
     const frame: ServerFrame = { type: 'plan', plan: true }
     expect(frame).toEqual({ type: 'plan', plan: true })

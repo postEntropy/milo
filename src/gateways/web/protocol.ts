@@ -306,6 +306,8 @@ export type ServerFrame =
   | { type: 'state'; busy: boolean; queued: number }
   /** The install-wide accent palette sync state, sent on connect and after any shared write. */
   | { type: 'palette-state'; sync: boolean; palette: ColorPaletteId }
+  /** The Session's folder changed: every open screen on that Session updates to match. */
+  | { type: 'session-folder'; project: ProjectView | null }
   /** A routine ran somewhere in this install: re-read whatever shows the history. */
   | { type: 'routines-changed' }
   /** A session's turn began or ended here: re-read the list that shows it running. */

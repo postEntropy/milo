@@ -23,7 +23,11 @@ const running: Array<{ stop(): Promise<void> }> = []
  * stands in for one. The hub the server builds asks one thing of it: to be told when a
  * session's turn begins or ends, and when a step may have changed what is on disk.
  */
-const runtime = { onSessionsChanged: () => () => {}, onWorkChanged: () => () => {} } as never
+const runtime = {
+  onSessionsChanged: () => () => {},
+  onWorkChanged: () => () => {},
+  onSessionFolderChanged: () => () => {},
+} as never
 
 beforeEach(() => {
   rmSync(path.join(home, 'devices.json'), { force: true })

@@ -3,7 +3,7 @@
 A Milo-backed turn runs under a base persona plus sections, assembled per turn by
 `buildSystemPrompt`. `config.systemPrompt` replaces the persona only: the sections still
 apply, because they carry live state and behaviour the persona cannot know. A Session started
-inside a Work project may instead select Command Code; it owns its model, tools and native JSONL history.
+inside a folder may instead select Command Code; it owns its model, tools and native JSONL history.
 Milo stores a link to that history and projects it into the chat UI, but never writes a second
 copy into `SessionRecord.messages`. Milo's prompt sections, memory, Plan mode and per-tool
 permission policy do not apply to Command Code; the CLI reads its own project rules and runs
@@ -65,7 +65,7 @@ read is exactly what a subagent keeps out of the session. Outside a project, it 
 to be asked. The tool's description is the whole rule, and it is chosen per turn from
 whether the session has a project.
 
-The external Command Code agent started from the web Work page is separate from this
+The external Command Code agent started in a Session folder is separate from this
 subagent. Herdr owns its terminal; Milo supplies the project folder and the install and
 project rules, but cannot enforce its permission policy, Plan mode, or sandbox on that
 process. Starting it does not prompt; the mark in an active Session's header opens the

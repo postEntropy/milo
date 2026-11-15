@@ -53,10 +53,11 @@ form of the author's own taste notes, which live outside the repo in
 
 ## Work
 
-- Work is the code workspace: a tab of its own in the web app and on the phone, with
-  projects, files, changes and rules. It is a place, not a second system — a work session is
-  an ordinary session in the project's folder. What it is and is not is in
-  [docs/work.md](docs/work.md); read that before changing the tab.
+- Sessions share one list. A folder is optional Session context, chosen directly from the
+Session's Folder control or `/folder`. Recent folders are remembered without a project setup
+step. Files, changes and rules are reached from the Session's folder menu. Existing project
+records remain the shared folder registry. Read [docs/work.md](docs/work.md) before changing
+folder selection or inspection.
 
 ## Agent
 

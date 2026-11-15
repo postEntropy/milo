@@ -3,11 +3,9 @@ import { api } from '../lib/api.js'
 import { isPhone, usePhone } from '../lib/phone.js'
 import { formatDuration, formatTokens } from '../../../src/util/format.ts'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
-import type { CommandCodeModel } from '../../../src/core/command-code-models.js'
 import { quotedLead } from '../../../src/core/sessions/format.ts'
 import { COMMAND_CATALOG } from '../../../src/gateways/command-catalog.ts'
 import type { JobView } from '@protocol'
-import type { SessionBackendKind } from '../../../src/core/sessions/types.js'
 import { Icon } from '../ui/Icons.js'
 import { Select } from '../ui/Select.js'
 import { ModelDetails } from '../ui/ModelDetails.js'
@@ -21,7 +19,8 @@ interface Props {
   jobs?: JobView[]
   /** Stops a running job, from the control on its own row. */
   onKillJob?: (id: string) => void
-  sessionBackend: SessionBackendKind
+  /** Remembered host folders available to mention with `@`. */
+  folders?: { id: string; name: string; path: string }[]
   provider: string
   /** What the provider is called on screen, so its models can be lead with it. */
   providerName: string
@@ -50,8 +49,6 @@ interface Props {
   onStop(): void
   /** Sets the pair: the model, and the provider it answers through. */
   onModelChange(model: string, provider: string): Promise<void>
-  commandCodeModel?: string
-  onCommandCodeModelChange(model: string): void
   onEffortChange(effort: 'low' | 'medium' | 'high'): void
   onProviderChange(provider: string): Promise<void>
 }
@@ -102,7 +99,7 @@ function oneLine(text: string): string {
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { busy, queued, jobs, onKillJob, sessionBackend, provider, providerName, draftKey, pendingDraftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, commandCodeModel, onCommandCodeModelChange, onEffortChange, onProviderChange },
+  { busy, queued, jobs, onKillJob, folders = [], provider, providerName, draftKey, pendingDraftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, onEffortChange, onProviderChange },
   handle,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -150,26 +147,42 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
   const [dismissed, setDismissed] = useState<string | null>(null)
   const [files, setFiles] = useState<File[]>([])
   const [uploadError, setUploadError] = useState('')
-  const [commandCodeModels, setCommandCodeModels] = useState<CommandCodeModel[] | null>(null)
-  const [commandCodeModelsError, setCommandCodeModelsError] = useState('')
-  const [commandCodeModelsLoading, setCommandCodeModelsLoading] = useState(false)
+  const [caret, setCaret] = useState(0)
   const uploadRef = useRef<HTMLInputElement>(null)
   const folded = useFoldedToolbar()
   /** A screen with room for the two panes: the providers and the models side by
    *  side. The app's own phone width is where the settings screen draws this
    *  same pair, so the composer asks the same question in the same place. */
   const wide = !usePhone()
-  const codeSession = sessionBackend === 'command-code'
 
   const palette = useMemo(() => {
-    if (codeSession || !draft.startsWith('/') || draft.includes(' ') || dismissed === draft) return []
+    if (!draft.startsWith('/') || draft.includes(' ') || dismissed === draft) return []
     const query = draft.slice(1).toLowerCase()
     return COMMAND_CATALOG.filter((command) => command.name.startsWith(query)).slice(0, 8)
-  }, [draft, dismissed, codeSession])
+  }, [draft, dismissed])
+
+  const mention = useMemo(() => {
+    if (dismissed === draft || folders.length === 0) return null
+    const before = draft.slice(0, caret)
+    const match = /(?:^|\s)@([^\s]*)$/.exec(before)
+    if (!match) return null
+    const query = match[1]!.toLowerCase()
+    const options = folders
+      .filter((folder) => !query || folder.name.toLowerCase().includes(query) || folder.path.toLowerCase().includes(query))
+      .slice(0, 8)
+    if (options.length === 0) return null
+    return {
+      start: before.length - match[1]!.length - 1,
+      end: caret,
+      options,
+    }
+  }, [draft, caret, dismissed, folders])
+
+  const menuCount = palette.length > 0 ? palette.length : (mention?.options.length ?? 0)
 
   useEffect(() => {
-    if (highlight >= palette.length) setHighlight(0)
-  }, [palette.length, highlight])
+    if (highlight >= menuCount) setHighlight(0)
+  }, [menuCount, highlight])
 
   // Starting a new session leaves the cursor on the button that was pressed.
   // The field takes it back, so the next keystroke is the message. Zero is the
@@ -318,21 +331,39 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     ref.current?.focus()
   }
 
+  function chooseMention(name: string): void {
+    if (!mention) return
+    const inserted = `@${name} `
+    const next = draft.slice(0, mention.start) + inserted + draft.slice(mention.end)
+    const nextCaret = mention.start + inserted.length
+    editDraft(next)
+    setCaret(nextCaret)
+    setDismissed(next)
+    requestAnimationFrame(() => {
+      const el = ref.current
+      if (!el) return
+      el.focus()
+      el.setSelectionRange(nextCaret, nextCaret)
+    })
+  }
+
   function key(event: ReactKeyboardEvent<HTMLTextAreaElement>): void {
-    if (palette.length > 0) {
+    if (palette.length > 0 || mention) {
+      const count = palette.length > 0 ? palette.length : mention!.options.length
       if (event.key === 'ArrowDown') {
         event.preventDefault()
-        setHighlight((current) => (current + 1) % palette.length)
+        setHighlight((current) => (current + 1) % count)
         return
       }
       if (event.key === 'ArrowUp') {
         event.preventDefault()
-        setHighlight((current) => (current - 1 + palette.length) % palette.length)
+        setHighlight((current) => (current - 1 + count) % count)
         return
       }
       if (event.key === 'Tab' || (event.key === 'Enter' && !event.shiftKey)) {
         event.preventDefault()
-        choose(palette[highlight]!.name)
+        if (palette.length > 0) choose(palette[highlight]!.name)
+        else chooseMention(mention!.options[highlight]!.name)
         return
       }
       if (event.key === 'Escape') {
@@ -353,7 +384,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      void submit(!codeSession && busy && (event.ctrlKey || event.metaKey) ? 'steer' : 'queue')
+      void submit(busy && (event.ctrlKey || event.metaKey) ? 'steer' : 'queue')
     }
   }
 
@@ -424,19 +455,6 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     }
   }
 
-  async function loadCommandCodeModels(): Promise<void> {
-    if (commandCodeModels !== null || commandCodeModelsLoading) return
-    setCommandCodeModelsLoading(true)
-    setCommandCodeModelsError('')
-    try {
-      setCommandCodeModels(await api<CommandCodeModel[]>('command-code-models'))
-    } catch (error) {
-      setCommandCodeModelsError(error instanceof Error ? error.message : String(error))
-    } finally {
-      setCommandCodeModelsLoading(false)
-    }
-  }
-
   return (
     <div className="composer-shell">
       <div className="queue-list" aria-live="polite">{queued > 0 && <div className="queue-chip"><Icon name="history" size={14} /> {queued} {queued === 1 ? 'message queued' : 'messages queued'}</div>}
@@ -469,6 +487,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         {palette.length > 0 && <div className="command-menu" role="listbox" aria-label="Commands">
           {palette.map((command, index) => <button className={`command-option ${index === highlight ? 'active' : ''}`} type="button" role="option" aria-selected={index === highlight} key={command.name} onMouseEnter={() => setHighlight(index)} onClick={() => choose(command.name)}><code className="command-name">/{command.name}</code><small>{command.hint}</small></button>)}
         </div>}
+        {palette.length === 0 && mention && <div className="command-menu" role="listbox" aria-label="Folders">
+          {mention.options.map((folder, index) => <button className={`command-option ${index === highlight ? 'active' : ''}`} type="button" role="option" aria-selected={index === highlight} key={folder.id} onMouseEnter={() => setHighlight(index)} onClick={() => chooseMention(folder.name)}><code className="command-name">@{folder.name}</code><small>{folder.path}</small></button>)}
+        </div>}
         {quote && <div className="composer-quote">
           <Icon name="quote" size={13} />
           <span className="composer-quote-text">{quote}</span>
@@ -476,11 +497,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         </div>}
         <textarea
           ref={ref}
-          aria-label={codeSession ? 'Message Command Code' : 'Message Milo'}
-          placeholder={codeSession ? 'Message Command Code…' : 'Ask Milo anything…'}
+          aria-label="Message Milo"
+          placeholder="Ask Milo anything…"
           rows={1}
           value={draft}
-          onChange={(event) => editDraft(event.target.value)}
+          onChange={(event) => { editDraft(event.target.value); setCaret(event.target.selectionStart ?? event.target.value.length) }}
+          onClick={(event) => setCaret(event.currentTarget.selectionStart ?? draft.length)}
+          onKeyUp={(event) => setCaret(event.currentTarget.selectionStart ?? draft.length)}
           onKeyDown={key}
         />
         <div className="composer-toolbar">
@@ -497,7 +520,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           >
             <Icon name={plan ? 'list-check' : 'code'} size={15} />
           </button>}
-          {sessionBackend === 'milo' ? <div className="composer-model-wrap">
+          <div className="composer-model-wrap">
             <Select
               className={`composer-pill${folded ? ' icon-only' : ''}`}
               label="Model and reasoning effort"
@@ -537,28 +560,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               onOpen={() => { pickerOpened.current = true; void loadProviders(); void loadCatalog(browsing) }}
               note={loading ? 'Loading models…' : error || 'No models found.'}
             />
-          </div> : <Select
-            className={`composer-pill${folded ? ' icon-only' : ''}`}
-            label="Command Code model"
-            icon="spark"
-            value={commandCodeModel ?? ''}
-            triggerLabel={folded ? '' : commandCodeModel || 'Choose model'}
-            choices={(commandCodeModels ?? []).map((item) => ({
-              value: item.id,
-              label: item.id,
-              meta: <span className="command-code-model-description">{item.description}</span>,
-            }))}
-            onChange={onCommandCodeModelChange}
-            onOpen={() => void loadCommandCodeModels()}
-            note={commandCodeModelsLoading ? 'Loading models…' : commandCodeModelsError || 'No Command Code models found.'}
-            disabled={busy}
-          />}
+          </div>
           <span className="composer-spacer" />
           {busy && (draft.trim() !== '' || files.length > 0) && <>
             <button className="composer-send-action" type="button" onClick={() => void submit('queue')} title="Send after the current turn finishes"><Icon name="history" size={14} />Queue</button>
-            {!codeSession && <button className="composer-send-action" type="button" onClick={() => void submit('steer')} title="Send guidance to the running turn"><Icon name="reply" size={14} />Steer</button>}
+            <button className="composer-send-action" type="button" onClick={() => void submit('steer')} title="Send guidance to the running turn"><Icon name="reply" size={14} />Steer</button>
           </>}
-          {!codeSession && context && context.budget > 0 && <span className={`composer-context${context.used / context.budget >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.budget.toLocaleString()} tokens — Milo tidies the oldest turns at ${context.budget.toLocaleString()}`}>
+          {context && context.budget > 0 && <span className={`composer-context${context.used / context.budget >= 0.8 ? ' full' : ''}`} title={`${context.used.toLocaleString()} of ${context.budget.toLocaleString()} tokens — Milo tidies the oldest turns at ${context.budget.toLocaleString()}`}>
             <svg className="composer-context-ring" width="22" height="22" viewBox="0 0 22 22" aria-hidden="true">
               <circle className="composer-context-track" cx="11" cy="11" r="9" />
               <circle className="composer-context-arc" cx="11" cy="11" r="9" strokeDasharray={RING_CIRCUMFERENCE} strokeDashoffset={RING_CIRCUMFERENCE * (1 - Math.min(1, context.used / context.budget))} />
@@ -566,7 +574,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             <span className="composer-context-count">{formatTokens(context.used)} / {formatTokens(context.budget)}</span>
           </span>}
           {busy
-            ? <button className="send-button stop" type="button" title="Stop (Esc)" aria-label={codeSession ? 'Stop Command Code turn' : 'Stop Milo turn'} onClick={onStop}><Icon name="stop" size={24} /></button>
+            ? <button className="send-button stop" type="button" title="Stop (Esc)" aria-label="Stop Milo turn" onClick={onStop}><Icon name="stop" size={24} /></button>
             : <button className="send-button" type="button" title="Send (Enter)" aria-label="Send message" disabled={!draft.trim() && files.length === 0} onClick={() => void submit('queue')}><Icon name="send" size={17} /></button>}
         </div>
       </div>

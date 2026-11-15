@@ -145,7 +145,7 @@ describe('a project mark is the same mark on every surface', () => {
 
     const onPhone = [
       ...swift.matchAll(
-        /MiloPalettePreset\(id: \.(\w+), label: "([^"]+)", logoTop: 0x([0-9A-Fa-f]{6}), logoBottom: 0x([0-9A-Fa-f]{6}), lightAccent: 0x([0-9A-Fa-f]{6}), darkAccent: 0x([0-9A-Fa-f]{6}), lightAccentOn: 0x([0-9A-Fa-f]{6}), darkAccentOn: 0x([0-9A-Fa-f]{6})\)/g,
+        /MiloPalettePreset\(id: \.(\w+), label: "([^"]+)", logoTop: 0x([0-9A-Fa-f]{6}), logoBottom: 0x([0-9A-Fa-f]{6}), lightAccent: 0x([0-9A-Fa-f]{6}), darkAccent: 0x([0-9A-Fa-f]{6}), lightAccentOn: 0x([0-9A-Fa-f]{6}), darkAccentOn: 0x([0-9A-Fa-f]{6})(?:, userBubbleText: 0x[0-9A-Fa-f]{6})?\)/g,
       ),
     ].map((match) => ({
       id: match[1],

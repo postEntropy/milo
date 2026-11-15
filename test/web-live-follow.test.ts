@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import type { ChatRequest, Provider, StreamEvent } from '../src/core/providers/types.js'
@@ -161,6 +161,7 @@ interface Frame {
   remember?: boolean
   says?: string
   plan?: boolean
+  project?: { id: string; name: string; path: string } | null
   text?: string
   messages?: Array<{ parts: Array<{ kind: string; text?: string }> }>
 }
@@ -190,14 +191,16 @@ async function twoScreens(
 ): Promise<{
   runtime: InstanceType<typeof AgentRuntime>
   hub: InstanceType<typeof WebHub>
+  settings: InstanceType<typeof WebSettings>
+  sessionId: string
   desktop: Frame[]
   phone: Frame[]
   at: { send(frame: unknown): void }
   phoneClient: { send(frame: unknown): void }
 }> {
   const runtime = build(provider, extra)
-  const settings = new WebSettings(runtime, home)
   const hub = new WebHub(runtime)
+  const settings = new WebSettings(runtime, home, hub)
 
   // One session, and both conversations resumed onto it. Resuming both (not only the
   // phone) is what keeps the desktop's socket on this session too: a scope the process
@@ -212,7 +215,7 @@ async function twoScreens(
   const phoneClient = client(phone)
   await hub.connect(desktopClient, DESKTOP)
   await hub.connect(phoneClient, PHONE)
-  return { runtime, hub, desktop, phone, at: desktopClient, phoneClient }
+  return { runtime, hub, settings, sessionId: session.id, desktop, phone, at: desktopClient, phoneClient }
 }
 
 describe('a turn on a session open in two conversations', () => {
@@ -552,6 +555,120 @@ describe('a turn on a session no socket asked for', () => {
 
     expect(await waitFor(() => phone.some((frame) => frame.type === 'sessions-changed'))).toBe(true)
     expect(desktop.some((frame) => frame.type === 'sessions-changed')).toBe(true)
+  })
+})
+
+describe('session folder sync across screens', () => {
+  it('syncs folder selection and clearing over settings across every attached screen', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'milo-live-folder-'))
+    const real = realpathSync(dir)
+    try {
+      const { hub, settings, sessionId, desktop, phone, at } = await twoScreens(new HeldProvider())
+
+      hub.handle(at, { type: 'control', action: 'plan', plan: true }, DESKTOP)
+      expect(await waitFor(() => phone.some((frame) => frame.type === 'plan' && frame.plan === true))).toBe(true)
+
+      const d0 = desktop.length
+      const p0 = phone.length
+      await settings.handle('session-folder', { id: sessionId, path: dir })
+
+      expect(await waitFor(() => phone.slice(p0).some((frame) => frame.type === 'session-folder'))).toBe(true)
+      for (const slice of [desktop.slice(d0), phone.slice(p0)]) {
+        expect(slice).toContainEqual(expect.objectContaining({
+          type: 'session-folder',
+          project: expect.objectContaining({ path: real }),
+        }))
+        expect(slice).toContainEqual(expect.objectContaining({ type: 'plan', plan: false }))
+        expect(slice).toContainEqual(expect.objectContaining({ type: 'sessions-changed' }))
+      }
+
+      const d1 = desktop.length
+      const p1 = phone.length
+      await settings.handle('session-folder', { id: sessionId, path: null })
+
+      expect(await waitFor(() => phone.slice(p1).some((frame) => frame.type === 'session-folder'))).toBe(true)
+      for (const slice of [desktop.slice(d1), phone.slice(p1)]) {
+        expect(slice).toContainEqual(expect.objectContaining({ type: 'session-folder', project: null }))
+        expect(slice).toContainEqual(expect.objectContaining({ type: 'sessions-changed' }))
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('syncs /folder commands from one screen to sibling screens', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'milo-live-folder-cmd-'))
+    const real = realpathSync(dir)
+    try {
+      const { hub, desktop, phone, at } = await twoScreens(new HeldProvider())
+
+      hub.handle(at, { type: 'control', action: 'plan', plan: true }, DESKTOP)
+      expect(await waitFor(() => phone.some((frame) => frame.type === 'plan' && frame.plan === true))).toBe(true)
+
+      const d0 = desktop.length
+      const p0 = phone.length
+      hub.handle(at, { type: 'command', text: `/folder ${dir}` }, DESKTOP)
+
+      expect(await waitFor(() => phone.slice(p0).some((frame) => frame.type === 'session-folder' && frame.project?.path === real))).toBe(true)
+      for (const slice of [desktop.slice(d0), phone.slice(p0)]) {
+        expect(slice).toContainEqual(expect.objectContaining({
+          type: 'session-folder',
+          project: expect.objectContaining({ path: real }),
+        }))
+        expect(slice).toContainEqual(expect.objectContaining({ type: 'plan', plan: false }))
+        expect(slice).toContainEqual(expect.objectContaining({ type: 'sessions-changed' }))
+      }
+
+      const d1 = desktop.length
+      const p1 = phone.length
+      hub.handle(at, { type: 'command', text: '/folder none' }, DESKTOP)
+
+      expect(await waitFor(() => phone.slice(p1).some((frame) => frame.type === 'session-folder' && frame.project === null))).toBe(true)
+      for (const slice of [desktop.slice(d1), phone.slice(p1)]) {
+        expect(slice).toContainEqual(expect.objectContaining({ type: 'session-folder', project: null }))
+        expect(slice).toContainEqual(expect.objectContaining({ type: 'sessions-changed' }))
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('pushes project updates and removals to attached sessions', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'milo-live-folder-proj-'))
+    const real = realpathSync(dir)
+    try {
+      const { settings, sessionId, desktop, phone } = await twoScreens(new HeldProvider())
+
+      await settings.handle('session-folder', { id: sessionId, path: dir })
+      expect(await waitFor(() => desktop.some((frame) => frame.type === 'session-folder' && frame.project !== null))).toBe(true)
+      const projectId = desktop.find((frame) => frame.type === 'session-folder' && frame.project)?.project?.id
+      expect(projectId).toBeTruthy()
+
+      const d0 = desktop.length
+      const p0 = phone.length
+      await settings.handle('project-action', { action: 'update', id: projectId, name: 'Renamed Studio' })
+
+      expect(await waitFor(() => phone.slice(p0).some((frame) => frame.type === 'session-folder'))).toBe(true)
+      for (const slice of [desktop.slice(d0), phone.slice(p0)]) {
+        expect(slice).toContainEqual(expect.objectContaining({
+          type: 'session-folder',
+          project: expect.objectContaining({ id: projectId, name: 'Renamed Studio', path: real }),
+        }))
+        expect(slice).toContainEqual(expect.objectContaining({ type: 'sessions-changed' }))
+      }
+
+      const d1 = desktop.length
+      const p1 = phone.length
+      await settings.handle('project-action', { action: 'remove', id: projectId })
+
+      expect(await waitFor(() => phone.slice(p1).some((frame) => frame.type === 'session-folder'))).toBe(true)
+      for (const slice of [desktop.slice(d1), phone.slice(p1)]) {
+        expect(slice).toContainEqual(expect.objectContaining({ type: 'session-folder', project: null }))
+        expect(slice).toContainEqual(expect.objectContaining({ type: 'sessions-changed' }))
+      }
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

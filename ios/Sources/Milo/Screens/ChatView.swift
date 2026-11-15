@@ -50,7 +50,7 @@ final class SidewaysDrags {
 /// carried by its own surface and spacing.
 struct ChatView: View {
     private struct ProjectShortcut: Identifiable {
-        enum Section { case files, changes }
+        enum Section { case files, changes, rules }
         let id = UUID()
         let projectId: String
         let projectName: String
@@ -72,7 +72,6 @@ struct ChatView: View {
     /// the edited words replace it rather than stacking a second copy on top.
     @State private var editing: Int?
     @State private var drawer = false
-    @State private var showCommandCodeInfo = false
     @State private var projectShortcut: ProjectShortcut?
     @State private var picker = false
     @State private var settings = false
@@ -80,20 +79,8 @@ struct ChatView: View {
     @State private var routinesSelected = false
     @State private var tasks = false
     @State private var tasksSelected = false
-    @State private var work = false
-    @State private var workSelected = false
-    /// The project the Work page is to open on top of its index — set when the welcome sends
-    /// a person to a project's home. Cleared by that page as it opens it.
-    @State private var workProject: String?
-    /// Set when the drawer's New project asks the Work screen for its folder picker, so the
-    /// control adds a project instead of promising it from another screen.
-    @State private var workNewProject = false
-    /// Whether one routine's, task list's or project's own page is open on top of its index. The
-    /// drawer's swipe belongs to the list: over a page the card stays put, because a page's way
-    /// back is the platform's own edge swipe, and the two cannot both answer one drag.
     @State private var routinePage = false
     @State private var taskPage = false
-    @State private var workPage = false
     /// The composer's panel, when one is open — raised by the `+` or by a long press on the
     /// send control, drawn over the composer, dismissed by a tap anywhere but itself.
     @State private var menu: ComposerMenu?
@@ -182,6 +169,13 @@ struct ChatView: View {
     /// and actions capsule — stand down in the tap's own frame rather than arriving with it
     /// and disappearing a moment later, once the thread is cleared.
     @State private var starting = false
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var submittingEdit = false
+    @State private var editOrigin = ""
+    @State private var destruction: Bool?
+    @State private var destructionSession = ""
+    private enum AccessibleSurface: Hashable { case sessions, panel }
+    @AccessibilityFocusState private var accessibleSurface: AccessibleSurface?
 
     var body: some View {
         ZStack(alignment: .leading) {
@@ -200,6 +194,8 @@ struct ChatView: View {
                 SidePanel(tabs: showing.tabs, active: showing.active, width: panelWidth) {
                     model.panelOpen = false
                 }
+                .accessibilityFocused($accessibleSurface, equals: .panel)
+                .accessibilityAddTraits(.isModal)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
                 // The surface comes in from the edge it lives on, while the card goes the other
                 // way — one opening rather than a slab of chrome sliding across.
@@ -207,6 +203,7 @@ struct ChatView: View {
             }
 
             cardContent
+                .accessibilityHidden(drawer || panelShown)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 // The card is the background: it runs under the status bar and the
                 // home indicator, and carries the rounded edge and the shadow while
@@ -228,7 +225,7 @@ struct ChatView: View {
                     .ignoresSafeArea()
                 }
                 .overlay(alignment: .top) {
-                    if !routines && !tasks && !work && !model.messages.isEmpty {
+                    if !routines && !tasks && !model.messages.isEmpty {
                         GeometryReader { geometry in
                             StatusBarBlur()
                                 .mask {
@@ -292,12 +289,26 @@ struct ChatView: View {
         // The card's own move, keyed on where it rests rather than on where a finger has it: a
         // drag is the hand's own motion and carries the card point for point, so only the
         // opening and the closing — and the fall back of a drag let go short — are animated.
-        .animation(Self.lidMove, value: rest)
+        .accessibilityAction(.escape) {
+            if drawer { closeDrawer() }
+            else if panelShown { model.panelOpen = false }
+            else { closeMenu() }
+        }
+        .onChange(of: drawer) { _, open in
+            accessibleSurface = open ? .sessions : nil
+        }
+        .onChange(of: panelShown) { _, open in
+            accessibleSurface = open ? .panel : nil
+        }
+        .sessionDestruction(destructionSession, pending: $destruction)
+        .overlay(alignment: .top) { noteToast }
+        .animation(.smooth(duration: 0.22), value: model.note)
+        .animation(reduceMotion ? nil : Self.lidMove, value: rest)
         // The panel's own motion, in one place: the control that raises a panel and the layer
         // that dismisses it then cannot animate apart. Opening blooms with a gentle bounce;
         // closing folds straight back into the control.
         .animation(
-            menu == .running ? .spring(duration: 0.35, bounce: 0.18) : .spring(duration: 0.22, bounce: 0),
+            reduceMotion ? nil : (menu == .running ? .spring(duration: 0.35, bounce: 0.18) : .spring(duration: 0.22, bounce: 0)),
             value: menu == .running
         )
         .sensoryFeedback(.impact(weight: .light, intensity: 0.7), trigger: menu != nil)
@@ -393,7 +404,7 @@ struct ChatView: View {
         // to answer, so the strip goes with it instead of following into a session it was
         // never picked from.
         .onChange(of: model.sessionId) { _, id in
-            if !draftSession.isEmpty {
+            if !draftSession.isEmpty && !(submittingEdit && editOrigin == draftSession) {
                 UserDefaults.standard.set(draft, forKey: "milo-draft:\(draftSession)")
                 fileDrafts[draftSession] = drafts
             }
@@ -428,6 +439,11 @@ struct ChatView: View {
                     switch shortcut.section {
                     case .files: ProjectFiles(projectId: shortcut.projectId)
                     case .changes: ProjectChanges(projectId: shortcut.projectId)
+                    case .rules: ProjectRulesSection(projectId: shortcut.projectId) { prompt in
+                        projectShortcut = nil
+                        draft = prompt
+                        composing = true
+                    }
                     }
                 }
             }
@@ -477,7 +493,7 @@ struct ChatView: View {
         .attachmentPickers(
             drafts: $drafts,
             menu: $menu,
-            onModel: model.sessionProject == nil ? { picker = true } : nil
+            onModel: { picker = true }
         ) { message in
             model.showNote(message)
         }
@@ -489,24 +505,20 @@ struct ChatView: View {
         SessionsDrawer(
             routinesSelected: routinesSelected,
             tasksSelected: tasksSelected,
-            workMode: workSelected || model.sessionProject != nil,
             revealed: drawer,
             onClose: closeDrawer,
             onNewSession: startSessionFromDrawer,
-            onNewProject: addProjectFromDrawer,
-            onNewWorkSession: startWorkSessionFromDrawer,
+            onNewFolderSession: startFolderSession,
             onSettings: openSettingsFromDrawer,
             onRoutines: openRoutines,
-            onTasks: openTasks,
-            onChatWorld: chooseChatWorld,
-            onWorkWorld: chooseWorkWorld,
-            onWorkProject: openWorkProject,
-            onWorkSession: openWorkSession
+            onTasks: openTasks
         )
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .opacity(sessionsShown ? 1 : 0)
         .animation(sessionsShown ? nil : .linear(duration: 0.01).delay(Self.drawerDuration), value: sessionsShown)
         .allowsHitTesting(drawer)
+        .accessibilityFocused($accessibleSurface, equals: .sessions)
+        .accessibilityAddTraits(.isModal)
         .accessibilityHidden(!drawer)
     }
 
@@ -520,21 +532,9 @@ struct ChatView: View {
             RoutinesView(account: account, pushed: $routinePage, onSessions: openDrawer)
         } else if tasks {
             TaskListsView(pushed: $taskPage, onSessions: openDrawer)
-        } else if work {
-            // A session started or opened here is a session like any other: the card goes
-            // back to the chat it was begun in, which is where it is read and spoken to.
-            WorkView(pushed: $workPage, opening: $workProject, newProject: $workNewProject, onSessions: openDrawer, onChat: leaveWork, onChatWorld: chooseChatWorld)
         } else {
             chat
         }
-    }
-
-    /// Back to the chat from the Work screen, with the cursor in the field when the
-    /// session was started there rather than opened.
-    private func leaveWork(focusing: Bool) {
-        if focusing { composing = true }
-        workSelected = false
-        work = false
     }
 
     /// The panel's tabs and the one in front, when the daemon has any and the sessions are not
@@ -564,7 +564,7 @@ struct ChatView: View {
     /// Whether the thread is what the person is looking at: the chat's card is the one
     /// showing and the sessions are not over it. A reply that lands while this is false is
     /// unread — leaving the chat before the answer is what that means.
-    private var threadOnScreen: Bool { !routines && !tasks && !work && !settings && !drawer }
+    private var threadOnScreen: Bool { !routines && !tasks && !settings && !drawer }
 
     /// How wide the panel comes out: most of the screen, because it carries reading matter
     /// rather than a list — and never all of it, so the chat it slid over stays the thing the
@@ -703,7 +703,7 @@ struct ChatView: View {
     private func claims(_ across: CGFloat, from start: CGPoint) -> Bool {
         guard !sideways.frames.contains(where: { $0.contains(start) }) else { return false }
         if drawer || panelShown { return true }
-        return across > 0 ? !((routines && routinePage) || (tasks && taskPage) || (work && workPage)) : hasPanel
+        return across > 0 ? !((routines && routinePage) || (tasks && taskPage)) : hasPanel
     }
 
     /// Where a drag that has just been let go leaves the card: past halfway, or flicked there,
@@ -735,11 +735,7 @@ struct ChatView: View {
     }
 
     /// Which of the three pages the drawer opens.
-    private enum Page { case routines, tasks, work }
-
-    /// The two worlds the session list is split into: the chats, and the sessions working in
-    /// a project. The drawer's switch picks one; its rows are what goes into it.
-    private enum World { case chat, work }
+    private enum Page { case routines, tasks }
 
     /// The drawer's actions, named rather than written inline: the drawer is a stack of
     /// arguments as it is, and the shell's body was one expression the type checker could
@@ -751,8 +747,6 @@ struct ChatView: View {
         routines = false
         tasksSelected = false
         tasks = false
-        workSelected = false
-        work = false
         Task { @MainActor in
             drawer = false
         }
@@ -766,8 +760,6 @@ struct ChatView: View {
         routines = false
         tasksSelected = false
         tasks = false
-        workSelected = false
-        work = false
         // The drawer leaves in the tap's own update, as the Work side's control does, so the
         // card is already coming back when the field takes the cursor.
         drawer = false
@@ -780,23 +772,17 @@ struct ChatView: View {
         }
     }
 
-    /// A work session from the drawer: the project was chosen in its own menu, and its page
-    /// opens with the composer that starts the session there — where the backend, the mode
-    /// and the model are chosen before the first words.
-    private func startWorkSessionFromDrawer(_ project: String) {
-        openWorkProject(project)
-    }
-
-    /// The picker lives on the Work index, so the card goes there with the ask: the control
-    /// adds the folder it names, rather than only going to the screen where adding one is
-    /// possible.
-    private func addProjectFromDrawer() {
-        routinesSelected = false
+    private func startFolderSession(_ project: String, _ backend: String) {
         routines = false
-        tasksSelected = false
+        routinesSelected = false
         tasks = false
-        workNewProject = true
-        openPage(.work)
+        tasksSelected = false
+        drawer = false
+        starting = true
+        Task {
+            if await model.startWorkSession(project: project, backend: backend, confirmed: true) { composing = true }
+            starting = false
+        }
     }
 
     private func openSettingsFromDrawer() {
@@ -805,91 +791,22 @@ struct ChatView: View {
         routines = false
         tasksSelected = false
         tasks = false
-        workSelected = false
-        work = false
         settings = true
     }
 
     private func openRoutines() { openPage(.routines) }
     private func openTasks() { openPage(.tasks) }
-    private func chooseChatWorld() { chooseWorld(.chat) }
-    private func chooseWorkWorld() { chooseWorld(.work) }
-    private func openWorkProject(_ id: String) { openPage(.work, project: id) }
-
-    /// A session of a project is the ordinary chat, working there: the card leaves the Work
-    /// page and the drawer, and the session opens behind it.
-    private func openWorkSession(_ id: String) {
-        Task { @MainActor in
-            await model.resume(id)
-            leaveWork(focusing: false)
-            drawer = false
-        }
-    }
-
-    /// The drawer's switch, which moves the world without closing the drawer. The list it
-    /// has just changed stays in front, and the card behind is put where that world begins —
-    /// the session the side was left on, or the place it starts from — so swiping the drawer
-    /// away lands where the switch said it would. A side already in front goes up to its
-    /// home, which is the Work index and, for Chat, the chat it is already showing.
-    private func chooseWorld(_ world: World) {
-        routinesSelected = false
-        routines = false
-        tasksSelected = false
-        tasks = false
-        switch world {
-        case .chat:
-            workSelected = false
-            work = false
-            // A work session cannot become a chat: leaving one is going back to the chat
-            // this side was last in, the browser's own rule.
-            guard work || model.sessionProject != nil else { return }
-            if let last = model.lastChatSession, model.sessions.contains(where: { $0.id == last }) {
-                Task { await model.resume(last) }
-            } else {
-                Task { await model.newSession() }
-            }
-        case .work:
-            // Already in Work's world — the card is its index or a project's page, or the
-            // session in front works in a project: the press goes up to the projects, as the
-            // browser's switch does.
-            if work || model.sessionProject != nil {
-                workSelected = true
-                work = true
-                workProject = nil
-                workPage = false
-                return
-            }
-            // A chat goes to the work session this side was last in, or to the projects.
-            if let last = model.lastWorkSession, model.sessions.contains(where: { $0.id == last }) {
-                workSelected = false
-                work = false
-                workPage = false
-                Task { await model.resume(last) }
-            } else {
-                workSelected = true
-                work = true
-                workProject = nil
-                workPage = false
-            }
-        }
-    }
-
     /// Coming out of the drawer onto a page: the page takes its place on the card first while
     /// `drawer` is still up (`rest` unchanged, so no animation transaction runs on the swap),
-    /// and the next turn closes `drawer` so `.animation(Self.lidMove, value: rest)` slides the
+    /// and the next turn closes `drawer` so `.animation(reduceMotion ? nil : Self.lidMove, value: rest)` slides the
     /// already-swapped card across the screen.
-    private func openPage(_ page: Page, project: String? = nil) {
+    private func openPage(_ page: Page) {
         closeMenu()
         model.panelOpen = false
-        // A page opened without a project lands on the index, never on whichever project
-        // some earlier visit asked for.
-        workProject = page == .work ? project : nil
         routinesSelected = page == .routines
         routines = page == .routines
         tasksSelected = page == .tasks
         tasks = page == .tasks
-        workSelected = page == .work
-        work = page == .work
         Task { @MainActor in
             drawer = false
         }
@@ -942,6 +859,7 @@ struct ChatView: View {
     /// changed, so the words go again with the session forked there rather than a second copy
     /// piling on top.
     private func send(_ intent: ClientFrame.Intent = .queue) {
+        guard !submittingEdit else { return }
         guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !drafts.isEmpty else { return }
         let outgoing = (quote.map(quotedLead) ?? "") + draft
         let attached = drafts
@@ -949,10 +867,24 @@ struct ChatView: View {
         // nowhere to put a file: with one attached the words go as a turn of their own —
         // the rule the browser's own composer keeps.
         if let upToTurn = editing, attached.isEmpty {
-            draft = ""
-            quote = nil
-            editing = nil
-            Task { await model.regenerate(prompt: outgoing, upToTurn: upToTurn) }
+            submittingEdit = true
+            let origin = model.sessionId
+            editOrigin = origin
+            let originalDraft = draft
+            Task {
+                let accepted = await model.regenerate(prompt: outgoing, upToTurn: upToTurn)
+                submittingEdit = false
+                if accepted {
+                    if UserDefaults.standard.string(forKey: "milo-draft:\(origin)") == originalDraft {
+                        UserDefaults.standard.removeObject(forKey: "milo-draft:\(origin)")
+                    }
+                    if model.sessionId == origin && draft == originalDraft {
+                        draft = ""
+                        quote = nil
+                        editing = nil
+                    }
+                } else if model.sessionId == origin { composing = true }
+            }
         } else {
             guard model.queueDraft(outgoing, intent: intent, drafts: attached) else { return }
             draft = ""
@@ -1028,19 +960,16 @@ struct ChatView: View {
                     // the disappearing welcome for 380ms and snapping up at the end.
                     ZStack(alignment: .topLeading) {
                         if model.messages.isEmpty {
-                            // The empty state is the thread's only content, but the outer stack
-                            // still leaves its own gap before the one-point end sentinel below it;
-                            // pulling back after the frame has aligned the suggestions to the
-                            // bottom keeps the last line resting above the composer instead of
-                            // sliding behind it.
-                            WelcomeView(claimed: held == true)
-                                .frame(
-                                    minHeight: max(0, boxHeight - MiloTheme.Space.four - 1),
-                                    alignment: .bottom
-                                )
-                                .padding(.bottom, -MiloTheme.Space.six)
-                                .transition(.opacity)
-                                .id(Self.threadTop)
+                            WelcomeView(
+                                claimed: held == true,
+                                keyboardUp: composing
+                            )
+                            .frame(
+                                minHeight: max(0, boxHeight - MiloTheme.Space.four - MiloTheme.Space.six - 1),
+                                alignment: .bottom
+                            )
+                            .transition(.opacity)
+                            .id(Self.threadTop)
                         }
                         LazyVStack(alignment: .leading, spacing: MiloTheme.Space.three) {
                             ForEach(Array(threadPieces.enumerated()), id: \.element.id) { index, piece in
@@ -1277,8 +1206,7 @@ struct ChatView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) { bottom(proxy) }
             // The line floats over the thread, under the bar: it takes no room from what is
             // being read, and comes and goes as a fade rather than a jump.
-            .overlay(alignment: .top) { noteToast }
-            .animation(.smooth(duration: 0.22), value: model.note)
+
         }
     }
 
@@ -1375,59 +1303,6 @@ struct ChatView: View {
                     // controls and the left one, and that difference was the tilt.
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                // A Session that has not begun is where the world is chosen, so the switch is
-                // here the moment the app opens — the drawer's own switch, from the same view.
-                // Once there are words, or a project, the bar names the Session instead.
-                if model.messages.isEmpty, model.sessionProject == nil, !starting {
-                    ModeSwitch(work: false, onChat: chooseChatWorld, onWork: chooseWorkWorld)
-                        .frame(width: 180)
-                }
-
-                // Where this session works, said on a session that has not written anything yet
-                // too: which folder the work happens in is a fact of the session, not of its
-                // words. A project whose folder has gone says so rather than reading as workable.
-                if let project = model.sessionProject {
-                    HStack(spacing: 0) {
-                        Button { openPage(.work, project: project.id) } label: {
-                            HStack(spacing: MiloTheme.Space.two) {
-                                Image(systemName: ProjectMark.symbol(project.icon))
-                                    .font(.system(size: 13, weight: .semibold))
-                                Text(project.name)
-                                    .font(.headline)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                            .padding(.horizontal, MiloTheme.Space.two)
-                            .frame(minHeight: 46)
-                            .foregroundStyle(project.error == nil ? MiloTheme.foreground : MiloTheme.danger)
-                            .contentShape(Rectangle())
-                        }
-                        .buttonStyle(.plain)
-                        .layoutPriority(1)
-                        .accessibilityElement(children: .combine)
-                        .accessibilityLabel(project.error == nil ? "Project: \(project.name)" : "Project: \(project.name), \(project.error ?? "")")
-                        .accessibilityHint("Opens the project's page")
-
-                        if model.sessionBackend?.kind == "command-code" {
-                            Button { showCommandCodeInfo = true } label: {
-                                SessionBackendMark(backend: "command-code", size: 18)
-                                    .frame(width: 44, height: 44)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
-                            .accessibilityLabel("Command Code access details")
-                            .accessibilityHint("Shows access and history details for this Session")
-                            .popover(isPresented: $showCommandCodeInfo, attachmentAnchor: .rect(.bounds), arrowEdge: .top) {
-                                commandCodeInfoPopover(path: project.path)
-                                    .presentationCompactAdaptation(.popover)
-                            }
-                        }
-                    }
-                    .padding(.horizontal, MiloTheme.Space.one)
-                    .glassEffect(.regular.interactive(), in: Capsule())
-                    .layoutPriority(1)
-                }
-
                 // Starting a new session and acting on this one: one surface holding both,
                 // the way this platform pairs two controls that belong together. The
                 // platform's glass button draws a surface of its own, so two of them side
@@ -1437,20 +1312,10 @@ struct ChatView: View {
                 // where there is a session to leave — and not while the next one is being
                 // opened, when the words below still belong to the session being left.
                 HStack(spacing: MiloTheme.Space.three) {
-                    if (!model.messages.isEmpty || model.sessionProject != nil), !starting {
+                    if !model.messages.isEmpty, !starting {
                         HStack(spacing: 0) {
                             Button {
-                                if let project = model.sessionProject {
-                                    openWorkProject(project.id)
-                                } else {
-                                    composing = true
-                                    starting = true
-                                    Task { @MainActor in
-                                        await model.newSession()
-                                        starting = false
-                                        composing = true
-                                    }
-                                }
+                                startSessionFromDrawer()
                             } label: {
                                 topGlyph("square.and.pencil")
                                     .frame(width: 46, height: 46)
@@ -1458,26 +1323,12 @@ struct ChatView: View {
                             .accessibilityLabel("New session")
 
                             Menu {
-                                if let project = model.sessionProject, project.error == nil {
-                                    Section {
-                                        Button {
-                                            projectShortcut = ProjectShortcut(projectId: project.id, projectName: project.name, section: .files)
-                                        } label: {
-                                            Label("Files", systemImage: "folder")
-                                        }
-                                        Button {
-                                            projectShortcut = ProjectShortcut(projectId: project.id, projectName: project.name, section: .changes)
-                                        } label: {
-                                            Label("Changes", systemImage: "arrow.triangle.branch")
-                                        }
-                                    }
-                                }
                                 sessionActions(
                                     onRename: { renaming = model.sessionId },
-                                    onExport: model.sessionBackend?.kind == "command-code" ? nil : { Task { await model.export(model.sessionId) } },
+                                    onExport: { Task { await model.export(model.sessionId) } },
                                     onCopy: { model.copyId(model.sessionId) },
-                                    onClear: model.sessionBackend?.kind == "command-code" ? nil : { Task { await model.clear() } },
-                                    onDelete: { Task { await model.delete(model.sessionId) } }
+                                    onClear: { destructionSession = model.sessionId; destruction = false },
+                                    onDelete: { destructionSession = model.sessionId; destruction = true }
                                 )
                             } label: {
                                 topGlyph("ellipsis")
@@ -1624,7 +1475,9 @@ struct ChatView: View {
             // the way, an error holding longer because it is the one worth reading. The same
             // life the browser's own notice keeps.
             .task(id: note) {
-                try? await Task.sleep(for: .seconds(note.failed ? 9 : 5))
+                do { try await Task.sleep(for: .seconds(note.failed ? 9 : 5)) }
+                catch { return }
+                guard model.note == note else { return }
                 model.dismissNote()
             }
         }
@@ -1678,54 +1531,122 @@ struct WelcomeView: View {
     /// would take the lift for a press of its own; the card's own claim is what says it was
     /// a swipe and the line goes unanswered — the row is wide, and the finger never leaves it.
     let claimed: Bool
+    let keyboardUp: Bool
     @Environment(AppModel.self) private var model
 
-    /// The heading and the ways in under it. The lines are the browser's own set — the last
-    /// conversation and the ideas the model drew — drawn the way this platform lists a
-    /// choice: an icon and its words on a plain row, no card and nothing drawn around it.
-    /// Work is not offered here: a session that works in a folder starts on that folder's
-    /// own page, and the drawer is where the two worlds are chosen.
-    var body: some View {
-        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-            Text("What's on your mind?")
-                .font(MiloTheme.Text.title)
-                .foregroundStyle(MiloTheme.foreground)
-                .padding(.top, MiloTheme.Space.two)
+    private var rows: [[Suggestion]] {
+        let items = model.suggestions
+        var result: [[Suggestion]] = []
+        var index = 0
+        while index < items.count {
+            let end = min(index + 2, items.count)
+            result.append(Array(items[index..<end]))
+            index = end
+        }
+        return result
+    }
 
-            VStack(alignment: .leading, spacing: 0) {
-                ForEach(model.suggestions) { suggestion in
-                    line(suggestion)
+    var body: some View {
+        VStack(spacing: 0) {
+            Spacer(minLength: keyboardUp ? 0 : MiloTheme.Space.four)
+
+            hero
+
+            Spacer(minLength: keyboardUp ? MiloTheme.Space.three : MiloTheme.Space.five)
+
+            VStack(spacing: keyboardUp ? MiloTheme.Space.two : MiloTheme.Space.three) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, pair in
+                    HStack(spacing: keyboardUp ? MiloTheme.Space.two : MiloTheme.Space.three) {
+                        ForEach(pair) { suggestion in
+                            card(suggestion)
+                        }
+                    }
+                    .fixedSize(horizontal: false, vertical: true)
                 }
             }
             .animation(.easeInOut(duration: 0.3), value: model.ideas)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity)
+        .animation(.spring(duration: 0.35, bounce: 0.14), value: keyboardUp)
     }
 
-    /// One way in: its mark, its words, and what a press does — the prompt said as a
-    /// message, or the session it names opened.
-    ///
-    /// The line is drawn a step off the heading's white: the mark and the words share
-    /// one quiet grey — a tone down from the platform's own secondary — so the row reads
-    /// as a way in rather than as the answer.
-    private func line(_ suggestion: Suggestion) -> some View {
-        Button {
+    private var hero: some View {
+        let layout = keyboardUp
+            ? AnyLayout(HStackLayout(alignment: .center, spacing: MiloTheme.Space.three))
+            : AnyLayout(VStackLayout(alignment: .center, spacing: MiloTheme.Space.three))
+
+        return layout {
+            ZStack {
+                Circle()
+                    .fill(MiloTheme.accent.opacity(0.18))
+                    .frame(width: keyboardUp ? 52 : 72, height: keyboardUp ? 52 : 72)
+                    .blur(radius: keyboardUp ? 12 : 16)
+                MiloMark(size: keyboardUp ? 24 : 34)
+                    .frame(width: keyboardUp ? 44 : 60, height: keyboardUp ? 44 : 60)
+                    .glassEffect(.regular, in: Circle())
+            }
+
+            VStack(alignment: keyboardUp ? .leading : .center, spacing: MiloTheme.Space.one) {
+                Text("What's on your mind?")
+                    .font(MiloTheme.Text.title)
+                    .foregroundStyle(MiloTheme.foreground)
+                    .multilineTextAlignment(keyboardUp ? .leading : .center)
+
+                Text("Let's make something of it.")
+                    .font(MiloTheme.Text.base)
+                    .foregroundStyle(MiloTheme.muted)
+                    .multilineTextAlignment(keyboardUp ? .leading : .center)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: keyboardUp ? .leading : .center)
+    }
+
+    private func card(_ suggestion: Suggestion) -> some View {
+        let isResume: Bool = {
+            if case .resume = suggestion.act { return true }
+            return false
+        }()
+        let headLayout = keyboardUp
+            ? AnyLayout(HStackLayout(alignment: .center, spacing: MiloTheme.Space.two))
+            : AnyLayout(VStackLayout(alignment: .leading, spacing: MiloTheme.Space.three))
+
+        return Button {
             press(suggestion)
         } label: {
-            HStack(spacing: MiloTheme.Space.three) {
-                Image(systemName: suggestion.symbol)
-                    .font(.system(size: 20, weight: .regular))
-                    .foregroundStyle(MiloTheme.muted2)
-                    .frame(width: 28, alignment: .center)
-                Text(suggestion.title)
-                    .font(MiloTheme.Text.body)
-                    .foregroundStyle(MiloTheme.muted2)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+            VStack(alignment: .leading, spacing: keyboardUp ? MiloTheme.Space.two : MiloTheme.Space.one) {
+                headLayout {
+                    Image(systemName: suggestion.symbol)
+                        .font(.system(size: keyboardUp ? 13 : 15, weight: .semibold))
+                        .foregroundStyle(isResume ? MiloTheme.accent : MiloTheme.foreground)
+                        .frame(width: keyboardUp ? 26 : 32, height: keyboardUp ? 26 : 32)
+                        .background(
+                            isResume ? MiloTheme.accent.opacity(0.14) : MiloTheme.surfaceRaised,
+                            in: Circle()
+                        )
+
+                    Text(suggestion.title)
+                        .font(MiloTheme.Text.base.weight(.semibold))
+                        .foregroundStyle(MiloTheme.foreground)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+
                 Spacer(minLength: 0)
+
+                Text(suggestion.detail)
+                    .font(MiloTheme.Text.small)
+                    .foregroundStyle(MiloTheme.muted)
+                    .lineLimit(keyboardUp ? 1 : 2)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(.vertical, MiloTheme.Space.three)
-            .contentShape(Rectangle())
+            .padding(keyboardUp ? MiloTheme.Space.three : MiloTheme.Space.three + 2)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(
+                MiloTheme.surface,
+                in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
         }
         .buttonStyle(PressableStyle())
     }

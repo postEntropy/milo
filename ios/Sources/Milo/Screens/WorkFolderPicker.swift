@@ -8,6 +8,8 @@ struct FolderPicker: View {
     @State private var listing: FolderListing?
     @State private var error: String?
     @State private var busy = false
+    @State private var attemptedPath: String?
+    @State private var pathDraft = ""
     /// Whether a folder name is being asked for — a project's folder may not exist yet,
     /// and a picker with no way to make one is a picker that can only say no.
     @State private var naming = false
@@ -16,6 +18,14 @@ struct FolderPicker: View {
     var body: some View {
         NavigationStack {
             List {
+                Section("Folder path") {
+                    TextField("Path on the host", text: $pathDraft)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .onSubmit { Task { await open(pathDraft) } }
+                    Button("Open folder") { Task { await open(pathDraft) } }
+                        .disabled(busy || pathDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
                 if let error {
                     Section {
                         Text(error)
@@ -23,7 +33,7 @@ struct FolderPicker: View {
                             .foregroundStyle(MiloTheme.danger)
                         // A folder that could not be read left the way forward disabled;
                         // this is the way to ask again instead of a dead end.
-                        Button("Try again") { Task { await open(listing?.path) } }
+                        Button("Try again") { Task { await open(attemptedPath) } }
                             .disabled(busy)
                     }
                 }
@@ -128,10 +138,12 @@ struct FolderPicker: View {
     }
 
     private func make(parent: String, name: String) async {
+        attemptedPath = parent
         busy = true
         defer { busy = false }
         do {
             listing = try await model.createFolder(parent, name: name)
+            pathDraft = listing?.path ?? ""
             error = nil
         } catch {
             self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
@@ -139,10 +151,12 @@ struct FolderPicker: View {
     }
 
     private func open(_ path: String?) async {
+        attemptedPath = path
         busy = true
         defer { busy = false }
         do {
             listing = try await model.browseFolders(path)
+            pathDraft = listing?.path ?? ""
             error = nil
         } catch {
             self.error = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription

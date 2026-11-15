@@ -51,7 +51,7 @@ See [Memory evaluation](memory-evaluation.md) for the scope, failure cases and r
   - `jobs/` — the background jobs: the manager, each job's state and output log, and its two tools.
   - `config/` — paths, zod schema, presets, and the load/save that edits the commented document
     (`document.ts`, `comments.ts`).
-  - `work.ts` / `work-diff.ts` — the Work tab's folder tree, file pages and git changes.
+  - `work.ts` / `work-diff.ts` — a Session folder’s tree, file pages and git changes.
   - `runtime.ts` / `session.ts` / `bootstrap.ts` / `history.ts` (the log and its readout) /
     `traces.ts` (the execution log).
 - `src/gateways/` — `cli/` (Ink), `telegram/` (grammY), `discord/` (discord.js) and `web/` (the HTTP +

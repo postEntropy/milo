@@ -281,8 +281,6 @@ final class AppModel {
     private(set) var projectsRead = false
     /// The session each world was last in, so the drawer's switch goes back to it: a work
     /// session cannot become a chat, so leaving one is going back to the chat last read.
-    private(set) var lastChatSession: String?
-    private(set) var lastWorkSession: String?
     /// A session a tapped reply notice asked to open; the chat reads it, then clears it.
     var pendingSession: String?
     /// Whether the session now opening came from such a tap. Taken back by the chat once it
@@ -296,16 +294,11 @@ final class AppModel {
     /// until the daemon draws them; the standing four stand in meanwhile.
     private(set) var ideas: [Idea] = []
 
-    /// The lines the welcome screen draws, from what is actually here — the browser's
+    /// The cards the welcome screen draws, from what is actually here — the browser's
     /// own builder, over the session list and the ideas.
     var suggestions: [Suggestion] {
-        // The chats, as the drawer lists them: a work session belongs to Work, so the
-        // welcome does not offer one to pick up here. A session whose project was removed is
-        // a chat like the drawer treats it, and is offered again rather than lost.
         buildSuggestions(
-            sessions: sessions.filter {
-                !$0.work
-            },
+            sessions: sessions,
             ideas: ideas,
             currentId: sessionId
         )
@@ -568,8 +561,6 @@ final class AppModel {
         projects = []
         projectsError = nil
         projectsRead = false
-        lastChatSession = nil
-        lastWorkSession = nil
         panel = nil
         pending = nil
         note = nil
@@ -1095,16 +1086,41 @@ final class AppModel {
         }
     }
 
-    /// Writes the session out on the machine hosting Milo. Nothing here changes, so
-    /// the one thing it has to say is where the file landed — or that there was no log
-    /// to write, which is the daemon answering nothing rather than refusing.
+    /// The shared host export, delivered into the phone's native share/Files flow.
+    private var exportingSession = false
+
     func export(_ id: String) async {
-        guard let account else { return }
+        guard let account, !exportingSession else { return }
+        exportingSession = true
+        defer { exportingSession = false }
         do {
-            let path = try await MiloApi.exportSession(account, id: id)
-            note = path
-                .map { Note("Exported to \($0)", failed: false) }
-                ?? Note("Nothing to export yet — this session has no log.")
+            guard let document = try await MiloApi.exportSession(account, id: id) else {
+                note = Note("Nothing to export yet — this Session has no log.")
+                return
+            }
+            guard let window = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene })
+                .flatMap(\.windows).first(where: \.isKeyWindow),
+                  var presenter = window.rootViewController else {
+                note = Note("Could not open the export sheet. Try again.")
+                return
+            }
+            while let presented = presenter.presentedViewController { presenter = presented }
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let file = directory.appendingPathComponent((document.name as NSString).lastPathComponent)
+            try document.content.write(to: file, atomically: true, encoding: .utf8)
+            let share = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+            share.popoverPresentationController?.sourceView = presenter.view
+            share.popoverPresentationController?.sourceRect = CGRect(x: presenter.view.bounds.midX, y: presenter.view.bounds.midY, width: 1, height: 1)
+            share.completionWithItemsHandler = { [weak self] _, completed, _, error in
+                Task { @MainActor in
+                    do { try FileManager.default.removeItem(at: directory) }
+                    catch { self?.failed(error) }
+                    if let error { self?.failed(error) }
+                    else if completed { self?.note = Note("Export shared.", failed: false) }
+                }
+            }
+            presenter.present(share, animated: true)
         } catch {
             failed(error)
         }
@@ -1157,12 +1173,14 @@ final class AppModel {
 
     /// Asking again from an earlier point: the fork, and the words that asked the
     /// first time sent into it.
-    func regenerate(prompt: String, upToTurn: Int) async {
+    @discardableResult
+    func regenerate(prompt: String, upToTurn: Int) async -> Bool {
         await fork(from: upToTurn, then: prompt)
     }
 
-    private func fork(from turn: Int, then prompt: String?) async {
-        guard let account, !sessionId.isEmpty else { return }
+    @discardableResult
+    private func fork(from turn: Int, then prompt: String?) async -> Bool {
+        guard let account, !sessionId.isEmpty else { return false }
         let from = sessionId
         owed = prompt
         owedIntent = nil
@@ -1174,10 +1192,12 @@ final class AppModel {
             AccountStore.save(next)
             phase = .chat(next)
             await reopen(next)
+            return true
         } catch {
             owed = nil
             owedUploads = []
             failed(error)
+            return false
         }
     }
 
@@ -1341,12 +1361,6 @@ final class AppModel {
         do {
             taskLists = try await MiloApi.taskLists(account)
             taskListsError = nil
-        } catch is URLError {
-            // The socket's own glass pill already speaks for a connection that is down or
-            // reconnecting; saying it a second time in the list would draw two different
-            // notices for one outage.
-            connectionSaid = true
-            taskListsError = nil
         } catch {
             taskListsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
         }
@@ -1370,6 +1384,11 @@ final class AppModel {
     @discardableResult
     func addTaskItem(listName: String, item: String) async -> Bool {
         await actOnTaskLists(["action": "add", "name": listName, "item": item])
+    }
+
+    @discardableResult
+    func reopenTaskItem(listName: String, itemId: String) async -> Bool {
+        await actOnTaskLists(["action": "reopen", "name": listName, "itemId": itemId])
     }
 
     @discardableResult
@@ -1402,6 +1421,23 @@ final class AppModel {
     }
 
     // MARK: - Projects
+
+    func setSessionFolder(_ path: String?) async -> Bool {
+        guard let account, !busy, !sessionId.isEmpty else {
+            showNote("Wait for the Session to finish before changing its folder.")
+            return false
+        }
+        do {
+            try await MiloApi.setSessionFolder(account, id: sessionId, path: path)
+            await reopen(account)
+            await refreshProjects()
+            await refreshSessions()
+            return true
+        } catch {
+            failed(error)
+            return false
+        }
+    }
 
     func refreshProjects() async {
         guard let account else { return }
@@ -1578,23 +1614,37 @@ final class AppModel {
 
     func openPicker() async {
         guard let account else { return }
+        modelApplyError = nil
         do {
             if providers.isEmpty { providers = try await MiloApi.providers(account) }
             let wanted = providers.contains { $0.id == providerId } ? providerId : (providers.first?.id ?? "")
             await loadModels(from: wanted)
         } catch {
-            failed(error)
+            modelsError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            models = []
         }
     }
 
+    private var modelCatalogRequest = 0
+    private(set) var catalogProvider = ""
+    private(set) var modelApplying = false
+    private(set) var modelApplyError: String?
+
     func loadModels(from provider: String) async {
         guard let account else { return }
+        modelCatalogRequest += 1
+        let request = modelCatalogRequest
+        catalogProvider = provider
+        models = []
         modelsLoading = true
         modelsError = nil
-        defer { modelsLoading = false }
+        defer { if request == modelCatalogRequest { modelsLoading = false } }
         do {
-            models = try await MiloApi.models(account, provider: provider)
+            let catalog = try await MiloApi.models(account, provider: provider)
+            guard request == modelCatalogRequest else { return }
+            models = catalog
         } catch {
+            guard request == modelCatalogRequest else { return }
             models = []
             // Kept here as well as said in the note: the picker is a sheet over the
             // screen the note is drawn on, so the note alone says it where nobody is
@@ -1604,8 +1654,11 @@ final class AppModel {
         }
     }
 
-    func choose(_ model: String, from provider: String? = nil) async {
-        guard let account else { return }
+    func choose(_ model: String, from provider: String? = nil) async -> Bool {
+        guard let account, !modelApplying else { return false }
+        modelApplying = true
+        modelApplyError = nil
+        defer { modelApplying = false }
         do {
             // A model id belongs to the provider that serves it: picking one from
             // another provider's list moves the install there first.
@@ -1616,8 +1669,17 @@ final class AppModel {
             }
             try await MiloApi.setModel(account, model: model)
             modelName = model
+            return true
         } catch {
-            failed(error)
+            modelApplyError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+            do {
+                let overview = try await MiloApi.overview(account)
+                if let current = overview.live?.model { modelName = current }
+                if let current = overview.live?.provider { providerId = current }
+            } catch {
+                modelApplyError = (modelApplyError ?? "Could not apply the model.") + " The current selection could not be confirmed. Reopen the picker after reconnecting."
+            }
+            return false
         }
     }
 
@@ -2440,13 +2502,6 @@ final class AppModel {
             reopening = false
             sessionProject = ready.project
             sessionBackend = ready.backend ?? SessionBackendView(kind: "milo", state: nil, nativeSessionId: nil, error: nil, pendingTurn: nil)
-            // Where each world was left, for the drawer's switch: a chat is a chat, and a
-            // session working in a project belongs to Work.
-            if ready.project == nil {
-                lastChatSession = ready.sessionId
-            } else {
-                lastWorkSession = ready.sessionId
-            }
             planMode = ready.plan ?? false
             // A reload joins the plan where it stands; a new proposal is what earns approval.
             planProposed = false
@@ -2660,6 +2715,13 @@ final class AppModel {
             ideas = items
         case .paletteState(let sync, let palette):
             applySharedPaletteState(sync: sync, palette: palette)
+        case .sessionFolder(let project):
+            sessionProject = project
+            workMoved += 1
+            Task {
+                await refreshProjects()
+                await refreshSessions()
+            }
         case .jobs(let running):
             jobs = running
         case .routinesChanged:
@@ -2667,11 +2729,13 @@ final class AppModel {
             // what it left rather than from the frame, which carries nothing.
             Task { await refreshRoutines() }
         case .sessionsChanged:
-            // A session started or stopped a turn anywhere in the install: re-read the
-            // list, which carries the running flag, rather than guess it here — and say so
-            // to the screens that draw a folder's own contents.
+            // A session started, stopped, or changed folder anywhere in the install:
+            // refresh both recent folders and sessions, and notify open folder inspectors.
             workMoved += 1
-            Task { await refreshSessions() }
+            Task {
+                await refreshProjects()
+                await refreshSessions()
+            }
         case .workChanged:
             // A step somewhere may have changed what is on disk, with the turn still
             // running. Only the screens drawing a folder act on it: the rest re-read a

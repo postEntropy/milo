@@ -10,7 +10,11 @@ const running: Array<{ stop(): Promise<void> }> = []
  * session's turn begins or ends, and when a step may have changed what is on disk. Both are
  * what a page re-reads what it draws on.
  */
-const runtime = { onSessionsChanged: () => () => {}, onWorkChanged: () => () => {} } as never
+const runtime = {
+  onSessionsChanged: () => () => {},
+  onWorkChanged: () => () => {},
+  onSessionFolderChanged: () => () => {},
+} as never
 
 afterEach(async () => {
   await Promise.all(running.splice(0).map((server) => server.stop()))

@@ -143,6 +143,10 @@ struct ModelInfo: Decodable, Identifiable, Hashable {
 /// The daemon's `/api` surface. Every call carries this device's token; nothing
 /// here needs the install's own.
 enum MiloApi {
+    static func setSessionFolder(_ account: Account, id: String, path: String?) async throws {
+        _ = try await call("session-folder", ["id": id, "path": path.map { $0 as Any } ?? NSNull()], account: account, as: Ack.self)
+    }
+
     static func call<T: Decodable>(
         _ action: String,
         _ body: [String: Any] = [:],
@@ -318,12 +322,11 @@ enum MiloApi {
      as markdown, in the daemon's exports directory — and hands back where it landed.
      Null when there is no log to write, which the daemon says by answering `null`.
      */
-    static func exportSession(_ account: Account, id: String) async throws -> String? {
-        let written = try await call("export", ["id": id, "format": "md"], account: account, as: Written?.self)
-        return written?.path
+    static func exportSession(_ account: Account, id: String) async throws -> ExportedSession? {
+        try await call("export", ["id": id, "format": "md", "download": true], account: account, as: ExportedSession?.self)
     }
 
-    private struct Written: Decodable { let path: String }
+    struct ExportedSession: Decodable { let name: String; let content: String }
 
     static func setModel(_ account: Account, model: String) async throws {
         _ = try await call("set-model", ["model": model], account: account, as: Ack.self)
@@ -740,6 +743,7 @@ struct SettingsOverview: Decodable {
     /// What the runtime holds now. Set when a chat command or another surface
     /// moved something the file does not know about yet.
     struct Live: Decodable {
+        let provider: String?
         let model: String?
         let effort: String?
         let permissionMode: String?

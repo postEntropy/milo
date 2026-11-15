@@ -35,6 +35,7 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   { name: 'sessions', usage: ' [page]', hint: 'list saved sessions' },
   { name: 'resume', usage: ' <id>', hint: 'switch to another session' },
   { name: 'fork', usage: ' [id] [turn]', hint: 'branch into a new session from this or a named session' },
+  { name: 'folder', usage: ' [path|none]', hint: 'choose or clear the working folder for this session' },
   { name: 'stats', hint: 'numbers for the current session' },
   { name: 'jobs', usage: ' [kill <id>]', hint: 'the background jobs, and how they are doing' },
   {

@@ -8,23 +8,17 @@ struct SessionsDrawer: View {
     let tasksSelected: Bool
     /// Which world the session in front belongs to: the card is a project's, or the chat is
     /// a session working in one. The list the drawer opens on follows it.
-    let workMode: Bool
     /// Whether the drawer is uncovered, so the list starts on the world in front each time
     /// it is opened rather than on whichever one was looked at last.
     let revealed: Bool
     let onClose: () -> Void
     let onNewSession: () -> Void
-    let onNewProject: () -> Void
-    let onNewWorkSession: (String) -> Void
+    let onNewFolderSession: (String, String) -> Void
     let onSettings: () -> Void
     let onRoutines: () -> Void
     let onTasks: () -> Void
     /// The switch's two sides. Choosing one moves the card behind the drawer to where that
     /// world begins, while the list it changed stays in front.
-    let onChatWorld: () -> Void
-    let onWorkWorld: () -> Void
-    let onWorkProject: (String) -> Void
-    let onWorkSession: (String) -> Void
     @Environment(AppModel.self) private var model
     /// The session being renamed, by id: the row's own press names one, and the alert
     /// the modifier presents does the rest.
@@ -39,7 +33,6 @@ struct SessionsDrawer: View {
     /// Which half of the list is drawn. It starts on the world in front and is the person's
     /// to move while the drawer is open; chosen here rather than by the card because looking
     /// through the other list is not yet opening anything.
-    @State private var workList = false
     /// The footer's glass, named so the controls that stay keep their skin while the ones
     /// that change melt into place — one material, not two that blink at each other.
     @Namespace private var footerGlass
@@ -64,11 +57,8 @@ struct SessionsDrawer: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .background(MiloTheme.surface.ignoresSafeArea())
         .sessionRename($renaming)
-        .onAppear { workList = workMode }
-        .onChange(of: workMode) { _, next in workList = next }
         .onChange(of: revealed) { _, up in
             if up {
-                workList = workMode
                 closeSearch()
             }
         }
@@ -116,7 +106,7 @@ struct SessionsDrawer: View {
                             .contentShape(Circle())
                     }
                     .glassEffect(.regular.interactive(), in: Circle())
-                    .accessibilityLabel(workList ? "Search work" : "Search chats")
+                    .accessibilityLabel("Search sessions")
                 }
             }
             .padding(.horizontal, MiloTheme.Space.four)
@@ -134,23 +124,7 @@ struct SessionsDrawer: View {
 
             // Which world the list is of, asked in the platform's own shape — and, asked for,
             // the field that narrows it takes that row.
-            if searchOpen {
-                searchField
-            } else {
-                ModeSwitch(
-                    work: workList,
-                    onChat: {
-                        workList = false
-                        onChatWorld()
-                    },
-                    onWork: {
-                        workList = true
-                        onWorkWorld()
-                    },
-                    height: 32
-                )
-                .padding(.horizontal, MiloTheme.Space.three)
-            }
+            if searchOpen { searchField }
 
             if let emptyLine {
                 Text(emptyLine)
@@ -164,11 +138,7 @@ struct SessionsDrawer: View {
             // with the card and flash there each time the drawer is uncovered.
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MiloTheme.Space.one) {
-                    if workList {
-                        workListRows
-                    } else {
-                        chatListRows
-                    }
+                    chatListRows
                 }
                 .padding(.horizontal, MiloTheme.Space.three)
                 .padding(.bottom, Self.controlsClearance)
@@ -195,45 +165,7 @@ struct SessionsDrawer: View {
         // folder's skin melts out beside it, the way the platform's own glass rearranges.
         GlassEffectContainer(spacing: MiloTheme.Space.two) {
             HStack(spacing: MiloTheme.Space.two) {
-                if workList {
-                    if !startableProjects.isEmpty {
-                        Menu {
-                            ForEach(startableProjects) { project in
-                                Button {
-                                    onNewWorkSession(project.id)
-                                } label: {
-                                    Label(project.name, systemImage: ProjectMark.symbol(project.icon))
-                                }
-                            }
-                        } label: {
-                            HStack(spacing: MiloTheme.Space.one + 2) {
-                                Image(systemName: "plus")
-                                    .font(.system(size: 15, weight: .semibold))
-                                Text("New session")
-                                    .font(MiloTheme.Text.base)
-                            }
-                            .foregroundStyle(MiloTheme.accentOn)
-                            .padding(.horizontal, MiloTheme.Space.four)
-                            .frame(height: Self.controlSpan)
-                            .background(MiloTheme.accent, in: Capsule())
-                            .contentShape(Capsule())
-                        }
-                        .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
-                        .glassEffectID("new-session", in: footerGlass)
-                        .accessibilityLabel("New session in a project")
-                    }
-
-                    Button { onNewProject() } label: {
-                        Image(systemName: "folder.badge.plus")
-                            .font(.system(size: 18, weight: .semibold))
-                            .foregroundStyle(MiloTheme.foreground)
-                            .frame(width: Self.controlSpan, height: Self.controlSpan)
-                    }
-                    .glassEffect(.regular.interactive(), in: Circle())
-                    .glassEffectID("new-project", in: footerGlass)
-                    .accessibilityLabel("New project")
-                } else {
-                    Button { onNewSession() } label: {
+                    Button(action: onNewSession) {
                         HStack(spacing: MiloTheme.Space.two) {
                             Image(systemName: "plus")
                                 .font(.system(size: 16, weight: .semibold))
@@ -248,8 +180,6 @@ struct SessionsDrawer: View {
                     }
                     .glassEffect(.regular.tint(MiloTheme.accent).interactive(), in: Capsule())
                     .glassEffectID("new-session", in: footerGlass)
-                }
-
                 Button { onSettings() } label: {
                     Image(systemName: "gearshape")
                         .font(.system(size: 20, weight: .semibold))
@@ -260,7 +190,6 @@ struct SessionsDrawer: View {
                 .glassEffectID("settings", in: footerGlass)
                 .accessibilityLabel("Settings")
             }
-            .animation(.smooth(duration: 0.3), value: workList)
         }
         .padding(.trailing, MiloTheme.Space.three)
         .padding(.bottom, MiloTheme.Space.four)
@@ -295,6 +224,7 @@ struct SessionsDrawer: View {
         }
         .buttonStyle(PressableStyle())
         .accessibilityLabel(title)
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     /// What the search field narrows the list to: the words on the row, the preview and
@@ -307,17 +237,9 @@ struct SessionsDrawer: View {
 
     /// What the Work list says when it holds no project: reading, a read that failed, and
     /// none at all are three different things a bare "none" would flatten into one.
-    private var projectsEmptyLine: String {
-        if model.projectsError != nil { return "Could not read your projects" }
-        if model.projectsLoading || !model.projectsRead { return "Reading your projects…" }
-        return "No projects yet"
-    }
-
-    /// Milo sessions enter the list with a turn; an external Session belongs there from
-    /// creation, because its native thread is already the conversation it will resume.
     private var chats: [SessionSummary] {
         model.sessions.filter {
-            !$0.work && ($0.messageCount > 0 || $0.backend?.kind == "command-code" || $0.id == model.sessionId)
+            $0.messageCount > 0 || $0.backend?.kind == "command-code" || $0.id == model.sessionId
         }
     }
 
@@ -328,24 +250,8 @@ struct SessionsDrawer: View {
 
     /// The projects a session can start in: a folder that is gone is read on its page, and
     /// is not offered here as a place to work.
-    private var startableProjects: [Project] {
-        model.projects.filter { $0.error == nil }
-    }
-
-    /// Whether there is anything for the search to narrow: nothing to find is no magnifier.
-    private var canSearch: Bool {
-        workList ? !model.projects.isEmpty : !chats.isEmpty
-    }
-
-    /// What the list says when it has nothing to draw: reading, a failed read, or none at
-    /// all in Work; a new install or a filter of only empty sessions in Chat.
-    private var emptyLine: String? {
-        if workList {
-            return model.projects.isEmpty ? projectsEmptyLine : nil
-        }
-        guard chats.isEmpty else { return nil }
-        return model.sessions.isEmpty ? "No sessions yet" : "No chats yet"
-    }
+    private var canSearch: Bool { !chats.isEmpty }
+    private var emptyLine: String? { chats.isEmpty ? "No sessions yet" : nil }
 
     /// Folding the field away, which also gives the list back whole.
     private func closeSearch() {
@@ -362,7 +268,7 @@ struct SessionsDrawer: View {
             Image(systemName: "magnifyingglass")
                 .font(MiloTheme.Text.small)
                 .foregroundStyle(MiloTheme.muted)
-            TextField(workList ? "Search work" : "Search chats", text: $query)
+            TextField("Search sessions", text: $query)
                 .font(MiloTheme.Text.base)
                 .foregroundStyle(MiloTheme.foreground)
                 .textInputAutocapitalization(.never)
@@ -446,109 +352,11 @@ struct SessionsDrawer: View {
         }
     }
 
-    /// One project of the Work side: its own name over the sessions it holds, the way the
-    /// index draws it one level in. The name opens the project's page, where the folder and
-    /// the rest of its sessions are; a session opens its chat.
-    private struct WorkGroupRow: Identifiable {
-        let project: Project
-        let sessions: [SessionSummary]
-        /// Every session the project holds, drawn or behind "All N sessions".
-        let total: Int
-        var id: String { project.id }
-    }
-
-    private var workGroups: [WorkGroupRow] {
-        model.projects.compactMap { project in
-            let mine = model.sessions
-                .filter { $0.project == project.id }
-                .sorted { $0.updatedAt > $1.updatedAt }
-            let named = searched && project.name.lowercased().contains(text)
-            let matching = searched && !named ? mine.filter { $0.searchText.contains(text) } : mine
-            if searched && !named && matching.isEmpty { return nil }
-            return WorkGroupRow(
-                project: project,
-                sessions: searched ? matching : matching.filter(\.workInline),
-                total: mine.count
-            )
-        }
-    }
-
-    @ViewBuilder private var workListRows: some View {
-        if searched {
-            let totalMatching = workGroups.reduce(0) { $0 + $1.sessions.count }
-            Text(totalMatching == 0 ? "No sessions found." : (totalMatching == 1 ? "1 session found" : "\(totalMatching) sessions found"))
-                .font(MiloTheme.Text.meta.weight(.medium))
-                .foregroundStyle(MiloTheme.muted)
-                .padding(.horizontal, MiloTheme.Space.three)
-                .padding(.top, MiloTheme.Space.two)
-        }
-        ForEach(workGroups) { group in
-            VStack(alignment: .leading, spacing: 0) {
-                projectHeading(group.project)
-                ForEach(group.sessions) { session in
-                    row(session) {
-                        onWorkSession(session.id)
-                    }
-                }
-                if group.total > group.sessions.count {
-                    Button { onWorkProject(group.project.id) } label: {
-                        HStack(spacing: MiloTheme.Space.two) {
-                            Text("All \(group.total) sessions")
-                            Spacer(minLength: MiloTheme.Space.two)
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 11, weight: .semibold))
-                        }
-                        .font(MiloTheme.Text.meta.weight(.medium))
-                        .foregroundStyle(MiloTheme.muted)
-                        .padding(.horizontal, MiloTheme.Space.three)
-                        .padding(.vertical, MiloTheme.Space.two)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("All \(group.total) sessions")
-                }
-            }
-            .padding(.top, MiloTheme.Space.three)
-        }
-    }
-
-    /// A project's name over its sessions: a heading that answers like a row, so opening the
-    /// page is the same press as opening a session. A folder that is gone still opens — its
-    /// page is where the reason is read and the project is removed — and says so here.
-    private func projectHeading(_ project: Project) -> some View {
-        Button { onWorkProject(project.id) } label: {
-            HStack(spacing: MiloTheme.Space.two) {
-                Image(systemName: ProjectMark.symbol(project.icon))
-                    .font(.system(size: 15, weight: .regular))
-                    .foregroundStyle(MiloTheme.muted2)
-                Text(project.name)
-                    .font(MiloTheme.Text.body.weight(.semibold))
-                    .foregroundStyle(MiloTheme.foreground)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer(minLength: MiloTheme.Space.two)
-                if project.error != nil {
-                    Text("Gone")
-                        .font(MiloTheme.Text.meta)
-                        .foregroundStyle(MiloTheme.danger)
-                }
-            }
-            .padding(.horizontal, MiloTheme.Space.three)
-            .padding(.vertical, MiloTheme.Space.two)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(project.error.map { "\(project.name), \($0)" } ?? project.name)
-    }
-
-    /// A session: a tap opens it, a hold lifts it into its card. Not a `Button` — a
-    /// `ButtonStyle` takes the press for its own animation, and the platform's long press
-    /// then never reaches the row, so nothing is ever raised.
     private func row(_ session: SessionSummary, opening: @escaping () -> Void) -> some View {
         SessionRow(
             session: session,
             renaming: $renaming,
-            style: .drawer(current: session.id == model.sessionId),
+            current: session.id == model.sessionId,
             onOpen: opening
         )
     }

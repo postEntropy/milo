@@ -100,8 +100,10 @@ struct Composer: View {
 
             // What `/` offers, above the field: the browser's own palette, drawn from the
             // daemon's catalog so the two surfaces cannot drift.
-            if sessionBackend != "command-code", !palette.isEmpty {
+            if !palette.isEmpty {
                 commandPalette
+            } else if !mentionOptions.isEmpty {
+                mentionPalette
             }
 
             // One capsule, two arrangements, and the surface is one in either: what is
@@ -202,7 +204,7 @@ struct Composer: View {
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, MiloTheme.Space.three)
-                    .frame(height: 34)
+                    .frame(minHeight: 44)
                     .background(
                         MiloTheme.surfaceWarm,
                         in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
@@ -211,6 +213,65 @@ struct Composer: View {
                 }
                 .buttonStyle(PressableStyle())
                 .accessibilityLabel("/\(command.name), \(command.hint)")
+            }
+        }
+        .padding(MiloTheme.Space.two)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .padding(.horizontal, MiloTheme.margin)
+    }
+
+    private var activeMentionRange: Range<String.Index>? {
+        guard let atIndex = draft.lastIndex(of: "@") else { return nil }
+        if atIndex > draft.startIndex {
+            let before = draft[draft.index(before: atIndex)]
+            guard before.isWhitespace || before.isNewline else { return nil }
+        }
+        let afterAt = draft[draft.index(after: atIndex)...]
+        guard !afterAt.contains(where: { $0.isWhitespace || $0.isNewline }) else { return nil }
+        return atIndex..<draft.endIndex
+    }
+
+    private var mentionOptions: [Project] {
+        guard let range = activeMentionRange else { return [] }
+        let query = draft[draft.index(after: range.lowerBound)...].lowercased()
+        let valid = model.projects.filter { $0.error == nil }
+        let matched = query.isEmpty
+            ? valid
+            : valid.filter { $0.name.lowercased().contains(query) || $0.path.lowercased().contains(query) }
+        return Array(matched.prefix(8))
+    }
+
+    private func chooseMention(_ project: Project) {
+        guard let range = activeMentionRange else { return }
+        draft.replaceSubrange(range, with: "@\(project.name) ")
+        focused = true
+    }
+
+    private var mentionPalette: some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+            ForEach(mentionOptions) { project in
+                Button { chooseMention(project) } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: MiloTheme.Space.two) {
+                        Text("@\(project.name)")
+                            .font(MiloTheme.Text.small.weight(.semibold).monospaced())
+                            .foregroundStyle(MiloTheme.foreground)
+                        Text(project.path)
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, MiloTheme.Space.three)
+                    .frame(minHeight: 44)
+                    .background(
+                        MiloTheme.surfaceWarm,
+                        in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
+                    )
+                    .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                }
+                .buttonStyle(PressableStyle())
+                .accessibilityLabel("@\(project.name), \(project.path)")
             }
         }
         .padding(MiloTheme.Space.two)
@@ -250,7 +311,7 @@ struct Composer: View {
                 if canSend {
                     Button { menu = .running } label: {
                         Image(systemName: "ellipsis")
-                            .frame(width: 36, height: 36)
+                            .frame(width: 44, height: 44)
                     }
                     .buttonStyle(PressableStyle())
                     .accessibilityLabel("Turn actions")
@@ -262,7 +323,7 @@ struct Composer: View {
             MiloIconButton(
                 systemName: "paperplane.fill",
                 size: 16,
-                span: 36,
+                span: 44,
                 primary: true,
                 disabled: !canSend,
                 action: { send(.queue) }
@@ -443,7 +504,7 @@ struct Composer: View {
         Image(systemName: "arrow.turn.down.right")
             .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(MiloTheme.accentOn)
-            .frame(width: 36, height: 36)
+            .frame(width: 44, height: 44)
             .background(Circle().fill(MiloTheme.accent))
     }
 
@@ -452,7 +513,7 @@ struct Composer: View {
         Image(systemName: "stop.fill")
             .font(.system(size: 16, weight: .semibold))
             .foregroundStyle(MiloTheme.foreground)
-            .frame(width: 36, height: 36)
+            .frame(width: 44, height: 44)
             .background(Circle().fill(MiloTheme.surface))
     }
 }
