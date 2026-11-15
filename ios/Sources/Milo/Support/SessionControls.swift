@@ -363,7 +363,9 @@ struct ConnectionPill: View {
                     .foregroundStyle(MiloTheme.foreground)
                     .padding(.horizontal, MiloTheme.Space.three)
                     .padding(.vertical, MiloTheme.Space.two)
-                    .background(MiloTheme.surface, in: Capsule())
+                    .contentShape(Capsule())
+                    .buttonStyle(PressableStyle())
+                    .glassEffect(.regular.interactive(), in: Capsule())
             }
             .padding(MiloTheme.Space.three)
             .glassEffect(.regular.tint(tone.opacity(0.12)), in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
