@@ -1,6 +1,7 @@
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { stripVTControlCharacters as stripAnsi } from 'node:util'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { stringify } from 'yaml'
 import { cleanup, render } from 'ink-testing-library'
@@ -119,5 +120,39 @@ describe('Shell layout on small terminals', () => {
     expect(lines.some((line) => line.includes('─'))).toBe(false)
     expect(lines.some((line) => line.includes('line one'))).toBe(true)
     expect(lines.some((line) => line.includes('line three'))).toBe(true)
+  })
+
+  it('shows the adaptive empty-state hero and ● MILO badge without box borders', async () => {
+    const app = render(<Shell initial={loadConfig()} cwd={home} startScreen="chat" />)
+    resize(app, 70, 22)
+    await tick()
+
+    const normalFrame = stripAnsi(app.lastFrame() ?? '')
+    expect(normalFrame).toContain('▄▄█████▄')
+    expect(normalFrame).toContain('▄██████▀')
+    expect(normalFrame).toContain('▀█████▀')
+    expect(normalFrame).toContain('MILO')
+    expect(normalFrame).toContain('deepseek-v4.1-flash')
+    expect(normalFrame).toContain('Default directory')
+    expect(normalFrame).not.toContain('● Ready')
+    expect(normalFrame).not.toMatch(/[─╭╰╮╯│]/)
+
+    resize(app, 42, 12)
+    await tick()
+    const tinyFrame = stripAnsi(app.lastFrame() ?? '')
+    expect(tinyFrame.split('\n').length).toBeLessThanOrEqual(12)
+    expect(tinyFrame).toContain('MILO · ready')
+    expect(tinyFrame).not.toContain('▄▄█████▄')
+    expect(tinyFrame).not.toMatch(/[─╭╰╮╯│]/)
+  })
+
+  it('draws the ● MILO status badge in the non-chat Shell header', async () => {
+    const app = render(<Shell initial={loadConfig()} cwd={home} startScreen="settings" />)
+    resize(app, 80, 24)
+    await tick()
+
+    const headerLine = stripAnsi((app.lastFrame() ?? '').split('\n')[0] ?? '')
+    expect(headerLine).toContain('● ▀▄ MILO')
+    expect(headerLine).toContain('deepseek-v4.1-flash')
   })
 })

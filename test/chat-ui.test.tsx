@@ -1,6 +1,7 @@
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+import { stripVTControlCharacters as stripAnsi } from 'node:util'
 import { useState } from 'react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from 'ink-testing-library'
@@ -97,6 +98,9 @@ interface RenderOptions {
   onOpenModel?: () => void
   onOpenSettings?: () => void
   onSessionChange?: (id: string) => void
+  model?: { provider: string; model: string; effort: ReasoningEffort }
+  sessionFolder?: string | null
+  maxInputTokens?: number
 }
 
 function Harness({ runtime, options }: { runtime: AgentRuntime; options: RenderOptions }) {
@@ -116,6 +120,9 @@ function Harness({ runtime, options }: { runtime: AgentRuntime; options: RenderO
       onOpenSettings={options.onOpenSettings ?? (() => {})}
       onExit={() => {}}
       onSessionChange={options.onSessionChange}
+      model={options.model}
+      sessionFolder={options.sessionFolder}
+      maxInputTokens={options.maxInputTokens}
     />
   )
 }
@@ -1099,6 +1106,143 @@ describe('ChatScreen', () => {
     await waitUntil(() => sent.length === 1)
 
     expect(sent[0]).toBe('first line\nsecond line')
+  })
+
+  it('renders the empty-state hero with two-tone mark, model, folder, and hints, collapsing on tiny viewports', async () => {
+    async function* emptyStream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const app = renderChat(makeRuntime(emptyStream), {
+      model: { provider: 'commandcode', model: 'claude-sonnet-4', effort: 'medium' },
+      sessionFolder: '/tmp/my-workspace',
+    })
+
+    const fullFrame = stripAnsi(app.lastFrame() ?? '')
+    expect(fullFrame).toContain('▄▄█████▄')
+    expect(fullFrame).toContain('▄██████▀')
+    expect(fullFrame).toContain('▀█████▀')
+    expect(fullFrame).toContain('MILO')
+    expect(fullFrame).toContain('claude-sonnet-4')
+    expect(fullFrame).toContain('my-workspace')
+    expect(fullFrame).toContain('Enter send')
+    expect(fullFrame).toContain('/help')
+    expect(fullFrame).not.toContain('● Ready')
+    expect(fullFrame).not.toMatch(/[─╭╰╮╯│]/)
+
+    // Collapses cleanly on short viewports (chatHeight < 8)
+    Object.defineProperty(app.stdout, 'columns', { value: 60, configurable: true })
+    Object.defineProperty(app.stdout, 'rows', { value: 11, configurable: true })
+    app.stdout.emit('resize')
+    await tick()
+
+    const shortFrame = stripAnsi(app.lastFrame() ?? '')
+    expect(shortFrame).toContain('MILO · ready')
+    expect(shortFrame).toContain('Ask Milo anything · /help')
+    expect(shortFrame).not.toContain('▄▄█████▄')
+    expect(shortFrame.split('\n').length).toBeLessThanOrEqual(11)
+    expect(shortFrame).not.toMatch(/[─╭╰╮╯│]/)
+
+    // Collapses cleanly on narrow viewports (columns < 44)
+    Object.defineProperty(app.stdout, 'columns', { value: 38, configurable: true })
+    Object.defineProperty(app.stdout, 'rows', { value: 24, configurable: true })
+    app.stdout.emit('resize')
+    await tick()
+
+    const narrowFrame = stripAnsi(app.lastFrame() ?? '')
+    expect(narrowFrame).toContain('MILO · ready')
+    expect(narrowFrame).not.toContain('▄▄█████▄')
+    expect(narrowFrame).not.toMatch(/[─╭╰╮╯│]/)
+  })
+
+  it('draws a proportional right-edge scrollbar when content overflows and moves the thumb on scroll', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      const lines = Array.from({ length: 60 }, (_, index) => `line ${index}`)
+      yield { type: 'text-delta', delta: lines.join('\n') }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const { stdin, lastFrame } = renderChat(makeRuntime(() => stream()))
+    // Before overflow: no scrollbar
+    expect(stripAnsi(lastFrame() ?? '')).not.toMatch(/[┃┆]/)
+
+    await submit(stdin, 'show many lines')
+    await waitForFrame(lastFrame, 'line 59')
+
+    const atBottom = stripAnsi(lastFrame() ?? '')
+    expect(atBottom).toContain('┃')
+    expect(atBottom).toContain('┆')
+    expect(atBottom).not.toMatch(/[─╭╰╮╯│]/)
+
+    const bottomRows = atBottom.split('\n')
+    const bottomThumbRow = bottomRows.findIndex((row) => row.trimEnd().endsWith('┃'))
+    const bottomTrackRow = bottomRows.findIndex((row) => row.trimEnd().endsWith('┆'))
+    expect(bottomTrackRow).toBeGreaterThan(-1)
+    expect(bottomThumbRow).toBeGreaterThan(bottomTrackRow)
+
+    // Scroll up toward the top of the transcript
+    for (let i = 0; i < 6; i += 1) {
+      stdin.write('\u001b[1;3A')
+      await tick(10)
+    }
+    await tick()
+
+    const scrolledFrame = stripAnsi(lastFrame() ?? '')
+    const scrolledRows = scrolledFrame.split('\n')
+    const scrolledThumbRow = scrolledRows.findIndex((row) => row.trimEnd().endsWith('┃'))
+    expect(scrolledThumbRow).toBeGreaterThan(-1)
+    expect(scrolledThumbRow).toBeLessThan(bottomThumbRow)
+    expect(scrolledFrame).not.toMatch(/[─╭╰╮╯│]/)
+  })
+
+  it('renders the context meter with budget, folder label, and mode badges', async () => {
+    let usageTokens = 12_000
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'usage', inputTokens: usageTokens, outputTokens: 10 }
+      yield { type: 'text-delta', delta: 'ok' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const { lastFrame, stdin } = renderChat(makeRuntime(() => stream()), {
+      mode: 'yolo',
+      model: { provider: 'commandcode', model: 'claude-sonnet-4', effort: 'medium' },
+      sessionFolder: '/tmp/alpha-repo',
+      maxInputTokens: 200_000,
+    })
+
+    const initial = lastFrame() ?? ''
+    const plainInitial = stripAnsi(initial)
+    expect(plainInitial).not.toContain('● Ready')
+    expect(plainInitial).toContain('Unrestricted')
+    expect(plainInitial).toContain('folder alpha-repo')
+    if (initial.includes('\u001b[')) {
+      // danger (#DA392F) on Unrestricted, secondary (#508080) on alpha-repo
+      expect(initial).toContain('\u001b[38;2;218;57;47mUnrestricted')
+      expect(initial).toContain('\u001b[38;2;80;128;128malpha-repo')
+    }
+
+    await submit(stdin, 'first')
+    const lowUsage = await waitForFrame(lastFrame, '◔ 12k/200k tok')
+    if (lowUsage.includes('\u001b[')) {
+      const statusRow = lowUsage.split('\n').find((row) => row.includes('◔ 12k/200k tok')) ?? ''
+      expect(statusRow).toContain('\u001b[38;2;125;115;115m')
+      expect(statusRow).not.toContain('\u001b[38;2;151;108;12m')
+      expect(statusRow).not.toContain('\u001b[38;2;218;57;47m')
+    }
+
+    usageTokens = 150_000
+    await submit(stdin, 'second')
+    const warnUsage = await waitForFrame(lastFrame, '◔ 150k/200k tok')
+    if (warnUsage.includes('\u001b[')) {
+      expect(warnUsage).toContain('\u001b[38;2;151;108;12m◔ 150k/200k tok')
+    }
+
+    usageTokens = 185_000
+    await submit(stdin, 'third')
+    const highUsage = await waitForFrame(lastFrame, '◔ 185k/200k tok')
+    if (highUsage.includes('\u001b[')) {
+      expect(highUsage).toContain('\u001b[38;2;218;57;47m◔ 185k/200k tok')
+    }
   })
 })
 

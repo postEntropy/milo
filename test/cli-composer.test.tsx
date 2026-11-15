@@ -439,4 +439,83 @@ describe('Composer', () => {
     expect(onChange).not.toHaveBeenCalled()
     expect(onSubmit).not.toHaveBeenCalled()
   })
+
+  it('floats the autocomplete popup with a title header, aligned columns, active marker, and gap', async () => {
+    const popupRows: number[] = []
+    const { stdin, lastFrame } = render(
+      <Harness
+        columns={72}
+        maxPopupRows={6}
+        commands={COMMAND_CATALOG}
+        onPopupRowsChange={(rows) => popupRows.push(rows)}
+        onSubmit={() => {}}
+        onRecallHistory={() => {}}
+      />,
+    )
+
+    await send(stdin, '/mo')
+    const frame = lastFrame() ?? ''
+    const lines = frame.split('\n')
+    expect(frame).toContain('Commands (3)')
+    expect(frame).toContain('Tab complete')
+    expect(frame).toContain('▸ /mode')
+    // 1 header + 3 items + 1 gap + 3 composer rows = 8 lines
+    expect(lines).toHaveLength(8)
+    expect(lines[4]?.trim()).toBe('')
+    expect(popupRows.at(-1)).toBe(5)
+
+    await send(stdin, CTRL_U)
+    await send(stdin, '/')
+    // Capped at 4 items + 1 header + 1 gap = 6 popup rows
+    expect(popupRows.at(-1)).toBe(6)
+    expect((lastFrame() ?? '').split('\n')).toHaveLength(9)
+  })
+
+  it('reports exact popup rows for @file suggestions and shows a right-aligned attachment badge', async () => {
+    const popupRows: number[] = []
+    const suggestFiles = vi.fn(async () => ['src/a.ts', 'src/b.ts'])
+    const { stdin, lastFrame, rerender } = render(
+      <Harness
+        columns={70}
+        maxPopupRows={6}
+        suggestFiles={suggestFiles}
+        onPopupRowsChange={(rows) => popupRows.push(rows)}
+        onSubmit={() => {}}
+        onRecallHistory={() => {}}
+      />,
+    )
+
+    await send(stdin, 'open @a', 40)
+    const popupFrame = lastFrame() ?? ''
+    expect(popupFrame).toContain('Files (2)')
+    expect(popupFrame).toContain('▸ @src/a.ts')
+    expect(popupRows.at(-1)).toBe(4)
+
+    await send(stdin, ESC)
+    await send(stdin, ' and @src/b.ts')
+    expect(lastFrame()).toContain('📎 2')
+
+    // Email addresses are ignored and narrow widths omit the badge cleanly.
+    rerender(
+      <Composer
+        value="email me@example.com"
+        onChange={() => {}}
+        onSubmit={() => {}}
+        onRecallHistory={() => {}}
+        columns={70}
+      />,
+    )
+    expect(lastFrame()).not.toContain('📎')
+
+    rerender(
+      <Composer
+        value="open @src/a.ts"
+        onChange={() => {}}
+        onSubmit={() => {}}
+        onRecallHistory={() => {}}
+        columns={20}
+      />,
+    )
+    expect(lastFrame()).not.toContain('📎')
+  })
 })

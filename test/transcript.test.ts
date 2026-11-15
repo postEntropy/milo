@@ -148,30 +148,73 @@ describe('markdown in the terminal', () => {
   const assistant = (text: string, width = 40) =>
     buildLines([{ kind: 'assistant', text }], width)
 
-  it('shows a subtle language label line when present and keeps the code as it was written', () => {
+  it('shows a language label line with a left rail and highlights fenced code', () => {
     const lines = assistant('Here:\n\n```ts\nconst a = 1\n  indented()\n```\n')
 
     expect(lines.map((line) => line.text)).toEqual([
       'Here:',
       '',
-      'ts',
-      'const a = 1',
-      '  indented()',
+      '▎ ts',
+      '▎ const a = 1',
+      '▎   indented()',
       '',
     ])
-    expect(lines.find((line) => line.text === 'ts')).toMatchObject({
-      color: theme.muted,
-      dim: true,
-    })
-    expect(lines.find((line) => line.text === 'const a = 1')).toMatchObject({
-      color: theme.muted,
-    })
+    const header = lines.find((line) => line.text === '▎ ts')!
+    expect(header.dim).toBeUndefined()
+    expect(header.segments).toEqual([
+      { text: '▎ ', color: theme.secondary },
+      { text: 'ts', color: theme.muted, bold: true },
+    ])
+    const codeLine = lines.find((line) => line.text === '▎ const a = 1')!
+    expect(codeLine.color).toBeUndefined()
+    expect(codeLine.segments).toEqual([
+      { text: '▎ ', color: theme.secondary },
+      { text: 'const', color: theme.accent, bold: true },
+      { text: ' a = ' },
+      { text: '1', color: theme.secondary },
+    ])
   })
 
   it('does not read markdown inside a fence as markdown', () => {
     const lines = assistant('```\n**not bold** and `not code`\n```')
 
-    expect(lines[0]).toMatchObject({ text: '**not bold** and `not code`', color: theme.muted })
+    expect(lines[0]?.text).toBe('▎ **not bold** and `not code`')
+    expect(lines[0]?.segments?.some((segment) => segment.bold)).toBe(false)
+  })
+
+  it('highlights strings, comments, numbers, keywords, and aliases inside fenced code', () => {
+    const lines = assistant('```py\n# note\nreturn "ok" + 42\n```', 60)
+
+    expect(lines[0]?.segments).toEqual([
+      { text: '▎ ', color: theme.secondary },
+      { text: 'py', color: theme.muted, bold: true },
+    ])
+    expect(lines[1]?.segments).toEqual([
+      { text: '▎ ', color: theme.secondary },
+      { text: '# note', color: theme.muted, italic: true },
+    ])
+    expect(lines[2]?.segments).toEqual([
+      { text: '▎ ', color: theme.secondary },
+      { text: 'return', color: theme.accent, bold: true },
+      { text: ' ' },
+      { text: '"ok"', color: theme.success },
+      { text: ' + ' },
+      { text: '42', color: theme.secondary },
+    ])
+  })
+
+  it('preserves multi-line block comments in fenced code', () => {
+    const lines = assistant('```ts\n/* first\nsecond */\nconst x = 2\n```', 60)
+
+    expect(lines[1]?.segments).toEqual([
+      { text: '▎ ', color: theme.secondary },
+      { text: '/* first', color: theme.muted, italic: true },
+    ])
+    expect(lines[2]?.segments).toEqual([
+      { text: '▎ ', color: theme.secondary },
+      { text: 'second */', color: theme.muted, italic: true },
+    ])
+    expect(lines[3]?.segments?.[1]).toEqual({ text: 'const', color: theme.accent, bold: true })
   })
 
   it('drops the markers of inline code and bold', () => {
@@ -189,6 +232,33 @@ describe('markdown in the terminal', () => {
     ])
   })
 
+  it('supports *italic* and _italic_ without breaking snake_case identifiers', () => {
+    const lines = assistant('Use *soft* and _quiet_ with foo_bar_baz')
+
+    expect(lines[0]?.text).toBe('Use soft and quiet with foo_bar_baz')
+    expect(lines[0]?.segments).toEqual([
+      { text: 'Use' },
+      { text: ' soft', italic: true },
+      { text: ' and' },
+      { text: ' quiet', italic: true },
+      { text: ' with foo_bar_baz' },
+    ])
+
+    const plainSnake = assistant('call foo_bar_baz now')
+    expect(plainSnake[0]?.segments).toBeUndefined()
+  })
+
+  it('renders markdown links with underlined accent label and muted URL', () => {
+    const lines = assistant('Read [the guide](https://milo.dev/docs).', 60)
+
+    expect(lines[0]?.text).toBe('Read the guide (https://milo.dev/docs).')
+    expect(lines[0]?.segments).toEqual([
+      { text: 'Read' },
+      { text: ' the guide', color: theme.accent, underline: true },
+      { text: ' (https://milo.dev/docs).', color: theme.muted },
+    ])
+  })
+
   it('does not add a space before punctuation that followed a span', () => {
     const lines = assistant('Use `npm test`.')
 
@@ -202,18 +272,49 @@ describe('markdown in the terminal', () => {
     expect(lines.every((line) => line.segments?.every((segment) => segment.bold))).toBe(true)
   })
 
-  it('renders a heading without its hashes', () => {
-    const lines = assistant('## Notes\nbody')
+  it('renders headings by level without hashes', () => {
+    const lines = assistant('# Main\n## Notes\n### Sub\nbody')
 
-    expect(lines[0]?.text).toBe('Notes')
-    expect(lines[0]?.segments?.[0]).toMatchObject({ bold: true })
-    expect(lines[1]?.text).toBe('body')
+    expect(lines[0]?.text).toBe('Main')
+    expect(lines[0]?.segments).toEqual([{ text: 'Main', bold: true, color: theme.accent }])
+    expect(lines[1]?.text).toBe('Notes')
+    expect(lines[1]?.segments).toEqual([{ text: 'Notes', bold: true, color: theme.secondary }])
+    expect(lines[2]?.text).toBe('Sub')
+    expect(lines[2]?.segments).toEqual([{ text: 'Sub', bold: true }])
+    expect(lines[3]?.text).toBe('body')
+  })
+
+  it('renders pipe tables aligned with bold accent header and no dashes or box rules', () => {
+    const lines = assistant(
+      '| Name | Role | Status |\n| --- | :---: | ---: |\n| Milo | Assistant | `ready` |\n| Ada | QA | ok |',
+      60,
+    )
+
+    expect(lines.map((line) => line.text)).toEqual([
+      'Name  Role       Status',
+      'Milo  Assistant  ready ',
+      'Ada   QA         ok    ',
+    ])
+    expect(lines[0]?.segments?.filter((s) => s.text.trim() !== '')).toEqual([
+      { text: 'Name', bold: true, color: theme.accent },
+      { text: 'Role', bold: true, color: theme.accent },
+      { text: 'Status', bold: true, color: theme.accent },
+    ])
+    expect(lines[1]?.segments?.some((s) => s.text === 'ready' && s.color === theme.success)).toBe(true)
+    const joined = lines.map((line) => line.text).join('\n')
+    expect(joined).not.toContain('---')
+    expect(joined).not.toMatch(/[─╭╰╮╯]/)
   })
 
   it('cuts a line of code at the width instead of overflowing', () => {
     const lines = assistant(`\`\`\`\n${'x'.repeat(50)}\n\`\`\``, 20)
 
-    expect(lines.map((line) => line.text)).toEqual(['x'.repeat(20), 'x'.repeat(20), 'x'.repeat(10)])
+    expect(lines.map((line) => line.text)).toEqual([
+      `▎ ${'x'.repeat(18)}`,
+      `▎ ${'x'.repeat(18)}`,
+      `▎ ${'x'.repeat(14)}`,
+    ])
+    expect(lines.every((line) => line.text.length <= 20)).toBe(true)
   })
 })
 
@@ -321,7 +422,7 @@ describe('rich markdown and transcript items', () => {
     }
   })
 
-  it('renders ui, panel, and steer items without box borders or rules', () => {
+  it('renders ui, panel, and steer items with rails and without box borders or rules', () => {
     const lines = buildLines(
       [
         { kind: 'ui', title: 'Summary', summary: '3 tasks ready' },
@@ -331,6 +432,10 @@ describe('rich markdown and transcript items', () => {
       30,
     )
 
+    const uiLines = lines.filter((line) => line.text.startsWith('▎ '))
+    expect(uiLines.length).toBeGreaterThanOrEqual(2)
+    expect(uiLines.every((line) => line.segments?.[0]?.color === theme.secondary)).toBe(true)
+
     const joined = lines.map((line) => line.text).join('\n')
     expect(joined).toContain('Summary')
     expect(joined).toContain('3 tasks ready')
@@ -339,7 +444,30 @@ describe('rich markdown and transcript items', () => {
     expect(joined).not.toMatch(/[─╭╰╮╯]/)
   })
 
-  it('renders expanded tool args, diff changes, and results with sensible truncation', () => {
+  it('colors +N and -M tool counts in success and danger', () => {
+    const lines = buildLines(
+      [
+        { kind: 'tool', name: 'edit_file', detail: 'src/app.ts', ok: true, counts: '+12 −3' },
+        { kind: 'tool', name: 'write_file', detail: 'src/new.ts', ok: true, counts: '+5' },
+        { kind: 'tool', name: 'edit_file', detail: 'src/old.ts', ok: true, counts: '-2' },
+      ],
+      60,
+    )
+
+    expect(lines[0]?.text).toBe('✏️ edit_file src/app.ts +12 −3')
+    expect(lines[0]?.segments).toEqual([
+      { text: '✏️ ' },
+      { text: 'edit_file', bold: true },
+      { text: ' src/app.ts ' },
+      { text: '+12', color: theme.success },
+      { text: ' ' },
+      { text: '−3', color: theme.danger },
+    ])
+    expect(lines[1]?.segments?.find((s) => s.text === '+5')?.color).toBe(theme.success)
+    expect(lines[2]?.segments?.find((s) => s.text === '-2')?.color).toBe(theme.danger)
+  })
+
+  it('renders expanded tool args, diff changes, and results with a left rail and non-dim truncation', () => {
     const longResult = Array.from({ length: 30 }, (_, index) => `line ${index + 1}`).join('\n')
     const lines = buildLines(
       [
@@ -369,11 +497,80 @@ describe('rich markdown and transcript items', () => {
     )
 
     expect(lines[0]?.text).toBe('✏️ edit_file src/app.ts +1 −1')
+    expect(lines.slice(1).every((line) => line.text.startsWith('▎ '))).toBe(true)
     expect(lines.some((line) => line.text.includes('"path": "src/app.ts"'))).toBe(true)
-    expect(lines.find((line) => line.text === '  - const a = 1')).toMatchObject({ color: theme.danger })
-    expect(lines.find((line) => line.text === '  + const a = 2')).toMatchObject({ color: theme.success })
-    expect(lines.some((line) => line.text.includes('result truncated'))).toBe(true)
+    const fileHeader = lines.find((line) => line.text.startsWith('▎ src/app.ts'))!
+    expect(fileHeader.segments?.[0]).toEqual({ text: '▎ ', color: theme.secondary })
+    const removeLine = lines.find((line) => line.text === '▎ - const a = 1')!
+    expect(removeLine.segments).toEqual([
+      { text: '▎ ', color: theme.muted },
+      { text: '- const a = 1', color: theme.danger },
+    ])
+    const addLine = lines.find((line) => line.text === '▎ + const a = 2')!
+    expect(addLine.segments).toEqual([
+      { text: '▎ ', color: theme.muted },
+      { text: '+ const a = 2', color: theme.success },
+    ])
+    const truncatedNotice = lines.find((line) => line.text.includes('result truncated'))!
+    expect(truncatedNotice.dim).toBeUndefined()
+    expect(truncatedNotice.segments?.[1]).toEqual({
+      text: '… (result truncated)',
+      color: theme.muted,
+      italic: true,
+    })
     expect(lines.map((line) => line.text).join('\n')).not.toMatch(/[─╭╰╮╯]/)
+  })
+
+  it('renders reasoning, todo, and verification items with rails and semantic weights', () => {
+    const lines = buildLines(
+      [
+        { kind: 'reasoning', header: '✻ Thought for 2.4s', text: 'checking constraints' },
+        {
+          kind: 'todo',
+          items: [
+            { content: 'Done task', status: 'completed' },
+            { content: 'Active task', status: 'in_progress' },
+            { content: 'Queued task', status: 'pending' },
+          ],
+        },
+        { kind: 'verification', ok: false, text: 'Checks failed\nAssertionError at line 10' },
+      ],
+      60,
+    )
+
+    const reasoningHeader = lines.find((line) => line.text === '✻ Thought for 2.4s')!
+    expect(reasoningHeader.dim).toBeUndefined()
+    expect(reasoningHeader.segments).toEqual([
+      { text: '✻', color: theme.secondary },
+      { text: ' Thought for 2.4s', color: theme.muted, italic: true },
+    ])
+    const reasoningBody = lines.find((line) => line.text === '▎ checking constraints')!
+    expect(reasoningBody.segments).toEqual([
+      { text: '▎ ', color: theme.secondary },
+      { text: 'checking constraints', color: theme.muted },
+    ])
+
+    const activeTodo = lines.find((line) => line.text === '▎ [>] Active task')!
+    expect(activeTodo.segments).toEqual([
+      { text: '▎ ', color: theme.accent },
+      { text: '[>] Active task', color: theme.accent, bold: true },
+    ])
+    const doneTodo = lines.find((line) => line.text === '▎ [x] Done task')!
+    expect(doneTodo.segments).toEqual([
+      { text: '▎ ', color: theme.muted },
+      { text: '[x] Done task', color: theme.success },
+    ])
+
+    const verdict = lines.find((line) => line.text === '▎ Checks failed')!
+    expect(verdict.segments).toEqual([
+      { text: '▎ ', color: theme.danger },
+      { text: 'Checks failed', color: theme.danger, bold: true },
+    ])
+    const detail = lines.find((line) => line.text === '▎ AssertionError at line 10')!
+    expect(detail.segments).toEqual([
+      { text: '▎ ', color: theme.danger },
+      { text: 'AssertionError at line 10', color: theme.muted },
+    ])
   })
 
   it('keeps unexpanded tools to their single summary line even when detail fields are present', () => {
@@ -406,12 +603,19 @@ describe('rich markdown and transcript items', () => {
 
     const rethemed = buildLines([fixed], 40, resolveTuiTheme('ocean'))
     expect(rethemed[0]).not.toBe(first[0])
+
+    const logoRethemed = buildLines([fixed], 40, { ...theme, logoTop: '#123456' })
+    expect(logoRethemed[0]).not.toBe(first[0])
   })
 })
 
 describe('resolveTuiTheme', () => {
-  it('returns the base theme when unset and maps every palette ID to an accessible accent', () => {
+  it('returns the base theme when unset and maps every palette ID to accessible accent and logo colors', () => {
     expect(resolveTuiTheme()).toEqual(theme)
+    expect(contrastRatio(theme.logoTop, '#FFFCF0')).toBeGreaterThanOrEqual(4.4)
+    expect(contrastRatio(theme.logoTop, '#100F0F')).toBeGreaterThanOrEqual(4.0)
+    expect(contrastRatio(theme.logoBottom, '#FFFCF0')).toBeGreaterThanOrEqual(4.4)
+    expect(contrastRatio(theme.logoBottom, '#100F0F')).toBeGreaterThanOrEqual(4.0)
 
     for (const id of COLOR_PALETTE_IDS) {
       const resolved = resolveTuiTheme(id)
@@ -419,6 +623,10 @@ describe('resolveTuiTheme', () => {
       expect(resolved.surface).toBe(theme.surface)
       expect(contrastRatio(resolved.accent, '#FFFCF0')).toBeGreaterThanOrEqual(4.4)
       expect(contrastRatio(resolved.accent, '#100F0F')).toBeGreaterThanOrEqual(4.0)
+      expect(contrastRatio(resolved.logoTop, '#FFFCF0')).toBeGreaterThanOrEqual(4.4)
+      expect(contrastRatio(resolved.logoTop, '#100F0F')).toBeGreaterThanOrEqual(4.0)
+      expect(contrastRatio(resolved.logoBottom, '#FFFCF0')).toBeGreaterThanOrEqual(4.4)
+      expect(contrastRatio(resolved.logoBottom, '#100F0F')).toBeGreaterThanOrEqual(4.0)
     }
   })
 

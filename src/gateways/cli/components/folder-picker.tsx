@@ -102,7 +102,8 @@ export function FolderPicker({
   }, [query, recentFolders, currentFolder])
 
   const safeSelected = Math.min(selected, Math.max(0, options.length - 1))
-  const listHeight = Math.max(1, maxHeight - 2)
+  const hasFilterGap = maxHeight >= 6
+  const listHeight = Math.max(1, maxHeight - (hasFilterGap ? 4 : 3))
 
   usePickerInput({
     count: options.length,
@@ -127,6 +128,13 @@ export function FolderPicker({
   )
   const visible = options.slice(windowStart, windowStart + listHeight)
 
+  const headerTitle = 'Session Folder'
+  const headerStatus = currentFolder
+    ? truncateLine(currentFolder, Math.max(10, innerWidth - headerTitle.length - 4))
+    : 'Default directory'
+  const showHeaderStatus = innerWidth >= headerTitle.length + headerStatus.length + 2
+  const filterPlaceholder = truncateLine('Filter recent folders or type a path…', Math.max(1, innerWidth - 11))
+
   return (
     <Box
       flexDirection="column"
@@ -135,37 +143,57 @@ export function FolderPicker({
       width={columns}
     >
       <Box justifyContent="space-between" width={innerWidth}>
-        <Text bold>
-          Folder{currentFolder ? ` (${truncateLine(currentFolder, Math.max(10, innerWidth - 40))})` : ''}
-        </Text>
-        <Text color={activeTheme.surfaceText}>↑/↓ move · Enter select · Esc cancel</Text>
+        <Text bold>{headerTitle}</Text>
+        {showHeaderStatus ? <Text color={activeTheme.surfaceText}>{headerStatus}</Text> : null}
       </Box>
 
-      <Box width={innerWidth}>
-        <Text color={activeTheme.surfaceText}>path: </Text>
+      <Box width={innerWidth} marginBottom={hasFilterGap ? 1 : 0}>
+        <Text bold color={activeTheme.surfaceText}>
+          ❯ filter:{' '}
+        </Text>
         <Text>{query}</Text>
         <Text inverse> </Text>
-        {query === '' && (
-          <Text color={activeTheme.surfaceText}>Filter recent folders or type a path…</Text>
-        )}
+        {query === '' && <Text color={activeTheme.surfaceText}>{filterPlaceholder}</Text>}
       </Box>
 
       {visible.map((option, offset) => {
         const absolute = windowStart + offset
         const isSelected = absolute === safeSelected
-        const prefix = isSelected ? '❯ ' : '  '
-        const label = truncateLine(`${prefix}${option.label}`, innerWidth)
+        const prefix = isSelected ? '▸ ' : '  '
+        const icon = option.kind === 'clear' ? '○ ' : option.kind === 'custom' ? '+ ' : '◆ '
+        const label = truncateLine(`${prefix}${icon}${option.label}`, innerWidth)
         const detailRoom = Math.max(0, innerWidth - label.length - 2)
         const detail = option.detail && detailRoom > 3 ? `  ${truncateLine(option.detail, detailRoom)}` : ''
+        const pad = isSelected ? ' '.repeat(Math.max(0, innerWidth - label.length - detail.length)) : ''
+
+        if (isSelected) {
+          return (
+            <Box key={option.key} width={innerWidth}>
+              <Text inverse bold wrap="truncate">
+                {label}
+                {detail}
+                {pad}
+              </Text>
+            </Box>
+          )
+        }
+
+        const labelText = label.slice(prefix.length + icon.length)
         return (
           <Box key={option.key} width={innerWidth}>
-            <Text bold={isSelected} wrap="truncate">
-              <Text bold={isSelected}>{label}</Text>
+            <Text wrap="truncate">
+              <Text>{prefix}</Text>
+              <Text color={activeTheme.surfaceText}>{icon}</Text>
+              <Text bold={option.kind === 'recent'}>{labelText}</Text>
               {detail ? <Text color={activeTheme.surfaceText}>{detail}</Text> : null}
             </Text>
           </Box>
         )
       })}
+
+      <Box width={innerWidth}>
+        <Text color={activeTheme.surfaceText}>↑/↓ move · Enter select · Esc close</Text>
+      </Box>
     </Box>
   )
 }

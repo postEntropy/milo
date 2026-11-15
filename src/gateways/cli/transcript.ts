@@ -1,4 +1,5 @@
 import type { FileChange } from '../../core/change.js'
+import { highlight, languageOf, type CodeRole, type CodeRun } from '../../core/highlight.js'
 import { todoMark, type TodoItem } from '../../core/todos.js'
 import { changeCounts, toolDisplayName, toolIcon, toolInput } from '../tool-line.js'
 import { theme, type ThemeColor, type TuiTheme } from './theme.js'
@@ -9,6 +10,8 @@ export type LineColor = ThemeColor
 export interface LineSegment {
   text: string
   bold?: boolean
+  italic?: boolean
+  underline?: boolean
   color?: LineColor
 }
 
@@ -97,6 +100,8 @@ function themeSignature(activeTheme: TuiTheme): string {
     activeTheme.muted,
     activeTheme.surface,
     activeTheme.surfaceText,
+    activeTheme.logoTop,
+    activeTheme.logoBottom,
   ].join('|')
 }
 
@@ -181,18 +186,32 @@ function renderItem(item: Item, width: number, activeTheme: TuiTheme): Line[] {
       // worth showing — no JSON dump, and nothing when there is nothing
       // (`/tools name`).
       const name = toolDisplayName(item.name)
-      // How much the call moved, in the same two tones the chat and browser count a
-      // write with. The terminal has no colour pair per segment, so the numbers ride
-      // the muted line they belong to.
-      const call = [item.detail ? `${name} ${item.detail}` : name, item.counts]
-        .filter(Boolean)
-        .join(' ')
+      const baseCall = item.detail ? `${name} ${item.detail}` : name
       const head = item.ok ? toolIcon(item.name) : '✗'
-      for (const text of wrapText(`${head} ${call}`, width)) {
-        push(text, {
-          color: item.ok ? activeTheme.muted : activeTheme.danger,
-          segments: boldName(text, name),
-        })
+      const countsText = item.counts?.trim() ?? ''
+      const lineColor = item.ok ? activeTheme.muted : activeTheme.danger
+
+      if (!countsText) {
+        for (const text of wrapText(`${head} ${baseCall}`, width)) {
+          push(text, {
+            color: lineColor,
+            segments: boldName(text, name),
+          })
+        }
+      } else {
+        const full = `${head} ${baseCall} ${countsText}`
+        const normalized = full.replace(/\s+/g, ' ').trim()
+        const countsStart = normalized.length - countsText.length
+        let cursor = 0
+        for (const text of wrapText(full, width)) {
+          const lineStart = cursor
+          push(text, {
+            color: lineColor,
+            segments: toolLineSegments(text, name, countsStart - lineStart, activeTheme),
+          })
+          cursor += text.length
+          if (normalized[cursor] === ' ') cursor += 1
+        }
       }
       if (item.expanded) {
         lines.push(...expandedToolLines(item, width, activeTheme))
@@ -208,14 +227,33 @@ function renderItem(item: Item, width: number, activeTheme: TuiTheme): Line[] {
       for (const text of wrapText(item.text, width)) push(text, { color: activeTheme.muted })
       break
     case 'reasoning': {
-      for (const text of wrapText(item.header, width)) {
-        if (item.header.trim()) push(text, { dim: true })
+      if (item.header.trim()) {
+        for (const [lineIndex, text] of wrapText(item.header, width).entries()) {
+          if (lineIndex === 0 && text.startsWith('✻')) {
+            const rest = text.slice(1)
+            const segments: LineSegment[] = [{ text: '✻', color: activeTheme.secondary }]
+            if (rest) segments.push({ text: rest, color: activeTheme.muted, italic: true })
+            push(text, { color: activeTheme.muted, segments })
+          } else {
+            push(text, {
+              color: activeTheme.muted,
+              segments: [{ text, color: activeTheme.muted, italic: true }],
+            })
+          }
+        }
       }
       if (item.text.trim()) {
-        // Indented, so the thinking reads as a note under the question rather
-        // than as the start of the answer.
-        for (const text of wrapText(item.text, width - 2)) {
-          push(`  ${text}`, { color: activeTheme.muted })
+        const innerWidth = Math.max(1, width - 2)
+        // Indented with a rail, so the thinking reads as a note under the question
+        // rather than as the start of the answer.
+        for (const text of wrapText(item.text, innerWidth)) {
+          push(`▎ ${text}`, {
+            color: activeTheme.muted,
+            segments: [
+              { text: '▎ ', color: activeTheme.secondary },
+              { text, color: activeTheme.muted },
+            ],
+          })
         }
       }
       break
@@ -242,6 +280,7 @@ function renderItem(item: Item, width: number, activeTheme: TuiTheme): Line[] {
       break
     }
     case 'todo': {
+      const innerWidth = Math.max(1, width - 2)
       for (const todo of item.items) {
         const color =
           todo.status === 'completed'
@@ -249,7 +288,15 @@ function renderItem(item: Item, width: number, activeTheme: TuiTheme): Line[] {
             : todo.status === 'in_progress'
               ? activeTheme.accent
               : activeTheme.muted
-        for (const text of wrapText(`${todoMark(todo.status)} ${todo.content}`, width)) push(text, { color })
+        const isActive = todo.status === 'in_progress'
+        const railColor = isActive ? activeTheme.accent : activeTheme.muted
+        for (const text of wrapText(`${todoMark(todo.status)} ${todo.content}`, innerWidth)) {
+          const bodySegment: LineSegment = isActive ? { text, color, bold: true } : { text, color }
+          push(`▎ ${text}`, {
+            color,
+            segments: [{ text: '▎ ', color: railColor }, bodySegment],
+          })
+        }
       }
       break
     }
@@ -257,30 +304,54 @@ function renderItem(item: Item, width: number, activeTheme: TuiTheme): Line[] {
       // The first line is the verdict and wears the colour; the detail under it
       // is the failing command's own output, muted so it does not read as a
       // second verdict.
+      const verdictColor = item.ok ? activeTheme.success : activeTheme.danger
+      const innerWidth = Math.max(1, width - 2)
       for (const [index, line] of item.text.split('\n').entries()) {
-        for (const text of wrapText(line, width)) {
-          push(text, { color: index === 0 ? (item.ok ? activeTheme.success : activeTheme.danger) : activeTheme.muted })
+        const bodyColor = index === 0 ? verdictColor : activeTheme.muted
+        for (const text of wrapText(line, innerWidth)) {
+          const bodySegment: LineSegment =
+            index === 0 ? { text, color: bodyColor, bold: true } : { text, color: bodyColor }
+          push(`▎ ${text}`, {
+            color: bodyColor,
+            segments: [{ text: '▎ ', color: verdictColor }, bodySegment],
+          })
         }
       }
       break
     }
     case 'ui': {
       const title = item.title?.trim()
+      const innerWidth = Math.max(1, width - 2)
       if (title) {
-        for (const text of wrapText(`◆ ${title}`, width)) {
-          push(text, {
+        for (const text of wrapText(`◆ ${title}`, innerWidth)) {
+          push(`▎ ${text}`, {
             color: activeTheme.secondary,
-            segments: [{ text, bold: true, color: activeTheme.secondary }],
+            segments: [
+              { text: '▎ ', color: activeTheme.secondary },
+              { text, bold: true, color: activeTheme.secondary },
+            ],
           })
         }
         if (item.summary.trim()) {
-          for (const text of wrapText(item.summary, Math.max(1, width - 2))) {
-            push(`  ${text}`, { color: activeTheme.muted })
+          for (const text of wrapText(item.summary, innerWidth)) {
+            push(`▎ ${text}`, {
+              color: activeTheme.muted,
+              segments: [
+                { text: '▎ ', color: activeTheme.secondary },
+                { text, color: activeTheme.muted },
+              ],
+            })
           }
         }
       } else {
-        for (const text of wrapText(`◆ ${item.summary}`, width)) {
-          push(text, { color: activeTheme.muted })
+        for (const text of wrapText(`◆ ${item.summary}`, innerWidth)) {
+          push(`▎ ${text}`, {
+            color: activeTheme.muted,
+            segments: [
+              { text: '▎ ', color: activeTheme.secondary },
+              { text, color: activeTheme.muted },
+            ],
+          })
         }
       }
       break
@@ -315,6 +386,16 @@ function renderItem(item: Item, width: number, activeTheme: TuiTheme): Line[] {
 function expandedToolLines(item: Extract<Item, { kind: 'tool' }>, width: number, activeTheme: TuiTheme): Line[] {
   const lines: Line[] = []
   const innerWidth = Math.max(1, width - 2)
+  const pushNotice = (notice: string) => {
+    lines.push({
+      text: `▎ ${notice}`,
+      color: activeTheme.muted,
+      segments: [
+        { text: '▎ ', color: activeTheme.muted },
+        { text: notice, color: activeTheme.muted, italic: true },
+      ],
+    })
+  }
 
   if (item.args !== undefined) {
     const formatted = toolInput(item.name, item.args)
@@ -328,14 +409,12 @@ function expandedToolLines(item: Extract<Item, { kind: 'tool' }>, width: number,
             truncated = true
             break
           }
-          lines.push({ text: `  ${piece}`, color: activeTheme.muted })
+          lines.push({ text: `▎ ${piece}`, color: activeTheme.muted })
           count += 1
         }
         if (truncated) break
       }
-      if (truncated) {
-        lines.push({ text: '  … (args truncated)', color: activeTheme.muted, dim: true })
-      }
+      if (truncated) pushNotice('… (args truncated)')
     }
   }
 
@@ -350,7 +429,14 @@ function expandedToolLines(item: Extract<Item, { kind: 'tool' }>, width: number,
       const counts = changeCounts([file])
       const header = counts ? `${file.path} (${counts})` : file.path
       for (const piece of wrapText(header, innerWidth)) {
-        lines.push({ text: `  ${piece}`, color: activeTheme.secondary })
+        lines.push({
+          text: `▎ ${piece}`,
+          color: activeTheme.secondary,
+          segments: [
+            { text: '▎ ', color: activeTheme.secondary },
+            { text: piece, color: activeTheme.secondary, bold: true },
+          ],
+        })
       }
       const contentWidth = Math.max(1, width - 4)
       for (const entry of file.lines) {
@@ -367,17 +453,20 @@ function expandedToolLines(item: Extract<Item, { kind: 'tool' }>, width: number,
               ? activeTheme.danger
               : activeTheme.muted
         for (const [pieceIndex, piece] of hardChunks(entry.text, contentWidth).entries()) {
-          const prefix = pieceIndex === 0 ? `  ${sign}` : '    '
-          lines.push({ text: `${prefix}${piece}`, color })
+          const prefix = pieceIndex === 0 ? sign : '  '
+          lines.push({
+            text: `▎ ${prefix}${piece}`,
+            color,
+            segments: [
+              { text: '▎ ', color: activeTheme.muted },
+              { text: `${prefix}${piece}`, color },
+            ],
+          })
         }
       }
-      if (file.truncated && !diffTruncated) {
-        lines.push({ text: '  … (diff truncated)', color: activeTheme.muted, dim: true })
-      }
+      if (file.truncated && !diffTruncated) pushNotice('… (diff truncated)')
     }
-    if (diffTruncated) {
-      lines.push({ text: '  … (diff truncated)', color: activeTheme.muted, dim: true })
-    }
+    if (diffTruncated) pushNotice('… (diff truncated)')
   }
 
   if (item.result?.trim()) {
@@ -390,14 +479,12 @@ function expandedToolLines(item: Extract<Item, { kind: 'tool' }>, width: number,
           truncated = true
           break
         }
-        lines.push({ text: `  ${piece}`, color: activeTheme.muted })
+        lines.push({ text: `▎ ${piece}`, color: activeTheme.muted })
         count += 1
       }
       if (truncated) break
     }
-    if (truncated) {
-      lines.push({ text: '  … (result truncated)', color: activeTheme.muted, dim: true })
-    }
+    if (truncated) pushNotice('… (result truncated)')
   }
 
   return lines
@@ -418,41 +505,94 @@ function boldName(text: string, name: string): LineSegment[] {
   ].filter((segment) => segment.text !== '')
 }
 
+/** Splits a tool line into bold tool name and colored `+N` / `−M` diff counts. */
+function toolLineSegments(
+  text: string,
+  name: string,
+  countsOffset: number,
+  activeTheme: TuiTheme,
+): LineSegment[] {
+  const splitAt = Math.max(0, Math.min(text.length, countsOffset))
+  const headPart = text.slice(0, splitAt)
+  const countsPart = text.slice(splitAt)
+  const segments: LineSegment[] = headPart ? boldName(headPart, name) : []
+
+  if (countsPart) {
+    let last = 0
+    for (const match of countsPart.matchAll(/(\+\d+|[-−]\d+)/g)) {
+      if (match.index > last) {
+        segments.push({ text: countsPart.slice(last, match.index) })
+      }
+      const token = match[0]
+      segments.push({
+        text: token,
+        color: token.startsWith('+') ? activeTheme.success : activeTheme.danger,
+      })
+      last = match.index + token.length
+    }
+    if (last < countsPart.length) {
+      segments.push({ text: countsPart.slice(last) })
+    }
+  }
+
+  return segments.length > 0 ? segments : [{ text }]
+}
+
+function isPlainSegment(segment: LineSegment): boolean {
+  return !segment.bold && !segment.italic && !segment.underline && !segment.color
+}
+
 /**
- * Markdown as far as the terminal goes: fenced code blocks (optional language
- * label, code kept as it was written), inline code, bold, headings, unordered
- * and ordered lists with hanging indents, and blockquotes.
+ * Markdown as far as the terminal goes: syntax-highlighted fenced code blocks,
+ * pipe tables, inline code, bold, italic, links, headings, unordered and
+ * ordered lists with hanging indents, and blockquotes.
  */
 function markdownLines(text: string, width: number, activeTheme: TuiTheme): Line[] {
   const lines: Line[] = []
-  let inFence = false
+  const sourceLines = text.split('\n')
 
-  for (const source of text.split('\n')) {
-    if (!inFence) {
-      const open = /^\s*```(.*)$/.exec(source)
-      if (open) {
-        inFence = true
-        const lang = open[1]!.trim()
-        if (lang) {
-          lines.push({ text: lang, color: activeTheme.muted, dim: true })
-        }
-        continue
+  for (let index = 0; index < sourceLines.length; index += 1) {
+    const source = sourceLines[index]!
+    const open = /^\s*```(.*)$/.exec(source)
+    if (open) {
+      const lang = open[1]!.trim()
+      const codeLines: string[] = []
+      while (index + 1 < sourceLines.length) {
+        const next = sourceLines[index + 1]!
+        index += 1
+        if (/^\s*```\s*$/.test(next)) break
+        codeLines.push(next)
       }
-    } else if (/^\s*```\s*$/.test(source)) {
-      inFence = false
-      continue
-    }
-
-    if (inFence) {
-      for (const piece of hardChunks(source, width)) {
-        lines.push({ text: piece, color: activeTheme.muted })
-      }
+      renderCodeBlock(codeLines, lang, width, activeTheme, lines)
       continue
     }
 
     if (source.trim() === '') {
       lines.push({ text: '' })
       continue
+    }
+
+    if (index + 1 < sourceLines.length) {
+      const headerCells = parseTableRow(source)
+      const nextLine = sourceLines[index + 1]!
+      if (
+        headerCells &&
+        (source.trim().startsWith('|') || headerCells.length >= 2) &&
+        isTableSeparatorRow(nextLine, headerCells.length)
+      ) {
+        index += 1
+        const bodyRows: string[][] = []
+        while (index + 1 < sourceLines.length) {
+          const candidate = sourceLines[index + 1]!
+          if (candidate.trim() === '' || /^\s*```/.test(candidate) || isTableSeparatorRow(candidate)) break
+          const rowCells = parseTableRow(candidate)
+          if (!rowCells) break
+          bodyRows.push(rowCells)
+          index += 1
+        }
+        renderTable(headerCells, bodyRows, width, activeTheme, lines)
+        continue
+      }
     }
 
     const quote = /^\s*>\s?(.*)$/.exec(source)
@@ -473,18 +613,229 @@ function markdownLines(text: string, width: number, activeTheme: TuiTheme): Line
       continue
     }
 
-    const heading = /^#{1,6}\s+(.*)$/.exec(source)
-    const segments = inlineSegments(heading ? heading[1]! : source, activeTheme)
-    if (heading) for (const segment of segments) segment.bold = true
+    const heading = /^(#{1,6})\s+(.*)$/.exec(source)
+    if (heading) {
+      const level = heading[1]!.length
+      const headingColor = level === 1 ? activeTheme.accent : level === 2 ? activeTheme.secondary : undefined
+      const segments = inlineSegments(heading[2]!, activeTheme).map((segment) => ({
+        ...segment,
+        bold: true,
+        ...(headingColor && !segment.color ? { color: headingColor } : {}),
+      }))
+      for (const styled of wrapSegments(segments, width)) {
+        const line = styled.map((segment) => segment.text).join('')
+        lines.push({ text: line, segments: styled })
+      }
+      continue
+    }
 
+    const segments = inlineSegments(source, activeTheme)
     for (const styled of wrapSegments(segments, width)) {
       const line = styled.map((segment) => segment.text).join('')
-      const plain = styled.every((segment) => !segment.bold && !segment.color)
+      const plain = styled.every(isPlainSegment)
       lines.push(plain ? { text: line } : { text: line, segments: styled })
     }
   }
 
   return lines.length > 0 ? lines : [{ text: '' }]
+}
+
+function roleSegment(role: CodeRole, text: string, activeTheme: TuiTheme): LineSegment {
+  switch (role) {
+    case 'keyword':
+      return { text, color: activeTheme.accent, bold: true }
+    case 'string':
+      return { text, color: activeTheme.success }
+    case 'number':
+      return { text, color: activeTheme.secondary }
+    case 'comment':
+      return { text, color: activeTheme.muted, italic: true }
+    case 'plain':
+      return { text }
+  }
+}
+
+function splitRunsByNewline(runs: CodeRun[]): CodeRun[][] {
+  const lines: CodeRun[][] = [[]]
+  for (const run of runs) {
+    const parts = run.text.split('\n')
+    for (let i = 0; i < parts.length; i += 1) {
+      if (i > 0) lines.push([])
+      const part = parts[i]!
+      if (part !== '') lines[lines.length - 1]!.push({ role: run.role, text: part })
+    }
+  }
+  return lines
+}
+
+function renderCodeBlock(
+  codeLines: string[],
+  lang: string,
+  width: number,
+  activeTheme: TuiTheme,
+  lines: Line[],
+): void {
+  if (lang) {
+    lines.push({
+      text: `▎ ${lang}`,
+      segments: [
+        { text: '▎ ', color: activeTheme.secondary },
+        { text: lang, color: activeTheme.muted, bold: true },
+      ],
+    })
+  }
+
+  if (codeLines.length === 0) return
+
+  const resolvedLang = lang ? languageOf(lang) : undefined
+  const highlighted = splitRunsByNewline(highlight(codeLines.join('\n'), resolvedLang))
+  const innerWidth = Math.max(1, width - 2)
+
+  for (const lineRuns of highlighted) {
+    if (lineRuns.length === 0) {
+      lines.push({ text: '▎', segments: [{ text: '▎', color: activeTheme.secondary }] })
+      continue
+    }
+
+    const styledChars: Array<{ ch: string; role: CodeRole }> = []
+    for (const run of lineRuns) {
+      for (const ch of Array.from(run.text)) {
+        styledChars.push({ ch, role: run.role })
+      }
+    }
+
+    for (let offset = 0; offset < styledChars.length; offset += innerWidth) {
+      const slice = styledChars.slice(offset, offset + innerWidth)
+      const bodySegments: LineSegment[] = []
+      let currentRole: CodeRole | null = null
+      let buffer = ''
+
+      for (const item of slice) {
+        if (currentRole === item.role) {
+          buffer += item.ch
+        } else {
+          if (currentRole !== null && buffer !== '') {
+            bodySegments.push(roleSegment(currentRole, buffer, activeTheme))
+          }
+          currentRole = item.role
+          buffer = item.ch
+        }
+      }
+      if (currentRole !== null && buffer !== '') {
+        bodySegments.push(roleSegment(currentRole, buffer, activeTheme))
+      }
+
+      const bodyText = bodySegments.map((segment) => segment.text).join('')
+      lines.push({
+        text: `▎ ${bodyText}`,
+        segments: [{ text: '▎ ', color: activeTheme.secondary }, ...bodySegments],
+      })
+    }
+  }
+}
+
+function parseTableRow(line: string): string[] | null {
+  const trimmed = line.trim()
+  if (!trimmed.includes('|')) return null
+  const stripped = trimmed.replace(/^\|/, '').replace(/\|$/, '')
+  const cells = stripped.split(/(?<!\\)\|/).map((cell) => cell.replace(/\\\|/g, '|').trim())
+  return cells.length > 0 ? cells : null
+}
+
+function isTableSeparatorRow(line: string, expectedCols?: number): boolean {
+  const trimmed = line.trim()
+  if (!trimmed.includes('|')) return false
+  const cells = parseTableRow(line)
+  if (!cells) return false
+  if (!trimmed.startsWith('|') && cells.length < 2) return false
+  if (expectedCols !== undefined && cells.length !== expectedCols) return false
+  return cells.every((cell) => /^:?-{1,}:?$/.test(cell))
+}
+
+function truncateSegments(segments: LineSegment[], maxWidth: number): LineSegment[] {
+  const total = segments.reduce((sum, segment) => sum + Array.from(segment.text).length, 0)
+  if (total <= maxWidth) return segments
+  if (maxWidth <= 1) {
+    const first = segments[0]
+    return first ? [{ ...first, text: '…'.slice(0, maxWidth) }] : []
+  }
+  let remaining = maxWidth - 1
+  const out: LineSegment[] = []
+  for (const segment of segments) {
+    if (remaining <= 0) break
+    const chars = Array.from(segment.text)
+    if (chars.length <= remaining) {
+      out.push({ ...segment })
+      remaining -= chars.length
+    } else {
+      out.push({ ...segment, text: `${chars.slice(0, remaining).join('')}…` })
+      remaining = 0
+    }
+  }
+  return out
+}
+
+function renderTable(
+  headerCells: string[],
+  bodyRows: string[][],
+  width: number,
+  activeTheme: TuiTheme,
+  lines: Line[],
+): void {
+  const colCount = Math.max(headerCells.length, ...bodyRows.map((row) => row.length))
+  const parseRow = (row: string[], isHeader: boolean) =>
+    Array.from({ length: colCount }, (_, colIndex) => {
+      const raw = row[colIndex] ?? ''
+      const segments = inlineSegments(raw, activeTheme).map((segment) =>
+        isHeader
+          ? {
+              ...segment,
+              bold: true,
+              color: segment.color ?? activeTheme.accent,
+            }
+          : segment,
+      )
+      const plainLength = segments.reduce((sum, segment) => sum + Array.from(segment.text).length, 0)
+      return { segments, plainLength }
+    })
+
+  const parsedHeader = parseRow(headerCells, true)
+  const parsedBody = bodyRows.map((row) => parseRow(row, false))
+  const allRows = [parsedHeader, ...parsedBody]
+
+  const colWidths = Array.from({ length: colCount }, (_, colIndex) =>
+    Math.max(1, ...allRows.map((row) => row[colIndex]!.plainLength)),
+  )
+
+  const gap = '  '
+  const available = Math.max(colCount, width - gap.length * (colCount - 1))
+  let totalWidth = colWidths.reduce((sum, w) => sum + w, 0)
+  while (totalWidth > available) {
+    let widestIndex = 0
+    for (let i = 1; i < colWidths.length; i += 1) {
+      if (colWidths[i]! > colWidths[widestIndex]!) widestIndex = i
+    }
+    if (colWidths[widestIndex]! <= 1) break
+    colWidths[widestIndex]! -= 1
+    totalWidth -= 1
+  }
+
+  for (const row of allRows) {
+    const rowSegments: LineSegment[] = []
+    for (let colIndex = 0; colIndex < colCount; colIndex += 1) {
+      if (colIndex > 0) rowSegments.push({ text: gap })
+      const cell = row[colIndex]!
+      const colWidth = colWidths[colIndex]!
+      const clipped = truncateSegments(cell.segments, colWidth)
+      const clippedLen = clipped.reduce((sum, segment) => sum + Array.from(segment.text).length, 0)
+      rowSegments.push(...clipped)
+      const pad = colWidth - clippedLen
+      if (pad > 0) rowSegments.push({ text: ' '.repeat(pad) })
+    }
+    const text = rowSegments.map((segment) => segment.text).join('')
+    const plain = rowSegments.every(isPlainSegment)
+    lines.push(plain ? { text } : { text, segments: rowSegments })
+  }
 }
 
 function renderQuoteLine(body: string, width: number, activeTheme: TuiTheme, lines: Line[]): void {
@@ -518,24 +869,33 @@ function renderListLine(marker: string, body: string, width: number, activeTheme
       })
       return
     }
-    const plain = styled.every((segment) => !segment.bold && !segment.color)
+    const plain = styled.every(isPlainSegment)
     lines.push(plain ? { text: `${hang}${text}` } : { text: `${hang}${text}`, segments: [{ text: hang }, ...styled] })
   })
 }
 
-/** `**bold**` and `` `code` `` — the two a terminal answer reaches for. */
+const INLINE_TOKEN =
+  /`([^`\n]+)`|\[([^\]\n]+)\]\(([^)\s]+)\)|\*\*([^*\n]+?)\*\*|(?<!\*)\*(?!\*)(?!\s)([^*\n]+?)(?<!\s)\*(?!\*)|(?<![A-Za-z0-9_])_(?!\s)([^_\n]+?)(?<!\s)_(?![A-Za-z0-9_])/g
+
+/** Inline markup: `` `code` ``, `[label](url)`, `**bold**`, and `*italic*` / `_italic_`. */
 function inlineSegments(text: string, activeTheme: TuiTheme): LineSegment[] {
   const segments: LineSegment[] = []
   let last = 0
 
-  for (const match of text.matchAll(/\*\*([^*]+)\*\*|`([^`]+)`/g)) {
+  for (const match of text.matchAll(INLINE_TOKEN)) {
     if (match.index > last) segments.push({ text: text.slice(last, match.index) })
-    const bold = match[1]
-    segments.push(
-      bold !== undefined
-        ? { text: bold, bold: true }
-        : { text: match[2]!, color: activeTheme.success },
-    )
+    if (match[1] !== undefined) {
+      segments.push({ text: match[1], color: activeTheme.success })
+    } else if (match[2] !== undefined && match[3] !== undefined) {
+      segments.push({ text: match[2], color: activeTheme.accent, underline: true })
+      segments.push({ text: ` (${match[3]})`, color: activeTheme.muted })
+    } else if (match[4] !== undefined) {
+      segments.push({ text: match[4], bold: true })
+    } else if (match[5] !== undefined) {
+      segments.push({ text: match[5], italic: true })
+    } else if (match[6] !== undefined) {
+      segments.push({ text: match[6], italic: true })
+    }
     last = match.index + match[0].length
   }
   if (last < text.length) segments.push({ text: text.slice(last) })
@@ -559,8 +919,22 @@ function wrapSegments(segments: LineSegment[], width: number): LineSegment[][] {
 
   const add = (text: string, style: LineSegment) => {
     const last = line[line.length - 1]
-    if (last && last.bold === style.bold && last.color === style.color) last.text += text
-    else line.push({ text, bold: style.bold, color: style.color })
+    if (
+      last &&
+      Boolean(last.bold) === Boolean(style.bold) &&
+      Boolean(last.italic) === Boolean(style.italic) &&
+      Boolean(last.underline) === Boolean(style.underline) &&
+      last.color === style.color
+    ) {
+      last.text += text
+    } else {
+      const next: LineSegment = { text }
+      if (style.bold) next.bold = true
+      if (style.italic) next.italic = true
+      if (style.underline) next.underline = true
+      if (style.color) next.color = style.color
+      line.push(next)
+    }
     length += text.length
   }
 
@@ -573,10 +947,10 @@ function wrapSegments(segments: LineSegment[], width: number): LineSegment[][] {
   for (const match of plain.matchAll(/\S+/g)) {
     const word = match[0]
     const at = match.index
-    const style = styleOf[at]
+    const style = styleOf[at]!
     // Whether a space stood before this word. Punctuation that follows a span —
     // `**cuidado**.` — had none, and must not gain one.
-    const spaced = at > 0 && /\s/.test(plain[at - 1])
+    const spaced = at > 0 && /\s/.test(plain[at - 1]!)
 
     if (word.length > limit) {
       // Longer than a whole line — a URL, a hash — cut instead of overflowed.

@@ -223,13 +223,18 @@ function findAtMention(value: string, cursor: number): AtMention | null {
   }
 }
 
-function matchCommands(value: string, commands: CommandEntry[] | undefined, maxRows: number): CommandEntry[] {
-  if (!commands || commands.length === 0 || maxRows <= 0) return []
-  if (!value.startsWith('/') || value.includes('\n')) return []
+interface CommandMatchResult {
+  matches: CommandEntry[]
+  total: number
+}
+
+function matchCommands(value: string, commands: CommandEntry[] | undefined, maxRows: number): CommandMatchResult {
+  if (!commands || commands.length === 0 || maxRows <= 0) return { matches: [], total: 0 }
+  if (!value.startsWith('/') || value.includes('\n')) return { matches: [], total: 0 }
   const rest = value.slice(1)
-  if (/\s/.test(rest)) return []
+  if (/\s/.test(rest)) return { matches: [], total: 0 }
   const query = rest.toLowerCase()
-  if (!query) return commands.slice(0, maxRows)
+  if (!query) return { matches: commands.slice(0, maxRows), total: commands.length }
   const prefix: CommandEntry[] = []
   const contains: CommandEntry[] = []
   for (const cmd of commands) {
@@ -237,7 +242,102 @@ function matchCommands(value: string, commands: CommandEntry[] | undefined, maxR
     if (lower.startsWith(query)) prefix.push(cmd)
     else if (lower.includes(query)) contains.push(cmd)
   }
-  return [...prefix, ...contains].slice(0, maxRows)
+  const all = [...prefix, ...contains]
+  return { matches: all.slice(0, maxRows), total: all.length }
+}
+
+type TokenKind = 'normal' | 'command' | 'mention'
+
+interface TokenRange {
+  start: number
+  end: number
+  kind: Exclude<TokenKind, 'normal'>
+}
+
+interface StyledChunk {
+  start: number
+  text: string
+  kind: TokenKind
+}
+
+/** Finds inline `/command` prefix and `@file` mention ranges within `value`. */
+function findInlineTokens(value: string): { tokens: TokenRange[]; mentionCount: number } {
+  const tokens: TokenRange[] = []
+  let mentionCount = 0
+
+  if (value.startsWith('/')) {
+    const cmdMatch = /^\/\S+/.exec(value)
+    if (cmdMatch) {
+      tokens.push({ start: 0, end: cmdMatch[0].length, kind: 'command' })
+    }
+  }
+
+  const mentionPattern = /@"[^"\n]+"|@[^\s\n]+/g
+  for (const match of value.matchAll(mentionPattern)) {
+    const start = match.index ?? 0
+    if (start > 0 && !/[\s([{"']/.test(value[start - 1]!)) continue
+    const end = start + match[0].length
+    if (tokens.some((tok) => start < tok.end && end > tok.start)) continue
+    tokens.push({ start, end, kind: 'mention' })
+    mentionCount += 1
+  }
+
+  tokens.sort((a, b) => a.start - b.start)
+  return { tokens, mentionCount }
+}
+
+function sliceStyledChunks(value: string, sliceStart: number, sliceEnd: number, tokens: TokenRange[]): StyledChunk[] {
+  if (sliceEnd <= sliceStart) return []
+  const chunks: StyledChunk[] = []
+  let pos = sliceStart
+
+  for (const tok of tokens) {
+    if (tok.end <= pos) continue
+    if (tok.start >= sliceEnd) break
+    if (tok.start > pos) {
+      chunks.push({ start: pos, text: value.slice(pos, tok.start), kind: 'normal' })
+    }
+    const overlapStart = Math.max(pos, tok.start)
+    const overlapEnd = Math.min(sliceEnd, tok.end)
+    if (overlapEnd > overlapStart) {
+      chunks.push({ start: overlapStart, text: value.slice(overlapStart, overlapEnd), kind: tok.kind })
+      pos = overlapEnd
+    }
+  }
+
+  if (pos < sliceEnd) {
+    chunks.push({ start: pos, text: value.slice(pos, sliceEnd), kind: 'normal' })
+  }
+
+  return chunks
+}
+
+function tokenKindAt(offset: number, tokens: TokenRange[]): TokenKind {
+  for (const tok of tokens) {
+    if (offset >= tok.start && offset < tok.end) return tok.kind
+    if (tok.start > offset) break
+  }
+  return 'normal'
+}
+
+function renderStyledChunks(chunks: StyledChunk[], keyPrefix: string) {
+  return chunks.map((chunk) => {
+    if (chunk.kind === 'command') {
+      return (
+        <Text key={`${keyPrefix}:${chunk.start}`} bold>
+          {chunk.text}
+        </Text>
+      )
+    }
+    if (chunk.kind === 'mention') {
+      return (
+        <Text key={`${keyPrefix}:${chunk.start}`} bold underline>
+          {chunk.text}
+        </Text>
+      )
+    }
+    return chunk.text
+  })
 }
 
 function normalizePastedText(raw: string): string {
@@ -278,6 +378,7 @@ export function Composer({
   const [cursor, setCursor] = useState(value.length)
   const [popupIndex, setPopupIndex] = useState(0)
   const [fileMatches, setFileMatches] = useState<string[]>([])
+  const [totalFileMatches, setTotalFileMatches] = useState(0)
   const [dismissedKey, setDismissedKey] = useState<string | null>(null)
   const [scrollRow, setScrollRow] = useState(0)
 
@@ -316,18 +417,23 @@ export function Composer({
   }
 
   const effectivePopupCap = Math.max(0, maxPopupRows)
-  const commandMatches = useMemo(() => matchCommands(value, commands, effectivePopupCap), [value, commands, effectivePopupCap])
+  // Reserve 2 rows for the floating popup's 1-line title header and `marginBottom={1}` gap when >=3 rows fit.
+  const hasPopupChrome = effectivePopupCap >= 3
+  const itemCap = hasPopupChrome ? effectivePopupCap - 2 : effectivePopupCap
+  const commandResult = useMemo(() => matchCommands(value, commands, itemCap), [value, commands, itemCap])
+  const commandMatches = commandResult.matches
   const atMention = useMemo(
-    () => (commandMatches.length > 0 || effectivePopupCap <= 0 ? null : findAtMention(value, clampedCursor)),
-    [commandMatches.length, effectivePopupCap, value, clampedCursor],
+    () => (commandMatches.length > 0 || itemCap <= 0 ? null : findAtMention(value, clampedCursor)),
+    [commandMatches.length, itemCap, value, clampedCursor],
   )
 
   const mentionQuery = atMention?.query ?? null
 
   useEffect(() => {
-    if (!suggestFiles || mentionQuery === null || effectivePopupCap <= 0) {
+    if (!suggestFiles || mentionQuery === null || itemCap <= 0) {
       suggestSeqRef.current += 1
       setFileMatches([])
+      setTotalFileMatches(0)
       return
     }
     const seq = ++suggestSeqRef.current
@@ -336,16 +442,18 @@ export function Composer({
     void Promise.resolve(suggestFiles(query))
       .then((results) => {
         if (!active || seq !== suggestSeqRef.current) return
-        setFileMatches(results.slice(0, effectivePopupCap))
+        setTotalFileMatches(results.length)
+        setFileMatches(results.slice(0, itemCap))
       })
       .catch(() => {
         if (!active || seq !== suggestSeqRef.current) return
         setFileMatches([])
+        setTotalFileMatches(0)
       })
     return () => {
       active = false
     }
-  }, [suggestFiles, mentionQuery, effectivePopupCap])
+  }, [suggestFiles, mentionQuery, itemCap])
 
   const popupKind: 'command' | 'file' | null =
     commandMatches.length > 0
@@ -362,11 +470,12 @@ export function Composer({
   const popupOpen = popupKind !== null && popupKey !== dismissedKey
 
   const popupCount = popupKind === 'command' ? commandMatches.length : fileMatches.length
+  const popupTotalRows = popupOpen ? popupCount + (hasPopupChrome ? 2 : 0) : 0
   const safePopupIndex = Math.min(popupIndex, Math.max(0, popupCount - 1))
 
   useEffect(() => {
-    onPopupRowsChange?.(popupOpen ? popupCount : 0)
-  }, [popupOpen, popupCount, onPopupRowsChange])
+    onPopupRowsChange?.(popupTotalRows)
+  }, [popupTotalRows, onPopupRowsChange])
 
   const [prevPopupKey, setPrevPopupKey] = useState<string | null>(popupKey)
   if (popupKey !== prevPopupKey) {
@@ -603,49 +712,78 @@ export function Composer({
   const placeholderText =
     placeholder ?? (busy ? 'Queue a message — Ctrl+Enter to steer…' : 'Type a message or @file…')
   const visibleSlice = visualLines.slice(nextScrollRow, nextScrollRow + visibleRowCount)
+  const innerWidth = Math.max(1, columns - 4)
   const popupWidth = Math.max(10, columns - 4)
+  const inlineInfo = useMemo(() => findInlineTokens(value), [value])
+  const attachmentBadge = inlineInfo.mentionCount > 0 ? `📎 ${inlineInfo.mentionCount}` : ''
+  const promptColor = busy ? undefined : activeTheme.surfaceText
+
+  const popupTitle =
+    popupKind === 'command' ? `Commands (${commandResult.total})` : `Files (${totalFileMatches})`
+  const popupHint = 'Tab complete'
+  const showPopupHint = popupWidth >= popupTitle.length + popupHint.length + 2
+  const cmdLabels = commandMatches.map((cmd) => `/${cmd.name}${cmd.usage ?? ''}`)
+  const maxCmdLabelLen = Math.min(
+    Math.max(8, Math.floor(popupWidth * 0.45)),
+    Math.max(0, ...cmdLabels.map((label) => label.length)),
+  )
 
   return (
     <Box flexDirection="column" width={columns}>
-      {popupOpen && popupKind === 'command' && (
+      {popupOpen && (
         <Box
           flexDirection="column"
           backgroundColor={activeTheme.surface}
           paddingX={2}
+          marginBottom={hasPopupChrome ? 1 : 0}
           width={columns}
         >
-          {commandMatches.map((cmd, index) => {
-            const selected = index === safePopupIndex
-            const label = `/${cmd.name}${cmd.usage ?? ''}`
-            const hintRoom = Math.max(0, popupWidth - 2 - label.length - 3)
-            const hint = hintRoom > 4 ? ` — ${truncateLine(cmd.hint, hintRoom)}` : ''
-            return (
-              <Text key={cmd.name} bold={selected} wrap="truncate">
-                <Text bold={selected}>{selected ? '❯ ' : '  '}</Text>
-                <Text bold={selected}>{truncateLine(label, popupWidth - 2)}</Text>
-                {hint ? <Text color={activeTheme.surfaceText}>{hint}</Text> : null}
+          {hasPopupChrome && (
+            <Box justifyContent="space-between" width={popupWidth}>
+              <Text bold color={activeTheme.surfaceText}>
+                {popupTitle}
               </Text>
-            )
-          })}
-        </Box>
-      )}
+              {showPopupHint ? <Text color={activeTheme.surfaceText}>{popupHint}</Text> : null}
+            </Box>
+          )}
 
-      {popupOpen && popupKind === 'file' && (
-        <Box
-          flexDirection="column"
-          backgroundColor={activeTheme.surface}
-          paddingX={2}
-          width={columns}
-        >
-          {fileMatches.map((filePath, index) => {
-            const selected = index === safePopupIndex
-            return (
-              <Text key={filePath} bold={selected} wrap="truncate">
-                <Text bold={selected}>{selected ? '❯ ' : '  '}</Text>
-                <Text bold={selected}>@{truncateLine(filePath, popupWidth - 3)}</Text>
-              </Text>
-            )
-          })}
+          {popupKind === 'command'
+            ? commandMatches.map((cmd, index) => {
+                const selected = index === safePopupIndex
+                const prefix = selected ? '▸ ' : '  '
+                const label = truncateLine(cmdLabels[index]!, maxCmdLabelLen).padEnd(maxCmdLabelLen)
+                const hintRoom = Math.max(0, popupWidth - prefix.length - label.length - 2)
+                const hint = hintRoom > 4 ? `  ${truncateLine(cmd.hint, hintRoom)}` : ''
+                const rowLen = prefix.length + label.length + hint.length
+                const pad = selected ? ' '.repeat(Math.max(0, popupWidth - rowLen)) : ''
+                return (
+                  <Box key={cmd.name} width={popupWidth}>
+                    <Text inverse={selected} bold={selected} wrap="truncate">
+                      {prefix}
+                      {label}
+                      {hint ? (
+                        <Text color={selected ? undefined : activeTheme.surfaceText}>{hint}</Text>
+                      ) : null}
+                      {pad}
+                    </Text>
+                  </Box>
+                )
+              })
+            : fileMatches.map((filePath, index) => {
+                const selected = index === safePopupIndex
+                const prefix = selected ? '▸ ' : '  '
+                const label = `@${truncateLine(filePath, Math.max(1, popupWidth - prefix.length - 1))}`
+                const rowText = `${prefix}${label}`
+                const pad = selected ? ' '.repeat(Math.max(0, popupWidth - rowText.length)) : ''
+                return (
+                  <Box key={filePath} width={popupWidth}>
+                    <Text inverse={selected} bold={selected} wrap="truncate">
+                      {rowText}
+                      {pad}
+                    </Text>
+                  </Box>
+                )
+              })}
         </Box>
       )}
 
@@ -659,8 +797,10 @@ export function Composer({
         overflow="hidden"
       >
         {value === '' ? (
-          <Box width={Math.max(1, columns - 4)}>
-            <Text bold>› </Text>
+          <Box width={innerWidth}>
+            <Text bold color={promptColor}>
+              ›{' '}
+            </Text>
             {!disabled && <Text inverse> </Text>}
             <Text color={activeTheme.surfaceText}>
               {truncateLine(placeholderText, Math.max(1, textWidth))}
@@ -671,32 +811,77 @@ export function Composer({
             const rowIndex = nextScrollRow + offset
             const prefix = rowIndex === 0 ? '› ' : '  '
             const isCursorRow = !disabled && rowIndex === cursorPos.row
+            const hasCharAtCursor = isCursorRow && cursorPos.col < line.content.length
+            const trailingCursorCols = isCursorRow && !hasCharAtCursor ? 1 : 0
+            const usedCols = 2 + line.content.length + trailingCursorCols
+            const showBadge =
+              offset === visibleSlice.length - 1 &&
+              attachmentBadge !== '' &&
+              usedCols + attachmentBadge.length + 2 <= innerWidth
 
-            if (!isCursorRow) {
-              return (
-                <Box key={`${line.paragraph}:${line.start}`} width={Math.max(1, columns - 4)}>
-                  <Text bold={rowIndex === 0}>{prefix}</Text>
-                  <Text>{line.content || ' '}</Text>
-                </Box>
-              )
-            }
-
-            const before = line.content.slice(0, cursorPos.col)
-            const hasCharAtCursor = cursorPos.col < line.content.length
-            const cursorBoundary = hasCharAtCursor
-              ? nextCharBoundary(line.content, cursorPos.col)
-              : cursorPos.col
-            const atCursor = hasCharAtCursor ? line.content.slice(cursorPos.col, cursorBoundary) : ' '
-            const after = hasCharAtCursor ? line.content.slice(cursorBoundary) : ''
+            const contentNode = !isCursorRow ? (
+              <Text>
+                {line.content.length > 0
+                  ? renderStyledChunks(
+                      sliceStyledChunks(value, line.start, line.end, inlineInfo.tokens),
+                      `l${rowIndex}`,
+                    )
+                  : ' '}
+              </Text>
+            ) : (
+              (() => {
+                const cursorBoundary = hasCharAtCursor
+                  ? nextCharBoundary(line.content, cursorPos.col)
+                  : cursorPos.col
+                const beforeChunks = sliceStyledChunks(
+                  value,
+                  line.start,
+                  line.start + cursorPos.col,
+                  inlineInfo.tokens,
+                )
+                const atCursor = hasCharAtCursor
+                  ? line.content.slice(cursorPos.col, cursorBoundary)
+                  : ' '
+                const cursorKind = hasCharAtCursor
+                  ? tokenKindAt(line.start + cursorPos.col, inlineInfo.tokens)
+                  : 'normal'
+                const afterChunks = hasCharAtCursor
+                  ? sliceStyledChunks(
+                      value,
+                      line.start + cursorBoundary,
+                      line.end,
+                      inlineInfo.tokens,
+                    )
+                  : []
+                return (
+                  <Text>
+                    {renderStyledChunks(beforeChunks, `b${rowIndex}`)}
+                    <Text
+                      inverse
+                      bold={cursorKind !== 'normal'}
+                      underline={cursorKind === 'mention'}
+                    >
+                      {atCursor}
+                    </Text>
+                    {renderStyledChunks(afterChunks, `a${rowIndex}`)}
+                  </Text>
+                )
+              })()
+            )
 
             return (
-              <Box key={`${line.paragraph}:${line.start}`} width={Math.max(1, columns - 4)}>
-                <Text bold={rowIndex === 0}>{prefix}</Text>
-                <Text>
-                  {before}
-                  <Text inverse>{atCursor}</Text>
-                  {after}
-                </Text>
+              <Box
+                key={`${line.paragraph}:${line.start}`}
+                width={innerWidth}
+                justifyContent={showBadge ? 'space-between' : undefined}
+              >
+                <Box>
+                  <Text bold={rowIndex === 0} color={rowIndex === 0 ? promptColor : undefined}>
+                    {prefix}
+                  </Text>
+                  {contentNode}
+                </Box>
+                {showBadge ? <Text color={activeTheme.surfaceText}>{attachmentBadge}</Text> : null}
               </Box>
             )
           })

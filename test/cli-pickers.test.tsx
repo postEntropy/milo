@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from 'ink-testing-library'
 import type { SessionSummary } from '../src/core/sessions/types.js'
 import { FolderPicker } from '../src/gateways/cli/components/folder-picker.js'
+import { MiloMark } from '../src/gateways/cli/components/milo-mark.js'
 import { SessionPicker } from '../src/gateways/cli/components/session-picker.js'
+import { theme } from '../src/gateways/cli/theme.js'
 
 const tick = (ms = 25) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -249,5 +251,76 @@ describe('FolderPicker', () => {
     await send(stdin, ESC)
     await tick(30)
     expect(onCancel).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders header, clear icon, recent marker, and single footer hint cleanly', () => {
+    const { lastFrame } = render(
+      <FolderPicker
+        currentFolder={null}
+        recentFolders={recentFolders}
+        maxHeight={10}
+        columns={90}
+        onSelect={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    const frame = lastFrame() ?? ''
+    expect(frame).toContain('Session Folder')
+    expect(frame).toContain('Default directory')
+    expect(frame).toContain('❯ filter:')
+    expect(frame).toContain('▸ ○ Clear folder (default directory)')
+    expect(frame).toContain('◆ milo')
+    expect(frame).toContain('↑/↓ move · Enter select · Esc close')
+  })
+})
+
+describe('SessionPicker visual chrome', () => {
+  it('shows unread dots, current status in header, active marker, and single footer hint', () => {
+    const unreadSession = makeSession({
+      id: 'unread-owl-1',
+      title: 'Unread updates',
+      unread: true,
+    })
+    const activeSession = makeSession({
+      id: 'active-fox-2',
+      title: 'Active thread',
+      unread: false,
+    })
+    const { lastFrame } = render(
+      <SessionPicker
+        sessions={[activeSession, unreadSession]}
+        currentSessionId="active-fox-2"
+        maxHeight={10}
+        columns={90}
+        onSelect={() => {}}
+        onCancel={() => {}}
+      />,
+    )
+    const frame = lastFrame() ?? ''
+    expect(frame).toContain('current: active-fox-2')
+    expect(frame).toContain('❯ filter:')
+    expect(frame).toContain('▸ active-fox-2')
+    expect(frame).toContain('● unread-owl-1 — Unread updates')
+    expect(frame).toContain('↑/↓ move · Enter open · Esc close')
+  })
+})
+
+describe('MiloMark', () => {
+  it('renders a 3-row shaded half-block mark by default and a 1-line compact mark', () => {
+    const hero = render(<MiloMark />).lastFrame() ?? ''
+    expect(hero.split('\n')).toHaveLength(3)
+    expect(hero).toContain('▄▄█████▄')
+    expect(hero).toContain('▄██████▀')
+    expect(hero).toContain('▀█████▀')
+    expect(hero).not.toContain('─')
+    expect(hero).not.toMatch(/[╭╰╮╯]/)
+
+    const compact = render(
+      <MiloMark compact theme={{ ...theme, logoTop: '#D96D5A', logoBottom: '#F3B18F' }} />,
+    ).lastFrame() ?? ''
+    expect(compact.split('\n')).toHaveLength(1)
+    expect(compact).toContain('▀▄ MILO')
+    expect(compact).not.toContain('─')
+    expect(compact).not.toMatch(/[╭╰╮╯]/)
   })
 })

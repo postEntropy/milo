@@ -50,14 +50,15 @@ import {
 } from '../../commands.js'
 import { changeCounts, showsToolCall, toolDetail, toolDisplayName } from '../../tool-line.js'
 import { copyToClipboard, setMouseTracking } from '../ansi.js'
-import { Composer, wrapComposerLines } from '../components/composer.js'
+import { Composer, truncateLine, wrapComposerLines } from '../components/composer.js'
 import { FolderPicker, type RecentFolder } from '../components/folder-picker.js'
+import { miloMarkRows } from '../components/milo-mark.js'
 import { SessionPicker } from '../components/session-picker.js'
 import { describePanelRequest, itemsFromMessages, summarizeGenUi } from '../history-items.js'
 import { readInputHistory, saveInputHistory } from '../input-history.js'
 import { isCopyKey, isCtrlC, isExpandToolKey, isMouseToggleKey } from '../keys.js'
 import { theme as defaultTheme, type ThemeColor, type TuiTheme } from '../theme.js'
-import { buildLines, padToBottom, visibleWindow, type Item, type Line } from '../transcript.js'
+import { buildLines, padToBottom, visibleWindow, type Item, type Line, type LineSegment } from '../transcript.js'
 import { useElapsed } from '../use-elapsed.js'
 import { useTerminalSize } from '../use-terminal-size.js'
 
@@ -394,9 +395,7 @@ export function ChatScreen({
     resolve?.({ allowed, ...(remember ? { remember } : {}) })
   }
 
-  // The width the transcript wraps to: the screen less the two columns each line
-  // is inset by, so a line never runs past the edge and gets clipped.
-  const width = Math.max(20, columns - 4)
+  const folderLabel = activeFolder ? path.basename(activeFolder) || activeFolder : null
 
   // Dynamically size the composer/picker/footer so total rows never exceed `rows`.
   const maxComposerLines = Math.max(1, Math.min(6, rows - 5))
@@ -428,19 +427,54 @@ export function ChatScreen({
     if (live !== '') tail.push({ kind: 'assistant', text: live })
     return tail.length > 0 ? [...items, ...tail] : items
   }, [items, live, reasoning])
+
+  // The width the transcript wraps to: the screen less the two columns each line
+  // is inset by (and two more when a scrollbar sits on the right edge), so a
+  // line never runs past the edge and gets clipped.
+  const baseWidth = Math.max(8, columns - 4)
+  const initialLines = useMemo(
+    () => buildLines(displayItems, baseWidth, activeTheme),
+    [displayItems, baseWidth, activeTheme],
+  )
+  const scrollable = initialLines.length > chatHeight
+  const width = scrollable ? Math.max(8, columns - 6) : baseWidth
+  const allLines = useMemo(
+    () => (scrollable ? buildLines(displayItems, width, activeTheme) : initialLines),
+    [scrollable, initialLines, displayItems, width, activeTheme],
+  )
   const window = useMemo(
-    () => visibleWindow(buildLines(displayItems, width, activeTheme), chatHeight, scrollOffset),
-    [displayItems, width, activeTheme, chatHeight, scrollOffset],
+    () => visibleWindow(allLines, chatHeight, scrollOffset),
+    [allLines, chatHeight, scrollOffset],
   )
   maxOffsetRef.current = window.maxOffset
   const bodyLines = useMemo<Line[]>(() => {
     if (window.lines.length === 0 && !busy && displayItems.length === 0) {
-      // Anchored like any other content: the first line of a session waits just
-      // above the composer, not stranded at the top of an empty screen.
-      return padToBottom([{ text: 'Ask Milo anything. Type /help for commands.', dim: true }], chatHeight)
+      // Anchored like any other content: the empty-state hero waits just above
+      // the composer, not stranded at the top of an empty screen.
+      return padToBottom(
+        emptyHeroLines({
+          chatHeight,
+          columns,
+          width: baseWidth,
+          activeTheme,
+          modelName: model?.model,
+          folderLabel,
+        }),
+        chatHeight,
+      )
     }
     return padToBottom(window.lines, chatHeight)
-  }, [window.lines, chatHeight, busy, displayItems.length])
+  }, [
+    window.lines,
+    chatHeight,
+    busy,
+    displayItems.length,
+    columns,
+    baseWidth,
+    activeTheme,
+    model?.model,
+    folderLabel,
+  ])
 
   const push = (item: Item) => setItems((current) => [...current, item])
 
@@ -476,37 +510,37 @@ export function ChatScreen({
   )
 
   const toggleExpandTools = () => {
-    setItems((current) => {
-      let lastUser = -1
-      for (let i = current.length - 1; i >= 0; i -= 1) {
-        if (current[i]?.kind === 'user') {
-          lastUser = i
-          break
-        }
+    let lastUser = -1
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      if (items[i]?.kind === 'user') {
+        lastUser = i
+        break
       }
-      const turnIndexes: number[] = []
-      let fallbackIndex = -1
-      for (let i = current.length - 1; i >= 0; i -= 1) {
-        if (current[i]?.kind === 'tool') {
-          if (fallbackIndex === -1) fallbackIndex = i
-          if (i > lastUser) turnIndexes.push(i)
-        }
+    }
+    const turnIndexes: number[] = []
+    let fallbackIndex = -1
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      if (items[i]?.kind === 'tool') {
+        if (fallbackIndex === -1) fallbackIndex = i
+        if (i > lastUser) turnIndexes.push(i)
       }
-      const targets = turnIndexes.length > 0 ? turnIndexes : fallbackIndex !== -1 ? [fallbackIndex] : []
-      if (targets.length === 0) {
-        showFlash('No tool calls to expand')
-        return current
-      }
-      const targetSet = new Set(targets)
-      const nextExpanded = targets.some((idx) => {
-        const item = current[idx]
-        return item?.kind === 'tool' && !item.expanded
-      })
-      showFlash(nextExpanded ? 'Expanded tool details' : 'Collapsed tool details')
-      return current.map((item, idx) =>
-        item.kind === 'tool' && targetSet.has(idx) ? { ...item, expanded: nextExpanded } : item,
-      )
+    }
+    const targets = turnIndexes.length > 0 ? turnIndexes : fallbackIndex !== -1 ? [fallbackIndex] : []
+    if (targets.length === 0) {
+      showFlash('No tool calls to expand')
+      return
+    }
+    const targetSet = new Set(targets)
+    const nextExpanded = targets.some((idx) => {
+      const item = items[idx]
+      return item?.kind === 'tool' && !item.expanded
     })
+    showFlash(nextExpanded ? 'Expanded tool details' : 'Collapsed tool details')
+    setItems((current) =>
+      current.map((item, idx) =>
+        item.kind === 'tool' && targetSet.has(idx) ? { ...item, expanded: nextExpanded } : item,
+      ),
+    )
   }
 
   const copyLastReply = () => {
@@ -1294,26 +1328,41 @@ export function ChatScreen({
 
   const statusText = `${statusLabel} ${formatSeconds(elapsed)}${queued > 0 ? ` · ${queued} queued` : ''}`
   const scrolled = window.offset > 0 ? `▲ scrolled (${window.offset}/${window.maxOffset})` : ''
-  const idleText = flashNotice || scrolled || 'Ready'
-  const counters = [
-    runningJobs > 0 ? `↻ ${runningJobs} job${runningJobs === 1 ? '' : 's'}` : '',
-    !busy && lastDuration !== null ? `last ${formatSeconds(lastDuration)}` : '',
+  const idleText = flashNotice || scrolled
+  const contextRatio =
+    contextTokens > 0 && budgetTokens && budgetTokens > 0 ? contextTokens / budgetTokens : 0
+  const contextColor =
+    contextRatio >= 0.9
+      ? activeTheme.danger
+      : contextRatio >= 0.7
+        ? activeTheme.warning
+        : activeTheme.muted
+  const contextText =
     contextTokens > 0
       ? budgetTokens
-        ? `~${formatTokens(contextTokens)}/${formatTokens(budgetTokens)} tok`
-        : `${formatTokens(contextTokens)} tok`
-      : '',
+        ? `◔ ${formatTokens(contextTokens)}/${formatTokens(budgetTokens)} tok`
+        : `◔ ${formatTokens(contextTokens)} tok`
+      : ''
+  const counterParts: Array<{ text: string; color: ThemeColor }> = [
+    ...(runningJobs > 0
+      ? [{ text: `↻ ${runningJobs} job${runningJobs === 1 ? '' : 's'}`, color: activeTheme.muted }]
+      : []),
+    ...(!busy && lastDuration !== null
+      ? [{ text: `last ${formatSeconds(lastDuration)}`, color: activeTheme.muted }]
+      : []),
+    ...(contextText ? [{ text: contextText, color: contextColor }] : []),
   ]
-    .filter(Boolean)
-    .join(' · ')
+  const countersWidth = counterParts.reduce(
+    (total, part, index) => total + part.text.length + (index > 0 ? 3 : 0),
+    0,
+  )
   // One band under the composer: what the request runs on, and where it is going,
   // said once. Each field is a muted label and a value that carries the colour, so
   // the eye lands on what is set rather than on the word naming it. The model's own
   // name already says where the request goes, so the provider is not repeated; a
-  // flag that takes something away wears the warning tone; and the fields drop from
-  // the end when the line does not fit, the session id first — the state that takes
-  // something away outlives the id nobody has to read twice.
-  const folderLabel = activeFolder ? path.basename(activeFolder) || activeFolder : null
+  // flag that takes something away wears the warning or danger tone; and the fields
+  // drop from the end when the line does not fit, the session id first — the state
+  // that takes something away outlives the id nobody has to read twice.
   const footerParts: FooterPart[] = [
     ...(model
       ? [
@@ -1324,11 +1373,19 @@ export function ChatScreen({
     ...(activeBackend && activeBackend !== 'milo'
       ? [{ text: activeBackend, color: activeTheme.secondary }]
       : []),
-    ...(mode !== 'ask' ? [{ text: PERMISSION_LABELS[mode], color: activeTheme.warning }] : []),
+    ...(mode !== 'ask'
+      ? [
+          {
+            text: PERMISSION_LABELS[mode],
+            color: mode === 'yolo' ? activeTheme.danger : activeTheme.warning,
+            bold: mode === 'yolo',
+          },
+        ]
+      : []),
     ...(display.tools !== 'full' ? [{ label: 'tools', text: display.tools, color: activeTheme.warning }] : []),
     ...(display.thinking === 'collapsed' ? [{ label: 'thinking', text: 'collapsed', color: activeTheme.warning }] : []),
     ...(mouseOff ? [{ text: 'mouse off', color: activeTheme.warning }] : []),
-    ...(folderLabel ? [{ label: 'folder', text: folderLabel, color: activeTheme.muted }] : []),
+    ...(folderLabel ? [{ label: 'folder', text: folderLabel, color: activeTheme.secondary }] : []),
     ...(sessionId ? [{ label: 'session', text: sessionId, color: activeTheme.muted }] : []),
   ]
   const footerWidth = Math.max(1, columns - 4)
@@ -1343,30 +1400,56 @@ export function ChatScreen({
       last.text = `${last.text.slice(0, Math.max(1, footerWidth - label - 1))}…`
     }
   }
-  const statusWidth = (busy ? statusText.length + 2 : idleText.length + 2)
-  const showCounters = counters !== '' && statusWidth + counters.length <= columns - 4
+  const jobText = jobNotice ? `job ${jobNotice} finished — Milo is on it…` : ''
+  const statusWidth = busy
+    ? statusText.length + 2
+    : jobNotice
+      ? jobText.length + 2
+      : idleText ? idleText.length + 2 : 0
+  const showCounters = counterParts.length > 0 && statusWidth + countersWidth <= columns - 4
+
+  const thumbHeight = scrollable
+    ? Math.max(1, Math.min(chatHeight, Math.round((chatHeight / allLines.length) * chatHeight)))
+    : 0
+  const trackSpan = Math.max(0, chatHeight - thumbHeight)
+  const topRatio = window.maxOffset > 0 ? (window.maxOffset - window.offset) / window.maxOffset : 1
+  const thumbStart = Math.round(topRatio * trackSpan)
+  const thumbEnd = thumbStart + thumbHeight
 
   return (
     <Box flexDirection="column" height={rows - HEADER_ROWS} width={columns}>
       <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        {bodyLines.map((line, index) => (
-          // Every line is its own row box, inset where the transcript is; a line
-          // carrying a background fills the whole row, the way the composer does,
-          // and the ones without one are transparent and read as plain text.
-          // biome-ignore lint/suspicious/noArrayIndexKey: the window is rebuilt every frame and never reorders
-          <Box key={index} width={columns} paddingX={2} backgroundColor={line.background}>
-            <Text color={line.color} dimColor={line.dim}>
-              {line.segments
-                ? line.segments.map((segment, segmentIndex) => (
-                    // biome-ignore lint/suspicious/noArrayIndexKey: segments are re-wrapped every frame and never reorder
-                    <Text key={segmentIndex} bold={segment.bold} color={segment.color}>
-                      {segment.text}
-                    </Text>
-                  ))
-                : line.text || ' '}
-            </Text>
-          </Box>
-        ))}
+        {bodyLines.map((line, index) => {
+          const textColor = line.color ?? (line.dim ? activeTheme.muted : undefined)
+          const isThumb = scrollable && index >= thumbStart && index < thumbEnd
+          return (
+            // Every line is its own row box, inset where the transcript is; a line
+            // carrying a background fills the whole row, the way the composer does,
+            // and the ones without one are transparent and read as plain text.
+            // biome-ignore lint/suspicious/noArrayIndexKey: the window is rebuilt every frame and never reorders
+            <Box key={index} width={columns} paddingX={2} backgroundColor={line.background}>
+              <Box flexGrow={1}>
+                <Text color={textColor}>
+                  {line.segments
+                    ? line.segments.map((segment, segmentIndex) => (
+                        // biome-ignore lint/suspicious/noArrayIndexKey: segments are re-wrapped every frame and never reorder
+                        <Text key={segmentIndex} {...segmentStyle(segment)}>
+                          {segment.text}
+                        </Text>
+                      ))
+                    : line.text || ' '}
+                </Text>
+              </Box>
+              {scrollable ? (
+                <Box width={2} justifyContent="flex-end">
+                  <Text color={isThumb ? activeTheme.accent : activeTheme.muted}>
+                    {isThumb ? '┃' : '┆'}
+                  </Text>
+                </Box>
+              ) : null}
+            </Box>
+          )
+        })}
       </Box>
 
       <Box paddingX={2} width={columns} justifyContent="space-between">
@@ -1376,12 +1459,26 @@ export function ChatScreen({
           </Text>
         ) : jobNotice ? (
           <Text color={activeTheme.warning}>
-            <Spinner type="dots" /> job {jobNotice} finished — Milo is on it…
+            <Spinner type="dots" /> {jobText}
           </Text>
+        ) : flashNotice ? (
+          <Text color={activeTheme.secondary}>{flashNotice}</Text>
+        ) : scrolled ? (
+          <Text color={activeTheme.secondary}>{scrolled}</Text>
         ) : (
-          <Text color={flashNotice ? activeTheme.secondary : activeTheme.muted}>{idleText}</Text>
+          <Text> </Text>
         )}
-        {showCounters ? <Text color={activeTheme.muted}>{counters}</Text> : null}
+        {showCounters ? (
+          <Text>
+            {counterParts.map((part, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: counter parts are rebuilt every frame
+              <Text key={index}>
+                {index > 0 ? <Text color={activeTheme.muted}> · </Text> : null}
+                <Text color={part.color}>{part.text}</Text>
+              </Text>
+            ))}
+          </Text>
+        ) : null}
       </Box>
 
       {activePicker === 'sessions' ? (
@@ -1606,4 +1703,128 @@ function statsRows(stats: SessionStats): { label: string; value: string }[] {
     })
   }
   return rows
+}
+
+const EMPTY_HINT_ITEMS: Array<{ key: string; label?: string }> = [
+  { key: 'Enter', label: 'send' },
+  { key: 'Shift+Enter', label: 'newline' },
+  { key: 'Ctrl+S', label: 'sessions' },
+  { key: '/folder', label: 'workspace' },
+  { key: '@file', label: 'attach' },
+  { key: '/help' },
+]
+
+function segmentStyle(segment: LineSegment): {
+  bold?: boolean
+  italic?: boolean
+  underline?: boolean
+  color?: ThemeColor
+} {
+  return {
+    bold: segment.bold,
+    italic: segment.italic,
+    underline: segment.underline,
+    color: segment.color,
+  }
+}
+
+function hintRows(width: number, activeTheme: TuiTheme): Line[] {
+  const rows: Array<Array<{ key: string; label?: string }>> = []
+  let current: Array<{ key: string; label?: string }> = []
+  let currentWidth = 0
+
+  for (const item of EMPTY_HINT_ITEMS) {
+    const itemText = item.label ? `${item.key} ${item.label}` : item.key
+    const added = current.length === 0 ? itemText.length : 3 + itemText.length
+    if (current.length > 0 && currentWidth + added > width) {
+      rows.push(current)
+      current = [item]
+      currentWidth = itemText.length
+    } else {
+      current.push(item)
+      currentWidth += added
+    }
+  }
+  if (current.length > 0) rows.push(current)
+
+  return rows.map((row) => {
+    const segments: LineSegment[] = []
+    let plain = ''
+    row.forEach((item, index) => {
+      if (index > 0) {
+        segments.push({ text: ' · ', color: activeTheme.muted })
+        plain += ' · '
+      }
+      segments.push({ text: item.key, color: activeTheme.secondary })
+      plain += item.key
+      if (item.label) {
+        segments.push({ text: ` ${item.label}`, color: activeTheme.muted })
+        plain += ` ${item.label}`
+      }
+    })
+    return { text: plain, segments }
+  })
+}
+
+function emptyHeroLines({
+  chatHeight,
+  columns,
+  width,
+  activeTheme,
+  modelName,
+  folderLabel,
+}: {
+  chatHeight: number
+  columns: number
+  width: number
+  activeTheme: TuiTheme
+  modelName?: string
+  folderLabel: string | null
+}): Line[] {
+  const [topMark, midMark, bottomMark] = miloMarkRows(activeTheme)
+
+  if (chatHeight < 8 || columns < 44) {
+    const readySuffix = width >= 12 ? ' · ready' : ''
+    const readyLine: Line = {
+      text: truncateLine(`MILO${readySuffix}`, width),
+      segments: [
+        { text: 'MILO', bold: true, color: topMark.color },
+        ...(readySuffix ? [{ text: readySuffix, color: activeTheme.muted }] : []),
+      ],
+    }
+    if (chatHeight < 2) return [readyLine]
+    const subText = width >= 25 ? 'Ask Milo anything · /help' : truncateLine('Ask Milo · /help', width)
+    return [readyLine, { text: subText, color: activeTheme.muted }]
+  }
+
+  const markWidth = topMark.text.length + 2
+  const folderText = truncateLine(folderLabel ?? 'Default directory', Math.max(8, width - markWidth))
+  const maxModelWidth = Math.max(0, width - markWidth - 'MILO'.length - 3)
+  const fittedModel = modelName && maxModelWidth >= 4 ? truncateLine(modelName, maxModelWidth) : ''
+
+  const titleSegments: LineSegment[] = [
+    ...topMark.segments,
+    { text: '  ' },
+    { text: 'MILO', bold: true, color: topMark.color },
+    ...(fittedModel
+      ? [
+          { text: ' · ', color: activeTheme.muted },
+          { text: fittedModel, color: activeTheme.secondary },
+        ]
+      : []),
+  ]
+
+  const folderSegments: LineSegment[] = [
+    ...midMark.segments,
+    { text: '  ' },
+    { text: folderText, color: activeTheme.muted },
+  ]
+
+  return [
+    { text: titleSegments.map((segment) => segment.text).join(''), segments: titleSegments },
+    { text: folderSegments.map((segment) => segment.text).join(''), segments: folderSegments },
+    { text: bottomMark.text, segments: bottomMark.segments },
+    { text: '' },
+    ...hintRows(width, activeTheme),
+  ]
 }

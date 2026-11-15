@@ -41,6 +41,8 @@ export interface TuiTheme {
   muted: string
   surface: string
   surfaceText: string
+  logoTop: string
+  logoBottom: string
 }
 
 export const theme = {
@@ -52,6 +54,8 @@ export const theme = {
   muted: '#7D7373',
   surface: '#7C7568',
   surfaceText: '#E8E3D8',
+  logoTop: '#C4541C',
+  logoBottom: '#B95C32',
 } as const satisfies TuiTheme
 
 export type ThemeColor = TuiTheme[keyof TuiTheme]
@@ -76,9 +80,31 @@ const PALETTE_ACCENTS: Record<ColorPaletteId, string> = {
   violet: '#7668C9',
 }
 
+/**
+ * Two-tone logo mark pairs for every shared palette ID, matching the web's
+ * `logoColors` tuned so both tones clear 4.4:1 against `#FFFCF0` and 4.0:1
+ * against `#100F0F`.
+ */
+const PALETTE_LOGO_COLORS: Record<ColorPaletteId, readonly [string, string]> = {
+  terracotta: ['#C64A25', '#B95C32'],
+  tangerine: ['#D4440B', '#AA661B'],
+  apricot: ['#BA5B2E', '#946F37'],
+  peach: ['#B65C4C', '#956D58'],
+  forest: ['#447F51', '#598052'],
+  mint: ['#34836F', '#527F6E'],
+  lime: ['#637F1C', '#6F7C2E'],
+  cherry: ['#D72D53', '#B95A3E'],
+  rose: ['#B84F72', '#A1666C'],
+  ocean: ['#2C8097', '#3E8271'],
+  lagoon: ['#3478C3', '#37817D'],
+  berry: ['#925BBC', '#BD5174'],
+  violet: ['#7063D1', '#A45BA7'],
+}
+
 /** Resolves a palette ID to a TUI theme, defaulting to the base `theme` when unset. */
 export function resolveTuiTheme(paletteId?: ColorPaletteId): TuiTheme {
   if (!paletteId) return theme
   const resolved = isColorPaletteId(paletteId) ? paletteId : resolveColorPaletteId(paletteId)
-  return { ...theme, accent: PALETTE_ACCENTS[resolved] }
+  const [logoTop, logoBottom] = PALETTE_LOGO_COLORS[resolved]
+  return { ...theme, accent: PALETTE_ACCENTS[resolved], logoTop, logoBottom }
 }

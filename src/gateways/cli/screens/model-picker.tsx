@@ -11,8 +11,9 @@ import { beginChatGptBrowserLogin, type ChatGptLogin } from '../../../core/chatg
 import { chatGptModels } from '../../../core/chatgpt/models.js'
 import { listModels, type ModelInfo } from '../../../core/providers/models.js'
 import { modelNote } from '../../model-label.js'
+import { MiloMark } from '../components/milo-mark.js'
 import { isCtrlC } from '../keys.js'
-import { theme } from '../theme.js'
+import { theme as defaultTheme, type TuiTheme } from '../theme.js'
 
 type Step = 'provider' | 'key' | 'login' | 'loading' | 'models' | 'manual'
 
@@ -20,11 +21,12 @@ const VISIBLE_ROWS = 12
 
 export interface ModelPickerProps {
   current?: { provider: string; model: string }
+  theme?: TuiTheme
   onDone: (config: Config) => void
   onCancel?: () => void
 }
 
-export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
+export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone, onCancel }: ModelPickerProps) {
   const [step, setStep] = useState<Step>('provider')
   const [index, setIndex] = useState(() => {
     const found = PRESETS.findIndex((preset) => preset.id === current?.provider)
@@ -183,28 +185,47 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
   }
 
   return (
-    <Box flexDirection="column" flexGrow={1} paddingX={1}>
+    <Box flexDirection="column" flexGrow={1} paddingX={2}>
       <Box marginBottom={1} flexDirection="column">
-        <Text bold color={theme.accent}>
-          {current ? 'Change provider / model' : 'Milo — first-run setup'}
-        </Text>
-        <Text color={theme.muted}>
+        <Box gap={2}>
+          <MiloMark compact theme={activeTheme} />
+          <Text bold>{current ? 'Change provider / model' : 'First-run setup'}</Text>
+        </Box>
+        <Text color={activeTheme.muted}>
           {current
             ? 'Esc to cancel and go back to the chat.'
-            : 'Configure your model provider. You can change it later with /model.'}
+            : 'Configure your model provider — first-run setup. You can change it later with /model.'}
         </Text>
       </Box>
 
       {step === 'provider' && (
         <Box flexDirection="column">
-          <Text>Choose a provider (↑/↓, Enter):</Text>
-          {PRESETS.map((item, itemIndex) => (
-            <Text key={item.id} color={itemIndex === index ? theme.accent : undefined}>
-              {itemIndex === index ? '❯ ' : '  '}
-              {item.name}
-              {item.oauth === 'chatgpt' ? ' (ChatGPT sign-in)' : item.keyless ? ' (no key needed)' : ''}
-            </Text>
-          ))}
+          <Box marginBottom={1}>
+            <Text bold>Choose a provider</Text>
+            <Text color={activeTheme.muted}> · ↑/↓ move · Enter select · Esc cancel</Text>
+          </Box>
+          {PRESETS.map((item, itemIndex) => {
+            const isSelected = itemIndex === index
+            const isCurrent = current?.provider === item.id
+            const tag =
+              item.oauth === 'chatgpt'
+                ? ' (ChatGPT sign-in)'
+                : item.keyless
+                  ? ' (no key needed)'
+                  : ''
+            return (
+              <Text key={item.id}>
+                <Text bold={isSelected} color={isSelected ? activeTheme.accent : undefined}>
+                  {isSelected ? '❯ ' : '  '}
+                  {item.name}
+                </Text>
+                {tag ? (
+                  <Text color={isSelected ? activeTheme.accent : activeTheme.muted}>{tag}</Text>
+                ) : null}
+                {isCurrent ? <Text color={activeTheme.secondary}> · current</Text> : null}
+              </Text>
+            )
+          })}
         </Box>
       )}
 
@@ -213,8 +234,10 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
           <Text>
             Paste your {preset.name} API key{preset.keyURL ? ` (from ${preset.keyURL})` : ''}:
           </Text>
-          <Box>
-            <Text>❯ </Text>
+          <Box backgroundColor={activeTheme.surface} paddingX={2} marginTop={1}>
+            <Text bold color={activeTheme.surfaceText}>
+              ❯{' '}
+            </Text>
             <TextInput value={apiKey} onChange={setApiKey} mask="*" onSubmit={() => setStep('loading')} />
           </Box>
         </Box>
@@ -223,24 +246,33 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
       {step === 'login' && (
         <Box flexDirection="column">
           <Text>Sign in to ChatGPT to use the Codex subscription:</Text>
-          {loginUrl ? <Text color={theme.accent}>{loginUrl}</Text> : <Text color={theme.muted}>Opening the sign-in page…</Text>}
-          <Text color={theme.muted}>
+          {loginUrl ? (
+            <Text color={activeTheme.accent}>{loginUrl}</Text>
+          ) : (
+            <Text color={activeTheme.muted}>Opening the sign-in page…</Text>
+          )}
+          <Text color={activeTheme.muted}>
             <Spinner type="dots" /> Waiting for the browser… Esc to cancel.
           </Text>
         </Box>
       )}
 
       {step === 'loading' && (
-        <Text color={theme.accent}>
+        <Text color={activeTheme.accent}>
           <Spinner type="dots" /> Fetching models from {preset.name}…
         </Text>
       )}
 
       {step === 'models' && (
         <Box flexDirection="column">
-          <Text>Choose a model — ↑/↓ to move, type to filter, Enter to pick:</Text>
           <Box>
-            <Text color={theme.success}>filter: </Text>
+            <Text bold>Choose a model</Text>
+            <Text color={activeTheme.muted}> · ↑/↓ move · type to filter · Enter select</Text>
+          </Box>
+          <Box backgroundColor={activeTheme.surface} paddingX={2} marginY={1}>
+            <Text bold color={activeTheme.surfaceText}>
+              ❯ filter:{' '}
+            </Text>
             <TextInput
               value={filter}
               onChange={(value) => {
@@ -254,17 +286,21 @@ export function ModelPicker({ current, onDone, onCancel }: ModelPickerProps) {
               placeholder="(all models)"
             />
           </Box>
-          {renderModelList(filtered, safeSelected)}
-          <Text color={theme.muted}>{filtered.length} model(s)</Text>
+          {renderModelList(filtered, safeSelected, activeTheme, current?.model)}
+          <Box marginTop={1}>
+            <Text color={activeTheme.muted}>{filtered.length} model(s)</Text>
+          </Box>
         </Box>
       )}
 
       {step === 'manual' && (
         <Box flexDirection="column">
-          {notice && <Text color={theme.warning}>{notice}</Text>}
+          {notice && <Text color={activeTheme.warning}>{notice}</Text>}
           <Text>Model id (edit or press Enter to accept the default):</Text>
-          <Box>
-            <Text>❯ </Text>
+          <Box backgroundColor={activeTheme.surface} paddingX={2} marginTop={1}>
+            <Text bold color={activeTheme.surfaceText}>
+              ❯{' '}
+            </Text>
             <TextInput value={manualModel} onChange={setManualModel} onSubmit={finish} />
           </Box>
         </Box>
@@ -289,8 +325,13 @@ function openBrowser(url: string): void {
   }
 }
 
-function renderModelList(filtered: ModelInfo[], selected: number): ReactNode {
-  if (filtered.length === 0) return <Text color={theme.muted}>No models match the filter.</Text>
+function renderModelList(
+  filtered: ModelInfo[],
+  selected: number,
+  activeTheme: TuiTheme,
+  currentModel?: string,
+): ReactNode {
+  if (filtered.length === 0) return <Text color={activeTheme.muted}>No models match the filter.</Text>
 
   const start = Math.max(
     0,
@@ -303,11 +344,18 @@ function renderModelList(filtered: ModelInfo[], selected: number): ReactNode {
       {window.map((model, offset) => {
         const absolute = start + offset
         const isSelected = absolute === selected
+        const isCurrent = currentModel === model.id
+        const note = modelNote(model)
         return (
-          <Text key={model.id} color={isSelected ? theme.accent : undefined}>
-            {isSelected ? '❯ ' : '  '}
-            {model.id}
-            {modelNote(model) ? ` — ${modelNote(model)}` : ''}
+          <Text key={model.id}>
+            <Text bold={isSelected} color={isSelected ? activeTheme.accent : undefined}>
+              {isSelected ? '❯ ' : '  '}
+              {model.id}
+            </Text>
+            {note ? (
+              <Text color={isSelected ? activeTheme.accent : activeTheme.muted}>{` — ${note}`}</Text>
+            ) : null}
+            {isCurrent ? <Text color={activeTheme.secondary}> · current</Text> : null}
           </Text>
         )
       })}

@@ -17,6 +17,7 @@ import { DEFAULT_REASONING_EFFORT, type ReasoningEffort } from '../../core/provi
 import { shortModel } from '../model-label.js'
 import type { Session } from '../../core/session.js'
 import { itemsFromMessages } from './history-items.js'
+import { MiloMark } from './components/milo-mark.js'
 import { ChatScreen } from './screens/chat.js'
 import { ModelPicker } from './screens/model-picker.js'
 import { SettingsScreen } from './screens/settings.js'
@@ -306,7 +307,7 @@ export function Shell({
   const activeTheme = resolveTuiTheme(
     loaded?.config.palette?.sync ? loaded.config.palette.palette : undefined,
   )
-  const accent = busy ? activeTheme.warning : activeTheme.accent
+  const statusDotColor = busy ? activeTheme.warning : activeTheme.success
   const model = loaded
     ? {
         provider: loaded.provider.id,
@@ -315,7 +316,7 @@ export function Shell({
       }
     : undefined
 
-  const leftText = `MILO${mode !== 'ask' ? ` · ${PERMISSION_LABELS[mode]}` : ''}${display.tools !== 'full' ? ` · tools ${display.tools}` : ''}${display.thinking === 'collapsed' ? ' · thinking collapsed' : ''}`
+  const leftText = `● ▀▄ MILO${mode !== 'ask' ? ` · ${PERMISSION_LABELS[mode]}` : ''}${display.tools !== 'full' ? ` · tools ${display.tools}` : ''}${display.thinking === 'collapsed' ? ' · thinking collapsed' : ''}`
   const headerRight = fitHeaderRight(
     loaded
       ? [
@@ -333,8 +334,13 @@ export function Shell({
       {screen !== 'chat' && (
         <Box paddingX={2} height={1} justifyContent="space-between">
           <Box>
-            <Text bold color={accent}>MILO</Text>
-            {mode !== 'ask' && <Text bold color={mode === 'yolo' ? activeTheme.danger : activeTheme.warning}> · {mode}</Text>}
+            <Text color={statusDotColor}>● </Text>
+            <MiloMark compact theme={activeTheme} />
+            {mode !== 'ask' && (
+              <Text bold color={mode === 'yolo' ? activeTheme.danger : activeTheme.warning}>
+                {' '}· {PERMISSION_LABELS[mode]}
+              </Text>
+            )}
             {display.tools !== 'full' && <Text color={activeTheme.secondary}> · tools {display.tools}</Text>}
             {display.thinking === 'collapsed' && <Text color={activeTheme.secondary}> · thinking collapsed</Text>}
           </Box>
@@ -385,6 +391,7 @@ export function Shell({
       ) : (
         <ModelPicker
           current={loaded ? { provider: loaded.provider.id, model: loaded.model } : undefined}
+          theme={activeTheme}
           onDone={afterSave}
           onCancel={cancel}
         />
