@@ -1534,18 +1534,6 @@ struct WelcomeView: View {
     let keyboardUp: Bool
     @Environment(AppModel.self) private var model
 
-    private var rows: [[Suggestion]] {
-        let items = model.suggestions
-        var result: [[Suggestion]] = []
-        var index = 0
-        while index < items.count {
-            let end = min(index + 2, items.count)
-            result.append(Array(items[index..<end]))
-            index = end
-        }
-        return result
-    }
-
     var body: some View {
         VStack(spacing: 0) {
             Spacer(minLength: keyboardUp ? 0 : MiloTheme.Space.four)
@@ -1555,13 +1543,8 @@ struct WelcomeView: View {
             Spacer(minLength: keyboardUp ? MiloTheme.Space.three : MiloTheme.Space.five)
 
             VStack(spacing: keyboardUp ? MiloTheme.Space.two : MiloTheme.Space.three) {
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, pair in
-                    HStack(spacing: keyboardUp ? MiloTheme.Space.two : MiloTheme.Space.three) {
-                        ForEach(pair) { suggestion in
-                            card(suggestion)
-                        }
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
+                ForEach(model.suggestions) { suggestion in
+                    card(suggestion)
                 }
             }
             .animation(.easeInOut(duration: 0.3), value: model.ideas)
@@ -1606,42 +1589,40 @@ struct WelcomeView: View {
             if case .resume = suggestion.act { return true }
             return false
         }()
-        let headLayout = keyboardUp
-            ? AnyLayout(HStackLayout(alignment: .center, spacing: MiloTheme.Space.two))
-            : AnyLayout(VStackLayout(alignment: .leading, spacing: MiloTheme.Space.three))
 
         return Button {
             press(suggestion)
         } label: {
-            VStack(alignment: .leading, spacing: keyboardUp ? MiloTheme.Space.two : MiloTheme.Space.one) {
-                headLayout {
-                    Image(systemName: suggestion.symbol)
-                        .font(.system(size: keyboardUp ? 13 : 15, weight: .semibold))
-                        .foregroundStyle(isResume ? MiloTheme.accent : MiloTheme.foreground)
-                        .frame(width: keyboardUp ? 26 : 32, height: keyboardUp ? 26 : 32)
-                        .background(
-                            isResume ? MiloTheme.accent.opacity(0.14) : MiloTheme.surfaceRaised,
-                            in: Circle()
-                        )
+            HStack(alignment: .center, spacing: MiloTheme.Space.three) {
+                Image(systemName: suggestion.symbol)
+                    .font(.system(size: keyboardUp ? 13 : 15, weight: .semibold))
+                    .foregroundStyle(isResume ? MiloTheme.accent : MiloTheme.foreground)
+                    .frame(width: keyboardUp ? 28 : 34, height: keyboardUp ? 28 : 34)
+                    .background(
+                        isResume ? MiloTheme.accent.opacity(0.14) : MiloTheme.surfaceRaised,
+                        in: Circle()
+                    )
 
+                VStack(alignment: .leading, spacing: 2) {
                     Text(suggestion.title)
                         .font(MiloTheme.Text.base.weight(.semibold))
                         .foregroundStyle(MiloTheme.foreground)
-                        .lineLimit(1)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                         .truncationMode(.tail)
+
+                    Text(suggestion.detail)
+                        .font(MiloTheme.Text.small)
+                        .foregroundStyle(MiloTheme.muted)
+                        .lineLimit(keyboardUp ? 1 : 2)
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
-
-                Spacer(minLength: 0)
-
-                Text(suggestion.detail)
-                    .font(MiloTheme.Text.small)
-                    .foregroundStyle(MiloTheme.muted)
-                    .lineLimit(keyboardUp ? 1 : 2)
-                    .multilineTextAlignment(.leading)
-                    .fixedSize(horizontal: false, vertical: true)
             }
-            .padding(keyboardUp ? MiloTheme.Space.three : MiloTheme.Space.three + 2)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(.horizontal, MiloTheme.Space.three)
+            .padding(.vertical, keyboardUp ? MiloTheme.Space.two + 2 : MiloTheme.Space.three)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 MiloTheme.surface,
                 in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg)
