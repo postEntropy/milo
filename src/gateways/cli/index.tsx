@@ -15,10 +15,12 @@ import type { MemoryScope } from '../../core/memory/index.js'
 import { PERMISSION_LABELS, type PermissionMode } from '../../core/tools/permission.js'
 import { DEFAULT_REASONING_EFFORT, type ReasoningEffort } from '../../core/providers/types.js'
 import { shortModel } from '../model-label.js'
+import type { Session } from '../../core/session.js'
+import { itemsFromMessages } from './history-items.js'
 import { ChatScreen } from './screens/chat.js'
 import { ModelPicker } from './screens/model-picker.js'
 import { SettingsScreen } from './screens/settings.js'
-import { theme } from './theme.js'
+import { resolveTuiTheme } from './theme.js'
 import { useTerminalSize } from './use-terminal-size.js'
 import { errorMessage } from '../../util/errors.js'
 import type { Item } from './transcript.js'
@@ -85,18 +87,50 @@ export function Shell({
 
   // The session bound to this terminal, resolved once the runtime exists.
   const [sessionId, setSessionId] = useState<string | null>(null)
+  const [sessionFolder, setSessionFolder] = useState<string | null>(null)
+  const [sessionBackend, setSessionBackend] = useState<string>('milo')
+  const [maxInputTokens, setMaxInputTokens] = useState<number | undefined>(undefined)
+  const [mouseOff, setMouseOff] = useState(false)
+  const sessionIdRef = useRef<string | null>(null)
+  sessionIdRef.current = sessionId
+  const displayRef = useRef(loaded?.config.display ?? DEFAULT_DISPLAY)
+  displayRef.current = loaded?.config.display ?? DEFAULT_DISPLAY
   // `--resume` applies once: rebuilding the runtime (a model change) must not
   // yank the user back to the session they asked for at startup.
   const resumed = useRef(false)
+  const hydratedStartupRef = useRef(false)
   useEffect(() => {
     if (!runtime) return
     let cancelled = false
+    const applySession = async (session: Session) => {
+      if (cancelled) return
+      setSessionId(session.id)
+      setSessionFolder(session.project?.ok ? session.project.project.path : null)
+      setSessionBackend(session.backend?.kind ?? 'milo')
+      const stats = typeof session.stats === 'function' ? session.stats() : undefined
+      setMaxInputTokens(stats?.maxInputTokens)
+      let messages = Array.isArray(session.messages) ? session.messages : []
+      if (session.backend?.kind === 'command-code' && typeof session.refreshHistory === 'function') {
+        try {
+          messages = await session.refreshHistory()
+        } catch {
+          messages = Array.isArray(session.messages) ? session.messages : []
+        }
+      }
+      if (!cancelled && !hydratedStartupRef.current) {
+        hydratedStartupRef.current = true
+        if (messages.length > 0) {
+          const hydrated = itemsFromMessages(messages, displayRef.current)
+          setItems((previous) => [...hydrated, ...previous])
+        }
+      }
+    }
     const resolve = async () => {
       if (resumeId && !resumed.current) {
         resumed.current = true
         const target = await runtime.resumeSession(CLI_SCOPE, resumeId)
         if (target) {
-          if (!cancelled) setSessionId(target.id)
+          await applySession(target)
           return
         }
         if (!cancelled) {
@@ -114,11 +148,20 @@ export function Shell({
       const session = continueSession
         ? await runtime.getSession(CLI_SCOPE)
         : await runtime.sessionFor(CLI_SCOPE, project ? { project } : undefined)
-      if (!cancelled) setSessionId(session.id)
+      await applySession(session)
     }
     void resolve()
+    const unlistenFolder =
+      typeof runtime.onSessionFolderChanged === 'function'
+        ? runtime.onSessionFolderChanged((changedId, placement) => {
+            if (changedId === sessionIdRef.current) {
+              setSessionFolder(placement?.ok ? placement.project.path : null)
+            }
+          })
+        : undefined
     return () => {
       cancelled = true
+      unlistenFolder?.()
     }
   }, [runtime, resumeId, continueSession, project])
 
@@ -192,6 +235,10 @@ export function Shell({
     setLoaded(loadConfig())
   }
 
+  const refreshConfig = () => {
+    setLoaded((current) => loadConfig() ?? current)
+  }
+
   const changeEffort = (effort: ReasoningEffort) => {
     // The running session first, so the very next turn sends it, then the disk.
     runtime?.setReasoningEffort(effort)
@@ -256,7 +303,10 @@ export function Shell({
 
   const display = loaded?.config.display ?? DEFAULT_DISPLAY
   const effort = loaded?.config.reasoningEffort
-  const accent = busy ? theme.warning : theme.accent
+  const activeTheme = resolveTuiTheme(
+    loaded?.config.palette?.sync ? loaded.config.palette.palette : undefined,
+  )
+  const accent = busy ? activeTheme.warning : activeTheme.accent
   const model = loaded
     ? {
         provider: loaded.provider.id,
@@ -284,11 +334,11 @@ export function Shell({
         <Box paddingX={2} height={1} justifyContent="space-between">
           <Box>
             <Text bold color={accent}>MILO</Text>
-            {mode !== 'ask' && <Text bold color={mode === 'yolo' ? theme.danger : theme.warning}> · {mode}</Text>}
-            {display.tools !== 'full' && <Text color={theme.secondary}> · tools {display.tools}</Text>}
-            {display.thinking === 'collapsed' && <Text color={theme.secondary}> · thinking collapsed</Text>}
+            {mode !== 'ask' && <Text bold color={mode === 'yolo' ? activeTheme.danger : activeTheme.warning}> · {mode}</Text>}
+            {display.tools !== 'full' && <Text color={activeTheme.secondary}> · tools {display.tools}</Text>}
+            {display.thinking === 'collapsed' && <Text color={activeTheme.secondary}> · thinking collapsed</Text>}
           </Box>
-          <Text color={theme.secondary}>{headerRight}</Text>
+          <Text color={activeTheme.secondary}>{headerRight}</Text>
         </Box>
       )}
 
@@ -296,6 +346,7 @@ export function Shell({
         <ChatScreen
           runtime={runtime}
           scope={CLI_SCOPE}
+          cwd={cwd}
           mode={mode}
           onModeChange={changeMode}
           onEffortChange={changeEffort}
@@ -308,8 +359,18 @@ export function Shell({
           onExit={exit}
           onBusyChange={setBusy}
           onSessionChange={setSessionId}
+          onSessionFolderChange={setSessionFolder}
+          onSessionBackendChange={setSessionBackend}
+          onMaxInputTokensChange={setMaxInputTokens}
+          onConfigRefresh={refreshConfig}
+          theme={activeTheme}
           model={model}
           sessionId={sessionId}
+          sessionFolder={sessionFolder}
+          sessionBackend={sessionBackend}
+          maxInputTokens={maxInputTokens}
+          mouseOff={mouseOff}
+          onMouseOffChange={setMouseOff}
           jobNotice={jobNotice}
         />
       ) : screen === 'settings' && loaded ? (

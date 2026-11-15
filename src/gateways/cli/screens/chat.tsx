@@ -2,49 +2,61 @@ import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type 
 import { readFile, stat } from 'node:fs/promises'
 import path from 'node:path'
 import { Box, Text, useApp, useInput } from 'ink'
-import TextInput from 'ink-text-input'
 import Spinner from 'ink-spinner'
 import type { AgentEvent } from '../../../core/agent/events.js'
+import { listProviderModels, listProviders, setProvider } from '../../../core/config/load.js'
 import type { DisplayConfig } from '../../../core/config/schema.js'
 import type { MemoryScope } from '../../../core/memory/index.js'
-import {
-  DEFAULT_REASONING_EFFORT,
-  REASONING_EFFORTS,
-  type AudioPart,
-  type ReasoningEffort,
+import { byRecentUse, projectNames, readProjects } from '../../../core/projects.js'
+import type {
+  AudioPart,
+  DocumentPart,
+  ImagePart,
+  Message,
+  ReasoningEffort,
 } from '../../../core/providers/types.js'
 import type { AgentRuntime } from '../../../core/runtime.js'
 import { MAX_INCOMING_BYTES, MAX_INCOMING_TOTAL_BYTES } from '../../../core/media.js'
 import { prepareTurnMedia } from '../../media.js'
-import type { DocumentPart, ImagePart } from '../../../core/providers/types.js'
-import { describeRebase, formatSeconds, type SessionStats } from '../../../core/sessions/index.js'
+import {
+  describeRebase,
+  formatSeconds,
+  type SessionStats,
+  type SessionSummary,
+} from '../../../core/sessions/index.js'
 import { formatWhen } from '../../../core/time.js'
-import { formatSkillList } from '../../../core/skills/index.js'
-import { projectNames } from '../../../core/projects.js'
 import type { TodoItem } from '../../../core/todos.js'
 import {
   PERMISSION_LABELS,
   type PermissionAsker,
   type PermissionMode,
+  type PermissionPolicy,
   type PermissionRequest,
   type PermissionResult,
 } from '../../../core/tools/permission.js'
+import { resolveToolPath, walk } from '../../../core/tools/walk.js'
+import type { FileChange } from '../../../core/change.js'
+import type { GenUiRender } from '../../../core/genui.js'
+import type { PanelRequest } from '../../../core/panel.js'
 import { errorMessage } from '../../../util/errors.js'
 import { formatTokens } from '../../../util/format.js'
-import { buildSessionsList } from '../../actions.js'
+import { COMMAND_CATALOG } from '../../command-catalog.js'
 import {
   compactReply,
   handleCommand,
   handleTurnControl,
-  jobsReply,
-  parseForkArgument,
+  type CommandContext,
   type TurnControlTarget,
 } from '../../commands.js'
-import { isCtrlC, isSteerKey } from '../keys.js'
-import { readInputHistory, saveInputHistory } from '../input-history.js'
-import { theme, type ThemeColor } from '../theme.js'
 import { changeCounts, showsToolCall, toolDetail, toolDisplayName } from '../../tool-line.js'
-import type { FileChange } from '../../../core/change.js'
+import { copyToClipboard, setMouseTracking } from '../ansi.js'
+import { Composer, wrapComposerLines } from '../components/composer.js'
+import { FolderPicker, type RecentFolder } from '../components/folder-picker.js'
+import { SessionPicker } from '../components/session-picker.js'
+import { describePanelRequest, itemsFromMessages, summarizeGenUi } from '../history-items.js'
+import { readInputHistory, saveInputHistory } from '../input-history.js'
+import { isCopyKey, isCtrlC, isExpandToolKey, isMouseToggleKey } from '../keys.js'
+import { theme as defaultTheme, type ThemeColor, type TuiTheme } from '../theme.js'
 import { buildLines, padToBottom, visibleWindow, type Item, type Line } from '../transcript.js'
 import { useElapsed } from '../use-elapsed.js'
 import { useTerminalSize } from '../use-terminal-size.js'
@@ -52,10 +64,14 @@ import { useTerminalSize } from '../use-terminal-size.js'
 type Phase = 'idle' | 'thinking' | 'writing' | 'tool' | 'asking' | 'waiting' | 'compacting'
 
 const HEADER_ROWS = 0
-/** The composer line and its breathing room. */
-const COMPOSER_ROWS = 3
 /** The permission prompt: the question and the key it is waiting on. */
 const PERMISSION_ROWS = 3
+/** Interval in ms used to coalesce streaming text and reasoning deltas. */
+const STREAM_FLUSH_MS = 24
+/** How long file completion suggestions are cached per root directory. */
+const FILE_CACHE_TTL_MS = 5000
+/** Duration in ms for transient footer/status notices. */
+const FLASH_NOTICE_MS = 2500
 
 /**
  * What the turn runs on. Kept in parts rather than as one string: the band under
@@ -83,6 +99,8 @@ interface FooterPart {
 export interface ChatScreenProps {
   runtime: AgentRuntime
   scope: MemoryScope
+  /** Working directory fallback used for file completions and relative attachments. */
+  cwd?: string
   mode: PermissionMode
   onModeChange: (mode: PermissionMode) => void
   /** How hard the model should think; written down, and applied to the next turn. */
@@ -99,48 +117,44 @@ export interface ChatScreenProps {
   onBusyChange?: (busy: boolean) => void
   model?: ModelInfo
   sessionId?: string | null
+  /** Active working folder for the current session, or null for the default directory. */
+  sessionFolder?: string | null
+  onSessionFolderChange?: (folder: string | null) => void
+  /** Active backend identifier for the current session (e.g. 'milo' or 'command-code'). */
+  sessionBackend?: string
+  onSessionBackendChange?: (backend: string) => void
+  /** Model context budget for the active session, when known. */
+  maxInputTokens?: number
+  onMaxInputTokensChange?: (tokens: number | undefined) => void
+  /** Whether terminal mouse tracking has been toggled off via Ctrl+M. */
+  mouseOff?: boolean
+  onMouseOffChange?: (off: boolean) => void
+  /** Called when /provider or /model updates config on disk so the shell reloads. */
+  onConfigRefresh?: () => void
+  /** Resolved TUI color theme. */
+  theme?: TuiTheme
   /** Fired when /new or /resume rebinds this conversation to another session. */
   onSessionChange?: (id: string) => void
   /** A finished job's announcement is running: its id, drawn in the status line. */
   jobNotice?: string | null
 }
 
-/** Described one per line: a bare list of names leaves the reader to guess. */
-const HELP_TEXT = [
-  'Commands:',
-  '/model — change the provider and model',
-  '/provider — switch the provider (same picker)',
-  '/setup — the settings hub (keys, display, gateways)',
-  '/mode ask|auto|yolo — when a tool needs confirming',
-  '/yolo — toggle yolo mode',
-  '/tools full|name|off — how much of each tool call to show',
-  '/thinking expanded|collapsed — open the model\'s reasoning under the question or leave it folded',
-  '  Display only: the model thinks either way; /effort is what changes that.',
-  "/effort low|medium|high — how hard the model thinks",
-  "  The other axis, and the one that costs: /effort default goes back to the provider's own.",
-  '/new [title] — start a new session',
-  '/sessions [page] — list saved sessions',
-  '/resume <id> — switch to another session',
-  '/stats — numbers for the current session',
-  '/jobs — the background jobs, and how they are doing',
-  '/skills — the skills installed, and where they live',
-  '/memory [search <words> | page <number> | edit <id> <text> | forget <id>] — inspect and correct notes',
-  '/clear — forget this session',
-  '/compact — fold the oldest turns into the summary now',
-  '/stop — stop the turn running now, and anything queued behind it',
-  '/steer <text> — hand text to the turn running now (Ctrl+Enter does the same)',
-  '/queue <text> — say it as its own turn, after the one running now (Enter does the same)',
-  '/exit — quit',
-  '',
-  '↑ walks back through what you sent; ↓ comes forward again.',
-].join('\n')
-
 /**
  * The commands a running turn rules out. They rebind the session, empty the
  * transcript it is writing into, or take over the screen its output goes to —
  * so they would fight the turn rather than wait behind it.
  */
-const BLOCKED_WHILE_BUSY = new Set(['new', 'resume', 'fork', 'clear', 'model', 'provider', 'setup', 'compact', 'folder'])
+const BLOCKED_WHILE_BUSY = new Set([
+  'new',
+  'resume',
+  'fork',
+  'clear',
+  'model',
+  'provider',
+  'setup',
+  'compact',
+  'folder',
+])
 
 /**
  * How many sent lines the arrows walk back through. Kept in memory, for this
@@ -152,6 +166,7 @@ const HISTORY_LIMIT = 200
 export function ChatScreen({
   runtime,
   scope,
+  cwd,
   mode,
   onModeChange,
   onEffortChange,
@@ -164,10 +179,22 @@ export function ChatScreen({
   onExit,
   onBusyChange,
   onSessionChange,
+  onSessionFolderChange,
+  onSessionBackendChange,
+  onMaxInputTokensChange,
+  onConfigRefresh,
+  theme: themeProp,
   model,
   sessionId,
+  sessionFolder,
+  sessionBackend,
+  maxInputTokens,
+  mouseOff: mouseOffProp,
+  onMouseOffChange,
   jobNotice,
 }: ChatScreenProps) {
+  const activeTheme = themeProp ?? defaultTheme
+  const baseCwd = cwd ?? process.cwd()
   const { exit } = useApp()
   const { rows, columns } = useTerminalSize()
 
@@ -189,10 +216,75 @@ export function ChatScreen({
   const [scrollOffset, setScrollOffset] = useState(0)
   const [startedAt, setStartedAt] = useState(0)
   const [permission, setPermission] = useState<PermissionRequest | null>(null)
-  /** Bumped on every recall, so the input remounts with its cursor at the end. */
-  const [recallEpoch, setRecallEpoch] = useState(0)
   /** How many background jobs are running, for the status line's counter. */
   const [runningJobs, setRunningJobs] = useState(0)
+  /** Active overlay picker replacing the composer when open. */
+  const [activePicker, setActivePicker] = useState<'sessions' | 'folder' | null>(null)
+  const [pickerSessions, setPickerSessions] = useState<SessionSummary[]>([])
+  const [pickerProjects, setPickerProjects] = useState<Record<string, string>>({})
+  const [pickerRecentFolders, setPickerRecentFolders] = useState<RecentFolder[]>([])
+  /** Rows currently occupied by the composer's `/` or `@` completion popup. */
+  const [popupRows, setPopupRows] = useState(0)
+  /** Transient confirmation/notice in the status line (e.g. copy or mouse toggle). */
+  const [flashNotice, setFlashNotice] = useState<string | null>(null)
+  /** Whether mouse tracking was explicitly disabled via Ctrl+M for text selection. */
+  const [localMouseOff, setLocalMouseOff] = useState(mouseOffProp ?? false)
+  const [localFolder, setLocalFolder] = useState<string | null>(sessionFolder ?? null)
+  const [localBackend, setLocalBackend] = useState<string>(sessionBackend ?? 'milo')
+  const [localMaxTokens, setLocalMaxTokens] = useState<number | undefined>(maxInputTokens)
+
+  useEffect(() => {
+    if (mouseOffProp !== undefined) setLocalMouseOff(mouseOffProp)
+  }, [mouseOffProp])
+
+  useEffect(() => {
+    if (sessionFolder !== undefined) setLocalFolder(sessionFolder)
+  }, [sessionFolder])
+
+  useEffect(() => {
+    if (sessionBackend !== undefined) setLocalBackend(sessionBackend)
+  }, [sessionBackend])
+
+  useEffect(() => {
+    if (maxInputTokens !== undefined) setLocalMaxTokens(maxInputTokens)
+  }, [maxInputTokens])
+
+  const mouseOff = mouseOffProp !== undefined ? mouseOffProp : localMouseOff
+  const activeFolder = sessionFolder !== undefined ? sessionFolder : localFolder
+  const activeBackend = sessionBackend !== undefined ? sessionBackend : localBackend
+  const budgetTokens = maxInputTokens !== undefined ? maxInputTokens : localMaxTokens
+
+  const updateMouseOff = useCallback(
+    (next: boolean) => {
+      setLocalMouseOff(next)
+      onMouseOffChange?.(next)
+    },
+    [onMouseOffChange],
+  )
+
+  const updateFolder = useCallback(
+    (next: string | null) => {
+      setLocalFolder(next)
+      onSessionFolderChange?.(next)
+    },
+    [onSessionFolderChange],
+  )
+
+  const updateBackend = useCallback(
+    (next: string) => {
+      setLocalBackend(next)
+      onSessionBackendChange?.(next)
+    },
+    [onSessionBackendChange],
+  )
+
+  const updateMaxTokens = useCallback(
+    (next: number | undefined) => {
+      setLocalMaxTokens(next)
+      onMaxInputTokensChange?.(next)
+    },
+    [onMaxInputTokensChange],
+  )
 
   // The manager changes under the UI — a job started a moment ago by a tool call,
   // one that just ended — so the count is read live rather than threaded down. Only
@@ -220,6 +312,10 @@ export function ChatScreen({
   const liveRef = useRef('')
   /** The thought being written, in a ref for the same reason: it is committed between renders. */
   const reasoningRef = useRef('')
+  /** Timer used to batch streaming text/reasoning deltas into fewer Ink redraws. */
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** Tracks whether a streaming draft `ui` item is on screen and should be replaced. */
+  const draftUiActiveRef = useRef(false)
   /** Messages typed behind the turn in flight, in the order they were typed. */
   const queueRef = useRef<Array<{ text: string; images: ImagePart[]; audio: AudioPart[]; documents?: DocumentPart[]; imagesForDisplayOnly?: boolean; displayText?: string; mediaNotices?: string[]; model?: string }>>([])
   /** The running turn's inbox: non-null for exactly as long as one is streaming. */
@@ -234,6 +330,43 @@ export function ChatScreen({
   const historyIndexRef = useRef<number | null>(null)
   /** What was in the composer before the first Up, handed back on the way down. */
   const draftRef = useRef('')
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const fileCacheRef = useRef<{ root: string; entries: string[]; loadedAt: number } | null>(null)
+  const maxOffsetRef = useRef(0)
+
+  const showFlash = useCallback((notice: string) => {
+    if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+    setFlashNotice(notice)
+    flashTimerRef.current = setTimeout(() => {
+      flashTimerRef.current = null
+      setFlashNotice(null)
+    }, FLASH_NOTICE_MS)
+  }, [])
+
+  const flushStream = useCallback(() => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current)
+      flushTimerRef.current = null
+    }
+    setLive(liveRef.current)
+    setReasoning(reasoningRef.current)
+  }, [])
+
+  const scheduleFlush = useCallback(() => {
+    if (flushTimerRef.current) return
+    flushTimerRef.current = setTimeout(() => {
+      flushTimerRef.current = null
+      setLive(liveRef.current)
+      setReasoning(reasoningRef.current)
+    }, STREAM_FLUSH_MS)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (flushTimerRef.current) clearTimeout(flushTimerRef.current)
+      if (flashTimerRef.current) clearTimeout(flashTimerRef.current)
+    }
+  }, [])
 
   useEffect(() => {
     onBusyChange?.(busy)
@@ -265,10 +398,24 @@ export function ChatScreen({
   // is inset by, so a line never runs past the edge and gets clipped.
   const width = Math.max(20, columns - 4)
 
-  // Everything below the transcript: whichever of the two footers is showing,
-  // plus the status line under it. The thought is no longer a pane of its own
-  // above the input — it is part of the transcript, so it costs nothing here.
-  const footerRows = (permission ? PERMISSION_ROWS : COMPOSER_ROWS) + 2
+  // Dynamically size the composer/picker/footer so total rows never exceed `rows`.
+  const maxComposerLines = Math.max(1, Math.min(6, rows - 5))
+  const composerTextWidth = Math.max(1, columns - 7)
+  const composerVisualCount = input === '' ? 1 : wrapComposerLines(input, composerTextWidth).length
+  const composerLines = Math.min(maxComposerLines, Math.max(1, composerVisualCount))
+  const composerRows = composerLines + 2
+  const maxPopupRows = Math.max(0, Math.min(6, rows - composerRows - 3))
+  const activePopupRows = Math.min(popupRows, maxPopupRows)
+  const pickerHeight = Math.max(4, Math.min(12, rows - 4))
+
+  // Everything below the transcript: whichever footer mode is active, plus the
+  // status line above it and the metadata band under it.
+  const footerRows =
+    (activePicker
+      ? pickerHeight
+      : permission
+        ? PERMISSION_ROWS
+        : composerRows + activePopupRows) + 2
   // A floor of 1, not 3: on a short viewport the old floor made the frame one
   // row taller than the screen, and the composer at the bottom is what it ate.
   const chatHeight = Math.max(1, rows - HEADER_ROWS - footerRows)
@@ -282,9 +429,10 @@ export function ChatScreen({
     return tail.length > 0 ? [...items, ...tail] : items
   }, [items, live, reasoning])
   const window = useMemo(
-    () => visibleWindow(buildLines(displayItems, width), chatHeight, scrollOffset),
-    [displayItems, width, chatHeight, scrollOffset],
+    () => visibleWindow(buildLines(displayItems, width, activeTheme), chatHeight, scrollOffset),
+    [displayItems, width, activeTheme, chatHeight, scrollOffset],
   )
+  maxOffsetRef.current = window.maxOffset
   const bodyLines = useMemo<Line[]>(() => {
     if (window.lines.length === 0 && !busy && displayItems.length === 0) {
       // Anchored like any other content: the first line of a session waits just
@@ -296,44 +444,297 @@ export function ChatScreen({
 
   const push = (item: Item) => setItems((current) => [...current, item])
 
-  useInput((inputChar, key) => {
-    if (permission) {
-      // A tool is waiting on y/n, and the composer is not on screen.
-      if (isCtrlC(inputChar, key)) resolvePermission(false)
-      else if (inputChar === 'y' || inputChar === 'Y') resolvePermission(true)
-      else if ((inputChar === 'a' || inputChar === 'A') && permission.approvalScope) resolvePermission(true, true)
-      else if (inputChar === 'n' || inputChar === 'N' || key.escape) resolvePermission(false)
+  const scrollBy = useCallback((delta: number) => {
+    setScrollOffset((value) => Math.max(0, Math.min(maxOffsetRef.current, value + delta)))
+  }, [])
+
+  const suggestFiles = useCallback(
+    async (query: string): Promise<string[]> => {
+      const root = activeFolder ?? baseCwd
+      const now = Date.now()
+      let entries =
+        fileCacheRef.current?.root === root && now - fileCacheRef.current.loadedAt < FILE_CACHE_TTL_MS
+          ? fileCacheRef.current.entries
+          : null
+      if (!entries) {
+        const walked = await walk({ root, maxEntries: 1500 })
+        entries = walked.entries.map((entry) => entry.rel)
+        fileCacheRef.current = { root, entries, loadedAt: now }
+      }
+      const lower = query.toLowerCase()
+      if (!lower) return entries.slice(0, 6)
+      const prefix: string[] = []
+      const contains: string[] = []
+      for (const rel of entries) {
+        const lowerRel = rel.toLowerCase()
+        if (lowerRel.startsWith(lower) || path.basename(lowerRel).startsWith(lower)) prefix.push(rel)
+        else if (lowerRel.includes(lower)) contains.push(rel)
+      }
+      return [...prefix, ...contains].slice(0, 6)
+    },
+    [activeFolder, baseCwd],
+  )
+
+  const toggleExpandTools = () => {
+    setItems((current) => {
+      let lastUser = -1
+      for (let i = current.length - 1; i >= 0; i -= 1) {
+        if (current[i]?.kind === 'user') {
+          lastUser = i
+          break
+        }
+      }
+      const turnIndexes: number[] = []
+      let fallbackIndex = -1
+      for (let i = current.length - 1; i >= 0; i -= 1) {
+        if (current[i]?.kind === 'tool') {
+          if (fallbackIndex === -1) fallbackIndex = i
+          if (i > lastUser) turnIndexes.push(i)
+        }
+      }
+      const targets = turnIndexes.length > 0 ? turnIndexes : fallbackIndex !== -1 ? [fallbackIndex] : []
+      if (targets.length === 0) {
+        showFlash('No tool calls to expand')
+        return current
+      }
+      const targetSet = new Set(targets)
+      const nextExpanded = targets.some((idx) => {
+        const item = current[idx]
+        return item?.kind === 'tool' && !item.expanded
+      })
+      showFlash(nextExpanded ? 'Expanded tool details' : 'Collapsed tool details')
+      return current.map((item, idx) =>
+        item.kind === 'tool' && targetSet.has(idx) ? { ...item, expanded: nextExpanded } : item,
+      )
+    })
+  }
+
+  const copyLastReply = () => {
+    if (liveRef.current.trim()) {
+      copyToClipboard(liveRef.current)
+      showFlash('Copied reply')
       return
     }
-    if (isCtrlC(inputChar, key)) {
-      if (runningRef.current) stop()
-      else exit()
+    for (let i = items.length - 1; i >= 0; i -= 1) {
+      const item = items[i]
+      if (item?.kind === 'assistant' && item.text.trim()) {
+        copyToClipboard(item.text)
+        showFlash('Copied last reply')
+        return
+      }
+      if (item?.kind === 'tool' && item.result?.trim()) {
+        copyToClipboard(item.result)
+        showFlash('Copied tool output')
+        return
+      }
+    }
+    showFlash('Nothing to copy')
+  }
+
+  const openSessionPicker = async () => {
+    if (runningRef.current) {
+      showFlash("Can't switch sessions while a turn is running")
       return
     }
-    if (key.return) {
-      // Enter is taken here rather than by `TextInput`, which would only ever
-      // see it as a return key: the modifier is what tells the two apart.
-      void submit(input, isSteerKey(key)).catch((error) => push({ kind: 'error', text: errorMessage(error) }))
+    if (!runtime.listSessions) {
+      push({ kind: 'info', text: 'Session switching is not available on this surface.' })
       return
     }
-    if (key.meta && (key.upArrow || key.downArrow)) {
-      // Alt+arrow is what a wheel tick is translated into before it reaches Ink
-      // (see `../mouse.ts`): one line of transcript per tick. A bare arrow still
-      // walks the input history, which is what the meta form leaves alone.
-      const step = key.upArrow ? 1 : -1
-      setScrollOffset((value) => Math.max(0, value + step))
+    try {
+      const [sessions, names] = await Promise.all([runtime.listSessions(), Promise.resolve(projectNames())])
+      setPickerSessions(sessions)
+      setPickerProjects(Object.fromEntries(names))
+      setActivePicker('sessions')
+    } catch (error) {
+      push({ kind: 'error', text: errorMessage(error) })
+    }
+  }
+
+  const openFolderPicker = async () => {
+    if (runningRef.current) {
+      showFlash("Can't change folder while a turn is running")
       return
     }
-    if (key.upArrow) recallHistory(-1)
-    else if (key.downArrow) recallHistory(1)
-    else if (key.pageUp) setScrollOffset((value) => value + Math.max(1, Math.floor(chatHeight / 2)))
-    else if (key.pageDown) {
-      setScrollOffset((value) => Math.max(0, value - Math.max(1, Math.floor(chatHeight / 2))))
+    try {
+      const sessions = runtime.listSessions ? await runtime.listSessions() : []
+      const projects = readProjects()
+      const ordered = byRecentUse(projects, sessions)
+      setPickerRecentFolders(ordered.map((project) => ({ id: project.id, name: project.name, path: project.path })))
+      setActivePicker('folder')
+    } catch (error) {
+      push({ kind: 'error', text: errorMessage(error) })
     }
+  }
+
+  useInput(
+    (inputChar, key) => {
+      if (key.eventType === 'release') return
+      if (permission) {
+        // A tool is waiting on y/n, and the composer is not on screen.
+        if (isCtrlC(inputChar, key)) resolvePermission(false)
+        else if (inputChar === 'y' || inputChar === 'Y') resolvePermission(true)
+        else if ((inputChar === 'a' || inputChar === 'A') && permission.approvalScope) resolvePermission(true, true)
+        else if (inputChar === 'n' || inputChar === 'N' || key.escape) resolvePermission(false)
+        return
+      }
+      if (isCtrlC(inputChar, key)) {
+        if (runningRef.current) stop()
+        else exit()
+        return
+      }
+      if (isExpandToolKey(inputChar, key)) {
+        toggleExpandTools()
+        return
+      }
+      if (isCopyKey(inputChar, key)) {
+        copyLastReply()
+        return
+      }
+      if (isMouseToggleKey(inputChar, key)) {
+        const nextOff = !mouseOff
+        setMouseTracking(!nextOff)
+        updateMouseOff(nextOff)
+        showFlash(nextOff ? 'Mouse off — drag to select text' : 'Mouse scroll enabled')
+        return
+      }
+      if (key.ctrl && inputChar === 's') {
+        void openSessionPicker()
+        return
+      }
+      if (key.end || (key.escape && window.offset > 0)) {
+        setScrollOffset(0)
+        return
+      }
+      if (key.pageUp) scrollBy(Math.max(1, Math.floor(chatHeight / 2)))
+      else if (key.pageDown) scrollBy(-Math.max(1, Math.floor(chatHeight / 2)))
+    },
+    { isActive: !activePicker },
+  )
+
+  const applySwitchedSession = async (
+    nextSession: {
+      id: string
+      messages?: Message[]
+      project?: { ok: true; project: { path: string } } | { ok: false; error: string }
+      backend?: { kind: string }
+      stats?: () => SessionStats
+      refreshHistory?: () => Promise<Message[]>
+    },
+    hydrate: boolean,
+  ) => {
+    onSessionChange?.(nextSession.id)
+    setContextTokens(0)
+    setLastDuration(null)
+    setScrollOffset(0)
+    let loadedMessages = nextSession.messages
+    if (nextSession.refreshHistory) {
+      try {
+        const refreshed = await nextSession.refreshHistory()
+        if (refreshed.length > 0) loadedMessages = refreshed
+      } catch {
+        // Fall back to whatever messages are already loaded in memory.
+      }
+    }
+    const nextFolder = nextSession.project?.ok ? nextSession.project.project.path : null
+    updateFolder(nextFolder)
+    updateBackend(nextSession.backend?.kind ?? 'milo')
+    const nextStats = nextSession.stats?.()
+    updateMaxTokens(nextStats?.maxInputTokens)
+    if (nextStats && nextStats.tokens > 0) setContextTokens(nextStats.tokens)
+    if (hydrate) {
+      const hydrated =
+        Array.isArray(loadedMessages) && loadedMessages.length > 0
+          ? itemsFromMessages(loadedMessages, display)
+          : []
+      setItems(hydrated)
+    } else {
+      setItems([])
+    }
+  }
+
+  const buildCliCommandContext = (
+    session: Awaited<ReturnType<AgentRuntime['getSession']>>,
+  ): CommandContext => ({
+    policy:
+      runtime.permissions ??
+      ({ mode, setMode: () => {} } as unknown as PermissionPolicy),
+    resetSession: async () => {
+      await session.clear?.()
+      setItems([])
+      setContextTokens(0)
+    },
+    persistMode: onModeChange,
+    display,
+    persistDisplay: onDisplayChange,
+    effort: runtime.reasoningEffort,
+    persistEffort: onEffortChange,
+    providers: listProviders(),
+    currentProvider: runtime.provider?.id,
+    persistProvider: runtime.setProvider
+      ? (id) => {
+          runtime.setProvider(id)
+          setProvider(runtime.provider.id, runtime.model)
+          onConfigRefresh?.()
+          return {
+            provider: runtime.provider.id,
+            name: runtime.providerName,
+            model: runtime.model,
+          }
+        }
+      : undefined,
+    models: runtime.provider?.id
+      ? () => listProviderModels(runtime.provider.id)
+      : undefined,
+    currentModel: runtime.model,
+    persistModel: runtime.setModel
+      ? (id) => {
+          runtime.setModel(id)
+          setProvider(runtime.provider.id, runtime.model)
+          onConfigRefresh?.()
+          return { model: runtime.model }
+        }
+      : undefined,
+    newSession: async (title) => {
+      const nextSession = await runtime.newSession(scope, title)
+      await applySwitchedSession(nextSession, false)
+      return nextSession
+    },
+    resumeSession: async (id) => {
+      const nextSession = await runtime.resumeSession(scope, id)
+      if (!nextSession) return false
+      await applySwitchedSession(nextSession, true)
+      return true
+    },
+    forkSession: async (targetId, options) => {
+      const source = targetId ?? session.id
+      const forked = await runtime.forkSession(scope, source, options)
+      if (!forked) return null
+      await applySwitchedSession(forked, true)
+      return forked
+    },
+    sessionFolder: () => activeFolder,
+    setSessionFolder: runtime.setSessionFolder
+      ? async (nextFolder) => {
+          await runtime.setSessionFolder(session.id, nextFolder)
+          const resolved = session.project?.ok ? session.project.project.path : null
+          updateFolder(resolved)
+          return resolved
+        }
+      : undefined,
+    listSessions: runtime.listSessions ? () => runtime.listSessions() : undefined,
+    sessionStats: session.stats ? () => session.stats() : undefined,
+    compactSession: session.compact ? () => session.compact() : undefined,
+    skills: () => runtime.skills ?? [],
+    jobs: () => runtime.jobs?.list(sessionId ?? undefined) ?? [],
+    killJob: (id) => runtime.jobs?.kill(id, sessionId ?? undefined) ?? false,
+    memories: (limit, query, offset) => session.memories(limit, query, offset),
+    updateMemory: (id, text) => session.updateMemory(id, text),
+    forgetMemory: (id) => session.forget(id),
   })
 
   const runCommand = async (raw: string) => {
-    const [command, ...rest] = raw.slice(1).trim().split(/\s+/)
+    const [rawCmd, ...rest] = raw.slice(1).trim().split(/\s+/)
+    const command = (rawCmd ?? '').toLowerCase()
     const argument = rest.join(' ')
     if (runningRef.current && BLOCKED_WHILE_BUSY.has(command)) {
       push({
@@ -345,189 +746,18 @@ export function ChatScreen({
     switch (command) {
       case 'model':
       case 'provider':
-        onOpenModel()
+        if (!argument.trim()) {
+          onOpenModel()
+          return
+        }
         break
       case 'setup':
         onOpenSettings()
-        break
-      case 'yolo': {
-        const next: PermissionMode = mode === 'yolo' ? 'ask' : 'yolo'
-        onModeChange(next)
-        push({
-          kind: 'info',
-          text:
-            next === 'yolo'
-              ? '⚠ yolo mode ON — tools run without confirmation. /yolo to turn it off.'
-              : 'yolo mode off — back to asking before side-effecting tools.',
-        })
-        break
-      }
-      case 'mode':
-        if (argument === 'ask' || argument === 'auto' || argument === 'yolo') {
-          onModeChange(argument)
-          push({ kind: 'info', text: `Permission mode: ${argument}` })
-        } else {
-          push({ kind: 'info', text: `Permission mode: ${mode}. Use /mode ask|auto|yolo` })
-        }
-        break
-      case 'tools': {
-        const level = argument.trim().toLowerCase()
-        if (level !== 'full' && level !== 'name' && level !== 'off') {
-          push({ kind: 'info', text: `Tools: ${display.tools}. Use /tools full|name|off` })
-          break
-        }
-        onDisplayChange({ tools: level })
-        push({
-          kind: 'info',
-          text: `Tools: ${level}${level === 'off' ? ' — a tool that fails is still reported' : ''}`,
-        })
-        break
-      }
-      case 'thinking': {
-        const asked = argument.trim().toLowerCase()
-        // `on`/`brief`/`full` and `true` are older spellings of an open thought,
-        // `off`/`false` of a folded one.
-        const level =
-          asked === 'collapsed' || asked === 'off' || asked === 'false'
-            ? 'collapsed'
-            : asked === 'expanded' || asked === 'on' || asked === 'true' || asked === 'brief' || asked === 'full'
-              ? 'expanded'
-              : undefined
-        if (!level) {
-          push({
-            kind: 'info',
-            text:
-              `Thinking display: ${display.thinking}. This is how the reasoning is drawn — ` +
-              'expanded opens it under the question, collapsed keeps it folded there. The model ' +
-              'thinks either way, and /effort is what changes that. Use /thinking expanded|collapsed',
-          })
-          break
-        }
-        onDisplayChange({ thinking: level })
-        push({
-          kind: 'info',
-          text:
-            level === 'collapsed'
-              ? 'Thinking display: collapsed. The model still reasons; the terminal keeps only the line.'
-              : 'Thinking display: expanded — the reasoning stays under the question.',
-        })
-        break
-      }
-      case 'effort': {
-        const asked = argument.trim().toLowerCase()
-        // `default`/`off` are older spellings of "back to Milo's own value",
-        // which is medium.
-        const next = (REASONING_EFFORTS as readonly string[]).includes(asked)
-          ? (asked as ReasoningEffort)
-          : asked === 'default' || asked === 'off'
-            ? DEFAULT_REASONING_EFFORT
-            : undefined
-        if (!next) {
-          push({
-            kind: 'info',
-            text:
-              `Reasoning effort: ${runtime.reasoningEffort ?? DEFAULT_REASONING_EFFORT}. ` +
-              'Use /effort low|medium|high',
-          })
-          break
-        }
-        onEffortChange(next)
-        push({
-          kind: 'info',
-          text: `Reasoning effort: ${next} — affects how the model answers, and what it costs. Saved for every surface.`,
-        })
-        break
-      }
-      case 'new': {
-        const session = await runtime.newSession(scope, argument || undefined)
-        onSessionChange?.(session.id)
-        // The size of a session is only known once a turn has been sent in it.
-        setContextTokens(0)
-        push({ kind: 'info', text: `New session: ${session.id}` })
-        break
-      }
-      case 'sessions': {
-        const outcome = buildSessionsList(await runtime.listSessions(), argument, undefined, {
-          projectNames: projectNames(),
-        })
-        push({ kind: 'info', text: outcome.ok ? outcome.result.reply : outcome.error })
-        break
-      }
-      case 'skills':
-        push({ kind: 'info', text: formatSkillList(runtime.skills) })
-        break
-      case 'memory': {
-        const session = await runtime.getSession(scope)
-        const result = await handleCommand(`/memory ${argument}`, {
-          memories: (limit, query, offset) => session.memories(limit, query, offset),
-          forgetMemory: (id) => session.forget(id),
-          updateMemory: (id, text) => session.updateMemory(id, text),
-        })
-        if (result.handled && result.reply) push({ kind: 'info', text: result.reply })
-        break
-      }
-      case 'resume': {
-        if (!argument) {
-          push({ kind: 'info', text: 'Usage: /resume <id>. See /sessions for the ids.' })
-          break
-        }
-        const session = await runtime.resumeSession(scope, argument)
-        if (!session) {
-          push({ kind: 'info', text: `No session "${argument}". See /sessions for the ids.` })
-          break
-        }
-        onSessionChange?.(session.id)
-        setContextTokens(0)
-        push({ kind: 'info', text: `Switched to session ${session.id}.` })
-        break
-      }
-      case 'fork': {
-        const { targetId, upToTurn } = parseForkArgument(argument)
-        const source = targetId ?? (await runtime.getSession(scope)).id
-        const forked = await runtime.forkSession(scope, source, { upToTurn })
-        if (!forked) {
-          push({ kind: 'info', text: `No session "${source}". See /sessions for the ids.` })
-          break
-        }
-        onSessionChange?.(forked.id)
-        setContextTokens(0)
-        push({ kind: 'info', text: `Branched into session ${forked.id}.` })
-        break
-      }
-      case 'stats': {
-        const session = await runtime.getSession(scope)
-        push({ kind: 'fields', rows: statsRows(session.stats()) })
-        break
-      }
-      case 'jobs': {
-        push({
-          kind: 'info',
-          text: jobsReply(argument, {
-            jobs: () => runtime.jobs?.list() ?? [],
-            killJob: (id) => runtime.jobs?.kill(id) ?? false,
-          }),
-        })
-        break
-      }
-      case 'compact': {
-        const session = await runtime.getSession(scope)
-        // Asked for by hand, the fold is still a model call — and the band is the
-        // only thing on screen while it runs, since no turn owns it here. `/compact`
-        // is one of the commands a running turn rules out, so nothing else is using
-        // the band, and the clock beside the word starts here rather than at the
-        // last turn's first token.
-        setPhase('compacting')
-        setStartedAt(Date.now())
-        try {
-          push({ kind: 'info', text: compactReply(await session.compact()) })
-        } finally {
-          setPhase('idle')
-        }
-        break
-      }
-      // The three that are about the turn rather than the session, carrying out
-      // the same rules the bots do: `/stop` right now and without asking, and
-      // `/steer` and `/queue` saying where a text goes.
+        return
+      case 'exit':
+      case 'quit':
+        onExit()
+        return
       case 'stop':
       case 'steer':
       case 'queue': {
@@ -536,29 +766,64 @@ export function ChatScreen({
           start: (pending) => submit(pending, false),
         })
         if (result.reply) push({ kind: 'info', text: result.reply })
-        break
+        return
       }
-      case 'clear': {
+      case 'sessions':
+        if (argument.trim().toLowerCase() === 'pick') {
+          await openSessionPicker()
+          return
+        }
+        break
+      case 'resume':
+        if (!argument.trim()) {
+          await openSessionPicker()
+          return
+        }
+        break
+      case 'folder':
+        if (!argument.trim() || argument.trim().toLowerCase() === 'pick') {
+          await openFolderPicker()
+          return
+        }
+        break
+      case 'stats': {
         const session = await runtime.getSession(scope)
-        await session.clear()
-        setItems([])
-        push({ kind: 'info', text: `Session ${session.id} cleared.` })
-        break
+        const stats = session.stats()
+        updateMaxTokens(stats.maxInputTokens)
+        push({ kind: 'fields', rows: statsRows(stats) })
+        return
       }
-      case 'help':
-        push({ kind: 'info', text: HELP_TEXT })
-        break
-      case 'exit':
-      case 'quit':
-        onExit()
-        break
+      case 'compact': {
+        const session = await runtime.getSession(scope)
+        setPhase('compacting')
+        setStartedAt(Date.now())
+        try {
+          const result = await handleCommand(raw, buildCliCommandContext(session))
+          if (result.handled && result.reply) push({ kind: 'info', text: result.reply })
+        } finally {
+          setPhase('idle')
+        }
+        return
+      }
       default:
-        push({ kind: 'info', text: `Unknown command: /${command} — try /help` })
+        break
+    }
+
+    const session = await runtime.getSession(scope)
+    const result = await handleCommand(raw, buildCliCommandContext(session))
+    if (result.handled && result.reply) {
+      push({ kind: 'info', text: result.reply })
+    } else if (!result.handled) {
+      push({ kind: 'info', text: `Unknown command: /${command} — try /help` })
     }
   }
 
   /** Files what has been streamed so far as a finished item. */
   const commitLive = () => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current)
+      flushTimerRef.current = null
+    }
     const text = liveRef.current
     liveRef.current = ''
     setLive('')
@@ -570,6 +835,8 @@ export function ChatScreen({
     setLive('')
     liveRef.current = ''
     setReasoning('')
+    reasoningRef.current = ''
+    draftUiActiveRef.current = false
     setToolName('')
     setPhase('thinking')
     setStartedAt(Date.now())
@@ -591,6 +858,7 @@ export function ChatScreen({
     /** Thinking too fast to be worth a line, kept in case it was the answer. */
     const dropped: string[] = []
     const stopWaiting = () => {
+      flushStream()
       const seconds = (Date.now() - waitingSince) / 1000
       waitingSince = Date.now()
       const thought = reasoningRef.current.trim()
@@ -628,8 +896,8 @@ export function ChatScreen({
             // thinking visible — leaving a ✻ line and nothing else on screen.
             if (delta.trim()) answered = true
             liveRef.current += delta
-            setLive(liveRef.current)
             setPhase('writing')
+            scheduleFlush()
           },
           onReasoning: (delta) => {
             // Counted whatever the level: a turn that says nothing in the answer
@@ -639,7 +907,7 @@ export function ChatScreen({
             // going to display the text, and it has no way to open it.
             if (display.thinking === 'collapsed') return
             reasoningRef.current += delta
-            setReasoning(reasoningRef.current)
+            scheduleFlush()
           },
           onToolStart: (name, args) => {
             toolArgsRef.current = args
@@ -652,6 +920,7 @@ export function ChatScreen({
             // also lands above the tool line rather than after it, which is
             // where it was actually said.
             commitLive()
+            draftUiActiveRef.current = false
             // `off` keeps tool activity out of the transcript and out of the
             // status line, so the turn reads as plain thinking. A tool whose own
             // call is not drawn never reaches the status line either.
@@ -659,7 +928,7 @@ export function ChatScreen({
             setToolName(name)
             setPhase('tool')
           },
-          onToolEnd: (name, isError, change) => {
+          onToolEnd: (name, result, isError, change) => {
             // A failure is always shown, even with tools off.
             if ((display.tools !== 'off' && showsToolCall(name)) || isError) {
               push({
@@ -668,6 +937,9 @@ export function ChatScreen({
                 detail: display.tools === 'name' ? '' : toolDetail(toolArgsRef.current),
                 ok: !isError,
                 counts: display.tools === 'full' ? changeCounts(change) : '',
+                args: toolArgsRef.current,
+                result,
+                change,
               })
             }
             setToolName('')
@@ -679,9 +951,36 @@ export function ChatScreen({
           // The plan is drawn as its own block, not a tool line, so it appears
           // whatever the tool level is set to — the person watching a long turn
           // wants to see it either way.
-          onTodo: (items) => push({ kind: 'todo', items }),
+          onTodo: (todoItems) => push({ kind: 'todo', items: todoItems }),
+          onSteer: (steerText) => push({ kind: 'steer', text: steerText }),
+          onUi: (render, draft) => {
+            const nextItem: Item = {
+              kind: 'ui',
+              ...(render.title ? { title: render.title } : {}),
+              summary: summarizeGenUi(render),
+            }
+            if (draftUiActiveRef.current) {
+              setItems((current) => {
+                for (let i = current.length - 1; i >= 0; i -= 1) {
+                  if (current[i]?.kind === 'ui') {
+                    const updated = [...current]
+                    updated[i] = nextItem
+                    return updated
+                  }
+                }
+                return [...current, nextItem]
+              })
+            } else {
+              push(nextItem)
+            }
+            draftUiActiveRef.current = Boolean(draft)
+          },
+          onPanel: (request) => {
+            const detail = describePanelRequest(request)
+            if (detail) push({ kind: 'panel', detail })
+          },
           // The gate's report arrives after the answer, as its own block.
-          onVerification: (ok, text) => push({ kind: 'verification', ok, text }),
+          onVerification: (ok, verificationText) => push({ kind: 'verification', ok, text: verificationText }),
           onUsage: (inputTokens) => setContextTokens(inputTokens),
           // The band says the fold is running; the transcript gets what it came to
           // once it is over. The clock starts again there, so the fold is counted
@@ -700,10 +999,19 @@ export function ChatScreen({
             setPhase('thinking')
             push({ kind: 'info', text: `⏳ waited ${formatSeconds(ms / 1000)} for another Milo.` })
           },
-          onRebased: (event) => {
-            push({ kind: 'info', text: `↺ another Milo has used this session: ${describeRebase(event)}.` })
+          onRebased: (rebasedEvent) => {
+            const notice: Item = {
+              kind: 'info',
+              text: `↺ another Milo has used this session: ${describeRebase(rebasedEvent)}.`,
+            }
+            if (Array.isArray(session.messages) && session.messages.length > 0) {
+              setItems([...itemsFromMessages(session.messages, display), notice])
+            } else {
+              push(notice)
+            }
           },
           onDone: (finishReason) => {
+            flushStream()
             // A capped answer otherwise looks like a complete one.
             if (finishReason === 'length') {
               push({
@@ -712,11 +1020,20 @@ export function ChatScreen({
               })
             }
           },
-          onAborted: () => push({ kind: 'info', text: 'stopped.' }),
-          onError: (message) => push({ kind: 'error', text: message }),
+          onAborted: () => {
+            flushStream()
+            push({ kind: 'info', text: 'stopped.' })
+          },
+          onError: (message) => {
+            flushStream()
+            push({ kind: 'error', text: message })
+          },
         })
       }
+      const nextStats = session.stats?.()
+      if (nextStats?.maxInputTokens !== undefined) updateMaxTokens(nextStats.maxInputTokens)
     } catch (error) {
+      flushStream()
       push({ kind: 'error', text: errorMessage(error) })
     }
 
@@ -761,6 +1078,7 @@ export function ChatScreen({
     }
 
     commitLive()
+    draftUiActiveRef.current = false
     setReasoning('')
     setToolName('')
     setPermission(null)
@@ -871,9 +1189,6 @@ export function ChatScreen({
     }
     const next = current === null ? history.length - 1 : current + direction
     if (next < 0) return
-    // A fresh mount is what puts the cursor at the end of the recalled line,
-    // where the next keystroke belongs; the input keeps its old offset otherwise.
-    setRecallEpoch((epoch) => epoch + 1)
     if (next >= history.length) {
       historyIndexRef.current = null
       setInput(draftRef.current)
@@ -901,13 +1216,16 @@ export function ChatScreen({
     let mediaNotices: string[] | undefined
     let prompt = text
     let mediaModel: string | undefined
+    const attachmentBase = activeFolder ?? baseCwd
     try {
       if (fileTokens.length) {
-        const sizes = await Promise.all(fileTokens.map((file) => stat(path.resolve(file))))
+        const sizes = await Promise.all(
+          fileTokens.map((file) => stat(resolveToolPath(attachmentBase, file))),
+        )
         if (sizes.some((info) => info.size > MAX_INCOMING_BYTES)) throw new Error('A file is larger than 50 MB.')
         if (sizes.reduce((total, info) => total + info.size, 0) > MAX_INCOMING_TOTAL_BYTES) throw new Error('Attachments together are larger than 50 MB.')
         const files = await Promise.all(fileTokens.map(async (file) => {
-          const resolved = path.resolve(file)
+          const resolved = resolveToolPath(attachmentBase, file)
           const bytes = await readFile(resolved)
           const ext = path.extname(file).toLowerCase()
           const mimeType = ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.txt': 'text/plain', '.md': 'text/markdown' } as Record<string, string>)[ext] ?? 'application/octet-stream'
@@ -975,12 +1293,16 @@ export function ChatScreen({
               : 'thinking…'
 
   const statusText = `${statusLabel} ${formatSeconds(elapsed)}${queued > 0 ? ` · ${queued} queued` : ''}`
-  const scrolled = window.offset > 0 ? `▲ scrolled (${window.offset})` : ''
-  const idleText = scrolled || 'Ready'
+  const scrolled = window.offset > 0 ? `▲ scrolled (${window.offset}/${window.maxOffset})` : ''
+  const idleText = flashNotice || scrolled || 'Ready'
   const counters = [
     runningJobs > 0 ? `↻ ${runningJobs} job${runningJobs === 1 ? '' : 's'}` : '',
     !busy && lastDuration !== null ? `last ${formatSeconds(lastDuration)}` : '',
-    contextTokens > 0 ? `${formatTokens(contextTokens)} tok` : '',
+    contextTokens > 0
+      ? budgetTokens
+        ? `~${formatTokens(contextTokens)}/${formatTokens(budgetTokens)} tok`
+        : `${formatTokens(contextTokens)} tok`
+      : '',
   ]
     .filter(Boolean)
     .join(' · ')
@@ -991,17 +1313,23 @@ export function ChatScreen({
   // flag that takes something away wears the warning tone; and the fields drop from
   // the end when the line does not fit, the session id first — the state that takes
   // something away outlives the id nobody has to read twice.
+  const folderLabel = activeFolder ? path.basename(activeFolder) || activeFolder : null
   const footerParts: FooterPart[] = [
     ...(model
       ? [
-          { text: model.model, color: theme.accent, bold: true },
-          { label: 'effort', text: model.effort, color: theme.secondary },
+          { text: model.model, color: activeTheme.accent, bold: true },
+          { label: 'effort', text: model.effort, color: activeTheme.secondary },
         ]
-      : [{ text: 'Milo', color: theme.muted }]),
-    ...(mode !== 'ask' ? [{ text: PERMISSION_LABELS[mode], color: theme.warning }] : []),
-    ...(display.tools !== 'full' ? [{ label: 'tools', text: display.tools, color: theme.warning }] : []),
-    ...(display.thinking === 'collapsed' ? [{ label: 'thinking', text: 'collapsed', color: theme.warning }] : []),
-    ...(sessionId ? [{ label: 'session', text: sessionId, color: theme.muted }] : []),
+      : [{ text: 'Milo', color: activeTheme.muted }]),
+    ...(activeBackend && activeBackend !== 'milo'
+      ? [{ text: activeBackend, color: activeTheme.secondary }]
+      : []),
+    ...(mode !== 'ask' ? [{ text: PERMISSION_LABELS[mode], color: activeTheme.warning }] : []),
+    ...(display.tools !== 'full' ? [{ label: 'tools', text: display.tools, color: activeTheme.warning }] : []),
+    ...(display.thinking === 'collapsed' ? [{ label: 'thinking', text: 'collapsed', color: activeTheme.warning }] : []),
+    ...(mouseOff ? [{ text: 'mouse off', color: activeTheme.warning }] : []),
+    ...(folderLabel ? [{ label: 'folder', text: folderLabel, color: activeTheme.muted }] : []),
+    ...(sessionId ? [{ label: 'session', text: sessionId, color: activeTheme.muted }] : []),
   ]
   const footerWidth = Math.max(1, columns - 4)
   const partWidth = (part: FooterPart) => (part.label ? part.label.length + 1 : 0) + part.text.length
@@ -1043,58 +1371,101 @@ export function ChatScreen({
 
       <Box paddingX={2} width={columns} justifyContent="space-between">
         {busy ? (
-          <Text color={theme.warning}>
+          <Text color={activeTheme.warning}>
             <Spinner type="dots" /> {statusText}
           </Text>
         ) : jobNotice ? (
-          <Text color={theme.warning}>
+          <Text color={activeTheme.warning}>
             <Spinner type="dots" /> job {jobNotice} finished — Milo is on it…
           </Text>
         ) : (
-          <Text color={theme.muted}>{idleText}</Text>
+          <Text color={flashNotice ? activeTheme.secondary : activeTheme.muted}>{idleText}</Text>
         )}
-        {showCounters ? <Text color={theme.muted}>{counters}</Text> : null}
+        {showCounters ? <Text color={activeTheme.muted}>{counters}</Text> : null}
       </Box>
 
-      {permission ? (
+      {activePicker === 'sessions' ? (
+        <SessionPicker
+          sessions={pickerSessions}
+          projectNames={pickerProjects}
+          currentSessionId={sessionId}
+          maxHeight={pickerHeight}
+          columns={columns}
+          theme={activeTheme}
+          onSelect={(pickedId) => {
+            setActivePicker(null)
+            if (pickedId === sessionId) return
+            void (async () => {
+              const next = await runtime.resumeSession(scope, pickedId)
+              if (next) {
+                await applySwitchedSession(next, true)
+                push({ kind: 'info', text: `Switched to session ${next.id}.` })
+              } else {
+                push({ kind: 'info', text: `No session "${pickedId}".` })
+              }
+            })().catch((error) => push({ kind: 'error', text: errorMessage(error) }))
+          }}
+          onCancel={() => setActivePicker(null)}
+        />
+      ) : activePicker === 'folder' ? (
+        <FolderPicker
+          currentFolder={activeFolder}
+          recentFolders={pickerRecentFolders}
+          maxHeight={pickerHeight}
+          columns={columns}
+          theme={activeTheme}
+          onSelect={(folderPath) => {
+            setActivePicker(null)
+            void (async () => {
+              const session = await runtime.getSession(scope)
+              if (!runtime.setSessionFolder) {
+                push({ kind: 'info', text: 'Session folder selection is not available on this surface.' })
+                return
+              }
+              await runtime.setSessionFolder(session.id, folderPath)
+              const resolved = session.project?.ok ? session.project.project.path : null
+              updateFolder(resolved)
+              push({
+                kind: 'info',
+                text: resolved ? `Session folder: ${resolved}.` : 'Session folder: Default directory.',
+              })
+            })().catch((error) => push({ kind: 'error', text: errorMessage(error) }))
+          }}
+          onCancel={() => setActivePicker(null)}
+        />
+      ) : permission ? (
         <Box flexDirection="column" paddingX={2}>
-          <Text color={theme.warning}>⚠ Milo wants to run {toolDisplayName(permission.tool)}:</Text>
-          <Text color={theme.warning}>  {permission.summary}</Text>
-          {permission.approvalScope && <Text color={theme.muted}>  {permission.approvalScope}</Text>}
-          <Text color={theme.muted}>{permission.approvalScope ? '[y] allow · [a] allow for session · [n] deny' : '[y] allow · [n] deny'}</Text>
+          <Text color={activeTheme.warning}>⚠ Milo wants to run {toolDisplayName(permission.tool)}:</Text>
+          <Text color={activeTheme.warning}>  {permission.summary}</Text>
+          {permission.approvalScope && <Text color={activeTheme.muted}>  {permission.approvalScope}</Text>}
+          <Text color={activeTheme.muted}>{permission.approvalScope ? '[y] allow · [a] allow for session · [n] deny' : '[y] allow · [n] deny'}</Text>
         </Box>
       ) : (
-        <Box
-          backgroundColor={theme.surface}
-          paddingX={2}
-          width={columns}
-          height={COMPOSER_ROWS}
-          alignItems="center"
-          overflow="hidden"
-        >
-          <Text bold>› </Text>
-          {/* Always mounted, and without an `onSubmit`: a turn running is no
-              reason to take the composer away — it is exactly when a correction
-              is worth typing — and Enter is read one level up, where the
-              modifier that tells queue and steer apart is still visible. The
-              placeholder is drawn here rather than by the input, whose own hint
-              is grey — and a grey that vanishes against the composer's fill is
-              no hint at all. */}
-          <TextInput key={recallEpoch} value={input} onChange={setInput} placeholder="" />
-          {input === '' && (
-            <Text color={theme.surfaceText}>
-              {' '}
-              {busy ? 'Queue a message — Ctrl+Enter to steer…' : 'Type a message or @file…'}
-            </Text>
-          )}
-        </Box>
+        <Composer
+          value={input}
+          onChange={setInput}
+          onSubmit={(submitted, steer) => {
+            void submit(submitted, steer).catch((error) => push({ kind: 'error', text: errorMessage(error) }))
+          }}
+          onRecallHistory={recallHistory}
+          onScroll={scrollBy}
+          onPopupRowsChange={setPopupRows}
+          commands={COMMAND_CATALOG}
+          suggestFiles={suggestFiles}
+          busy={busy}
+          disabled={Boolean(permission || activePicker)}
+          columns={columns}
+          maxVisibleLines={maxComposerLines}
+          maxPopupRows={maxPopupRows}
+          theme={activeTheme}
+        />
       )}
 
       <Box paddingX={2} width={columns}>
         {footerParts.map((part, index) => (
           <Text key={`${part.label ?? ''}:${part.text}`}>
-            {index > 0 ? <Text color={theme.muted}> · </Text> : null}
-            {part.label ? <Text color={theme.muted}>{part.label} </Text> : null}
+            {index > 0 ? <Text color={activeTheme.muted}> · </Text> : null}
+            {part.label ? <Text color={activeTheme.muted}>{part.label} </Text> : null}
             <Text color={part.color} bold={part.bold}>
               {part.text}
             </Text>
@@ -1109,9 +1480,15 @@ interface EventHandlers {
   onText: (delta: string) => void
   onReasoning: (delta: string) => void
   onToolStart: (name: string, args: unknown) => void
-  onToolEnd: (name: string, isError: boolean, change?: FileChange[]) => void
+  onToolEnd: (name: string, result: string, isError: boolean, change?: FileChange[]) => void
   /** The plan the model is keeping, in full, each time it changes. */
   onTodo: (items: TodoItem[]) => void
+  /** A steering correction delivered to the running turn. */
+  onSteer: (text: string) => void
+  /** A generated interface block rendered beside the transcript. */
+  onUi: (render: GenUiRender, draft?: boolean) => void
+  /** A panel request emitted by the turn. */
+  onPanel: (request: PanelRequest) => void
   /** The project's checks, after a turn that wrote. */
   onVerification: (ok: boolean, text: string) => void
   /** What the last request cost in input tokens: the size of the session as sent. */
@@ -1143,10 +1520,19 @@ function applyEvent(event: AgentEvent, handlers: EventHandlers): void {
       handlers.onToolStart(event.name, event.args)
       break
     case 'tool-end':
-      handlers.onToolEnd(event.name, event.isError, event.change)
+      handlers.onToolEnd(event.name, event.result, event.isError, event.change)
       break
     case 'todo':
       handlers.onTodo(event.items)
+      break
+    case 'steer':
+      handlers.onSteer(event.text)
+      break
+    case 'ui':
+      handlers.onUi(event.render, event.draft)
+      break
+    case 'panel':
+      handlers.onPanel(event.request)
       break
     case 'verification':
       handlers.onVerification(event.ok, event.text)

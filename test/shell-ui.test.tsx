@@ -166,5 +166,20 @@ describe('Shell', () => {
 
     // The way back to the conversation this terminal left, without `/resume`.
     expect(await launch(true)).toBe(second)
+
+    // Hydrates the stored messages from that continued session into the transcript.
+    const continued = render(
+      <Shell
+        initial={null}
+        cwd={home}
+        startScreen="chat"
+        continueSession
+        resumeId={undefined}
+      />,
+    )
+    continued.stdin.write('\r')
+    await waitFor(continued.lastFrame, 'hello')
+    expect(continued.lastFrame() ?? '').toContain('hi')
+    continued.unmount()
   })
 })

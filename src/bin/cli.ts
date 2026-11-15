@@ -6,7 +6,7 @@ import { createElement } from 'react'
 import { render } from 'ink'
 import { configExists, loadConfig, type LoadedConfig } from '../core/config/load.js'
 import { errorMessage } from '../util/errors.js'
-import { enterMouseTracking, enterTui, exitTui } from '../gateways/cli/ansi.js'
+import { enterBracketedPaste, enterMouseTracking, enterTui, exitTui } from '../gateways/cli/ansi.js'
 import { mouseStdin } from '../gateways/cli/mouse.js'
 import { Shell } from '../gateways/cli/index.js'
 import type { PermissionMode } from '../core/tools/permission.js'
@@ -81,6 +81,7 @@ async function runTui(
 
   enterTui()
   enterMouseTracking()
+  enterBracketedPaste()
   try {
     const app = render(
       createElement(Shell, {

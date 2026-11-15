@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { useState } from 'react'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render } from 'ink-testing-library'
 import type { AgentEvent } from '../src/core/agent/events.js'
 import type { DisplayConfig } from '../src/core/config/schema.js'
@@ -800,6 +800,305 @@ describe('ChatScreen', () => {
     expect(lastFrame()).toContain('No session')
 
     expect(changes).toEqual(['brave-wolf-2', 'calm-otter-7'])
+  })
+
+  it('hydrates stored messages when switching sessions via /resume and /fork', async () => {
+    async function* emptyStream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const resumedSession = {
+      id: 'calm-otter-7',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'old question' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'old answer' }] },
+      ],
+      send: () => emptyStream(),
+      clear: async () => undefined,
+      stats: () => ({
+        id: 'calm-otter-7',
+        createdAt: 0,
+        updatedAt: 0,
+        messages: 2,
+        turns: 1,
+        tokens: 18,
+        compacted: false,
+      }),
+    }
+
+    const forkedSession = {
+      id: 'bold-lynx-3',
+      messages: [
+        { role: 'user', content: [{ type: 'text', text: 'branched question' }] },
+        { role: 'assistant', content: [{ type: 'text', text: 'branched answer' }] },
+      ],
+      send: () => emptyStream(),
+      clear: async () => undefined,
+      stats: () => ({
+        id: 'bold-lynx-3',
+        createdAt: 0,
+        updatedAt: 0,
+        messages: 2,
+        turns: 1,
+        tokens: 18,
+        compacted: false,
+      }),
+    }
+
+    const runtime = {
+      getSession: async () => resumedSession,
+      resumeSession: async (_scope: unknown, id: string) =>
+        id === 'calm-otter-7' ? resumedSession : null,
+      forkSession: async () => forkedSession,
+    } as unknown as AgentRuntime
+
+    const { lastFrame, stdin } = renderChat(runtime)
+
+    await submit(stdin, '/resume calm-otter-7')
+    await waitForFrame(lastFrame, 'old answer')
+    expect(lastFrame()).toContain('old question')
+    expect(lastFrame()).toContain('Switched to session calm-otter-7')
+
+    await submit(stdin, '/fork')
+    await waitForFrame(lastFrame, 'branched answer')
+    expect(lastFrame()).toContain('branched question')
+    expect(lastFrame()).toContain('Branched into new session: bold-lynx-3')
+  })
+
+  it('delegates /folder, /status, and /export through the shared command handler', async () => {
+    async function* emptyStream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const session: {
+      id: string
+      messages: never[]
+      project: { ok: true; project: { path: string } } | undefined
+      send: () => AsyncGenerator<AgentEvent>
+      clear: () => Promise<void>
+      stats: () => {
+        id: string
+        createdAt: number
+        updatedAt: number
+        messages: number
+        turns: number
+        tokens: number
+        compacted: boolean
+      }
+    } = {
+      id: 'calm-otter-7',
+      messages: [],
+      project: undefined,
+      send: () => emptyStream(),
+      clear: async () => undefined,
+      stats: () => ({
+        id: 'calm-otter-7',
+        createdAt: 0,
+        updatedAt: 0,
+        messages: 0,
+        turns: 0,
+        tokens: 10,
+        compacted: false,
+      }),
+    }
+
+    const runtime = {
+      getSession: async () => session,
+      setSessionFolder: async (_id: string, folder: string | null) => {
+        session.project = folder ? { ok: true, project: { path: folder } } : undefined
+      },
+    } as unknown as AgentRuntime
+
+    const { lastFrame, stdin } = renderChat(runtime)
+
+    await submit(stdin, '/folder /tmp/workspace-alpha')
+    await waitForFrame(lastFrame, 'Session folder: /tmp/workspace-alpha.')
+    expect(lastFrame()).toContain('folder workspace-alpha')
+
+    await submit(stdin, '/status')
+    await waitForFrame(lastFrame, 'Permission mode: ask')
+
+    await submit(stdin, '/export xml')
+    await waitForFrame(lastFrame, 'Export as what?')
+  })
+
+  it('toggles expanded tool details on Ctrl+O', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield {
+        type: 'tool-start',
+        id: 'tool-1',
+        name: 'read_file',
+        args: { path: 'src/index.ts' },
+      }
+      yield {
+        type: 'tool-end',
+        id: 'tool-1',
+        name: 'read_file',
+        result: 'secret tool output line',
+        isError: false,
+      }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const runtime = {
+      getSession: async () => ({ messages: [], send: () => stream() }),
+    } as unknown as AgentRuntime
+
+    const { lastFrame, stdin } = renderChat(runtime)
+
+    await submit(stdin, 'inspect index')
+    await waitForFrame(lastFrame, 'read_file')
+    expect(lastFrame()).not.toContain('secret tool output line')
+
+    stdin.write('\u000f')
+    await waitForFrame(lastFrame, 'secret tool output line')
+
+    stdin.write('\u000f')
+    await waitUntil(() => !(lastFrame() ?? '').includes('secret tool output line'))
+  })
+
+  it('copies the last assistant reply on Ctrl+Y and toggles mouse tracking on Ctrl+M', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'text-delta', delta: 'copyable reply text' }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const runtime = {
+      getSession: async () => ({ messages: [], send: () => stream() }),
+    } as unknown as AgentRuntime
+
+    const writes: string[] = []
+    const writeSpy = vi.spyOn(process.stdout, 'write').mockImplementation(((chunk: string | Uint8Array) => {
+      writes.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'))
+      return true
+    }) as typeof process.stdout.write)
+
+    try {
+      const { lastFrame, stdin } = renderChat(runtime)
+
+      await submit(stdin, 'hello')
+      await waitForFrame(lastFrame, 'copyable reply text')
+
+      stdin.write('\u0019')
+      await waitForFrame(lastFrame, 'Copied last reply')
+      const expectedOsc52 = `\u001b]52;c;${Buffer.from('copyable reply text', 'utf8').toString('base64')}\u0007`
+      expect(writes.some((entry) => entry.includes(expectedOsc52))).toBe(true)
+
+      stdin.write('\u001b[109;5u')
+      await waitForFrame(lastFrame, 'mouse off')
+
+      stdin.write('\u001b[109;5u')
+      await waitUntil(() => !(lastFrame() ?? '').includes('mouse off'))
+    } finally {
+      writeSpy.mockRestore()
+    }
+  })
+
+  it('renders steer, ui (replacing drafts), and panel events', async () => {
+    async function* stream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'steer', text: 'check tests too' }
+      yield {
+        type: 'ui',
+        draft: true,
+        render: { title: 'Draft Card', tree: { kind: 'text', text: 'draft body' } },
+      }
+      yield {
+        type: 'ui',
+        draft: false,
+        render: { title: 'Final Card', tree: { kind: 'text', text: 'final body' } },
+      }
+      yield { type: 'panel', request: { path: 'src/app.ts' } }
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const runtime = {
+      getSession: async () => ({ messages: [], send: () => stream() }),
+    } as unknown as AgentRuntime
+
+    const { lastFrame, stdin } = renderChat(runtime)
+
+    await submit(stdin, 'build widget')
+    await waitForFrame(lastFrame, 'Final Card')
+    const frame = lastFrame() ?? ''
+    expect(frame).toContain('check tests too')
+    expect(frame).toContain('final body')
+    expect(frame).not.toContain('Draft Card')
+    expect(frame).toContain('src/app.ts')
+  })
+
+  it('opens the session picker on Ctrl+S and the folder picker on bare /folder', async () => {
+    async function* emptyStream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const sessionTwo = {
+      id: 'swift-fox-9',
+      messages: [{ role: 'assistant', content: [{ type: 'text', text: 'from swift fox' }] }],
+      send: () => emptyStream(),
+      clear: async () => undefined,
+      stats: () => ({
+        id: 'swift-fox-9',
+        createdAt: 0,
+        updatedAt: 0,
+        messages: 1,
+        turns: 1,
+        tokens: 10,
+        compacted: false,
+      }),
+    }
+
+    const runtime = {
+      getSession: async () => sessionTwo,
+      listSessions: async () => [
+        { id: 'swift-fox-9', createdAt: 0, updatedAt: 0, messageCount: 1, preview: 'fox session' },
+      ],
+      resumeSession: async (_scope: unknown, id: string) => (id === 'swift-fox-9' ? sessionTwo : null),
+    } as unknown as AgentRuntime
+
+    const { lastFrame, stdin } = renderChat(runtime)
+
+    stdin.write('\u0013')
+    await waitForFrame(lastFrame, 'fox session')
+
+    stdin.write('\r')
+    await waitForFrame(lastFrame, 'from swift fox')
+    expect(lastFrame()).toContain('Switched to session swift-fox-9')
+
+    await submit(stdin, '/folder')
+    await waitForFrame(lastFrame, 'Clear folder (default directory)')
+
+    stdin.write('\u001b')
+    await waitUntil(() => !(lastFrame() ?? '').includes('Enter select'))
+  })
+
+  it('supports multiline Shift+Enter input in the composer', async () => {
+    const sent: string[] = []
+    async function* emptyStream(): AsyncGenerator<AgentEvent> {
+      yield { type: 'done', finishReason: 'stop' }
+    }
+
+    const runtime = {
+      getSession: async () => ({
+        messages: [],
+        send: (text: string) => {
+          sent.push(text)
+          return emptyStream()
+        },
+      }),
+    } as unknown as AgentRuntime
+
+    const { stdin } = renderChat(runtime)
+
+    stdin.write('first line')
+    await tick(20)
+    stdin.write('\u001b[13;2u')
+    await tick(20)
+    stdin.write('second line')
+    await tick(20)
+    stdin.write('\r')
+    await waitUntil(() => sent.length === 1)
+
+    expect(sent[0]).toBe('first line\nsecond line')
   })
 })
 

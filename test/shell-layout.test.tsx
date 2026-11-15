@@ -96,4 +96,28 @@ describe('Shell layout on small terminals', () => {
     // status/counter row painted onto it is what this guards against.
     expect(lines.some((line) => /› /.test(line))).toBe(true)
   })
+
+  it('keeps multiline composer within the viewport height without borders', async () => {
+    const app = render(<Shell initial={loadConfig()} cwd={home} startScreen="chat" />)
+    resize(app, 44, 12)
+    await tick()
+
+    app.stdin.write('line one')
+    await tick(20)
+    app.stdin.write('\u001b[13;2u')
+    await tick(20)
+    app.stdin.write('line two')
+    await tick(20)
+    app.stdin.write('\u001b[13;2u')
+    await tick(20)
+    app.stdin.write('line three')
+    await tick(40)
+
+    const lines = (app.lastFrame() ?? '').split('\n')
+    expect(lines.length).toBeLessThanOrEqual(12)
+    expect(lines.filter((line) => ROUNDED.test(line))).toHaveLength(0)
+    expect(lines.some((line) => line.includes('─'))).toBe(false)
+    expect(lines.some((line) => line.includes('line one'))).toBe(true)
+    expect(lines.some((line) => line.includes('line three'))).toBe(true)
+  })
 })
