@@ -184,9 +184,11 @@ function renderItem(item: Item, width: number, activeTheme: TuiTheme): Line[] {
     case 'tool': {
       // The same shape as the chat surfaces: icon, name, and the one value
       // worth showing — no JSON dump, and nothing when there is nothing
-      // (`/tools name`).
+      // (`/tools name`). A `shell_command` with a command drops the label.
       const name = toolDisplayName(item.name)
-      const baseCall = item.detail ? `${name} ${item.detail}` : name
+      const hasLabel = !(item.name === 'shell_command' && item.detail)
+      const baseCall = hasLabel ? (item.detail ? `${name} ${item.detail}` : name) : item.detail
+      const label = hasLabel ? name : ''
       const head = item.ok ? toolIcon(item.name) : '✗'
       const countsText = item.counts?.trim() ?? ''
       const lineColor = item.ok ? activeTheme.muted : activeTheme.danger
@@ -195,7 +197,7 @@ function renderItem(item: Item, width: number, activeTheme: TuiTheme): Line[] {
         for (const text of wrapText(`${head} ${baseCall}`, width)) {
           push(text, {
             color: lineColor,
-            segments: boldName(text, name),
+            ...(label ? { segments: boldName(text, label) } : {}),
           })
         }
       } else {
@@ -207,7 +209,7 @@ function renderItem(item: Item, width: number, activeTheme: TuiTheme): Line[] {
           const lineStart = cursor
           push(text, {
             color: lineColor,
-            segments: toolLineSegments(text, name, countsStart - lineStart, activeTheme),
+            segments: toolLineSegments(text, label, countsStart - lineStart, activeTheme),
           })
           cursor += text.length
           if (normalized[cursor] === ' ') cursor += 1
@@ -496,6 +498,7 @@ function expandedToolLines(item: Extract<Item, { kind: 'tool' }>, width: number,
  * long call wraps.
  */
 function boldName(text: string, name: string): LineSegment[] {
+  if (!name) return [{ text }]
   const at = text.indexOf(name)
   if (at === -1) return [{ text }]
   return [

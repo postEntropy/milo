@@ -922,20 +922,23 @@ struct ToolRow: View {
 
     /// The whole line, for the sweep to travel along: the name and its value in one
     /// string, as the server drew it.
-    private var wholeLine: String { tool.text.isEmpty ? tool.name : tool.text }
+    private var wholeLine: String { tool.text.isEmpty ? ToolIcons.label(tool.name) : tool.text }
 
-    /// The line the server drew is the name and its value in one string; splitting on
-    /// the name is what lets the name be loud and the value quiet. Where the line does
-    /// not begin with the raw name — an MCP tool's display name — the whole of it is the
-    /// name, the honest reading rather than a guess at where the value starts.
+    /// The line the server drew is the display label and its value in one string;
+    /// splitting on the display label keeps the verb intact when a long path truncates.
     private var name: String {
-        if tool.text.isEmpty { return tool.name }
-        return tool.text.hasPrefix(tool.name) ? tool.name : tool.text
+        let display = ToolIcons.label(tool.name)
+        if tool.text.isEmpty { return display }
+        if isShellCommand && tool.text != display { return tool.text }
+        if tool.text == display || tool.text.hasPrefix("\(display) ") { return display }
+        return tool.text
     }
 
     private var value: String {
-        guard tool.text.hasPrefix(tool.name) else { return "" }
-        return String(tool.text.dropFirst(tool.name.count)).trimmingCharacters(in: .whitespaces)
+        let display = ToolIcons.label(tool.name)
+        if isShellCommand && tool.text != display { return "" }
+        guard tool.text.hasPrefix("\(display) ") else { return "" }
+        return String(tool.text.dropFirst(display.count + 1)).trimmingCharacters(in: .whitespaces)
     }
 
     private var failed: Bool { tool.state == "failed" }

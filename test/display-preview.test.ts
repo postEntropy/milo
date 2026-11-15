@@ -9,14 +9,14 @@ describe('the Display preview', () => {
   it('draws the call with its whole command at full detail', () => {
     expect(assistantParts('full')).toContainEqual({
       kind: 'tool',
-      tool: { name: 'shell_command', text: 'shell_command npm test -- --coverage', state: 'running' },
+      tool: { name: 'shell_command', text: 'npm test -- --coverage', state: 'running' },
     })
   })
 
   it('keeps only the tool name at name detail', () => {
     expect(assistantParts('name')).toContainEqual({
       kind: 'tool',
-      tool: { name: 'shell_command', text: 'shell_command', state: 'running' },
+      tool: { name: 'shell_command', text: 'Shell', state: 'running' },
     })
   })
 

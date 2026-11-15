@@ -163,7 +163,7 @@ describe('runTurn', () => {
     await harness.run()
     // The names are bold on a chat surface, so a name does not read as the
     // first word of the arguments beside it.
-    expect(harness.edits.at(-1)).toBe('> 📄 **read_file**\n\ndone')
+    expect(harness.edits.at(-1)).toBe('> 📄 **Read**\n\ndone')
   })
 
   it('keeps a run of tool lines in one quote, without letting them reflow', async () => {
@@ -181,7 +181,7 @@ describe('runTurn', () => {
     // One quote for the burst, and the lines kept apart inside it by a hard
     // break (two spaces before the newline): a plain newline in a paragraph is a
     // soft break, and the second tool line would reflow into the first sentence.
-    expect(harness.edits.at(-1)).toBe('> 📄 **read_file**  \n> 🌐 **web_search**\n\nanswer')
+    expect(harness.edits.at(-1)).toBe('> 📄 **Read**  \n> 🌐 **Searched web**\n\nanswer')
   })
 
   it('opens a new block for tools after the prose', async () => {
@@ -198,7 +198,7 @@ describe('runTurn', () => {
     const harness = makeHarness(stream)
     await harness.run()
     expect(harness.edits.at(-1)).toBe(
-      '> 📄 **read_file**\n\nachei\n\n> ⚡ **shell_command**\n\npronto',
+      '> 📄 **Read**\n\nachei\n\n> ⚡ **Shell**\n\npronto',
     )
   })
 
@@ -274,7 +274,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('Vou rodar\n\n> ⚡ **shell_command**\n\nRodou.')
+    expect(harness.edits.at(-1)).toBe('Vou rodar\n\n> ⚡ **Shell**\n\nRodou.')
   })
 
   it('gives web_search the globe instead of the marker', async () => {
@@ -287,7 +287,7 @@ describe('runTurn', () => {
 
     const harness = makeHarness(stream)
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('> 🌐 **web_search**\n\nfound')
+    expect(harness.edits.at(-1)).toBe('> 🌐 **Searched web**\n\nfound')
   })
 
   it('marks a failed tool', async () => {
@@ -301,7 +301,7 @@ describe('runTurn', () => {
     await harness.run()
     // The name is emphasised here too: a failure line is one of these lines, and
     // it is drawn the same way whichever tool failed.
-    expect(harness.edits.at(-1)).toContain('❌ **shell_command** failed')
+    expect(harness.edits.at(-1)).toContain('❌ **Shell** failed')
   })
 
   it('routes permission requests to the surface and reflects the answer', async () => {
@@ -428,7 +428,7 @@ describe('runTurn — display settings', () => {
   it('shows only the tool name when asked for names', async () => {
     const harness = makeHarness(withCommand, { allowed: true }, { tools: 'name', thinking: 'expanded' })
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('> ⚡ **shell_command**\n\npronto')
+    expect(harness.edits.at(-1)).toBe('> ⚡ **Shell**\n\npronto')
   })
 
   it('keeps tool activity out entirely when off', async () => {
@@ -446,7 +446,7 @@ describe('runTurn — display settings', () => {
 
     const harness = makeHarness(stream, { allowed: true }, { tools: 'off', thinking: 'expanded' })
     await harness.run()
-    expect(harness.edits.at(-1)).toBe('> ❌ **shell_command** failed')
+    expect(harness.edits.at(-1)).toBe('> ❌ **Shell** failed')
   })
 
   it('shows the first line of the reasoning as one line', async () => {
@@ -511,11 +511,11 @@ describe('runTurn — display settings', () => {
       [
         '> 💭 first thought',
         '',
-        '> 🌐 **web_search** preços',
+        '> 🌐 **Searched web** preços',
         '',
         '> 💭 second thought',
         '',
-        '> 🌐 **web_search** modelos',
+        '> 🌐 **Searched web** modelos',
         '',
         'pronto',
       ].join('\n'),
@@ -540,13 +540,13 @@ describe('runTurn — display settings', () => {
     // than pretending to continue a paragraph the block ended.
     expect(harness.edits.at(-1)).toBe(
       [
-        '> 🌐 **web_search** a',
+        '> 🌐 **Searched web** a',
         '',
         '```shell',
         'ls',
         '```',
         '',
-        '> 📄 **read_file** a.txt',
+        '> 📄 **Read** a.txt',
       ].join('\n'),
     )
   })

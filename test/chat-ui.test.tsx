@@ -203,7 +203,7 @@ describe('ChatScreen', () => {
     await submit(stdin, 'read a.txt')
 
     const frame = lastFrame() ?? ''
-    expect(frame).toContain('read_file')
+    expect(frame).toContain('Read a.txt')
     expect(frame).toContain('all done')
   })
 
@@ -225,7 +225,7 @@ describe('ChatScreen', () => {
 
     const lines = frame.split('\n').map((line) => line.trim())
     const preamble = lines.findIndex((line) => line.includes('Vou conferir o código.'))
-    const tool = lines.findIndex((line) => line.includes('read_file'))
+    const tool = lines.findIndex((line) => line.includes('Read yolo.ts'))
     const answer = lines.findIndex((line) => line.includes('Não. Em yolo'))
     // And said in the order they were said: preamble, the call it announced,
     // then what the call let it answer.
@@ -489,7 +489,7 @@ describe('ChatScreen', () => {
 
     const { lastFrame, stdin } = renderChat(runtime)
     await submit(stdin, 'run it')
-    expect(lastFrame()).toContain('shell_command')
+    expect(lastFrame()).toContain('Shell')
     expect(lastFrame()).toContain('rm -rf build')
 
     stdin.write('n')
@@ -713,7 +713,8 @@ describe('ChatScreen', () => {
 
     const frame = lastFrame() ?? ''
     expect(frame).toContain('feito')
-    expect(frame).not.toContain('shell_command')
+    expect(frame).not.toContain('ls -la')
+    expect(frame).not.toContain('Shell')
     expect(frame).not.toContain('pensando alto')
   })
 
@@ -729,7 +730,7 @@ describe('ChatScreen', () => {
     })
     await submit(stdin, 'roda isso')
 
-    expect(lastFrame()).toContain('shell_command')
+    expect(lastFrame()).toContain('nope')
   })
 
   it('shows a stopped turn as stopped, not as an error', async () => {
@@ -954,7 +955,7 @@ describe('ChatScreen', () => {
     const { lastFrame, stdin } = renderChat(runtime)
 
     await submit(stdin, 'inspect index')
-    await waitForFrame(lastFrame, 'read_file')
+    await waitForFrame(lastFrame, 'Read src/index.ts')
     expect(lastFrame()).not.toContain('secret tool output line')
 
     stdin.write('\u000f')

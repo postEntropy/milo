@@ -10,8 +10,8 @@ import {
   changeCounts,
   drawsToolFailure,
   toolDetail,
-  toolDisplayName,
   toolDraw,
+  toolParts,
   toolResult,
 } from '../tool-line.js'
 import type { Item } from './transcript.js'
@@ -164,8 +164,7 @@ function pushAssistantMessage(
       const outcome = outcomes.get(part.id)
       const mark = toolDraw(part.name, part.args, display.tools)
       if (mark) {
-        const label = toolDisplayName(part.name)
-        const detail = mark.text.startsWith(`${label} `) ? mark.text.slice(label.length + 1) : ''
+        const { value: detail } = toolParts(part.name, mark.text)
         const counts = display.tools === 'full' ? changeCounts(outcome?.change) : ''
         const result = display.tools === 'full' && outcome ? toolResult(outcome.result) : ''
         const change = display.tools === 'full' ? outcome?.change : undefined

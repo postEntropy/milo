@@ -18,6 +18,8 @@ const TOOL_ICONS: Record<string, IconName> = {
   glob: 'files',
   grep: 'search',
   fetch_url: 'link',
+  read_x_post: 'link',
+  read_attachment: 'file',
   write_file: 'file-plus',
   edit_file: 'edit',
   // One change across several files, and the project's own formatter: a stack of

@@ -48,7 +48,7 @@ describe('buildLines', () => {
     // The person's own line is a filled stripe, like the composer: the surface
     // behind it, and the text drawn on that surface.
     expect(lines[0]).toMatchObject({ text: '› hi', color: theme.surfaceText, background: theme.surface })
-    expect(lines.find((line) => line.text.includes('read_file'))).toMatchObject({
+    expect(lines.find((line) => line.text.includes('Read a.txt'))).toMatchObject({
       color: theme.muted,
     })
     expect(lines.find((line) => line.text.startsWith('error:'))).toMatchObject({
@@ -69,16 +69,30 @@ describe('buildLines', () => {
     // Consecutive tool lines sit together; the icons are what matters, and the
     // line carries the same shape a chat surface shows: icon, name, value.
     expect(lines.filter((line) => line.text !== '').map((line) => line.text)).toEqual([
-      '🌐 web_search bun 1.2',
-      '📄 read_file a.txt',
-      '✗ web_search bun 1.2',
+      '🌐 Searched web bun 1.2',
+      '📄 Read a.txt',
+      '✗ Searched web bun 1.2',
     ])
   })
 
   it('shows only the name when there is no detail to show', () => {
     const lines = buildLines([{ kind: 'tool', name: 'read_file', detail: '', ok: true }], 40)
 
-    expect(lines.map((line) => line.text)).toEqual(['📄 read_file'])
+    expect(lines.map((line) => line.text)).toEqual(['📄 Read'])
+  })
+
+  it('shows a shell command directly when it has a command, and Shell when it does not', () => {
+    const lines = buildLines(
+      [
+        { kind: 'tool', name: 'shell_command', detail: 'npm test', ok: true },
+        { kind: 'tool', name: 'shell_command', detail: '', ok: true },
+      ],
+      40,
+    )
+
+    expect(lines.map((line) => line.text)).toEqual(['⚡ npm test', '⚡ Shell'])
+    expect(lines[0]?.segments).toBeUndefined()
+    expect(lines[1]?.segments?.find((segment) => segment.bold)?.text).toBe('Shell')
   })
 
   it('names a tool from an external server by its server and its own name', () => {
@@ -94,15 +108,15 @@ describe('buildLines', () => {
 
   it('bolds the tool name so it does not read as the start of the arguments', () => {
     const lines = buildLines([{ kind: 'tool', name: 'read_file', detail: 'a.txt', ok: true }], 40)
-    const line = lines.find((entry) => entry.text.includes('read_file'))!
+    const line = lines.find((entry) => entry.text.includes('Read'))!
 
     expect(line.segments).toEqual([
       { text: '📄 ' },
-      { text: 'read_file', bold: true },
+      { text: 'Read', bold: true },
       { text: ' a.txt' },
     ])
     // The plain text stays intact for the window and the tests around it.
-    expect(line.text).toBe('📄 read_file a.txt')
+    expect(line.text).toBe('📄 Read a.txt')
   })
 
   it('keeps the name bold in a failure line', () => {
@@ -110,8 +124,8 @@ describe('buildLines', () => {
       [{ kind: 'tool', name: 'web_search', detail: 'x', ok: false }],
       40,
     )
-    const line = lines.find((entry) => entry.text.includes('web_search'))!
-    expect(line.segments?.find((segment) => segment.bold)?.text).toBe('web_search')
+    const line = lines.find((entry) => entry.text.includes('Searched web'))!
+    expect(line.segments?.find((segment) => segment.bold)?.text).toBe('Searched web')
   })
 
   it('leaves lines without a tool name unstyled', () => {
@@ -128,7 +142,7 @@ describe('buildLines', () => {
       40,
     )
 
-    expect(lines.map((line) => line.text)).toEqual(['🔗 fetch_url one', '🔗 fetch_url two'])
+    expect(lines.map((line) => line.text)).toEqual(['🔗 Fetched one', '🔗 Fetched two'])
   })
 
   it('still separates a tool call from the prose around it', () => {
@@ -140,7 +154,7 @@ describe('buildLines', () => {
       40,
     )
 
-    expect(lines.map((line) => line.text)).toEqual(['let me look', '', '📄 read_file a.txt'])
+    expect(lines.map((line) => line.text)).toEqual(['let me look', '', '📄 Read a.txt'])
   })
 })
 
@@ -454,10 +468,10 @@ describe('rich markdown and transcript items', () => {
       60,
     )
 
-    expect(lines[0]?.text).toBe('✏️ edit_file src/app.ts +12 −3')
+    expect(lines[0]?.text).toBe('✏️ Edited src/app.ts +12 −3')
     expect(lines[0]?.segments).toEqual([
       { text: '✏️ ' },
-      { text: 'edit_file', bold: true },
+      { text: 'Edited', bold: true },
       { text: ' src/app.ts ' },
       { text: '+12', color: theme.success },
       { text: ' ' },
@@ -496,9 +510,9 @@ describe('rich markdown and transcript items', () => {
       60,
     )
 
-    expect(lines[0]?.text).toBe('✏️ edit_file src/app.ts +1 −1')
+    expect(lines[0]?.text).toBe('✏️ Edited src/app.ts +1 −1')
     expect(lines.slice(1).every((line) => line.text.startsWith('▎ '))).toBe(true)
-    expect(lines.some((line) => line.text.includes('"path": "src/app.ts"'))).toBe(true)
+    expect(lines.some((line) => line.text.includes('path: src/app.ts'))).toBe(true)
     const fileHeader = lines.find((line) => line.text.startsWith('▎ src/app.ts'))!
     expect(fileHeader.segments?.[0]).toEqual({ text: '▎ ', color: theme.secondary })
     const removeLine = lines.find((line) => line.text === '▎ - const a = 1')!
@@ -588,7 +602,7 @@ describe('rich markdown and transcript items', () => {
       40,
     )
 
-    expect(lines.map((line) => line.text)).toEqual(['📄 read_file a.txt'])
+    expect(lines.map((line) => line.text)).toEqual(['📄 Read a.txt'])
   })
 
   it('memoizes rendered lines per item across streaming updates and invalidates on width or theme change', () => {

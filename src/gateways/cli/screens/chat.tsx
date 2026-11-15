@@ -959,7 +959,7 @@ export function ChatScreen({
             // status line, so the turn reads as plain thinking. A tool whose own
             // call is not drawn never reaches the status line either.
             if (display.tools === 'off' || !showsToolCall(name)) return
-            setToolName(name)
+            setToolName(toolDisplayName(name))
             setPhase('tool')
           },
           onToolEnd: (name, result, isError, change) => {

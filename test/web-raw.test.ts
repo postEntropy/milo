@@ -77,11 +77,11 @@ describe('a web turn’s copies on the wire', () => {
 
     const end = frames.find((frame) => frame.type === 'turn-end')
     // The whole copy: the call with its arguments, and what came back for it.
-    expect(end?.raw).toContain('**read_file**')
+    expect(end?.raw).toContain('**Read**')
     expect(end?.raw).toContain('a.txt')
     expect(end?.raw).toContain('the file says hello')
     // The second copy is the path: the call stays, the result's own words go.
-    expect(end?.rawNoOutput).toContain('**read_file**')
+    expect(end?.rawNoOutput).toContain('**Read**')
     expect(end?.rawNoOutput).toContain('a.txt')
     expect(end?.rawNoOutput).not.toContain('the file says hello')
   })

@@ -47,7 +47,7 @@ describe('transcriptOf — a turn keeps the order it happened in', () => {
     expect(of(messages).at(-1)?.parts).toEqual([
       { kind: 'reasoning', text: 'reading first' },
       { kind: 'text', text: 'Checking the file.' },
-      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt', input: '{\n  "path": "a.txt"\n}', state: 'done', result: 'ok' } },
+      { kind: 'tool', tool: { name: 'read_file', text: 'Read a.txt', input: 'path: a.txt', state: 'done', result: 'ok' } },
       { kind: 'text', text: 'It is fine.' },
     ])
   })
@@ -155,7 +155,7 @@ describe('transcriptOf — a turn keeps the order it happened in', () => {
 
     const raw = of(messages).at(-1)?.raw ?? ''
     expect(raw).toContain('Checking.')
-    expect(raw).toContain('**read_file**')
+    expect(raw).toContain('**Read**')
     expect(raw).toContain('a.txt')
     expect(raw).toContain('**Result**')
     expect(raw).toContain('ok')
@@ -177,13 +177,13 @@ describe('transcriptOf — the display level is applied the same way the live tu
 
   it('draws the value beside the name, and the result under it, at full detail', () => {
     expect(toolParts(messages, 'full')).toEqual([
-      { kind: 'tool', tool: { name: 'read_file', text: 'read_file a.txt', input: '{\n  "path": "a.txt"\n}', state: 'done', result: 'ok' } },
+      { kind: 'tool', tool: { name: 'read_file', text: 'Read a.txt', input: 'path: a.txt', state: 'done', result: 'ok' } },
     ])
   })
 
   it('withholds the value and the result at name detail, rather than shortening the line', () => {
     expect(toolParts(messages, 'name')).toEqual([
-      { kind: 'tool', tool: { name: 'read_file', text: 'read_file', state: 'done' } },
+      { kind: 'tool', tool: { name: 'read_file', text: 'Read', state: 'done' } },
     ])
   })
 
@@ -199,13 +199,13 @@ describe('transcriptOf — the display level is applied the same way the live tu
 describe('transcriptOf — how a call ended', () => {
   it('says a call failed, which a reload used to hide', () => {
     expect(toolParts(turn({ id: 'c1', name: 'shell_command', args: { command: 'npm test' } }, { isError: true }))).toEqual([
-      { kind: 'tool', tool: { name: 'shell_command', text: 'shell_command npm test', input: 'npm test', state: 'failed', result: 'ok' } },
+      { kind: 'tool', tool: { name: 'shell_command', text: 'npm test', input: 'npm test', state: 'failed', result: 'ok' } },
     ])
   })
 
   it('says a call finished when its result came back clean', () => {
     expect(toolParts(turn({ id: 'c1', name: 'grep' }, {}))).toEqual([
-      { kind: 'tool', tool: { name: 'grep', text: 'grep a.txt', input: '{\n  "path": "a.txt"\n}', state: 'done', result: 'ok' } },
+      { kind: 'tool', tool: { name: 'grep', text: 'Searched a.txt', input: 'path: a.txt', state: 'done', result: 'ok' } },
     ])
   })
 
@@ -217,13 +217,13 @@ describe('transcriptOf — how a call ended', () => {
     ]
 
     expect(toolParts(messages)).toEqual([
-      { kind: 'tool', tool: { name: 'grep', text: 'grep x', input: '{\n  "pattern": "x"\n}', state: 'done' } },
+      { kind: 'tool', tool: { name: 'grep', text: 'Searched x', input: 'pattern: x', state: 'done' } },
     ])
   })
 
   it('says nothing about a call whose result never came, rather than guessing', () => {
     expect(toolParts(turn({ id: 'c1', name: 'grep' }))).toEqual([
-      { kind: 'tool', tool: { name: 'grep', text: 'grep a.txt', input: '{\n  "path": "a.txt"\n}' } },
+      { kind: 'tool', tool: { name: 'grep', text: 'Searched a.txt', input: 'path: a.txt' } },
     ])
   })
 
@@ -235,7 +235,7 @@ describe('transcriptOf — how a call ended', () => {
       { role: 'tool', content: [{ type: 'tool-result', id: 'c1', name: 'todo', content: 'no', isError: true }] },
     ]
 
-    expect(toolParts(messages)).toEqual([{ kind: 'tool', tool: { name: 'todo', text: 'todo', state: 'failed' } }])
+    expect(toolParts(messages)).toEqual([{ kind: 'tool', tool: { name: 'todo', text: 'Plan', state: 'failed' } }])
   })
 
   it('leaves a hidden call that went fine out of the transcript', () => {
@@ -265,7 +265,7 @@ describe('transcriptOf — the second copy, without the tool output', () => {
     const message = of(messages).at(-1)
     expect(message?.raw).toContain('ok')
     // The path: the call and its arguments stay, the result's own words go.
-    expect(message?.rawNoOutput).toContain('**read_file**')
+    expect(message?.rawNoOutput).toContain('**Read**')
     expect(message?.rawNoOutput).toContain('a.txt')
     expect(message?.rawNoOutput).not.toContain('ok')
   })

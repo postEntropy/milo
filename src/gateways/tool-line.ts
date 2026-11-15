@@ -32,50 +32,54 @@ export type ToolBrand = 'drive'
  * what does this tool look like — and a tool with two tables would be a tool with
  * two answers.
  */
-const TOOLS: Record<string, { icon: string; brand?: ToolBrand }> = {
-  read_file: { icon: '📄' },
-  list_dir: { icon: '📁' },
-  glob: { icon: '🔎' },
-  grep: { icon: '🔍' },
-  fetch_url: { icon: '🔗' },
-  git: { icon: '🌿' },
-  git_commit: { icon: '📌' },
-  write_file: { icon: '📝' },
-  edit_file: { icon: '✏️' },
-  apply_patch: { icon: '🧩' },
-  format: { icon: '📐' },
-  remember: { icon: '🧠' },
-  recall: { icon: '🗂' },
-  sessions: { icon: '🗃' },
-  search_history: { icon: '🕘' },
-  web_search: { icon: '🌐' },
-  read_skill: { icon: '📘' },
-  view_image: { icon: '🖼️' },
-  instructions: { icon: '📜' },
-  memories: { icon: '🧠' },
-  routine: { icon: '⏱️' },
-  task_lists: { icon: '☑️' },
-  job_status: { icon: '📊' },
-  job_kill: { icon: '🛑' },
-  task: { icon: '🤖' },
-  todo: { icon: '🗒' },
-  shell_command: { icon: '⚡' },
-  browser_open: { icon: '🧭' },
-  browser_snapshot: { icon: '👁️' },
-  browser_screenshot: { icon: '📸' },
-  browser_act: { icon: '🖱️' },
+const TOOLS: Record<string, { icon: string; label: string; brand?: ToolBrand }> = {
+  read_file: { icon: '📄', label: 'Read' },
+  list_dir: { icon: '📁', label: 'Listed' },
+  glob: { icon: '🔎', label: 'Found files' },
+  grep: { icon: '🔍', label: 'Searched' },
+  fetch_url: { icon: '🔗', label: 'Fetched' },
+  read_x_post: { icon: '🔗', label: 'Read post' },
+  read_attachment: { icon: '📎', label: 'Read attachment' },
+  git: { icon: '🌿', label: 'Git' },
+  git_commit: { icon: '📌', label: 'Committed' },
+  write_file: { icon: '📝', label: 'Wrote' },
+  edit_file: { icon: '✏️', label: 'Edited' },
+  apply_patch: { icon: '🧩', label: 'Patched' },
+  format: { icon: '📐', label: 'Formatted' },
+  remember: { icon: '🧠', label: 'Remembered' },
+  recall: { icon: '🗂', label: 'Recalled' },
+  sessions: { icon: '🗃', label: 'Sessions' },
+  search_history: { icon: '🕘', label: 'Searched history' },
+  web_search: { icon: '🌐', label: 'Searched web' },
+  read_skill: { icon: '📘', label: 'Read skill' },
+  view_image: { icon: '🖼️', label: 'Viewed image' },
+  instructions: { icon: '📜', label: 'Instructions' },
+  memories: { icon: '🧠', label: 'Memories' },
+  routine: { icon: '⏱️', label: 'Routine' },
+  task_lists: { icon: '☑️', label: 'Task lists' },
+  job_status: { icon: '📊', label: 'Job status' },
+  job_kill: { icon: '🛑', label: 'Stopped job' },
+  task: { icon: '🤖', label: 'Task' },
+  todo: { icon: '🗒', label: 'Plan' },
+  send_file: { icon: '📎', label: 'Sent file' },
+  panel: { icon: '🪟', label: 'Panel' },
+  shell_command: { icon: '⚡', label: 'Shell' },
+  browser_open: { icon: '🧭', label: 'Opened page' },
+  browser_snapshot: { icon: '👁️', label: 'Snapshot' },
+  browser_screenshot: { icon: '📸', label: 'Screenshot' },
+  browser_act: { icon: '🖱️', label: 'Browser' },
   // Every email tool wears the one envelope — the browser draws the same mail mark,
   // and a chat client, which can only draw a character, wears this one.
-  gmail_search: { icon: '📧' },
-  gmail_read: { icon: '📧' },
-  gmail_modify: { icon: '📧' },
-  gmail_draft: { icon: '📧' },
-  gmail_send: { icon: '📧' },
-  mail_labels: { icon: '📧' },
+  gmail_search: { icon: '📧', label: 'Searched email' },
+  gmail_read: { icon: '📧', label: 'Read email' },
+  gmail_modify: { icon: '📧', label: 'Modified email' },
+  gmail_draft: { icon: '📧', label: 'Drafted email' },
+  gmail_send: { icon: '📧', label: 'Sent email' },
+  mail_labels: { icon: '📧', label: 'Email labels' },
   // A folder rather than Drive's logotype: the text surfaces can only draw a
   // character, and there is no Drive emoji — the browser draws the mark instead.
-  drive_search: { icon: '📂', brand: 'drive' },
-  drive_read: { icon: '📂', brand: 'drive' },
+  drive_search: { icon: '📂', label: 'Searched Drive', brand: 'drive' },
+  drive_read: { icon: '📂', label: 'Read Drive', brand: 'drive' },
 }
 
 const FALLBACK = '🔧'
@@ -94,6 +98,8 @@ const MCP_NAME = /^mcp__([a-z0-9]+(?:[_-][a-z0-9]+)*)__(.+)$/
 
 /** The name a person reads for a tool, on any surface that names one. */
 export function toolDisplayName(name: string): string {
+  const entry = TOOLS[name]
+  if (entry) return entry.label
   const mcp = MCP_NAME.exec(name)
   return mcp ? `${mcp[1]}: ${mcp[2]}` : name
 }
@@ -186,6 +192,10 @@ export function toolBrand(name: string): ToolBrand | null {
  * The words of a line — the tool's name and the one value worth showing — with no
  * icon in front. The browser asks for this and draws the icon itself, because an
  * icon there is a drawing and not a character.
+ *
+ * A `shell_command` with a command to show drops the label and shows the command
+ * directly; at `name` level (no args) or with an empty command it falls back to
+ * the `Shell` label.
  */
 export function toolText(
   name: string,
@@ -193,8 +203,26 @@ export function toolText(
   options: { markdown?: boolean } = {},
 ): string {
   const summary = toolDetail(args)
+  if (name === 'shell_command' && summary) return summary
   const label = toolLabel(name, options.markdown ?? false)
   return summary ? `${label} ${summary}` : label
+}
+
+/**
+ * Splits a rendered tool line into its tool label and its detail value so a
+ * surface can style them separately. A `shell_command` at `full` carries the
+ * command alone, with no label in front of it.
+ */
+export function toolParts(name: string, text: string): { label: string; value: string } {
+  const display = toolDisplayName(name)
+  if (name === 'shell_command' && text !== display) {
+    return { label: '', value: text }
+  }
+  if (text === display) return { label: display, value: '' }
+  if (text.startsWith(`${display} `)) {
+    return { label: display, value: text.slice(display.length + 1).trim() }
+  }
+  return { label: text, value: '' }
 }
 
 export function toolLine(
@@ -236,7 +264,61 @@ export function toolInput(name: string, args: unknown): string {
     return typeof command === 'string' ? command : ''
   }
   if (typeof args === 'string') return args
-  return JSON.stringify(args, null, 2) ?? ''
+  return formatInputValue(args)
+}
+
+function formatInputValue(value: unknown, indent = ''): string {
+  if (value == null) return ''
+  if (typeof value === 'string') return value
+  if (typeof value === 'number' || typeof value === 'boolean') return String(value)
+  if (Array.isArray(value)) {
+    return value
+      .map((item) => {
+        const formatted = formatInputValue(item, `${indent}  `)
+        return formatted.includes('\n')
+          ? `${indent}-\n${formatted}`
+          : `${indent}- ${formatted}`
+      })
+      .join('\n')
+  }
+  if (typeof value === 'object') {
+    const lines: string[] = []
+    for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+      if (entry === undefined) continue
+      lines.push(formatInputEntry(key, entry, indent))
+    }
+    return lines.join('\n')
+  }
+  return String(value)
+}
+
+function formatInputEntry(key: string, value: unknown, indent: string): string {
+  if (value === null) return `${indent}${key}: null`
+  if (typeof value === 'number' || typeof value === 'boolean') return `${indent}${key}: ${String(value)}`
+  if (typeof value === 'string') {
+    if (!value.includes('\n')) return `${indent}${key}: ${value}`
+    const body = value
+      .split('\n')
+      .map((line) => `${indent}  ${line}`)
+      .join('\n')
+    return `${indent}${key}:\n${body}`
+  }
+  if (Array.isArray(value)) {
+    if (value.length === 0) return `${indent}${key}: []`
+    const allScalar = value.every(
+      (item) => item === null || ['string', 'number', 'boolean'].includes(typeof item),
+    )
+    if (allScalar && value.every((item) => typeof item !== 'string' || !item.includes('\n'))) {
+      const joined = value.map(String).join(', ')
+      if (joined.length <= 80) return `${indent}${key}: ${joined}`
+    }
+    return `${indent}${key}:\n${formatInputValue(value, `${indent}  `)}`
+  }
+  if (typeof value === 'object') {
+    const nested = formatInputValue(value, `${indent}  `)
+    return nested ? `${indent}${key}:\n${nested}` : `${indent}${key}: {}`
+  }
+  return `${indent}${key}: ${String(value)}`
 }
 
 const GIST_LIMIT = 120
@@ -328,10 +410,10 @@ export function toolDetail(args: unknown): string {
   // alone would otherwise answer for it and lose the verb.
   if (typeof record.action === 'string' && record.action.trim()) {
     const action = record.action.trim()
-    const target = [record.path, record.id, record.name, record.text].find(
+    const target = [record.path, record.id, record.name, record.text, record.key].find(
       (value) => typeof value === 'string' && value.trim() !== '',
     )
-    return `${action}${typeof target === 'string' ? ` ${target.trim()}` : ''}`
+    return gist(`${action}${typeof target === 'string' ? ` ${target.trim()}` : ''}`)
   }
   // `remember` keeps a list of facts, not one value: the line shows the first — the
   // fact kept is the news, and what it was is what a person wants to read here — and
@@ -343,11 +425,20 @@ export function toolDetail(args: unknown): string {
     const first = gist(facts[0])
     return facts.length > 1 ? `${first} (+${facts.length - 1} more)` : first
   }
+  if (typeof record.patch === 'string') {
+    const paths = [...record.patch.matchAll(/^\*\*\* (?:Update|Add|Delete) File:\s*(.+)$/gm)]
+      .map((match) => match[1]?.trim() ?? '')
+      .filter(Boolean)
+    if (paths.length > 0) {
+      const first = gist(paths[0]!)
+      return paths.length > 1 ? `${first} (+${paths.length - 1} more)` : first
+    }
+  }
   // `description` is the `task` tool's label for a subtask (its `prompt` is the
   // whole instruction, and has no place on a one-line activity log); `url` and
   // `name` are the one interesting value of `fetch_url` and `read_skill`; `to` is
   // who mail is for, which is what a draft or a send line is about.
-  for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name', 'to', 'app']) {
+  for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name', 'to', 'app', 'message', 'mode']) {
     const value = record[key]
     if (typeof value === 'string' && value.trim()) return gist(value)
   }

@@ -599,6 +599,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .tool-line svg.icon { color: var(--muted); stroke-width: 2.5; }
 .message-content .tool-line code { display: flex; min-width: 0; flex: 1; align-items: baseline; gap: var(--space-3); font: 500 var(--text-xs) var(--font-mono); white-space: nowrap; }
 .message-content .tool-line .tool-name { flex: none; color: var(--fg); }
+.message-content .tool-line .tool-name.tool-command { overflow: hidden; flex: 0 1 auto; min-width: 0; text-overflow: ellipsis; }
 .message-content .tool-line .tool-value { overflow: hidden; flex: 0 1 auto; min-width: 0; color: var(--muted); text-overflow: ellipsis; }
 .message-content .tool-line .tool-failed { flex: none; color: var(--danger); font-family: var(--font-body); }
 .tool-line code .tool-mark { flex: none; align-self: center; }

@@ -17,6 +17,8 @@ enum ToolIcons {
         "glob": "doc.on.doc",
         "grep": "magnifyingglass",
         "fetch_url": "link",
+        "read_x_post": "link",
+        "read_attachment": "doc.text",
         "write_file": "doc.badge.plus",
         "edit_file": "pencil",
         // One change across several files, and the project's own formatter.
@@ -60,10 +62,66 @@ enum ToolIcons {
         "drive_read": "externaldrive",
     ]
 
+    private static let labels: [String: String] = [
+        "read_file": "Read",
+        "list_dir": "Listed",
+        "glob": "Found files",
+        "grep": "Searched",
+        "fetch_url": "Fetched",
+        "read_x_post": "Read post",
+        "read_attachment": "Read attachment",
+        "git": "Git",
+        "git_commit": "Committed",
+        "write_file": "Wrote",
+        "edit_file": "Edited",
+        "apply_patch": "Patched",
+        "format": "Formatted",
+        "remember": "Remembered",
+        "recall": "Recalled",
+        "sessions": "Sessions",
+        "search_history": "Searched history",
+        "web_search": "Searched web",
+        "read_skill": "Read skill",
+        "view_image": "Viewed image",
+        "instructions": "Instructions",
+        "memories": "Memories",
+        "routine": "Routine",
+        "task_lists": "Task lists",
+        "job_status": "Job status",
+        "job_kill": "Stopped job",
+        "task": "Task",
+        "todo": "Plan",
+        "send_file": "Sent file",
+        "panel": "Panel",
+        "shell_command": "Shell",
+        "browser_open": "Opened page",
+        "browser_snapshot": "Snapshot",
+        "browser_screenshot": "Screenshot",
+        "browser_act": "Browser",
+        "gmail_search": "Searched email",
+        "gmail_read": "Read email",
+        "gmail_modify": "Modified email",
+        "gmail_draft": "Drafted email",
+        "gmail_send": "Sent email",
+        "mail_labels": "Email labels",
+        "drive_search": "Searched Drive",
+        "drive_read": "Read Drive",
+    ]
+
     /// A tool's mark, and a plain one for a tool this table has never heard of.
     static func symbol(_ name: String) -> String {
         // A tool that runs on someone else's server wears the server mark.
         if name.hasPrefix("mcp__") { return "server.rack" }
         return symbols[name] ?? "gearshape"
+    }
+
+    /// The human-readable label for a tool name, matching the server's `toolDisplayName`.
+    static func label(_ name: String) -> String {
+        if let label = labels[name] { return label }
+        if name.hasPrefix("mcp__") {
+            let parts = name.dropFirst(5).split(separator: "__", maxSplits: 1)
+            if parts.count == 2 { return "\(parts[0]): \(parts[1])" }
+        }
+        return name
     }
 }

@@ -39,7 +39,7 @@ describe('rawTurn — a turn copied whole', () => {
     expect(raw).toContain('**Reasoning**')
     expect(raw).toContain('let me look')
     expect(raw).toContain('Checking.')
-    expect(raw).toContain('**read_file**')
+    expect(raw).toContain('**Read**')
     expect(raw).toContain('"path": "a.txt"')
     expect(raw).toContain('**Result**')
     expect(raw).toContain('hello')
@@ -47,8 +47,8 @@ describe('rawTurn — a turn copied whole', () => {
 
     // And in the order the turn happened in.
     expect(raw.indexOf('**Reasoning**')).toBeLessThan(raw.indexOf('Checking.'))
-    expect(raw.indexOf('Checking.')).toBeLessThan(raw.indexOf('**read_file**'))
-    expect(raw.indexOf('**read_file**')).toBeLessThan(raw.indexOf('**Result**'))
+    expect(raw.indexOf('Checking.')).toBeLessThan(raw.indexOf('**Read**'))
+    expect(raw.indexOf('**Read**')).toBeLessThan(raw.indexOf('**Result**'))
     expect(raw.indexOf('**Result**')).toBeLessThan(raw.indexOf('Done.'))
   })
 
@@ -107,7 +107,7 @@ describe('rawTurn — the turn without its output', () => {
     expect(path).toContain('**Reasoning**')
     expect(path).toContain('let me look')
     expect(path).toContain('Checking.')
-    expect(path).toContain('**read_file**')
+    expect(path).toContain('**Read**')
     expect(path).toContain('"path": "a.txt"')
     expect(path).toContain('Done.')
     // What came back is not the path: the result's own words are left out.
@@ -124,7 +124,7 @@ describe('rawTurn — the turn without its output', () => {
     ]
 
     const path = rawTurn(messages, { output: false }) ?? ''
-    expect(path).toContain('**shell_command**')
+    expect(path).toContain('**Shell**')
     expect(path).toContain('**Result — it failed**')
     // A failure the path would otherwise swallow is said; the words are not read back.
     expect(path).not.toContain('it could not run')

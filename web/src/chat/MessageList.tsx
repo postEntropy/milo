@@ -7,7 +7,7 @@ import { formatTokens, humanSize } from '../../../src/util/format.ts'
 import type { FrameAttachment, SessionCardItem, ThinkingDisplay, ToolMark, TranscriptPart } from '@protocol'
 import { proseOf } from '@protocol'
 import type { RoutineDelivery } from '../../../src/core/outgoing.ts'
-import { toolBrand, toolLabel, changeTotals } from '../../../src/gateways/tool-line.ts'
+import { toolBrand, toolParts, changeTotals } from '../../../src/gateways/tool-line.ts'
 import type { FileChange } from '../../../src/core/change.ts'
 import { toolRows } from './tool-runs.js'
 import type { TodoItem, TodoStatus } from '../../../src/core/todos.ts'
@@ -50,8 +50,8 @@ function ToolLine({ tool }: { tool: ToolMark }) {
   const { state: copied, copy } = useCopy(tool.text)
   const label = copyLabel(copied)
   const brand = toolBrand(tool.name)
-  const name = toolLabel(tool.name, false)
-  const value = tool.text.startsWith(name) ? tool.text.slice(name.length).trim() : ''
+  const { label: toolName, value } = toolParts(tool.name, tool.text)
+  const sole = !toolName && value !== ''
   const totals = changeTotals(tool.change)
   const change = tool.change && tool.change.length > 0 ? tool.change : null
   const result = tool.result || null
@@ -59,8 +59,8 @@ function ToolLine({ tool }: { tool: ToolMark }) {
   const canOpen = hasDetail || tool.state === 'running'
   const line = <code>
     <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />{' '}
-    <span className="tool-name">{value ? name : tool.text}</span>
-    {value && <span className="tool-value">{value}</span>}
+    {toolName && <span className="tool-name">{toolName}</span>}
+    {value && <span className={sole ? 'tool-name tool-command' : 'tool-value'}>{value}</span>}
     {(totals.additions > 0 || totals.deletions > 0) && <span className="tool-change-count">
       {totals.additions > 0 && <span className="plus">+{totals.additions}</span>}
       {totals.deletions > 0 && <span className="minus">−{totals.deletions}</span>}

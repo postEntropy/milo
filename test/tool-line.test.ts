@@ -1,93 +1,111 @@
 import { describe, expect, it } from 'vitest'
-import { changeCounts, isExternalTool, toolBrand, toolDisplayName, toolDraw, toolIcon, toolLine, toolResult, toolResultPreview, toolText } from '../src/gateways/tool-line.js'
+import { changeCounts, isExternalTool, toolBrand, toolDisplayName, toolDraw, toolIcon, toolInput, toolLine, toolParts, toolResult, toolResultPreview, toolText } from '../src/gateways/tool-line.js'
 
 describe('toolLine', () => {
-  it('shows a shell command like any other tool, with the command beside it', () => {
+  it('shows a shell command directly when it has a command, and Shell when it does not', () => {
     expect(toolLine('shell_command', { command: 'docker compose up -d' })).toBe(
-      '⚡ shell_command docker compose up -d',
+      '⚡ docker compose up -d',
     )
+    expect(toolLine('shell_command')).toBe('⚡ Shell')
   })
 
   it('keeps a search in the same shape, with the query', () => {
-    expect(toolLine('web_search', { query: 'bun 1.2 release' })).toBe('🌐 web_search bun 1.2 release')
+    expect(toolLine('web_search', { query: 'bun 1.2 release' })).toBe('🌐 Searched web bun 1.2 release')
   })
 
   it('marks the read tools with their own icon', () => {
-    expect(toolLine('list_dir', { path: 'src' })).toBe('📁 list_dir src')
-    expect(toolLine('glob', { pattern: '**/*.ts' })).toBe('🔎 glob **/*.ts')
-    expect(toolLine('grep', { pattern: 'alpha' })).toBe('🔍 grep alpha')
+    expect(toolLine('list_dir', { path: 'src' })).toBe('📁 Listed src')
+    expect(toolLine('glob', { pattern: '**/*.ts' })).toBe('🔎 Found files **/*.ts')
+    expect(toolLine('grep', { pattern: 'alpha' })).toBe('🔍 Searched alpha')
   })
 
   it('gives every email tool the one envelope, and Drive the folder', () => {
-    expect(toolLine('gmail_search', { query: 'is:unread' })).toBe('📧 gmail_search is:unread')
-    expect(toolLine('gmail_modify', { id: 'm1', op: 'trash' })).toBe('📧 gmail_modify')
+    expect(toolLine('gmail_search', { query: 'is:unread' })).toBe('📧 Searched email is:unread')
+    expect(toolLine('gmail_modify', { id: 'm1', op: 'trash' })).toBe('📧 Modified email')
     // Who a message is for, not the message itself: a body has no place on a gist.
     expect(toolLine('gmail_draft', { to: 'ana@exemplo', subject: 'Hello', body: 'x' })).toBe(
-      '📧 gmail_draft ana@exemplo',
+      '📧 Drafted email ana@exemplo',
     )
     expect(toolLine('gmail_send', { to: 'ana@exemplo', subject: 'Hello', body: 'x' })).toBe(
-      '📧 gmail_send ana@exemplo',
+      '📧 Sent email ana@exemplo',
     )
-    expect(toolLine('mail_labels', { action: 'list' })).toBe('📧 mail_labels list')
-    expect(toolLine('drive_search', { query: 'budget' })).toBe('📂 drive_search budget')
+    expect(toolLine('mail_labels', { action: 'list' })).toBe('📧 Email labels list')
+    expect(toolLine('drive_search', { query: 'budget' })).toBe('📂 Searched Drive budget')
   })
 
   it('names the thing a verb acts on, by its path or its id', () => {
-    expect(toolLine('sessions', { action: 'list' })).toBe('🗃 sessions list')
+    expect(toolLine('sessions', { action: 'list' })).toBe('🗃 Sessions list')
     expect(toolLine('sessions', { action: 'remove', id: 'merry-badger-52' })).toBe(
-      '🗃 sessions remove merry-badger-52',
+      '🗃 Sessions remove merry-badger-52',
     )
     expect(toolLine('routine', { action: 'remove', id: 'calm-otter-7' })).toBe(
-      '⏱️ routine remove calm-otter-7',
+      '⏱️ Routine remove calm-otter-7',
     )
   })
 
   it('shows the rule and list name beside their actions', () => {
     expect(toolLine('instructions', { action: 'add', text: 'Never run reboot without asking.' })).toBe(
-      '📜 instructions add Never run reboot without asking.',
+      '📜 Instructions add Never run reboot without asking.',
     )
     expect(toolLine('task_lists', { action: 'create', name: 'Release plan' })).toBe(
-      '☑️ task_lists create Release plan',
+      '☑️ Task lists create Release plan',
     )
   })
 
   it('writes a file change the same way, by its path', () => {
-    expect(toolLine('write_file', { path: 'src/a.ts', content: 'x' })).toBe('📝 write_file src/a.ts')
+    expect(toolLine('write_file', { path: 'src/a.ts', content: 'x' })).toBe('📝 Wrote src/a.ts')
     expect(toolLine('edit_file', { path: 'src/a.ts', old_string: 'a', new_string: 'b' })).toBe(
-      '✏️ edit_file src/a.ts',
+      '✏️ Edited src/a.ts',
     )
+    expect(
+      toolLine('apply_patch', {
+        patch: '*** Begin Patch\n*** Update File: src/a.ts\n@@\n-a\n+b\n*** Add File: src/b.ts\n+x\n*** End Patch',
+      }),
+    ).toBe('🧩 Patched src/a.ts (+1 more)')
   })
 
   it('falls back to the marker for an unknown tool', () => {
-    expect(toolLine('read_file', { path: 'src/index.ts' })).toBe('📄 read_file src/index.ts')
+    expect(toolLine('read_file', { path: 'src/index.ts' })).toBe('📄 Read src/index.ts')
     expect(toolLine('something_new', { path: 'a' })).toBe('🔧 something_new a')
   })
 
   it('shows a subtask by its label, never by its prompt', () => {
     expect(toolLine('task', { description: 'survey deps', prompt: 'a long instruction' })).toBe(
-      '🤖 task survey deps',
+      '🤖 Task survey deps',
     )
   })
 
   it('shows the fact Milo kept, and counts the others rather than dumping the list', () => {
     expect(toolLine('remember', { facts: ['Prefers TypeScript over JavaScript.'] })).toBe(
-      '🧠 remember Prefers TypeScript over JavaScript.',
+      '🧠 Remembered Prefers TypeScript over JavaScript.',
     )
     expect(
       toolLine('remember', { facts: ['Prefers TypeScript.', 'Lives in São Paulo.', 'Ships on Fridays.'] }),
-    ).toBe('🧠 remember Prefers TypeScript. (+2 more)')
+    ).toBe('🧠 Remembered Prefers TypeScript. (+2 more)')
   })
 
-  it('names the skill being loaded and the URL being fetched', () => {
-    expect(toolLine('read_skill', { name: 'deploy' })).toBe('📘 read_skill deploy')
+  it('names the skill being loaded, the URL being fetched, and commits/browser calls', () => {
+    expect(toolLine('read_skill', { name: 'deploy' })).toBe('📘 Read skill deploy')
     expect(toolLine('fetch_url', { url: 'https://example.com/a' })).toBe(
-      '🔗 fetch_url https://example.com/a',
+      '🔗 Fetched https://example.com/a',
     )
+    expect(toolLine('read_x_post', { url: 'https://x.com/milo/status/1' })).toBe(
+      '🔗 Read post https://x.com/milo/status/1',
+    )
+    expect(toolLine('read_attachment')).toBe('📎 Read attachment')
+    expect(toolLine('git_commit', { message: 'fix: typo\n\nmore detail' })).toBe(
+      '📌 Committed fix: typo more detail',
+    )
+    expect(toolLine('browser_open', { url: 'https://example.com' })).toBe(
+      '🧭 Opened page https://example.com',
+    )
+    expect(toolLine('browser_snapshot', { mode: 'text' })).toBe('👁️ Snapshot text')
+    expect(toolLine('browser_act', { action: 'press', key: 'Enter' })).toBe('🖱️ Browser press Enter')
   })
 
   it('starts every line with an emoji, never a typographic glyph', () => {
     const emoji = /\p{Extended_Pictographic}/u
-    const names = ['read_file', 'list_dir', 'glob', 'grep', 'fetch_url', 'write_file', 'edit_file', 'remember', 'recall', 'search_history', 'web_search', 'read_skill', 'task', 'shell_command', 'gmail_search', 'gmail_read', 'gmail_modify', 'gmail_draft', 'gmail_send', 'mail_labels', 'drive_search', 'drive_read', 'unknown_tool']
+    const names = ['read_file', 'list_dir', 'glob', 'grep', 'fetch_url', 'read_x_post', 'read_attachment', 'write_file', 'edit_file', 'remember', 'recall', 'search_history', 'web_search', 'read_skill', 'task', 'shell_command', 'gmail_search', 'gmail_read', 'gmail_modify', 'gmail_draft', 'gmail_send', 'mail_labels', 'drive_search', 'drive_read', 'panel', 'send_file', 'unknown_tool']
 
     for (const name of names) {
       const [icon] = toolLine(name, { path: 'a' }).split(' ')
@@ -97,30 +115,28 @@ describe('toolLine', () => {
   })
 
   it('shows nothing rather than an empty object when no value is useful', () => {
-    expect(toolLine('read_file', {})).toBe('📄 read_file')
-    expect(toolLine('read_file')).toBe('📄 read_file')
-    expect(toolLine('read_file', { offset: 10 })).toBe('📄 read_file')
-    expect(toolLine('read_file', 'nonsense')).toBe('📄 read_file')
+    expect(toolLine('read_file', {})).toBe('📄 Read')
+    expect(toolLine('read_file')).toBe('📄 Read')
+    expect(toolLine('read_file', { offset: 10 })).toBe('📄 Read')
+    expect(toolLine('read_file', 'nonsense')).toBe('📄 Read')
   })
 
   it('emphasises the name only where the surface renders Markdown', () => {
     expect(toolLine('read_file', { path: 'a.txt' }, { markdown: true })).toBe(
-      '📄 **read_file** a.txt',
+      '📄 **Read** a.txt',
     )
-    expect(toolLine('web_search', { query: 'x' }, { markdown: true })).toBe('🌐 **web_search** x')
-    // A shell command is one of these lines now, so it is emphasised and named
-    // exactly like the rest — the chat surfaces draw them all the same way.
-    expect(toolLine('shell_command', { command: 'ls' }, { markdown: true })).toBe(
-      '⚡ **shell_command** ls',
-    )
-    expect(toolLine('read_file', { path: 'a.txt' })).toBe('📄 read_file a.txt')
+    expect(toolLine('web_search', { query: 'x' }, { markdown: true })).toBe('🌐 **Searched web** x')
+    // A shell command with no command still names the tool; with one, it drops the label.
+    expect(toolLine('shell_command', undefined, { markdown: true })).toBe('⚡ **Shell**')
+    expect(toolLine('shell_command', { command: 'ls' }, { markdown: true })).toBe('⚡ ls')
+    expect(toolLine('read_file', { path: 'a.txt' })).toBe('📄 Read a.txt')
   })
 
   it('flattens and shortens a long command', () => {
     const line = toolLine('shell_command', { command: `echo ${'x'.repeat(200)}\nnext line` })
     expect(line).not.toContain('\n')
     expect(line.endsWith('…')).toBe(true)
-    expect(line.length).toBeLessThanOrEqual('⚡ shell_command '.length + 120)
+    expect(line.length).toBeLessThanOrEqual('⚡ '.length + 120)
   })
 })
 
@@ -150,9 +166,21 @@ describe('toolBrand', () => {
 
 describe('toolText', () => {
   it('is the line without its icon, for the surface that draws the icon itself', () => {
-    expect(toolText('gmail_search', { query: 'is:unread' })).toBe('gmail_search is:unread')
-    expect(toolText('read_file')).toBe('read_file')
-    expect(toolText('read_file', { path: 'a.txt' }, { markdown: true })).toBe('**read_file** a.txt')
+    expect(toolText('gmail_search', { query: 'is:unread' })).toBe('Searched email is:unread')
+    expect(toolText('read_file')).toBe('Read')
+    expect(toolText('read_file', { path: 'a.txt' }, { markdown: true })).toBe('**Read** a.txt')
+    expect(toolText('shell_command', { command: 'npm test' })).toBe('npm test')
+    expect(toolText('shell_command')).toBe('Shell')
+  })
+})
+
+describe('toolParts', () => {
+  it('splits a label and its value, and leaves a shell command without a label', () => {
+    expect(toolParts('read_file', 'Read a.txt')).toEqual({ label: 'Read', value: 'a.txt' })
+    expect(toolParts('read_file', 'Read')).toEqual({ label: 'Read', value: '' })
+    expect(toolParts('shell_command', 'npm test')).toEqual({ label: '', value: 'npm test' })
+    expect(toolParts('shell_command', 'Shell script.sh')).toEqual({ label: '', value: 'Shell script.sh' })
+    expect(toolParts('shell_command', 'Shell')).toEqual({ label: 'Shell', value: '' })
   })
 })
 
@@ -161,10 +189,25 @@ describe('toolDraw', () => {
     const args = { facts: ['Prefers TypeScript over JavaScript.'] }
     expect(toolDraw('remember', args, 'full')).toEqual({
       name: 'remember',
-      text: 'remember Prefers TypeScript over JavaScript.',
+      text: 'Remembered Prefers TypeScript over JavaScript.',
     })
-    expect(toolDraw('remember', args, 'name')).toEqual({ name: 'remember', text: 'remember' })
+    expect(toolDraw('remember', args, 'name')).toEqual({ name: 'remember', text: 'Remembered' })
     expect(toolDraw('remember', args, 'off')).toBeNull()
+  })
+})
+
+describe('toolInput', () => {
+  it('formats arguments as clean key/value lines rather than raw JSON, and unwraps shell commands', () => {
+    expect(toolInput('shell_command', { command: 'npm test' })).toBe('npm test')
+    expect(toolInput('glob', { pattern: '**/.git', path: '/repo', limit: 20 })).toBe(
+      'pattern: **/.git\npath: /repo\nlimit: 20',
+    )
+    expect(toolInput('remember', { facts: ['Uses Linux', 'Speaks Portuguese'] })).toBe(
+      'facts: Uses Linux, Speaks Portuguese',
+    )
+    expect(toolInput('edit_file', { path: 'a.ts', oldText: 'a\nb' })).toBe(
+      'path: a.ts\noldText:\n  a\n  b',
+    )
   })
 })
 
@@ -210,7 +253,9 @@ describe('a tool from an external server', () => {
 
   it('is named the same wherever a name is read', () => {
     expect(toolDisplayName('mcp__github__create_issue')).toBe('github: create_issue')
-    expect(toolDisplayName('read_file')).toBe('read_file')
+    expect(toolDisplayName('read_file')).toBe('Read')
+    expect(toolDisplayName('shell_command')).toBe('Shell')
+    expect(toolDisplayName('unknown_tool')).toBe('unknown_tool')
     // Markdown emphasis wraps the whole name, not the prefix alone.
     expect(toolText('mcp__notes__append', undefined, { markdown: true })).toBe('**notes: append**')
   })
