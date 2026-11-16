@@ -55,6 +55,7 @@ struct Composer: View {
     /// one is the composer's own action.
     let onModel: () -> Void
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     /// Whether the send control is under a finger, for the give every filled control here has.
     /// A control driven by gestures rather than by a `Button` — the long press the panel hangs
     /// on — has to ask for that itself.
@@ -102,8 +103,10 @@ struct Composer: View {
             // daemon's catalog so the two surfaces cannot drift.
             if !palette.isEmpty {
                 commandPalette
+                    .transition(.opacity.combined(with: .offset(y: 6)))
             } else if !mentionOptions.isEmpty {
                 mentionPalette
+                    .transition(.opacity.combined(with: .offset(y: 6)))
             }
 
             // One capsule, two arrangements, and the surface is one in either: what is
@@ -139,6 +142,8 @@ struct Composer: View {
             .padding(.bottom, MiloTheme.Space.one)
             .padding(.top, MiloTheme.Space.one)
         }
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: !palette.isEmpty)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: !mentionOptions.isEmpty)
     }
 
     /// What the `+`'s own mark takes: the size it is drawn at, inside the wider box the

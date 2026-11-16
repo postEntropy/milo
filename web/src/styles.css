@@ -1125,6 +1125,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 /* The `/` palette, the same popup shape as the model menu above the box. */
 .command-menu { position: absolute; z-index: 30; bottom: calc(100% + 8px); left: 0; right: 0; display: flex; max-height: 320px; flex-direction: column; gap: var(--space-1); overflow: auto; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--surface); box-shadow: var(--shadow); padding: var(--space-3); }
+.command-menu { transform-origin: bottom center; animation: command-menu-in var(--motion-base) var(--ease-standard) backwards; }
+@keyframes command-menu-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 .command-option { display: flex; min-height: var(--control-lg); align-items: baseline; gap: var(--space-5); width: 100%; border: 0; border-radius: var(--radius-sm); background: transparent; padding: var(--space-4) var(--space-5); text-align: start; }
 .command-option.active { background: var(--surface-warm); }
 .command-name { flex: none; color: var(--fg); font: var(--text-xs) var(--font-mono); }
@@ -1590,7 +1592,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .message:not(.is-loaded) .reasoning,
 .message:not(.is-loaded) .wait-line,
 .approval,
-.command-menu,
 .job-panel,
 .settings-section:not([hidden]),
 .empty-state,
