@@ -242,10 +242,9 @@ export const DEFAULT_HISTORY: HistoryConfig = { windowDays: 365 }
 
 /**
  * The execution log under `~/.milo/traces.jsonl`: one append-only JSONL file,
- * a line per model request, classifier request, tool call and turn, each with
- * how long it took and how it ended. Numbers and names only — the log holds no
- * prompt, no argument and no answer, so it is safe to keep and to read. On by
- * default, because a latency nobody measures is a latency nobody can act on.
+ * a line per model or embedding request, classifier request, tool call, turn and verification, each with
+ * how long it took and how it ended. Requests and tool calls include their full
+ * inputs and outputs. On by default; disabling it stops recording new events.
  */
 export const TracesSchema = z.object({
   /** false turns the execution log off; nothing else in Milo changes. */

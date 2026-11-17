@@ -3,6 +3,7 @@ import { errorMessage } from '../../util/errors.js'
 import { OPENAI_DECISIONS_MODEL } from '../config/schema.js'
 import type { DangerReviewer } from '../tools/permission.js'
 import type { TraceWriter } from '../traces.js'
+import { currentTraceContext } from '../trace-context.js'
 
 /**
  * The wire an endpoint speaks. TypeSafe (`/systemone`, the hosted jev and
@@ -123,7 +124,7 @@ export class Classifier {
     if (cached !== undefined) {
       this.cache.delete(key)
       this.cache.set(key, cached)
-      this.record({ purpose, ok: true, ms: 0, cached: true, answers: cached })
+      this.record({ purpose, input: { state, questions }, ok: true, ms: 0, cached: true, answers: cached })
       return cached
     }
 
@@ -132,7 +133,7 @@ export class Classifier {
     // to come. The recorded event marks it cached, since nothing was asked.
     const failing = this.cacheEnabled ? this.failures.get(key) : undefined
     if (failing && failing.until > Date.now()) {
-      this.record({ purpose, ok: false, ms: 0, cached: true, error: failing.error })
+      this.record({ purpose, input: { state, questions }, ok: false, ms: 0, cached: true, error: failing.error })
       throw new Error(failing.error)
     }
 
@@ -151,13 +152,13 @@ export class Classifier {
         this.remember(key, answers)
         this.failures.delete(key)
       }
-      this.record({ purpose, ok: true, ms: Date.now() - started, cached: false, answers })
+      this.record({ purpose, input: { state, questions }, ok: true, ms: Date.now() - started, cached: false, answers })
       return answers
     } catch (error) {
       // A wait the caller itself cancelled is not the endpoint failing, so it buys
       // no backoff — only a genuine failure does.
       if (this.cacheEnabled && !options.signal?.aborted) this.defer(key, errorMessage(error))
-      this.record({ purpose, ok: false, ms: Date.now() - started, cached: false, error: errorMessage(error) })
+      this.record({ purpose, input: { state, questions }, ok: false, ms: Date.now() - started, cached: false, error: errorMessage(error) })
       throw error
     } finally {
       clearTimeout(timeout)
@@ -180,6 +181,7 @@ export class Classifier {
   /** One line of the execution log: what was asked, of whom, how long, and the answer. */
   private record(event: {
     purpose: string
+    input: { state: string; questions: Record<string, ClassifierQuestion> }
     ok: boolean
     ms: number
     cached: boolean
@@ -187,15 +189,22 @@ export class Classifier {
     error?: string
   }): void {
     if (!this.traces) return
+    const context = currentTraceContext()
     this.traces.record({
       at: new Date().toISOString(),
       event: 'classifier.request',
       ok: event.ok,
       ms: event.ms,
       purpose: event.purpose,
+      ...(context?.turn ? { turn: context.turn } : {}),
+      ...(context?.session ? { session: context.session } : {}),
+      ...(context?.surface ? { surface: context.surface } : {}),
+      ...(context?.callId ? { callId: context.callId } : {}),
       ...(this.options.backend ? { backend: this.options.backend } : {}),
       model: this.modelName(),
       cached: event.cached,
+      input: event.input,
+      ...(event.answers ? { output: event.answers } : {}),
       ...(event.answers ? { answers: event.answers } : {}),
       ...(event.error ? { error: event.error } : {}),
     })

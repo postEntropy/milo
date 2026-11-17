@@ -165,6 +165,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
   // Milo never needs is a file it does not have to read.
   const memory = installMemory(
     createMemory(loaded.config.memory, memoryDir(), {
+      traces: traces ?? undefined,
       apiKey:
         loaded.config.memory.embedding?.provider === 'openrouter'
           ? embeddingKey(loaded.config, auth)

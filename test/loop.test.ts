@@ -818,7 +818,7 @@ describe('the execution log along a turn', () => {
       registry,
       messages: [{ role: 'user', content: [{ type: 'text', text: 'read a.txt' }] }],
       context: { cwd: process.cwd(), signal: new AbortController().signal },
-      trace: { traces: writer, surface: 'cli', session: 'calm-otter-7' },
+      trace: { traces: writer, surface: 'cli', session: 'calm-otter-7', turn: 'turn-1' },
     })) {
       void _
     }
@@ -837,6 +837,10 @@ describe('the execution log along a turn', () => {
     })
     expect(seen.find((event) => event.event === 'tool.call')).toMatchObject({
       tool: 'fake_read',
+      turn: 'turn-1',
+      callId: 'c1',
+      input: { path: 'a.txt' },
+      output: expect.objectContaining({ content: expect.any(String) }),
       ok: true,
       purpose: 'chat',
       surface: 'cli',

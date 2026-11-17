@@ -1,3 +1,4 @@
+import { Analytics } from './analytics/Analytics.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, uploadFile, withToken } from './lib/api.js'
 import { copyText } from './lib/clipboard.js'
@@ -57,10 +58,10 @@ type NewSessionContext = { project?: string; firstMessage?: string; plan?: boole
 /** A past turn the search box found, with the session it belongs to. */
 type HistoryHit = { session: string; at: string; kind: string; text: string }
 
-type View = 'chat' | 'settings' | 'routines' | 'tasks' | 'work' | 'email'
+type View = 'chat' | 'settings' | 'routines' | 'tasks' | 'work' | 'email' | 'analytics'
 
 /** The address each screen lives at, so a link can be shared and Back works. */
-const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', tasks: '/tasks', work: '/work', email: '/email', settings: '/settings' }
+const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', tasks: '/tasks', work: '/work', email: '/email', analytics: '/analytics', settings: '/settings' }
 
 /** Which screen a path names; anything that is not one of them is the chat. */
 function viewFromPath(pathname: string): View {
@@ -90,6 +91,7 @@ export default function App() {
     () => localStorage.getItem('milo-chat') || localStorage.getItem('milo-conversation') || randomUUID(),
   )
   const [sessionId, setSessionId] = useState('')
+  const [analyticsSession, setAnalyticsSession] = useState<{ id: string; label: string } | null>(null)
   /** The session the socket is speaking to, for callbacks that outlive this render. */
   const sessionIdRef = useRef('')
   const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -1282,6 +1284,7 @@ export default function App() {
           <button className="sidebar-search-toggle" type="button" title="Search sessions" aria-label="Search sessions" aria-expanded={searchOpen} onClick={() => setSearchOpen((open) => !open)}><Icon name="search" size={18} /></button>
         </div>
         <div className="sidebar-pad">
+          <button className={`sidebar-tab ${view === 'analytics' ? 'active' : ''}`} type="button" onClick={() => { setAnalyticsSession(null); setView(view === 'analytics' ? 'chat' : 'analytics'); setSidebarOpen(false) }}><Icon name="chart" size={18} /><span>Analytics</span></button>
           <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={18} /><span>Routines</span></button>
           <button className={`sidebar-tab ${view === 'tasks' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'tasks' ? 'chat' : 'tasks'); setSidebarOpen(false) }}><Icon name="list-check" size={18} /><span>Task lists</span></button>
           <button className={`sidebar-tab ${view === 'email' ? 'active' : ''}`} type="button" onClick={() => { setEmailRoute(null); setView(view === 'email' ? 'chat' : 'email'); setSidebarOpen(false) }}><Icon name="mail" size={18} /><span>Email</span>{mailUnread !== null && mailUnread.count > 0 && <span className="sidebar-badge">{mailUnread.more ? `${mailUnread.count}+` : mailUnread.count}</span>}</button>
@@ -1295,7 +1298,7 @@ export default function App() {
                 <span className="history-hit-where">{hit.kind} · {hit.session}</span>
               </button>)}
             </div>}
-            {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} onRename={renameSession} onExport={exportSession} onCopy={copySessionId} onDelete={deleteSession} />)}</div>)}
+            {sessionGroups.map((group) => <div className="session-group" key={group.label}><div className="section-label">{group.label}</div>{group.sessions.map((session) => <SessionRow key={session.id} session={session} active={session.id === sessionId} onClick={() => void openSession(session.id)} onRename={renameSession} onTraces={(id) => { setAnalyticsSession({ id, label: session.label }); setView('analytics'); setSidebarOpen(false) }} onExport={exportSession} onCopy={copySessionId} onDelete={deleteSession} />)}</div>)}
             {chatList.length === 0 && <p className="list-empty">{search ? 'No sessions found.' : 'Your saved sessions show up here.'}</p>}
           </nav>
         </div>
@@ -1322,6 +1325,8 @@ export default function App() {
         ? <Settings section={settingsSection} onSection={setSettingsSection} chatId={chatId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} onOpenSession={(id) => void openSession(id)} theme={theme} onThemeChange={setTheme} palette={effectivePalette} paletteSync={sharedPalette.sync} onPaletteChange={changePalette} onPaletteSyncChange={changePaletteSync} onPaletteStateLoaded={syncSharedPalette} onDirtyChange={noteDirty} />
         : view === 'routines'
         ? <Routines chatId={chatId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
+        : view === 'analytics'
+        ? <Analytics session={analyticsSession} onSessionChange={setAnalyticsSession} />
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
         : view === 'chat'

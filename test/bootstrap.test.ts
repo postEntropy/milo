@@ -329,4 +329,34 @@ describe('createRuntime', () => {
     })
     expect(log[1]).toMatchObject({ kind: 'assistant', text: 'hi there' })
   })
+  it('records full model requests only when tracing is enabled', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      'data: {"choices":[{"delta":{"content":"trace response"}}]}\n\ndata: [DONE]\n\n',
+      { status: 200, headers: { 'content-type': 'text/event-stream' } },
+    )))
+    const { readTraces } = await import('../src/core/traces.js')
+    for (const enabled of [true, false]) {
+      const loaded = loadedConfig('https://x.test/v1')
+      loaded.config.traces.enabled = enabled
+      loaded.config.sessions = { ...loaded.config.sessions, generateTitles: false, compaction: false }
+      const runtime = createRuntime(loaded, process.cwd())
+      try {
+        const session = await runtime.getSession({ gateway: 'cli', chatId: `trace-${enabled}` })
+        for await (const _ of session.send('trace input')) void _
+        const events = readTraces().filter((event) => event.session === session.id)
+        if (!enabled) {
+          expect(events).toEqual([])
+        } else {
+          const request = events.find((event) => event.event === 'model.request')
+          const turn = events.find((event) => event.event === 'turn')
+          expect(request).toMatchObject({ input: { messages: expect.arrayContaining([expect.objectContaining({ role: 'user' })]) }, output: expect.arrayContaining([{ type: 'text', delta: 'trace response' }]) })
+          expect(turn?.turn).toBe(request?.turn)
+          expect(turn?.turn).toEqual(expect.any(String))
+        }
+      } finally {
+        await runtime.close()
+      }
+    }
+  })
+
 })

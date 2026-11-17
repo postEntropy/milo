@@ -60,7 +60,7 @@ describe('ResponsesProvider', () => {
       }),
       frame({
         type: 'response.completed',
-        response: { status: 'completed', usage: { input_tokens: 10, output_tokens: 5 }, output: [] },
+        response: { status: 'completed', usage: { input_tokens: 10, output_tokens: 5, input_tokens_details: { cached_tokens: 4 }, output_tokens_details: { reasoning_tokens: 2 } }, output: [] },
       }),
     ])
 
@@ -84,7 +84,7 @@ describe('ResponsesProvider', () => {
       name: 'read_file',
       args: { path: 'x' },
     })
-    expect(events.find((event) => event.type === 'usage')).toMatchObject({ inputTokens: 10, outputTokens: 5 })
+    expect(events.find((event) => event.type === 'usage')).toMatchObject({ inputTokens: 10, outputTokens: 5, cachedInputTokens: 4, reasoningTokens: 2 })
     expect(events.at(-1)).toMatchObject({ type: 'done', finishReason: 'tool_calls' })
 
     const [, init] = fetchMock.mock.calls[0]!

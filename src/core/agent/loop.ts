@@ -1,4 +1,4 @@
-import { isAbort } from '../../util/errors.js'
+import { errorMessage, isAbort } from '../../util/errors.js'
 import { saveImage } from '../images.js'
 import { sleep } from '../providers/retry.js'
 import { thinkingBudgetFor } from '../providers/thinking.js'
@@ -14,6 +14,7 @@ import type {
   TraceTag,
 } from '../providers/types.js'
 import type { TraceWriter } from '../traces.js'
+import { withTraceContext } from '../trace-context.js'
 import type { ToolContext, ToolEffect, ToolImage, ToolRegistry, ToolResult } from '../tools/index.js'
 import {
   actsOnSomething,
@@ -59,6 +60,7 @@ export interface RunTrace {
   purpose?: string
   surface?: string
   session?: string
+  turn?: string
 }
 
 export interface RunAgentOptions {
@@ -192,6 +194,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         purpose: options.trace.purpose ?? 'chat',
         ...(options.trace.surface ? { surface: options.trace.surface } : {}),
         ...(options.trace.session ? { session: options.trace.session } : {}),
+        ...(options.trace.turn ? { turn: options.trace.turn } : {}),
       }
     : undefined
 
@@ -369,13 +372,33 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       // and two calls into one browser session from interleaving.
       const run = toolCalls.slice(index, concurrentRunEnd(toolCalls, registry, index))
       index += run.length
-      // A run that overlaps starts all its calls here, so the span is measured
-      // from this line rather than from where each result is read back.
-      const runStarted = Date.now()
+      const executeTraced = async (call: (typeof run)[number]): Promise<ToolResult> => {
+        const started = Date.now()
+        const record = (ok: boolean, extra: { output?: ToolResult; error?: string }): void => {
+          options.trace?.traces.record({
+            at: new Date().toISOString(), startedAt: new Date(started).toISOString(), event: 'tool.call', ok, ms: Date.now() - started,
+            purpose: tag?.purpose ?? 'chat', tool: call.name, callId: call.id, input: call.args,
+            ...(tag?.surface ? { surface: tag.surface } : {}),
+            ...(tag?.session ? { session: tag.session } : {}),
+            ...(tag?.turn ? { turn: tag.turn } : {}),
+            ...extra,
+          })
+        }
+        try {
+          const result = tag
+            ? await withTraceContext({ turn: tag.turn, session: tag.session, surface: tag.surface, callId: call.id }, () => executeCall(options.permission, registry, call, context))
+            : await executeCall(options.permission, registry, call, context)
+          record(!result.isError, { output: result })
+          return result
+        } catch (error) {
+          record(false, { error: errorMessage(error) })
+          throw error
+        }
+      }
       const pending =
         run.length > 1
           ? run.map((call) => {
-              const started = executeCall(options.permission, registry, call, context)
+              const started = executeTraced(call)
               // A sibling that fails while an earlier result is still being
               // awaited is not this turn's error — but an unhandled rejection
               // would still take the process down. Read back below; marked
@@ -387,9 +410,8 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
 
       for (let at = 0; at < run.length; at += 1) {
         const call = run[at]
-        const startedAt = pending ? runStarted : Date.now()
         yield { type: 'tool-start', id: call.id, name: call.name, args: call.args }
-        const result = pending ? await pending[at] : await executeCall(options.permission, registry, call, context)
+        const result = pending ? await pending[at] : await executeTraced(call)
         yield {
           type: 'tool-end',
           id: call.id,
@@ -405,16 +427,6 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         if (ran && actsOnSomething(ran, call.args) && !result.blocked) {
           options.onSideEffect?.({ tool: call.name, args: call.args })
         }
-        options.trace?.traces.record({
-          at: new Date().toISOString(),
-          event: 'tool.call',
-          ok: !result.isError,
-          ms: Date.now() - startedAt,
-          purpose: tag?.purpose ?? 'chat',
-          tool: call.name,
-          ...(tag?.surface ? { surface: tag.surface } : {}),
-          ...(tag?.session ? { session: tag.session } : {}),
-        })
         // The plan is drawn by the surfaces and nothing the model needs told
         // back, so it rides as its own event rather than into the transcript.
         if (result.todos) yield { type: 'todo', items: result.todos }

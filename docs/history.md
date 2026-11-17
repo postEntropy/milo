@@ -32,23 +32,34 @@ and rebuildable from them.
 
 The history log holds *what was said*; the **execution log** at `~/.milo/traces.jsonl` holds *what it
 cost* — one append-only JSONL file, a line per event, each with `at`, `event`, `ok` and `ms` plus its own
-numbers. It never holds a prompt, an argument or an answer, so it is safe to keep and to read; that line
-is the whole reason it can live beside the history.
+numbers. New events include model inputs and outputs, referenced attachment bytes, tool arguments and results, and classifier inputs and answers.
+The log can therefore contain the full contents of Sessions, internal instructions and tool results. It is
+stored locally with owner-only file permissions and is available to authenticated web and iOS clients.
 
-Four events, each a closed name:
+Six events, each a closed name:
 
 - `model.request` — one call to the chat model: `purpose` (`chat`, `task`, `compaction`, `recap`,
   `derive`), `model`, `provider`, `ttftMs` (time to the first token), `ms`, `inputTokens`, `outputTokens`,
-  `finish`, and `surface`/`session` for a chat turn.
+  `finish`, and `surface`/`session` for a chat turn, plus the input, streamed output and turn identifier when available.
 - `classifier.request` — the decision model: `purpose` (`danger`, `mail-labels`), `backend`, `model`,
   `cached`, and the typed answer it gave.
-- `tool.call` — `tool`, `ms`, `ok` (no arguments).
+- `embedding.request` — an embedding model call, including its input texts and returned vectors.
+- `tool.call` — `tool`, `ms`, `ok`, call id, arguments and result.
 - `turn` — the whole turn: `surface`, `session`, `model`, `ms`, `ok`.
+- `verification` — the checks run after a turn changes a folder.
+
+The Analytics pages on web and iOS read the same log, filter it and open a turn timeline. Older events
+remain readable with their original, more limited details.
+Model inputs are the provider-neutral requests passed into Milo's provider interface, and outputs are
+the normalized stream events it returns; they are not a byte-for-byte HTTP capture. Embedding outputs
+are the normalized vectors used by memory. Authentication headers are not part of these records.
+
+Command Code runs in its own process. Milo logs the turn, its input and the native transcript returned
+for it; the process's internal model requests and their usage are not exposed as Milo model requests.
 
 Every model call goes through one seam (`Provider.stream`), so wrapping it once covers the chat turn, a
 delegated subtask and the mechanical calls alike, from one measurement instead of counting the same span
-at each caller. The classifier is a client of its own and is timed where it runs; the embedding engine
-(run only when memory recall by meaning is on) is not logged yet.
+at each caller. The classifier and embedding engine are clients of their own and are timed where they run.
 
 The log is on by default (`traces.enabled`); `false` turns it off and nothing else changes. It is never
 trimmed on its own — `milo log` reports what it holds (`status`), shows the last few events (`tail [n]`),

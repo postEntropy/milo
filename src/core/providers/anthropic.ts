@@ -176,6 +176,8 @@ export class AnthropicProvider implements Provider {
     let contentChars = 0
     let reasoningChars = 0
     let inputTokens = 0
+    let cachedInputTokens: number | undefined
+    let cacheWriteTokens: number | undefined
 
     for await (const message of parseSSE(response.body)) {
       let event: AnthropicStreamEvent
@@ -189,6 +191,8 @@ export class AnthropicProvider implements Provider {
       switch (event.type) {
         case 'message_start': {
           const usage = event.message?.usage
+          cachedInputTokens = usage?.cache_read_input_tokens
+          cacheWriteTokens = usage?.cache_creation_input_tokens
           inputTokens =
             (usage?.input_tokens ?? 0) +
             (usage?.cache_read_input_tokens ?? 0) +
@@ -242,7 +246,7 @@ export class AnthropicProvider implements Provider {
           }
           const outputTokens = event.usage?.output_tokens
           if (typeof outputTokens === 'number') {
-            yield { type: 'usage', inputTokens, outputTokens }
+            yield { type: 'usage', inputTokens, outputTokens, ...(cachedInputTokens !== undefined ? { cachedInputTokens } : {}), ...(cacheWriteTokens !== undefined ? { cacheWriteTokens } : {}) }
           }
           break
         }

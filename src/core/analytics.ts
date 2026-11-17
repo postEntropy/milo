@@ -1,0 +1,313 @@
+import { createReadStream } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { createInterface } from 'node:readline'
+import { tracesFile } from './config/paths.js'
+import type { TraceEvent } from './traces.js'
+
+export interface AnalyticsEvent {
+  id: string
+  at: string
+  startedAt?: string
+  event: string
+  ok: boolean
+  ms: number
+  model?: string
+  provider?: string
+  purpose?: string
+  surface?: string
+  session?: string
+  turn?: string
+  callId?: string
+  tool?: string
+  inputTokens?: number
+  outputTokens?: number
+  ttftMs?: number
+  finish?: string
+  error?: string
+}
+
+export interface AnalyticsReport {
+  events: AnalyticsEvent[]
+  total: number
+  requests: number
+  embeddingRequests: number
+  requestsWithUsage: number
+  failures: number
+  inputTokens: number
+  outputTokens: number
+  averageMs: number | null
+  models: Array<{ model: string; requests: number; failures: number; inputTokens: number; outputTokens: number }>
+}
+
+export interface SessionTraceTurn {
+  id: string
+  index: number
+  startedAt: string
+  endedAt: string
+  ms: number
+  spanMs: number
+  ok: boolean
+  model?: string
+  surface?: string
+  requests: number
+  toolCalls: number
+  failures: number
+  inputTokens: number
+  outputTokens: number
+  events: AnalyticsEvent[]
+}
+
+export interface SessionTraceReport {
+  session: string
+  totalEvents: number
+  turnsCount: number
+  requests: number
+  toolCalls: number
+  failures: number
+  inputTokens: number
+  outputTokens: number
+  totalMs: number
+  models: AnalyticsReport['models']
+  turns: SessionTraceTurn[]
+}
+
+async function readEvents(detailId?: string): Promise<Array<{ id: string; event: AnalyticsEvent; full?: TraceEvent }>> {
+  const entries: Array<{ id: string; event: AnalyticsEvent; full?: TraceEvent }> = []
+  const stream = createReadStream(tracesFile())
+  let lastByte: number | undefined
+  stream.on('data', (chunk: Buffer | string) => {
+    lastByte = typeof chunk === 'string' ? chunk.charCodeAt(chunk.length - 1) : chunk.at(-1)
+  })
+  const lines = createInterface({ input: stream, crlfDelay: Infinity })
+  let index = 0
+  let invalidLine: number | undefined
+  try {
+    for await (const line of lines) {
+      index += 1
+      if (invalidLine !== undefined) throw new Error(`Execution log contains invalid JSON on line ${invalidLine}.`)
+      if (!line.trim()) continue
+      let event: TraceEvent
+      try {
+        event = JSON.parse(line) as TraceEvent
+      } catch {
+        invalidLine = index
+        continue
+      }
+      if (!event || typeof event.at !== 'string' || typeof event.event !== 'string' || typeof event.ok !== 'boolean' || typeof event.ms !== 'number') throw new Error(`Execution log contains an invalid event on line ${index}.`)
+      const id = typeof event.id === 'string' ? event.id : `legacy-${createHash('sha256').update(line).digest('hex')}`
+      entries.push({ id, event: summary(id, event), ...(id === detailId ? { full: event } : {}) })
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []
+    throw error
+  } finally {
+    lines.close()
+    stream.destroy()
+  }
+  // A crash can leave the last append incomplete, without its terminating newline.
+  if (invalidLine !== undefined && lastByte === 10) throw new Error(`Execution log contains invalid JSON on line ${invalidLine}.`)
+  return entries
+}
+
+function summary(id: string, event: TraceEvent): AnalyticsEvent {
+  const { input: _input, output: _output, attachments: _attachments, id: _id, ...rest } = event
+  return { ...rest, id } as AnalyticsEvent
+}
+
+function summarizeModels(events: AnalyticsEvent[]): AnalyticsReport['models'] {
+  const byModel = new Map<string, AnalyticsReport['models'][number]>()
+  for (const event of events) {
+    if (event.event !== 'model.request') continue
+    const model = typeof event.model === 'string' ? event.model : 'Unknown'
+    const item = byModel.get(model) ?? { model, requests: 0, failures: 0, inputTokens: 0, outputTokens: 0 }
+    item.requests += 1
+    if (!event.ok) item.failures += 1
+    if (typeof event.inputTokens === 'number') item.inputTokens += event.inputTokens
+    if (typeof event.outputTokens === 'number') item.outputTokens += event.outputTokens
+    byModel.set(model, item)
+  }
+  return [...byModel.values()].sort((a, b) => b.requests - a.requests || a.model.localeCompare(b.model))
+}
+
+function sumTokens(events: AnalyticsEvent[], key: 'inputTokens' | 'outputTokens'): number {
+  return events.reduce((total, event) => total + (event.event === 'model.request' && typeof event[key] === 'number' ? event[key] : 0), 0)
+}
+
+function eventEndMs(event: AnalyticsEvent): number {
+  const parsed = Date.parse(event.at)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function eventStartMs(event: AnalyticsEvent): number {
+  if (typeof event.startedAt === 'string') {
+    const parsed = Date.parse(event.startedAt)
+    if (Number.isFinite(parsed)) return parsed
+  }
+  const end = eventEndMs(event)
+  return end > 0 ? end - Math.max(0, event.ms) : 0
+}
+
+export async function analyticsReport(options: { query?: string; event?: string; session?: string; offset?: number; limit?: number; days?: number } = {}): Promise<AnalyticsReport> {
+  const query = options.query?.trim().toLowerCase() ?? ''
+  const session = options.session?.trim() ?? ''
+  const entries = (await readEvents()).filter(({ event: item }) => {
+    const since = options.days ? Date.now() - options.days * 86_400_000 : 0
+    return (!since || Date.parse(item.at) >= since)
+      && (!session || item.session === session)
+      && (!options.event || options.event === 'all' || item.event === options.event)
+      && (!query || JSON.stringify(item).toLowerCase().includes(query))
+  }).reverse()
+  const allEvents = entries.map(({ event }) => event)
+  const requests = allEvents.filter((event) => event.event === 'model.request')
+  const offset = Math.max(0, Math.floor(options.offset ?? 0))
+  const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 30)))
+  return {
+    events: allEvents.slice(offset, offset + limit),
+    total: entries.length,
+    requests: requests.length,
+    embeddingRequests: allEvents.filter((event) => event.event === 'embedding.request').length,
+    requestsWithUsage: requests.filter((event) => typeof event.inputTokens === 'number' && typeof event.outputTokens === 'number').length,
+    failures: allEvents.filter((event) => !event.ok).length,
+    inputTokens: sumTokens(allEvents, 'inputTokens'),
+    outputTokens: sumTokens(allEvents, 'outputTokens'),
+    averageMs: requests.length ? requests.reduce((total, event) => total + event.ms, 0) / requests.length : null,
+    models: summarizeModels(allEvents),
+  }
+}
+
+export async function sessionTraces(sessionId: string): Promise<SessionTraceReport> {
+  const session = sessionId.trim()
+  if (!session) {
+    return {
+      session: '',
+      totalEvents: 0,
+      turnsCount: 0,
+      requests: 0,
+      toolCalls: 0,
+      failures: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalMs: 0,
+      models: [],
+      turns: [],
+    }
+  }
+
+  const events = (await readEvents())
+    .map(({ event }) => event)
+    .filter((event) => event.session === session)
+
+  const legacyWindows = events
+    .filter((event) => event.event === 'turn' && !event.turn)
+    .map((event) => ({
+      id: `legacy-turn:${event.id}`,
+      start: eventStartMs(event) - 1000,
+      end: eventEndMs(event) + 1000,
+    }))
+
+  const groups = new Map<string, AnalyticsEvent[]>()
+  for (const event of events) {
+    let key = typeof event.turn === 'string' && event.turn ? event.turn : ''
+    if (!key) {
+      const start = eventStartMs(event)
+      const end = eventEndMs(event)
+      const match = legacyWindows.find((win) => start >= win.start && end <= win.end)
+      key = match ? match.id : `event:${event.id}`
+    }
+    const list = groups.get(key)
+    if (list) list.push(event)
+    else groups.set(key, [event])
+  }
+
+  const orderedGroups = [...groups.entries()].map(([id, items]) => {
+    const sorted = [...items].sort((a, b) => {
+      const startDiff = eventStartMs(a) - eventStartMs(b)
+      if (startDiff !== 0) return startDiff
+      // Put the wrapping 'turn' summary event first when timestamps tie.
+      if (a.event === 'turn' && b.event !== 'turn') return -1
+      if (b.event === 'turn' && a.event !== 'turn') return 1
+      return eventEndMs(a) - eventEndMs(b)
+    })
+    const turnEvent = sorted.find((item) => item.event === 'turn')
+    const minStart = Math.min(...sorted.map(eventStartMs))
+    const maxEnd = Math.max(...sorted.map(eventEndMs))
+    const spanMs = Math.max(0, maxEnd - minStart)
+    return {
+      id,
+      minStart,
+      maxEnd,
+      spanMs,
+      turnEvent,
+      sorted,
+    }
+  }).sort((a, b) => a.minStart - b.minStart || a.maxEnd - b.maxEnd)
+
+  const turns: SessionTraceTurn[] = orderedGroups.map((group, position) => {
+    const requests = group.sorted.filter((item) => item.event === 'model.request')
+    const toolCalls = group.sorted.filter((item) => item.event === 'tool.call').length
+    const failures = group.sorted.filter((item) => !item.ok).length
+    const model = group.turnEvent?.model ?? requests.find((item) => typeof item.model === 'string')?.model
+    const surface = group.turnEvent?.surface ?? group.sorted.find((item) => typeof item.surface === 'string')?.surface
+    return {
+      id: group.id,
+      index: position + 1,
+      startedAt: new Date(group.minStart).toISOString(),
+      endedAt: new Date(group.maxEnd).toISOString(),
+      ms: group.turnEvent ? group.turnEvent.ms : group.spanMs,
+      spanMs: Math.max(group.spanMs, group.turnEvent?.ms ?? 0),
+      ok: group.turnEvent ? group.turnEvent.ok && failures === 0 : failures === 0,
+      ...(model ? { model } : {}),
+      ...(surface ? { surface } : {}),
+      requests: requests.length,
+      toolCalls,
+      failures,
+      inputTokens: sumTokens(group.sorted, 'inputTokens'),
+      outputTokens: sumTokens(group.sorted, 'outputTokens'),
+      events: group.sorted,
+    }
+  }).reverse()
+
+  return {
+    session,
+    totalEvents: events.length,
+    turnsCount: turns.length,
+    requests: events.filter((event) => event.event === 'model.request').length,
+    toolCalls: events.filter((event) => event.event === 'tool.call').length,
+    failures: events.filter((event) => !event.ok).length,
+    inputTokens: sumTokens(events, 'inputTokens'),
+    outputTokens: sumTokens(events, 'outputTokens'),
+    totalMs: turns.reduce((total, turn) => total + turn.ms, 0),
+    models: summarizeModels(events),
+    turns,
+  }
+}
+
+export async function analyticsDetail(id: string): Promise<{ event: TraceEvent; related: Array<{ id: string; event: AnalyticsEvent }> }> {
+  const entries = await readEvents(id)
+  const found = entries.find((entry) => entry.id === id)
+  if (!found?.full) throw new Error('This trace is no longer in the execution log. Refresh the list.')
+  const turn = found.event.turn
+  if (typeof turn === 'string') {
+    return {
+      event: found.full,
+      related: entries.filter((entry) => entry.event.turn === turn && entry.id !== id).map((entry) => ({ id: entry.id, event: entry.event })),
+    }
+  }
+  if (found.event.event === 'turn' && typeof found.event.session === 'string') {
+    const winStart = eventStartMs(found.event) - 1000
+    const winEnd = eventEndMs(found.event) + 1000
+    return {
+      event: found.full,
+      related: entries
+        .filter((entry) =>
+          entry.id !== id
+          && !entry.event.turn
+          && entry.event.session === found.event.session
+          && eventStartMs(entry.event) >= winStart
+          && eventEndMs(entry.event) <= winEnd,
+        )
+        .map((entry) => ({ id: entry.id, event: entry.event })),
+    }
+  }
+  return { event: found.full, related: [] }
+}

@@ -42,7 +42,7 @@ async function collect(provider: AnthropicProvider): Promise<StreamEvent[]> {
 describe('AnthropicProvider', () => {
   it('parses thinking, text and tool_use blocks plus the stop reason', async () => {
     stubFetch([
-      frame({ type: 'message_start', message: { usage: { input_tokens: 7 } } }),
+      frame({ type: 'message_start', message: { usage: { input_tokens: 7, cache_read_input_tokens: 4, cache_creation_input_tokens: 2 } } }),
       frame({ type: 'content_block_start', index: 0, content_block: { type: 'thinking' } }),
       frame({
         type: 'content_block_delta',
@@ -86,8 +86,10 @@ describe('AnthropicProvider', () => {
       args: { path: 'a.txt' },
     })
     expect(events.find((event) => event.type === 'usage')).toMatchObject({
-      inputTokens: 7,
+      inputTokens: 13,
       outputTokens: 3,
+      cachedInputTokens: 4,
+      cacheWriteTokens: 2,
     })
     expect(events.at(-1)).toMatchObject({ type: 'done', finishReason: 'tool_calls' })
   })

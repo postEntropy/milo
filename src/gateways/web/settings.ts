@@ -1,3 +1,4 @@
+import { analyticsDetail, analyticsReport, sessionTraces } from '../../core/analytics.js'
 import path from 'node:path'
 import { readFile } from 'node:fs/promises'
 import {
@@ -152,6 +153,9 @@ export class WebSettings {
       case 'memory-notes': return this.memoryNotes(body)
       case 'forget-note': return this.forgetNote(body)
       case 'update-note': return this.updateNote(body)
+      case 'analytics': return analyticsReport({ query: optionalText(body.query), event: optionalText(body.event), session: optionalText(body.session), days: typeof body.days === 'number' && Number.isFinite(body.days) && body.days > 0 ? body.days : undefined, offset: typeof body.offset === 'number' && Number.isFinite(body.offset) ? body.offset : undefined })
+      case 'analytics-detail': return analyticsDetail(typeof body.id === 'string' ? body.id : '')
+      case 'session-traces': return sessionTraces(typeof body.session === 'string' ? body.session : '')
       case 'routines': return this.routines.listRoutines()
       case 'task-lists': return readTaskLists()
       case 'task-list-action': return this.taskListAction(body)

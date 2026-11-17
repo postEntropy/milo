@@ -42,7 +42,7 @@ interface OpenAIDelta {
 
 interface OpenAIStreamChunk {
   error?: { message?: string }
-  usage?: { prompt_tokens?: number; completion_tokens?: number }
+  usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number }; completion_tokens_details?: { reasoning_tokens?: number } }
   choices?: { delta?: OpenAIDelta; finish_reason?: string }[]
 }
 
@@ -151,6 +151,8 @@ export class OpenAIProvider implements Provider {
           type: 'usage',
           inputTokens: chunk.usage.prompt_tokens ?? 0,
           outputTokens: chunk.usage.completion_tokens ?? 0,
+          ...(typeof chunk.usage.prompt_tokens_details?.cached_tokens === 'number' ? { cachedInputTokens: chunk.usage.prompt_tokens_details.cached_tokens } : {}),
+          ...(typeof chunk.usage.completion_tokens_details?.reasoning_tokens === 'number' ? { reasoningTokens: chunk.usage.completion_tokens_details.reasoning_tokens } : {}),
         }
       }
 

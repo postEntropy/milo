@@ -52,7 +52,7 @@ interface ResponseItem {
 
 interface ResponsePayload {
   status?: string
-  usage?: { input_tokens?: number; output_tokens?: number }
+  usage?: { input_tokens?: number; output_tokens?: number; input_tokens_details?: { cached_tokens?: number }; output_tokens_details?: { reasoning_tokens?: number } }
   error?: { message?: string }
   incomplete_details?: { reason?: string }
   output?: ResponseItem[]
@@ -225,6 +225,8 @@ export class ResponsesProvider implements Provider {
               type: 'usage',
               inputTokens: payload.usage.input_tokens ?? 0,
               outputTokens: payload.usage.output_tokens ?? 0,
+              ...(typeof payload.usage.input_tokens_details?.cached_tokens === 'number' ? { cachedInputTokens: payload.usage.input_tokens_details.cached_tokens } : {}),
+              ...(typeof payload.usage.output_tokens_details?.reasoning_tokens === 'number' ? { reasoningTokens: payload.usage.output_tokens_details.reasoning_tokens } : {}),
             }
           }
           if (payload?.status === 'incomplete' && payload.incomplete_details?.reason === 'max_output_tokens') {

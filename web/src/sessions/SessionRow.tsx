@@ -33,6 +33,7 @@ export function SessionRow({
   active,
   onClick,
   onRename,
+  onTraces,
   onExport,
   onCopy,
   onDelete,
@@ -42,6 +43,7 @@ export function SessionRow({
   active: boolean
   onClick(): void
   onRename(id: string, title: string): Promise<void>
+  onTraces(id: string): void
   onExport(id: string): Promise<void>
   onCopy(id: string): void
   onDelete(id: string): Promise<void>
@@ -166,6 +168,19 @@ export function SessionRow({
               <Icon name="download" size={16} />
               <span>Export</span>
             </button>}
+            <button
+              className="session-dropdown-item"
+              type="button"
+              role="menuitem"
+              onClick={(e) => {
+                e.stopPropagation()
+                setMenuOpen(false)
+                onTraces(session.id)
+              }}
+            >
+              <Icon name="chart" size={16} />
+              <span>Traces</span>
+            </button>
             <button
               className="session-dropdown-item"
               type="button"

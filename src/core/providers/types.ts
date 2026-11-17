@@ -194,6 +194,8 @@ export interface TraceTag {
   surface?: string
   /** The session's name (`calm-otter-7`), when the request belongs to one. */
   session?: string
+  /** The turn that owns the request, when it was made in a session. */
+  turn?: string
 }
 
 export interface ChatRequest {
@@ -228,7 +230,7 @@ export type StreamEvent =
   | { type: 'reasoning'; delta: string }
   | { type: 'reasoning-signature'; signature: string }
   | { type: 'tool-call'; id: string; name: string; args: unknown }
-  | { type: 'usage'; inputTokens: number; outputTokens: number }
+  | { type: 'usage'; inputTokens: number; outputTokens: number; cachedInputTokens?: number; cacheWriteTokens?: number; reasoningTokens?: number }
   | { type: 'done'; finishReason: FinishReason }
 
 export interface Provider {

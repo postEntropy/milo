@@ -65,7 +65,7 @@ describe('OpenAIProvider', () => {
           },
         ],
       }),
-      frame({ usage: { prompt_tokens: 10, completion_tokens: 5 } }),
+      frame({ usage: { prompt_tokens: 10, completion_tokens: 5, prompt_tokens_details: { cached_tokens: 4 }, completion_tokens_details: { reasoning_tokens: 2 } } }),
       'data: [DONE]\n\n',
     ])
 
@@ -90,6 +90,8 @@ describe('OpenAIProvider', () => {
     expect(events.find((event) => event.type === 'usage')).toMatchObject({
       inputTokens: 10,
       outputTokens: 5,
+      cachedInputTokens: 4,
+      reasoningTokens: 2,
     })
     expect(events.at(-1)).toMatchObject({ type: 'done', finishReason: 'tool_calls' })
   })

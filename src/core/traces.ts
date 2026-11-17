@@ -1,21 +1,19 @@
 import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { errorMessage } from '../util/errors.js'
 import { logWarn } from '../util/log.js'
 import { tracesFile } from './config/paths.js'
 import type { ChatRequest, FinishReason, Provider, StreamEvent } from './providers/types.js'
+import { currentTraceContext } from './trace-context.js'
 
 /** The kinds of execution the log records. A closed vocabulary, so a reader can trust the name. */
-export type TraceEventName = 'model.request' | 'classifier.request' | 'tool.call' | 'turn' | 'verification'
+export type TraceEventName = 'model.request' | 'embedding.request' | 'classifier.request' | 'tool.call' | 'turn' | 'verification'
 
 /**
  * One line of the execution log.
  *
- * What it holds is deliberately narrow: when, what kind, whether it worked, how
- * long it took — plus the numbers that say which model and how much it cost.
- * Never the prompt, an argument or an answer. That is the line between a log a
- * person can keep and one that holds the conversation, and it is the whole reason
- * this file is allowed to exist beside the history that already holds the words.
+ * Requests and tool calls include their inputs and outputs so a run can be inspected.
  */
 export interface TraceEvent {
   at: string
@@ -46,7 +44,8 @@ export const fileTraces: TraceWriter = {
     try {
       const file = tracesFile()
       mkdirSync(path.dirname(file), { recursive: true, mode: DIR_MODE })
-      appendFileSync(file, `${JSON.stringify(entry)}\n`, { mode: FILE_MODE })
+      const recorded = typeof entry.id === 'string' ? entry : { ...entry, id: randomUUID() }
+      appendFileSync(file, `${JSON.stringify(recorded)}\n`, { mode: FILE_MODE })
     } catch (error) {
       logWarn(`could not write the execution log: ${errorMessage(error)}`)
     }
@@ -78,52 +77,101 @@ export class TracedProvider implements Provider {
 
   async *stream(req: ChatRequest): AsyncGenerator<StreamEvent> {
     const started = Date.now()
+    const id = randomUUID()
+    // Freeze the input before the agent appends the response to the same messages array.
+    const { signal: _signal, trace: _trace, ...request } = req
+    let input: unknown
+    try {
+      input = JSON.parse(JSON.stringify(request)) as unknown
+    } catch (error) {
+      input = { error: `Could not capture request: ${errorMessage(error)}` }
+      logWarn(`could not capture request for the execution log: ${errorMessage(error)}`)
+    }
+    const attachments = traceAttachments(req)
+    const output: StreamEvent[] = []
+    let completed = false
     let firstTokenAt: number | undefined
-    let inputTokens = 0
-    let outputTokens = 0
+    let usage: Extract<StreamEvent, { type: 'usage' }> | undefined
     let finish: FinishReason | undefined
     let ok = true
     let failure: string | undefined
 
     try {
       for await (const event of this.inner.stream(req)) {
+        const last = output.at(-1)
+        if (event.type === 'text' && last?.type === 'text') last.delta += event.delta
+        else if (event.type === 'reasoning' && last?.type === 'reasoning') last.delta += event.delta
+        else output.push({ ...event })
         // The first token is the number that matters: it is the wait the person
         // feels, apart from the rest, which is the model producing the answer.
         if (firstTokenAt === undefined && (event.type === 'text' || event.type === 'reasoning' || event.type === 'tool-call')) {
           firstTokenAt = Date.now()
         }
         if (event.type === 'usage') {
-          inputTokens = event.inputTokens
-          outputTokens = event.outputTokens
+          usage = event
         } else if (event.type === 'done') {
           finish = event.finishReason
         }
         yield event
       }
+      completed = true
     } catch (error) {
       ok = false
       failure = errorMessage(error)
       throw error
     } finally {
+      if (!completed && ok) {
+        ok = false
+        failure = 'Request cancelled.'
+      }
       const tag = req.trace
+      const context = currentTraceContext()
       this.traces.record({
         at: new Date().toISOString(),
+        startedAt: new Date(started).toISOString(),
         event: 'model.request',
+        id,
         ok,
         ms: Date.now() - started,
         purpose: tag?.purpose ?? 'chat',
         model: req.model,
         provider: this.inner.id,
-        ...(tag?.surface ? { surface: tag.surface } : {}),
-        ...(tag?.session ? { session: tag.session } : {}),
+        ...(tag?.surface ?? context?.surface ? { surface: tag?.surface ?? context?.surface } : {}),
+        ...(tag?.session ?? context?.session ? { session: tag?.session ?? context?.session } : {}),
+        ...(tag?.turn ?? context?.turn ? { turn: tag?.turn ?? context?.turn } : {}),
+        ...(context?.callId ? { callId: context.callId } : {}),
+        input,
+        output,
+        ...(attachments.length ? { attachments } : {}),
         ...(firstTokenAt !== undefined ? { ttftMs: firstTokenAt - started } : {}),
-        inputTokens,
-        outputTokens,
+        ...(usage ? { inputTokens: usage.inputTokens, outputTokens: usage.outputTokens } : {}),
+        ...(usage?.cachedInputTokens !== undefined ? { cachedInputTokens: usage.cachedInputTokens } : {}),
+        ...(usage?.cacheWriteTokens !== undefined ? { cacheWriteTokens: usage.cacheWriteTokens } : {}),
+        ...(usage?.reasoningTokens !== undefined ? { reasoningTokens: usage.reasoningTokens } : {}),
         ...(finish ? { finish } : {}),
         ...(failure ? { error: failure } : {}),
       })
     }
   }
+}
+
+/** Keep the bytes that a request refers to even if its original files are later removed. */
+function traceAttachments(req: ChatRequest): Array<{ path: string; data?: string; error?: string }> {
+  const paths = new Set<string>()
+  for (const message of req.messages) {
+    for (const part of message.content) {
+      if (part.type === 'image' || part.type === 'document' || part.type === 'audio') paths.add(part.path)
+      else if (part.type === 'tool-result') for (const image of part.images ?? []) paths.add(image.path)
+    }
+  }
+  return [...paths].map((file) => {
+    try {
+      if (!statSync(file).isFile()) throw new Error('Attachment is not a regular file.')
+      return { path: file, data: readFileSync(file).toString('base64') }
+    } catch (error) {
+      return { path: file, error: errorMessage(error) }
+    }
+  })
 }
 
 export interface TraceStatus {

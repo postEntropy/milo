@@ -1746,3 +1746,21 @@ describe('the verification gate', () => {
     expect(events.some((event) => event.type === 'verification')).toBe(false)
   })
 })
+
+it('links a session turn to the request and its recorded input and output', async () => {
+  const { TracedProvider } = await import('../src/core/traces.js')
+  const seen: import('../src/core/traces.js').TraceEvent[] = []
+  const writer = { record: (event: import('../src/core/traces.js').TraceEvent) => seen.push(event) }
+  const { session, memory } = await sessionWith(new TracedProvider(new CapturingProvider(), writer), { traces: writer })
+  try {
+    for await (const _ of session.send('inspect this turn')) void _
+    const request = seen.find((event) => event.event === 'model.request')
+    const turn = seen.find((event) => event.event === 'turn')
+    expect(request?.turn).toEqual(expect.any(String))
+    expect(turn?.turn).toBe(request?.turn)
+    expect(request?.input).toMatchObject({ messages: expect.arrayContaining([expect.objectContaining({ role: 'user' })]) })
+    expect(request?.output).toEqual(expect.arrayContaining([expect.objectContaining({ type: 'text', delta: 'SECRET_ASSISTANT_REPLY' })]))
+  } finally {
+    await memory.close()
+  }
+})

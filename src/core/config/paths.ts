@@ -55,7 +55,7 @@ export const browserProfilesDir = (): string => path.join(browserDir(), 'profile
 export const historyDir = (): string => path.join(MILO_HOME, 'history')
 /**
  * One append-only JSONL file: how long each model, classifier, tool and turn
- * took, with its outcome. Numbers and names only — never the conversation.
+ * took, with its outcome, inputs and outputs.
  */
 export const tracesFile = (): string => path.join(MILO_HOME, 'traces.jsonl')
 /**

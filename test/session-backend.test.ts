@@ -100,7 +100,7 @@ async function drain(stream: AsyncGenerator<AgentEvent>): Promise<AgentEvent[]> 
   return events
 }
 
-async function seedCommandCodeSession(dir: string, commandCode: CommandCodeSessionDriver, scope: { gateway: string; chatId: string }, project = 'project-a', provider: Provider = new StubProvider()) {
+async function seedCommandCodeSession(dir: string, commandCode: CommandCodeSessionDriver, scope: { gateway: string; chatId: string }, project = 'project-a', provider: Provider = new StubProvider(), traces?: RuntimeOptions['traces']) {
   const store = new FileSessionStore({ dir })
   const record = await store.create(scope, project)
   record.backend = {
@@ -111,7 +111,7 @@ async function seedCommandCodeSession(dir: string, commandCode: CommandCodeSessi
     workingDirectory: process.cwd(),
   }
   await store.save(record, record.version)
-  const runtime = new AgentRuntime({ ...runtimeOptions(dir, commandCode), provider, store })
+  const runtime = new AgentRuntime({ ...runtimeOptions(dir, commandCode), provider, store, traces })
   const session = await runtime.resumeSession(scope, record.id)
   if (!session) throw new Error('Seeded Command Code Session could not be resumed.')
   return { runtime, session }
@@ -138,6 +138,35 @@ describe('Session agent backends', () => {
       preview: 'Create a source file.',
       messageCount: 2,
     })
+  })
+
+  it('records a Command Code turn without claiming its internal model requests', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-agent-'))
+    const seen: import('../src/core/traces.js').TraceEvent[] = []
+    const scope = { gateway: 'web', chatId: '2e741b35-7ca0-4b32-9d1c-47ba5e7a22a1' }
+    const { session } = await seedCommandCodeSession(dir, new StubCommandCode(), scope, 'project-a', new StubProvider(), { record: (event) => seen.push(event) })
+    await drain(session.send('Create a source file.'))
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({
+      event: 'turn', backend: 'command-code', ok: true, session: session.id,
+      input: 'Create a source file.',
+      output: { transcript: expect.arrayContaining([expect.objectContaining({ role: 'assistant', content: [{ type: 'text', text: 'Native response' }] })]), events: expect.arrayContaining([{ type: 'text-delta', delta: 'Native response' }]) },
+    })
+  })
+
+  it('records an unconfirmed Command Code turn as failed', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-agent-'))
+    const seen: import('../src/core/traces.js').TraceEvent[] = []
+    const commandCode = new StubCommandCode()
+    commandCode.send = async function* (): AsyncGenerator<AgentEvent, NativeSessionTurn, void> {
+      yield { type: 'text-delta', delta: 'Partial response' }
+      throw new Error('Native process failed')
+    }
+    const scope = { gateway: 'web', chatId: '2e741b35-7ca0-4b32-9d1c-47ba5e7a22a1' }
+    const { session } = await seedCommandCodeSession(dir, commandCode, scope, 'project-a', new StubProvider(), { record: (event) => seen.push(event) })
+    await drain(session.send('Try the command.'))
+    expect(seen).toHaveLength(1)
+    expect(seen[0]).toMatchObject({ event: 'turn', backend: 'command-code', ok: false, error: 'Native process failed', input: 'Try the command.', output: { events: [{ type: 'text-delta', delta: 'Partial response' }] } })
   })
 
   it('persists a selected model on the Command Code Session without changing Milo defaults', async () => {

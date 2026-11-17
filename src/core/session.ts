@@ -26,6 +26,7 @@ import { taskDescription } from './tools/task.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent, type RunTrace } from './agent/loop.js'
 import type { TraceWriter } from './traces.js'
+import { withTraceContext } from './trace-context.js'
 import { runSubagent } from './agent/subagent.js'
 import { buildSystemPrompt, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import { extractProjectMentions, type Project, type ProjectPlacement } from './projects.js'
@@ -522,9 +523,9 @@ export class Session {
    * own gateway, so a routine's run reads as `routine` rather than as nothing.
    * Absent when logging is off, which is what keeps the loop from setting a tag.
    */
-  private runTrace(purpose: string): RunTrace | undefined {
+  private runTrace(purpose: string, turn?: string): RunTrace | undefined {
     const traces = this.options.traces
-    return traces ? { traces, purpose, surface: this.scope.gateway, session: this.id } : undefined
+    return traces ? { traces, purpose, surface: this.scope.gateway, session: this.id, turn } : undefined
   }
 
   /**
@@ -856,6 +857,7 @@ export class Session {
       ? readProjectInstructions({ ok: true, project: turnFolder })
       : this.options.instructions?.()
     const startedAt = Date.now()
+    const turnId = randomUUID()
     const needsVisionModel = Boolean(opts?.images?.length && !opts.imagesForDisplayOnly && this.options.mediaModels?.vision)
     const model = opts?.model ?? (needsVisionModel ? this.options.mediaModels?.vision : undefined) ?? this.options.model
     // What is known about the model this turn runs on: its own output ceiling and
@@ -954,9 +956,9 @@ export class Session {
     const recalled = opts?.notice
       ? []
       : (
-          await memory.recall(this.scope, input, {
+          await withTraceContext({ turn: turnId, session: this.id, surface: this.scope.gateway }, () => memory.recall(this.scope, input, {
             limit: this.options.recallLimit ?? DEFAULT_RECALL_LIMIT,
-          })
+          }))
         ).sort((a, b) => a.text.localeCompare(b.text))
     const prompt = {
       base: system,
@@ -1006,7 +1008,7 @@ export class Session {
     const incoming: Message[] = opts?.notice
       ? []
       : [{ role: 'user', content: [{ type: 'text', text: input }, ...(opts?.images ?? []), ...(opts?.audio ?? []), ...(opts?.documents ?? [])] }]
-    yield* this.compactIfNeeded(prompt, signal, provider, model, incoming)
+    yield* this.compactIfNeeded(prompt, signal, provider, model, incoming, turnId)
 
     const systemPrompt = buildSystemPrompt({
       ...prompt,
@@ -1229,7 +1231,7 @@ export class Session {
               reasoningEffort: effort,
               input,
               context: { remember, memories, recall, origin, routine, sendFile, attachments: () => this.record.attachments ?? [], inspectAttachmentImage },
-              trace: this.runTrace('task'),
+              trace: this.runTrace('task', turnId),
             }),
         },
         maxSteps,
@@ -1248,7 +1250,7 @@ export class Session {
         permission,
         keepSnapshots: this.options.keepSnapshots,
         genui: draws,
-        trace: this.runTrace('chat'),
+        trace: this.runTrace('chat', turnId),
       })
       for (let attempt = 0; attempt < 2; attempt += 1) {
         for await (const event of runAgentTurn()) {
@@ -1309,7 +1311,9 @@ export class Session {
           }
           this.options.traces?.record({
             at: new Date().toISOString(),
+            startedAt: new Date(startedVerification).toISOString(),
             event: 'verification',
+            turn: turnId,
             ok: result.kind === 'checks' ? result.ok : result.kind === 'none',
             ms: Date.now() - startedVerification,
             purpose: 'verification',
@@ -1392,7 +1396,9 @@ export class Session {
       this.options.history?.append(entries)
       this.options.traces?.record({
         at: new Date().toISOString(),
+        startedAt: new Date(startedAt).toISOString(),
         event: 'turn',
+        turn: turnId,
         ok: !errored,
         ms: Date.now() - startedAt,
         purpose: 'chat',
@@ -1407,7 +1413,7 @@ export class Session {
     // said is in the history log either way — this only adds the tidier version of
     // it, and nothing is lost if it never lands.
     if (!errored && this.options.derive && answer.trim()) {
-      this.inBackground(this.extract(input, answer))
+      this.inBackground(withTraceContext({ turn: turnId, session: this.id, surface: this.scope.gateway }, () => this.extract(input, answer)))
     }
 
     // Naming the session is the same kind of call: drawn from the turn it opened
@@ -1415,7 +1421,7 @@ export class Session {
     // named, and never a routine's own run — those belong to the routine and are
     // kept out of `/sessions`, so a name for one is a name nobody reads.
     if (this.shouldBeNamed(errored)) {
-      this.inBackground(this.nameFromOpeningTurn())
+      this.inBackground(withTraceContext({ turn: turnId, session: this.id, surface: this.scope.gateway }, () => this.nameFromOpeningTurn()))
     }
 
     if (!errored && !abort.aborted) {
@@ -1423,10 +1429,10 @@ export class Session {
       // If the person sends another turn immediately, that turn can wait on this
       // prepared result; otherwise the provider latency happens between turns.
       const alreadyRunning = [...this.background]
-      this.inBackground((async () => {
+      this.inBackground(withTraceContext({ turn: turnId, session: this.id, surface: this.scope.gateway }, async () => {
         await Promise.all(alreadyRunning)
         await this.prepareCompaction(provider, model)
-      })())
+      }))
     }
   }
 
@@ -1497,9 +1503,13 @@ export class Session {
     }
     if (!existingPending) await this.persist()
     let attempted = false
+    const traceStarted = Date.now()
+    let traceError: string | undefined = 'Command Code turn was interrupted.'
+    const nativeEvents: AgentEvent[] = []
+    const traceEnabled = Boolean(this.options.traces)
     try {
       attempted = true
-      const result: NativeSessionTurn = yield* driver.send(this.record, input, {
+      const stream = driver.send(this.record, input, {
         signal: opts?.signal,
         retryPending: existingPending !== undefined,
         newTurn: existingPending === undefined,
@@ -1508,24 +1518,52 @@ export class Session {
           await this.persist()
         },
       })
+      const recorded = async function* (): AsyncGenerator<AgentEvent, NativeSessionTurn, void> {
+        let finished = false
+        try {
+          while (true) {
+            const next = await stream.next()
+            if (next.done) {
+              finished = true
+              return next.value
+            }
+            const event = next.value
+            if (traceEnabled) {
+              const last = nativeEvents.at(-1)
+              if (event.type === 'text-delta' && last?.type === 'text-delta') last.delta += event.delta
+              else if (event.type === 'reasoning-delta' && last?.type === 'reasoning-delta') last.delta += event.delta
+              else nativeEvents.push({ ...event })
+            }
+            yield event
+          }
+        } finally {
+          if (!finished) await stream.return(undefined as never)
+        }
+      }
+      const result = yield* recorded()
       this.record.backend = { ...result.backend }
       this.applyNativeHistory(result.history)
       if (result.error) {
+        traceError = result.error
         const failedBackend = this.record.backend
         if (failedBackend?.kind === 'command-code') {
           this.record.backend = { ...failedBackend, state: 'error', error: result.error }
         }
         yield { type: 'error', message: result.error }
       } else if (this.record.backend?.kind === 'command-code' && this.record.backend.pendingTurn) {
+        traceError = 'Command Code did not confirm that the message reached its native transcript.'
         this.record.backend = {
           ...this.record.backend,
           state: 'error',
           error: 'Command Code did not confirm that the message reached its native transcript.',
         }
         yield { type: 'error', message: this.record.backend.error ?? 'Command Code could not verify the pending turn.' }
+      } else {
+        traceError = undefined
       }
       await this.persist()
     } catch (error) {
+      traceError = isAbort(error, opts?.signal) ? 'Command Code turn was stopped.' : errorMessage(error)
       if (isAbort(error, opts?.signal)) {
         yield { type: 'aborted' }
       } else {
@@ -1547,6 +1585,25 @@ export class Session {
         await this.persist()
       } catch (historyError) {
         logWarn(`could not refresh Command Code Session ${this.id}: ${errorMessage(historyError)}`)
+      }
+    } finally {
+      if (attempted) {
+        this.options.traces?.record({
+          at: new Date().toISOString(),
+          startedAt: new Date(traceStarted).toISOString(),
+          event: 'turn',
+          ok: traceError === undefined,
+          ms: Date.now() - traceStarted,
+          purpose: 'chat',
+          backend: 'command-code',
+          session: this.id,
+          surface: this.scope.gateway,
+          turn: pendingTurn.id,
+          ...(readyBackend.model ? { model: readyBackend.model } : {}),
+          input,
+          output: { transcript: this.messages.slice(pendingTurn.baseMessageCount), events: nativeEvents },
+          ...(traceError ? { error: traceError } : {}),
+        })
       }
     }
     if (attempted) this.options.onSideEffect?.()
@@ -1765,12 +1822,12 @@ export class Session {
     // before it writes.
     if (existing && existing.sourceUpdatedAt >= seenAt) return
 
-    const text = await digest({
+    const text = await withTraceContext({ session: this.id, surface: this.scope.gateway }, () => digest({
       provider: this.options.provider,
       model: this.options.model,
       messages: this.messages,
       summary: this.summary,
-    })
+    }))
     if (!text) return
 
     await this.recaps.write({ session: this.id, text, sourceUpdatedAt: seenAt, at: Date.now() })
@@ -1881,13 +1938,13 @@ export class Session {
     const startedAt = Date.now()
     let summary: string | null = null
     try {
-      summary = await summarize({
+      summary = await withTraceContext({ session: this.id, surface: this.scope.gateway }, () => summarize({
         provider: this.options.provider,
         model: this.options.model,
         previous: this.summary,
         dropped,
         signal,
-      })
+      }))
     } catch {
       summary = null
     }
@@ -1941,6 +1998,7 @@ export class Session {
     provider: Provider = this.options.provider,
     model: string = this.options.model,
     incoming: Message[] = [],
+    turn?: string,
   ): AsyncGenerator<Extract<AgentEvent, { type: 'compacting' | 'compacted' }>, void> {
     const config = this.options.sessions
     if (!config?.compaction) return
@@ -2017,13 +2075,13 @@ export class Session {
     const startedAt = Date.now()
     let summary: string | null = null
     try {
-      summary = await summarize({
+      summary = await withTraceContext({ turn, session: this.id, surface: this.scope.gateway }, () => summarize({
         provider,
         model,
         previous: this.summary,
         dropped,
         signal,
-      })
+      }))
     } catch {
       summary = null
     }

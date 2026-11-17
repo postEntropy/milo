@@ -138,3 +138,35 @@ describe('the hosted embedder', () => {
     await expect(embedder.embed(['um'])).rejects.toThrow(InputRefusedError)
   })
 })
+
+describe('the execution log for embeddings', () => {
+  it('records the input and the vectors returned to memory', async () => {
+    const { mkdtempSync, rmSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const { MemorySchema } = await import('../src/core/config/schema.js')
+    const { createMemory, SqliteMemory } = await import('../src/core/memory/index.js')
+    const { withTraceContext } = await import('../src/core/trace-context.js')
+    let offline = false
+    const ollama = await fakeProvider((call) => offline
+      ? { status: 503, body: { error: 'unavailable' } }
+      : { status: 200, body: { embeddings: (call.body.input as string[]).map(() => [3, 4]) } })
+    const dir = mkdtempSync(join(tmpdir(), 'milo-embed-trace-'))
+    const seen: import('../src/core/traces.js').TraceEvent[] = []
+    const memory = createMemory(MemorySchema.parse({ embedding: { provider: 'ollama', model: 'test-embed', url: ollama.url } }), dir, { traces: { record: (event) => seen.push(event) } }) as InstanceType<typeof SqliteMemory>
+    try {
+      await withTraceContext({ turn: 'turn-1', session: 'calm-otter-7' }, () => memory.remember({ gateway: 'cli', chatId: 'test' }, [{ text: 'The user prefers tea.' }]))
+      const event = seen.find((item) => item.event === 'embedding.request')
+      expect(event).toMatchObject({ ok: true, model: 'test-embed', provider: 'ollama', turn: 'turn-1', input: ['The user prefers tea.'] })
+      const vectors = event?.output as number[][] | undefined
+      expect(vectors?.[0]?.[0]).toBeCloseTo(0.6)
+      expect(vectors?.[0]?.[1]).toBeCloseTo(0.8)
+      offline = true
+      await memory.remember({ gateway: 'cli', chatId: 'test' }, [{ text: 'The user prefers coffee.' }])
+      expect(seen.find((item) => item.event === 'embedding.request' && !item.ok)).toMatchObject({ input: ['The user prefers coffee.'], error: expect.stringContaining('503') })
+    } finally {
+      memory.close()
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+})
