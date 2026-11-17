@@ -3,20 +3,32 @@ import SwiftUI
 /// The sessions, resting behind the chat. The chat is the layer that travels, so
 /// the rounded edge and the shadow belong to it; this one is a plain column on
 /// the sidebar's own tone, full-bleed to the screen's edges.
-struct SessionsDrawer: View {
+struct SessionsDrawer: View, Equatable {
     let routinesSelected: Bool
     let tasksSelected: Bool
+    let analyticsSelected: Bool
     /// Which world the session in front belongs to: the card is a project's, or the chat is
     /// a session working in one. The list the drawer opens on follows it.
     /// Whether the drawer is uncovered, so the list starts on the world in front each time
     /// it is opened rather than on whichever one was looked at last.
     let revealed: Bool
+    let swiping: Bool
     let onClose: () -> Void
     let onNewSession: () -> Void
     let onNewFolderSession: (String, String) -> Void
     let onSettings: () -> Void
     let onRoutines: () -> Void
     let onTasks: () -> Void
+    let onAnalytics: () -> Void
+    let onTraces: (SessionSummary) -> Void
+
+    nonisolated static func == (lhs: SessionsDrawer, rhs: SessionsDrawer) -> Bool {
+        lhs.routinesSelected == rhs.routinesSelected
+            && lhs.tasksSelected == rhs.tasksSelected
+            && lhs.analyticsSelected == rhs.analyticsSelected
+            && lhs.revealed == rhs.revealed
+            && lhs.swiping == rhs.swiping
+    }
     /// The switch's two sides. Choosing one moves the card behind the drawer to where that
     /// world begins, while the list it changed stays in front.
     @Environment(AppModel.self) private var model
@@ -36,10 +48,17 @@ struct SessionsDrawer: View {
     /// The footer's glass, named so the controls that stay keep their skin while the ones
     /// that change melt into place — one material, not two that blink at each other.
     @Namespace private var footerGlass
+    @State private var listCache = ListCache()
 
     var body: some View {
+        let snapshot = listCache.snapshot(
+            sessions: model.sessions,
+            sessionId: model.sessionId,
+            projects: model.projects,
+            query: text
+        )
         HStack(spacing: 0) {
-            column
+            column(snapshot)
                 .frame(width: 300, alignment: .leading)
                 // What starts a session and what sets one up float at the drawer's own
                 // end, over the list, on the right, in the platform's glass — the controls
@@ -64,7 +83,7 @@ struct SessionsDrawer: View {
         }
     }
 
-    private var column: some View {
+    private func column(_ snapshot: ListSnapshot) -> some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
             // The drawer's name, with the way into the list's search at the far end — where
             // this platform puts search on a list's own screen rather than among the list's
@@ -94,7 +113,7 @@ struct SessionsDrawer: View {
                     .font(MiloTheme.Text.title)
                     .foregroundStyle(MiloTheme.foreground)
                 Spacer(minLength: 0)
-                if canSearch {
+                if snapshot.canSearch {
                     Button {
                         UIImpactFeedbackGenerator(style: .light).impactOccurred()
                         withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) { searchOpen = true }
@@ -117,6 +136,7 @@ struct SessionsDrawer: View {
             // reached the same way from either world, so they sit above the switch — never
             // inside the list the switch narrows.
             VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
+                pageTab("Analytics", symbol: "chart.bar", selected: analyticsSelected, action: onAnalytics)
                 pageTab("Routines", symbol: "clock", selected: routinesSelected, action: onRoutines)
                 pageTab("Task lists", symbol: "checklist", selected: tasksSelected, action: onTasks)
             }
@@ -126,7 +146,7 @@ struct SessionsDrawer: View {
             // the field that narrows it takes that row.
             if searchOpen { searchField }
 
-            if let emptyLine {
+            if let emptyLine = snapshot.emptyLine {
                 Text(emptyLine)
                     .font(MiloTheme.Text.base)
                     .foregroundStyle(MiloTheme.muted)
@@ -138,12 +158,13 @@ struct SessionsDrawer: View {
             // with the card and flash there each time the drawer is uncovered.
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: MiloTheme.Space.one) {
-                    chatListRows
+                    chatListRows(snapshot)
                 }
                 .padding(.horizontal, MiloTheme.Space.three)
                 .padding(.bottom, Self.controlsClearance)
             }
             .scrollIndicators(.hidden)
+            .scrollDisabled(swiping)
         }
     }
 
@@ -235,23 +256,85 @@ struct SessionsDrawer: View {
 
     private var searched: Bool { !text.isEmpty }
 
-    /// What the Work list says when it holds no project: reading, a read that failed, and
-    /// none at all are three different things a bare "none" would flatten into one.
-    private var chats: [SessionSummary] {
-        model.sessions.filter {
-            $0.messageCount > 0 || $0.backend?.kind == "command-code" || $0.id == model.sessionId
+    private struct ListSnapshot {
+        let canSearch: Bool
+        let emptyLine: String?
+        let filteredCount: Int
+        let groups: [(title: String, sessions: [SessionSummary])]
+        let projectNames: [String: String]
+    }
+
+    private final class ListCache {
+        private var sessions: [SessionSummary] = []
+        private var sessionId = ""
+        private var projects: [Project] = []
+        private var query = ""
+        private var startOfToday: Double = 0
+        private var cached: ListSnapshot?
+
+        func snapshot(
+            sessions: [SessionSummary],
+            sessionId: String,
+            projects: [Project],
+            query: String
+        ) -> ListSnapshot {
+            let today = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970 * 1000
+            if let cached,
+               self.sessions == sessions,
+               self.sessionId == sessionId,
+               self.projects == projects,
+               self.query == query,
+               self.startOfToday == today {
+                return cached
+            }
+
+            let chats = sessions.filter {
+                $0.messageCount > 0 || $0.backend?.kind == "command-code" || $0.id == sessionId
+            }
+            let filtered = query.isEmpty ? chats : chats.filter { $0.searchText.contains(query) }
+
+            let day: Double = 86_400_000
+            let yesterday = today - day
+            let week = today - 7 * day
+            var todayList: [SessionSummary] = []
+            var yesterdayList: [SessionSummary] = []
+            var weekList: [SessionSummary] = []
+            var olderList: [SessionSummary] = []
+            for session in filtered {
+                if session.updatedAt >= today {
+                    todayList.append(session)
+                } else if session.updatedAt >= yesterday {
+                    yesterdayList.append(session)
+                } else if session.updatedAt >= week {
+                    weekList.append(session)
+                } else {
+                    olderList.append(session)
+                }
+            }
+
+            var groups: [(title: String, sessions: [SessionSummary])] = []
+            if !todayList.isEmpty { groups.append(("Today", todayList)) }
+            if !yesterdayList.isEmpty { groups.append(("Yesterday", yesterdayList)) }
+            if !weekList.isEmpty { groups.append(("Previous 7 days", weekList)) }
+            if !olderList.isEmpty { groups.append(("Older", olderList)) }
+
+            let projectNames = Dictionary(projects.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+            let next = ListSnapshot(
+                canSearch: !chats.isEmpty,
+                emptyLine: chats.isEmpty ? "No sessions yet" : nil,
+                filteredCount: filtered.count,
+                groups: groups,
+                projectNames: projectNames
+            )
+            self.sessions = sessions
+            self.sessionId = sessionId
+            self.projects = projects
+            self.query = query
+            self.startOfToday = today
+            self.cached = next
+            return next
         }
     }
-
-    private var filtered: [SessionSummary] {
-        guard searched else { return chats }
-        return chats.filter { $0.searchText.contains(text) }
-    }
-
-    /// The projects a session can start in: a folder that is gone is read on its page, and
-    /// is not offered here as a place to work.
-    private var canSearch: Bool { !chats.isEmpty }
-    private var emptyLine: String? { chats.isEmpty ? "No sessions yet" : nil }
 
     /// Folding the field away, which also gives the list back whole.
     private func closeSearch() {
@@ -304,37 +387,15 @@ struct SessionsDrawer: View {
         .transition(.opacity.combined(with: .scale(scale: 0.96)))
     }
 
-    /// The list the way the browser buckets it: how recent, newest group first, with the
-    /// same four headings and the same boundaries — a session sits under the same one on
-    /// both surfaces. `updatedAt` is in milliseconds, as the daemon sends it.
-    private var groups: [(title: String, sessions: [SessionSummary])] {
-        let day: Double = 86_400_000
-        let startOfToday = Calendar.current.startOfDay(for: Date()).timeIntervalSince1970 * 1000
-        let ranges: [(title: String, from: Double, to: Double)] = [
-            ("Today", startOfToday, .infinity),
-            ("Yesterday", startOfToday - day, startOfToday),
-            ("Previous 7 days", startOfToday - 7 * day, startOfToday - day),
-            ("Older", -.infinity, startOfToday - 7 * day),
-        ]
-        return ranges
-            .map { range in
-                (
-                    title: range.title,
-                    sessions: filtered.filter { $0.updatedAt >= range.from && $0.updatedAt < range.to }
-                )
-            }
-            .filter { !$0.sessions.isEmpty }
-    }
-
-    @ViewBuilder private var chatListRows: some View {
+    @ViewBuilder private func chatListRows(_ snapshot: ListSnapshot) -> some View {
         if searched {
-            Text(filtered.isEmpty ? "No sessions found." : (filtered.count == 1 ? "1 session found" : "\(filtered.count) sessions found"))
+            Text(snapshot.filteredCount == 0 ? "No sessions found." : (snapshot.filteredCount == 1 ? "1 session found" : "\(snapshot.filteredCount) sessions found"))
                 .font(MiloTheme.Text.meta.weight(.medium))
                 .foregroundStyle(MiloTheme.muted)
                 .padding(.horizontal, MiloTheme.Space.three)
                 .padding(.top, MiloTheme.Space.two)
         }
-        ForEach(groups, id: \.title) { group in
+        ForEach(snapshot.groups, id: \.title) { group in
             Text(group.title)
                 .font(MiloTheme.Text.small.weight(.medium))
                 .foregroundStyle(MiloTheme.muted)
@@ -342,7 +403,7 @@ struct SessionsDrawer: View {
                 .padding(.top, MiloTheme.Space.three)
                 .padding(.bottom, MiloTheme.Space.one)
             ForEach(group.sessions) { session in
-                row(session) {
+                row(session, projectName: session.project.flatMap { snapshot.projectNames[$0] }) {
                     Task {
                         await model.resume(session.id)
                         onClose()
@@ -352,12 +413,15 @@ struct SessionsDrawer: View {
         }
     }
 
-    private func row(_ session: SessionSummary, opening: @escaping () -> Void) -> some View {
+    private func row(_ session: SessionSummary, projectName: String?, opening: @escaping () -> Void) -> some View {
         SessionRow(
             session: session,
             renaming: $renaming,
             current: session.id == model.sessionId,
-            onOpen: opening
+            projectName: projectName,
+            onOpen: opening,
+            onTraces: { onTraces(session) }
         )
+        .equatable()
     }
 }

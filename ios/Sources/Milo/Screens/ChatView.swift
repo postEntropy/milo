@@ -33,6 +33,7 @@ private struct StatusBarBlur: UIViewRepresentable {
 /// drag of its own — a code block, a table, a slider, a chart's scrub. A drag that begins
 /// inside one belongs to it, not to the sessions drawer.
 struct SidewaysDragKey: PreferenceKey {
+    static let space = "sideways-drag-space"
     static var defaultValue: [CGRect] { [] }
     static func reduce(value: inout [CGRect], nextValue: () -> [CGRect]) {
         value.append(contentsOf: nextValue())
@@ -57,6 +58,11 @@ struct ChatView: View {
         let section: Section
     }
 
+    private struct SessionTracesTarget: Identifiable {
+        let id: String
+        let title: String
+    }
+
     let account: Account
     @Environment(AppModel.self) private var model
     @State private var draft = ""
@@ -73,6 +79,7 @@ struct ChatView: View {
     @State private var editing: Int?
     @State private var drawer = false
     @State private var projectShortcut: ProjectShortcut?
+    @State private var tracesTarget: SessionTracesTarget?
     @State private var picker = false
     @State private var settings = false
     @State private var routines = false
@@ -81,6 +88,8 @@ struct ChatView: View {
     @State private var tasksSelected = false
     @State private var routinePage = false
     @State private var taskPage = false
+    @State private var analytics = false
+    @State private var analyticsPage = false
     /// The composer's panel, when one is open — raised by the `+` or by a long press on the
     /// send control, drawn over the composer, dismissed by a tap anywhere but itself.
     @State private var menu: ComposerMenu?
@@ -104,17 +113,11 @@ struct ChatView: View {
     /// Measured from where the drag was claimed, so the card begins under the hand and does not
     /// jump by the distance it took to tell a swipe from a scroll.
     @State private var drag: CGFloat = 0
-    /// Where that claim happened, in the hand's own travel.
-    @State private var dragFrom: CGFloat = 0
     /// Whether the drag on the card is the card's to answer — decided once per gesture, as soon
     /// as the hand has said which way it is going, and kept for the rest of it. `nil` while it is
     /// still anybody's. A drag the thread is scrolling is left to the thread; one the card has
     /// claimed freezes the thread under it — see the scroll's own `scrollDisabled`.
     @State private var held: Bool?
-    /// Where the touch in hand began. A touch begins at a place of its own, so a different one
-    /// is the signal that the last is over — even one the system took away mid-gesture, which
-    /// would otherwise leave its claim behind.
-    @State private var touch: CGPoint?
     /// Whether a finger is on the card at all, straight off the gesture: a `@GestureState`, so
     /// the platform clears it the moment the touch ends and the thread can never be left frozen
     /// by a swipe that was taken away.
@@ -127,6 +130,7 @@ struct ChatView: View {
     /// dozens of times a second, and a screen that re-rendered for each of them is what made
     /// a long session stutter under the thumb — every pass let a lazy stack re-activate the
     /// rows it was unsure of, and re-building one of them costs the whole row.
+    @MainActor
     private final class ScrollBook {
         /// Whether the person is the one moving the thread — a finger in it, or the glide a
         /// flick left behind. It holds the following off until they have settled, so a reply
@@ -138,9 +142,82 @@ struct ChatView: View {
         /// where the send's own message sits inside it: what the room is measured from.
         var bare: CGFloat = 0
         var threadHeight: CGFloat = 0
+        var viewportHeight: CGFloat = 0
         var sentTop: CGFloat?
         /// Whether the scroll the room was opened for has already been made.
         var placed = true
+        /// Where that claim happened, in the hand's own travel, and where the touch began.
+        var dragFrom: CGFloat = 0
+        var touch: CGPoint?
+
+        private var cachedMessages: [AppModel.Message] = []
+        private var cachedBusy: Bool?
+        private var cachedPieces: [ThreadPiece] = []
+        private var cachedRegenerate: (message: UUID, prompt: String, upToTurn: Int)?
+
+        func thread(
+            for messages: [AppModel.Message],
+            busy: Bool
+        ) -> (pieces: [ThreadPiece], regenerate: (message: UUID, prompt: String, upToTurn: Int)?) {
+            if cachedBusy == busy, cachedMessages == messages {
+                return (cachedPieces, cachedRegenerate)
+            }
+            var out: [ThreadPiece] = []
+            var turn = 0
+            var answer: AppModel.Message?
+            var asked: AppModel.Message?
+            var askedTurn = 0
+
+            for message in messages {
+                if message.isUser {
+                    if message.deliveryId == nil {
+                        turn += 1
+                        asked = message
+                        askedTurn = turn
+                    }
+                } else if !busy, message.routine == nil, !message.streaming, !message.prose.isEmpty {
+                    answer = message
+                }
+
+                let count = MessageRow.pieceCount(of: message)
+                let whole = message.isUser
+                    || message.routine != nil
+                    || !(message.cards?.isEmpty ?? true)
+                    || message.streaming
+                    || count <= MessageRow.chunk
+                if whole {
+                    out.append(ThreadPiece(message: message, turn: turn, groups: 0..<count, head: true, foot: true))
+                    continue
+                }
+                var start = 0
+                while start < count {
+                    let end = min(start + MessageRow.chunk, count)
+                    out.append(
+                        ThreadPiece(
+                            message: message,
+                            turn: turn,
+                            groups: start..<end,
+                            head: start == 0,
+                            foot: end == count
+                        )
+                    )
+                    start = end
+                }
+            }
+
+            let offer: (message: UUID, prompt: String, upToTurn: Int)?
+            if !busy, let answer, let asked {
+                offer = (answer.id, asked.prose, askedTurn - 1)
+            } else {
+                offer = nil
+            }
+
+            cachedMessages = messages
+            cachedBusy = busy
+            cachedPieces = out
+            cachedRegenerate = offer
+            return (out, offer)
+        }
     }
     /// Held in a plain reference, the way the sideways-drag frames are.
     @State private var book = ScrollBook()
@@ -172,8 +249,8 @@ struct ChatView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var submittingEdit = false
     @State private var editOrigin = ""
-    @State private var destruction: Bool?
-    @State private var destructionSession = ""
+    @State private var deleting = false
+    @State private var deleteSession = ""
     private enum AccessibleSurface: Hashable { case sessions, panel }
     @AccessibilityFocusState private var accessibleSurface: AccessibleSurface?
 
@@ -203,29 +280,36 @@ struct ChatView: View {
             }
 
             cardContent
-                .accessibilityHidden(drawer || panelShown)
+                .accessibilityHidden(UIAccessibility.isVoiceOverRunning && (drawer || panelShown))
+                .scrollDisabled(touching && held == true)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .coordinateSpace(.named(SidewaysDragKey.space))
                 // The card is the background: it runs under the status bar and the
                 // home indicator, and carries the rounded edge and the shadow while
                 // the content stays inside the safe area.
                 .background {
-                    UnevenRoundedRectangle(
+                    let cardShape = UnevenRoundedRectangle(
                         topLeadingRadius: travel > 0 ? 28 : 0,
                         bottomLeadingRadius: travel > 0 ? 28 : 0,
                         bottomTrailingRadius: travel < 0 ? 28 : 0,
                         topTrailingRadius: travel < 0 ? 28 : 0
                     )
-                    .fill(MiloTheme.background)
-                    .shadow(
-                        color: travel == 0 ? .clear : MiloTheme.seamShadow,
-                        radius: 14,
-                        x: travel < 0 ? 2 : -2,
-                        y: 0
-                    )
-                    .ignoresSafeArea()
+                    cardShape
+                        .fill(MiloTheme.background)
+                        .shadow(
+                            color: travel == 0 ? .clear : MiloTheme.seamShadow,
+                            radius: 14,
+                            x: travel < 0 ? 2 : -2,
+                            y: 0
+                        )
+                        .overlay {
+                            MiloWallpaper()
+                                .clipShape(cardShape)
+                        }
+                        .ignoresSafeArea()
                 }
                 .overlay(alignment: .top) {
-                    if !routines && !tasks && !model.messages.isEmpty {
+                    if !routines && !tasks && !analytics && !model.messages.isEmpty {
                         GeometryReader { geometry in
                             StatusBarBlur()
                                 .mask {
@@ -295,12 +379,14 @@ struct ChatView: View {
             else { closeMenu() }
         }
         .onChange(of: drawer) { _, open in
+            guard UIAccessibility.isVoiceOverRunning else { return }
             accessibleSurface = open ? .sessions : nil
         }
         .onChange(of: panelShown) { _, open in
+            guard UIAccessibility.isVoiceOverRunning else { return }
             accessibleSurface = open ? .panel : nil
         }
-        .sessionDestruction(destructionSession, pending: $destruction)
+        .sessionDelete(deleteSession, isPresented: $deleting)
         .overlay(alignment: .top) { noteToast }
         .animation(.smooth(duration: 0.22), value: model.note)
         .animation(reduceMotion ? nil : Self.lidMove, value: rest)
@@ -327,17 +413,17 @@ struct ChatView: View {
         // box's; and one the card has claimed freezes the thread under it, so the words do not
         // creep while the card is being pulled aside.
         .simultaneousGesture(
-            DragGesture(minimumDistance: 24, coordinateSpace: .global)
+            DragGesture(minimumDistance: 24, coordinateSpace: .local)
                 .updating($touching) { _, state, _ in state = true }
                 .onChanged { value in
                     // A touch begins at a place of its own: clearing here is what keeps a swipe
                     // the system took away from carrying its claim — and its half-open lid —
                     // into the next one, and lets the thread go with it.
-                    if touch != value.startLocation {
-                        touch = value.startLocation
+                    if book.touch != value.startLocation {
+                        book.touch = value.startLocation
                         if held != nil { drag = 0 }
                         held = nil
-                        dragFrom = 0
+                        book.dragFrom = 0
                     }
                     let across = value.translation.width
                     let down = value.translation.height
@@ -349,7 +435,7 @@ struct ChatView: View {
                         if abs(across) > abs(down) * 1.5 {
                             held = claims(across, from: value.startLocation)
                             if held == true {
-                                dragFrom = across
+                                book.dragFrom = across
                                 // The card uncovers the chats, whichever session it is pulled
                                 // from: a work session's project is reached through the Work
                                 // tab, where its sessions are listed beside their folder.
@@ -364,11 +450,11 @@ struct ChatView: View {
                         }
                     }
                     guard held == true else { return }
-                    drag = across - dragFrom
+                    drag = across - book.dragFrom
                 }
                 .onEnded { value in
                     let ours = held == true
-                    touch = nil
+                    book.touch = nil
                     guard ours else {
                         held = nil
                         drag = 0
@@ -426,6 +512,9 @@ struct ChatView: View {
         }
         .sheet(isPresented: $picker) { ModelPickerSheet() }
         .sheet(isPresented: $settings) { SettingsView(account: account) }
+        .sheet(item: $tracesTarget) { target in
+            SessionTracesSheet(account: account, sessionId: target.id, sessionTitle: target.title)
+        }
         .sheet(item: $projectShortcut) { shortcut in
             DetailSheet {
                 VStack(alignment: .leading, spacing: MiloTheme.Space.five) {
@@ -471,6 +560,7 @@ struct ChatView: View {
             if id != nil {
                 tasksSelected = false
                 tasks = false
+                analytics = false
                 routinesSelected = true
                 routines = true
             }
@@ -479,6 +569,7 @@ struct ChatView: View {
             if model.pendingRoutine != nil {
                 tasksSelected = false
                 tasks = false
+                analytics = false
                 routinesSelected = true
                 routines = true
             }
@@ -505,21 +596,28 @@ struct ChatView: View {
         SessionsDrawer(
             routinesSelected: routinesSelected,
             tasksSelected: tasksSelected,
+            analyticsSelected: analytics,
             revealed: drawer,
+            swiping: touching && held == true,
             onClose: closeDrawer,
             onNewSession: startSessionFromDrawer,
             onNewFolderSession: startFolderSession,
             onSettings: openSettingsFromDrawer,
             onRoutines: openRoutines,
-            onTasks: openTasks
+            onTasks: openTasks,
+            onAnalytics: openAnalytics,
+            onTraces: { session in
+                tracesTarget = SessionTracesTarget(id: session.id, title: session.label)
+            }
         )
+        .equatable()
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
         .opacity(sessionsShown ? 1 : 0)
         .animation(sessionsShown ? nil : .linear(duration: 0.01).delay(Self.drawerDuration), value: sessionsShown)
-        .allowsHitTesting(drawer)
+        .allowsHitTesting(drawer && held != true)
         .accessibilityFocused($accessibleSurface, equals: .sessions)
         .accessibilityAddTraits(.isModal)
-        .accessibilityHidden(!drawer)
+        .accessibilityHidden(UIAccessibility.isVoiceOverRunning && !drawer)
     }
 
     @ViewBuilder
@@ -530,8 +628,13 @@ struct ChatView: View {
             // drawer without choosing a session leaves the person on the routines —
             // only a session chosen takes the card back to the chat.
             RoutinesView(account: account, pushed: $routinePage, onSessions: openDrawer)
+                .equatable()
+        } else if analytics {
+            AnalyticsView(account: account, pushed: $analyticsPage, onSessions: openDrawer)
+                .equatable()
         } else if tasks {
             TaskListsView(pushed: $taskPage, onSessions: openDrawer)
+                .equatable()
         } else {
             chat
         }
@@ -564,7 +667,7 @@ struct ChatView: View {
     /// Whether the thread is what the person is looking at: the chat's card is the one
     /// showing and the sessions are not over it. A reply that lands while this is false is
     /// unread — leaving the chat before the answer is what that means.
-    private var threadOnScreen: Bool { !routines && !tasks && !settings && !drawer }
+    private var threadOnScreen: Bool { !routines && !tasks && !analytics && !settings && !drawer }
 
     /// How wide the panel comes out: most of the screen, because it carries reading matter
     /// rather than a list — and never all of it, so the chat it slid over stays the thing the
@@ -604,18 +707,6 @@ struct ChatView: View {
     /// it, which is what says a surface has been brought over the chat rather than through it.
     private static let lidMove = Animation.spring(duration: drawerDuration, bounce: 0.16)
 
-    /// Which turn each message belongs to: the person's own line opens one, so a
-    /// message's place is how many of them came before it. What a fork cuts at.
-    private var turns: [UUID: Int] {
-        var turns: [UUID: Int] = [:]
-        var turn = 0
-        for message in model.messages {
-            if message.isUser && message.deliveryId == nil { turn += 1 }
-            turns[message.id] = turn
-        }
-        return turns
-    }
-
     /// A row of the thread: a whole message, or a stretch of a settled turn long enough that
     /// drawing it as one row would lay out every piece of it the moment it came into reach.
     /// `MessageRow.chunk` says how much one row holds; the first row of a turn keeps its head
@@ -641,59 +732,6 @@ struct ChatView: View {
         var id: String { "\(message.id.uuidString)-\(groups.lowerBound)" }
     }
 
-    /// The thread as the lazy stack holds it. A live turn is never cut: its pieces arrive one
-    /// at a time into a row that is already there to take them.
-    private var pieces: [ThreadPiece] {
-        var out: [ThreadPiece] = []
-        var turn = 0
-        for message in model.messages {
-            if message.isUser && message.deliveryId == nil { turn += 1 }
-            let count = MessageRow.pieceCount(of: message)
-            let whole = message.isUser
-                || message.routine != nil
-                || !(message.cards?.isEmpty ?? true)
-                || message.streaming
-                || count <= MessageRow.chunk
-            if whole {
-                out.append(ThreadPiece(message: message, turn: turn, groups: 0..<count, head: true, foot: true))
-                continue
-            }
-            var start = 0
-            while start < count {
-                let end = min(start + MessageRow.chunk, count)
-                out.append(
-                    ThreadPiece(
-                        message: message,
-                        turn: turn,
-                        groups: start..<end,
-                        head: start == 0,
-                        foot: end == count
-                    )
-                )
-                start = end
-            }
-        }
-        return out
-    }
-
-    /// What asking again would redo: the last answer, with the words that asked for it
-    /// and the turn before them. Offered only when nothing is running — a turn in
-    /// flight is not asked again, the browser's own rule.
-    private var regenerate: (message: UUID, prompt: String, upToTurn: Int)? {
-        guard !model.busy else { return nil }
-        var answer: AppModel.Message?
-        var asked: AppModel.Message?
-        for message in model.messages {
-            if message.isUser { if message.deliveryId == nil { asked = message }; continue }
-            // A routine's delivery is nobody's turn: it is not what "ask this again"
-            // would redo, and it must not take the offer away from the answer above it.
-            if message.routine != nil { continue }
-            if !message.streaming, !message.prose.isEmpty { answer = message }
-        }
-        guard let answer, let asked, let turn = turns[asked.id] else { return nil }
-        return (answer.id, asked.prose, turn - 1)
-    }
-
     /// Whether a sideways drag belongs to the card rather than to the thread: toward an edge
     /// that has something to show — the sessions on the right, the panel on the left — and from
     /// outside anything that owns a sideways drag of its own. A lid already up is the one the
@@ -701,9 +739,9 @@ struct ChatView: View {
     /// project's own page keeps the sessions out of it — a page is left to the platform's own
     /// edge swipe for the way back, and a drag in the middle of one answers nothing.
     private func claims(_ across: CGFloat, from start: CGPoint) -> Bool {
-        guard !sideways.frames.contains(where: { $0.contains(start) }) else { return false }
         if drawer || panelShown { return true }
-        return across > 0 ? !((routines && routinePage) || (tasks && taskPage)) : hasPanel
+        guard !sideways.frames.contains(where: { $0.contains(start) }) else { return false }
+        return across > 0 ? !((routines && routinePage) || (tasks && taskPage) || (analytics && analyticsPage)) : hasPanel
     }
 
     /// Where a drag that has just been let go leaves the card: past halfway, or flicked there,
@@ -713,7 +751,7 @@ struct ChatView: View {
     /// of them.
     private func settle(_ value: DragGesture.Value) {
         let live = travel
-        let flick = rest + (value.predictedEndTranslation.width - dragFrom)
+        let flick = rest + (value.predictedEndTranslation.width - book.dragFrom)
         let half = (live >= 0 ? Self.drawerWidth : panelWidth) / 2
         withAnimation(Self.lidMove) {
             if rest > 0 {
@@ -735,7 +773,7 @@ struct ChatView: View {
     }
 
     /// Which of the three pages the drawer opens.
-    private enum Page { case routines, tasks }
+    private enum Page { case routines, tasks, analytics }
 
     /// The drawer's actions, named rather than written inline: the drawer is a stack of
     /// arguments as it is, and the shell's body was one expression the type checker could
@@ -747,6 +785,7 @@ struct ChatView: View {
         routines = false
         tasksSelected = false
         tasks = false
+        analytics = false
         Task { @MainActor in
             drawer = false
         }
@@ -760,6 +799,7 @@ struct ChatView: View {
         routines = false
         tasksSelected = false
         tasks = false
+        analytics = false
         // The drawer leaves in the tap's own update, as the Work side's control does, so the
         // card is already coming back when the field takes the cursor.
         drawer = false
@@ -776,6 +816,7 @@ struct ChatView: View {
         routines = false
         routinesSelected = false
         tasks = false
+        analytics = false
         tasksSelected = false
         drawer = false
         starting = true
@@ -791,11 +832,13 @@ struct ChatView: View {
         routines = false
         tasksSelected = false
         tasks = false
+        analytics = false
         settings = true
     }
 
     private func openRoutines() { openPage(.routines) }
     private func openTasks() { openPage(.tasks) }
+    private func openAnalytics() { openPage(.analytics) }
     /// Coming out of the drawer onto a page: the page takes its place on the card first while
     /// `drawer` is still up (`rest` unchanged, so no animation transaction runs on the swap),
     /// and the next turn closes `drawer` so `.animation(reduceMotion ? nil : Self.lidMove, value: rest)` slides the
@@ -807,6 +850,7 @@ struct ChatView: View {
         routines = page == .routines
         tasksSelected = page == .tasks
         tasks = page == .tasks
+        analytics = page == .analytics
         Task { @MainActor in
             drawer = false
         }
@@ -943,10 +987,9 @@ struct ChatView: View {
 
     private var chat: some View {
         ScrollViewReader { proxy in
-            // These are session-wide scans. Resolve them once for this view update;
-            // doing either lookup from each row made laying out N messages cost N².
-            let threadPieces = pieces
-            let regenerationOffer = regenerate
+            // These are session-wide scans. Resolve them once per message or busy change;
+            // doing either lookup from each row or on every sidebar frame made N messages slow.
+            let (threadPieces, regenerationOffer) = book.thread(for: model.messages, busy: model.busy)
             ScrollView {
                 // The room sits outside the lazy stack so it is always in the scroll's
                 // content size: a lazy stack only measures what is near the viewport, which
@@ -997,6 +1040,7 @@ struct ChatView: View {
                                     foot: piece.foot,
                                     canQuoteMessage: index < threadPieces.count - 1
                                 )
+                                .equatable()
                                 // The pieces of one turn sit a step apart, and a turn stands
                                 // a longer step from the one before it: the rhythm the rows
                                 // had when a turn was always one row.
@@ -1105,7 +1149,11 @@ struct ChatView: View {
             .onScrollGeometryChange(for: CGFloat.self) { geometry in
                 geometry.containerSize.height
             } action: { _, height in
-                boxHeight = height
+                book.viewportHeight = height
+                if model.messages.isEmpty, boxHeight != height {
+                    boxHeight = height
+                }
+                guard !drawer, !panelShown, held != true else { return }
                 // While the keyboard is up for typing, the box is temporarily shorter by
                 // the keyboard's height; a send drops the keyboard at once, so keeping the
                 // full height means the room is already sized for the open screen the
@@ -1115,6 +1163,11 @@ struct ChatView: View {
                 guard (!composing && book.placed) || height > book.threadHeight else { return }
                 book.threadHeight = height
                 sizeRoom(proxy)
+            }
+            .onChange(of: model.messages.isEmpty) { _, empty in
+                if empty, boxHeight != book.viewportHeight {
+                    boxHeight = book.viewportHeight
+                }
             }
             // The person's own move, read off the platform's phase rather than guessed at
             // from the thread's distance to its end: the reply's growth moves that distance
@@ -1325,10 +1378,13 @@ struct ChatView: View {
                             Menu {
                                 sessionActions(
                                     onRename: { renaming = model.sessionId },
+                                    onTraces: {
+                                        let label = model.sessions.first { $0.id == model.sessionId }?.label ?? "Session"
+                                        tracesTarget = SessionTracesTarget(id: model.sessionId, title: label)
+                                    },
                                     onExport: { Task { await model.export(model.sessionId) } },
                                     onCopy: { model.copyId(model.sessionId) },
-                                    onClear: { destructionSession = model.sessionId; destruction = false },
-                                    onDelete: { destructionSession = model.sessionId; destruction = true }
+                                    onDelete: { deleteSession = model.sessionId; deleting = true }
                                 )
                             } label: {
                                 topGlyph("ellipsis")
@@ -1599,7 +1655,7 @@ struct WelcomeView: View {
                     .foregroundStyle(isResume ? MiloTheme.accent : MiloTheme.foreground)
                     .frame(width: keyboardUp ? 28 : 34, height: keyboardUp ? 28 : 34)
                     .background(
-                        isResume ? MiloTheme.accent.opacity(0.14) : MiloTheme.surfaceRaised,
+                        isResume ? MiloTheme.accent.opacity(0.16) : MiloTheme.surfaceWarm,
                         in: Circle()
                     )
 
@@ -1623,10 +1679,7 @@ struct WelcomeView: View {
             .padding(.horizontal, MiloTheme.Space.three)
             .padding(.vertical, keyboardUp ? MiloTheme.Space.two + 2 : MiloTheme.Space.three)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                MiloTheme.surface,
-                in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg)
-            )
+            .miloGlassCard(interactive: true)
             .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
         }
         .buttonStyle(PressableStyle())

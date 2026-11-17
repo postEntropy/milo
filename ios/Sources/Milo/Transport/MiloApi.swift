@@ -151,7 +151,8 @@ enum MiloApi {
         _ action: String,
         _ body: [String: Any] = [:],
         account: Account,
-        as type: T.Type
+        as type: T.Type,
+        timeout: TimeInterval = 25
     ) async throws -> T {
         guard let url = account.url("/api/\(action)") else { throw ApiError.badAddress }
         var request = URLRequest(url: url)
@@ -159,7 +160,7 @@ enum MiloApi {
         request.setValue("application/json", forHTTPHeaderField: "content-type")
         request.setValue("Bearer \(account.token)", forHTTPHeaderField: "authorization")
         request.httpBody = try? JSONSerialization.data(withJSONObject: body)
-        request.timeoutInterval = 25
+        request.timeoutInterval = timeout
 
         let data: Data
         let response: URLResponse
@@ -300,12 +301,6 @@ enum MiloApi {
 
     static func deleteSession(_ account: Account, id: String) async throws {
         _ = try await call("session-delete", ["id": id], account: account, as: Ack.self)
-    }
-
-    /// Forgets what was said in this chat's session, keeping the session's identity —
-    /// `/clear`'s own act. The daemon clears the one this chat is bound to.
-    static func clearSession(_ account: Account) async throws {
-        _ = try await call("clear-session", ["chatId": account.chatId], account: account, as: Ack.self)
     }
 
     /**
