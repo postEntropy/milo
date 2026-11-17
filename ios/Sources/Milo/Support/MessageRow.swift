@@ -33,7 +33,7 @@ struct ThreadSwap: Transition {
     }
 }
 
-struct MessageRow: View {
+struct MessageRow: View, Equatable {
     let message: AppModel.Message
     /// Which turn this message belongs to — what a fork cuts at.
     let turn: Int
@@ -60,6 +60,18 @@ struct MessageRow: View {
     /// A whole-message quote is useful on an earlier answer; the latest one is already in context.
     var canQuoteMessage = true
     @Environment(AppModel.self) private var model
+
+    nonisolated static func == (lhs: MessageRow, rhs: MessageRow) -> Bool {
+        lhs.message == rhs.message
+            && lhs.turn == rhs.turn
+            && lhs.regenerate?.prompt == rhs.regenerate?.prompt
+            && lhs.regenerate?.upToTurn == rhs.regenerate?.upToTurn
+            && lhs.readOnly == rhs.readOnly
+            && lhs.groups == rhs.groups
+            && lhs.head == rhs.head
+            && lhs.foot == rhs.foot
+            && lhs.canQuoteMessage == rhs.canQuoteMessage
+    }
 
     /// The answer's thinking, when it thought at all. Read off the parts rather than the
     /// turn's own clock, so a thought read back from a session still has its line and its
@@ -90,7 +102,25 @@ struct MessageRow: View {
     /// How many pieces an answer draws: one per run of consecutive calls and one per other
     /// part. A settled turn longer than `chunk` is drawn as several rows of these pieces, so
     /// a thread opens and scrolls without laying out the whole of every long answer at once.
-    static func pieceCount(of message: AppModel.Message) -> Int { drawn(of: message).count }
+    static func pieceCount(of message: AppModel.Message) -> Int {
+        var count = 0
+        var inToolRun = false
+        for part in message.parts {
+            switch part {
+            case .reasoning, .other:
+                continue
+            case .tool:
+                if !inToolRun {
+                    count += 1
+                    inToolRun = true
+                }
+            case .text, .todo, .ui, .verification:
+                count += 1
+                inToolRun = false
+            }
+        }
+        return count
+    }
 
     /// How many pieces one row may hold. Two of them are a screenful of prose: the rest of a
     /// long turn is only built as it comes into reach, so entering the thread costs what is
@@ -104,8 +134,10 @@ struct MessageRow: View {
             case .reasoning, .other:
                 continue
             case .tool(let call):
-                if case .calls(let earlier)? = out.last {
-                    out[out.count - 1] = .calls(earlier + [call])
+                if case .calls(var earlier)? = out.last {
+                    out[out.count - 1] = .calls([])
+                    earlier.append(call)
+                    out[out.count - 1] = .calls(earlier)
                 } else {
                     out.append(.calls([call]))
                 }

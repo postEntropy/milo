@@ -9,7 +9,7 @@ import SwiftUI
  It lives beside the chat rather than in Settings: a routine is a thing you use, not a
  setting you configure.
  */
-struct RoutinesView: View {
+struct RoutinesView: View, Equatable {
     let account: Account
     /// Whether one routine's own page is open on top of the list, told to the shell: the
     /// drawer's swipe belongs to the list, and over a page it keeps out of the way — the way
@@ -19,6 +19,10 @@ struct RoutinesView: View {
     /// Opening the sessions from here. The drawer belongs to the chat, but a screen that is
     /// not the chat still reaches it — by this control and by the same swipe.
     let onSessions: () -> Void
+
+    nonisolated static func == (lhs: RoutinesView, rhs: RoutinesView) -> Bool {
+        lhs.account == rhs.account
+    }
     @Environment(AppModel.self) private var model
     @State private var path: [Route] = []
     @State private var showingNewRoutine = false
@@ -122,7 +126,7 @@ private struct RoutineList: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(MiloTheme.Space.five)
-                .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+                .miloGlassCard(radius: MiloTheme.Radius.xl)
 
                 if model.notificationsAllowed == false {
                     Label("Reminders are off. Allow notifications in Settings.", systemImage: "bell.slash")
@@ -148,7 +152,7 @@ private struct RoutineList: View {
                         }
                         .padding(MiloTheme.Space.four)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                        .miloGlassCard()
                     } else if model.routines.isEmpty {
                         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
                             Image(systemName: model.routinesLoading ? "hourglass" : "sparkles")
@@ -163,7 +167,7 @@ private struct RoutineList: View {
                         }
                         .padding(MiloTheme.Space.five)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                        .miloGlassCard()
                     } else {
                         let visible = model.routines.filter { !$0.finished }
                         if visible.isEmpty {
@@ -172,7 +176,7 @@ private struct RoutineList: View {
                                 .foregroundStyle(MiloTheme.muted)
                                 .padding(MiloTheme.Space.four)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                                .miloGlassCard()
                         } else {
                             VStack(spacing: MiloTheme.Space.two) {
                                 ForEach(visible) { routine in
@@ -216,7 +220,7 @@ private struct RoutineList: View {
                                 }
                                 .padding(MiloTheme.Space.four)
                                 .frame(maxWidth: .infinity, alignment: .leading)
-                                .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                                .miloGlassCard(interactive: true)
                             }
                             .buttonStyle(PressableStyle())
                         }
@@ -237,7 +241,7 @@ private struct RoutineList: View {
             .frame(maxWidth: 620)
             .frame(maxWidth: .infinity)
         }
-        .background(MiloTheme.background)
+        .miloWallpaperBackground()
         // The way back to the sessions, at this screen's own top and in the chat's own
         // control: the drawer belongs to the chat, but the routines are one press from it
         // rather than a page with no exit. Drawn in the page's tone, so what scrolls under
@@ -446,7 +450,7 @@ private struct RoutineRow: View {
                         .contentShape(Circle())
                 }
                 .buttonStyle(PressableStyle())
-                .glassEffect(.regular.tint(MiloTheme.success.opacity(0.24)).interactive(), in: Circle())
+                .background(MiloTheme.success.opacity(0.16), in: Circle())
                 .accessibilityLabel("Run \(routine.label) now")
 
                 if !routine.finished, let onToggle {
@@ -460,14 +464,14 @@ private struct RoutineRow: View {
                             .contentShape(Circle())
                     }
                     .buttonStyle(PressableStyle())
-                    .glassEffect(.regular.tint(pauseTone.opacity(0.24)).interactive(), in: Circle())
+                    .background(pauseTone.opacity(0.16), in: Circle())
                     .accessibilityLabel(routine.enabled ? "Pause \(routine.label)" : "Resume \(routine.label)")
                 }
             }
         }
         .padding(.horizontal, MiloTheme.Space.four)
         .padding(.vertical, MiloTheme.Space.three + 2)
-        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .miloGlassCard(interactive: true)
         .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
         .contextMenu {
             menuItem("Run now", "play.fill", action: onRun)
@@ -681,7 +685,7 @@ private struct RoutineDetail: View {
             .frame(maxWidth: 620)
             .frame(maxWidth: .infinity)
         }
-        .background(MiloTheme.background)
+        .miloWallpaperBackground()
         .navigationTitle(routine?.label ?? "Routine")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
@@ -805,7 +809,7 @@ private struct RoutineDetail: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .padding(MiloTheme.Space.four)
-        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .miloGlassCard()
     }
 
     private func loadRuns(reset: Bool) async {
@@ -1088,7 +1092,7 @@ private struct NewRoutine: View {
                     .foregroundStyle(MiloTheme.foreground)
                     .padding(MiloTheme.Space.four)
                     .frame(maxWidth: .infinity, minHeight: 112, alignment: .topLeading)
-                    .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                    .miloGlassCard()
                     .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
                     .onTapGesture { asking = true }
 
@@ -1117,7 +1121,7 @@ private struct NewRoutine: View {
                                     .padding(.horizontal, MiloTheme.Space.four)
                                     .padding(.vertical, MiloTheme.Space.three)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                                    .miloGlassCard(radius: MiloTheme.Radius.md, interactive: true)
                                     .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
                                 }
                                 .buttonStyle(PressableStyle())
@@ -1179,7 +1183,7 @@ private struct NewRoutine: View {
                     }
                     .padding(MiloTheme.Space.four)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                    .miloGlassCard()
                 }
 
                 if !thread.isEmpty {
@@ -1218,7 +1222,7 @@ private struct NewRoutine: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(MiloTheme.background)
+        .miloWallpaperBackground()
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: MiloTheme.Space.two) {
                 ConnectionPill()

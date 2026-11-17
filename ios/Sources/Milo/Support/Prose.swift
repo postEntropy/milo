@@ -31,7 +31,7 @@ struct Prose: View {
     @State private var parsed = Parse()
 
     var body: some View {
-        let blocks = parsed.blocks(for: text, parse: parse)
+        let blocks = parsed.blocks(for: text, color: color, parse: parse)
         VStack(alignment: .leading, spacing: MiloTheme.Space.four) {
             ForEach(Array(blocks.enumerated()), id: \.offset) { _, block in
                 draw(block)
@@ -40,15 +40,17 @@ struct Prose: View {
     }
 
     /// Holds the blocks read off one text, and reads again only when that text — or the
-    /// text itself changes.
+    /// colour links wear inside it — changes.
     private final class Parse {
         private var text: String?
+        private var color: Color?
         private var read: [Block] = []
 
-        func blocks(for text: String, parse: (String) -> [Block]) -> [Block] {
-            if self.text == text { return read }
+        func blocks(for text: String, color: Color, parse: (String) -> [Block]) -> [Block] {
+            if self.text == text, self.color == color { return read }
             let blocks = parse(text)
             self.text = text
+            self.color = color
             self.read = blocks
             return blocks
         }
@@ -58,10 +60,10 @@ struct Prose: View {
     private func draw(_ block: Block) -> some View {
         switch block {
         case .paragraph(let paragraph):
-            words(inline(paragraph), font: .body, face: bodyFace, tone: color)
+            words(paragraph, font: .body, face: bodyFace, tone: color)
         case .heading(let level, let line):
             words(
-                inline(line),
+                line,
                 font: level <= 2 ? .title3.weight(.semibold) : .headline,
                 face: level <= 2 ? titleFace : headlineFace,
                 tone: color
@@ -70,7 +72,7 @@ struct Prose: View {
             CodeBlock(language: language, code: code)
         case .list(let items):
             VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
-                ForEach(Array(marked(items).enumerated()), id: \.offset) { _, item in
+                ForEach(Array(items.enumerated()), id: \.offset) { _, item in
                     // Aligned by the tops where the words are the platform's own text view,
                     // and by their first baselines where they are `Text` — the two line the
                     // mark up with the first line in their own way.
@@ -79,7 +81,7 @@ struct Prose: View {
                         spacing: MiloTheme.Space.two
                     ) {
                         listMark(item)
-                        words(inline(item.text), font: .body, face: bodyFace, tone: color)
+                        words(item.text, font: .body, face: bodyFace, tone: color)
                     }
                     // A nested line steps in under the one it belongs to; the marker
                     // column travels with it.
@@ -91,7 +93,7 @@ struct Prose: View {
                 Rectangle()
                     .fill(MiloTheme.muted.opacity(0.35))
                     .frame(width: 3)
-                words(inline(quote), font: .body, face: bodyFace, tone: color.opacity(0.85))
+                words(quote, font: .body, face: bodyFace, tone: color.opacity(0.85))
             }
             .fixedSize(horizontal: false, vertical: true)
         case .table(let columns, let rows):
@@ -134,13 +136,13 @@ struct Prose: View {
     /// wears: a report with a table of ten rows is thirty small cells, and thirty
     /// `UITextView`s inside one row is the whole cost of opening a session full of them.
     /// A cell is read, not answered — the quote belongs to the prose around it.
-    private func table(columns: [String], rows: [[String]]) -> some View {
+    private func table(columns: [AttributedString], rows: [[AttributedString]]) -> some View {
         ScrollView(.horizontal, showsIndicators: false) {
             Grid(alignment: .leading, horizontalSpacing: MiloTheme.Space.five, verticalSpacing: MiloTheme.Space.two) {
                 GridRow {
                     ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
                         cell(
-                            inline(column),
+                            column,
                             font: MiloTheme.Text.small.weight(.semibold),
                             tone: MiloTheme.muted
                         )
@@ -150,7 +152,7 @@ struct Prose: View {
                     GridRow {
                         ForEach(Array(columns.enumerated()), id: \.offset) { index, _ in
                             cell(
-                                inline(index < row.count ? row[index] : ""),
+                                index < row.count ? row[index] : AttributedString(),
                                 font: MiloTheme.Text.base,
                                 tone: color
                             )
@@ -202,7 +204,7 @@ struct Prose: View {
     /// in a column of its own, outside the words. The browser draws its own bullets outside
     /// the text too, so a quotation carries the line and not the mark.
     @ViewBuilder
-    private func listMark(_ item: (marker: String, text: String, indent: Int, checked: Bool?)) -> some View {
+    private func listMark(_ item: MarkedItem) -> some View {
         Group {
             if let checked = item.checked {
                 Image(systemName: checked ? "checkmark.square.fill" : "square")
@@ -242,21 +244,29 @@ struct Prose: View {
     }
 
     private enum Block {
-        case paragraph(String)
-        case heading(level: Int, text: String)
+        case paragraph(AttributedString)
+        case heading(level: Int, text: AttributedString)
         /// A fenced block: what the fence's tag named, and the code itself.
         case code(language: String?, text: String)
-        case list([ListItem])
-        case quote(String)
-        case table(columns: [String], rows: [[String]])
+        case list([MarkedItem])
+        case quote(AttributedString)
+        case table(columns: [AttributedString], rows: [[AttributedString]])
         /// A horizontal rule: three or more of one mark, alone on a line.
         case rule
         /// A picture on a line of its own.
         case image(alt: String, url: String)
     }
 
-    /// One line of a list: how deep it sits, whether it is numbered, and its words — and,
-    /// for a task line, the box at its head.
+    /// One line of a list, already marked and inline-parsed.
+    private struct MarkedItem {
+        let marker: String
+        let text: AttributedString
+        let indent: Int
+        let checked: Bool?
+    }
+
+    /// One line of a list: how deep it sits, whether it is numbered, and its words.
+    /// The leading whitespace is the depth — two spaces per level, a tab counting two.
     private struct ListItem {
         let indent: Int
         let ordered: Bool
@@ -278,7 +288,7 @@ struct Prose: View {
 
         func endParagraph() {
             let joined = paragraph.joined(separator: "\n")
-            if !joined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { blocks.append(.paragraph(joined)) }
+            if !joined.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { blocks.append(.paragraph(inline(joined))) }
             paragraph = []
         }
 
@@ -331,11 +341,11 @@ struct Prose: View {
             // A table: a row of cells, under a separator line of dashes.
             if line.contains("|"), index + 1 < lines.count, isTableSeparator(lines[index + 1]) {
                 endParagraph()
-                let columns = tableCells(line)
-                var rows: [[String]] = []
+                let columns = tableCells(line).map(inline)
+                var rows: [[AttributedString]] = []
                 index += 2
                 while index < lines.count, lines[index].contains("|") {
-                    rows.append(tableCells(lines[index]))
+                    rows.append(tableCells(lines[index]).map(inline))
                     index += 1
                 }
                 blocks.append(.table(columns: columns, rows: rows))
@@ -367,7 +377,7 @@ struct Prose: View {
                 let title = trimmed.drop(while: { $0 == "#" }).trimmingCharacters(in: .whitespaces)
                 if !title.isEmpty {
                     endParagraph()
-                    blocks.append(.heading(level: markers, text: title))
+                    blocks.append(.heading(level: markers, text: inline(title)))
                     index += 1
                     continue
                 }
@@ -383,7 +393,7 @@ struct Prose: View {
                     quoted.append(String(mark.drop(while: { $0 == ">" }).drop(while: { $0 == " " })))
                     index += 1
                 }
-                blocks.append(.quote(quoted.joined(separator: "\n")))
+                blocks.append(.quote(inline(quoted.joined(separator: "\n"))))
                 continue
             }
 
@@ -396,7 +406,7 @@ struct Prose: View {
                     items.append(next)
                     index += 1
                 }
-                blocks.append(.list(items))
+                blocks.append(.list(marked(items)))
                 continue
             }
 
@@ -440,14 +450,19 @@ struct Prose: View {
     /// The marker each line wears, numbered within its own level so a nested list counts
     /// 1, 2, 3 again under its parent rather than running on from it. A level left behind
     /// has its count forgotten.
-    private func marked(_ items: [ListItem]) -> [(marker: String, text: String, indent: Int, checked: Bool?)] {
+    private func marked(_ items: [ListItem]) -> [MarkedItem] {
         var counters: [Int] = []
         return items.map { item in
             let level = max(0, item.indent)
             if counters.count > level + 1 { counters.removeLast(counters.count - level - 1) }
             while counters.count <= level { counters.append(0) }
             counters[level] += 1
-            return (item.ordered ? "\(counters[level])." : "•", item.text, level, item.checked)
+            return MarkedItem(
+                marker: item.ordered ? "\(counters[level])." : "•",
+                text: inline(item.text),
+                indent: level,
+                checked: item.checked
+            )
         }
     }
 
@@ -543,10 +558,12 @@ struct Prose: View {
         return out
     }
 
+    private static let urlRegex = try? Regex("https?://[^\\s<>()\\[\\]]+")
+
     /// Bare `http(s)` URLs the parser left as text, made into links — a URL the person can
     /// tap rather than read. One already inside a link is left to that link.
     private func autolinking(_ attributed: AttributedString) -> AttributedString {
-        guard let regex = try? Regex("https?://[^\\s<>()\\[\\]]+") else { return attributed }
+        guard let regex = Self.urlRegex else { return attributed }
         let plain = String(attributed.characters)
         guard !plain.isEmpty else { return attributed }
         var result = attributed
@@ -567,7 +584,7 @@ private struct SidewaysDragMark: ViewModifier {
     func body(content: Content) -> some View {
         content.background {
             GeometryReader { geo in
-                Color.clear.preference(key: SidewaysDragKey.self, value: [geo.frame(in: .global)])
+                Color.clear.preference(key: SidewaysDragKey.self, value: [geo.frame(in: .named(SidewaysDragKey.space))])
             }
         }
     }
@@ -597,6 +614,22 @@ struct CodeBlock: View {
     let language: String?
     let code: String
     @State private var copied = false
+    @State private var highlighted = Highlighted()
+
+    private final class Highlighted {
+        private var code: String?
+        private var language: String?
+        private var attributed = AttributedString()
+
+        func text(for code: String, language: String?) -> AttributedString {
+            if self.code == code, self.language == language { return attributed }
+            let next = coloured(code, language: language)
+            self.code = code
+            self.language = language
+            self.attributed = next
+            return next
+        }
+    }
 
     /// What the head says the block is: the tag the fence wrote, or the fact that it wrote none.
     private var name: String { language ?? "Plain text" }
@@ -606,7 +639,7 @@ struct CodeBlock: View {
             head
 
             ScrollView(.horizontal, showsIndicators: false) {
-                Text(coloured(code, language: language))
+                Text(highlighted.text(for: code, language: language))
                     .font(MiloTheme.Text.mono)
                     .foregroundStyle(MiloTheme.foreground)
                     .textSelection(.enabled)

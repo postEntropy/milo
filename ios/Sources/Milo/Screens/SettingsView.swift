@@ -303,6 +303,7 @@ private struct DisplaySettingsView: View {
     /// The same shape for the phone's own reply notice: the key is the notifier's, so the
     /// switch that writes it and the reading that acts on it cannot come to disagree.
     @AppStorage(PhoneNotifications.replySetting) private var notifyReply = false
+    @AppStorage(MiloWallpaperKind.storageKey) private var wallpaper = MiloWallpaperKind.defaultKind.rawValue
 
     var body: some View {
         List {
@@ -314,6 +315,13 @@ private struct DisplaySettingsView: View {
                 }
                 .tint(MiloTheme.accent)
                 .id("appearance-\(model.effectivePalette.rawValue)")
+                Picker("Background", selection: $wallpaper) {
+                    ForEach(MiloWallpaperKind.allCases) { item in
+                        Text(item.label).tag(item.rawValue)
+                    }
+                }
+                .tint(MiloTheme.accent)
+                .id("wallpaper-\(model.effectivePalette.rawValue)")
             } footer: {
                 Text("Applies to this phone only.")
             }

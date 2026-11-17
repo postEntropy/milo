@@ -1,11 +1,18 @@
 import SwiftUI
 
-struct SessionRow: View {
-    @Environment(AppModel.self) private var model
+struct SessionRow: View, Equatable {
     let session: SessionSummary
     @Binding var renaming: String?
     let current: Bool
+    var projectName: String? = nil
     let onOpen: () -> Void
+    let onTraces: () -> Void
+
+    nonisolated static func == (lhs: SessionRow, rhs: SessionRow) -> Bool {
+        lhs.session == rhs.session
+            && lhs.current == rhs.current
+            && lhs.projectName == rhs.projectName
+    }
 
     var body: some View {
         HStack(spacing: MiloTheme.Space.three) {
@@ -31,8 +38,8 @@ struct SessionRow: View {
                         .font(MiloTheme.Text.meta.monospacedDigit())
                         .foregroundStyle(MiloTheme.muted)
                         .lineLimit(1)
-                    if let project = session.project {
-                        Text(model.projects.first { $0.id == project }?.name ?? "Folder")
+                    if session.project != nil {
+                        Text(projectName ?? "Folder")
                             .font(MiloTheme.Text.meta)
                             .foregroundStyle(MiloTheme.muted)
                             .lineLimit(1)
@@ -58,7 +65,7 @@ struct SessionRow: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityAddTraits(current ? .isSelected : [])
         .accessibilityValue(session.backend?.kind == "command-code" ? "Command Code backend" : "")
-        .sessionMenu(session, renaming: $renaming)
+        .sessionMenu(session, renaming: $renaming, onTraces: onTraces)
     }
 
 }
@@ -83,21 +90,17 @@ extension SessionSummary {
 @ViewBuilder
 func sessionActions(
     onRename: @escaping () -> Void,
+    onTraces: @escaping () -> Void,
     onExport: (() -> Void)?,
     onCopy: @escaping () -> Void,
-    onClear: (() -> Void)? = nil,
     onDelete: @escaping () -> Void
 ) -> some View {
-    menuItem("Rename", "pencil", action: onRename)
+    menuItem("Rename", "character.cursor.ibeam", action: onRename)
+    menuItem("Traces", "chart.bar.xaxis", action: onTraces)
     if let onExport {
         menuItem("Export", "arrow.down.doc", action: onExport)
     }
     menuItem("Copy ID", "doc.on.doc", action: onCopy)
-    // Only the session this chat is in can be cleared: the daemon clears the session
-    // the chat is bound to, and the transcript it empties is this one's.
-    if let onClear {
-        menuItem("Clear transcript", "eraser", action: onClear)
-    }
     // A destructive line: the menu draws its words in the platform's own red, and the mark
     // beside them wears whatever tone the line is told — so it is told that same red, since
     // the accent it would otherwise take makes the trash the loudest thing on the row.
@@ -121,35 +124,36 @@ func sessionActions(
    never raised at all.
  */
 extension View {
-    func sessionMenu(_ session: SessionSummary, renaming: Binding<String?>) -> some View {
-        modifier(SessionMenu(session: session, renaming: renaming))
+    func sessionMenu(_ session: SessionSummary, renaming: Binding<String?>, onTraces: @escaping () -> Void) -> some View {
+        modifier(SessionMenu(session: session, renaming: renaming, onTraces: onTraces))
     }
 }
 
 private struct SessionMenu: ViewModifier {
     let session: SessionSummary
     @Binding var renaming: String?
+    let onTraces: () -> Void
 
     /// Where the session left off. Nil until the read lands; the reason when it could not
     /// be made.
     @State private var peek: [PeekLine]?
     @State private var peekError: String?
-    @State private var destruction: Bool?
+    @State private var deleting = false
 
     @Environment(AppModel.self) private var model
 
     func body(content: Content) -> some View {
         content
             // Read as the row comes up, and read again whenever the session moves.
-            .sessionDestruction(session.id, pending: $destruction)
+            .sessionDelete(session.id, isPresented: $deleting)
             .task(id: session.updatedAt) { await read() }
             .contextMenu {
                 sessionActions(
                     onRename: { renaming = session.id },
+                    onTraces: onTraces,
                     onExport: session.backend?.kind == "command-code" ? nil : { Task { await model.export(session.id) } },
                     onCopy: { model.copyId(session.id) },
-                    onClear: session.id == model.sessionId && session.backend?.kind != "command-code" ? { destruction = false } : nil,
-                    onDelete: { destruction = true }
+                    onDelete: { deleting = true }
                 )
             } preview: {
                 SessionPeek(session: session, lines: peek, error: peekError)
@@ -286,8 +290,8 @@ struct SessionsButton: View {
     }
 
     private var mark: some View {
-        Image(systemName: "line.3.horizontal")
-            .font(.system(size: 20, weight: .semibold))
+        Image(systemName: "sidebar.left")
+            .font(.system(size: 19, weight: .semibold))
             .foregroundStyle(MiloTheme.foreground)
             .frame(width: 30, height: 30)
     }
@@ -419,40 +423,33 @@ extension View {
 }
 
 
-/// The same destructive-action review wherever a Session offers its menu.
-private struct SessionDestruction: ViewModifier {
+/// The same delete confirmation wherever a Session offers its menu.
+private struct SessionDeletion: ViewModifier {
     let id: String
-    @Binding var pending: Bool?
+    @Binding var isPresented: Bool
     @Environment(AppModel.self) private var model
 
     func body(content: Content) -> some View {
-        let deleting = pending == true
-        let session = model.sessions.first { $0.id == id }
+        let session = isPresented ? model.sessions.first { $0.id == id } : nil
         let name = session?.title ?? session?.preview ?? id
         content.confirmationDialog(
-            deleting ? "Delete Session “\(name)”?" : "Clear transcript for “\(name)”?" ,
-            isPresented: Binding(get: { pending != nil }, set: { if !$0 { pending = nil } }),
+            "Delete Session “\(name)”?",
+            isPresented: $isPresented,
             titleVisibility: .visible
         ) {
-            Button(deleting ? "Delete Session" : "Clear transcript", role: .destructive) {
-                pending = nil
-                Task {
-                    if deleting { await model.delete(id) }
-                    else if model.sessionId == id { await model.clear() }
-                    else { model.showNote("The Session changed. Open its menu to clear it.") }
-                }
+            Button("Delete Session", role: .destructive) {
+                isPresented = false
+                Task { await model.delete(id) }
             }
-            Button("Cancel", role: .cancel) { pending = nil }
+            Button("Cancel", role: .cancel) { isPresented = false }
         } message: {
-            Text(deleting
-                 ? "This removes the Session from Milo. It cannot be restored here. Command Code's native history, if any, stays on the host."
-                 : "This clears the Session transcript. It cannot be restored here.")
+            Text("This removes the Session from Milo. It cannot be restored here. Command Code's native history, if any, stays on the host.")
         }
     }
 }
 
 extension View {
-    func sessionDestruction(_ id: String, pending: Binding<Bool?>) -> some View {
-        modifier(SessionDestruction(id: id, pending: pending))
+    func sessionDelete(_ id: String, isPresented: Binding<Bool>) -> some View {
+        modifier(SessionDeletion(id: id, isPresented: isPresented))
     }
 }

@@ -159,7 +159,7 @@ struct FrameAttachment: Decodable, Identifiable, Hashable {
 
 /// One piece of a turn, in the order it happened. A kind this build has never heard of
 /// decodes to `other` rather than failing the message.
-enum WirePart: Decodable {
+enum WirePart: Decodable, Equatable {
     case text(String)
     case reasoning(String)
     case tool(ToolMark)

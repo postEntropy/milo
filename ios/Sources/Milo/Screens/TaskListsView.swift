@@ -6,7 +6,7 @@ import SwiftUI
  in. Everything lives in the daemon's store, so every action reads the whole set back
  rather than guessing at what it became.
  */
-struct TaskListsView: View {
+struct TaskListsView: View, Equatable {
     /// Whether one list's own page is open on top of the index, told to the shell: the
     /// drawer's swipe belongs to the index, and over a page it keeps out of the way — the way
     /// back from one is the platform's own, the edge swipe it answers and the control the stack
@@ -15,6 +15,10 @@ struct TaskListsView: View {
     /// Opening the sessions from here. The drawer belongs to the chat, and this screen
     /// reaches it through the same control and the same swipe.
     let onSessions: () -> Void
+
+    nonisolated static func == (lhs: TaskListsView, rhs: TaskListsView) -> Bool {
+        true
+    }
     @Environment(AppModel.self) private var model
     @State private var path: [String] = []
 
@@ -94,7 +98,7 @@ private struct TaskListIndex: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(MiloTheme.Space.five)
-                .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.xl))
+                .miloGlassCard(radius: MiloTheme.Radius.xl)
 
                 if let error = model.taskListsError {
                     MiloErrorPill(text: error)
@@ -123,7 +127,7 @@ private struct TaskListIndex: View {
                         }
                         .padding(MiloTheme.Space.five)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                        .miloGlassCard()
                     } else {
                         VStack(spacing: MiloTheme.Space.two) {
                             ForEach(model.taskLists) { list in
@@ -148,7 +152,7 @@ private struct TaskListIndex: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(MiloTheme.background)
+        .miloWallpaperBackground()
         .safeAreaInset(edge: .top, spacing: 0) {
             VStack(spacing: MiloTheme.Space.one) {
                 HStack(spacing: 0) {
@@ -283,14 +287,14 @@ private struct TaskListRow: View {
         }
         .padding(MiloTheme.Space.four)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .miloGlassCard(interactive: true)
         .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
         .onTapGesture(perform: onOpen)
         // A row that opens a list reads as a control, the way the button it used to be did:
         // a tap is not the only way to answer one.
         .accessibilityAddTraits(.isButton)
         .contextMenu {
-            menuItem("Rename", "pencil", action: onRename)
+            menuItem("Rename", "character.cursor.ibeam", action: onRename)
             Button(role: .destructive, action: onDelete) {
                 Label("Delete", systemImage: "trash")
             }
@@ -336,14 +340,14 @@ private struct TaskListDetail: View {
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(MiloTheme.Space.five)
-                    .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                    .miloGlassCard()
 
                     HStack(spacing: MiloTheme.Space.two) {
                         Button {
                             renameDraft = list.name
                             renaming = true
                         } label: {
-                            Label("Rename", systemImage: "pencil")
+                            Label("Rename", systemImage: "character.cursor.ibeam")
                                 .font(MiloTheme.Text.base.weight(.semibold))
                                 .foregroundStyle(MiloTheme.foreground)
                                 .frame(maxWidth: .infinity)
@@ -384,7 +388,7 @@ private struct TaskListDetail: View {
                         }
                         .padding(MiloTheme.Space.four)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                        .miloGlassCard()
                     } else {
                         if !todo.isEmpty {
                             VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
@@ -436,7 +440,7 @@ private struct TaskListDetail: View {
                         .foregroundStyle(MiloTheme.muted)
                         .padding(MiloTheme.Space.four)
                         .frame(maxWidth: .infinity, alignment: .leading)
-                        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+                        .miloGlassCard()
                 }
             }
             .padding(.horizontal, MiloTheme.margin)
@@ -446,7 +450,7 @@ private struct TaskListDetail: View {
             .frame(maxWidth: .infinity)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(MiloTheme.background)
+        .miloWallpaperBackground()
         .navigationTitle(list?.name ?? "Task list")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
@@ -581,7 +585,7 @@ private struct TaskRow: View {
             .accessibilityLabel("Remove \(item.content)")
         }
         .padding(MiloTheme.Space.three)
-        .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
+        .miloGlassCard()
         .confirmationDialog("Remove this task?", isPresented: $removing, titleVisibility: .visible) {
             Button("Remove task", role: .destructive, action: onRemove)
             Button("Cancel", role: .cancel) {}

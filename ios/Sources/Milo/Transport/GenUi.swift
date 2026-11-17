@@ -5,7 +5,7 @@ import Foundation
 /// server's (`src/core/genui.ts`) — a node this app does not know draws as nothing
 /// rather than failing the message, which is what a build older than the catalog has
 /// to do.
-struct GenUi: Decodable {
+struct GenUi: Decodable, Equatable {
     let title: String?
     let tree: GenUiNode
 
@@ -28,7 +28,7 @@ extension GenUi {
 /// is read tolerantly: a node whose shape does not match draws as nothing, because a
 /// part that throws takes the whole transcript with it — the `ready` frame is one
 /// message, and half a widget is not worth a blank chat.
-enum GenUiNode: Decodable {
+enum GenUiNode: Decodable, Equatable {
     indirect case box(direction: String?, gap: Int?, padding: Int?, align: String?, wrap: Bool, children: [GenUiNode])
     indirect case section(title: String, description: String?, children: [GenUiNode])
     case timeline([TimelineEntry])
@@ -63,41 +63,41 @@ enum GenUiNode: Decodable {
     case button(Button)
     case unknown
 
-    struct Step: Decodable {
+    struct Step: Decodable, Equatable {
         let title: String
         let detail: String?
         let when: String?
     }
 
-    struct TimelineEntry: Decodable { let when: String; let title: String; let detail: String?; let tone: String? }
-    struct ChoiceOption: Decodable { let value: String; let title: String; let detail: String? }
-    struct ChoiceCards { let id: String; let label: String; let options: [ChoiceOption]; let value: String? }
-    struct TextInput { let id: String; let label: String; let value: String?; let placeholder: String?; let multiline: Bool; let required: Bool; let maxLength: Int? }
-    struct FormSubmit: Decodable { let label: String; let send: String }
+    struct TimelineEntry: Decodable, Equatable { let when: String; let title: String; let detail: String?; let tone: String? }
+    struct ChoiceOption: Decodable, Equatable { let value: String; let title: String; let detail: String? }
+    struct ChoiceCards: Equatable { let id: String; let label: String; let options: [ChoiceOption]; let value: String? }
+    struct TextInput: Equatable { let id: String; let label: String; let value: String?; let placeholder: String?; let multiline: Bool; let required: Bool; let maxLength: Int? }
+    struct FormSubmit: Decodable, Equatable { let label: String; let send: String }
 
-    struct Fact: Decodable {
+    struct Fact: Decodable, Equatable {
         let label: String
         let value: String
         let tone: String?
     }
 
-    struct Callout {
+    struct Callout: Equatable {
         let tone: String?
         let title: String?
         let text: String
     }
 
-    struct Badge {
+    struct Badge: Equatable {
         let label: String
         let tone: String?
     }
 
-    struct ChartSeries: Decodable {
+    struct ChartSeries: Decodable, Equatable {
         let label: String?
         let values: [Double]
     }
 
-    struct Chart {
+    struct Chart: Equatable {
         let type: String
         let labels: [String]
         let series: [ChartSeries]
@@ -107,7 +107,7 @@ enum GenUiNode: Decodable {
         let decimals: Int?
     }
 
-    struct Stat {
+    struct Stat: Equatable {
         let label: String
         let formula: String
         let prefix: String?
@@ -119,7 +119,7 @@ enum GenUiNode: Decodable {
         let trend: [Double]?
     }
 
-    struct Progress {
+    struct Progress: Equatable {
         let label: String?
         let formula: String
         let max: Double?
@@ -127,19 +127,19 @@ enum GenUiNode: Decodable {
         let tone: String?
     }
 
-    struct Code {
+    struct Code: Equatable {
         let language: String?
         let text: String
     }
 
-    struct MultiSelect {
+    struct MultiSelect: Equatable {
         let id: String
         let label: String
         let options: [String]
         let values: [String]
     }
 
-    struct DateField {
+    struct DateField: Equatable {
         let id: String
         let label: String
         let value: String
@@ -147,7 +147,7 @@ enum GenUiNode: Decodable {
         let max: String?
     }
 
-    struct DateRange {
+    struct DateRange: Equatable {
         let id: String
         let label: String
         let from: String
@@ -156,26 +156,26 @@ enum GenUiNode: Decodable {
         let max: String?
     }
 
-    struct Tab: Decodable {
+    struct Tab: Decodable, Equatable {
         let label: String
         let children: [GenUiNode]
     }
 
-    struct Tabs {
+    struct Tabs: Equatable {
         let tabs: [Tab]
     }
 
-    struct AccordionItem: Decodable {
+    struct AccordionItem: Decodable, Equatable {
         let title: String
         let open: Bool?
         let children: [GenUiNode]
     }
 
-    struct Accordion {
+    struct Accordion: Equatable {
         let items: [AccordionItem]
     }
 
-    struct Slider {
+    struct Slider: Equatable {
         let id: String
         let label: String
         let min: Double
@@ -186,7 +186,7 @@ enum GenUiNode: Decodable {
         let suffix: String?
     }
 
-    struct NumberField {
+    struct NumberField: Equatable {
         let id: String
         let label: String
         let value: Double
@@ -196,20 +196,20 @@ enum GenUiNode: Decodable {
         let suffix: String?
     }
 
-    struct Checkbox {
+    struct Checkbox: Equatable {
         let id: String
         let label: String
         let value: Bool?
     }
 
-    struct Select {
+    struct Select: Equatable {
         let id: String
         let label: String
         let options: [String]
         let value: String
     }
 
-    struct Button {
+    struct Button: Equatable {
         let label: String
         let send: String
         let tone: String?

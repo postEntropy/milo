@@ -17,7 +17,7 @@ final class AppModel {
         case chat(Account)
     }
 
-    struct Message: Identifiable {
+    struct Message: Identifiable, Equatable {
         let id = UUID()
         let isUser: Bool
         var parts: [WirePart]
@@ -56,6 +56,26 @@ final class AppModel {
         /// a card signed with the routine's name and the time it landed, not as an
         /// answer to something the person said.
         var routine: RoutineDelivery? = nil
+
+        nonisolated static func == (lhs: Message, rhs: Message) -> Bool {
+            lhs.id == rhs.id
+                && lhs.isUser == rhs.isUser
+                && lhs.streaming == rhs.streaming
+                && lhs.waiting == rhs.waiting
+                && lhs.thought == rhs.thought
+                && lhs.status == rhs.status
+                && lhs.deliveryId == rhs.deliveryId
+                && lhs.raw == rhs.raw
+                && lhs.rawNoOutput == rhs.rawNoOutput
+                && lhs.tokens?.input == rhs.tokens?.input
+                && lhs.tokens?.output == rhs.tokens?.output
+                && lhs.routine == rhs.routine
+                && lhs.parts == rhs.parts
+                && lhs.attachments == rhs.attachments
+                && lhs.drafts == rhs.drafts
+                && lhs.actions == rhs.actions
+                && lhs.cards == rhs.cards
+        }
     }
 
     private(set) var phase: Phase = .loading
@@ -178,7 +198,7 @@ final class AppModel {
     /// Whether the thread is the screen in front — kept by `ChatView`, which knows when a
     /// page is over it or the sessions are up. A reply that lands while this is false is
     /// unread: it arrived after the person left the chat.
-    var threadOnScreen = true
+    @ObservationIgnored var threadOnScreen = true
 
     /// The running model without its vendor prefix, from the catalog's projected
     /// label when loaded or after the last `/` before the picker has been opened.
@@ -239,7 +259,6 @@ final class AppModel {
 
     // The drawer.
     private(set) var sessions: [SessionSummary] = []
-    private(set) var sessionsLoading = false
 
     // The routines, and the reminders the phone schedules from them.
     private(set) var routines: [RoutineSummary] = []
@@ -889,8 +908,6 @@ final class AppModel {
         guard let account else { return }
         sessionsSeq += 1
         let mine = sessionsSeq
-        sessionsLoading = true
-        defer { if mine == sessionsSeq { sessionsLoading = false } }
         do {
             let next = try await MiloApi.sessions(account).sorted { $0.updatedAt > $1.updatedAt }
             guard mine == sessionsSeq else { return }
@@ -901,9 +918,11 @@ final class AppModel {
             // what is already there has nothing to tell the screens: publishing it
             // again would rebuild the list under whatever is happening on screen.
             // Only a list that moved is handed over.
-            if shown != sessions { sessions = shown }
-            cacheSessions(account)
-            note = nil
+            if shown != sessions {
+                sessions = shown
+                cacheSessions(account)
+            }
+            if note != nil { note = nil }
         } catch {
             if mine == sessionsSeq {
                 if case ApiError.unreachable = error { connectionSaid = true }
@@ -1066,20 +1085,6 @@ final class AppModel {
                 await reopen(next)
             }
             try await MiloApi.deleteSession(account, id: id)
-            await refreshSessions()
-        } catch {
-            failed(error)
-        }
-    }
-
-    /// Forgets what was said in this chat, keeping the session itself — `/clear`'s own
-    /// act, offered from the session's menu. The socket is reopened so the thread is drawn
-    /// from the record the daemon just emptied, never from what the app still holds.
-    func clear() async {
-        guard let account else { return }
-        do {
-            try await MiloApi.clearSession(account)
-            await reopen(account)
             await refreshSessions()
         } catch {
             failed(error)
