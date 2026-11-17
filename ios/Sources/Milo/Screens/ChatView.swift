@@ -995,7 +995,7 @@ struct ChatView: View {
                 // content size: a lazy stack only measures what is near the viewport, which
                 // would leave the room unmeasured whenever the end of the thread begins
                 // below the fold.
-                VStack(alignment: .leading, spacing: MiloTheme.Space.six) {
+                VStack(alignment: .leading, spacing: model.messages.isEmpty ? MiloTheme.Space.three : MiloTheme.Space.six) {
                     // The empty state and the lazy stack share one top-leading origin rather
                     // than stacking vertically: when the first message is sent inside
                     // `SettlesIn.motion`, the welcome fades out in place while the first row
@@ -1003,13 +1003,16 @@ struct ChatView: View {
                     // the disappearing welcome for 380ms and snapping up at the end.
                     ZStack(alignment: .topLeading) {
                         if model.messages.isEmpty {
+                            let welcomeHeight = max(0, boxHeight - MiloTheme.Space.four - MiloTheme.Space.three - 1)
                             WelcomeView(
                                 claimed: held == true,
-                                keyboardUp: composing
+                                keyboardUp: composing,
+                                typing: !draft.isEmpty || !drafts.isEmpty,
+                                availableHeight: welcomeHeight
                             )
                             .frame(
-                                minHeight: max(0, boxHeight - MiloTheme.Space.four - MiloTheme.Space.six - 1),
-                                alignment: .bottom
+                                minHeight: welcomeHeight,
+                                alignment: composing ? .bottom : .center
                             )
                             .transition(.opacity)
                             .id(Self.threadTop)
@@ -1588,25 +1591,61 @@ struct WelcomeView: View {
     /// a swipe and the line goes unanswered — the row is wide, and the finger never leaves it.
     let claimed: Bool
     let keyboardUp: Bool
+    let typing: Bool
+    let availableHeight: CGFloat
     @Environment(AppModel.self) private var model
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var pressCount = 0
+
+    /// Drops the greeting when the keyboard + accessory bar leave too little vertical
+    /// room so the four cards never slip behind the composer.
+    private var showHero: Bool {
+        guard !typing else { return false }
+        if keyboardUp, availableHeight > 0, availableHeight < 290 { return false }
+        return true
+    }
 
     var body: some View {
-        VStack(spacing: 0) {
-            Spacer(minLength: keyboardUp ? 0 : MiloTheme.Space.four)
+        let contentTransition: AnyTransition = reduceMotion
+            ? .opacity
+            : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom))
 
-            hero
+        return VStack(spacing: 0) {
+            Spacer(minLength: keyboardUp ? 0 : MiloTheme.Space.three)
 
-            Spacer(minLength: keyboardUp ? MiloTheme.Space.three : MiloTheme.Space.five)
+            if !typing {
+                if showHero {
+                    hero
+                        .transition(contentTransition)
 
-            VStack(spacing: keyboardUp ? MiloTheme.Space.two : MiloTheme.Space.three) {
-                ForEach(model.suggestions) { suggestion in
-                    card(suggestion)
+                    Spacer()
+                        .frame(height: keyboardUp ? MiloTheme.Space.two + 2 : MiloTheme.Space.five)
                 }
+
+                VStack(spacing: keyboardUp ? MiloTheme.Space.one + 2 : MiloTheme.Space.three) {
+                    ForEach(Array(model.suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                        let isResume: Bool = {
+                            if case .resume = suggestion.act { return true }
+                            return false
+                        }()
+                        let hasMore = index < model.suggestions.count - 1
+                        card(suggestion, isResume: isResume)
+                            .padding(.bottom, isResume && hasMore ? (keyboardUp ? MiloTheme.Space.one : MiloTheme.Space.two) : 0)
+                    }
+                }
+                .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: model.ideas)
+                .transition(contentTransition)
             }
-            .animation(.easeInOut(duration: 0.3), value: model.ideas)
+
+            if !keyboardUp {
+                Spacer(minLength: MiloTheme.Space.four)
+                Spacer(minLength: 0)
+            }
         }
         .frame(maxWidth: .infinity)
-        .animation(.spring(duration: 0.35, bounce: 0.14), value: keyboardUp)
+        .animation(reduceMotion ? nil : .spring(duration: 0.35, bounce: 0.14), value: keyboardUp)
+        .animation(reduceMotion ? nil : .spring(duration: 0.28, bounce: 0.08), value: typing)
+        .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.5), trigger: pressCount)
     }
 
     private var hero: some View {
@@ -1618,10 +1657,10 @@ struct WelcomeView: View {
             ZStack {
                 Circle()
                     .fill(MiloTheme.accent.opacity(0.18))
-                    .frame(width: keyboardUp ? 52 : 72, height: keyboardUp ? 52 : 72)
-                    .blur(radius: keyboardUp ? 12 : 16)
-                MiloMark(size: keyboardUp ? 24 : 34)
-                    .frame(width: keyboardUp ? 44 : 60, height: keyboardUp ? 44 : 60)
+                    .frame(width: keyboardUp ? 44 : 72, height: keyboardUp ? 44 : 72)
+                    .blur(radius: keyboardUp ? 10 : 16)
+                MiloMark(size: keyboardUp ? 20 : 34)
+                    .frame(width: keyboardUp ? 36 : 60, height: keyboardUp ? 36 : 60)
                     .glassEffect(.regular, in: Circle())
             }
 
@@ -1631,29 +1670,26 @@ struct WelcomeView: View {
                     .foregroundStyle(MiloTheme.foreground)
                     .multilineTextAlignment(keyboardUp ? .leading : .center)
 
-                Text("Let's make something of it.")
-                    .font(MiloTheme.Text.base)
-                    .foregroundStyle(MiloTheme.muted)
-                    .multilineTextAlignment(keyboardUp ? .leading : .center)
+                if !keyboardUp {
+                    Text("Let's make something of it.")
+                        .font(MiloTheme.Text.base)
+                        .foregroundStyle(MiloTheme.mutedStrong)
+                        .multilineTextAlignment(.center)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: keyboardUp ? .leading : .center)
     }
 
-    private func card(_ suggestion: Suggestion) -> some View {
-        let isResume: Bool = {
-            if case .resume = suggestion.act { return true }
-            return false
-        }()
-
-        return Button {
+    private func card(_ suggestion: Suggestion, isResume: Bool) -> some View {
+        Button {
             press(suggestion)
         } label: {
             HStack(alignment: .center, spacing: MiloTheme.Space.three) {
                 Image(systemName: suggestion.symbol)
                     .font(.system(size: keyboardUp ? 13 : 15, weight: .semibold))
                     .foregroundStyle(isResume ? MiloTheme.accent : MiloTheme.foreground)
-                    .frame(width: keyboardUp ? 28 : 34, height: keyboardUp ? 28 : 34)
+                    .frame(width: keyboardUp ? 26 : 34, height: keyboardUp ? 26 : 34)
                     .background(
                         isResume ? MiloTheme.accent.opacity(0.16) : MiloTheme.surfaceWarm,
                         in: Circle()
@@ -1663,23 +1699,30 @@ struct WelcomeView: View {
                     Text(suggestion.title)
                         .font(MiloTheme.Text.base.weight(.semibold))
                         .foregroundStyle(MiloTheme.foreground)
-                        .lineLimit(2)
+                        .lineLimit(keyboardUp ? 1 : 2)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                         .truncationMode(.tail)
 
                     Text(suggestion.detail)
                         .font(MiloTheme.Text.small)
-                        .foregroundStyle(MiloTheme.muted)
+                        .foregroundStyle(MiloTheme.mutedStrong)
                         .lineLimit(keyboardUp ? 1 : 2)
                         .multilineTextAlignment(.leading)
                         .fixedSize(horizontal: false, vertical: true)
                 }
+
+                if isResume {
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(MiloTheme.mutedStrong)
+                }
             }
             .padding(.horizontal, MiloTheme.Space.three)
-            .padding(.vertical, keyboardUp ? MiloTheme.Space.two + 2 : MiloTheme.Space.three)
+            .padding(.vertical, keyboardUp ? MiloTheme.Space.two : MiloTheme.Space.three)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .miloGlassCard(interactive: true)
+            .miloGlassCard(tint: isResume ? MiloTheme.accent.opacity(0.12) : nil, interactive: true)
             .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.lg))
         }
         .buttonStyle(PressableStyle())
@@ -1688,6 +1731,7 @@ struct WelcomeView: View {
     private func press(_ suggestion: Suggestion) {
         // A lift the card has claimed was the end of a swipe, not a press of this line.
         guard !claimed else { return }
+        pressCount += 1
         switch suggestion.act {
         case .send(let prompt): withAnimation(SettlesIn.motion) { model.send(prompt) }
         case .resume(let id): Task { await model.resume(id) }

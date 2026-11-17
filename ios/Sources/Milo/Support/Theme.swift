@@ -112,6 +112,9 @@ enum MiloTheme {
     static let foreground = Color(.label)
     static let foreground2 = Color(.label).opacity(0.85)
     static let muted = Color(.secondaryLabel)
+    /// Higher-contrast secondary copy for summaries sitting on glass or tinted surfaces
+    /// where `.secondaryLabel` washes out in light mode.
+    static let mutedStrong = Color.milo(light: 0x4E4E56, dark: 0xAEAEB6)
     /// A step under `muted`, for a line that has to be quieter than the platform's own
     /// secondary still allows. A fixed light/dark pair rather than an opacity on `label`:
     /// an opacity blends toward the page, so it would dim in the dark and turn pale in the
