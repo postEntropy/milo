@@ -5,6 +5,7 @@ import { logDebug } from '../../util/log.js'
 import { browserProfileDir } from '../config/paths.js'
 import { CdpConnection } from './cdp.js'
 import { attachUrl, findChrome, launchChrome } from './chrome.js'
+import { isMetadataUrl, resolvesToMetadataHost } from './metadata.js'
 import { keyStroke } from './keys.js'
 import {
   DESCRIBE_SOURCE,
@@ -140,6 +141,7 @@ export class BrowserSession {
   private connection: CdpConnection | null = null
   private stopChrome: (() => void) | null = null
   private starting: Promise<void> | null = null
+  private generation = 0
   private mode: 'owned' | 'attached' | null = null
   private version: string | null = null
   private binary: string | null = null
@@ -227,23 +229,38 @@ export class BrowserSession {
   }
 
   async close(): Promise<void> {
+    this.generation += 1
+    this.starting = null
     this.stopScreencast()
     this.connection?.close()
     this.connection = null
     this.stopChrome?.()
     this.stopChrome = null
     this.targets.clear()
+    this.inflight.clear()
+    this.lastNetworkActivity.clear()
+    for (const sessionId of [...this.loadWaiters.keys()]) this.fire(this.loadWaiters, sessionId)
+    this.loadWaiters.clear()
+    for (const sessionId of [...this.domWaiters.keys()]) this.fire(this.domWaiters, sessionId)
+    this.domWaiters.clear()
     this.pageTargetId = null
     this.mode = null
   }
 
   /** Opens a URL and hands back the page as the model reads it. */
   async navigate(url: string, wait: Wait, signal: AbortSignal): Promise<Observation> {
+    const parsed = new URL(url)
+    if (await resolvesToMetadataHost(parsed.hostname)) {
+      throw new Error(`cannot open ${url} — that is a cloud metadata address, not a page`)
+    }
     await this.start()
     const target = await this.drivePage(signal)
     const sessionId = target.sessionId!
 
-    const settled = wait === 'domcontentloaded' ? this.domSettled(sessionId) : this.loadSettled(sessionId)
+    const settled = wait === 'domcontentloaded'
+      ? this.domSettled(sessionId, signal)
+      : this.loadSettled(sessionId, signal)
+    settled.catch(() => undefined)
     const result = await this.send<{ errorText?: string }>(
       'Page.navigate',
       { url },
@@ -254,8 +271,8 @@ export class BrowserSession {
     if (result.errorText) throw new Error(`could not open ${url}: ${result.errorText}`)
 
     await settled
-    if (wait === 'networkidle') await this.networkIdle(sessionId)
-    await sleep(SETTLE_MS)
+    if (wait === 'networkidle') await this.networkIdle(sessionId, signal)
+    await sleep(SETTLE_MS, signal)
     return this.observe(signal)
   }
 
@@ -359,60 +376,69 @@ export class BrowserSession {
       const objectId = body.result?.objectId
       if (!objectId) return []
 
-      const listeners = await this.send<{ listeners: CdpEventListener[] }>(
-        'DOMDebugger.getEventListeners',
-        { objectId, depth: -1, pierce: true },
-        realm.sessionId,
-        SNAPSHOT_TIMEOUT_MS,
-        signal,
-      )
-      const nodes = [
-        ...new Set(
-          listeners.listeners
-            .filter((listener) => (PRESS_LISTENERS as readonly string[]).includes(listener.type))
-            .map((listener) => listener.backendNodeId)
-            .filter((id): id is number => typeof id === 'number'),
-        ),
-      ]
-      if (nodes.length === 0) return []
-
-      const pushed = await this.send<{ nodeIds: number[] }>(
-        'DOM.pushNodesByBackendIdsToFrontend',
-        { backendNodeIds: nodes },
-        realm.sessionId,
-        SNAPSHOT_TIMEOUT_MS,
-        signal,
-      )
       const handles: { objectId: string }[] = []
-      for (const nodeId of pushed.nodeIds) {
-        const resolved = await this.send<{ object?: { objectId?: string } }>(
-          'DOM.resolveNode',
-          { nodeId },
+      try {
+        const listeners = await this.send<{ listeners: CdpEventListener[] }>(
+          'DOMDebugger.getEventListeners',
+          { objectId, depth: -1, pierce: true },
           realm.sessionId,
           SNAPSHOT_TIMEOUT_MS,
           signal,
         )
-        if (resolved.object?.objectId) handles.push({ objectId: resolved.object.objectId })
-      }
-      if (handles.length === 0) return []
+        const nodes = [
+          ...new Set(
+            listeners.listeners
+              .filter((listener) => (PRESS_LISTENERS as readonly string[]).includes(listener.type))
+              .map((listener) => listener.backendNodeId)
+              .filter((id): id is number => typeof id === 'number'),
+          ),
+        ]
+        if (nodes.length === 0) return []
 
-      const described = await this.send<{ result?: { value?: RawElement[] } }>(
-        'Runtime.callFunctionOn',
-        {
-          functionDeclaration: DESCRIBE_SOURCE,
-          // The realm is named rather than taken from a receiver node: the
-          // frames of one page each have their own, and a node handed to the
-          // wrong one would describe nothing.
-          executionContextId: realm.contextId,
-          arguments: [{ value: this.nonce }, { value: base }, ...handles],
-          returnByValue: true,
-        },
-        realm.sessionId,
-        SNAPSHOT_TIMEOUT_MS,
-        signal,
-      )
-      const value = described.result?.value
-      return Array.isArray(value) ? value : []
+        const pushed = await this.send<{ nodeIds: number[] }>(
+          'DOM.pushNodesByBackendIdsToFrontend',
+          { backendNodeIds: nodes },
+          realm.sessionId,
+          SNAPSHOT_TIMEOUT_MS,
+          signal,
+        )
+        for (const nodeId of pushed.nodeIds) {
+          const resolved = await this.send<{ object?: { objectId?: string } }>(
+            'DOM.resolveNode',
+            { nodeId },
+            realm.sessionId,
+            SNAPSHOT_TIMEOUT_MS,
+            signal,
+          )
+          if (resolved.object?.objectId) handles.push({ objectId: resolved.object.objectId })
+        }
+        if (handles.length === 0) return []
+
+        const described = await this.send<{ result?: { value?: RawElement[] } }>(
+          'Runtime.callFunctionOn',
+          {
+            functionDeclaration: DESCRIBE_SOURCE,
+            // The realm is named rather than taken from a receiver node: the
+            // frames of one page each have their own, and a node handed to the
+            // wrong one would describe nothing.
+            executionContextId: realm.contextId,
+            arguments: [{ value: this.nonce }, { value: base }, ...handles],
+            returnByValue: true,
+          },
+          realm.sessionId,
+          SNAPSHOT_TIMEOUT_MS,
+          signal,
+        )
+        const value = described.result?.value
+        return Array.isArray(value) ? value : []
+      } finally {
+        const toRelease = [objectId, ...handles.map((handle) => handle.objectId)]
+        for (const handleId of toRelease) {
+          void this.send('Runtime.releaseObject', { objectId: handleId }, realm.sessionId, ACT_TIMEOUT_MS).catch(
+            () => undefined,
+          )
+        }
+      }
     } catch (error) {
       logDebug(`browser: the listener pass found nothing: ${errorMessage(error)}`)
       return []
@@ -599,7 +625,7 @@ export class BrowserSession {
 
     const note = await this.performReportingAReplacedPage(request, target, signal)
     if (options.observe === false) return { note }
-    await sleep(SETTLE_MS)
+    await sleep(SETTLE_MS, signal)
     const observation = await this.observe(signal)
     return { note, observation }
   }
@@ -689,14 +715,22 @@ export class BrowserSession {
   }
 
   private async launch(): Promise<void> {
+    const epoch = this.generation
     if (this.options.cdpUrl) {
       const wsUrl = await attachUrl(this.options.cdpUrl)
+      if (epoch !== this.generation) throw abortError()
+      const connection = await CdpConnection.connect(wsUrl, CONNECT_TIMEOUT_MS)
+      if (epoch !== this.generation) {
+        connection.close()
+        throw abortError()
+      }
       this.endpoint = wsUrl
       this.binary = `attached to ${this.options.cdpUrl}`
-      this.connection = await CdpConnection.connect(wsUrl, CONNECT_TIMEOUT_MS)
+      this.connection = connection
       this.mode = 'attached'
     } else {
       const chromePath = await findChrome(this.options.chromePath)
+      if (epoch !== this.generation) throw abortError()
       if (!chromePath) {
         throw new Error(
           'no Chrome or Chromium found — install one from the Browser section of `milo setup`' +
@@ -708,15 +742,26 @@ export class BrowserSession {
         profileDir: this.options.profileDir,
         headless: this.options.headless !== false,
       })
+      if (epoch !== this.generation) {
+        stop()
+        throw abortError()
+      }
       // The browser is up but nothing is answering on its socket. Let it go here,
       // because this is the only chance: the next launch overwrites `stopChrome`,
       // and the process it named would then run on with no one holding it.
+      let connection: CdpConnection
       try {
-        this.connection = await CdpConnection.connect(handle.wsUrl, CONNECT_TIMEOUT_MS)
+        connection = await CdpConnection.connect(handle.wsUrl, CONNECT_TIMEOUT_MS)
       } catch (error) {
         stop()
         throw error
       }
+      if (epoch !== this.generation) {
+        connection.close()
+        stop()
+        throw abortError()
+      }
+      this.connection = connection
       this.stopChrome = stop
       this.endpoint = handle.wsUrl
       this.binary = chromePath
@@ -773,11 +818,41 @@ export class BrowserSession {
     connection.on('Target.detachedFromTarget', (params) => {
       const sessionId = params.sessionId
       if (typeof sessionId !== 'string') return
+      this.cleanupTargetSession(sessionId)
       for (const state of this.targets.values()) {
         if (state.sessionId !== sessionId) continue
         state.sessionId = null
         state.contexts.clear()
       }
+    })
+    connection.on('Target.targetDestroyed', (params) => {
+      const targetId = params.targetId
+      if (typeof targetId !== 'string') return
+      const state = this.targets.get(targetId)
+      if (state?.sessionId) this.cleanupTargetSession(state.sessionId)
+      this.targets.delete(targetId)
+      if (this.pageTargetId === targetId) this.pageTargetId = null
+    })
+    connection.on('Fetch.requestPaused', (params, sessionId) => {
+      const requestId = typeof params.requestId === 'string' ? params.requestId : null
+      if (!requestId || !sessionId) return
+      const req = params.request as { url?: string } | undefined
+      const url = req?.url ?? ''
+      void (async () => {
+        let blocked = isMetadataUrl(url)
+        if (!blocked && url) {
+          try {
+            blocked = await resolvesToMetadataHost(new URL(url).hostname)
+          } catch {
+            blocked = false
+          }
+        }
+        if (blocked) {
+          await this.send('Fetch.failRequest', { requestId, errorReason: 'AccessDenied' }, sessionId, ACT_TIMEOUT_MS).catch(() => undefined)
+        } else {
+          await this.send('Fetch.continueRequest', { requestId }, sessionId, ACT_TIMEOUT_MS).catch(() => undefined)
+        }
+      })()
     })
 
     connection.on('Runtime.executionContextCreated', (params, sessionId) => {
@@ -847,6 +922,14 @@ export class BrowserSession {
         logDebug(`browser: ${method} failed on ${state.type}: ${errorMessage(error)}`)
       })
     }
+    await this.send(
+      'Fetch.enable',
+      { patterns: [{ urlPattern: 'http://*' }, { urlPattern: 'https://*' }] },
+      sessionId,
+      HANDSHAKE_TIMEOUT_MS,
+    ).catch((error) => {
+      logDebug(`browser: Fetch.enable failed on ${state.type}: ${errorMessage(error)}`)
+    })
     if (state.type === 'page') {
       await this.send(
         'Emulation.setDeviceMetricsOverride',
@@ -989,30 +1072,54 @@ export class BrowserSession {
     return undefined
   }
 
-  private loadSettled(sessionId: string): Promise<void> {
-    return this.settled(this.loadWaiters, sessionId)
+  private cleanupTargetSession(sessionId: string): void {
+    this.inflight.delete(sessionId)
+    this.lastNetworkActivity.delete(sessionId)
+    this.fire(this.loadWaiters, sessionId)
+    this.loadWaiters.delete(sessionId)
+    this.fire(this.domWaiters, sessionId)
+    this.domWaiters.delete(sessionId)
+    if (this.screencast?.sessionId === sessionId) {
+      this.screencast.off()
+      this.screencast = null
+    }
   }
 
-  private domSettled(sessionId: string): Promise<void> {
-    return this.settled(this.domWaiters, sessionId)
+  private loadSettled(sessionId: string, signal?: AbortSignal): Promise<void> {
+    return this.settled(this.loadWaiters, sessionId, signal)
+  }
+
+  private domSettled(sessionId: string, signal?: AbortSignal): Promise<void> {
+    return this.settled(this.domWaiters, sessionId, signal)
   }
 
   /**
-   * Resolves on the event, or on a timeout — never rejects. A navigation that
-   * came back with no error but a slow load still leaves a page worth looking
-   * at, and failing here would throw that away.
+   * Resolves on the event, or on a timeout — never rejects on timeout, only on caller abort.
+   * A navigation that came back with no error but a slow load still leaves a page worth
+   * looking at, and failing on timeout would throw that away.
    */
-  private settled(waiters: Map<string, Set<() => void>>, sessionId: string): Promise<void> {
-    return new Promise((resolve) => {
+  private settled(waiters: Map<string, Set<() => void>>, sessionId: string, signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) return Promise.reject(abortError())
+    return new Promise((resolve, reject) => {
       const set = waiters.get(sessionId) ?? new Set<() => void>()
-      const done = () => {
+      const cleanup = () => {
         clearTimeout(timer)
         set.delete(done)
+        if (set.size === 0) waiters.delete(sessionId)
+        signal?.removeEventListener('abort', onAbort)
+      }
+      const done = () => {
+        cleanup()
         resolve()
+      }
+      const onAbort = () => {
+        cleanup()
+        reject(abortError())
       }
       const timer = setTimeout(done, OPEN_TIMEOUT_MS)
       set.add(done)
       waiters.set(sessionId, set)
+      signal?.addEventListener('abort', onAbort, { once: true })
     })
   }
 
@@ -1023,13 +1130,14 @@ export class BrowserSession {
   }
 
   /** Waits until nothing has been in flight for a moment — an SPA has settled. */
-  private async networkIdle(sessionId: string): Promise<void> {
+  private async networkIdle(sessionId: string, signal?: AbortSignal): Promise<void> {
     const deadline = Date.now() + OPEN_TIMEOUT_MS
     while (Date.now() < deadline) {
+      if (signal?.aborted) throw abortError()
       const busy = (this.inflight.get(sessionId) ?? 0) > 0
       const quiet = Date.now() - (this.lastNetworkActivity.get(sessionId) ?? 0)
       if (!busy && quiet >= NETWORK_IDLE_MS) return
-      await sleep(50)
+      await sleep(50, signal)
     }
   }
 
@@ -1255,6 +1363,23 @@ function scriptFailure(details: { text?: string; exception?: { description?: str
   return details.text ?? 'script error'
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
+function abortError(): Error {
+  const error = new Error('the turn was stopped')
+  error.name = 'AbortError'
+  return error
+}
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(abortError())
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(abortError())
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }

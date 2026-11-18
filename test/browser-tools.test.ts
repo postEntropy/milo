@@ -1,10 +1,12 @@
+import { createServer } from 'node:http'
 import { mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { WebSocketServer, type WebSocket } from 'ws'
 import { z } from 'zod'
 import { createBrowserTools } from '../src/core/browser/tools.js'
-import type { ActRequest, BrowserSession } from '../src/core/browser/session.js'
+import { BrowserSession, type ActRequest } from '../src/core/browser/session.js'
 import { mergeObservations, type Observation, type RawElement } from '../src/core/browser/observer.js'
 import { createToolRegistry } from '../src/core/tools/index.js'
 import type { Tool, ToolContext } from '../src/core/tools/types.js'
@@ -89,19 +91,30 @@ describe('browser_open', () => {
     expect(result.isError).toBe(true)
   })
 
-  it('refuses a cloud metadata address', async () => {
+  it('refuses a cloud metadata address in IPv4, IPv6, and IPv4-mapped forms', async () => {
     // Opening is read-only and never asks, so an address that hands back the
     // machine's credentials must be barred at the tool, not left to the page.
     const { byName } = stub()
-    const result = await run(byName.get('browser_open')!, { url: 'http://169.254.169.254/latest/meta-data/' })
-    expect(result.isError).toBe(true)
-    expect(result.content).toContain('metadata address')
+    for (const url of [
+      'http://169.254.169.254/latest/meta-data/',
+      'http://[::ffff:a9fe:a9fe]/latest/meta-data/',
+      'http://[::ffff:169.254.169.254]/latest/meta-data/',
+      'http://[fd00:ec2::254]/latest/meta-data/',
+      'http://100.100.100.200/latest/meta-data/',
+      'http://[fe80::1]/',
+    ]) {
+      const result = await run(byName.get('browser_open')!, { url })
+      expect(result.isError, url).toBe(true)
+      expect(result.content, url).toContain('metadata address')
+    }
   })
 
-  it('still opens loopback, which a dev server needs', async () => {
+  it('still opens loopback IPv4 and IPv6, which a dev server needs', async () => {
     const { byName } = stub()
-    const result = await run(byName.get('browser_open')!, { url: 'http://127.0.0.1:3000/' })
-    expect(result.isError).toBeUndefined()
+    for (const url of ['http://127.0.0.1:3000/', 'http://[::1]:3000/']) {
+      const result = await run(byName.get('browser_open')!, { url })
+      expect(result.isError, url).toBeUndefined()
+    }
   })
 
   it('answers with the page as elements', async () => {
@@ -253,5 +266,82 @@ describe('browser_act', () => {
     const result = await run(byName.get('browser_act')!, { action: 'click', ref: 'r1' })
     expect(result.isError).toBe(true)
     expect(result.content).toContain('earlier look')
+  })
+})
+
+describe('BrowserSession lifecycle and request interception', () => {
+  it('intercepts metadata subrequests, cleans screencast on targetDestroyed, and handles close while starting', async () => {
+    const methods: Array<{ method: string; params: Record<string, unknown> }> = []
+    let wsClient: WebSocket | null = null
+    const httpServer = createServer((req, res) => {
+      if (req.url === '/json/version') {
+        const addr = httpServer.address()
+        const port = typeof addr === 'object' && addr ? addr.port : 0
+        res.writeHead(200, { 'content-type': 'application/json' })
+        res.end(JSON.stringify({ webSocketDebuggerUrl: `ws://127.0.0.1:${port}/devtools/browser/1` }))
+        return
+      }
+      res.writeHead(404).end()
+    })
+    const wss = new WebSocketServer({ server: httpServer })
+    wss.on('connection', (socket) => {
+      wsClient = socket
+      socket.on('message', (raw) => {
+        const msg = JSON.parse(raw.toString()) as { id: number; method: string; params?: Record<string, unknown> }
+        methods.push({ method: msg.method, params: msg.params ?? {} })
+        let result: Record<string, unknown> = {}
+        if (msg.method === 'Target.createTarget') result = { targetId: 't1' }
+        else if (msg.method === 'Target.attachToTarget') result = { sessionId: 's1' }
+        else if (msg.method === 'Browser.getVersion') result = { product: 'Chrome/test' }
+        socket.send(JSON.stringify({ id: msg.id, result }))
+      })
+    })
+    await new Promise<void>((resolve) => httpServer.listen(0, '127.0.0.1', resolve))
+    const addr = httpServer.address()
+    const port = typeof addr === 'object' && addr ? addr.port : 0
+    const session = new BrowserSession({
+      cdpUrl: `http://127.0.0.1:${port}`,
+      profileDir: '/tmp/milo-test-profile',
+    })
+
+    try {
+      await session.startScreencast(() => undefined)
+      expect(session.isStreaming).toBe(true)
+
+      wsClient!.send(JSON.stringify({
+        method: 'Fetch.requestPaused',
+        sessionId: 's1',
+        params: { requestId: 'req-bad', request: { url: 'http://[::ffff:a9fe:a9fe]/latest' } },
+      }))
+      wsClient!.send(JSON.stringify({
+        method: 'Fetch.requestPaused',
+        sessionId: 's1',
+        params: { requestId: 'req-ok', request: { url: 'https://example.com/' } },
+      }))
+      await new Promise((resolve) => setTimeout(resolve, 30))
+
+      expect(methods).toContainEqual({
+        method: 'Fetch.failRequest',
+        params: { requestId: 'req-bad', errorReason: 'AccessDenied' },
+      })
+      expect(methods).toContainEqual({
+        method: 'Fetch.continueRequest',
+        params: { requestId: 'req-ok' },
+      })
+
+      wsClient!.send(JSON.stringify({ method: 'Target.targetDestroyed', params: { targetId: 't1' } }))
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      expect(session.isStreaming).toBe(false)
+
+      await session.close()
+      const startPending = session.start()
+      await session.close()
+      await expect(startPending).rejects.toThrow(/stopped|closed/i)
+      expect(session.isRunning).toBe(false)
+    } finally {
+      await session.close()
+      wss.close()
+      await new Promise<void>((resolve) => httpServer.close(() => resolve()))
+    }
   })
 })

@@ -6,6 +6,7 @@ import { writeFileAtomic } from '../../util/fs.js'
 import { displayPath, resolveToolPath } from '../tools/walk.js'
 import type { Tool, ToolResult } from '../tools/types.js'
 import { formatSnapshot } from './observer.js'
+import { resolvesToMetadataHost } from './metadata.js'
 import type { ActRequest, BrowserSession, ScrollDirection, Wait } from './session.js'
 
 /**
@@ -108,7 +109,7 @@ function browserOpenTool(session: BrowserSession): Tool<BrowserOpenArgs> {
       if (url.protocol !== 'http:' && url.protocol !== 'https:') {
         return { content: `Cannot open ${url.protocol} URLs — only http and https.`, isError: true }
       }
-      if (isMetadataHost(url.hostname)) {
+      if (await resolvesToMetadataHost(url.hostname)) {
         return { content: `Cannot open ${url.href} — that is a cloud metadata address, not a page.`, isError: true }
       }
 
@@ -122,18 +123,6 @@ function browserOpenTool(session: BrowserSession): Tool<BrowserOpenArgs> {
       }
     },
   }
-}
-
-/**
- * Whether a host is a cloud instance's own metadata service. Every provider puts
- * it in link-local space (169.254.0.0/16), and nothing a person asks a browser to
- * open lives there — while a page that reaches it can read the machine's
- * credentials out of the response. Loopback is left alone on purpose: driving a
- * dev server on 127.0.0.1 is a real thing to ask for.
- */
-function isMetadataHost(hostname: string): boolean {
-  const host = hostname.toLowerCase().replace(/^\[|\]$/g, '')
-  return host === 'metadata.google.internal' || /^169\.254\./.test(host)
 }
 
 const snapshotSchema = z.object({

@@ -1,16 +1,9 @@
 #!/usr/bin/env node
 /**
- * Exercita cada verbo do toolset de browser num navegador de verdade, e confere
- * que a **página reagiu** — não só que a chamada não deu erro.
+ * Exercises each action of the browser toolset in a real browser and verifies
+ * that the page actually reacted — not merely that the call returned without error.
  *
  *   npm run check:browser
- *
- * O bench mede quanto custa; este confere que funciona. Os dois existem porque
- * um vocabulário com verbos que ninguém nunca rodou é um vocabulário que só
- * parece fechado: `upload`, `hover` e `double_click` ficaram de fora por dias
- * sem que nada apontasse, e o próprio `click` chegou a faltar da checagem.
- *
- * Precisa de um Chrome/Chromium, como o bench. A página é servida daqui mesmo.
  */
 import { createServer } from 'node:http'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -22,25 +15,25 @@ import { findChrome } from '../src/core/browser/chrome.js'
 import { BROWSER_ACTIONS, type BrowserAction } from '../src/core/browser/tools.js'
 import type { RawElement } from '../src/core/browser/observer.js'
 
-const PAGE = `<!doctype html><html><head><title>Acoes</title><style>body{height:3000px}
+const PAGE = `<!doctype html><html><head><title>Actions</title><style>body{height:3000px}
 /* The confirm control of a framework page, copied from the one that cost a
    session 60 steps: a bare div, a cursor the sheet sets to default, and the
    listener added by script. The markup says nothing about it being pressable. */
 .btn-submit{background:#f80;width:200px;height:40px;line-height:40px;text-align:center;cursor:default}
 </style></head><body>
-<h1>Acoes</h1>
-<p id="out">nada</p>
-<input id="text" type="text" placeholder="texto">
-<div id="ce" contenteditable="true" role="textbox" aria-label="editavel">editavel</div>
-<input id="file" type="file" aria-label="arquivo">
-<select id="sel" aria-label="escolha">
-  <option value="">Escolha</option><option value="s">Pequeno</option><option value="l">Grande</option>
+<h1>Actions</h1>
+<p id="out">none</p>
+<input id="text" type="text" placeholder="text">
+<div id="ce" contenteditable="true" role="textbox" aria-label="editable">editable</div>
+<input id="file" type="file" aria-label="file">
+<select id="sel" aria-label="choice">
+  <option value="">Choice</option><option value="s">Small</option><option value="l">Large</option>
 </select>
-<button id="clickMe" type="button">Clique</button>
-<button id="dbl" type="button">Duplo</button>
-<div id="hoverMe" role="button" tabindex="0">Passe o mouse</div>
-<form id="form"><input id="field" type="text" placeholder="campo"><button type="submit">Enviar</button></form>
-<div id="confirm" class="btn-submit">Confirmar descadastro</div>
+<button id="clickMe" type="button">Click</button>
+<button id="dbl" type="button">Double</button>
+<div id="hoverMe" role="button" tabindex="0">Hover</div>
+<form id="form"><input id="field" type="text" placeholder="field"><button type="submit">Send</button></form>
+<div id="confirm" class="btn-submit">Confirm unsubscribe</div>
 <script>
   // The marker is what the check reads: it can only come from these writes,
   // never from a stray word elsewhere in the page.
@@ -64,7 +57,7 @@ const PAGE = `<!doctype html><html><head><title>Acoes</title><style>body{height:
  * action on two different documents.
  */
 const ESCAPING = `<!doctype html><html><head><title>Escaping</title></head><body>
-<button id="b">Clique</button>
+<button id="b">Click</button>
 <script>setTimeout(function () { location.reload() }, 200)</script>
 </body></html>`
 
@@ -104,55 +97,55 @@ function checksFor(file: string): Check[] {
       action: 'click',
       what: 'click',
       expect: 'clicked',
-      run: (s, e) => s.act({ action: 'click', ref: on(e, 'Clique') }, AbortSignal.timeout(10_000)),
+      run: (s, e) => s.act({ action: 'click', ref: on(e, 'Click') }, AbortSignal.timeout(10_000)),
     },
     {
       action: 'type',
       what: 'type into a text field',
-      expect: 'typed:capivara',
-      run: (s, e) => s.act({ action: 'type', ref: on(e, 'texto'), text: 'capivara' }, AbortSignal.timeout(10_000)),
+      expect: 'typed:capybara',
+      run: (s, e) => s.act({ action: 'type', ref: on(e, 'text'), text: 'capybara' }, AbortSignal.timeout(10_000)),
     },
     {
       action: 'type',
       what: 'type into a contenteditable',
-      expect: 'ce:escrito',
-      run: (s, e) => s.act({ action: 'type', ref: on(e, 'editavel'), text: 'escrito' }, AbortSignal.timeout(10_000)),
+      expect: 'ce:written',
+      run: (s, e) => s.act({ action: 'type', ref: on(e, 'editable'), text: 'written' }, AbortSignal.timeout(10_000)),
     },
     {
       action: 'press',
       what: 'press Enter, which submits the form',
       expect: 'submit',
-      run: (s, e) => s.act({ action: 'press', ref: on(e, 'campo'), key: 'Enter' }, AbortSignal.timeout(10_000)),
+      run: (s, e) => s.act({ action: 'press', ref: on(e, 'field'), key: 'Enter' }, AbortSignal.timeout(10_000)),
     },
     {
       action: 'click',
       what: 'click a div the page made pressable',
       expect: 'pressed',
-      run: (s, e) => s.act({ action: 'click', ref: on(e, 'Confirmar descadastro') }, AbortSignal.timeout(10_000)),
+      run: (s, e) => s.act({ action: 'click', ref: on(e, 'Confirm unsubscribe') }, AbortSignal.timeout(10_000)),
     },
     {
       action: 'double_click',
       what: 'double_click',
       expect: 'dblclick',
-      run: (s, e) => s.act({ action: 'double_click', ref: on(e, 'Duplo') }, AbortSignal.timeout(10_000)),
+      run: (s, e) => s.act({ action: 'double_click', ref: on(e, 'Double') }, AbortSignal.timeout(10_000)),
     },
     {
       action: 'hover',
       what: 'hover',
       expect: 'hover',
-      run: (s, e) => s.act({ action: 'hover', ref: on(e, 'Passe o mouse') }, AbortSignal.timeout(10_000)),
+      run: (s, e) => s.act({ action: 'hover', ref: on(e, 'Hover') }, AbortSignal.timeout(10_000)),
     },
     {
       action: 'select',
       what: 'select by its visible text',
       expect: 'select:l',
-      run: (s, e) => s.act({ action: 'select', ref: on(e, 'escolha'), text: 'Grande' }, AbortSignal.timeout(10_000)),
+      run: (s, e) => s.act({ action: 'select', ref: on(e, 'choice'), text: 'Large' }, AbortSignal.timeout(10_000)),
     },
     {
       action: 'upload',
       what: 'upload a file',
-      expect: 'file:nota.txt',
-      run: (s, e) => s.act({ action: 'upload', ref: on(e, 'arquivo'), path: file }, AbortSignal.timeout(10_000)),
+      expect: 'file:note.txt',
+      run: (s, e) => s.act({ action: 'upload', ref: on(e, 'file'), path: file }, AbortSignal.timeout(10_000)),
     },
     {
       action: 'scroll',
@@ -209,7 +202,7 @@ async function runEngine(
       const marked = text.text.replace(/\s+/g, ' ').match(/@[^\s]+/)?.[0]
       results.push({
         what: check.what,
-        said: marked ? marked.slice(1) : '(a pagina nao disse nada)',
+        said: marked ? marked.slice(1) : '(the page said nothing)',
         ok: Boolean(marked?.startsWith(`@${check.expect}`)),
       })
     }
@@ -223,8 +216,8 @@ async function runEngine(
 
 async function main(): Promise<void> {
   const work = mkdtempSync(path.join(tmpdir(), 'milo-check-'))
-  const file = path.join(work, 'nota.txt')
-  writeFileSync(file, 'conteudo')
+  const file = path.join(work, 'note.txt')
+  writeFileSync(file, 'content')
 
   const server = createServer((request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -235,7 +228,7 @@ async function main(): Promise<void> {
 
   const chrome = await findChrome(process.env.MILO_BROWSER_CHROME ?? null)
   if (!chrome) {
-    console.error('Nenhum Chrome/Chromium encontrado — defina MILO_BROWSER_CHROME.')
+    console.error('No Chrome/Chromium found — set MILO_BROWSER_CHROME.')
     server.close()
     return
   }
@@ -250,7 +243,7 @@ async function main(): Promise<void> {
     let startup = ''
     try {
       results = await runEngine(
-        'browser toolset — cada verbo, e o que a pagina disse depois',
+        'browser toolset — each action and what the page said afterwards',
         { chromePath: chrome, profileDir: path.join(work, 'profile'), headless: true },
         url,
         file,
@@ -261,24 +254,24 @@ async function main(): Promise<void> {
     }
 
     for (const result of results) {
-      console.log(`  ${result.ok ? 'ok  ' : 'NAO '} ${result.what.padEnd(38)} ${result.said}`)
+      console.log(`  ${result.ok ? 'ok  ' : 'FAIL'} ${result.what.padEnd(38)} ${result.said}`)
     }
-    if (startup) console.log(`  o navegador nao abriu a pagina: ${startup}`)
+    if (startup) console.log(`  the browser did not open the page: ${startup}`)
 
     broken = results.filter((result) => !result.ok).length + (startup ? 1 : 0)
     if (results.length > 0) {
       console.log(
-        `\n  ${results.length - results.filter((result) => !result.ok).length}/${results.length} checks, e a pagina confirmou o efeito · verbos ` +
+        `\n  ${results.length - results.filter((result) => !result.ok).length}/${results.length} checks, and the page confirmed the effect · actions ` +
           `${BROWSER_ACTIONS.length - missing.length}/${BROWSER_ACTIONS.length}` +
-          (missing.length > 0 ? ` — FALTAM: ${missing.join(', ')}` : ''),
+          (missing.length > 0 ? ` — MISSING: ${missing.join(', ')}` : ''),
       )
     }
 
     const silent = results.filter((result) => result.unanswered).length
     if (silent > 0) {
       console.log(
-        `\n  ${silent} desses é "o navegador não respondeu", não "o verbo não funcionou" — numa máquina` +
-          '\n  sob carga isso acontece. Rode de novo antes de investigar o toolset.',
+        `\n  ${silent} of those reported "the browser did not answer" rather than "the action did not work" — under` +
+          '\n  machine load that can happen. Re-run before investigating the toolset.',
       )
     }
   } finally {
@@ -287,10 +280,8 @@ async function main(): Promise<void> {
   }
 
   if (broken > 0 || missing.length > 0) {
-    // Só a legenda do que de fato apareceu: um navegador que não subiu não deixou
-    // nenhum "NAO" para explicar.
     if (results.some((result) => !result.ok) || missing.length > 0) {
-      console.log('\nO "NAO" acima é o que a página não confirmou; "FALTAM" é o verbo que ninguém exercitou.')
+      console.log('\n"FAIL" above is what the page did not confirm; "MISSING" is an action nothing exercised.')
     }
     process.exitCode = 1
   }
