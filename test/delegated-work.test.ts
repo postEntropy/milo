@@ -67,6 +67,40 @@ describe('delegated work', () => {
     expect((await store.control(work.id, 'resume')).state).toBe('queued')
   })
 
+  it('recovers a run when its process id belongs to a different process', async () => {
+    const { store, file } = setup()
+    const work = await store.create(input)
+    await store.claim(work.id, 1000)
+    const raw = JSON.parse(readFileSync(file, 'utf8'))
+    if (!raw[0].runs[0].processIdentity) return
+    raw[0].runs[0].processIdentity = 'a-different-process'
+    writeFileSync(file, JSON.stringify(raw))
+    await store.recover(3000)
+    expect(store.list()[0]).toMatchObject({ state: 'interrupted', runs: [{ result: 'interrupted' }] })
+  })
+
+  it('waits for a claim in progress before shutdown settles', async () => {
+    const { store } = setup()
+    const work = await store.create(input)
+    const claim = store.claim.bind(store)
+    let release!: () => void
+    let entered!: () => void
+    const enteredClaim = new Promise<void>((resolve) => { entered = resolve })
+    const gate = new Promise<void>((resolve) => { release = resolve })
+    store.claim = async (id, now) => { entered(); await gate; return claim(id, now) }
+    const scheduler = new DelegatedScheduler({ store, runtime: {} as AgentRuntime, deliver: async () => {}, log: () => {} })
+    const starting = scheduler.start()
+    await enteredClaim
+    scheduler.stop()
+    let settled = false
+    const waiting = scheduler.settle().then(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
+    release()
+    await Promise.all([starting, waiting])
+    expect(store.list().find((item) => item.id === work.id)?.state).toBe('failed')
+  })
+
   it('skips missed recurring times and preserves the next future occurrence', async () => {
     const { store } = setup()
     const work = await store.create({ ...input, schedule: { kind: 'every', minutes: 1 } })

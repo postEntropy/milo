@@ -6,6 +6,7 @@ import { z } from 'zod'
 import { ensurePrivateDir, writePrivateFile } from '../util/fs.js'
 import { errorMessage } from '../util/errors.js'
 import { logWarn } from '../util/log.js'
+import { processIdentity, processIsGone } from '../util/process-identity.js'
 import { COLOR_PALETTE_IDS, type ColorPaletteId } from './color-palettes.js'
 import {
   CREW_AVATAR_ACCESSORIES,
@@ -47,6 +48,7 @@ export function resolveBotAvatar(bot: { id: string; name: string; avatar?: Parti
 }
 
 const PROCESS_INSTANCE_ID = randomUUID()
+const PROCESS_IDENTITY = processIdentity(process.pid)
 const MAX_BOT_ASSIGNMENTS = 50
 const MAX_BOT_NAME_LENGTH = 120
 const MAX_GUIDANCE_LENGTH = 4_000
@@ -97,6 +99,7 @@ const assignmentSchema = z.object({
   startedAt: z.number(), finishedAt: z.number().optional(), report: z.string().optional(),
   processId: z.number().int().positive().optional(),
   instanceId: z.string().optional(),
+  processIdentity: z.string().optional(),
   stopRequestedAt: z.number().optional(),
   guidance: z.array(z.object({ id: z.string(), text: z.string(), at: z.number(), appliedAt: z.number().optional() })).optional(),
 })
@@ -108,25 +111,18 @@ const botSchema = z.object({
 export type CrewAssignment = z.infer<typeof assignmentSchema>
 export type CrewBot = z.infer<typeof botSchema>
 
-function isDeadPid(pid: number, instanceId: string | undefined, forStartupRecover: boolean): boolean {
+function isDeadPid(pid: number, instanceId: string | undefined, identity: string | undefined, forStartupRecover: boolean): boolean {
   if (forStartupRecover && instanceId && pid === process.pid && instanceId !== PROCESS_INSTANCE_ID) {
     return true
   }
-  try {
-    process.kill(pid, 0)
-    return false
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code === 'ESRCH' || code === 'EPERM') return true
-    throw error
-  }
+  return processIsGone(pid, identity)
 }
 
 function markDeadProcesses(bots: CrewBot[], forStartupRecover = false): boolean {
   let changed = false
   for (const bot of bots) for (const assignment of bot.assignments) {
     if (assignment.state !== 'running' || assignment.processId === undefined) continue
-    if (!isDeadPid(assignment.processId, assignment.instanceId, forStartupRecover)) continue
+    if (!isDeadPid(assignment.processId, assignment.instanceId, assignment.processIdentity, forStartupRecover)) continue
     assignment.state = 'interrupted'
     assignment.report = 'The process running this assignment stopped before it finished.'
     changed = true
@@ -237,7 +233,7 @@ export class CrewStore {
       }
       const assignment: CrewAssignment = {
         id: randomUUID(), sessionId: input.sessionId, mission: input.mission,
-        model: input.model, provider: input.provider, state: 'running', startedAt: Date.now(), processId: process.pid, instanceId: PROCESS_INSTANCE_ID,
+        model: input.model, provider: input.provider, state: 'running', startedAt: Date.now(), processId: process.pid, instanceId: PROCESS_INSTANCE_ID, processIdentity: PROCESS_IDENTITY,
       }
       bot.assignments.push(assignment)
       if (bot.assignments.length > MAX_BOT_ASSIGNMENTS) {

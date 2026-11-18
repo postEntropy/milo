@@ -6,24 +6,19 @@ import { z } from 'zod'
 import { ensurePrivateDir, writePrivateFile } from '../util/fs.js'
 import { errorMessage } from '../util/errors.js'
 import { logWarn } from '../util/log.js'
+import { processIdentity, processIsGone } from '../util/process-identity.js'
 import { delegatedWorkFile } from './config/paths.js'
 import { nextRunAt, type RoutineTarget, type RoutineWhen } from './routines.js'
 
 const PROCESS_INSTANCE_ID = randomUUID()
+const PROCESS_IDENTITY = processIdentity(process.pid)
 const MAX_WORK_RUNS = 50
 
-function isDeadRunPid(pid: number, instanceId: string | undefined, forStartupRecover: boolean): boolean {
+function isDeadRunPid(pid: number, instanceId: string | undefined, identity: string | undefined, forStartupRecover: boolean): boolean {
   if (forStartupRecover && instanceId && pid === process.pid && instanceId !== PROCESS_INSTANCE_ID) {
     return true
   }
-  try {
-    process.kill(pid, 0)
-    return false
-  } catch (error) {
-    const code = (error as NodeJS.ErrnoException).code
-    if (code === 'ESRCH' || code === 'EPERM') return true
-    throw error
-  }
+  return processIsGone(pid, identity)
 }
 
 const scheduleSchema = z.discriminatedUnion('kind', [
@@ -40,6 +35,7 @@ const runSchema = z.object({
   result: z.enum(['running', 'completed', 'failed', 'interrupted', 'cancelled']),
   report: z.string().optional(), failure: z.string().optional(), processId: z.number().int().positive(),
   instanceId: z.string().optional(),
+  processIdentity: z.string().optional(),
   deliveryError: z.string().optional(),
 })
 const workSchema = z.object({
@@ -131,7 +127,7 @@ export class DelegatedWorkStore {
     return this.change((items) => {
       const work = items.find((item) => item.id === id)
       if (!work || !(work.state === 'queued' || (work.state === 'waiting' && work.nextAt !== undefined && work.nextAt <= now))) return null
-      const run: DelegatedRun = { id: randomUUID(), startedAt: now, result: 'running', processId: process.pid, instanceId: PROCESS_INSTANCE_ID }
+      const run: DelegatedRun = { id: randomUUID(), startedAt: now, result: 'running', processId: process.pid, instanceId: PROCESS_INSTANCE_ID, processIdentity: PROCESS_IDENTITY }
       work.runs.push(run)
       if (work.runs.length > MAX_WORK_RUNS) {
         const running = work.runs.filter((entry) => entry.result === 'running')
@@ -222,7 +218,7 @@ export class DelegatedWorkStore {
           else work.state = 'interrupted'
           continue
         }
-        if (!isDeadRunPid(run.processId, run.instanceId, true)) continue
+        if (!isDeadRunPid(run.processId, run.instanceId, run.processIdentity, true)) continue
         run.result = work.state === 'cancelled' ? 'cancelled' : 'interrupted'
         run.finishedAt = now
         run.report = 'The process running this work stopped before it finished.'

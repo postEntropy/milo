@@ -11,6 +11,7 @@ export class DelegatedScheduler {
   private readonly running = new Set<string>()
   private readonly pending = new Set<Promise<void>>()
   private ticking = false
+  private tickPromise: Promise<void> | undefined
   private stopped = true
 
   constructor(private readonly options: {
@@ -28,8 +29,9 @@ export class DelegatedScheduler {
     if (!this.stopped) return
     await this.options.store.recover(this.now())
     this.stopped = false
-    await this.tick()
-    this.timer = setInterval(() => { void this.tick() }, 1000)
+    await this.scheduleTick()
+    if (this.stopped) return
+    this.timer = setInterval(() => { void this.scheduleTick() }, 1000)
     this.timer.unref?.()
   }
 
@@ -40,7 +42,17 @@ export class DelegatedScheduler {
   }
 
   async settle(): Promise<void> {
+    if (this.tickPromise) await this.tickPromise
     while (this.pending.size) await Promise.allSettled([...this.pending])
+  }
+
+  private scheduleTick(): Promise<void> {
+    if (this.tickPromise) return this.tickPromise
+    const pending = this.tick().finally(() => {
+      if (this.tickPromise === pending) this.tickPromise = undefined
+    })
+    this.tickPromise = pending
+    return pending
   }
 
   private async tick(): Promise<void> {
@@ -55,7 +67,7 @@ export class DelegatedScheduler {
         const claimed = await this.options.store.claim(work.id, now)
         if (!claimed) continue
         if (this.stopped) {
-          await this.options.store.finish(claimed.work.id, claimed.run.id, { report: '', failure: 'The scheduler stopped before starting this run.' }, this.now()).catch(() => undefined)
+          await this.options.store.finish(claimed.work.id, claimed.run.id, { report: '', failure: 'The scheduler stopped before starting this run.' }, this.now())
           break
         }
         this.running.add(work.id)
