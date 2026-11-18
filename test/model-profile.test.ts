@@ -91,6 +91,14 @@ describe('mergeModelProfile', () => {
 })
 
 describe('lookupModelProfile', () => {
+  it('keeps the profiles and learned limits of providers separate', async () => {
+    const file = cacheFile()
+    const fetchCatalog = async () => null
+    await lookupModelProfile('m', { file, providerId: 'a', fetchCatalog, fetchProvider: async () => [{ id: 'm', vision: false }] })
+    await rememberOutputCap('m', 100, { file, providerId: 'a' })
+    const other = await lookupModelProfile('m', { file, providerId: 'b', fetchCatalog, fetchProvider: async () => [{ id: 'm', vision: true, maxOutput: 500 }] })
+    expect(other).toMatchObject({ vision: true, maxOutput: 500 })
+  })
   it('remembers the answer, so the catalog is read once', async () => {
     const file = cacheFile()
     let fetches = 0

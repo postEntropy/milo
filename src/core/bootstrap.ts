@@ -194,19 +194,19 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
 
   // A ceiling a route named in a refusal is written where the profile lookup reads
   // it, so the run after this one asks with that number instead of learning it again.
-  const learnOutputCap = (model: string) => (cap: number): Promise<void> =>
-    rememberOutputCap(model, cap)
+  const learnOutputCap = (model: string, providerId: string) => (cap: number): Promise<void> =>
+    rememberOutputCap(model, cap, { providerId })
 
   runtime = new AgentRuntime({
-    provider: traced(createProvider(loaded.provider, loaded.model, { onOutputCap: learnOutputCap(loaded.model) })),
+    provider: traced(createProvider(loaded.provider, loaded.model, { onOutputCap: learnOutputCap(loaded.model, loaded.provider.id) })),
     commandCode: new HerdrCommandCodeSessionDriver(),
     // One entry, and the model it is on: `auto` picks its wire from the model
     // id, so a model switched later resolves a provider of its own instead of
     // keeping the wire of the one it replaced.
-    providerFor: (model) => traced(createProvider(activeProvider, model, { onOutputCap: learnOutputCap(model) })),
+    providerFor: (model) => traced(createProvider(activeProvider, model, { onOutputCap: learnOutputCap(model, activeProvider.id) })),
     providerForBot: (id, model) => {
       const selected = resolveActive(id)
-      return selected && selected.apiKey !== undefined ? traced(createProvider(selected, model, { onOutputCap: learnOutputCap(model) })) : undefined
+      return selected && selected.apiKey !== undefined ? traced(createProvider(selected, model, { onOutputCap: learnOutputCap(model, selected.id) })) : undefined
     },
     providerSwitch: {
       use: (id) => {
@@ -249,6 +249,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     modelProfile: (model: string, providerId?: string) => {
       const target = (providerId ? resolveActive(providerId) : undefined) ?? activeProvider
       return lookupModelProfile(model, {
+        providerId: target.id,
         override: loaded.config.models[model],
         fetchProvider: () =>
           target.oauth === 'chatgpt'

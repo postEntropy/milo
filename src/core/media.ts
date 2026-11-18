@@ -101,6 +101,7 @@ export async function prepareIncoming(files: IncomingFile[], options: PrepareInc
       ? options.modelProfile(model)
       : loaded && model
       ? lookupModelProfile(model, {
+          providerId: loaded.provider.id,
           override: config?.models?.[model],
           fetchProvider: () =>
             listModels({

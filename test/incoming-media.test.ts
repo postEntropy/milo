@@ -260,7 +260,7 @@ describe('incoming media', () => {
     // The fact was learned on an earlier run and sits in models.json; a catalog
     // that cannot be reached must not turn it back into "unknown".
     writeFileSync(path.join(home, 'models.json'), JSON.stringify({
-      'cached-vision': { profile: { id: 'cached-vision', vision: true }, at: Date.now() },
+      [JSON.stringify(['vision-test', 'cached-vision'])]: { profile: { id: 'cached-vision', vision: true }, at: Date.now() },
     }))
     configure({ model: 'cached-vision' })
     const fetchMock = vi.fn(async () => new Response('{}', { status: 404 }))

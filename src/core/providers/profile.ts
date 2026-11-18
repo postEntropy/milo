@@ -131,6 +131,8 @@ async function writeCache(file: string, cache: Cache): Promise<void> {
 export interface LookupModelProfileOptions {
   /** Where the answer is kept between runs. */
   file?: string
+  /** The provider route whose catalog and output limits apply. */
+  providerId?: string
   /** What the person wrote for this model, which outranks every catalog. */
   override?: ModelProfileOverride
   /** Swapped in tests, so nothing here has to reach the network. */
@@ -154,7 +156,8 @@ export async function lookupModelProfile(
   const now = options.now ?? Date.now
   const cache = readCache(file)
 
-  const cached = cache[model]
+  const key = options.providerId ? JSON.stringify([options.providerId, model]) : model
+  const cached = cache[key]
   if (cached && now() - cached.at < CACHE_TTL_MS) {
     // The person's own word is applied on top of every read rather than baked
     // into the cache: editing `config.models` must land on the next turn, not
@@ -173,7 +176,7 @@ export async function lookupModelProfile(
   const profile = mergeModelProfile(model, { provider: info, openRouter: entry })
 
   const learned = cached?.learnedMaxOutput
-  cache[model] = { profile, at: now(), ...(learned !== undefined ? { learnedMaxOutput: learned } : {}) }
+  cache[key] = { profile, at: now(), ...(learned !== undefined ? { learnedMaxOutput: learned } : {}) }
   await writeCache(file, cache)
   return applyOverride(learnedCeiling(profile, learned), options.override)
 }
@@ -186,13 +189,14 @@ export async function lookupModelProfile(
 export async function rememberOutputCap(
   model: string,
   cap: number,
-  options: { file?: string } = {},
+  options: { file?: string; providerId?: string } = {},
 ): Promise<void> {
   const file = options.file ?? modelProfileFile()
   const cache = readCache(file)
-  const entry = cache[model]
+  const key = options.providerId ? JSON.stringify([options.providerId, model]) : model
+  const entry = cache[key]
   if (entry?.learnedMaxOutput === cap) return
-  cache[model] = {
+  cache[key] = {
     profile: entry?.profile ?? { id: model },
     // A model nothing has been read for stays stale, so the catalogs are still
     // asked; only the learned ceiling is added to their answer.
