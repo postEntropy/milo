@@ -742,13 +742,18 @@ final class AppModel {
     /// Sends a turn whose destination is pinned on it — how the Routines screen makes
     /// one for a chat that is not this one. Same path as any send, so the answer lands
     /// in the thread like everything else.
-    func send(_ text: String, target: SendTarget) {
+    @discardableResult
+    func send(_ text: String, target: SendTarget) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return false }
         messages.append(Message(isUser: true, parts: [.text(trimmed)], attachments: [], streaming: false))
         busy = true
         askToStayOn()
-        if !client.send(.send(text: trimmed, target: target)) { unsent() }
+        if !client.send(.send(text: trimmed, target: target)) {
+            unsent()
+            return false
+        }
+        return true
     }
 
     /**
@@ -922,7 +927,6 @@ final class AppModel {
                 sessions = shown
                 cacheSessions(account)
             }
-            if note != nil { note = nil }
         } catch {
             if mine == sessionsSeq {
                 if case ApiError.unreachable = error { connectionSaid = true }
@@ -1416,7 +1420,7 @@ final class AppModel {
             let outcome = try await MiloApi.taskListAction(account, body)
             taskLists = outcome.lists
             return true
-        } catch is URLError {
+        } catch is URLError, ApiError.unreachable {
             connectionSaid = true
             return false
         } catch {
@@ -1428,7 +1432,11 @@ final class AppModel {
     // MARK: - Projects
 
     func setSessionFolder(_ path: String?) async -> Bool {
-        guard let account, !busy, !sessionId.isEmpty else {
+        guard let account else {
+            showNote("This phone is not paired with a daemon — pair it again to change the Session folder.")
+            return false
+        }
+        guard !busy, !sessionId.isEmpty else {
             showNote("Wait for the Session to finish before changing its folder.")
             return false
         }
@@ -1463,7 +1471,7 @@ final class AppModel {
             projectsError = nil
             projectsRead = true
             Task { await refreshSessions() }
-        } catch is URLError {
+        } catch is URLError, ApiError.unreachable {
             guard mine == projectsSeq else { return }
             // The socket's own glass pill already speaks for a connection that is down or
             // reconnecting; saying it again in the list would draw two notices for one outage.
@@ -1516,7 +1524,7 @@ final class AppModel {
             projectsRead = true
             Task { await refreshSessions() }
             return outcome.result
-        } catch is URLError {
+        } catch is URLError, ApiError.unreachable {
             connectionSaid = true
             // The pill says the connection is down; this says what it meant for the act
             // the person just took, which the pill cannot.

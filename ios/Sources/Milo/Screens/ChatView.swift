@@ -19,6 +19,14 @@ private struct StatusBarBlur: UIViewRepresentable {
             animation.fractionComplete = 0.1
             animator = animation
         }
+
+        override func willMove(toWindow newWindow: UIWindow?) {
+            super.willMove(toWindow: newWindow)
+            if newWindow == nil {
+                animator?.stopAnimation(true)
+                animator = nil
+            }
+        }
     }
 
     func makeUIView(context: Context) -> BlurView { BlurView() }
@@ -78,6 +86,7 @@ struct ChatView: View {
     /// the edited words replace it rather than stacking a second copy on top.
     @State private var editing: Int?
     @State private var drawer = false
+    @State private var folderSheet = false
     @State private var projectShortcut: ProjectShortcut?
     @State private var tracesTarget: SessionTracesTarget?
     @State private var picker = false
@@ -514,6 +523,17 @@ struct ChatView: View {
         }
         .sheet(isPresented: $picker) { ModelPickerSheet() }
         .sheet(isPresented: $settings) { SettingsView(account: account) }
+        .sheet(isPresented: $folderSheet) {
+            SessionFolderSheet { section in
+                guard let project = model.sessionProject else { return }
+                let mapped: ProjectShortcut.Section = switch section {
+                case .files: .files
+                case .changes: .changes
+                case .rules: .rules
+                }
+                projectShortcut = ProjectShortcut(projectId: project.id, projectName: project.name, section: mapped)
+            }
+        }
         .sheet(item: $tracesTarget) { target in
             SessionTracesSheet(account: account, sessionId: target.id, sessionTitle: target.title)
         }
@@ -1382,6 +1402,18 @@ struct ChatView: View {
                 // where there is a session to leave — and not while the next one is being
                 // opened, when the words below still belong to the session being left.
                 HStack(spacing: MiloTheme.Space.three) {
+                    Button { folderSheet = true } label: {
+                        Image(systemName: model.sessionProject == nil ? "folder" : "folder.fill")
+                            .font(.system(size: 17, weight: .semibold))
+                            .foregroundStyle(model.sessionProject == nil ? MiloTheme.foreground : MiloTheme.accent)
+                            .frame(width: 30, height: 30)
+                    }
+                    .buttonStyle(.glass)
+                    .buttonBorderShape(.circle)
+                    .controlSize(.regular)
+                    .tint(MiloTheme.foreground)
+                    .accessibilityLabel(model.sessionProject.map { "Folder: \($0.name)" } ?? "Folder")
+
                     if !model.messages.isEmpty, !starting {
                         HStack(spacing: 0) {
                             Button {

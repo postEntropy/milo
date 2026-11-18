@@ -49,8 +49,15 @@ final class MiloClient {
     private var reconnect: Task<Void, Never>?
     struct SendOutcome { let error: String?; let steered: Bool }
     private var pending: [String: CheckedContinuation<SendOutcome, Never>] = [:]
+    private var pendingTimers: [String: Task<Void, Never>] = [:]
+    private static let maxFrameBytes = 65_536
 
     func connect(to account: Account) {
+        reconnect?.cancel()
+        reconnect = nil
+        socket?.cancel(with: .goingAway, reason: nil)
+        socket = nil
+        failPending()
         self.account = account
         retry = 0
         everOnline = false
@@ -76,7 +83,10 @@ final class MiloClient {
      */
     @discardableResult
     func send(_ frame: ClientFrame) -> Bool {
-        guard let socket, let data = try? JSONSerialization.data(withJSONObject: frame.json) else { return false }
+        guard let socket,
+              let data = try? JSONSerialization.data(withJSONObject: frame.json),
+              data.count <= Self.maxFrameBytes
+        else { return false }
         socket.send(.data(data)) { [weak self] error in
             guard error != nil else { return }
             Task { @MainActor in self?.onSendFailed?() }
@@ -90,25 +100,34 @@ final class MiloClient {
         let id = requestId
         var json = frame.json
         json["requestId"] = id
-        guard let data = try? JSONSerialization.data(withJSONObject: json) else { return SendOutcome(error: "The message could not be prepared.", steered: false) }
+        guard let data = try? JSONSerialization.data(withJSONObject: json) else {
+            return SendOutcome(error: "The message could not be prepared.", steered: false)
+        }
+        guard data.count <= Self.maxFrameBytes else {
+            return SendOutcome(error: "The message is too large to send.", steered: false)
+        }
         return await withCheckedContinuation { continuation in
             pending[id] = continuation
             socket.send(.data(data)) { [weak self] error in
                 guard error != nil else { return }
                 Task { @MainActor in self?.finish(id, error: "Connection lost before Milo confirmed the message. It may have arrived; check the session before sending again.") }
             }
-            Task { [weak self] in
+            pendingTimers[id] = Task { [weak self] in
                 try? await Task.sleep(nanoseconds: 15_000_000_000)
+                guard !Task.isCancelled else { return }
                 self?.finish(id, error: "Milo did not confirm the message. It may have arrived; check the session before sending again.")
             }
         }
     }
 
     private func finish(_ id: String, error: String?, steered: Bool = false) {
+        pendingTimers.removeValue(forKey: id)?.cancel()
         pending.removeValue(forKey: id)?.resume(returning: SendOutcome(error: error, steered: steered))
     }
 
     private func failPending() {
+        for timer in pendingTimers.values { timer.cancel() }
+        pendingTimers.removeAll()
         let waiting = pending
         pending.removeAll()
         for continuation in waiting.values {
@@ -129,7 +148,10 @@ final class MiloClient {
         task.send(.data(hello)) { [weak self] error in
             guard let error else { return }
             let outcome = MiloClient.outcome(task, error)
-            Task { @MainActor in self?.dropped(outcome) }
+            Task { @MainActor in
+                guard let self, task === self.socket else { return }
+                self.dropped(outcome)
+            }
         }
         receive(on: task)
     }
@@ -224,7 +246,8 @@ final class MiloClient {
         // "Reconnecting…" over a socket that has yet to connect once.
         state = everOnline ? .offline : .connecting
         retry += 1
-        let delay = min(0.5 * pow(2, Double(retry)), 8)
+        let base = min(0.5 * pow(2, Double(retry)), 8)
+        let delay = base * Double.random(in: 0.75...1.25)
         reconnect?.cancel()
         reconnect = Task { [weak self] in
             try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))

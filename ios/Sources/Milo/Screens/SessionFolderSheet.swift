@@ -1,7 +1,10 @@
 import SwiftUI
 
+enum SessionFolderSection { case files, changes, rules }
+
 /// A folder is optional Session context; choosing one needs no project setup step.
 struct SessionFolderSheet: View {
+    var onInspect: ((SessionFolderSection) -> Void)? = nil
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @State private var browsing = false
@@ -17,6 +20,11 @@ struct SessionFolderSheet: View {
                 if let current = model.sessionProject {
                     Section("Current folder") {
                         LabeledContent(current.name, value: current.path)
+                        if let onInspect {
+                            Button { dismiss(); onInspect(.files) } label: { Label("Files", systemImage: "doc.text") }
+                            Button { dismiss(); onInspect(.changes) } label: { Label("Changes", systemImage: "arrow.triangle.branch") }
+                            Button { dismiss(); onInspect(.rules) } label: { Label("Rules", systemImage: "list.bullet.rectangle") }
+                        }
                         Button("Clear folder") { choose(nil) }
                     }
                 }
