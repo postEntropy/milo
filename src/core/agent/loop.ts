@@ -1,5 +1,6 @@
 import { errorMessage, isAbort } from '../../util/errors.js'
 import { saveImage } from '../images.js'
+import { describeWhen } from '../routines.js'
 import { sleep } from '../providers/retry.js'
 import { thinkingBudgetFor } from '../providers/thinking.js'
 import { dropOldSnapshots } from '../sessions/compact.js'
@@ -561,11 +562,17 @@ async function executeCall(
           ? `${context.origin.gateway}:${context.origin.chatId}` : 'none'
       approvalArgs = { ...args, destination, folder: context.cwd }
     } else if ((args.action === 'resume' || args.action === 'update') && typeof args.id === 'string') {
-      const work = context.delegatedWork.list().find((item) => item.id === args.id)
-      if (work) {
-        const folder = work.project ? (context.resolveProjectPath?.(work.project) ?? work.project) : 'default directory'
-        approvalArgs = { ...args, name: work.name, allow: work.allow, objective: args.action === 'resume' ? work.objective : args.objective, currentObjective: work.objective, currentSchedule: work.schedule, destination: work.target.gateway === 'none' ? 'none' : `${work.target.gateway}:${work.target.chatId}`, folder }
+      let work: ReturnType<NonNullable<ToolContext['delegatedWork']>['list']>[number] | undefined
+      try {
+        work = context.delegatedWork.list().find((item) => item.id === args.id)
+      } catch {
+        // Store read errors are reported directly by delegatedWorkTool.execute without prompting first.
       }
+      if (!work) {
+        return registry.execute(call.name, call.args, context)
+      }
+      const folder = work.project ? (context.resolveProjectPath?.(work.project) ?? work.project) : 'default directory'
+      approvalArgs = { ...args, name: work.name, allow: work.allow, objective: args.action === 'resume' ? work.objective : args.objective, currentObjective: work.objective, currentSchedule: work.schedule ? describeWhen(work.schedule) : undefined, destination: work.target.gateway === 'none' ? 'none' : `${work.target.gateway}:${work.target.chatId}`, folder }
     }
   }
   const blocked = await checkPermission(permission, registry, call.name, approvalArgs, context)

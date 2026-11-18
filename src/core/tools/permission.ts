@@ -389,11 +389,11 @@ export function withDelegatedGrants(policy: PermissionPolicy, granted: string[],
     if (policy.explicitlyDenies?.(tool, args, directory)) return 'deny'
     // Sending needs an action-specific approval with the recipient and body visible.
     if (tool.name === 'gmail_send') return 'deny'
+    const acts = actsOnSomething(tool, args)
+    if (acts && (!granted.includes(tool.name) || barredByRules(args, directory))) return 'deny'
     const decision = await policy.decide(tool, args, options)
     if (decision === 'deny') return 'deny'
-    if (!actsOnSomething(tool, args)) return decision
-    if (!granted.includes(tool.name) || barredByRules(args, directory)) return 'deny'
-    return 'allow'
+    return acts ? 'allow' : decision
   })
 }
 
@@ -436,13 +436,13 @@ export function summarizeToolCall(args: unknown, tool?: string): string {
     if (tool === 'delegated_work') {
       const action = typeof record.action === 'string' ? record.action : 'create'
       const objective = typeof record.objective === 'string' ? record.objective : typeof record.currentObjective === 'string' ? record.currentObjective : ''
-      const grants = Array.isArray(record.allow) ? record.allow : Array.isArray(record.currentAllow) ? record.currentAllow : []
+      const grants = Array.isArray(record.allow) ? record.allow : []
       return [`${action === 'create' ? 'Create' : action === 'update' ? 'Update' : 'Resume'} delegated work${typeof record.name === 'string' ? `: ${record.name}` : ''}`,
         objective ? `Objective: ${objective}` : '', `Unattended tools: ${grants.length ? grants.join(', ') : 'none'}`,
         typeof record.every === 'string' ? `Every: ${record.every}` : '', typeof record.at === 'string' ? `At: ${record.at}` : '',
         Array.isArray(record.days) ? `Days: ${record.days.join(', ')}` : '', Array.isArray(record.dayOfMonth) ? `Dates: ${record.dayOfMonth.join(', ')}` : '', Array.isArray(record.month) ? `Months: ${record.month.join(', ')}` : '',
         record.once === true ? 'Runs once' : '', typeof record.destination === 'string' ? `Destination: ${record.destination}` : '', typeof record.folder === 'string' ? `Folder: ${record.folder}` : '',
-        record.currentSchedule ? `Current schedule: ${JSON.stringify(record.currentSchedule)}` : '',
+        typeof record.currentSchedule === 'string' && record.currentSchedule ? `Current schedule: ${record.currentSchedule}` : '',
       ].filter(Boolean).join('\n')
     }
     if (tool === 'gmail_send' || tool === 'gmail_draft') {

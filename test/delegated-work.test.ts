@@ -296,4 +296,90 @@ describe('delegated work permissions', () => {
     expect(summary).toContain('Folder: /srv/repos/milo')
     expect(summary).not.toContain('Folder: proj-1')
   })
+
+  it('rejects invalid delegated_work tool requests before asking confirmation and executes lifecycle actions', async () => {
+    const { store } = setup()
+    let asked = 0
+    const runTool = async (args: Record<string, unknown>) => {
+      let calls = 0
+      const toolResults: string[] = []
+      const provider = { id: 'script', async *stream() {
+        if (calls++ === 0) {
+          yield { type: 'tool-call' as const, id: 'call', name: 'delegated_work', args }
+          yield { type: 'done' as const, finishReason: 'tool_calls' as const }
+        } else yield { type: 'done' as const, finishReason: 'stop' as const }
+      } }
+      const registry = new ToolRegistry([delegatedWorkTool])
+      for await (const event of runAgent({
+        provider, model: 'm', registry, tools: registry.specs(), messages: [],
+        context: { cwd: '/tmp', signal: new AbortController().signal, delegatedWork: store, sessionId: 's' },
+        permission: {
+          policy: new DefaultPermissionPolicy({ mode: 'yolo' }),
+          ask: async () => { asked += 1; return { allowed: true } },
+        },
+      })) {
+        if (event.type === 'tool-end') toolResults.push(event.result)
+      }
+      return toolResults
+    }
+
+    const deniedSend = await runTool({ action: 'create', name: 'Mail', objective: 'Send', allow: ['gmail_send'], target: { gateway: 'none' } })
+    expect(asked).toBe(0)
+    expect(deniedSend[0]).toContain('cannot be granted')
+
+    const missingId = await runTool({ action: 'resume', id: 'no-such-work' })
+    expect(asked).toBe(0)
+    expect(missingId[0]).toContain('No delegated work')
+
+    const created = await runTool({ action: 'create', name: 'Sweep', objective: 'Check repo', allow: ['gmail_modify'], target: { gateway: 'none' } })
+    expect(asked).toBe(1)
+    expect(created[0]).toContain('Sweep')
+    const id = store.list()[0]!.id
+    await runTool({ action: 'update', id, objective: 'Check tests too' })
+    await runTool({ action: 'pause', id })
+    expect(store.list()[0]).toMatchObject({ objective: 'Check tests too', state: 'paused' })
+    await runTool({ action: 'cancel', id })
+    expect(store.list()[0]?.state).toBe('cancelled')
+  })
+
+  it('recovers orphaned running work whose current run is absent', async () => {
+    const { store, file } = setup()
+    const work = await store.create(input)
+    await store.claim(work.id, 1000)
+    // Simulate a truncated/legacy file where work says running without an active run record
+    const raw = JSON.parse(readFileSync(file, 'utf8')) as Array<Record<string, unknown>>
+    raw[0]!.runs = []
+    writeFileSync(file, JSON.stringify(raw))
+    const reloaded = new DelegatedWorkStore(file)
+    await reloaded.recover(2000)
+    expect(reloaded.list()[0]).toMatchObject({ state: 'interrupted' })
+  })
+
+  it('keeps prior reports without overwriting them on failure and enforces strictProject', async () => {
+    const { store } = setup()
+    const work = await store.create({ ...input, objective: 'Run checks', schedule: { kind: 'every', minutes: 5 } })
+    const claimed1 = await store.claim(work.id, 1000)
+    await store.finish(work.id, claimed1!.run.id, { sessionId: 's1', report: 'Clean first run' }, 2000)
+    const claimed2 = await store.claim(work.id, 305_000)
+    await store.finish(work.id, claimed2!.run.id, { sessionId: 's2', report: '', failure: 'Gateway timeout' }, 306_000)
+    expect(store.list()[0]?.runs[1]).toMatchObject({ result: 'failed', failure: 'Gateway timeout', report: '' })
+
+    const { dir } = setup()
+    const strictWork = await store.create({ ...input, project: 'missing-project-folder' })
+    const runtime = new AgentRuntime({
+      provider: { id: 'stub', async *stream() { yield { type: 'done', finishReason: 'stop' } } },
+      model: 'test', system: '', cwd: dir,
+      registry: { specs: () => [] } as never,
+      memory: { remember: async () => undefined, recall: async () => [], list: async () => [], forget: async () => false } as never,
+    })
+    const scheduler = new DelegatedScheduler({ store, runtime, deliver: async () => undefined, log: () => undefined })
+    await scheduler.start()
+    await scheduler.settle()
+    scheduler.stop()
+    await runtime.close()
+    expect(store.list().find((item) => item.id === strictWork.id)).toMatchObject({
+      state: 'failed',
+      runs: [{ result: 'failed', failure: 'No project with the id missing-project-folder.' }],
+    })
+  })
 })

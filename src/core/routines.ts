@@ -688,7 +688,7 @@ const SILENT_RUN =
 export async function runRoutineOnce(
   runtime: AgentRuntime,
   routine: Routine,
-  options?: { signal?: AbortSignal; project?: string; strictGrants?: boolean },
+  options?: { signal?: AbortSignal; project?: string; strictGrants?: boolean; strictProject?: boolean },
 ): Promise<RoutineRunResult> {
   const session = await runtime.newSession(
     { gateway: ROUTINE_GATEWAY, chatId: routine.id },
@@ -701,6 +701,7 @@ export async function runRoutineOnce(
       grantedTools: routine.allow,
       strictGrants: options?.strictGrants ?? true,
       project: options?.project,
+      strictProject: options?.strictProject,
       deliverTo: routine.target.gateway === 'none'
         ? { gateway: ROUTINE_GATEWAY, chatId: routine.id }
         : routine.target,

@@ -135,7 +135,7 @@ export interface RuntimeOptions {
    * What is known about a model — its window, output ceiling and reasoning mode —
    * for the compaction ceiling and the request's own limits.
    */
-  modelProfile?: (model: string) => Promise<ModelProfile | undefined>
+  modelProfile?: (model: string, providerId?: string) => Promise<ModelProfile | undefined>
   /** How hard the model should think; `medium` unless the config was changed. */
   reasoningEffort?: ReasoningEffort
   /**
@@ -176,6 +176,8 @@ export interface NewSessionOptions {
   /** Tools the run may use with nobody to ask — a routine's standing grants. */
   grantedTools?: string[]
   strictGrants?: boolean
+  /** Fails opening a session when its requested project folder is missing or invalid. */
+  strictProject?: boolean
   /** The chat its turns may send files to — a routine's own target. */
   deliverTo?: { gateway: string; chatId: string }
   /**
@@ -780,7 +782,7 @@ export class AgentRuntime {
     const placement = options?.project
       ? lockedPlacement ?? this.options.project?.(options.project)
       : undefined
-    if (options?.backend === 'command-code' && options.project && !placement?.ok) {
+    if ((options?.backend === 'command-code' || options?.strictProject) && options?.project && !placement?.ok) {
       throw new Error(placement && !placement.ok ? placement.error : `No project with the id ${options.project}.`)
     }
     await this.detach(scope)

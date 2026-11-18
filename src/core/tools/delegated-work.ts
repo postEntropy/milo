@@ -6,8 +6,8 @@ import type { Tool } from './types.js'
 const schema = z.object({
   action: z.enum(['create', 'list', 'show', 'pause', 'resume', 'cancel', 'update']),
   id: z.string().optional().describe('The work id shown by list.'),
-  name: z.string().optional().describe('A short name for the work.'),
-  objective: z.string().optional().describe('The complete objective, including what the person wants reported.'),
+  name: z.string().max(120).optional().describe('A short name for the work.'),
+  objective: z.string().max(8_000).optional().describe('The complete objective, including what the person wants reported.'),
   every: z.string().optional().describe('A recurring interval, such as 2h. Omit all schedule fields for one-time work.'),
   at: z.string().optional().describe('The local clock time for recurring work, such as 08:00.'),
   days: z.array(z.string()).optional(),
@@ -17,6 +17,24 @@ const schema = z.object({
   gateway: z.enum(['telegram', 'discord', 'web', 'none']).optional(),
   chatId: z.string().optional(),
   allow: z.array(z.string()).optional().describe('Tools allowed unattended; these are standing grants the person must approve.'),
+}).superRefine((args, ctx) => {
+  const scheduled = args.every !== undefined || args.at !== undefined || args.days !== undefined || args.dayOfMonth !== undefined || args.month !== undefined
+  if (args.action !== 'create') {
+    if (args.name !== undefined || args.allow !== undefined || args.gateway !== undefined || args.chatId !== undefined) {
+      ctx.addIssue({ code: 'custom', message: `name, allow, gateway and chatId only apply to action "create".` })
+    }
+  }
+  if (args.action !== 'create' && args.action !== 'update') {
+    if (scheduled || args.objective !== undefined || args.once !== undefined) {
+      ctx.addIssue({ code: 'custom', message: `schedule, once and objective only apply to create or update.` })
+    }
+  }
+  if (args.once && (args.action !== 'update' || scheduled)) {
+    ctx.addIssue({ code: 'custom', message: 'once only applies on update without schedule fields.' })
+  }
+  if (args.name && /[\r\n]/.test(args.name)) {
+    ctx.addIssue({ code: 'custom', message: 'Work name must fit on one line.' })
+  }
 })
 type Args = z.infer<typeof schema>
 
@@ -28,12 +46,18 @@ function target(args: Args, origin?: { gateway: string; chatId: string }): Routi
   return { gateway: 'none' }
 }
 
+function needsCreateConfirmation(args: Args): boolean {
+  if (args.action !== 'create' || !(args.allow?.length)) return false
+  if (!args.name?.trim() || !args.objective?.trim() || args.allow.includes('gmail_send')) return false
+  return true
+}
+
 export const delegatedWorkTool: Tool<Args> = {
   name: 'delegated_work',
   description: 'Manage work delegated to Milo to run in the background. Create one-time work or ongoing work on a schedule; it starts when milo serve is running and ongoing work runs again at its scheduled time. Give a complete objective and a short name. The same agent can create Crew bots during the work. Use list before show, update, pause, resume or cancel, and use the exact id. Update changes the objective or replaces the schedule while not running. A run may use only its standing grants without a person present: name the fewest needed in allow, which asks the person to approve them. The work inherits the current Session folder and delivers to the current chat when possible; gateway none keeps its history without sending a message.',
   schema,
-  asksWhen: (args) => (args.action === 'create' && (args.allow?.length ?? 0) > 0) || args.action === 'resume' || args.action === 'update',
-  requiresConfirmation: (args) => (args.action === 'create' && (args.allow?.length ?? 0) > 0) || args.action === 'resume' || args.action === 'update',
+  asksWhen: (args) => needsCreateConfirmation(args) || ((args.action === 'resume' || args.action === 'update') && Boolean(args.id?.trim())),
+  requiresConfirmation: (args) => needsCreateConfirmation(args) || ((args.action === 'resume' || args.action === 'update') && Boolean(args.id?.trim())),
   async execute(args, ctx) {
     if (!ctx.delegatedWork || !ctx.sessionId) return { content: 'Delegated work is not available in this session.', isError: true }
     try {

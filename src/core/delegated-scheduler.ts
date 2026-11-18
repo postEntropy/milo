@@ -1,4 +1,5 @@
 import { errorMessage } from '../util/errors.js'
+import { formatPriorReports } from './crew.js'
 import type { OutgoingMessage } from './outgoing.js'
 import { runRoutineOnce, type Routine, type RoutineRunResult } from './routines.js'
 import type { AgentRuntime } from './runtime.js'
@@ -16,6 +17,7 @@ export class DelegatedScheduler {
     store: DelegatedWorkStore
     runtime: AgentRuntime
     deliver: (work: DelegatedWork, message: OutgoingMessage) => Promise<void>
+    onChanged?: () => void
     log: (message: string) => void
     now?: () => number
   }) {}
@@ -47,14 +49,23 @@ export class DelegatedScheduler {
     try {
       const now = this.now()
       for (const work of this.options.store.list()) {
+        if (this.stopped) break
         if (this.running.has(work.id)) continue
         if (work.state !== 'queued' && !(work.state === 'waiting' && work.nextAt !== undefined && work.nextAt <= now)) continue
         const claimed = await this.options.store.claim(work.id, now)
         if (!claimed) continue
+        if (this.stopped) {
+          await this.options.store.finish(claimed.work.id, claimed.run.id, { report: '', failure: 'The scheduler stopped before starting this run.' }, this.now()).catch(() => undefined)
+          break
+        }
         this.running.add(work.id)
+        this.options.onChanged?.()
         const pending = this.fire(claimed.work, claimed.run.id)
           .catch((error) => this.options.log(`Delegated work ${work.id} failed: ${errorMessage(error)}`))
-          .finally(() => this.running.delete(work.id))
+          .finally(() => {
+            this.running.delete(work.id)
+            this.options.onChanged?.()
+          })
         this.pending.add(pending)
         void pending.finally(() => this.pending.delete(pending))
       }
@@ -64,25 +75,33 @@ export class DelegatedScheduler {
   }
 
   private async fire(work: DelegatedWork, runId: string): Promise<void> {
+    if (this.stopped || work.state === 'cancelled') {
+      await this.options.store.finish(work.id, runId, { report: '', failure: 'The work was cancelled before starting.' }, this.now()).catch(() => undefined)
+      return
+    }
     const stop = new AbortController()
     let monitorError: string | undefined
     const monitor = setInterval(() => {
       try {
+        if (this.stopped) { stop.abort(); return }
         const current = this.options.store.list().find((item) => item.id === work.id)
         if (!current) throw new Error('The work disappeared.')
         if (current.state === 'cancelled') stop.abort()
       } catch (error) { monitorError = errorMessage(error); stop.abort() }
     }, 250)
     monitor.unref?.()
-    const prior = work.runs.slice(0, -1).filter((run) => run.report).map((run) => run.report).join('\n\n')
+    const prior = formatPriorReports(
+      work.runs.slice(0, -1).map((run) => (!run.failure ? run.report : undefined)),
+      'Previous reports from this work:',
+    )
     const routine: Routine = {
       id: work.id, name: work.name,
-      prompt: `${work.objective}${prior ? `\n\nPrevious reports from this work:\n${prior}` : ''}`,
+      prompt: `${work.objective}${prior ? `\n\n${prior}` : ''}`,
       when: work.schedule ?? { kind: 'every', minutes: 1 }, target: work.target,
       allow: work.allow, enabled: true, createdAt: work.createdAt,
     }
     let result: RoutineRunResult
-    try { result = await runRoutineOnce(this.options.runtime, routine, { signal: stop.signal, project: work.project, strictGrants: true }) }
+    try { result = await runRoutineOnce(this.options.runtime, routine, { signal: stop.signal, project: work.project, strictGrants: true, strictProject: Boolean(work.project) }) }
     catch (error) { result = { answer: '', failure: errorMessage(error), files: [] } }
     finally { clearInterval(monitor) }
     if (monitorError) result.failure = `Could not monitor the work: ${monitorError}`

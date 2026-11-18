@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 import lockfile from 'proper-lockfile'
 import { z } from 'zod'
@@ -8,6 +8,23 @@ import { errorMessage } from '../util/errors.js'
 import { logWarn } from '../util/log.js'
 import { delegatedWorkFile } from './config/paths.js'
 import { nextRunAt, type RoutineTarget, type RoutineWhen } from './routines.js'
+
+const PROCESS_INSTANCE_ID = randomUUID()
+const MAX_WORK_RUNS = 50
+
+function isDeadRunPid(pid: number, instanceId: string | undefined, forStartupRecover: boolean): boolean {
+  if (forStartupRecover && instanceId && pid === process.pid && instanceId !== PROCESS_INSTANCE_ID) {
+    return true
+  }
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ESRCH' || code === 'EPERM') return true
+    throw error
+  }
+}
 
 const scheduleSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('every'), minutes: z.number().positive().finite() }),
@@ -21,7 +38,8 @@ const targetSchema = z.union([
 const runSchema = z.object({
   id: z.string(), startedAt: z.number(), finishedAt: z.number().optional(), sessionId: z.string().optional(),
   result: z.enum(['running', 'completed', 'failed', 'interrupted', 'cancelled']),
-  report: z.string().optional(), processId: z.number().int().positive(),
+  report: z.string().optional(), failure: z.string().optional(), processId: z.number().int().positive(),
+  instanceId: z.string().optional(),
   deliveryError: z.string().optional(),
 })
 const workSchema = z.object({
@@ -34,7 +52,7 @@ const workSchema = z.object({
 
 export type DelegatedWork = z.infer<typeof workSchema>
 export type DelegatedRun = z.infer<typeof runSchema>
-export interface NewDelegatedWork {
+interface NewDelegatedWork {
   name: string
   objective: string
   schedule?: RoutineWhen
@@ -47,14 +65,34 @@ export interface NewDelegatedWork {
 /** The install's one record of delegated objectives, shared by every surface. */
 export class DelegatedWorkStore {
   private tail: Promise<void> = Promise.resolve()
+  private cached: { mtimeMs: number; size: number; data: DelegatedWork[] } | null = null
   constructor(private readonly file = delegatedWorkFile()) {}
 
-  list(): DelegatedWork[] {
+  private readAll(bypassCache = false): DelegatedWork[] {
+    let stat: { mtimeMs: number; size: number }
+    try { stat = statSync(this.file) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') { this.cached = null; return [] }
+      throw error
+    }
+    if (!bypassCache && this.cached && this.cached.mtimeMs === stat.mtimeMs && this.cached.size === stat.size) {
+      return structuredClone(this.cached.data)
+    }
     let raw: string
     try { raw = readFileSync(this.file, 'utf8') }
-    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
-    try { return z.array(workSchema).parse(JSON.parse(raw)) }
-    catch (error) { throw new Error(`Could not read delegated work: ${errorMessage(error)}`) }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') { this.cached = null; return [] }
+      throw error
+    }
+    try {
+      const parsed = z.array(workSchema).parse(JSON.parse(raw))
+      this.cached = { mtimeMs: stat.mtimeMs, size: stat.size, data: parsed }
+      return structuredClone(parsed)
+    } catch (error) { throw new Error(`Could not read delegated work: ${errorMessage(error)}`) }
+  }
+
+  list(): DelegatedWork[] {
+    return this.readAll()
   }
 
   private async change<T>(fn: (items: DelegatedWork[]) => T): Promise<T> {
@@ -70,8 +108,9 @@ export class DelegatedWorkStore {
         retries: { retries: 15, factor: 1.5, minTimeout: 20, maxTimeout: 250, randomize: true },
         onCompromised: (error) => logWarn(`lost the lock on delegated work: ${errorMessage(error)}`),
       })
-      const items = this.list()
+      const items = this.readAll(true)
       const result = fn(items)
+      this.cached = null
       await writePrivateFile(this.file, `${JSON.stringify(items, null, 2)}\n`)
       return result
     } finally {
@@ -92,8 +131,13 @@ export class DelegatedWorkStore {
     return this.change((items) => {
       const work = items.find((item) => item.id === id)
       if (!work || !(work.state === 'queued' || (work.state === 'waiting' && work.nextAt !== undefined && work.nextAt <= now))) return null
-      const run: DelegatedRun = { id: randomUUID(), startedAt: now, result: 'running', processId: process.pid }
+      const run: DelegatedRun = { id: randomUUID(), startedAt: now, result: 'running', processId: process.pid, instanceId: PROCESS_INSTANCE_ID }
       work.runs.push(run)
+      if (work.runs.length > MAX_WORK_RUNS) {
+        const running = work.runs.filter((entry) => entry.result === 'running')
+        const finished = work.runs.filter((entry) => entry.result !== 'running')
+        work.runs = [...finished.slice(-(MAX_WORK_RUNS - running.length)), ...running]
+      }
       work.state = 'running'
       delete work.nextAt
       return { work, run }
@@ -107,7 +151,8 @@ export class DelegatedWorkStore {
       if (!work || !run || run.result !== 'running') throw new Error('The running work was not found.')
       run.finishedAt = now
       run.sessionId = result.sessionId
-      run.report = result.failure ?? result.report
+      run.report = result.report
+      if (result.failure) run.failure = result.failure
       run.result = work.state === 'cancelled' ? 'cancelled' : result.failure ? 'failed' : 'completed'
       if (work.state === 'cancelled') return work
       if (work.pauseAfterRun) { work.state = 'paused'; delete work.pauseAfterRun }
@@ -170,9 +215,14 @@ export class DelegatedWorkStore {
         }
         if (work.state !== 'running' && work.state !== 'cancelled') continue
         const run = work.runs.findLast((entry) => entry.result === 'running')
-        if (!run) continue
-        try { process.kill(run.processId, 0); continue }
-        catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error }
+        if (!run) {
+          if (work.state === 'cancelled') continue
+          if (work.pauseAfterRun) { work.state = 'paused'; delete work.pauseAfterRun }
+          else if (work.schedule) { work.state = 'waiting'; work.nextAt = nextRunAt(work.schedule, new Date(now)).getTime() }
+          else work.state = 'interrupted'
+          continue
+        }
+        if (!isDeadRunPid(run.processId, run.instanceId, true)) continue
         run.result = work.state === 'cancelled' ? 'cancelled' : 'interrupted'
         run.finishedAt = now
         run.report = 'The process running this work stopped before it finished.'
