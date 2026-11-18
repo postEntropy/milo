@@ -1,4 +1,3 @@
-import { spawn } from 'node:child_process'
 import {
   beginChatGptBrowserLogin,
   beginChatGptDeviceLogin,
@@ -9,6 +8,7 @@ import {
   importCodexLogin,
 } from '../core/chatgpt/auth.js'
 import { errorMessage } from '../util/errors.js'
+import { openBrowser } from '../util/terminal.js'
 
 const USAGE = `milo chatgpt — sign in with a ChatGPT (Codex) subscription
 
@@ -36,6 +36,11 @@ export async function runChatGpt(argv: string[]): Promise<number> {
   const fresh = rest.includes('--new')
 
   switch (sub ?? 'status') {
+    case 'help':
+    case '--help':
+    case '-h':
+      console.log(USAGE)
+      return 0
     case 'login':
       return login({ device, fresh })
     case 'status':
@@ -122,20 +127,4 @@ function who(account: { email?: string; planType?: string }): string {
   const email = account.email ?? 'this account'
   const plan = chatGptPlanName(account.planType)
   return plan ? `${email} (ChatGPT ${plan})` : email
-}
-
-function openBrowser(url: string): void {
-  const command =
-    process.platform === 'darwin'
-      ? (['open', [url]] as const)
-      : process.platform === 'win32'
-        ? (['cmd', ['/c', 'start', '', url]] as const)
-        : (['xdg-open', [url]] as const)
-  try {
-    const child = spawn(command[0], [...command[1]], { stdio: 'ignore', detached: true })
-    child.on('error', () => {})
-    child.unref()
-  } catch {
-    // The URL is printed above; opening a browser is a convenience.
-  }
 }

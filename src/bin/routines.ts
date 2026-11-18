@@ -1,6 +1,5 @@
-import process from 'node:process'
-import { createInterface } from 'node:readline/promises'
 import { createRuntime } from '../core/bootstrap.js'
+import { confirmOnTty } from '../util/terminal.js'
 import { DEFAULT_WORKING_DIRECTORY } from '../core/config/paths.js'
 import { loadConfig } from '../core/config/load.js'
 import {
@@ -22,7 +21,7 @@ import {
   type RoutineGateway,
   type RoutineTarget,
 } from '../core/routines.js'
-import { builtinTools } from '../core/tools/index.js'
+import { GRANTABLE_ROUTINE_TOOLS, unknownGrantableTools } from '../core/tools/index.js'
 import { errorMessage } from '../util/errors.js'
 import { plural } from '../util/format.js'
 
@@ -38,19 +37,7 @@ export interface RoutineIo {
  * the install is configured for them, and a grant for one should not be a typo
  * that quietly does nothing.
  */
-const GRANTABLE = new Set([
-  ...builtinTools.map((tool) => tool.name),
-  'web_search',
-  'read_skill',
-  'browser_open',
-  'browser_snapshot',
-  'browser_screenshot',
-  'browser_act',
-  'gmail_modify',
-  'gmail_draft',
-  'gmail_send',
-  'mail_labels',
-])
+const GRANTABLE = GRANTABLE_ROUTINE_TOOLS
 
 const USAGE = [
   'Usage:',
@@ -122,6 +109,8 @@ export async function runRoutines(argv: string[], io: Partial<RoutineIo> = {}): 
       case 'run':
         return await run(rest, out, err)
       case 'help':
+      case '--help':
+      case '-h':
         out(USAGE)
         return 0
       default:
@@ -257,7 +246,7 @@ async function add(argv: string[], context: Required<RoutineIo>): Promise<number
   }
 
   if (flags.allow?.length) {
-    const unknown = flags.allow.filter((name) => !GRANTABLE.has(name))
+    const unknown = unknownGrantableTools(flags.allow)
     if (unknown.length > 0) {
       context.err(`Not a tool I know: ${unknown.join(', ')}. Valid tools: ${[...GRANTABLE].sort().join(', ')}.`)
       context.err(USAGE)
@@ -373,12 +362,4 @@ async function run(argv: string[], out: RoutineIo['out'], err: RoutineIo['err'])
  * not take a standing grant on the strength of a bare Enter — no terminal at all
  * is a no too, and `--yes` is how a script says it meant it.
  */
-async function askOnTty(question: string): Promise<boolean> {
-  if (!process.stdin.isTTY) return false
-  const readline = createInterface({ input: process.stdin, output: process.stdout })
-  try {
-    return /^y(es)?$/i.test((await readline.question(question)).trim())
-  } finally {
-    readline.close()
-  }
-}
+const askOnTty = confirmOnTty

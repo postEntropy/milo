@@ -64,6 +64,11 @@ export async function runMcp(argv: string[], io: Partial<McpIo> = {}): Promise<n
         list(out, manager.status())
         return 0
       }
+      case 'help':
+      case '--help':
+      case '-h':
+        out(USAGE)
+        return 0
       default:
         // A word that is not a verb answers with the verbs, never a default.
         err(`Unknown mcp command "${verb}".\n${USAGE}`)

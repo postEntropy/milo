@@ -26,8 +26,18 @@ export interface Args {
   /** `milo run --allow tool,…`: tools this unattended run may use without asking. */
   allow: string[]
   unknownFlags: string[]
+  /** First flag that expected a value at the end of argv and got none. */
+  missingValue?: string
   /** The bare words after the command — for `milo run`, the prompt. */
   prompt?: string
+}
+
+function takeValue(argv: string[], next: number, flag: string, args: Args): string | undefined {
+  if (next >= argv.length) {
+    args.missingValue ??= flag
+    return undefined
+  }
+  return argv[next]
 }
 
 /**
@@ -58,17 +68,19 @@ export function parseArgs(argv: string[]): Args {
     else if (flag === '--yolo') args.yolo = true
     else if (flag === '--no-web') args.noWeb = true
     else if (flag === '--json') args.json = true
-    else if (flag === '--web-port') args.webPort = Number(argv[++i])
-    else if (flag === '--mode') args.mode = argv[++i]
-    else if (flag === '--provider') args.provider = argv[++i]
-    else if (flag === '--model' || flag === '-m') args.model = argv[++i]
-    else if (flag === '--resume') args.resume = argv[++i]
+    else if (flag === '--web-port') {
+      const value = takeValue(argv, ++i, flag, args)
+      if (value !== undefined) args.webPort = Number(value)
+    } else if (flag === '--mode') args.mode = takeValue(argv, ++i, flag, args)
+    else if (flag === '--provider') args.provider = takeValue(argv, ++i, flag, args)
+    else if (flag === '--model' || flag === '-m') args.model = takeValue(argv, ++i, flag, args)
+    else if (flag === '--resume') args.resume = takeValue(argv, ++i, flag, args)
     else if (flag === '--continue' || flag === '-c') args.continueSession = true
-    else if (flag === '--project') args.project = argv[++i]
-    else if (flag === '--cwd') args.cwd = argv[++i]
-    else if (flag === '--session') args.session = argv[++i]
+    else if (flag === '--project') args.project = takeValue(argv, ++i, flag, args)
+    else if (flag === '--cwd') args.cwd = takeValue(argv, ++i, flag, args)
+    else if (flag === '--session') args.session = takeValue(argv, ++i, flag, args)
     else if (flag === '--allow') {
-      const value = argv[++i]
+      const value = takeValue(argv, ++i, flag, args)
       if (value) args.allow.push(...value.split(',').map((name) => name.trim()).filter(Boolean))
     } else if (flag.startsWith('-')) args.unknownFlags.push(flag)
     else words.push(flag)

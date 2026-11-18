@@ -15,7 +15,7 @@ import { resolveProjectRef } from '../core/projects.js'
 import { resolveToolPath } from '../core/tools/walk.js'
 
 import { parseArgs, type Args } from './args.js'
-import { resolveCommand, resolveInitialMode, validateArgs } from './dispatch.js'
+import { isResourceCommand, resolveCommand, resolveInitialMode, SERVE_USAGE, validateArgs } from './dispatch.js'
 import { applyOverrides } from './overrides.js'
 
 const { version: VERSION } = createRequire(import.meta.url)('../../package.json') as {
@@ -34,7 +34,7 @@ Usage:
   milo log                   What the execution log holds (status | tail | follow | trim)
   milo routines              The prompts Milo runs on a timer (list | add | remove | enable | run)
   milo projects              The folders a session may work in (list | add | rename | move | remove)
-  milo google                Connect a Google account, read-only (connect | status | forget)
+  milo google                Connect a Google account (connect | status | forget)
   milo chatgpt               Sign in with a ChatGPT (Codex) subscription (login | status | logout)
   milo pair                  Let a phone in: prints a one-time code and the address to give
   milo devices               The devices paired with this Milo (list | revoke)
@@ -91,7 +91,7 @@ async function runTui(
         standalone,
         initialMode,
         project,
-        resumeId: args.resume,
+        resumeId: args.resume ?? args.session,
         continueSession: args.continueSession,
       }),
       {
@@ -121,14 +121,96 @@ async function runTui(
 }
 
 async function main(): Promise<void> {
-  const args = parseArgs(process.argv.slice(2))
+  const argv = process.argv.slice(2)
+  const args = parseArgs(argv)
+  const command = resolveCommand(args.command)
+
+  if (command === null) {
+    console.error(`Unknown command: ${args.command}\n`)
+    printHelp()
+    process.exitCode = 1
+    return
+  }
+
+  // Resource commands and `run` own their own flags, help text, and validation.
+  if (isResourceCommand(command)) {
+    switch (command) {
+      case 'web': {
+        const { runWeb } = await import('./web.js')
+        await runWeb(argv)
+        return
+      }
+      case 'spotlight': {
+        const { runSpotlight } = await import('./spotlight.js')
+        await runSpotlight(argv)
+        return
+      }
+      case 'skills': {
+        const { runSkills } = await import('./skills.js')
+        process.exitCode = await runSkills(argv)
+        return
+      }
+      case 'history': {
+        const { runHistory } = await import('./history.js')
+        process.exitCode = await runHistory(argv)
+        return
+      }
+      case 'log': {
+        const { runLog } = await import('./log.js')
+        process.exitCode = await runLog(argv)
+        return
+      }
+      case 'routines': {
+        const { runRoutines } = await import('./routines.js')
+        process.exitCode = await runRoutines(argv)
+        return
+      }
+      case 'projects': {
+        const { runProjects } = await import('./projects.js')
+        process.exitCode = await runProjects(argv)
+        return
+      }
+      case 'mcp': {
+        const { runMcp } = await import('./mcp.js')
+        process.exitCode = await runMcp(argv)
+        return
+      }
+      case 'google': {
+        const { runGoogle } = await import('./google.js')
+        process.exitCode = await runGoogle(argv)
+        return
+      }
+      case 'chatgpt': {
+        const { runChatGpt } = await import('./chatgpt.js')
+        process.exitCode = await runChatGpt(argv)
+        return
+      }
+      case 'pair': {
+        const { runPair } = await import('./pair.js')
+        process.exitCode = await runPair(argv)
+        return
+      }
+      case 'devices': {
+        const { runDevices } = await import('./devices.js')
+        process.exitCode = await runDevices(argv)
+        return
+      }
+    }
+  }
+
+  if (command === 'run') {
+    const { runCommand } = await import('./run.js')
+    process.exitCode = await runCommand(argv)
+    return
+  }
 
   if (args.version) {
     console.log(VERSION)
     return
   }
   if (args.help) {
-    printHelp()
+    if (command === 'serve') console.log(SERVE_USAGE)
+    else printHelp()
     return
   }
 
@@ -139,13 +221,12 @@ async function main(): Promise<void> {
     return
   }
   const initialMode = resolveInitialMode(args)
-  const command = resolveCommand(args.command)
 
   // `milo run` resolves its own project after loading the config; the terminal
   // surfaces need only the id, and a bad reference is said here rather than after
   // the TUI has taken the screen.
   let project: string | undefined
-  if (args.project && command !== 'run') {
+  if (args.project) {
     const found = resolveProjectRef(args.project)
     if (!found) {
       console.error(`No project "${args.project}" is registered. See \`milo projects list\`.`)
@@ -154,7 +235,7 @@ async function main(): Promise<void> {
     }
     project = found.id
   }
-  if (args.cwd && command !== 'run') {
+  if (args.cwd) {
     const folder = resolveToolPath(process.cwd(), args.cwd)
     if (!statSync(folder, { throwIfNoEntry: false })?.isDirectory()) {
       console.error(`--cwd "${args.cwd}" is not a folder.`)
@@ -164,89 +245,20 @@ async function main(): Promise<void> {
   }
 
   switch (command) {
-    case 'run': {
-      const { runCommand } = await import('./run.js')
-      process.exitCode = await runCommand(process.argv.slice(2))
-      return
-    }
     case 'serve': {
       const { runServe } = await import('../gateways/serve.js')
       await runServe({ noWeb: args.noWeb, webPort: args.webPort })
       return
     }
-    case 'web': {
-      const { runWeb } = await import('./web.js')
-      await runWeb(process.argv.slice(2))
-      return
-    }
-    case 'spotlight': {
-      const { runSpotlight } = await import('./spotlight.js')
-      await runSpotlight(process.argv.slice(2))
-      return
-    }
     case 'model':
       await runTui('model', true, args, initialMode)
       return
-    case 'skills': {
-      const { runSkills } = await import('./skills.js')
-      process.exitCode = await runSkills(process.argv.slice(2))
-      return
-    }
-    case 'history': {
-      const { runHistory } = await import('./history.js')
-      process.exitCode = await runHistory(process.argv.slice(2))
-      return
-    }
-    case 'log': {
-      const { runLog } = await import('./log.js')
-      process.exitCode = await runLog(process.argv.slice(2))
-      return
-    }
-    case 'routines': {
-      const { runRoutines } = await import('./routines.js')
-      process.exitCode = await runRoutines(process.argv.slice(2))
-      return
-    }
-    case 'projects': {
-      const { runProjects } = await import('./projects.js')
-      process.exitCode = await runProjects(process.argv.slice(2))
-      return
-    }
-    case 'mcp': {
-      const { runMcp } = await import('./mcp.js')
-      process.exitCode = await runMcp(process.argv.slice(2))
-      return
-    }
-    case 'google': {
-      const { runGoogle } = await import('./google.js')
-      process.exitCode = await runGoogle(process.argv.slice(2))
-      return
-    }
-    case 'chatgpt': {
-      const { runChatGpt } = await import('./chatgpt.js')
-      process.exitCode = await runChatGpt(process.argv.slice(2))
-      return
-    }
-    case 'pair': {
-      const { runPair } = await import('./pair.js')
-      process.exitCode = await runPair(process.argv.slice(2))
-      return
-    }
-    case 'devices': {
-      const { runDevices } = await import('./devices.js')
-      process.exitCode = await runDevices(process.argv.slice(2))
-      return
-    }
     case 'setup':
       await runTui('settings', true, args, initialMode)
       return
     case 'chat':
       await runTui('chat', false, args, initialMode, project)
       return
-    default:
-      console.error(`Unknown command: ${args.command}\n`)
-      printHelp()
-      process.exitCode = 1
   }
 }
 

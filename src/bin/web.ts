@@ -7,7 +7,7 @@ import { loadConfig, readAuth, resolveGatewayToken } from '../core/config/load.j
 import { MILO_HOME } from '../core/config/paths.js'
 import { bindProblem, startWebServer, webReachLines } from '../gateways/web/http.js'
 import { errorMessage } from '../util/errors.js'
-import { hyperlink } from '../util/terminal.js'
+import { hyperlink, openBrowser } from '../util/terminal.js'
 
 interface Options {
   host?: string
@@ -77,18 +77,6 @@ function parseOptions(args: string[]): Options {
     } else throw new Error(`Unknown option: ${arg}`)
   }
   return options
-}
-
-async function openBrowser(url: string): Promise<void> {
-  const commands = process.platform === 'darwin'
-    ? ['open', [url]] as const
-    : process.platform === 'win32'
-      ? ['cmd', ['/c', 'start', '', url]] as const
-      : ['xdg-open', [url]] as const
-  const { spawn } = await import('node:child_process')
-  const child = spawn(commands[0], [...commands[1]], { stdio: 'ignore', detached: true })
-  child.on('error', () => undefined)
-  child.unref()
 }
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {

@@ -72,9 +72,16 @@ describe('parseArgs', () => {
     expect(parseArgs(['serve']).webPort).toBeUndefined()
   })
 
-  it('leaves a flag with a missing value undefined instead of throwing', () => {
-    expect(parseArgs(['--model']).model).toBeUndefined()
-    expect(parseArgs(['--mode']).mode).toBeUndefined()
+  it('leaves a flag with a missing value undefined instead of throwing, and records it for validation', () => {
+    const model = parseArgs(['--model'])
+    expect(model.model).toBeUndefined()
+    expect(validateArgs(model)).toContain('Missing value for "--model"')
+    const mode = parseArgs(['--mode'])
+    expect(mode.mode).toBeUndefined()
+    expect(validateArgs(mode)).toContain('Missing value for "--mode"')
+    const port = parseArgs(['serve', '--web-port'])
+    expect(port.webPort).toBeUndefined()
+    expect(validateArgs(port)).toContain('Missing value for "--web-port"')
   })
 
   it('takes the bare words after run as the prompt', () => {
@@ -111,6 +118,12 @@ describe('validateArgs', () => {
   it('lets a resource command read its own flags', () => {
     expect(validateArgs(parseArgs(['chatgpt', 'login', '--device']))).toBeNull()
     expect(validateArgs(parseArgs(['chatgpt', 'login', '--new']))).toBeNull()
+    expect(validateArgs(parseArgs(['routines', 'add', 'hi', '--every', '1h', '--gateway', 'none']))).toBeNull()
+    expect(validateArgs(parseArgs(['google', 'connect', '--access', 'readonly']))).toBeNull()
+    expect(validateArgs(parseArgs(['history', 'trim', '--older-than', '30', '--yes']))).toBeNull()
+    expect(validateArgs(parseArgs(['log', '-f']))).toBeNull()
+    expect(validateArgs(parseArgs(['projects', 'add', '/tmp', '--name', 'demo']))).toBeNull()
+    expect(validateArgs(parseArgs(['skills', 'add', '--skill', 'x', '-y']))).toBeNull()
     expect(validateArgs(parseArgs(['chatgpt', 'login', '--banana']))).toContain('Unknown option')
   })
 

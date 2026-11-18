@@ -81,12 +81,28 @@ async function readPrompt(args: ReturnType<typeof parseArgs>, deps: RunDeps): Pr
   return Buffer.concat(chunks).toString('utf8').trim()
 }
 
+const RUN_USAGE = [
+  'Usage:',
+  '  milo run "prompt"                   One turn, no UI: answer on stdout',
+  '  milo run --json "prompt"            One JSON object per event',
+  '  milo run --session <id> "prompt"    Continue a specific session (--resume also accepted)',
+  '  milo run --continue "prompt"        Continue the last terminal session',
+  '  milo run --project <ref> "prompt"   Work in a registered project folder',
+  '  milo run --cwd <folder> "prompt"    Work in a folder as it is',
+  '  milo run --allow <tools> "prompt"   Grant tools for this unattended run',
+  '  milo run --mode <mode> "prompt"     Permission mode: ask | auto | yolo',
+].join('\n')
+
 export async function runCommand(
   argv: string[],
   io: RunIo = defaultIo,
   deps: RunDeps = {},
 ): Promise<number> {
   const args = parseArgs(argv)
+  if (args.help) {
+    io.out(`${RUN_USAGE}\n`)
+    return 0
+  }
   const problem = validateArgs(args)
   if (problem) {
     io.err(`${problem}\n`)
@@ -144,10 +160,11 @@ export async function runCommand(
   const runtime: RunRuntime = deps.runtime ?? createRuntime(loaded, cwd)
   try {
     let session: RunSession | null
-    if (args.session) {
-      session = await runtime.resumeSession(RUN_SCOPE, args.session)
+    const resumeId = args.session ?? args.resume
+    if (resumeId) {
+      session = await runtime.resumeSession(RUN_SCOPE, resumeId)
       if (!session) {
-        io.err(`No session "${args.session}".\n`)
+        io.err(`No session "${resumeId}".\n`)
         return 1
       }
     } else if (args.continueSession) {
@@ -174,9 +191,12 @@ export async function runCommand(
     /** The gate's verdict, when the install turned it on. */
     let verified: boolean | undefined
     for await (const event of session.send(prompt)) {
+      if (event.type === 'error') failed = true
+      else if (event.type === 'aborted') aborted = true
+      else if (event.type === 'verification') verified = event.ok
+
       if (args.json) {
         io.out(`${JSON.stringify(event)}\n`)
-        if (event.type === 'verification') verified = event.ok
         continue
       }
       if (event.type === 'text-delta') {
@@ -184,13 +204,9 @@ export async function runCommand(
         wrote = true
       } else if (event.type === 'error') {
         io.err(`${wrote ? '\n' : ''}${event.message}\n`)
-        failed = true
-      } else if (event.type === 'aborted') {
-        aborted = true
       } else if (event.type === 'verification') {
         // The answer stays on stdout; the verdict goes to stderr, so a pipe
         // reading the answer is not handed the report with it.
-        verified = event.ok
         io.err(`${event.text}\n`)
       }
     }

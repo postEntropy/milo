@@ -63,6 +63,8 @@ export async function runProjects(argv: string[], io: Partial<ProjectIo> = {}): 
       case 'rm':
         return await remove(rest, out, err)
       case 'help':
+      case '--help':
+      case '-h':
         out(USAGE)
         return 0
       default:

@@ -165,17 +165,34 @@ describe('milo run', () => {
     expect(runtime.opened).toEqual([])
   })
 
-  it('continues a named session, and refuses one that is gone', async () => {
+  it('continues a named session via --session or --resume, and refuses one that is gone', async () => {
     const io = collector()
     const session = new FakeSession('s1', answer)
     const runtime = new FakeRuntime(session)
 
     expect(await runCommand(['run', '--session', 'calm-otter-7', 'go'], io, { loaded: loaded(), runtime })).toBe(0)
-    expect(runtime.resumed).toEqual(['calm-otter-7'])
+    expect(await runCommand(['run', '--resume', 'calm-otter-7', 'go'], io, { loaded: loaded(), runtime })).toBe(0)
+    expect(runtime.resumed).toEqual(['calm-otter-7', 'calm-otter-7'])
 
     const missing = new FakeRuntime(null)
     expect(await runCommand(['run', '--session', 'calm-otter-7', 'go'], io, { loaded: loaded(), runtime: missing })).toBe(1)
     expect(io.errors()).toContain('No session "calm-otter-7"')
+  })
+
+  it('exits one in --json mode when the turn errors or aborts, and prints help cleanly', async () => {
+    const helpIo = collector()
+    expect(await runCommand(['run', '--help'], helpIo)).toBe(0)
+    expect(helpIo.text()).toContain('milo run')
+
+    const errIo = collector()
+    const errRuntime = new FakeRuntime(new FakeSession('s1', [{ type: 'error', message: 'boom' }]))
+    expect(await runCommand(['run', '--json', 'go'], errIo, { loaded: loaded(), runtime: errRuntime })).toBe(1)
+    expect(errIo.text()).toContain('"type":"error"')
+
+    const abortIo = collector()
+    const abortRuntime = new FakeRuntime(new FakeSession('s1', [{ type: 'aborted' }]))
+    expect(await runCommand(['run', '--json', 'go'], abortIo, { loaded: loaded(), runtime: abortRuntime })).toBe(1)
+    expect(abortIo.text()).toContain('"type":"aborted"')
   })
 
   it('picks up the session this conversation last used with --continue', async () => {

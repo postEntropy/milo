@@ -1,10 +1,11 @@
 import process from 'node:process'
-import { createInterface } from 'node:readline/promises'
 import { tracesFile } from '../core/config/paths.js'
 import { dayOf } from '../core/history.js'
 import { followTraces, readTraces, traceStatus, trimTraces, type TraceEvent } from '../core/traces.js'
 import { errorMessage } from '../util/errors.js'
 import { humanSize, shortenPath } from '../util/format.js'
+import { confirmOnTty } from '../util/terminal.js'
+import { parseTrimFlags } from './trim.js'
 
 export interface LogIo {
   out(line: string): void
@@ -56,6 +57,8 @@ export async function runLog(argv: string[], io: Partial<LogIo> = {}): Promise<n
       case 'trim':
         return await trim(rest, { out, err, confirm })
       case 'help':
+      case '--help':
+      case '-h':
         out(USAGE)
         return 0
       default:
@@ -127,32 +130,8 @@ function tail(argv: string[], out: LogIo['out'], err: LogIo['err']): number {
   return 0
 }
 
-interface TrimFlags {
-  days?: number
-  before?: string
-  yes: boolean
-}
-
-function parseTrim(argv: string[]): TrimFlags {
-  const flags: TrimFlags = { yes: false }
-  for (let i = 0; i < argv.length; i += 1) {
-    const token = argv[i]!
-    if (token === '--yes' || token === '-y') flags.yes = true
-    else if (token === '--older-than') {
-      const value = Number(argv[++i])
-      if (!Number.isFinite(value) || value < 0) throw new Error('--older-than needs a number of days.')
-      flags.days = value
-    } else if (token === '--before') {
-      const value = argv[++i]
-      if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) throw new Error('--before needs a date like 2025-01-31.')
-      flags.before = value
-    } else if (token.startsWith('-')) throw new Error(`Unknown option ${token}.`)
-  }
-  return flags
-}
-
 async function trim(argv: string[], context: Required<LogIo>): Promise<number> {
-  const flags = parseTrim(argv)
+  const flags = parseTrimFlags(argv)
   const before =
     flags.before ??
     (flags.days !== undefined
@@ -187,12 +166,4 @@ async function trim(argv: string[], context: Required<LogIo>): Promise<number> {
  * Asks, unless there is nobody to ask. A piped `milo log trim` must not trim by
  * assuming the answer — a bare Enter is a no, and no terminal at all is a no too.
  */
-async function askOnTty(question: string): Promise<boolean> {
-  if (!process.stdin.isTTY) return false
-  const readline = createInterface({ input: process.stdin, output: process.stdout })
-  try {
-    return /^y(es)?$/i.test((await readline.question(question)).trim())
-  } finally {
-    readline.close()
-  }
-}
+const askOnTty = confirmOnTty

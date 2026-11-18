@@ -1,7 +1,7 @@
 import path from 'node:path'
 import process from 'node:process'
-import { createInterface } from 'node:readline/promises'
 import { skillsDir } from '../core/config/paths.js'
+import { confirmOnTty } from '../util/terminal.js'
 import { BUILTIN_SKILLS, SUGGESTED_SOURCES } from '../core/skills/builtin.js'
 import { SKILLS_DIRECTORY, fetchLeaderboard, type PopularSkill } from '../core/skills/catalog.js'
 import {
@@ -48,6 +48,10 @@ export async function runSkills(argv: string[], io: Partial<SkillsIo> = {}): Pro
   const confirm = io.confirm ?? askOnTty
 
   const args = argv[0] === 'skills' ? argv.slice(1) : argv
+  if (args.includes('--help') || args.includes('-h')) {
+    out(USAGE)
+    return 0
+  }
   let parsed: Parsed
   try {
     parsed = parseFlags(args)
@@ -74,6 +78,8 @@ export async function runSkills(argv: string[], io: Partial<SkillsIo> = {}): Pro
       case 'rm':
         return remove(rest[0], out, err, dir)
       case 'help':
+      case '--help':
+      case '-h':
         out(USAGE)
         return 0
       default:
@@ -277,12 +283,4 @@ function remove(
  * install by assuming the answer — a bare Enter is a no, and no terminal at all
  * is a no too.
  */
-async function askOnTty(question: string): Promise<boolean> {
-  if (!process.stdin.isTTY) return false
-  const readline = createInterface({ input: process.stdin, output: process.stdout })
-  try {
-    return /^y(es)?$/i.test((await readline.question(question)).trim())
-  } finally {
-    readline.close()
-  }
-}
+const askOnTty = confirmOnTty

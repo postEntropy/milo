@@ -30,6 +30,8 @@ export async function runDevices(argv: string[] = [], io: Partial<DevicesIo> = {
       case 'revoke':
         return revoke(rest[0], out, err)
       case 'help':
+      case '--help':
+      case '-h':
         out(USAGE)
         return 0
       default:

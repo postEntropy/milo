@@ -21,6 +21,32 @@ export type Command =
   | 'devices'
   | 'run'
 
+export const SERVE_USAGE = [
+  'Usage:',
+  '  milo serve                 Run the enabled bot gateways and the web UI',
+  '  milo serve --no-web        Run the bot gateways without the web UI',
+  '  milo serve --web-port <n>  Port for the web UI (default 7717)',
+].join('\n')
+
+const RESOURCE_COMMANDS = new Set<Command>([
+  'skills',
+  'history',
+  'log',
+  'routines',
+  'projects',
+  'mcp',
+  'google',
+  'chatgpt',
+  'pair',
+  'devices',
+  'web',
+  'spotlight',
+])
+
+export function isResourceCommand(command: Command | null): command is Command {
+  return command !== null && RESOURCE_COMMANDS.has(command)
+}
+
 /**
  * Flags a resource command reads itself. The global parser does not know them,
  * so they are kept out of the unknown list for the command that owns them
@@ -28,11 +54,20 @@ export type Command =
  */
 const RESOURCE_FLAGS: Record<string, readonly string[]> = {
   chatgpt: ['--device', '--new'],
+  google: ['--access', '--client-id', '--client-secret', '--credentials'],
+  history: ['--older-than', '--before', '--yes', '-y'],
+  log: ['-f', '--follow', '--older-than', '--before', '--yes', '-y'],
+  projects: ['--name', '--icon'],
+  routines: ['--every', '--at', '--days', '--day-of-month', '--month', '--gateway', '--to', '--chat', '--limit', '--silent', '--name', '--yes'],
+  skills: ['--skill', '-s', '--yes', '-y'],
   web: ['--no-open', '--host', '--port'],
 }
 
 /** What the command line asks for, or the message to say instead of running. */
 export function validateArgs(args: Args): string | null {
+  if (args.missingValue) {
+    return `Missing value for "${args.missingValue}".`
+  }
   const unknown = args.unknownFlags.filter((flag) => !RESOURCE_FLAGS[args.command]?.includes(flag))
   if (unknown.length > 0) {
     const valid = '--version (-v), --help (-h), --yolo, --no-web, --json, --web-port, --mode, --provider, --model (-m), --resume, --continue (-c), --project, --cwd, --session, --allow'

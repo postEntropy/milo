@@ -7,7 +7,6 @@
  */
 import process from 'node:process'
 import { readFileSync } from 'node:fs'
-import { createInterface } from 'node:readline/promises'
 import { readAuth, readConfig, saveAuth } from '../core/config/load.js'
 import { connectGoogle } from '../core/google/connect.js'
 import { googleState } from '../core/google/state.js'
@@ -21,7 +20,7 @@ import {
 import { GOOGLE_SHORTCUT, googleStepsInWords } from '../core/google/walkthrough.js'
 import { googleToolNames, googleWriteToolNames } from '../core/tools/index.js'
 import { errorMessage } from '../util/errors.js'
-import { hyperlink } from '../util/terminal.js'
+import { askOnTty, hyperlink } from '../util/terminal.js'
 
 const CLOUD = 'https://console.cloud.google.com/apis/credentials'
 
@@ -72,6 +71,8 @@ export async function runGoogle(argv: string[], io: Partial<GoogleIo> = {}): Pro
       case 'forget':
         return forget(out)
       case 'help':
+      case '--help':
+      case '-h':
         out(USAGE)
         return 0
       default:
@@ -257,16 +258,6 @@ async function chooseAccess(
   io.err('No access level was chosen.')
   io.err(`Pick one of: ${GOOGLE_TIERS.map((tier) => tier.id).join(', ')}`)
   return null
-}
-
-async function askOnTty(question: string): Promise<string> {
-  if (!process.stdin.isTTY) return ''
-  const readline = createInterface({ input: process.stdin, output: process.stdout })
-  try {
-    return await readline.question(question)
-  } finally {
-    readline.close()
-  }
 }
 
 /**
