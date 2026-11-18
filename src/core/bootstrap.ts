@@ -115,11 +115,14 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
 
   const store = new FileSessionStore({ dir: sessionsDir() })
   const recaps = new FileRecapStore({ dir: recapsDir() })
+  const delegatedWork = new DelegatedWorkStore()
   // A run leaves a session behind once it is spoken in, so the directory is
   // pruned on the way in — and the empties a run opened but never used are
   // swept with it. Not waited for: the first turn does not need it, and a prune
   // is not a reason to keep someone waiting at the prompt.
-  void pruneSessions(store, recaps, loaded.config.sessions.maxSessions).catch((error) => {
+  void pruneSessions(store, recaps, loaded.config.sessions.maxSessions, () =>
+    delegatedWork.list().flatMap((work) => work.runs.flatMap((run) => run.sessionId ? [run.sessionId] : [])),
+  ).catch((error) => {
     logWarn(`could not prune old sessions: ${errorMessage(error)}`)
   })
 
@@ -240,7 +243,7 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     // `milo serve` is what runs it.
     routine: routines,
     crew: new CrewStore(),
-    delegatedWork: new DelegatedWorkStore(),
+    delegatedWork,
     skills,
     sessions: loaded.config.sessions,
     // Where a model's shape comes from: its window, output ceiling and reasoning

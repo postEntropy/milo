@@ -113,6 +113,15 @@ describe('a routine run is a session of its own', () => {
 })
 
 describe('a routine’s history outlives the generic prune', () => {
+  it('keeps sessions still referenced by delegated work', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-runs-'))
+    const { runtime, store, recaps } = build(dir)
+    const run = await runRoutineOnce(runtime, routine('brave-otter-1'))
+    expect(run.id).toBeDefined()
+    for (let index = 0; index < 101; index += 1) await runRoutineOnce(runtime, routine('busy-routine'))
+    await pruneSessions(store, recaps, 1, () => [run.id!])
+    expect(await runtime.loadSession(run.id!)).not.toBeNull()
+  })
   it('spares the runs when old sessions are swept', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-runs-'))
     const { runtime, store, recaps } = build(dir)

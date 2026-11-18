@@ -22,6 +22,7 @@ export async function pruneSessions(
   store: SessionStore,
   recaps: RecapStore,
   keep: number,
+  referencedRuns?: () => Iterable<string>,
 ): Promise<number> {
   const removed = new Set<string>()
   try {
@@ -42,6 +43,7 @@ export async function pruneSessions(
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, 100)
       .map((session) => session.id)
+    if (referencedRuns) runs.push(...referencedRuns())
     for (const id of await store.prune({ keep, protect: runs })) removed.add(id)
   } catch (error) {
     logWarn(`could not prune old sessions: ${errorMessage(error)}`)
