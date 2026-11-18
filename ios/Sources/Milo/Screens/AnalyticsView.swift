@@ -148,6 +148,7 @@ private struct SessionTraceTurn: Decodable, Identifiable, Equatable {
     let ms: Double
     let spanMs: Double
     let ok: Bool
+    let session: String?
     let model: String?
     let surface: String?
     let requests: Int
@@ -156,6 +157,10 @@ private struct SessionTraceTurn: Decodable, Identifiable, Equatable {
     let inputTokens: Int
     let outputTokens: Int
     let events: [AnalyticsEvent]
+
+    var listKey: String {
+        "\(session ?? ""):\(id):\(startedAt)"
+    }
 
     var steps: [AnalyticsEvent] {
         let nonTurn = events.filter { $0.event != "turn" }
@@ -169,6 +174,74 @@ private struct SessionTraceTurn: Decodable, Identifiable, Equatable {
     var startMs: Double {
         AnalyticsDate.timestampMs(from: startedAt) ?? steps.first?.startMs ?? 0
     }
+}
+
+private struct AnalyticsTurnsReport: Decodable, Equatable {
+    let turns: [SessionTraceTurn]
+    let total: Int
+    let totalEvents: Int
+    let requests: Int
+    let embeddingRequests: Int?
+    let requestsWithUsage: Int
+    let failures: Int
+    let inputTokens: Int
+    let outputTokens: Int
+    let averageMs: Double?
+    let models: [AnalyticsModel]
+}
+
+private enum AnalyticsViewMode: String, CaseIterable, Identifiable {
+    case traces
+    case turns
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .traces: return "Traces"
+        case .turns: return "Turns"
+        }
+    }
+}
+
+private struct AnalyticsSummary: Equatable {
+    let totalCount: Int
+    let requests: Int
+    let embeddingRequests: Int?
+    let requestsWithUsage: Int
+    let failures: Int
+    let inputTokens: Int
+    let outputTokens: Int
+    let averageMs: Double?
+    let models: [AnalyticsModel]
+
+    init(_ report: AnalyticsReport) {
+        totalCount = report.total
+        requests = report.requests
+        embeddingRequests = report.embeddingRequests
+        requestsWithUsage = report.requestsWithUsage
+        failures = report.failures
+        inputTokens = report.inputTokens
+        outputTokens = report.outputTokens
+        averageMs = report.averageMs
+        models = report.models
+    }
+
+    init(_ report: AnalyticsTurnsReport) {
+        totalCount = report.total
+        requests = report.requests
+        embeddingRequests = report.embeddingRequests
+        requestsWithUsage = report.requestsWithUsage
+        failures = report.failures
+        inputTokens = report.inputTokens
+        outputTokens = report.outputTokens
+        averageMs = report.averageMs
+        models = report.models
+    }
+}
+
+private struct InspectedSession: Identifiable {
+    let id: String
 }
 
 private struct SessionTraceReport: Decodable, Equatable {
@@ -356,12 +429,16 @@ struct AnalyticsView: View, Equatable {
     }
     @Environment(AppModel.self) private var appModel
     @State private var path: [String] = []
+    @State private var viewMode: AnalyticsViewMode = .traces
     @State private var report: AnalyticsReport?
+    @State private var turnsReport: AnalyticsTurnsReport?
     /// Full model breakdown for the active period/event filter, kept stable when a single
     /// model is tapped so the list does not collapse to one row.
     @State private var catalogModels: [AnalyticsModel] = []
     @State private var selectedModel: String?
     @State private var showAllModels = false
+    @State private var collapsedTurns: Set<String> = []
+    @State private var inspectedSession: InspectedSession?
     @State private var error: String?
     @State private var query = ""
     @State private var kind = "all"
@@ -379,9 +456,16 @@ struct AnalyticsView: View, Equatable {
         PeriodFilter(rawValue: days) ?? .allTime
     }
 
+    private var activeSummary: AnalyticsSummary? {
+        switch viewMode {
+        case .traces: return report.map(AnalyticsSummary.init)
+        case .turns: return turnsReport.map(AnalyticsSummary.init)
+        }
+    }
+
     private var displayedModels: [AnalyticsModel] {
         if !catalogModels.isEmpty { return catalogModels }
-        return report?.models ?? []
+        return activeSummary?.models ?? []
     }
 
     private var totalCatalogRequests: Int {
@@ -403,8 +487,8 @@ struct AnalyticsView: View, Equatable {
                             .transition(.opacity.combined(with: .scale(scale: 0.96)))
                     }
 
-                    if let report {
-                        metricsSection(report)
+                    if let summary = activeSummary {
+                        metricsSection(summary)
                         if !displayedModels.isEmpty {
                             modelsSection(displayedModels)
                         }
@@ -453,8 +537,16 @@ struct AnalyticsView: View, Equatable {
             .navigationDestination(for: String.self) { id in
                 AnalyticsDetailView(account: account, id: id)
             }
+            .sheet(item: $inspectedSession) { target in
+                SessionTracesSheet(account: account, sessionId: target.id, sessionTitle: target.id)
+            }
             .refreshable { await load() }
             .task { await load() }
+            .onChange(of: viewMode) { _, _ in
+                UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                offset = 0
+                Task { await load() }
+            }
             .onChange(of: kind) { _, _ in
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
                 offset = 0
@@ -511,15 +603,18 @@ struct AnalyticsView: View, Equatable {
                 .font(MiloTheme.Text.body)
                 .foregroundStyle(MiloTheme.muted)
 
-            if let report {
+            if let summary = activeSummary {
+                let unit = viewMode == .turns
+                    ? (summary.totalCount == 1 ? "turn" : "turns")
+                    : (summary.totalCount == 1 ? "event" : "events")
                 HStack(spacing: MiloTheme.Space.two) {
-                    Label("\(report.total.formatted()) \(report.total == 1 ? "event" : "events")", systemImage: "waveform.path.ecg")
+                    Label("\(summary.totalCount.formatted()) \(unit)", systemImage: "waveform.path.ecg")
                     Text("·").foregroundStyle(MiloTheme.muted)
-                    Text("\(report.requests.formatted()) \(report.requests == 1 ? "request" : "requests")")
+                    Text("\(summary.requests.formatted()) \(summary.requests == 1 ? "request" : "requests")")
                         .foregroundStyle(MiloTheme.muted)
-                    if report.failures > 0 {
+                    if summary.failures > 0 {
                         Text("·").foregroundStyle(MiloTheme.muted)
-                        Text("\(report.failures.formatted()) failed")
+                        Text("\(summary.failures.formatted()) failed")
                             .foregroundStyle(MiloTheme.danger)
                     }
                     Spacer(minLength: 0)
@@ -528,6 +623,14 @@ struct AnalyticsView: View, Equatable {
                 .contentTransition(.numericText())
                 .padding(.top, MiloTheme.Space.one)
             }
+
+            Picker("View", selection: $viewMode) {
+                ForEach(AnalyticsViewMode.allCases) { mode in
+                    Text(mode.label).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .padding(.top, MiloTheme.Space.one)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(MiloTheme.Space.five)
@@ -535,16 +638,16 @@ struct AnalyticsView: View, Equatable {
     }
 
     @ViewBuilder
-    private func metricsSection(_ report: AnalyticsReport) -> some View {
+    private func metricsSection(_ summary: AnalyticsSummary) -> some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
             HStack(spacing: MiloTheme.Space.two) {
                 metric(
                     "Model requests",
-                    report.requests.formatted(),
+                    summary.requests.formatted(),
                     icon: "cpu",
                     iconTone: MiloTheme.accent
                 )
-                if let count = report.embeddingRequests, count > 0 {
+                if let count = summary.embeddingRequests, count > 0 {
                     metric(
                         "Embedding requests",
                         count.formatted(),
@@ -557,37 +660,37 @@ struct AnalyticsView: View, Equatable {
             HStack(spacing: MiloTheme.Space.two) {
                 metric(
                     "Average request",
-                    report.averageMs.map { duration($0) } ?? "—",
+                    summary.averageMs.map { duration($0) } ?? "—",
                     icon: "timer",
                     iconTone: MiloTheme.muted
                 )
                 metric(
                     "Failed events",
-                    report.failures.formatted(),
-                    icon: report.failures > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle",
-                    iconTone: report.failures > 0 ? MiloTheme.danger : MiloTheme.success,
-                    failed: report.failures > 0
+                    summary.failures.formatted(),
+                    icon: summary.failures > 0 ? "exclamationmark.triangle.fill" : "checkmark.circle",
+                    iconTone: summary.failures > 0 ? MiloTheme.danger : MiloTheme.success,
+                    failed: summary.failures > 0
                 )
             }
 
             HStack(spacing: MiloTheme.Space.two) {
                 metric(
                     "Input tokens",
-                    report.inputTokens.formatted(),
+                    summary.inputTokens.formatted(),
                     icon: "arrow.down.circle",
                     iconTone: MiloTheme.secondary
                 )
                 metric(
                     "Output tokens",
-                    report.outputTokens.formatted(),
+                    summary.outputTokens.formatted(),
                     icon: "arrow.up.circle",
                     iconTone: MiloTheme.accent
                 )
             }
 
-            if report.requestsWithUsage < report.requests {
+            if summary.requestsWithUsage < summary.requests {
                 Label(
-                    "Token counts are available for \(report.requestsWithUsage.formatted()) of \(report.requests.formatted()) requests.",
+                    "Token counts are available for \(summary.requestsWithUsage.formatted()) of \(summary.requests.formatted()) requests.",
                     systemImage: "info.circle"
                 )
                 .font(MiloTheme.Text.small)
@@ -783,15 +886,21 @@ struct AnalyticsView: View, Equatable {
         }
     }
 
+    private var sectionHeading: String {
+        let label = viewMode.label
+        guard let total = activeSummary?.totalCount, total > 0 else { return label }
+        return "\(label) · \(total.formatted())"
+    }
+
     private var tracesSection: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
             HStack(alignment: .center, spacing: MiloTheme.Space.two) {
-                Text(report.map { $0.total > 0 ? "Traces · \($0.total.formatted())" : "Traces" } ?? "Traces")
+                Text(sectionHeading)
                     .font(MiloTheme.Text.title.monospacedDigit())
                     .foregroundStyle(MiloTheme.foreground)
                     .contentTransition(.numericText())
 
-                if loading && report != nil {
+                if loading && activeSummary != nil {
                     ProgressView()
                         .controlSize(.small)
                         .transition(.opacity)
@@ -826,37 +935,57 @@ struct AnalyticsView: View, Equatable {
 
             filtersBar
 
-            if loading && report == nil {
-                VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-                    Image(systemName: "hourglass")
-                        .font(.system(size: 22, weight: .medium))
-                        .foregroundStyle(MiloTheme.accent)
-                    Text("Loading traces…")
-                        .font(MiloTheme.Text.body.weight(.semibold))
-                        .foregroundStyle(MiloTheme.foreground)
-                    Text("Reading execution events from Milo.")
-                        .font(MiloTheme.Text.small)
-                        .foregroundStyle(MiloTheme.muted)
-                }
-                .padding(MiloTheme.Space.five)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .glassCard()
-            } else if let report {
-                if report.events.isEmpty {
-                    VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-                        Image(systemName: "magnifyingglass")
-                            .font(.system(size: 22, weight: .medium))
-                            .foregroundStyle(MiloTheme.accent)
-                        Text("No traces found.")
-                            .font(MiloTheme.Text.body.weight(.semibold))
-                            .foregroundStyle(MiloTheme.foreground)
-                        Text("Try clearing your search or widening the time range.")
-                            .font(MiloTheme.Text.small)
-                            .foregroundStyle(MiloTheme.muted)
+            if loading && activeSummary == nil {
+                statusCard(
+                    icon: "hourglass",
+                    title: viewMode == .turns ? "Loading turns…" : "Loading traces…",
+                    subtitle: "Reading execution events from Milo."
+                )
+            } else if viewMode == .turns, let turnsReport {
+                if turnsReport.turns.isEmpty {
+                    statusCard(
+                        icon: "magnifyingglass",
+                        title: "No turns found.",
+                        subtitle: "Try clearing your search or widening the time range."
+                    )
+                    .transition(.opacity)
+                } else {
+                    LazyVStack(spacing: MiloTheme.Space.four) {
+                        ForEach(turnsReport.turns, id: \.listKey) { turn in
+                            let key = turn.listKey
+                            TurnTimelineCard(
+                                turn: turn,
+                                collapsed: collapsedTurns.contains(key),
+                                showSession: true,
+                                onToggle: {
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                    withAnimation(.spring(response: 0.3, dampingFraction: 0.85)) {
+                                        if collapsedTurns.contains(key) {
+                                            collapsedTurns.remove(key)
+                                        } else {
+                                            collapsedTurns.insert(key)
+                                        }
+                                    }
+                                },
+                                onSelect: { id in
+                                    path.append(id)
+                                },
+                                onOpenSession: { sessionId in
+                                    inspectedSession = InspectedSession(id: sessionId)
+                                }
+                            )
+                        }
                     }
-                    .padding(MiloTheme.Space.five)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .glassCard()
+
+                    paginationBar(total: turnsReport.total, singular: "turn", plural: "turns")
+                }
+            } else if viewMode == .traces, let report {
+                if report.events.isEmpty {
+                    statusCard(
+                        icon: "magnifyingglass",
+                        title: "No traces found.",
+                        subtitle: "Try clearing your search or widening the time range."
+                    )
                     .transition(.opacity)
                 } else {
                     LazyVStack(spacing: MiloTheme.Space.two) {
@@ -868,10 +997,27 @@ struct AnalyticsView: View, Equatable {
                         }
                     }
 
-                    paginationBar(report)
+                    paginationBar(total: report.total, singular: "event", plural: "events")
                 }
             }
         }
+    }
+
+    private func statusCard(icon: String, title: String, subtitle: String) -> some View {
+        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+            Image(systemName: icon)
+                .font(.system(size: 22, weight: .medium))
+                .foregroundStyle(MiloTheme.accent)
+            Text(title)
+                .font(MiloTheme.Text.body.weight(.semibold))
+                .foregroundStyle(MiloTheme.foreground)
+            Text(subtitle)
+                .font(MiloTheme.Text.small)
+                .foregroundStyle(MiloTheme.muted)
+        }
+        .padding(MiloTheme.Space.five)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .glassCard()
     }
 
     private var filtersBar: some View {
@@ -1011,9 +1157,9 @@ struct AnalyticsView: View, Equatable {
         }
     }
 
-    private func paginationBar(_ report: AnalyticsReport) -> some View {
+    private func paginationBar(total: Int, singular: String, plural: String) -> some View {
         let canPrevious = offset > 0
-        let canNext = offset + 30 < report.total
+        let canNext = offset + 30 < total
         return HStack(spacing: MiloTheme.Space.three) {
             Button {
                 UIImpactFeedbackGenerator(style: .light).impactOccurred()
@@ -1038,7 +1184,7 @@ struct AnalyticsView: View, Equatable {
 
             Spacer(minLength: 0)
 
-            Text("\(report.total.formatted()) events")
+            Text("\(total.formatted()) \(total == 1 ? singular : plural)")
                 .font(MiloTheme.Text.small.monospacedDigit())
                 .foregroundStyle(MiloTheme.muted)
                 .contentTransition(.numericText())
@@ -1069,42 +1215,71 @@ struct AnalyticsView: View, Equatable {
         .padding(.top, MiloTheme.Space.two)
     }
 
+    private func fetchWithCatalog<T: Decodable & Sendable>(
+        action: String,
+        as type: T.Type,
+        effectiveQuery: String,
+        needsCatalog: Bool,
+        models: @escaping (T) -> [AnalyticsModel]
+    ) async throws -> (T, [AnalyticsModel]) {
+        async let filteredCall = MiloApi.call(
+            action,
+            ["query": effectiveQuery, "event": kind, "days": days, "offset": offset],
+            account: account,
+            as: type,
+            timeout: 120
+        )
+        if needsCatalog {
+            async let catalogCall = MiloApi.call(
+                action,
+                ["query": "", "event": kind, "days": days, "offset": 0],
+                account: account,
+                as: type,
+                timeout: 120
+            )
+            let (next, fullCatalog) = try await (filteredCall, catalogCall)
+            return (next, models(fullCatalog))
+        }
+        let next = try await filteredCall
+        return (next, models(next))
+    }
+
     @MainActor private func load() async {
         loadGeneration += 1
         let generation = loadGeneration
+        let targetMode = viewMode
         loading = true
         defer { if generation == loadGeneration { loading = false } }
         let effectiveQuery = selectedModel ?? query
         let needsCatalog = selectedModel != nil || !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         do {
-            async let filteredCall = MiloApi.call(
-                "analytics",
-                ["query": effectiveQuery, "event": kind, "days": days, "offset": offset],
-                account: account,
-                as: AnalyticsReport.self,
-                timeout: 120
-            )
-            if needsCatalog {
-                async let catalogCall = MiloApi.call(
-                    "analytics",
-                    ["query": "", "event": kind, "days": days, "offset": 0],
-                    account: account,
+            switch targetMode {
+            case .traces:
+                let (next, models) = try await fetchWithCatalog(
+                    action: "analytics",
                     as: AnalyticsReport.self,
-                    timeout: 120
+                    effectiveQuery: effectiveQuery,
+                    needsCatalog: needsCatalog,
+                    models: \.models
                 )
-                let (next, fullCatalog) = try await (filteredCall, catalogCall)
                 guard generation == loadGeneration else { return }
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
                     report = next
-                    catalogModels = fullCatalog.models
+                    catalogModels = models
                     error = nil
                 }
-            } else {
-                let next = try await filteredCall
+            case .turns:
+                let (next, models) = try await fetchWithCatalog(
+                    action: "analytics-turns",
+                    as: AnalyticsTurnsReport.self,
+                    effectiveQuery: effectiveQuery,
+                    needsCatalog: needsCatalog,
+                    models: \.models
+                )
                 guard generation == loadGeneration else { return }
                 withAnimation(.spring(response: 0.34, dampingFraction: 0.84)) {
-                    report = next
-                    catalogModels = next.models
+                    turnsReport = next
+                    catalogModels = models
                     error = nil
                 }
             }
@@ -2290,8 +2465,10 @@ struct SessionTracesSheet: View {
 private struct TurnTimelineCard: View {
     let turn: SessionTraceTurn
     let collapsed: Bool
+    var showSession: Bool = false
     let onToggle: () -> Void
     let onSelect: (String) -> Void
+    var onOpenSession: ((String) -> Void)? = nil
 
     private var toolCallIds: Set<String> {
         Set(turn.steps.filter { $0.event == "tool.call" }.compactMap(\.callId))
@@ -2350,6 +2527,21 @@ private struct TurnTimelineCard: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer(minLength: MiloTheme.Space.two)
+                    if showSession, let sessionId = turn.session, !sessionId.isEmpty, let onOpenSession {
+                        Button {
+                            onOpenSession(sessionId)
+                        } label: {
+                            Text("Session")
+                                .font(MiloTheme.Text.meta.weight(.semibold))
+                                .foregroundStyle(MiloTheme.foreground2)
+                                .lineLimit(1)
+                                .fixedSize()
+                                .padding(.horizontal, MiloTheme.Space.two + 3)
+                                .padding(.vertical, 3)
+                                .glassEffect(.regular.interactive(), in: Capsule())
+                        }
+                        .buttonStyle(PressableStyle())
+                    }
                     if let summary = turn.summaryEvent {
                         Button {
                             onSelect(summary.id)
@@ -2408,6 +2600,12 @@ private struct TurnTimelineCard: View {
         var parts: [String] = []
         if let ts = AnalyticsDate.timestampMs(from: turn.startedAt) {
             parts.append(RelativeTime.when(ts))
+        }
+        if showSession, let session = turn.session, !session.isEmpty {
+            parts.append(session)
+        }
+        if showSession, let surface = turn.surface, !surface.isEmpty {
+            parts.append(surface)
         }
         if let model = turn.model, !model.isEmpty {
             parts.append(model)

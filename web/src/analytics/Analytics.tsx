@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { AnalyticsEvent, AnalyticsReport, SessionTraceReport, SessionTraceTurn } from '../../../src/core/analytics.js'
+import type { AnalyticsEvent, AnalyticsReport, AnalyticsTurnsReport, SessionTraceReport, SessionTraceTurn } from '../../../src/core/analytics.js'
 import { api } from '../lib/api.js'
 import { message } from '../lib/format.js'
 import { PageHeader } from '../ui/PageHeader.js'
@@ -50,6 +50,102 @@ function turnSteps(turn: SessionTraceTurn): AnalyticsEvent[] {
   return nonTurn.length > 0 ? nonTurn : turn.events
 }
 
+function TurnTimelineCard({
+  turn,
+  selected,
+  showSession = false,
+  onSelect,
+  onOpenSession,
+}: {
+  turn: SessionTraceTurn
+  selected: string | null
+  showSession?: boolean
+  onSelect: (id: string) => void
+  onOpenSession?: (sessionId: string) => void
+}) {
+  const turnOrigin = Date.parse(turn.startedAt)
+  const span = Math.max(1, turn.spanMs || turn.ms || 1)
+  const steps = turnSteps(turn)
+  const toolCallIds = new Set(steps.filter((item) => item.event === 'tool.call' && item.callId).map((item) => item.callId!))
+  const turnSummaryEvent = turn.events.find((item) => item.event === 'turn')
+  const subtitle = [
+    new Date(turn.startedAt).toLocaleString(),
+    showSession ? turn.session : null,
+    showSession ? turn.surface : null,
+    showSession ? turn.model : null,
+    duration(turn.ms),
+    turn.inputTokens || turn.outputTokens ? `${number(turn.inputTokens)} in / ${number(turn.outputTokens)} out` : null,
+  ].filter(Boolean).join(' · ')
+
+  return <div className="analytics-turn-card">
+    <div className="analytics-turn-head">
+      <div>
+        <div className="analytics-turn-title">Turn {turn.index}</div>
+        <div className="analytics-turn-sub">{subtitle}</div>
+      </div>
+      <div className="analytics-turn-meta">
+        {!turn.ok && <span className="analytics-pill danger">Failed</span>}
+        {showSession && turn.session && onOpenSession && (
+          <button type="button" className="analytics-pill-button" onClick={() => onOpenSession(turn.session!)}>Session</button>
+        )}
+        {turnSummaryEvent && (
+          <button type="button" className={`analytics-pill-button ${selected === turnSummaryEvent.id ? 'selected' : ''}`} onClick={() => onSelect(turnSummaryEvent.id)}>Inspect turn</button>
+        )}
+      </div>
+    </div>
+    <div className="analytics-timeline">
+      <div className="analytics-timeline-legend">
+        <span>Chronological · Start → End</span>
+        <span>{steps.length} {steps.length === 1 ? 'step' : 'steps'}</span>
+      </div>
+      {steps.map((item, idx) => {
+        const start = eventStart(item)
+        const offsetMs = Math.max(0, start - turnOrigin)
+        const leftPct = Math.max(0, Math.min(96, (offsetMs / span) * 100))
+        const widthPct = Math.max(2, Math.min(100 - leftPct, (Math.max(0, item.ms) / span) * 100))
+        const ttftPct = item.event === 'model.request' && typeof item.ttftMs === 'number' && item.ms > 0
+          ? Math.max(0, Math.min(100, (item.ttftMs / item.ms) * 100))
+          : 0
+        const nested = item.event !== 'tool.call' && Boolean(item.callId && toolCallIds.has(item.callId))
+        return <button type="button" className={`analytics-timeline-step ${nested ? 'nested' : ''} ${selected === item.id ? 'selected' : ''}`} key={item.id} onClick={() => onSelect(item.id)}>
+          <div className="analytics-timeline-top">
+            <span className={`analytics-dot ${item.ok ? 'ok' : 'fail'}`} />
+            <span className="analytics-step-index">#{idx + 1}</span>
+            <span className="analytics-step-title">{title(item)}</span>
+            <span className="analytics-pill">{eventLabel(item.event)}</span>
+            <span className="analytics-step-ms">{duration(item.ms)}</span>
+          </div>
+          <div className="analytics-waterfall-row">
+            <span className="analytics-step-offset">+{duration(offsetMs)}</span>
+            <div className="analytics-waterfall-track" aria-hidden="true">
+              <span className={`analytics-waterfall-bar ${item.ok ? '' : 'fail'}`} style={{ left: `${leftPct}%`, width: `${widthPct}%` }}>
+                {ttftPct > 0 && <span className="analytics-waterfall-ttft" style={{ width: `${ttftPct}%` }} />}
+              </span>
+            </div>
+          </div>
+          <div className="analytics-step-meta">
+            {[item.model && item.model !== turn.model ? item.model : null, item.inputTokens !== undefined && item.outputTokens !== undefined ? `${number(item.inputTokens)} in / ${number(item.outputTokens)} out` : null, typeof item.ttftMs === 'number' ? `TTFT ${duration(item.ttftMs)}` : null].filter(Boolean).join(' · ')}
+          </div>
+        </button>
+      })}
+    </div>
+  </div>
+}
+
+function PaginationBar({ offset, total, singular, plural, onPage }: {
+  offset: number
+  total: number
+  singular: string
+  plural: string
+  onPage: (next: number) => void
+}) {
+  return <div className="analytics-pages">
+    <button className="analytics-button" type="button" disabled={offset === 0} onClick={() => onPage(Math.max(0, offset - 30))}>Previous</button>
+    <span>{number(total)} {total === 1 ? singular : plural}</span>
+    <button className="analytics-button" type="button" disabled={offset + 30 >= total} onClick={() => onPage(offset + 30)}>Next</button>
+  </div>
+}
+
 export function Analytics({
   session = null,
   onSessionChange,
@@ -57,7 +153,9 @@ export function Analytics({
   session?: AnalyticsSessionTarget | null
   onSessionChange?: (next: AnalyticsSessionTarget | null) => void
 } = {}) {
+  const [view, setView] = useState<'traces' | 'turns'>('traces')
   const [report, setReport] = useState<AnalyticsReport | null>(null)
+  const [turnsReport, setTurnsReport] = useState<AnalyticsTurnsReport | null>(null)
   const [sessionReport, setSessionReport] = useState<SessionTraceReport | null>(null)
   const [detail, setDetail] = useState<Detail | null>(null)
   const [selected, setSelected] = useState<string | null>(null)
@@ -83,11 +181,17 @@ export function Analytics({
       }).catch((reason: unknown) => { if (active) setError(message(reason)) })
       return () => { active = false }
     }
+    if (view === 'turns') {
+      api<AnalyticsTurnsReport>('analytics-turns', { query, event, days: Number(days), offset }).then((value) => {
+        if (active) { setTurnsReport(value); setError('') }
+      }).catch((reason: unknown) => { if (active) setError(message(reason)) })
+      return () => { active = false }
+    }
     api<AnalyticsReport>('analytics', { query, event, days: Number(days), offset }).then((value) => {
       if (active) { setReport(value); setError('') }
     }).catch((reason: unknown) => { if (active) setError(message(reason)) })
     return () => { active = false }
-  }, [session?.id, query, event, days, offset, refresh])
+  }, [session?.id, view, query, event, days, offset, refresh])
   useEffect(() => {
     if (!selected) { setDetail(null); return }
     let active = true
@@ -98,16 +202,26 @@ export function Analytics({
     return () => { active = false }
   }, [selected])
   const update = (action: () => void) => { setOffset(0); action() }
+  const switchView = (next: 'traces' | 'turns') => {
+    if (next === view) return
+    setOffset(0)
+    setView(next)
+  }
   const openSessionTraces = (id: string, label?: string) => {
     setSelected(null)
     onSessionChange?.({ id, label: label || id })
   }
   const orderedTurns = sessionReport ? (ascending ? [...sessionReport.turns].reverse() : sessionReport.turns) : []
+  const summary = view === 'turns' ? turnsReport : report
   return <main className="settings-workspace"><div className="settings-inner analytics">
     <PageHeader
       title={session ? `Traces · ${session.label}` : 'Analytics'}
       description={session ? `Execution timeline for Session ${session.id}.` : 'Requests, tools and turns across Milo.'}
       action={<div className="analytics-header-actions">
+        {!session && <div className="analytics-view-switch" role="tablist" aria-label="Analytics view">
+          <button type="button" role="tab" aria-selected={view === 'traces'} className={`analytics-view-tab ${view === 'traces' ? 'active' : ''}`} onClick={() => switchView('traces')}>Traces</button>
+          <button type="button" role="tab" aria-selected={view === 'turns'} className={`analytics-view-tab ${view === 'turns' ? 'active' : ''}`} onClick={() => switchView('turns')}>Turns</button>
+        </div>}
         {session && <button className="analytics-button" type="button" onClick={() => setAscending((prev) => !prev)}>{ascending ? 'Oldest first' : 'Newest first'}</button>}
         {session && onSessionChange && <button className="analytics-button" type="button" onClick={() => { setSelected(null); onSessionChange(null) }}>All traces</button>}
         <button className="analytics-button" type="button" onClick={() => setRefresh((n) => n + 1)}>Refresh</button>
@@ -123,18 +237,19 @@ export function Analytics({
       <div><span>Total duration</span><strong>{duration(sessionReport.totalMs)}</strong></div>
       <div><span>Failed events</span><strong>{number(sessionReport.failures)}</strong></div>
     </div> : <>
-      {report && <div className="analytics-stats">
-        <div><span>Model requests</span><strong>{number(report.requests)}</strong></div>
-        {report.embeddingRequests > 0 && <div><span>Embedding requests</span><strong>{number(report.embeddingRequests)}</strong></div>}
-        <div><span>Input tokens</span><strong>{number(report.inputTokens)}</strong></div>
-        <div><span>Output tokens</span><strong>{number(report.outputTokens)}</strong></div>
-        <div><span>Average request</span><strong>{report.averageMs === null ? '—' : duration(report.averageMs)}</strong></div>
-        <div><span>Failed events</span><strong>{number(report.failures)}</strong></div>
+      {summary && <div className="analytics-stats">
+        {view === 'turns' && turnsReport && <div><span>Turns</span><strong>{number(turnsReport.total)}</strong></div>}
+        <div><span>Model requests</span><strong>{number(summary.requests)}</strong></div>
+        {summary.embeddingRequests > 0 && <div><span>Embedding requests</span><strong>{number(summary.embeddingRequests)}</strong></div>}
+        <div><span>Input tokens</span><strong>{number(summary.inputTokens)}</strong></div>
+        <div><span>Output tokens</span><strong>{number(summary.outputTokens)}</strong></div>
+        <div><span>Average request</span><strong>{summary.averageMs === null ? '—' : duration(summary.averageMs)}</strong></div>
+        <div><span>Failed events</span><strong>{number(summary.failures)}</strong></div>
       </div>}
-      {report && report.requestsWithUsage < report.requests && <p className="analytics-usage-note">Token counts are available for {number(report.requestsWithUsage)} of {number(report.requests)} requests.</p>}
-      {report && report.models.length > 0 && <section className="analytics-models" aria-label="Models">
+      {summary && summary.requestsWithUsage < summary.requests && <p className="analytics-usage-note">Token counts are available for {number(summary.requestsWithUsage)} of {number(summary.requests)} requests.</p>}
+      {summary && summary.models.length > 0 && <section className="analytics-models" aria-label="Models">
         <h3>Models</h3>
-        <div>{report.models.map((model) => <button type="button" className="analytics-model" key={model.model} onClick={() => update(() => setQuery(model.model))}>
+        <div>{summary.models.map((model) => <button type="button" className="analytics-model" key={model.model} onClick={() => update(() => setQuery(model.model))}>
           <strong>{model.model}</strong><span>{number(model.requests)} requests · {number(model.inputTokens)} input · {number(model.outputTokens)} output{model.failures ? ` · ${number(model.failures)} failed` : ''}</span>
         </button>)}</div>
       </section>}
@@ -149,65 +264,25 @@ export function Analytics({
       </div>
     </>}
     <div className="analytics-layout">
-      <section aria-label={session ? 'Session turn timeline' : 'Trace history'} className="analytics-list">
+      <section aria-label={session ? 'Session turn timeline' : view === 'turns' ? 'Turn history' : 'Trace history'} className="analytics-list">
         {session ? <>
           {!sessionReport && !error && <p>Loading session traces…</p>}
           {sessionReport?.turns.length === 0 && <p>No traces recorded for this Session yet.</p>}
-          {orderedTurns.map((turn) => {
-            const turnOrigin = Date.parse(turn.startedAt)
-            const span = Math.max(1, turn.spanMs || turn.ms || 1)
-            const steps = turnSteps(turn)
-            const toolCallIds = new Set(steps.filter((item) => item.event === 'tool.call' && item.callId).map((item) => item.callId!))
-            const turnSummaryEvent = turn.events.find((item) => item.event === 'turn')
-            return <div className="analytics-turn-card" key={turn.id}>
-              <div className="analytics-turn-head">
-                <div>
-                  <div className="analytics-turn-title">Turn {turn.index}</div>
-                  <div className="analytics-turn-sub">{new Date(turn.startedAt).toLocaleString()} · {duration(turn.ms)}{turn.inputTokens || turn.outputTokens ? ` · ${number(turn.inputTokens)} in / ${number(turn.outputTokens)} out` : ''}</div>
-                </div>
-                <div className="analytics-turn-meta">
-                  {!turn.ok && <span className="analytics-pill danger">Failed</span>}
-                  {turnSummaryEvent && <button type="button" className={`analytics-pill-button ${selected === turnSummaryEvent.id ? 'selected' : ''}`} onClick={() => setSelected(turnSummaryEvent.id)}>Inspect turn</button>}
-                </div>
-              </div>
-              <div className="analytics-timeline">
-                <div className="analytics-timeline-legend">
-                  <span>Chronological · Start → End</span>
-                  <span>{steps.length} {steps.length === 1 ? 'step' : 'steps'}</span>
-                </div>
-                {steps.map((item, idx) => {
-                  const start = eventStart(item)
-                  const offsetMs = Math.max(0, start - turnOrigin)
-                  const leftPct = Math.max(0, Math.min(96, (offsetMs / span) * 100))
-                  const widthPct = Math.max(2, Math.min(100 - leftPct, (Math.max(0, item.ms) / span) * 100))
-                  const ttftPct = item.event === 'model.request' && typeof item.ttftMs === 'number' && item.ms > 0
-                    ? Math.max(0, Math.min(100, (item.ttftMs / item.ms) * 100))
-                    : 0
-                  const nested = item.event !== 'tool.call' && Boolean(item.callId && toolCallIds.has(item.callId))
-                  return <button type="button" className={`analytics-timeline-step ${nested ? 'nested' : ''} ${selected === item.id ? 'selected' : ''}`} key={item.id} onClick={() => setSelected(item.id)}>
-                    <div className="analytics-timeline-top">
-                      <span className={`analytics-dot ${item.ok ? 'ok' : 'fail'}`} />
-                      <span className="analytics-step-index">#{idx + 1}</span>
-                      <span className="analytics-step-title">{title(item)}</span>
-                      <span className="analytics-pill">{eventLabel(item.event)}</span>
-                      <span className="analytics-step-ms">{duration(item.ms)}</span>
-                    </div>
-                    <div className="analytics-waterfall-row">
-                      <span className="analytics-step-offset">+{duration(offsetMs)}</span>
-                      <div className="analytics-waterfall-track" aria-hidden="true">
-                        <span className={`analytics-waterfall-bar ${item.ok ? '' : 'fail'}`} style={{ left: `${leftPct}%`, width: `${widthPct}%` }}>
-                          {ttftPct > 0 && <span className="analytics-waterfall-ttft" style={{ width: `${ttftPct}%` }} />}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="analytics-step-meta">
-                      {[item.model && item.model !== turn.model ? item.model : null, item.inputTokens !== undefined && item.outputTokens !== undefined ? `${number(item.inputTokens)} in / ${number(item.outputTokens)} out` : null, typeof item.ttftMs === 'number' ? `TTFT ${duration(item.ttftMs)}` : null].filter(Boolean).join(' · ')}
-                    </div>
-                  </button>
-                })}
-              </div>
-            </div>
-          })}
+          {orderedTurns.map((turn) => <TurnTimelineCard key={turn.id} turn={turn} selected={selected} onSelect={setSelected} />)}
+        </> : view === 'turns' ? <>
+          {!turnsReport && !error && <p>Loading turns…</p>}
+          {turnsReport?.turns.length === 0 && <p>No turns found.</p>}
+          {turnsReport?.turns.map((turn) => (
+            <TurnTimelineCard
+              key={`${turn.session ?? ''}:${turn.id}:${turn.startedAt}`}
+              turn={turn}
+              selected={selected}
+              showSession
+              onSelect={setSelected}
+              onOpenSession={onSessionChange ? openSessionTraces : undefined}
+            />
+          ))}
+          {turnsReport && <PaginationBar offset={offset} total={turnsReport.total} singular="turn" plural="turns" onPage={setOffset} />}
         </> : <>
           {!report && !error && <p>Loading traces…</p>}
           {report?.events.length === 0 && <p>No traces found.</p>}
@@ -216,7 +291,7 @@ export function Analytics({
             <span>{eventLabel(item.event)} · {new Date(item.at).toLocaleString()}</span>
             <span>{[item.model, item.session, item.surface, duration(item.ms)].filter(Boolean).join(' · ')}</span>
           </button>)}
-          {report && <div className="analytics-pages"><button className="analytics-button" type="button" disabled={offset === 0} onClick={() => setOffset(Math.max(0, offset - 30))}>Previous</button><span>{number(report.total)} events</span><button className="analytics-button" type="button" disabled={offset + 30 >= report.total} onClick={() => setOffset(offset + 30)}>Next</button></div>}
+          {report && <PaginationBar offset={offset} total={report.total} singular="event" plural="events" onPage={setOffset} />}
         </>}
       </section>
       <section aria-label="Trace details" className="analytics-detail">
@@ -227,7 +302,7 @@ export function Analytics({
           {Object.entries(detail.event).filter(([key]) => !['input', 'output', 'attachments', 'at', 'event'].includes(key)).map(([key, value]) => <div className="analytics-field" key={key}><span>{labels[key] ?? key}</span><span>{fieldValue(key, value)}</span></div>)}
           {(['input', 'output'] as const).map((key) => detail.event[key] !== undefined && <div key={key} className="analytics-payload"><h4>{key === 'input' ? 'Input' : 'Output'}</h4><pre>{pretty(detail.event[key])}</pre></div>)}
           {detail.event.attachments !== undefined && <details className="analytics-attachments" onToggle={(e) => setAttachmentsOpen(e.currentTarget.open)}><summary>Attachment data</summary>{attachmentsOpen && <pre>{pretty(detail.event.attachments)}</pre>}</details>}
-          {!session && detail.related.length > 0 && <div className="analytics-related"><h4>Turn timeline</h4>{detail.related.map(({ id, event: related }) => <button className="analytics-row" type="button" key={id} onClick={() => setSelected(id)}><span className="analytics-row-title">{title(related as unknown as AnalyticsEvent)}</span><span>{eventLabel(String(related.event))} · {new Date(String(related.at)).toLocaleTimeString()}</span></button>)}</div>}
+          {!session && view === 'traces' && detail.related.length > 0 && <div className="analytics-related"><h4>Turn timeline</h4>{detail.related.map(({ id, event: related }) => <button className="analytics-row" type="button" key={id} onClick={() => setSelected(id)}><span className="analytics-row-title">{title(related as unknown as AnalyticsEvent)}</span><span>{eventLabel(String(related.event))} · {new Date(String(related.at)).toLocaleTimeString()}</span></button>)}</div>}
         </>}
       </section>
     </div>

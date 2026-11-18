@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 const home = mkdtempSync(path.join(os.tmpdir(), 'milo-analytics-'))
 process.env.MILO_HOME = home
 const { fileTraces } = await import('../src/core/traces.js')
-const { analyticsDetail, analyticsReport, sessionTraces } = await import('../src/core/analytics.js')
+const { analyticsDetail, analyticsReport, analyticsTurns, sessionTraces } = await import('../src/core/analytics.js')
 const file = path.join(home, 'traces.jsonl')
 
 beforeEach(() => rmSync(file, { force: true }))
@@ -86,6 +86,34 @@ describe('analytics', () => {
     const detail = await analyticsDetail('old-turn')
     expect(detail.related.map((item) => item.id)).toEqual(['old-req', 'old-tool'])
   })
+
+  it('groups, filters and paginates turns across sessions without mixing legacy windows', async () => {
+    const now = Date.now()
+    const iso = (offsetMs: number) => new Date(now + offsetMs).toISOString()
+    fileTraces.record({ id: 's1-req-1', session: 'sess-1', turn: 't1', event: 'model.request', ok: true, startedAt: iso(-5000), at: iso(-4500), ms: 500, model: 'model-a', inputTokens: 40, outputTokens: 10 })
+    fileTraces.record({ id: 's1-tool-1', session: 'sess-1', turn: 't1', event: 'tool.call', ok: true, startedAt: iso(-4400), at: iso(-4200), ms: 200, tool: 'read_file' })
+    fileTraces.record({ id: 's2-req-1', session: 'sess-2', turn: 't1', event: 'model.request', ok: false, startedAt: iso(-3000), at: iso(-2700), ms: 300, model: 'model-b', inputTokens: 20, outputTokens: 5, error: 'timeout' })
+    fileTraces.record({ id: 's1-legacy-turn', session: 'sess-1', event: 'turn', ok: true, at: iso(-1000), ms: 300, model: 'model-a' })
+    fileTraces.record({ id: 's1-legacy-req', session: 'sess-1', event: 'model.request', ok: true, at: iso(-1100), ms: 150, model: 'model-a' })
+    fileTraces.record({ id: 's2-legacy-req', session: 'sess-2', event: 'model.request', ok: true, at: iso(-1050), ms: 100, model: 'model-b' })
+    fileTraces.record({ id: 'old-turn-req', session: 'sess-old', turn: 't-old', event: 'model.request', ok: true, startedAt: '2020-01-01T00:00:00.000Z', at: '2020-01-01T00:00:01.000Z', ms: 1000, model: 'model-a' })
+
+    const page = await analyticsTurns({ limit: 2, offset: 1, days: 1 })
+    expect(page.total).toBe(4)
+    expect(page.requests).toBe(4)
+    expect(page.failures).toBe(1)
+    expect(page.turns).toHaveLength(2)
+    expect(page.turns[0]).toMatchObject({ session: 'sess-1', index: 2, id: 'legacy-turn:s1-legacy-turn' })
+    expect(page.turns[0]?.events.map((item) => item.id)).toEqual(['s1-legacy-turn', 's1-legacy-req'])
+    expect(page.turns[1]).toMatchObject({ session: 'sess-2', index: 1, id: 't1', ok: false })
+
+    const byEvent = await analyticsTurns({ event: 'tool.call' })
+    expect(byEvent.total).toBe(1)
+    expect(byEvent.turns[0]?.events.map((item) => item.id)).toEqual(['s1-req-1', 's1-tool-1'])
+
+    const byQuery = await analyticsTurns({ query: 'sess-2', days: 1 })
+    expect(byQuery.total).toBe(2)
+  })
 })
 
 it('serves full details only through the authenticated analytics API', async () => {
@@ -104,11 +132,15 @@ it('serves full details only through the authenticated analytics API', async () 
       method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: JSON.stringify(body),
     })
     expect((await call('analytics-detail', 'wrong', { id: 'request-1' })).status).toBe(401)
+    expect((await call('analytics-turns', 'wrong', {})).status).toBe(401)
     expect((await call('session-traces', 'wrong', { session: 'sess-api' })).status).toBe(401)
     const list = await (await call('analytics', 'test-token', {})).json() as { events: Array<{ id: string }> }
     expect(list.events[0]).not.toHaveProperty('input')
     const detail = await (await call('analytics-detail', 'test-token', { id: list.events[0]!.id })).json() as { event: Record<string, unknown> }
     expect(detail.event).toMatchObject({ input: { system: 'instructions' }, output: expect.arrayContaining([{ type: 'text', delta: 'answer' }]) })
+    const turnsReport = await (await call('analytics-turns', 'test-token', {})).json() as { total: number; turns: Array<{ id: string; session?: string }> }
+    expect(turnsReport).toMatchObject({ total: 1 })
+    expect(turnsReport.turns[0]).toMatchObject({ id: 'turn-api', session: 'sess-api' })
     const sessionReport = await (await call('session-traces', 'test-token', { session: 'sess-api' })).json() as { session: string; turnsCount: number }
     expect(sessionReport).toMatchObject({ session: 'sess-api', turnsCount: 1 })
   } finally {

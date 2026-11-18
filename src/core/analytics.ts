@@ -47,6 +47,7 @@ export interface SessionTraceTurn {
   ms: number
   spanMs: number
   ok: boolean
+  session?: string
   model?: string
   surface?: string
   requests: number
@@ -55,6 +56,20 @@ export interface SessionTraceTurn {
   inputTokens: number
   outputTokens: number
   events: AnalyticsEvent[]
+}
+
+export interface AnalyticsTurnsReport {
+  turns: SessionTraceTurn[]
+  total: number
+  totalEvents: number
+  requests: number
+  embeddingRequests: number
+  requestsWithUsage: number
+  failures: number
+  inputTokens: number
+  outputTokens: number
+  averageMs: number | null
+  models: AnalyticsReport['models']
 }
 
 export interface SessionTraceReport {
@@ -147,31 +162,147 @@ function eventStartMs(event: AnalyticsEvent): number {
   return end > 0 ? end - Math.max(0, event.ms) : 0
 }
 
+function summarizeEvents(events: AnalyticsEvent[]): Omit<AnalyticsReport, 'events' | 'total'> {
+  const requests = events.filter((event) => event.event === 'model.request')
+  return {
+    requests: requests.length,
+    embeddingRequests: events.filter((event) => event.event === 'embedding.request').length,
+    requestsWithUsage: requests.filter((event) => typeof event.inputTokens === 'number' && typeof event.outputTokens === 'number').length,
+    failures: events.filter((event) => !event.ok).length,
+    inputTokens: sumTokens(events, 'inputTokens'),
+    outputTokens: sumTokens(events, 'outputTokens'),
+    averageMs: requests.length ? requests.reduce((total, event) => total + event.ms, 0) / requests.length : null,
+    models: summarizeModels(events),
+  }
+}
+
+function groupTurns(events: AnalyticsEvent[]): SessionTraceTurn[] {
+  const legacyWindows = events
+    .filter((event) => event.event === 'turn' && !event.turn)
+    .map((event) => ({
+      id: `legacy-turn:${event.id}`,
+      session: event.session,
+      start: eventStartMs(event) - 1000,
+      end: eventEndMs(event) + 1000,
+    }))
+
+  const groups = new Map<string, { id: string; items: AnalyticsEvent[] }>()
+  for (const event of events) {
+    let turnId = typeof event.turn === 'string' && event.turn ? event.turn : ''
+    if (!turnId) {
+      const start = eventStartMs(event)
+      const end = eventEndMs(event)
+      const match = legacyWindows.find((win) => win.session === event.session && start >= win.start && end <= win.end)
+      turnId = match ? match.id : `event:${event.id}`
+    }
+    const key = event.session ? `${event.session}\0${turnId}` : `\0${turnId}`
+    const existing = groups.get(key)
+    if (existing) existing.items.push(event)
+    else groups.set(key, { id: turnId, items: [event] })
+  }
+
+  const orderedGroups = [...groups.values()].map(({ id, items }) => {
+    const sorted = [...items].sort((a, b) => {
+      const startDiff = eventStartMs(a) - eventStartMs(b)
+      if (startDiff !== 0) return startDiff
+      // Put the wrapping 'turn' summary event first when timestamps tie.
+      if (a.event === 'turn' && b.event !== 'turn') return -1
+      if (b.event === 'turn' && a.event !== 'turn') return 1
+      return eventEndMs(a) - eventEndMs(b)
+    })
+    const turnEvent = sorted.find((item) => item.event === 'turn')
+    const minStart = Math.min(...sorted.map(eventStartMs))
+    const maxEnd = Math.max(...sorted.map(eventEndMs))
+    const spanMs = Math.max(0, maxEnd - minStart)
+    const session = turnEvent?.session ?? sorted.find((item) => typeof item.session === 'string')?.session
+    return {
+      id,
+      session,
+      minStart,
+      maxEnd,
+      spanMs,
+      turnEvent,
+      sorted,
+    }
+  }).sort((a, b) => a.minStart - b.minStart || a.maxEnd - b.maxEnd)
+
+  const sessionIndices = new Map<string, number>()
+  return orderedGroups.map((group) => {
+    const sessionKey = group.session ?? ''
+    const index = (sessionIndices.get(sessionKey) ?? 0) + 1
+    sessionIndices.set(sessionKey, index)
+    const requests = group.sorted.filter((item) => item.event === 'model.request')
+    const toolCalls = group.sorted.filter((item) => item.event === 'tool.call').length
+    const failures = group.sorted.filter((item) => !item.ok).length
+    const model = group.turnEvent?.model ?? requests.find((item) => typeof item.model === 'string')?.model
+    const surface = group.turnEvent?.surface ?? group.sorted.find((item) => typeof item.surface === 'string')?.surface
+    return {
+      id: group.id,
+      index,
+      startedAt: new Date(group.minStart).toISOString(),
+      endedAt: new Date(group.maxEnd).toISOString(),
+      ms: group.turnEvent ? group.turnEvent.ms : group.spanMs,
+      spanMs: Math.max(group.spanMs, group.turnEvent?.ms ?? 0),
+      ok: group.turnEvent ? group.turnEvent.ok && failures === 0 : failures === 0,
+      ...(group.session ? { session: group.session } : {}),
+      ...(model ? { model } : {}),
+      ...(surface ? { surface } : {}),
+      requests: requests.length,
+      toolCalls,
+      failures,
+      inputTokens: sumTokens(group.sorted, 'inputTokens'),
+      outputTokens: sumTokens(group.sorted, 'outputTokens'),
+      events: group.sorted,
+    }
+  }).reverse()
+}
+
 export async function analyticsReport(options: { query?: string; event?: string; session?: string; offset?: number; limit?: number; days?: number } = {}): Promise<AnalyticsReport> {
   const query = options.query?.trim().toLowerCase() ?? ''
   const session = options.session?.trim() ?? ''
+  const since = options.days ? Date.now() - options.days * 86_400_000 : 0
   const entries = (await readEvents()).filter(({ event: item }) => {
-    const since = options.days ? Date.now() - options.days * 86_400_000 : 0
     return (!since || Date.parse(item.at) >= since)
       && (!session || item.session === session)
       && (!options.event || options.event === 'all' || item.event === options.event)
       && (!query || JSON.stringify(item).toLowerCase().includes(query))
   }).reverse()
   const allEvents = entries.map(({ event }) => event)
-  const requests = allEvents.filter((event) => event.event === 'model.request')
   const offset = Math.max(0, Math.floor(options.offset ?? 0))
   const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 30)))
   return {
     events: allEvents.slice(offset, offset + limit),
     total: entries.length,
-    requests: requests.length,
-    embeddingRequests: allEvents.filter((event) => event.event === 'embedding.request').length,
-    requestsWithUsage: requests.filter((event) => typeof event.inputTokens === 'number' && typeof event.outputTokens === 'number').length,
-    failures: allEvents.filter((event) => !event.ok).length,
-    inputTokens: sumTokens(allEvents, 'inputTokens'),
-    outputTokens: sumTokens(allEvents, 'outputTokens'),
-    averageMs: requests.length ? requests.reduce((total, event) => total + event.ms, 0) / requests.length : null,
-    models: summarizeModels(allEvents),
+    ...summarizeEvents(allEvents),
+  }
+}
+
+export async function analyticsTurns(options: { query?: string; event?: string; session?: string; offset?: number; limit?: number; days?: number } = {}): Promise<AnalyticsTurnsReport> {
+  const query = options.query?.trim().toLowerCase() ?? ''
+  const session = options.session?.trim() ?? ''
+  const since = options.days ? Date.now() - options.days * 86_400_000 : 0
+  const events = (await readEvents())
+    .map(({ event }) => event)
+    .filter((event) => !session || event.session === session)
+
+  const turns = groupTurns(events).filter((turn) => {
+    if (since && Date.parse(turn.endedAt) < since) return false
+    if (options.event && options.event !== 'all' && !turn.events.some((item) => item.event === options.event)) return false
+    if (!query) return true
+    return (turn.session?.toLowerCase().includes(query) ?? false)
+      || (turn.model?.toLowerCase().includes(query) ?? false)
+      || (turn.surface?.toLowerCase().includes(query) ?? false)
+      || turn.events.some((item) => JSON.stringify(item).toLowerCase().includes(query))
+  })
+
+  const matchingEvents = turns.flatMap((turn) => turn.events)
+  const offset = Math.max(0, Math.floor(options.offset ?? 0))
+  const limit = Math.max(1, Math.min(100, Math.floor(options.limit ?? 30)))
+  return {
+    turns: turns.slice(offset, offset + limit),
+    total: turns.length,
+    totalEvents: matchingEvents.length,
+    ...summarizeEvents(matchingEvents),
   }
 }
 
@@ -197,75 +328,7 @@ export async function sessionTraces(sessionId: string): Promise<SessionTraceRepo
     .map(({ event }) => event)
     .filter((event) => event.session === session)
 
-  const legacyWindows = events
-    .filter((event) => event.event === 'turn' && !event.turn)
-    .map((event) => ({
-      id: `legacy-turn:${event.id}`,
-      start: eventStartMs(event) - 1000,
-      end: eventEndMs(event) + 1000,
-    }))
-
-  const groups = new Map<string, AnalyticsEvent[]>()
-  for (const event of events) {
-    let key = typeof event.turn === 'string' && event.turn ? event.turn : ''
-    if (!key) {
-      const start = eventStartMs(event)
-      const end = eventEndMs(event)
-      const match = legacyWindows.find((win) => start >= win.start && end <= win.end)
-      key = match ? match.id : `event:${event.id}`
-    }
-    const list = groups.get(key)
-    if (list) list.push(event)
-    else groups.set(key, [event])
-  }
-
-  const orderedGroups = [...groups.entries()].map(([id, items]) => {
-    const sorted = [...items].sort((a, b) => {
-      const startDiff = eventStartMs(a) - eventStartMs(b)
-      if (startDiff !== 0) return startDiff
-      // Put the wrapping 'turn' summary event first when timestamps tie.
-      if (a.event === 'turn' && b.event !== 'turn') return -1
-      if (b.event === 'turn' && a.event !== 'turn') return 1
-      return eventEndMs(a) - eventEndMs(b)
-    })
-    const turnEvent = sorted.find((item) => item.event === 'turn')
-    const minStart = Math.min(...sorted.map(eventStartMs))
-    const maxEnd = Math.max(...sorted.map(eventEndMs))
-    const spanMs = Math.max(0, maxEnd - minStart)
-    return {
-      id,
-      minStart,
-      maxEnd,
-      spanMs,
-      turnEvent,
-      sorted,
-    }
-  }).sort((a, b) => a.minStart - b.minStart || a.maxEnd - b.maxEnd)
-
-  const turns: SessionTraceTurn[] = orderedGroups.map((group, position) => {
-    const requests = group.sorted.filter((item) => item.event === 'model.request')
-    const toolCalls = group.sorted.filter((item) => item.event === 'tool.call').length
-    const failures = group.sorted.filter((item) => !item.ok).length
-    const model = group.turnEvent?.model ?? requests.find((item) => typeof item.model === 'string')?.model
-    const surface = group.turnEvent?.surface ?? group.sorted.find((item) => typeof item.surface === 'string')?.surface
-    return {
-      id: group.id,
-      index: position + 1,
-      startedAt: new Date(group.minStart).toISOString(),
-      endedAt: new Date(group.maxEnd).toISOString(),
-      ms: group.turnEvent ? group.turnEvent.ms : group.spanMs,
-      spanMs: Math.max(group.spanMs, group.turnEvent?.ms ?? 0),
-      ok: group.turnEvent ? group.turnEvent.ok && failures === 0 : failures === 0,
-      ...(model ? { model } : {}),
-      ...(surface ? { surface } : {}),
-      requests: requests.length,
-      toolCalls,
-      failures,
-      inputTokens: sumTokens(group.sorted, 'inputTokens'),
-      outputTokens: sumTokens(group.sorted, 'outputTokens'),
-      events: group.sorted,
-    }
-  }).reverse()
+  const turns = groupTurns(events)
 
   return {
     session,
