@@ -201,6 +201,7 @@ export function BotAvatar({
   const uid = useId().replace(/:/g, '')
   const gradId = `bot-avatar-grad-${uid}`
   const shineId = `bot-avatar-shine-${uid}`
+  const clipId = `bot-avatar-clip-${uid}`
   const preset = colorPalettePreset(avatar.palette)
   const [topColor, bottomColor] = preset.logoColors
   const running = state === 'running'
@@ -221,10 +222,13 @@ export function BotAvatar({
             <stop offset="0%" stopColor="#FFFFFF" stopOpacity="0.28" />
             <stop offset="100%" stopColor="#FFFFFF" stopOpacity="0" />
           </linearGradient>
+          <clipPath id={clipId}>
+            {renderBody(avatar.shape, '#000000')}
+          </clipPath>
         </defs>
         <g className="bot-avatar-figure">
           {renderBody(avatar.shape, `url(#${gradId})`)}
-          <ellipse cx="17.5" cy="12.5" rx="6.5" ry="3.2" fill={`url(#${shineId})`} />
+          <ellipse cx="17.5" cy="12.5" rx="6.5" ry="3.2" fill={`url(#${shineId})`} clipPath={`url(#${clipId})`} />
           {renderEyes(avatar.eyes)}
           {renderAccessory(avatar.accessory, topColor, bottomColor)}
         </g>

@@ -205,6 +205,7 @@ export function Analytics({
   const update = (action: () => void) => { setOffset(0); action() }
   const switchView = (next: 'traces' | 'turns') => {
     if (next === view) return
+    setSelected(null)
     setOffset(0)
     setView(next)
   }

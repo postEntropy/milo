@@ -74,9 +74,10 @@ async function readJsonSafe(response: Response): Promise<unknown> {
   }
 }
 
-export async function api<T>(action: string, body: Record<string, unknown> = {}): Promise<T> {
+export async function api<T>(action: string, body: Record<string, unknown> = {}, signal?: AbortSignal): Promise<T> {
   const response = await fetch(`/api/${action}`, {
     method: 'POST',
+    signal,
     headers: {
       ...authHeaders(),
       'content-type': 'application/json',

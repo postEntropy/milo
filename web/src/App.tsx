@@ -139,6 +139,7 @@ export default function App() {
   const [inspectProject, setInspectProject] = useState<ProjectView | null>(null)
   /** Bumped when the server says a routine ran, so the history on screen re-reads. */
   const [routinesTick, setRoutinesTick] = useState(0)
+  const [crewTick, setCrewTick] = useState(0)
   const [thinking, setThinking] = useState<ThinkingDisplay>('expanded')
   const [effort, setEffort] = useState<'low' | 'medium' | 'high'>('medium')
   const [identity, setIdentity] = useState({ provider: 'milo', providerName: 'Milo', model: '' })
@@ -676,6 +677,7 @@ export default function App() {
       return
     }
     if (frame.type === 'routines-changed') { setRoutinesTick((current) => current + 1); return }
+    if (frame.type === 'crew-changed' || frame.type === 'delegated-work-changed') { setCrewTick((current) => current + 1); return }
     if (frame.type === 'palette-state') {
       setSharedPalette({ sync: Boolean(frame.sync), palette: resolveColorPaletteId(frame.palette) })
       return
@@ -1376,7 +1378,7 @@ export default function App() {
         : view === 'analytics'
         ? <Analytics session={analyticsSession} onSessionChange={setAnalyticsSession} />
         : view === 'crew'
-        ? <Crew />
+        ? <Crew tick={crewTick} />
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
         : view === 'work' && workProject

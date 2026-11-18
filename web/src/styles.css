@@ -1489,7 +1489,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .composer-box textarea,
   .field input, .field select, .field textarea,
   .session-rename-input, .secret-row input, .select-search input,
-  .tasklist-input { font-size: 1rem; }
+  .tasklist-input, .crew-inline-form input { font-size: 1rem; }
   /* Settings' own size on a phone: one value for the labels and every control, so
      a dropdown is the same size as the text field beside it. Deliberately below the
      16px that keeps iOS from zooming on a focused field — the compact screen is the
