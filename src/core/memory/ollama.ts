@@ -1,9 +1,11 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmod, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { existsSync, type Dirent } from 'node:fs'
+import { once } from 'node:events'
+import { chmod, mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises'
+import { createReadStream, createWriteStream, existsSync, type Dirent } from 'node:fs'
 import { createServer } from 'node:net'
 import path from 'node:path'
+import { pipeline } from 'node:stream/promises'
 import * as nodeZlib from 'node:zlib'
 import { humanSize } from '../../util/format.js'
 
@@ -99,11 +101,13 @@ export async function installEngine(options: {
 
   const archive = path.join(options.dir, asset.name)
   report(`downloading ${asset.name} (${humanSize(asset.size)})`)
-  await download(asset, archive, report, options.signal)
-
-  report('unpacking')
-  await extract(archive, options.dir)
-  await rm(archive, { force: true })
+  try {
+    await download(asset, archive, report, options.signal)
+    report('unpacking')
+    await extract(archive, options.dir)
+  } finally {
+    await rm(archive, { force: true }).catch(() => undefined)
+  }
 
   const binary = await findBinary(options.dir, platform)
   if (!binary) throw new Error('the archive did not contain the engine where it was expected')
@@ -190,55 +194,79 @@ async function get<T>(url: string, signal?: AbortSignal): Promise<T> {
  * or a kill mid-stream must all leave nothing behind, because a file that exists
  * is a file the rest of Milo treats as installed.
  */
+const STALL_TIMEOUT_MS = 60_000
+
 async function download(
   asset: Asset,
   file: string,
   report: InstallProgress,
   signal?: AbortSignal,
 ): Promise<void> {
-  const response = await fetch(asset.browser_download_url, { signal, redirect: 'follow' })
-  if (!response.ok) throw new Error(`the download answered ${response.status}`)
-  if (!response.body) throw new Error('the download came back empty')
+  const controller = new AbortController()
+  const onParentAbort = () => controller.abort(signal?.reason)
+  signal?.addEventListener('abort', onParentAbort, { once: true })
 
-  const expected = asset.digest?.replace(/^sha256:/, '')
-  const hash = createHash('sha256')
-  const reader = response.body.getReader()
-  const chunks: Uint8Array[] = []
-  let total = 0
-  let announced = 0
+  let stallTimer: NodeJS.Timeout | null = null
+  const armStallTimer = () => {
+    if (stallTimer) clearTimeout(stallTimer)
+    stallTimer = setTimeout(() => controller.abort(new Error('download stalled')), STALL_TIMEOUT_MS)
+  }
 
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    chunks.push(value)
-    hash.update(value)
-    total += value.byteLength
-    // Every 100 MB: this is over a gigabyte, and the count is the only sign of
-    // life the person gets while it downloads.
-    if (total - announced >= 100 * 1024 * 1024) {
-      announced = total
-      report(`downloading the engine — ${humanSize(total)} of ${humanSize(asset.size)}`)
+  const tempFile = `${file}.part`
+  const writer = createWriteStream(tempFile, { mode: 0o600 })
+  let renamed = false
+
+  try {
+    armStallTimer()
+    const response = await fetch(asset.browser_download_url, { signal: controller.signal, redirect: 'follow' })
+    if (!response.ok) throw new Error(`the download answered ${response.status}`)
+    if (!response.body) throw new Error('the download came back empty')
+
+    const expected = asset.digest?.replace(/^sha256:/, '')
+    const hash = createHash('sha256')
+    const reader = response.body.getReader()
+    let total = 0
+    let announced = 0
+
+    for (;;) {
+      armStallTimer()
+      const { done, value } = await reader.read()
+      if (done) break
+      hash.update(value)
+      total += value.byteLength
+      if (!writer.write(value)) await once(writer, 'drain')
+      // Every 100 MB: this is over a gigabyte, and the count is the only sign of
+      // life the person gets while it downloads.
+      if (total - announced >= 100 * 1024 * 1024) {
+        announced = total
+        report(`downloading the engine — ${humanSize(total)} of ${humanSize(asset.size)}`)
+      }
     }
-  }
 
-  if (total !== asset.size) {
-    throw new Error(`the download was ${humanSize(total)}, not the ${humanSize(asset.size)} published`)
-  }
-  if (expected && hash.digest('hex') !== expected) {
-    throw new Error('the download did not match the digest the release published')
-  }
+    await new Promise<void>((resolve, reject) => {
+      writer.once('error', reject)
+      writer.end(() => resolve())
+    })
 
-  await writeFile(file, Buffer.concat(chunks), { mode: 0o600 })
+    if (total !== asset.size) {
+      throw new Error(`the download was ${humanSize(total)}, not the ${humanSize(asset.size)} published`)
+    }
+    if (expected && hash.digest('hex') !== expected) {
+      throw new Error('the download did not match the digest the release published')
+    }
+
+    await rename(tempFile, file)
+    renamed = true
+  } finally {
+    if (stallTimer) clearTimeout(stallTimer)
+    signal?.removeEventListener('abort', onParentAbort)
+    if (!writer.destroyed) writer.destroy()
+    if (!renamed) await rm(tempFile, { force: true }).catch(() => undefined)
+  }
 }
 
 /**
- * Unpacks an archive into `dir`.
- *
- * Decompression happens in this process where Node can do it — zstd since Node
- * 22.15, gzip always — and through the tool otherwise, which is what the oldest
- * Node this project supports needs. The tar itself is left to `tar`, which every
- * platform Milo runs on already has and which is the one piece not worth
- * reimplementing.
+ * Unpacks an archive into `dir` in a streaming pipeline without buffering multi-GB archives in memory.
  */
 async function extract(archive: string, dir: string): Promise<void> {
   if (archive.endsWith('.zip')) {
@@ -246,38 +274,69 @@ async function extract(archive: string, dir: string): Promise<void> {
     return
   }
 
-  const packed = await readFile(archive)
-  const tar = archive.endsWith('.tar.zst')
-    ? await decompressZstd(packed)
-    : await gunzip(packed)
-
-  const temporary = `${archive}.tar`
-  await writeFile(temporary, tar, { mode: 0o600 })
-  try {
-    await run('tar', ['-xf', temporary, '-C', dir])
-  } finally {
-    await rm(temporary, { force: true })
+  if (archive.endsWith('.tar.zst')) {
+    const createZstdDecompress = (
+      nodeZlib as unknown as { createZstdDecompress?: () => NodeJS.ReadWriteStream }
+    ).createZstdDecompress
+    if (createZstdDecompress) {
+      await extractViaTarStdin(createReadStream(archive), createZstdDecompress(), dir)
+      return
+    }
+    await extractZstdCli(archive, dir)
+    return
   }
+
+  await extractViaTarStdin(createReadStream(archive), nodeZlib.createGunzip(), dir)
 }
 
-type ZstdDecompressor = (
-  input: Buffer,
-  done: (error: Error | null, output: Buffer) => void,
-) => void
-
-/** Node 22.15 and later have this; 22.13, this project's floor, does not. */
-function decompressZstd(data: Buffer): Promise<Buffer> {
-  const zstd = (nodeZlib as unknown as { zstdDecompress?: ZstdDecompressor }).zstdDecompress
-  if (!zstd) return captured('zstd', ['-d', '-c'], data)
-  return new Promise((resolve, reject) => {
-    zstd(data, (error, output) => (error ? reject(error) : resolve(output)))
+async function extractViaTarStdin(
+  source: NodeJS.ReadableStream,
+  decompress: NodeJS.ReadWriteStream,
+  dir: string,
+): Promise<void> {
+  const tar = spawn('tar', ['-xf', '-', '-C', dir], { stdio: ['pipe', 'ignore', 'pipe'] })
+  let stderr = ''
+  tar.stderr?.on('data', (chunk: Buffer) => {
+    stderr += chunk.toString()
   })
+  const exited = new Promise<void>((resolve, reject) => {
+    tar.once('error', () => reject(new Error(`could not run \`tar\`: ${stderr.trim()}`)))
+    tar.once('close', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`tar failed: ${stderr.trim() || `exit ${code}`}`))
+    })
+  })
+  await pipeline(source, decompress, tar.stdin!)
+  await exited
 }
 
-function gunzip(data: Buffer): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    nodeZlib.gunzip(data, (error, output) => (error ? reject(error) : resolve(output)))
+async function extractZstdCli(archive: string, dir: string): Promise<void> {
+  const zstd = spawn('zstd', ['-d', '-c', archive], { stdio: ['ignore', 'pipe', 'pipe'] })
+  const tar = spawn('tar', ['-xf', '-', '-C', dir], { stdio: ['pipe', 'ignore', 'pipe'] })
+  let zstdErr = ''
+  let tarErr = ''
+  zstd.stderr?.on('data', (chunk: Buffer) => {
+    zstdErr += chunk.toString()
   })
+  tar.stderr?.on('data', (chunk: Buffer) => {
+    tarErr += chunk.toString()
+  })
+  const zstdExit = new Promise<void>((resolve, reject) => {
+    zstd.once('error', () => reject(new Error(`could not run \`zstd\`: ${zstdErr.trim()}`)))
+    zstd.once('close', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`zstd failed: ${zstdErr.trim() || `exit ${code}`}`))
+    })
+  })
+  const tarExit = new Promise<void>((resolve, reject) => {
+    tar.once('error', () => reject(new Error(`could not run \`tar\`: ${tarErr.trim()}`)))
+    tar.once('close', (code) => {
+      if (code === 0) resolve()
+      else reject(new Error(`tar failed: ${tarErr.trim() || `exit ${code}`}`))
+    })
+  })
+  await pipeline(zstd.stdout!, tar.stdin!)
+  await Promise.all([zstdExit, tarExit])
 }
 
 /** Runs a command and fails with what it said, so a screen can report it. */
@@ -293,24 +352,6 @@ function run(command: string, args: string[]): Promise<void> {
       if (code === 0) resolve()
       else reject(new Error(`${command} failed: ${stderr.trim() || `exit ${code}`}`))
     })
-  })
-}
-
-function captured(command: string, args: string[], input: Buffer): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] })
-    const out: Buffer[] = []
-    let stderr = ''
-    child.stdout?.on('data', (chunk: Buffer) => out.push(chunk))
-    child.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString()
-    })
-    child.once('error', () => reject(new Error(`could not run \`${command}\`: ${stderr.trim()}`)))
-    child.once('close', (code) => {
-      if (code === 0) resolve(Buffer.concat(out))
-      else reject(new Error(`${command} failed: ${stderr.trim() || `exit ${code}`}`))
-    })
-    child.stdin?.end(input)
   })
 }
 
@@ -356,6 +397,12 @@ export async function startEngine(options: {
     },
     stdio: ['ignore', 'ignore', 'pipe'],
   })
+  // Drain stderr continuously so verbose engine logs never fill the 64 KB pipe buffer.
+  let stderrTail = ''
+  child.stderr?.setEncoding('utf8')
+  child.stderr?.on('data', (chunk: string) => {
+    stderrTail = (stderrTail + chunk).slice(-400)
+  })
   const stop = () => {
     if (child.exitCode === null && !child.killed) child.kill('SIGTERM')
   }
@@ -364,7 +411,8 @@ export async function startEngine(options: {
   const deadline = Date.now() + (options.timeoutMs ?? 30_000)
   for (;;) {
     if (child.exitCode !== null) {
-      throw new Error(`the engine stopped as soon as it started (exit ${child.exitCode})`)
+      const detail = stderrTail.trim() ? `: ${stderrTail.trim()}` : ''
+      throw new Error(`the engine stopped as soon as it started (exit ${child.exitCode})${detail}`)
     }
     try {
       const response = await fetch(`${url}/api/tags`, { signal: AbortSignal.timeout(1_500) })

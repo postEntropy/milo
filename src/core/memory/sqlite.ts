@@ -165,6 +165,8 @@ export class SqliteMemory implements Memory {
   private readonly coverage: boolean
   /** The fill-in, once per process. Nothing waits on it. */
   private filling: Promise<void> | null = null
+  private readonly closeAbort = new AbortController()
+  private closed = false
   /** One line per process is enough for an engine that is simply not up. */
   private warned = false
 
@@ -378,19 +380,22 @@ export class SqliteMemory implements Memory {
   /** Attaches vectors to rows the write has already put in the store. */
   private async embedRows(rows: { uid: string; text: string }[]): Promise<boolean> {
     const embedder = this.embedder
-    if (!embedder || rows.length === 0) return true
+    if (!embedder || rows.length === 0 || this.closed) return true
     try {
       const vectors = await embedder.embed(rows.map((row) => truncate(row.text)))
+      if (this.closed) return true
       this.transaction(() => {
         rows.forEach((row, index) => {
           const vector = vectors[index]
-          // A vector with nothing in it is left off entirely: stored, it would
-          // put the note in every ranking with a score of zero.
+          // Zero-norm noise vectors cannot rank similarity; mark unusable so background
+          // backfill advances past them instead of re-selecting them forever.
           if (vector && !isNoise(vector)) this.setVectorStmt.run(toBlob(vector), row.uid, row.text)
+          else if (vector) this.markUnusable(row.uid, row.text)
         })
       })
       return true
     } catch (error) {
+      if (this.closed) return true
       // The note is written and findable by its words; only its semantic side is
       // missing, and the next process tries again.
       this.warnOnce(`could not embed ${rows.length} note(s): ${errorMessage(error)}`)
@@ -454,7 +459,7 @@ export class SqliteMemory implements Memory {
       // giving up: giving up here would leave every note written so far without a
       // vector until the next process, which is the whole store on the first run.
       let failures = 0
-      while (failures < 3) {
+      while (failures < 3 && !this.closed) {
         const rows = missing.all(EMBED_BATCH) as unknown as { uid: string; text: string }[]
         if (rows.length === 0) break
         if (await this.embedRows(rows)) {
@@ -462,7 +467,7 @@ export class SqliteMemory implements Memory {
           continue
         }
         failures += 1
-        await delay(1_000 * failures)
+        await delay(1_000 * failures, this.closeAbort.signal)
       }
     })().catch((error: unknown) => {
       logWarn(`could not fill in the embeddings: ${errorMessage(error)}`)
@@ -659,6 +664,9 @@ export class SqliteMemory implements Memory {
 
   /** For tests and shutdown: nothing else needs the handle. */
   close(): void {
+    if (this.closed) return
+    this.closed = true
+    this.closeAbort.abort()
     this.db.close()
   }
 
@@ -862,7 +870,11 @@ export class SqliteMemory implements Memory {
       this.db.exec('commit')
       return result
     } catch (error) {
-      this.db.exec('rollback')
+      try {
+        this.db.exec('rollback')
+      } catch {
+        // SQLite may have already rolled back automatically on constraint/busy errors.
+      }
       throw error
     }
   }
@@ -997,7 +1009,20 @@ function toVector(blob: Uint8Array): Float32Array {
 const truncate = (text: string): string =>
   text.length > EMBED_CHARS ? text.slice(0, EMBED_CHARS) : text
 
-const delay = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+const delay = (ms: number, signal?: AbortSignal): Promise<void> => {
+  if (signal?.aborted) return Promise.resolve()
+  return new Promise((resolve) => {
+    const onAbort = () => {
+      clearTimeout(timer)
+      resolve()
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
+}
 
 function parseTags(tags: string): string[] {
   try {

@@ -307,4 +307,24 @@ describe('recall by meaning', () => {
     ).toBe(true)
     memory.close()
   })
+
+  it('marks zero-norm vectors unusable instead of looping forever in background backfill', async () => {
+    const dir = tempDir()
+    const writer = new SqliteMemory({ dir })
+    await writer.remember(scope, [{ text: 'Noise note without meaningful dimensions.' }])
+    writer.close()
+
+    let embedCalls = 0
+    const silentEmbedder: Embedder = {
+      model: 'zero-model',
+      async embed(texts) {
+        embedCalls += 1
+        return texts.map(() => new Float32Array([0, 0, 0]))
+      },
+    }
+    const reader = new SqliteMemory({ dir, embedder: silentEmbedder })
+    await reader.whenEmbedded()
+    expect(embedCalls).toBe(1)
+    reader.close()
+  })
 })
