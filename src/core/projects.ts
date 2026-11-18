@@ -109,7 +109,11 @@ function readProjectsStrict(): Project[] {
     throw new Error(`projects.json is not valid JSON: ${errorMessage(error)}`)
   }
   if (!Array.isArray(parsed)) throw new Error('projects.json does not hold a list.')
-  return parsed.filter(isProject).map((project) => ({
+  const valid = parsed.filter(isProject)
+  if (valid.length !== parsed.length) {
+    throw new Error('projects.json contains an invalid project entry.')
+  }
+  return valid.map((project) => ({
     ...project,
     name: project.name.trim() || basename(project.path),
     createdAt: typeof project.createdAt === 'number' ? project.createdAt : 0,
@@ -120,12 +124,23 @@ function readProjectsStrict(): Project[] {
 /**
  * The project list for a surface that only reads it. A file someone left mid-edit
  * must not take the daemon down, so the reason is said out loud and an empty list
- * is answered — but a *write* reads strictly below, so this tolerant reading is
- * never the basis of an overwrite.
+ * is answered — while writes use `readProjectsStrict` and refuse to overwrite a
+ * partially invalid file.
  */
 export function readProjects(): Project[] {
+  const file = projectsFile()
+  if (!existsSync(file)) return []
   try {
-    return readProjectsStrict()
+    const text = readFileSync(file, 'utf8').trim()
+    if (text === '') return []
+    const parsed: unknown = JSON.parse(text)
+    if (!Array.isArray(parsed)) throw new Error('projects.json does not hold a list.')
+    return parsed.filter(isProject).map((project) => ({
+      ...project,
+      name: project.name.trim() || basename(project.path),
+      createdAt: typeof project.createdAt === 'number' ? project.createdAt : 0,
+      incarnation: typeof project.incarnation === 'string' && project.incarnation ? project.incarnation : undefined,
+    }))
   } catch (error) {
     logWarn(`could not read projects.json: ${errorMessage(error)}`)
     return []
@@ -169,7 +184,9 @@ async function lockProjects(): Promise<ProjectLock> {
     assert() {
       if (compromised) throw new Error('The project lock was lost; the operation was not allowed to continue.')
     },
-    release: unlock,
+    async release() {
+      if (!compromised) await unlock()
+    },
   }
 }
 

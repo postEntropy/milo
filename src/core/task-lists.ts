@@ -57,19 +57,29 @@ export function readTaskLists(): TaskList[] {
 async function withTaskLists<T>(change: (lists: TaskList[]) => { result: T; write?: boolean }): Promise<T> {
   const file = taskListsFile()
   mkdirSync(dirname(file), { recursive: true })
+  let compromised = false
   const release = await lockfile.lock(file, {
     realpath: false,
     stale: LOCK_STALE_MS,
     retries: WRITE_LOCK_RETRIES,
-    onCompromised: (error) => logWarn(`lost the lock on task-lists.json: ${errorMessage(error)}`),
+    onCompromised: (error) => {
+      compromised = true
+      logWarn(`lost the lock on task-lists.json: ${errorMessage(error)}`)
+    },
   })
   try {
+    if (compromised) throw new Error('The task-lists lock was lost before writing.')
     const lists = readTaskLists()
     const outcome = change(lists)
-    if (outcome.write) await writePrivateFile(file, `${JSON.stringify(lists, null, 2)}\n`)
+    if (outcome.write) {
+      if (compromised) throw new Error('The task-lists lock was lost before writing.')
+      await writePrivateFile(file, `${JSON.stringify(lists, null, 2)}\n`)
+    }
     return outcome.result
   } finally {
-    await release()
+    if (!compromised) {
+      await release().catch(() => undefined)
+    }
   }
 }
 

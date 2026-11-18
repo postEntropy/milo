@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { mkdirSync } from 'node:fs'
+import { chmodSync, mkdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { chmod, rename, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
@@ -54,8 +54,47 @@ export async function writeFileAtomic(
 }
 
 /** Writes and atomically replaces one private file with mode 0600. */
-export async function writePrivateFile(file: string, content: string): Promise<void> {
+export async function writePrivateFile(file: string, content: string | Buffer): Promise<void> {
   await writeAtMode(file, content, PRIVATE_FILE_MODE)
+}
+
+function writeAtModeSync(file: string, content: string | Buffer, mode: number): void {
+  const temp = path.join(
+    path.dirname(file),
+    `.${path.basename(file)}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`,
+  )
+  try {
+    writeFileSync(temp, content, { mode })
+    chmodSync(temp, mode)
+    renameSync(temp, file)
+  } catch (error) {
+    try {
+      rmSync(temp, { force: true })
+    } catch {
+      // Best-effort cleanup of temp file.
+    }
+    throw error
+  }
+}
+
+/** Synchronous atomic file replacement preserving existing permissions or `fallbackMode`. */
+export function writeFileAtomicSync(
+  file: string,
+  content: string | Buffer,
+  fallbackMode = 0o644,
+): void {
+  let mode = fallbackMode
+  try {
+    mode = statSync(file).mode & 0o7777
+  } catch {
+    // New file uses fallbackMode.
+  }
+  writeAtModeSync(file, content, mode)
+}
+
+/** Synchronous atomic replacement for private `0600` files. */
+export function writePrivateFileSync(file: string, content: string): void {
+  writeAtModeSync(file, content, PRIVATE_FILE_MODE)
 }
 
 /** A directory Milo makes for its own files: 0700, so its names are not a listing. */

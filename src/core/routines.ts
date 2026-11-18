@@ -376,7 +376,11 @@ function readRoutinesStrict(): Routine[] {
     throw new Error(`routines.json is not valid JSON: ${errorMessage(error)}`)
   }
   if (!Array.isArray(parsed)) throw new Error('routines.json does not hold a list.')
-  return parsed.map(readRoutine).filter(isRoutine).map((routine) => ({
+  const valid = parsed.map(readRoutine).filter(isRoutine)
+  if (valid.length !== parsed.length) {
+    throw new Error('routines.json contains an invalid routine entry.')
+  }
+  return valid.map((routine) => ({
     ...routine,
     enabled: routine.enabled !== false,
     allow: Array.isArray(routine.allow)
@@ -400,12 +404,27 @@ function countOf(value: unknown): number | undefined {
 /**
  * The routine list for a surface that only reads it. A file someone left mid-edit
  * must not take the daemon down, so the reason is said out loud and an empty list
- * is answered — but a *write* reads strictly below, so this tolerant reading is
- * never the basis of an overwrite.
+ * is answered (filtering malformed entries tolerantly) — while writes use
+ * `readRoutinesStrict` and refuse to overwrite a partially invalid file.
  */
 export function readRoutines(): Routine[] {
+  const file = routinesFile()
+  if (!existsSync(file)) return []
   try {
-    return readRoutinesStrict()
+    const text = readFileSync(file, 'utf8').trim()
+    if (text === '') return []
+    const parsed: unknown = JSON.parse(text)
+    if (!Array.isArray(parsed)) throw new Error('routines.json does not hold a list.')
+    return parsed.map(readRoutine).filter(isRoutine).map((routine) => ({
+      ...routine,
+      enabled: routine.enabled !== false,
+      allow: Array.isArray(routine.allow)
+        ? routine.allow.filter((name) => typeof name === 'string')
+        : undefined,
+      limit: countOf(routine.limit),
+      runs: countOf(routine.runs),
+      silent: routine.silent === true ? true : undefined,
+    }))
   } catch (error) {
     logWarn(`could not read routines.json: ${errorMessage(error)}`)
     return []
@@ -429,17 +448,28 @@ let localRoutineWrites = Promise.resolve()
  * from the copy it read, so without the lock the slower writer's copy wins and
  * the other change is gone.
  */
-async function lockRoutines(): Promise<() => Promise<void>> {
+async function lockRoutines(): Promise<{ assert(): void; release(): Promise<void> }> {
   // Only the directory has to exist: `realpath: false` locks the path as given,
   // and the lock itself is a directory created beside the file.
   mkdirSync(dirname(routinesFile()), { recursive: true })
-  return lockfile.lock(routinesFile(), {
+  let compromised = false
+  const unlock = await lockfile.lock(routinesFile(), {
     realpath: false,
     stale: LOCK_STALE_MS,
     retries: WRITE_LOCK_RETRIES,
-    // A late write is not a reason to take the process down.
-    onCompromised: (error) => logWarn(`lost the lock on routines.json: ${errorMessage(error)}`),
+    onCompromised: (error) => {
+      compromised = true
+      logWarn(`lost the lock on routines.json: ${errorMessage(error)}`)
+    },
   })
+  return {
+    assert() {
+      if (compromised) throw new Error('The routine lock was lost before writing.')
+    },
+    async release() {
+      if (!compromised) await unlock()
+    },
+  }
 }
 
 function serialize(routines: Routine[]): string {
@@ -461,18 +491,24 @@ async function changeRoutines<T>(
   let releaseLocal!: () => void
   localRoutineWrites = new Promise<void>((resolve) => { releaseLocal = resolve })
   await previous
-  let releaseFile: (() => Promise<void>) | undefined
+  let lock: { assert(): void; release(): Promise<void> } | undefined
   try {
-    releaseFile = await lockRoutines()
+    lock = await lockRoutines()
+    lock.assert()
     // Strict: a read-modify-write must never be built on a tolerant empty reading
     // of a file it could not parse, which is how a corrupt one got erased.
     const routines = readRoutinesStrict()
     const outcome = change(routines)
-    if (outcome.next) await writePrivateFile(routinesFile(), serialize(outcome.next))
+    if (outcome.next) {
+      lock.assert()
+      await writePrivateFile(routinesFile(), serialize(outcome.next))
+    }
     return outcome.result
   } finally {
     try {
-      await releaseFile?.()
+      await lock?.release()
+    } catch {
+      // Lock may already be released or compromised.
     } finally {
       releaseLocal()
     }
@@ -663,7 +699,7 @@ export async function runRoutineOnce(
     // the destination named here is the run itself.
     {
       grantedTools: routine.allow,
-      strictGrants: options?.strictGrants,
+      strictGrants: options?.strictGrants ?? true,
       project: options?.project,
       deliverTo: routine.target.gateway === 'none'
         ? { gateway: ROUTINE_GATEWAY, chatId: routine.id }

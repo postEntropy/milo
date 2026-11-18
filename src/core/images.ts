@@ -12,7 +12,7 @@ import path from 'node:path'
 import { errorMessage } from '../util/errors.js'
 import { logDebug } from '../util/log.js'
 import { imagesDir, MILO_HOME } from './config/paths.js'
-import { ensurePrivateDir, PRIVATE_FILE_MODE } from '../util/fs.js'
+import { ensurePrivateDir, PRIVATE_FILE_MODE, writePrivateFile } from '../util/fs.js'
 import type { ImageMime, ImageRef } from './providers/types.js'
 import type { ImagePart } from './providers/types.js'
 
@@ -57,11 +57,7 @@ export async function saveImage(image: { mimeType: ImageMime; data: string }): P
       const now = new Date()
       utimesSync(file, now, now)
     } else {
-      // Through a temporary neighbour: a screenshot half written would show the
-      // model a corrupted screen, which reads as a wrong answer about the app.
-      const temp = `${file}.${process.pid}.tmp`
-      await writeFile(temp, bytes, { mode: PRIVATE_FILE_MODE })
-      await rename(temp, file)
+      await writePrivateFile(file, bytes)
     }
     pruneImages()
     return { mimeType: image.mimeType, path: file }

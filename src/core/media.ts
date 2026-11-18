@@ -285,9 +285,9 @@ export async function prepareIncoming(files: IncomingFile[], options: PrepareInc
       notice(`File ${safeName} (${mimeType}) was attached. Milo cannot extract its contents yet.`)
       await unlink(stored).catch(() => undefined)
     } finally {
-      if (!keepStored) await unlink(stored).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== 'ENOENT') throw error
-      })
+      if (!keepStored) {
+        await unlink(stored).catch(() => undefined)
+      }
     }
   }
   if (useAuxiliary && visionModel && prepared.images.length && !prepared.imagesForDisplayOnly && options.analyzeImages) {
@@ -392,7 +392,7 @@ async function renderPdfPages(file: string, name: string, count: number, signal?
 }
 
 /** Resolve missing or generic MIME types consistently on every surface. */
-function incomingMime(file: IncomingFile): string {
+export function incomingMime(file: IncomingFile): string {
   const bytes = Buffer.from(file.data.buffer, file.data.byteOffset, Math.min(file.data.byteLength, 16))
   if (bytes.subarray(0, 5).toString('ascii') === '%PDF-') return 'application/pdf'
   if (bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png'

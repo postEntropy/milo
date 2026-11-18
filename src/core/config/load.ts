@@ -1,4 +1,6 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import lockfile from 'proper-lockfile'
+import { writeFileAtomicSync, writePrivateFileSync } from '../../util/fs.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
 import { DEFAULT_SEARCH_KEY_ENV } from '../search/types.js'
@@ -79,7 +81,7 @@ export function saveConfig(config: Config): void {
   // comments the file carries, ours and anyone else's, survive the write.
   const doc = readDocument()
   applyConfig(doc, config)
-  writeFileSync(configFile(), renderDocument(doc))
+  writeFileAtomicSync(configFile(), renderDocument(doc))
 }
 
 export function readAuth(): Auth {
@@ -99,11 +101,45 @@ export function readAuth(): Auth {
  */
 export function saveAuth(auth: Auth): void {
   mkdirSync(MILO_HOME, { recursive: true })
-  writeFileSync(authFile(), `${JSON.stringify(auth, null, 2)}\n`, { mode: 0o600 })
+  writePrivateFileSync(authFile(), `${JSON.stringify(auth, null, 2)}\n`)
+}
+
+let authLockTail: Promise<void> = Promise.resolve()
+
+/** Serializes read-modify-write updates to `auth.json` across async callers and processes. */
+export async function updateAuth(mutate: (auth: Auth) => void): Promise<void> {
+  const previous = authLockTail
+  let unlock!: () => void
+  authLockTail = new Promise<void>((resolve) => {
+    unlock = resolve
+  })
+  await previous
+  const file = authFile()
+  let release: (() => Promise<void>) | undefined
+  let compromised = false
   try {
-    chmodSync(authFile(), 0o600)
-  } catch {
-    // best effort on platforms without chmod
+    mkdirSync(MILO_HOME, { recursive: true })
+    release = await lockfile.lock(file, {
+      realpath: false,
+      stale: 10_000,
+      retries: { retries: 15, factor: 1.5, minTimeout: 20, maxTimeout: 250, randomize: true },
+      onCompromised: (error) => {
+        compromised = true
+        logWarn(`lost the lock on ${file}: ${errorMessage(error)}`)
+      },
+    })
+    const auth = readAuth()
+    mutate(auth)
+    if (compromised) throw new Error(`lost lock before writing ${file}`)
+    saveAuth(auth)
+  } finally {
+    try {
+      if (!compromised) await release?.()
+    } catch {
+      // Lock may already be released or compromised.
+    } finally {
+      unlock()
+    }
   }
 }
 
