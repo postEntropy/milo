@@ -119,6 +119,16 @@ private struct DelegatedTarget: Decodable {
     let chatId: String?
 }
 
+private struct DelegatedSchedule: Decodable {
+    let kind: String
+    let time: String?
+    let minutes: Double?
+    let days: [Int]?
+    let dayOfMonth: [Int]?
+    let month: [Int]?
+    var restricted: Bool { days != nil || dayOfMonth != nil || month != nil }
+}
+
 private struct DelegatedWork: Decodable, Identifiable {
     let id: String
     let name: String
@@ -126,6 +136,7 @@ private struct DelegatedWork: Decodable, Identifiable {
     let state: String
     let pauseAfterRun: Bool?
     let scheduleLabel: String?
+    let schedule: DelegatedSchedule?
     let nextAt: Double?
     let createdAt: Double?
     let project: String?
@@ -451,8 +462,12 @@ struct CrewView: View, Equatable {
                 workRow: { item in
                     workRow(item) {
                         objectiveDraft = item.objective
-                        scheduleMode = "every"
-                        scheduleDraft = ""
+                        scheduleMode = item.schedule?.kind == "at" && item.schedule?.restricted == true ? "existing" : item.schedule?.kind ?? "once"
+                        if item.schedule?.kind == "every" {
+                            scheduleDraft = item.scheduleLabel?.replacingOccurrences(of: "every ", with: "") ?? ""
+                        } else {
+                            scheduleDraft = item.schedule?.time ?? ""
+                        }
                         editingWork = false
                         path.append(.work(item.id))
                     }
@@ -992,13 +1007,16 @@ struct CrewView: View, Equatable {
                         Picker("Schedule", selection: $scheduleMode) {
                             Text("Interval").tag("every")
                             Text("Daily time").tag("at")
+                            if item.schedule?.kind == "at" && item.schedule?.restricted == true {
+                                Text(item.scheduleLabel ?? "Current schedule").tag("existing")
+                            }
                             Text("Run once").tag("once")
                         }
                         .pickerStyle(.segmented)
 
                         if scheduleMode != "once" {
                             MiloField(
-                                label: scheduleMode == "every" ? "Interval" : "Daily time",
+                                label: scheduleMode == "every" ? "Interval" : "Time",
                                 text: $scheduleDraft,
                                 placeholder: scheduleMode == "every" ? "2h" : "08:00"
                             )
@@ -1376,6 +1394,12 @@ struct CrewView: View, Equatable {
                 updated = try await MiloApi.call("delegated-work-edit", ["id": id, "once": true], account: account, as: DelegatedWork.self)
             } else {
                 updated = try await MiloApi.call("delegated-work-edit", ["id": id, field: value], account: account, as: DelegatedWork.self)
+            } else if field == "existing", let schedule = work.first(where: { $0.id == id })?.schedule {
+                var body: [String: Any] = ["id": id, "at": value]
+                if let days = schedule.days { body["days"] = days.map(String.init) }
+                if let dates = schedule.dayOfMonth { body["dayOfMonth"] = dates.map(String.init) }
+                if let months = schedule.month { body["month"] = months.map(String.init) }
+                updated = try await MiloApi.call("delegated-work-edit", body, account: account, as: DelegatedWork.self)
             }
             refreshGeneration += 1
             work = work.map { $0.id == updated.id ? updated : $0 }

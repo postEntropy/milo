@@ -71,10 +71,11 @@ export function Crew({ tick = 0 }: { tick?: number }) {
     setOpenRun(null)
     setSelectedWork(entry.id)
     setObjective(entry.objective)
-    setScheduleKind(entry.schedule?.kind ?? 'once')
+    const restricted = entry.schedule?.kind === 'at' && Boolean(entry.schedule.days || entry.schedule.dayOfMonth || entry.schedule.month)
+    setScheduleKind(restricted ? 'existing' : entry.schedule?.kind ?? 'once')
     setScheduleValue(
       entry.schedule?.kind === 'every'
-        ? `${entry.schedule.minutes}m`
+        ? entry.scheduleLabel.replace(/^every /, '')
         : entry.schedule?.kind === 'at'
           ? entry.schedule.time
           : '',
@@ -197,7 +198,8 @@ export function Crew({ tick = 0 }: { tick?: number }) {
       generation.current += 1
       setWork((current) => current?.map((item) => (item.id === updated.id ? updated : item)) ?? current)
       setObjective(updated.objective)
-      setScheduleValue('')
+      setScheduleKind(updated.schedule?.kind === 'at' && (updated.schedule.days || updated.schedule.dayOfMonth || updated.schedule.month) ? 'existing' : updated.schedule?.kind ?? 'once')
+      setScheduleValue(updated.schedule?.kind === 'every' ? updated.scheduleLabel.replace(/^every /, '') : updated.schedule?.kind === 'at' ? updated.schedule.time : '')
       setError(null)
     }
     catch (cause) { setError(message(cause)) }
@@ -231,8 +233,8 @@ export function Crew({ tick = 0 }: { tick?: number }) {
           <Field label="Objective"><textarea value={objective} onChange={(event) => setObjective(event.target.value)} /></Field>
           <button className="button primary" type="submit" disabled={saving || !objective.trim() || objective.trim() === job.objective.trim()}>Save objective</button>
         </form>
-        <form className="crew-surface-card" onSubmit={(event) => { event.preventDefault(); void edit(scheduleKind === 'once' ? { once: true } : { [scheduleKind]: scheduleValue }) }}>
-          <Field label="Schedule"><Select label="Schedule" value={scheduleKind} onChange={setScheduleKind} choices={[{ value: 'every', label: 'Interval' }, { value: 'at', label: 'Daily time' }, { value: 'once', label: 'Run once' }]} /></Field>
+        <form className="crew-surface-card" onSubmit={(event) => { event.preventDefault(); const schedule = job.schedule; void edit(scheduleKind === 'once' ? { once: true } : scheduleKind === 'existing' && schedule?.kind === 'at' ? { at: scheduleValue, ...(schedule.days ? { days: schedule.days.map(String) } : {}), ...(schedule.dayOfMonth ? { dayOfMonth: schedule.dayOfMonth.map(String) } : {}), ...(schedule.month ? { month: schedule.month.map(String) } : {}) } : { [scheduleKind]: scheduleValue }) }}>
+          <Field label="Schedule"><Select label="Schedule" value={scheduleKind} onChange={setScheduleKind} choices={[...(job.schedule?.kind === 'at' && (job.schedule.days || job.schedule.dayOfMonth || job.schedule.month) ? [{ value: 'existing', label: job.scheduleLabel }] : []), { value: 'every', label: 'Interval' }, { value: 'at', label: 'Daily time' }, { value: 'once', label: 'Run once' }]} /></Field>
           {scheduleKind !== 'once' && <Field label={scheduleKind === 'every' ? 'Interval, for example 2h' : 'Time, for example 08:00'}><input value={scheduleValue} onChange={(event) => setScheduleValue(event.target.value)} /></Field>}
           <button className="button primary" type="submit" disabled={saving || (scheduleKind !== 'once' && !scheduleValue.trim())}>Save schedule</button>
         </form>
