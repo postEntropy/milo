@@ -35,8 +35,12 @@ export async function pruneSessions(
     // itself, and pruning them here would make the Runs surface lose what it had
     // shown. The store only knows ids, so the exclusion stays here with the rest
     // of the policy.
+    // Protect only the most recent routine/delegated run sessions so unbounded
+    // background runs do not fill disk indefinitely.
     const runs = (await store.list())
       .filter((session) => session.scope?.gateway === ROUTINE_GATEWAY)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, 100)
       .map((session) => session.id)
     for (const id of await store.prune({ keep, protect: runs })) removed.add(id)
   } catch (error) {
