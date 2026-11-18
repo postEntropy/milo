@@ -31,8 +31,6 @@ Item {
   property bool opened: false
   /** Asked: the popup has stepped aside and the desktop is usable again. */
   property bool working: false
-  /** The pointer is over the popup, so it should take keyboard focus. */
-  property bool pointerInside: false
 
   readonly property string pluginId: (manifest && manifest.id) || "dev.leonardo.milo_spotlight"
 
@@ -369,9 +367,9 @@ Item {
   OverlayWindow {
     id: panel
     shown: root.opened
-    // Keep keyboard focus with the desktop until the pointer enters the popup.
-    // This applies both before the first question and while Milo is working.
-    shownKeyboardFocus: root.pointerInside ? WlrKeyboardFocus.Exclusive : WlrKeyboardFocus.None
+    // Take exclusive keyboard focus while the person is composing or answering a
+    // prompt; once submitted (`working`), hand keyboard focus back to the desktop.
+    shownKeyboardFocus: root.working ? WlrKeyboardFocus.None : WlrKeyboardFocus.Exclusive
     WlrLayershell.namespace: "omarchy-milo-spotlight"
 
     // The rest of the screen is not ours: only the bubbles and the field take a
@@ -387,22 +385,7 @@ Item {
       x: parent.width - width - root.margin
       y: parent.height - height - root.margin
 
-      // Observe clicks even when a child control (especially the TextEdit)
-      // handles the pointer event itself. With keyboard focus released, the
-      // first click must reclaim it before the person can type again.
-      TapHandler {
-        acceptedButtons: Qt.LeftButton
-        onTapped: root.focusInput()
-      }
-
-      HoverHandler {
-        onHoveredChanged: {
-          root.pointerInside = hovered
-          if (hovered) Qt.callLater(function() { prompt.forceActiveFocus() })
-        }
-      }
-
-      // A click on the bubbles brings the field back, for a follow-up.
+      // A click on empty chrome brings the field back without interfering with text selection.
       MouseArea {
         anchors.fill: parent
         onClicked: root.focusInput()
@@ -585,6 +568,11 @@ Item {
           radius: root.cornerRadius
           color: root.background
           borderSpec: root.borderSpec
+
+          TapHandler {
+            acceptedButtons: Qt.LeftButton
+            onTapped: root.focusInput()
+          }
 
           RowLayout {
             id: promptRow

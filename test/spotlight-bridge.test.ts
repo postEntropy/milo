@@ -168,7 +168,10 @@ describe('the popup bridge', () => {
     await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve))
     const { reports } = bridge(port)
 
-    await until(() => reports.filter((report) => report.type === 'ready').length === 2)
+    await until(() =>
+      reports.filter((report) => report.type === 'ready').length === 2
+      && reports.filter((report) => report.type === 'text').length === 2,
+    )
     const starts = reports.filter((report) => report.type === 'ready')
     expect(starts).toMatchObject([
       { type: 'ready', chatId: expect.any(String), busy: true, messages: [{ role: 'user', text: 'Hello' }] },

@@ -299,8 +299,8 @@ class SpotlightBridge {
     if (frame.type === 'event') {
       const event = frame.event
       if (event.type === 'text-delta') this.report({ type: 'text', delta: event.delta })
-      else if (event.type === 'tool-start') this.report({ type: 'tool', text: toolText(event.name, event.args), state: 'running' })
-      else if (event.type === 'tool-end') this.report({ type: 'tool', text: toolText(event.name), state: event.isError ? 'failed' : 'done' })
+      else if (event.type === 'tool-start') this.report({ type: 'tool', text: event.text ?? toolText(event.name, event.args), state: 'running' })
+      else if (event.type === 'tool-end') this.report({ type: 'tool', text: toolText(event.name), state: event.isError && event.drawFailure !== false ? 'failed' : 'done' })
       else if (event.type === 'error') this.report({ type: 'error', message: event.message })
       else if (event.type === 'verification' && !event.ok) this.report({ type: 'error', message: event.text })
       return
