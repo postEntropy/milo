@@ -442,6 +442,21 @@ describe('handleCommand', () => {
     expect(result.reply).toContain('cleared')
   })
 
+  it('blocks /clear when sessions are locked and matches commands case-insensitively', async () => {
+    let cleared = false
+    const locked = await handleCommand('/CLEAR', {
+      sessionLocked: 'locked',
+      resetSession: () => {
+        cleared = true
+      },
+    })
+    expect(cleared).toBe(false)
+    expect(locked.reply).toBe('locked')
+
+    const status = await handleCommand('/STATUS', { status: 'ok' })
+    expect(status.reply).toBe('ok')
+  })
+
   it('starts a new session with an optional title', async () => {
     const titles: (string | undefined)[] = []
     const result = await handleCommand('/new my project', {

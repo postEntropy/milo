@@ -83,6 +83,12 @@ describe('toHtml', () => {
     expect(toHtml('o valor < 5 && a > b')).toBe('o valor &lt; 5 &amp;&amp; a &gt; b')
   })
 
+  it('keeps asterisks untouched inside inline code and links', () => {
+    expect(toHtml('`*a* **b**` and [link *x*](https://example.com/?a=*1*)')).toBe(
+      '<code>*a* **b**</code> and <a href="https://example.com/?a=*1*">link <i>x</i></a>',
+    )
+  })
+
   it('turns a heading into a bold line, which is the closest thing HTML mode has', () => {
     expect(toHtml('## Resumo\nfeito')).toBe('<b>Resumo</b>\nfeito')
   })
@@ -149,6 +155,20 @@ describe('TelegramMessenger', () => {
   it('lets an edit failure surface so the caller can swallow it', async () => {
     const { sender } = fakeSender({ editHtmlFails: true, editPlainFails: true })
     await expect(new TelegramMessenger(sender).edit('1', 11, 'a')).rejects.toThrow(/not modified/)
+  })
+
+  it('keeps HTML enabled on transient non-markup errors such as 429', async () => {
+    const sender: TelegramSender = {
+      sendHtml: async () => 1,
+      sendPlain: async () => 2,
+      editHtml: async () => {
+        throw Object.assign(new Error('Too Many Requests: retry after 3'), { error_code: 429 })
+      },
+      editPlain: async () => {},
+    }
+    const messenger = new TelegramMessenger(sender)
+    await expect(messenger.edit('1', 1, 'hello')).rejects.toThrow(/Too Many Requests/)
+    expect(messenger.usingHtml).toBe(true)
   })
 })
 

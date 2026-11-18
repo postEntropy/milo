@@ -38,8 +38,10 @@ const HTML: Tags = {
   code: (text) => `<code>${text}</code>`,
   link: (text, url) => `<a href="${url.replace(/"/g, '&quot;')}">${text}</a>`,
   quote: (text) => `<blockquote>${text}</blockquote>`,
-  block: (code, language) =>
-    language ? `<pre><code class="language-${language}">${code}</code></pre>` : `<pre>${code}</pre>`,
+  block: (code, language) => {
+    const safeLang = language.replace(/[^a-zA-Z0-9_+-]/g, '')
+    return safeLang ? `<pre><code class="language-${safeLang}">${code}</code></pre>` : `<pre>${code}</pre>`
+  },
 }
 
 /** The same walk with the markup dropped: what a message falls back to. */
@@ -120,15 +122,35 @@ function render(markdown: string, tags: Tags): string {
  * the tags are inserted after: escaping touches none of `*`, a backtick or a
  * bracket, so the two passes cannot collide.
  */
-function inline(text: string, tags: Tags): string {
-  return tags
-    .text(text)
+function formatEmphasis(text: string, tags: Tags): string {
+  return text
     .replace(/\*\*([^*\n]+)\*\*/g, (_match, bold: string) => tags.bold(bold))
     .replace(/\*([^*\n]+)\*/g, (_match, italic: string) => tags.italic(italic))
-    .replace(/`([^`\n]+)`/g, (_match, code: string) => tags.code(code))
+}
+
+function inline(text: string, tags: Tags): string {
+  const escaped = tags.text(text)
+  let sentinel = '\u0000'
+  while (escaped.includes(sentinel)) sentinel += '\u0000'
+
+  const preserved: string[] = []
+  const stash = (rendered: string): string => {
+    const idx = preserved.push(rendered) - 1
+    return `${sentinel}${idx}${sentinel}`
+  }
+
+  // Extract inline code and links before emphasis so `*` inside code spans or URLs
+  // is never rewritten as italic/bold markup.
+  const masked = escaped
+    .replace(/`([^`\n]+)`/g, (_match, code: string) => stash(tags.code(code)))
     .replace(/\[([^\]\n]+)\]\(([^)\s]+)\)/g, (_match, label: string, url: string) =>
-      tags.link(label, url),
+      stash(tags.link(formatEmphasis(label, tags), url)),
     )
+
+  return formatEmphasis(masked, tags).replace(
+    new RegExp(`${sentinel}(\\d+)${sentinel}`, 'g'),
+    (_match, index: string) => preserved[Number(index)] ?? '',
+  )
 }
 
 function isFence(line: string): boolean {

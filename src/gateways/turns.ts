@@ -74,6 +74,13 @@ export class TurnQueue {
     return { stopped: true, dropped: this.queued(key) }
   }
 
+  /** Stops every running and queued turn across all conversations. */
+  stopAll(): void {
+    for (const key of this.running.keys()) {
+      this.stop(key)
+    }
+  }
+
   /**
    * Queues `work` behind whatever is already running for `key`.
    *
@@ -120,7 +127,10 @@ export class TurnQueue {
 
     this.tails.set(key, next)
     void next.then(() => {
-      if (this.tails.get(key) === next) this.tails.delete(key)
+      if (this.tails.get(key) === next) {
+        this.tails.delete(key)
+        this.epoch.delete(key)
+      }
     })
     if (onSettled) {
       // On the same promise, so it runs for a turn that failed as well — a surface

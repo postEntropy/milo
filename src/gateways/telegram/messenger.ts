@@ -7,6 +7,8 @@ export interface TelegramSender {
   editPlain(chatId: string, messageId: number, text: string): Promise<void>
 }
 
+export const TELEGRAM_HTML_MAX_LENGTH = 4096
+
 /**
  * Telegram shows "message is not modified" whenever an edit repeats the current
  * content — which happens constantly while streaming. It is not a real failure
@@ -15,6 +17,18 @@ export interface TelegramSender {
 export function isNotModified(error: unknown): boolean {
   const description = (error as { description?: string } | null)?.description ?? ''
   return description.includes('message is not modified')
+}
+
+/** True only when Telegram rejected the HTML markup itself (parse entities / length), not 429 or network errors. */
+export function isHtmlRejected(error: unknown): boolean {
+  const text = `${(error as { description?: string } | null)?.description ?? ''} ${(error as { message?: string } | null)?.message ?? ''}`.toLowerCase()
+  return (
+    text.includes('parse entities') ||
+    text.includes("can't find end of") ||
+    text.includes('unsupported start tag') ||
+    text.includes('unexpected end tag') ||
+    text.includes('message is too long')
+  )
 }
 
 /**
@@ -40,9 +54,15 @@ export class TelegramMessenger {
 
   async post(chatId: string, markdown: string): Promise<number> {
     if (this.html) {
-      try {
-        return await this.sender.sendHtml(chatId, toHtml(markdown))
-      } catch {
+      const html = toHtml(markdown)
+      if (html.length <= TELEGRAM_HTML_MAX_LENGTH) {
+        try {
+          return await this.sender.sendHtml(chatId, html)
+        } catch (error) {
+          if (!isHtmlRejected(error)) throw error
+          this.html = false
+        }
+      } else {
         this.html = false
       }
     }
@@ -51,10 +71,16 @@ export class TelegramMessenger {
 
   async edit(chatId: string, messageId: number, markdown: string): Promise<void> {
     if (this.html) {
-      try {
-        await this.sender.editHtml(chatId, messageId, toHtml(markdown))
-        return
-      } catch {
+      const html = toHtml(markdown)
+      if (html.length <= TELEGRAM_HTML_MAX_LENGTH) {
+        try {
+          await this.sender.editHtml(chatId, messageId, html)
+          return
+        } catch (error) {
+          if (!isHtmlRejected(error)) throw error
+          this.html = false
+        }
+      } else {
         this.html = false
       }
     }

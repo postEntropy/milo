@@ -1,5 +1,31 @@
 import type { CommandResult } from '../commands.js'
 import { chunk } from '../chunk.js'
+import { toHtml } from './html.js'
+
+const TELEGRAM_HTML_MAX = 4096
+
+function splitHtmlSafe(part: string, htmlLimit: number): string[] {
+  if (toHtml(part).length <= htmlLimit) return [part]
+  const out: string[] = []
+  const queue = [part]
+  while (queue.length > 0) {
+    const item = queue.shift()!
+    const htmlLen = toHtml(item).length
+    if (htmlLen <= htmlLimit || item.length <= 1) {
+      out.push(item)
+      continue
+    }
+    const target = Math.max(64, Math.floor((item.length * htmlLimit) / htmlLen * 0.85))
+    const pieces = target < item.length ? chunk(item, target) : [item.slice(0, Math.ceil(item.length / 2)), item.slice(Math.ceil(item.length / 2))]
+    if (pieces.length <= 1) {
+      const mid = Math.ceil(item.length / 2)
+      queue.unshift(item.slice(0, mid), item.slice(mid))
+    } else {
+      queue.unshift(...pieces)
+    }
+  }
+  return out
+}
 
 /**
  * A command reply as the messages it goes out as, split from **one** source: the
@@ -21,10 +47,12 @@ import { chunk } from '../chunk.js'
 export function commandReplyParts(
   command: CommandResult,
   maxLength: number,
+  maxHtmlLength = TELEGRAM_HTML_MAX,
 ): { parts: string[]; markdown: boolean } {
   const markdown = Boolean(command.markdown)
+  const rawParts = chunk(markdown ? command.markdown! : (command.reply ?? ''), maxLength)
   return {
-    parts: chunk(markdown ? command.markdown! : (command.reply ?? ''), maxLength),
+    parts: markdown ? rawParts.flatMap((part) => splitHtmlSafe(part, maxHtmlLength)) : rawParts,
     markdown,
   }
 }

@@ -85,22 +85,39 @@ export class DiscordGateway implements Gateway {
   constructor(private readonly options: DiscordGatewayOptions) {}
 
   async start(): Promise<void> {
-    const { Client, GatewayIntentBits, Events, ActionRowBuilder, ButtonBuilder, ButtonStyle } =
-      await import('discord.js')
+    const {
+      Client,
+      GatewayIntentBits,
+      Partials,
+      Events,
+      ActionRowBuilder,
+      ButtonBuilder,
+      ButtonStyle,
+    } = await import('discord.js')
 
     const client = new Client({
       intents: [
         GatewayIntentBits.Guilds,
         GatewayIntentBits.GuildMessages,
+        GatewayIntentBits.DirectMessages,
         GatewayIntentBits.MessageContent,
       ],
+      partials: [Partials.Channel],
     })
+    client.on(Events.Error, (error) =>
+      logWarn(`discord: client error: ${errorMessage(error)}`),
+    )
 
     this.builders = { ActionRowBuilder, ButtonBuilder, ButtonStyle }
     const builders = this.builders
 
     const actionRouter = new ActionRouter()
     actionRouter.on('sessions', async (payload, context) => {
+      const locked = sessionLockMessage({ allowlist: this.options.allowlist, userId: context.userId })
+      if (locked) {
+        await context.answer(locked)
+        return
+      }
       const outcome = buildSessionsList(await this.options.runtime.listSessions(), payload, undefined, {
         projectNames: projectNames(),
       })
@@ -126,10 +143,15 @@ export class DiscordGateway implements Gateway {
       if (request.approvalScope) row.addComponents(new ButtonBuilder().setCustomId('perm:always').setLabel('Allow for session').setStyle(ButtonStyle.Primary))
       row.addComponents(new ButtonBuilder().setCustomId('perm:deny').setLabel('Deny').setStyle(ButtonStyle.Danger))
 
-      const prompt = await target.reply({
-        content: `⚠ Allow ${toolDisplayName(request.tool)}?\n\n${request.summary}${request.approvalScope ? `\n\n${request.approvalScope}` : ''}`,
-        components: [row],
-      })
+      let prompt: Message
+      try {
+        prompt = await target.reply({
+          content: `⚠ Allow ${toolDisplayName(request.tool)}?\n\n${request.summary}${request.approvalScope ? `\n\n${request.approvalScope}` : ''}`,
+          components: [row],
+        })
+      } catch {
+        return { allowed: false }
+      }
 
       try {
         // Raced against the stop: `awaitMessageComponent` has no signal of its
@@ -148,7 +170,12 @@ export class DiscordGateway implements Gateway {
           // Fail closed, and take the buttons away with the decision: the prompt
           // is a question a stopped turn no longer has.
           await prompt
-            .edit({ content: '🛑 Stopped before this was answered — denied.', components: [] })
+            .edit({
+              content: signal?.aborted
+                ? '🛑 Stopped before this was answered — denied.'
+                : '⏱ Timed out — denied.',
+              components: [],
+            })
             .catch(() => undefined)
           return { allowed: false }
         }
@@ -186,7 +213,9 @@ export class DiscordGateway implements Gateway {
           turn: turnOf(this.turns, message.channelId),
           start: (pending) => this.startTurn(message, ask, pending),
         })
-        void message.reply(result.reply ?? '').catch(() => undefined)
+        void this.replyChunked(message, result.reply ?? '').catch((error) =>
+          logWarn(`discord: failed to reply: ${errorMessage(error)}`),
+        )
         return
       }
 
@@ -219,17 +248,26 @@ export class DiscordGateway implements Gateway {
         chatId: interaction.channelId ?? '',
         userId: interaction.user.id,
         messageId: interaction.message?.id,
-        answer: async () => {},
+        answer: async (text) => {
+          if (text) {
+            await interaction.reply({ content: text, ephemeral: true }).catch(() => undefined)
+          }
+        },
         edit: async (content) => {
           const components = toDiscordComponents<ActionRowBuilder<ButtonBuilder>>(content.actions, builders)
+          const raw = content.markdown ?? content.text
+          const body = raw.length > MAX_LENGTH ? `${raw.slice(0, MAX_LENGTH - 1)}…` : raw
           await interaction.update({
-            content: content.markdown ?? content.text,
+            content: body,
             components,
-          }).catch(() => undefined)
+          }).catch((error) => logWarn(`discord: failed to update interaction: ${errorMessage(error)}`))
         },
       }
 
-      const handled = await actionRouter.dispatch(customId, context).catch(() => false)
+      const handled = await actionRouter.dispatch(customId, context).catch((error) => {
+        logWarn(`discord: action handler failed: ${errorMessage(error)}`)
+        return false
+      })
       if (handled) return
 
       // A button no handler knows — an old message, say. Answer it, or Discord shows
@@ -271,7 +309,9 @@ export class DiscordGateway implements Gateway {
       }))
       this.startTurn(message, ask, caption || 'Please inspect the attached media.', [], files)
     } catch (error) {
-      await message.reply(`Could not read that attachment: ${error instanceof Error ? error.message : String(error)}`).catch(() => undefined)
+      await message
+        .reply(`Could not read that attachment: ${error instanceof Error ? error.message : String(error)}`)
+        .catch((replyError) => logWarn(`discord: failed to send attachment error: ${errorMessage(replyError)}`))
     }
   }
 
@@ -322,19 +362,14 @@ export class DiscordGateway implements Gateway {
         const components = this.builders
           ? toDiscordComponents<ActionRowBuilder<ButtonBuilder>>(command.actions, this.builders)
           : []
-        if (components.length > 0) {
-          await message.reply({
-            content: command.markdown ?? command.reply ?? '',
-            components,
-          })
-        } else {
-          await message.reply(command.markdown ?? command.reply ?? '')
-        }
+        await this.replyChunked(message, command.markdown ?? command.reply ?? '', components)
         return
       }
     } catch (error) {
       // A command that throws must not swallow the message it was answering.
-      await message.reply(`⚠ ${errorMessage(error)}`).catch(() => undefined)
+      await this.replyChunked(message, `⚠ ${errorMessage(error)}`).catch((replyError) =>
+        logWarn(`discord: failed to send command error: ${errorMessage(replyError)}`),
+      )
       return
     } finally {
       stopTyping()
@@ -378,9 +413,26 @@ export class DiscordGateway implements Gateway {
     })
     // A stop is not a failure, and it is already on screen as "🛑 stopped".
     if (failure) {
-      await message
-        .reply(`[error] ${failure}`)
+      await this.replyChunked(message, `[error] ${failure}`)
         .catch((err) => logWarn(`discord: failed to send error reply: ${errorMessage(err)}`))
+    }
+  }
+
+  private async replyChunked(
+    message: Message,
+    text: string,
+    components: ActionRowBuilder<ButtonBuilder>[] = [],
+  ): Promise<void> {
+    const parts = chunk(text, MAX_LENGTH)
+    if (parts.length === 0) return
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i]!
+      const isLast = i === parts.length - 1
+      if (isLast && components.length > 0) {
+        await message.reply({ content: part, components })
+      } else {
+        await message.reply(part)
+      }
     }
   }
 
@@ -405,6 +457,7 @@ export class DiscordGateway implements Gateway {
   }
 
   async stop(): Promise<void> {
+    this.turns.stopAll()
     await this.client?.destroy()
   }
 

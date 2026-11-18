@@ -257,7 +257,7 @@ export function modelLockMessage(options: LockOptions): string | undefined {
 /** Sessions are per-person: one member listing or switching them would expose the others'. */
 export function sessionLockMessage(options: LockOptions): string | undefined {
   return lockedTo(
-    '/new, /sessions and /resume',
+    '/new, /sessions, /resume, /fork, /folder, /clear, /crew and /delegated',
     'Manage sessions from the terminal, or allow only your own id under Gateways.',
     options,
   )
@@ -457,7 +457,7 @@ export async function handleCommand(
 
   const { command, argument } = parse(raw)
 
-  switch (command) {
+  switch (command.toLowerCase()) {
     case 'start':
     case 'help':
       return { handled: true, reply: HELP }
@@ -770,6 +770,7 @@ export async function handleCommand(
     }
 
     case 'clear':
+      if (context.sessionLocked) return { handled: true, reply: context.sessionLocked }
       await context.resetSession?.()
       return { handled: true, reply: 'Session cleared.' }
 

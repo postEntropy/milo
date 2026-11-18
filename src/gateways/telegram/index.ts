@@ -27,9 +27,10 @@ import type { ChatSurface } from '../surface.js'
 import type { Gateway } from '../types.js'
 import { readIncomingResponse, type IncomingFile } from '../../core/media.js'
 import type { ImagePart } from '../../core/providers/types.js'
-import { TelegramMessenger, isNotModified } from './messenger.js'
+import { TelegramMessenger, isHtmlRejected, isNotModified } from './messenger.js'
 import { commandReplyParts } from './reply.js'
 import { toHtml, toPlain } from './html.js'
+import { COMMAND_CATALOG } from '../command-catalog.js'
 import {
   ActionRouter,
   DISABLED_CALLBACK,
@@ -57,6 +58,45 @@ const CAPTION_MAX = 1024
  * so the indicator is refreshed just inside that window while a turn runs.
  */
 const TYPING_REFRESH_MS = 4_000
+const MAX_RETRY_AFTER_SECONDS = 30
+
+function normalizeTelegramText(raw: string, botUsername?: string): string {
+  const trimmed = raw.trim()
+  if (!trimmed.startsWith('/') || !botUsername) return trimmed
+  const escaped = botUsername.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+  return trimmed.replace(new RegExp(`^/([^\\s@]+)@${escaped}(?=\\s|$)`, 'i'), '/$1')
+}
+
+function retryAfterMs(error: unknown): number | null {
+  const err = error as { error_code?: number; parameters?: { retry_after?: number } } | null
+  if (err?.error_code !== 429) return null
+  const seconds = err.parameters?.retry_after
+  if (typeof seconds !== 'number' || !Number.isFinite(seconds) || seconds <= 0) return null
+  return Math.min(seconds, MAX_RETRY_AFTER_SECONDS) * 1000
+}
+
+async function withRetryAfter<T>(fn: () => Promise<T>, signal?: AbortSignal): Promise<T> {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await fn()
+    } catch (error) {
+      const delayMs = attempt < 2 ? retryAfterMs(error) : null
+      if (delayMs === null || signal?.aborted) throw error
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(() => {
+          signal?.removeEventListener('abort', onAbort)
+          resolve()
+        }, delayMs)
+        const onAbort = (): void => {
+          clearTimeout(timer)
+          resolve()
+        }
+        signal?.addEventListener('abort', onAbort, { once: true })
+      })
+      if (signal?.aborted) throw error
+    }
+  }
+}
 
 export class TelegramGateway implements Gateway {
   readonly id = 'telegram' as const
@@ -70,27 +110,22 @@ export class TelegramGateway implements Gateway {
     const { Bot: TelegramBot } = await import('grammy')
     const bot = new TelegramBot(this.options.token)
 
-    // Otherwise the client suggests /start, which Milo does not have.
     await bot.api
-      .setMyCommands([
-        { command: 'help', description: 'Show the available commands' },
-        { command: 'new', description: 'Start a new session' },
-        { command: 'sessions', description: 'List saved sessions' },
-        { command: 'resume', description: 'Switch to another session: /resume <id>' },
-        { command: 'stats', description: 'Numbers for the current session' },
-        { command: 'mode', description: 'Permission mode: ask, auto or yolo' },
-        { command: 'yolo', description: 'Toggle yolo mode' },
-        { command: 'clear', description: 'Forget this session' },
-        { command: 'status', description: 'Show the current permission mode' },
-        { command: 'compact', description: 'Fold the oldest turns into the summary now' },
-        { command: 'stop', description: 'Stop the turn running now' },
-        { command: 'steer', description: 'Add to the turn running now: /steer <text>' },
-        { command: 'queue', description: 'Say it after this turn: /queue <text>' },
-      ])
-      .catch(() => undefined)
+      .setMyCommands(
+        COMMAND_CATALOG.map((entry) => ({
+          command: entry.name,
+          description: entry.hint.slice(0, 256),
+        })),
+      )
+      .catch((error) => logWarn(`telegram: failed to register commands: ${errorMessage(error)}`))
 
     const actionRouter = new ActionRouter()
     actionRouter.on('sessions', async (payload, context) => {
+      const locked = sessionLockMessage({ allowlist: this.options.allowlist, userId: context.userId })
+      if (locked) {
+        await context.answer(locked)
+        return
+      }
       const outcome = buildSessionsList(await this.options.runtime.listSessions(), payload, undefined, {
         projectNames: projectNames(),
       })
@@ -119,12 +154,14 @@ export class TelegramGateway implements Gateway {
         return
       }
 
+      let answered = false
       const context: ActionContext = {
         gateway: 'telegram',
         chatId: chatId,
         userId: String(ctx.from?.id ?? ''),
         messageId: messageId !== undefined ? String(messageId) : undefined,
         answer: async (text) => {
+          answered = true
           await ctx.answerCallbackQuery(text ? { text } : undefined).catch(() => undefined)
         },
         edit: async (content) => {
@@ -136,13 +173,18 @@ export class TelegramGateway implements Gateway {
               parse_mode: 'HTML',
               reply_markup: replyMarkup,
             })
-            .catch(() => undefined)
+            .catch((error) => {
+              if (!isNotModified(error)) logWarn(`telegram: could not edit action message: ${errorMessage(error)}`)
+            })
         },
       }
 
-      const handled = await actionRouter.dispatch(data, context).catch(() => false)
+      const handled = await actionRouter.dispatch(data, context).catch((error) => {
+        logWarn(`telegram: action handler failed: ${errorMessage(error)}`)
+        return false
+      })
       if (handled) {
-        await context.answer().catch(() => undefined)
+        if (!answered) await context.answer().catch(() => undefined)
         return
       }
 
@@ -151,10 +193,15 @@ export class TelegramGateway implements Gateway {
         await ctx.answerCallbackQuery().catch(() => undefined)
         return
       }
-      const known = this.pending.resolve(parsed.id, {
-        allowed: parsed.allowed,
-        ...(parsed.remember ? { remember: true } : {}),
-      })
+      const actor = ctx.from?.id === undefined ? undefined : String(ctx.from.id)
+      const known = this.pending.resolve(
+        parsed.id,
+        {
+          allowed: parsed.allowed,
+          ...(parsed.remember ? { remember: true } : {}),
+        },
+        actor,
+      )
       await ctx
         .answerCallbackQuery({
           text: known ? (parsed.allowed ? (parsed.remember ? 'Always allowed' : 'Allowed') : 'Denied') : 'Expired',
@@ -169,7 +216,8 @@ export class TelegramGateway implements Gateway {
 
     bot.on('message:text', (ctx) => {
       const chatId = String(ctx.chat.id)
-      const text = ctx.msg.text
+      const text = normalizeTelegramText(ctx.msg.text, ctx.me?.username)
+      if (!text) return
 
       if (!isAllowed(this.options.allowlist, [ctx.from?.id, ctx.chat.id])) {
         // Fire and forget: the update loop must not wait on a network call.
@@ -186,7 +234,9 @@ export class TelegramGateway implements Gateway {
           turn: turnOf(this.turns, chatId),
           start: (pending) => this.startTurn(bot, ctx, chatId, pending),
         })
-        void this.reply(bot, chatId, result).catch(() => undefined)
+        void this.reply(bot, chatId, result).catch((error) =>
+          logWarn(`telegram: failed to reply: ${errorMessage(error)}`),
+        )
         return
       }
 
@@ -295,7 +345,9 @@ export class TelegramGateway implements Gateway {
     } catch (error) {
       // A command that throws must not swallow the message it was answering.
       for (const part of chunk(`⚠ ${errorMessage(error)}`, MAX_LENGTH)) {
-        await ctx.reply(part).catch(() => undefined)
+        await ctx.reply(part).catch((replyError) =>
+          logWarn(`telegram: failed to send command error: ${errorMessage(replyError)}`),
+        )
       }
       return
     } finally {
@@ -304,17 +356,22 @@ export class TelegramGateway implements Gateway {
 
     const messenger = new TelegramMessenger({
       sendHtml: async (chat, html) =>
-        (await bot.api.sendMessage(chat, html, { parse_mode: 'HTML' })).message_id,
-      sendPlain: async (chat, text) => (await bot.api.sendMessage(chat, text)).message_id,
+        (await withRetryAfter(() => bot.api.sendMessage(chat, html, { parse_mode: 'HTML' }), signal)).message_id,
+      sendPlain: async (chat, text) =>
+        (await withRetryAfter(() => bot.api.sendMessage(chat, text), signal)).message_id,
       editHtml: async (chat, messageId, html) => {
         try {
-          await bot.api.editMessageText(chat, messageId, html, { parse_mode: 'HTML' })
+          await withRetryAfter(() => bot.api.editMessageText(chat, messageId, html, { parse_mode: 'HTML' }), signal)
         } catch (error) {
           if (!isNotModified(error)) throw error
         }
       },
       editPlain: async (chat, messageId, text) => {
-        await bot.api.editMessageText(chat, messageId, text)
+        try {
+          await withRetryAfter(() => bot.api.editMessageText(chat, messageId, text), signal)
+        } catch (error) {
+          if (!isNotModified(error)) throw error
+        }
       },
     })
 
@@ -326,7 +383,7 @@ export class TelegramGateway implements Gateway {
           logWarn(`telegram: could not edit message ${messageId}: ${errorMessage(error)}`)
         })
       },
-      ask: (_chatId, _messageId, request) => this.ask(bot, chatId, request, signal),
+      ask: (_chatId, _messageId, request) => this.ask(bot, chatId, request, signal, userId),
       files: (_chatId, files) => this.postFiles(chatId, files),
       typing: () => this.typing(bot, chatId),
     }
@@ -379,15 +436,16 @@ export class TelegramGateway implements Gateway {
       const reply_markup = isLast && replyMarkup ? replyMarkup : undefined
       if (html) {
         try {
-          await bot.api.sendMessage(chatId, toHtml(part), { parse_mode: 'HTML', reply_markup })
+          await withRetryAfter(() => bot.api.sendMessage(chatId, toHtml(part), { parse_mode: 'HTML', reply_markup }))
           continue
-        } catch {
+        } catch (error) {
+          if (!isHtmlRejected(error)) throw error
           // The API refused the markup. What already went out stays as it is; the
           // rest of the reply goes as the words alone, never raw Markdown.
           html = false
         }
       }
-      await bot.api.sendMessage(chatId, toPlain(part), { reply_markup })
+      await withRetryAfter(() => bot.api.sendMessage(chatId, toPlain(part), { reply_markup }))
     }
   }
 
@@ -410,6 +468,7 @@ export class TelegramGateway implements Gateway {
     chatId: string,
     request: PermissionRequest,
     signal?: AbortSignal,
+    owner?: string,
   ): Promise<PermissionResult> {
     const id = randomUUID()
     let promptId: number | undefined
@@ -430,7 +489,7 @@ export class TelegramGateway implements Gateway {
       return { allowed: false }
     }
 
-    const result = await this.pending.wait(id, ASK_TIMEOUT_MS, signal)
+    const result = await this.pending.wait(id, ASK_TIMEOUT_MS, signal, owner)
     if (signal?.aborted && promptId !== undefined) {
       // The id is spent, so a tap answers "Expired" — but the buttons should not
       // be left there inviting a tap that a stopped turn must not honour.
@@ -442,6 +501,7 @@ export class TelegramGateway implements Gateway {
   }
 
   async stop(): Promise<void> {
+    this.turns.stopAll()
     await this.bot?.stop()
   }
 
