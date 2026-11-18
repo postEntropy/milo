@@ -43,6 +43,10 @@ export const crewTool: Tool<z.infer<typeof schema>> = {
       }
       if (args.action === 'rename') return { content: JSON.stringify(await ctx.crew.rename(args.id, args.name)) }
       if (args.action === 'avatar') {
+        const hasTraits = args.shape !== undefined || args.eyes !== undefined || args.accessory !== undefined || args.palette !== undefined
+        if (!args.shuffle && !hasTraits) {
+          return { content: 'Pass shuffle or at least one avatar trait (shape, eyes, accessory, palette).', isError: true }
+        }
         const patch = args.shuffle
           ? 'shuffle'
           : { shape: args.shape, eyes: args.eyes, accessory: args.accessory, palette: args.palette }

@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CrewStore } from '../src/core/crew.js'
 import { extractToolBot } from '../src/core/crew-avatars.js'
+import { crewTool } from '../src/core/tools/crew.js'
 
 const dirs: string[] = []
 function store(): { crew: CrewStore; file: string } {
@@ -130,6 +131,71 @@ describe('Crew', () => {
       id: 'bot-123',
       name: 'Scout',
       report: 'All queries under 12ms.',
+    })
+  })
+
+  it('parses stopped task output and bot names containing parentheses', () => {
+    const stopped = extractToolBot({
+      name: 'task',
+      text: 'Task Scout (Lead) · survey',
+      result: 'Crew bot Scout (Lead) (bot-99) was stopped. Partial report:\nPartial trace',
+    })
+    expect(stopped).toMatchObject({
+      id: 'bot-99',
+      name: 'Scout (Lead)',
+      report: 'Partial trace',
+    })
+  })
+
+  it('rejects explicit empty botId, trims newlines from names, caps assignments, and recovers dead PIDs', async () => {
+    const { crew } = store()
+    await expect(crew.start({ botId: '', name: 'Scout', mission: 'Read', model: 'm', sessionId: 's' })).rejects.toThrow('No bot has that id.')
+
+    const { bot, assignment } = await crew.start({ name: 'Scout\nLead\n)', mission: 'First', model: 'm', sessionId: 's' })
+    expect(bot.name).toBe('Scout Lead')
+    await crew.finish(bot.id, assignment.id, 'completed', 'done')
+
+    for (let index = 0; index < 55; index += 1) {
+      const next = await crew.start({ botId: bot.id, name: bot.name, mission: `M${index}`, model: 'm', sessionId: 's' })
+      await crew.finish(bot.id, next.assignment.id, 'completed', `R${index}`)
+    }
+    expect(crew.list()[0]?.assignments).toHaveLength(50)
+
+    const { crew: pidCrew, file: pidFile } = store()
+    await pidCrew.start({ name: 'Orphan', mission: 'Hang', model: 'm', sessionId: 's' })
+    const raw = JSON.parse(readFileSync(pidFile, 'utf8')) as Array<{ assignments: Array<{ processId: number }> }>
+    raw[0]!.assignments[0]!.processId = 999_999_999
+    writeFileSync(pidFile, JSON.stringify(raw))
+    await new CrewStore(pidFile).recover()
+    expect(new CrewStore(pidFile).list()[0]?.assignments[0]?.state).toBe('interrupted')
+  })
+
+  it('exposes crewTool actions and rejects no-op avatar updates', async () => {
+    const ctx = { cwd: tmpdir(), signal: new AbortController().signal }
+    expect(await crewTool.execute({ action: 'list' }, ctx)).toEqual({
+      content: 'Crew is not available in this session.',
+      isError: true,
+    })
+
+    const { crew } = store()
+    const { bot, assignment } = await crew.start({ name: 'Scout', mission: 'Read', model: 'm', sessionId: 's' })
+    expect(JSON.parse((await crewTool.execute({ action: 'list' }, { ...ctx, crew })).content)).toHaveLength(1)
+    expect(JSON.parse((await crewTool.execute({ action: 'show', id: bot.id }, { ...ctx, crew })).content).id).toBe(bot.id)
+    expect((await crewTool.execute({ action: 'show', id: 'missing' }, { ...ctx, crew })).isError).toBe(true)
+
+    expect(JSON.parse((await crewTool.execute({ action: 'rename', id: bot.id, name: 'Sage' }, { ...ctx, crew })).content).name).toBe('Sage')
+    expect(await crewTool.execute({ action: 'avatar', id: bot.id }, { ...ctx, crew })).toEqual({
+      content: 'Pass shuffle or at least one avatar trait (shape, eyes, accessory, palette).',
+      isError: true,
+    })
+    expect(JSON.parse((await crewTool.execute({ action: 'avatar', id: bot.id, shape: 'orb' }, { ...ctx, crew })).content).avatar?.shape).toBe('orb')
+
+    await crewTool.execute({ action: 'guide', id: bot.id, text: 'Focus on tests' }, { ...ctx, crew })
+    await crewTool.execute({ action: 'stop', id: bot.id }, { ...ctx, crew })
+    expect(crew.list()[0]?.assignments[0]).toMatchObject({
+      id: assignment.id,
+      stopRequestedAt: expect.any(Number),
+      guidance: [{ text: 'Focus on tests' }],
     })
   })
 })

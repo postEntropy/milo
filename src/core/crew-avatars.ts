@@ -52,7 +52,7 @@ export function formatBotAvatarBadge(avatar: CrewAvatar): string {
   return `[${EYE_GLYPHS[avatar.eyes]} ${avatar.palette} ${avatar.shape}${avatar.accessory !== 'none' ? ` + ${avatar.accessory}` : ''}]`
 }
 
-export interface ToolBotPreview {
+interface ToolBotPreview {
   id: string
   name: string
   task?: string
@@ -77,7 +77,7 @@ export function extractToolBot(tool: {
 }): ToolBotPreview | null {
   if (tool.name !== 'task') return null
   const resultMatch = tool.result ? /^Crew bot (.+?) \(([^)\n]+)\):\n([\s\S]*)$/.exec(tool.result) : null
-  const stoppedMatch = !resultMatch && tool.result ? /^Crew bot (.+?) was stopped\.?(?:\s*Partial report:\n([\s\S]*))?$/.exec(tool.result) : null
+  const stoppedMatch = !resultMatch && tool.result ? /^Crew bot (.+?)(?: \(([^)\n]+)\))? was stopped\.?(?:\s*Partial report:\n([\s\S]*))?$/.exec(tool.result) : null
   const inputName = readInputField(tool.input, 'name')
   const inputBotId = readInputField(tool.input, 'botId')
   const inputDesc = readInputField(tool.input, 'description')
@@ -96,10 +96,10 @@ export function extractToolBot(tool: {
   )?.trim()
 
   if (!name) return null
-  const id = (resultMatch?.[2] ?? inputBotId ?? name).trim()
+  const id = (resultMatch?.[2] ?? stoppedMatch?.[2] ?? inputBotId ?? name).trim()
   const task = (inputDesc ?? (textRest.length > 0 ? textRest.join(' · ') : strippedText)).trim() || undefined
   const model = inputModel ? (inputProvider ? `${inputProvider}/${inputModel}` : inputModel) : undefined
-  const report = (resultMatch?.[3] ?? stoppedMatch?.[2] ?? tool.result ?? '')?.trim() || undefined
+  const report = (resultMatch?.[3] ?? stoppedMatch?.[3] ?? tool.result ?? '')?.trim() || undefined
 
   let mission: string | undefined
   if (tool.input) {

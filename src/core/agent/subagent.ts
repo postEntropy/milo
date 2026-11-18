@@ -144,32 +144,46 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
 
   let text = ''
   let failure: string | null = null
-  for await (const event of runAgent({
-    provider: options.provider,
-    model: options.model,
-    system,
-    tools,
-    registry: options.registry,
-    messages,
-    context,
-    maxSteps: options.maxSteps,
-    maxTokens: options.maxTokens,
-    temperature: options.temperature,
-    reasoningEffort: options.reasoningEffort,
-    signal: options.signal,
-    steering: options.steering,
-    permission: options.permission,
-    onSideEffect: options.onSideEffect,
-    trace: options.trace,
-  })) {
-    if (event.type === 'text-delta') text += event.delta
-    else if (event.type === 'steer') options.onSteer?.(event.text)
-    else if (event.type === 'tool-start') {
-      text = closeParagraph(text)
+  const unconfirmedSteers: string[] = []
+  const confirmSteers = () => {
+    for (const steer of unconfirmedSteers.splice(0)) options.onSteer?.(steer)
+  }
+  try {
+    for await (const event of runAgent({
+      provider: options.provider,
+      model: options.model,
+      system,
+      tools,
+      registry: options.registry,
+      messages,
+      context,
+      maxSteps: options.maxSteps,
+      maxTokens: options.maxTokens,
+      temperature: options.temperature,
+      reasoningEffort: options.reasoningEffort,
+      signal: options.signal,
+      steering: options.steering,
+      permission: options.permission,
+      onSideEffect: options.onSideEffect,
+      trace: options.trace,
+    })) {
+      if (event.type === 'text-delta') { confirmSteers(); text += event.delta }
+      else if (event.type === 'reasoning-delta' || event.type === 'usage' || event.type === 'done') confirmSteers()
+      else if (event.type === 'steer') unconfirmedSteers.push(event.text)
+      else if (event.type === 'tool-start') {
+        confirmSteers()
+        text = closeParagraph(text)
+      }
+      // A subagent has no surface to report to, so a failure has to come back as
+      // the result: the parent is the only one who can say it went wrong.
+      else if (event.type === 'error') { confirmSteers(); failure = event.message }
     }
-    // A subagent has no surface to report to, so a failure has to come back as
-    // the result: the parent is the only one who can say it went wrong.
-    else if (event.type === 'error') failure = event.message
+  } catch (error) {
+    if (options.signal.aborted && error instanceof Error && error.name === 'AbortError') {
+      const partial = text.trim()
+      return { content: partial, isError: true }
+    }
+    throw error
   }
 
   const report = text.trim()

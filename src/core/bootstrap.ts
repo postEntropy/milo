@@ -246,20 +246,22 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     // Where a model's shape comes from: its window, output ceiling and reasoning
     // mode are in no request, so they are read from the config and the catalogs
     // once per model and cached.
-    modelProfile: (model: string) =>
-      lookupModelProfile(model, {
+    modelProfile: (model: string, providerId?: string) => {
+      const target = (providerId ? resolveActive(providerId) : undefined) ?? activeProvider
+      return lookupModelProfile(model, {
         override: loaded.config.models[model],
         fetchProvider: () =>
-          activeProvider.oauth === 'chatgpt'
+          target.oauth === 'chatgpt'
             ? Promise.resolve(chatGptModels())
             : listModels({
-                baseURL: activeProvider.baseURL,
-                apiKey: activeProvider.apiKey,
-                wire: activeProvider.wire,
-                headers: activeProvider.headers,
+                baseURL: target.baseURL,
+                apiKey: target.apiKey,
+                wire: target.wire,
+                headers: target.headers,
                 signal: AbortSignal.timeout(4_000),
               }),
-      }),
+      })
+    },
     reasoningEffort: loaded.config.reasoningEffort,
     cwd,
     // Where a session's project is, read from the install's own list — the same

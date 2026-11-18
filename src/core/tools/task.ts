@@ -27,11 +27,9 @@ export type TaskArgs = z.infer<typeof schema>
 const TASK_DESCRIPTION =
   'Delegate a self-contained subtask to a Crew bot when that helps the work, or do it yourself when delegation would not help. Give the bot a short name and a complete mission: it has its own context and cannot see this session. To choose a different model or provider, first discover the available ids with the crew tool. It returns a report, runs the same tools as you, cannot delegate again, and anything it needs confirmed is put to the user the same way yours would be.'
 
-const TASK_DESCRIPTION_IN_PROJECT = TASK_DESCRIPTION
-
-/** The description the catalog carries: whether the turn works in a project changes it. */
-export function taskDescription(project: boolean): string {
-  return project ? TASK_DESCRIPTION_IN_PROJECT : TASK_DESCRIPTION
+/** The description the catalog carries. */
+export function taskDescription(_project: boolean): string {
+  return TASK_DESCRIPTION
 }
 
 export const taskTool: Tool<TaskArgs> = {

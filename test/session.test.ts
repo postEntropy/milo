@@ -1936,3 +1936,138 @@ it('links a session turn to the request and its recorded input and output', asyn
     await memory.close()
   }
 })
+
+describe('Crew & Bot session integration', () => {
+  it('omits the crew tool from routine sessions while keeping task recording and cross-provider profiles', async () => {
+    let mainCalls = 0
+    let seenTools: ToolSpec[] = []
+    let taskResult = ''
+    const mainProvider: Provider = {
+      id: 'main',
+      async *stream(req) {
+        seenTools = req.tools ?? []
+        if (mainCalls++ === 0) {
+          yield {
+            type: 'tool-call',
+            id: 'call-1',
+            name: 'task',
+            args: { name: 'Scout', description: 'Inspect report', prompt: 'Check it', provider: 'alt', model: 'alt-model' },
+          }
+          yield { type: 'done', finishReason: 'tool_calls' }
+          return
+        }
+        yield { type: 'text', delta: 'done' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+    const altRequests: ChatRequest[] = []
+    const altProvider: Provider = {
+      id: 'alt',
+      nativePdf: 'openai',
+      async *stream(req) {
+        altRequests.push(structuredClone({ ...req, signal: undefined }))
+        yield { type: 'text', delta: 'Checked with alt provider.' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-crew-'))
+    const crew = new CrewStore(path.join(dir, 'crew.json'))
+    const profileCalls: Array<[string, string | undefined]> = []
+    const { session, memory } = await sessionWith(mainProvider, {
+      scope: { gateway: ROUTINE_GATEWAY, chatId: 'routine-1' },
+      crew,
+      providerForBot: (id) => (id === 'alt' ? altProvider : undefined),
+      modelProfile: async (model, providerId) => {
+        profileCalls.push([model, providerId])
+        if (providerId === 'alt') {
+          return {
+            id: model,
+            reasoning: false,
+            vision: false,
+            document: true,
+            contextWindow: 32_000,
+            maxOutput: 4_096,
+          }
+        }
+        return undefined
+      },
+    })
+    try {
+      for await (const event of session.send('hello', {
+        images: [{ type: 'image', path: '/images/shot.png', mimeType: 'image/png', name: 'shot.png' }],
+      })) {
+        if (event.type === 'tool-end' && event.name === 'task') taskResult = event.result
+      }
+      expect(seenTools.some((tool) => tool.name === 'crew')).toBe(false)
+      expect(taskResult).toContain('Checked with alt provider.')
+      expect(profileCalls).toContainEqual(['alt-model', 'alt'])
+      expect(altRequests[0]?.nativePdf).toBe(true)
+      const firstUser = altRequests[0]?.messages.find((m) => m.role === 'user')
+      expect(Array.isArray(firstUser?.content) ? firstUser.content.some((p) => p.type === 'image') : false).toBe(false)
+      expect(crew.list()).toHaveLength(1)
+    } finally {
+      await memory.close()
+    }
+  })
+
+  it('preserves partial output when a running Crew bot is stopped and leaves unapplied guidance unmarked', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-stop-'))
+    const crew = new CrewStore(path.join(dir, 'crew.json'))
+    let mainCalls = 0
+    let taskResult = ''
+    const mainProvider: Provider = {
+      id: 'main',
+      async *stream() {
+        if (mainCalls++ === 0) {
+          yield {
+            type: 'tool-call',
+            id: 'call-1',
+            name: 'task',
+            args: { name: 'Runner', description: 'Work', prompt: 'Do work', model: 'slow' },
+          }
+          yield { type: 'done', finishReason: 'tool_calls' }
+          return
+        }
+        yield { type: 'text', delta: 'stopped acknowledged' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+    let startedResolve!: () => void
+    const started = new Promise<void>((resolve) => { startedResolve = resolve })
+    const botProvider: Provider = {
+      id: 'slow',
+      async *stream(req) {
+        yield { type: 'text', delta: 'Partial progress\n' }
+        startedResolve()
+        await new Promise<void>((_resolve, reject) => {
+          req.signal?.addEventListener('abort', () => reject(abortError()), { once: true })
+        })
+      },
+    }
+    const { session, memory } = await sessionWith(mainProvider, {
+      crew,
+      providerFor: () => botProvider,
+      providerForBot: () => botProvider,
+    })
+    try {
+      const running = (async () => {
+        for await (const event of session.send('run task')) {
+          if (event.type === 'tool-end' && event.name === 'task') taskResult = event.result
+        }
+      })()
+      await started
+      const botId = crew.list()[0]!.id
+      await crew.guide(botId, 'Never seen before stop')
+      await crew.stop(botId)
+      await running
+      expect(taskResult).toContain('was stopped')
+      expect(taskResult).toContain('Partial progress')
+      const stored = crew.list()[0]!.assignments[0]!
+      expect(stored.state).toBe('interrupted')
+      expect(stored.report).toContain('Partial progress')
+      expect(stored.guidance?.[0]?.appliedAt).toBeUndefined()
+    } finally {
+      await memory.close()
+    }
+  })
+})

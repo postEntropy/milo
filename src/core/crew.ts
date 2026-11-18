@@ -1,5 +1,5 @@
 import { randomInt, randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { dirname } from 'node:path'
 import lockfile from 'proper-lockfile'
 import { z } from 'zod'
@@ -46,7 +46,36 @@ export function resolveBotAvatar(bot: { id: string; name: string; avatar?: Parti
   return parsed.success ? parsed.data : base
 }
 
-export function randomBotAvatar(current?: CrewAvatar): CrewAvatar {
+const PROCESS_INSTANCE_ID = randomUUID()
+const MAX_BOT_ASSIGNMENTS = 50
+const MAX_BOT_NAME_LENGTH = 120
+const MAX_GUIDANCE_LENGTH = 4_000
+const MAX_PRIOR_REPORTS = 5
+const MAX_PRIOR_CHARS = 8_000
+
+function cleanBotName(name: string): string {
+  return name.replace(/[\r\n]+/g, ' ').replace(/\)/g, ' ').trim()
+}
+
+/** Bounds prior assignment/work reports before injecting them into a prompt. */
+export function formatPriorReports(reports: ReadonlyArray<string | undefined>, header: string): string {
+  const usable = reports.map((text) => text?.trim() ?? '').filter(Boolean)
+  if (usable.length === 0) return ''
+  const recent = usable.slice(-MAX_PRIOR_REPORTS)
+  const kept: string[] = []
+  let total = 0
+  for (let index = recent.length - 1; index >= 0; index -= 1) {
+    const entry = recent[index]!
+    const cost = entry.length + (kept.length > 0 ? 2 : 0)
+    if (kept.length > 0 && total + cost > MAX_PRIOR_CHARS) break
+    const clipped = entry.length > MAX_PRIOR_CHARS ? `${entry.slice(0, MAX_PRIOR_CHARS - 1)}…` : entry
+    kept.unshift(clipped)
+    total += clipped.length + (kept.length > 1 ? 2 : 0)
+  }
+  return `${header}\n${kept.join('\n\n')}`
+}
+
+function randomBotAvatar(current?: CrewAvatar): CrewAvatar {
   for (let attempt = 0; attempt < 8; attempt += 1) {
     const next: CrewAvatar = {
       shape: CREW_AVATAR_SHAPES[randomInt(CREW_AVATAR_SHAPES.length)]!,
@@ -67,6 +96,7 @@ const assignmentSchema = z.object({
   state: z.enum(['running', 'completed', 'failed', 'interrupted']),
   startedAt: z.number(), finishedAt: z.number().optional(), report: z.string().optional(),
   processId: z.number().int().positive().optional(),
+  instanceId: z.string().optional(),
   stopRequestedAt: z.number().optional(),
   guidance: z.array(z.object({ id: z.string(), text: z.string(), at: z.number(), appliedAt: z.number().optional() })).optional(),
 })
@@ -78,16 +108,28 @@ const botSchema = z.object({
 export type CrewAssignment = z.infer<typeof assignmentSchema>
 export type CrewBot = z.infer<typeof botSchema>
 
-function markDeadProcesses(bots: CrewBot[]): boolean {
+function isDeadPid(pid: number, instanceId: string | undefined, forStartupRecover: boolean): boolean {
+  if (forStartupRecover && instanceId && pid === process.pid && instanceId !== PROCESS_INSTANCE_ID) {
+    return true
+  }
+  try {
+    process.kill(pid, 0)
+    return false
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code
+    if (code === 'ESRCH' || code === 'EPERM') return true
+    throw error
+  }
+}
+
+function markDeadProcesses(bots: CrewBot[], forStartupRecover = false): boolean {
   let changed = false
   for (const bot of bots) for (const assignment of bot.assignments) {
     if (assignment.state !== 'running' || assignment.processId === undefined) continue
-    try { process.kill(assignment.processId, 0) } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error
-      assignment.state = 'interrupted'
-      assignment.report = 'The process running this assignment stopped before it finished.'
-      changed = true
-    }
+    if (!isDeadPid(assignment.processId, assignment.instanceId, forStartupRecover)) continue
+    assignment.state = 'interrupted'
+    assignment.report = 'The process running this assignment stopped before it finished.'
+    changed = true
   }
   return changed
 }
@@ -95,19 +137,38 @@ function markDeadProcesses(bots: CrewBot[]): boolean {
 /** One store is shared by every surface and by the agent that starts a bot. */
 export class CrewStore {
   private tail: Promise<void> = Promise.resolve()
+  private cached: { mtimeMs: number; size: number; data: CrewBot[] } | null = null
 
   constructor(private readonly file = crewFile()) {}
 
-  private readRaw(): CrewBot[] | null {
+  private readRaw(bypassCache = false): CrewBot[] | null {
+    let stat: { mtimeMs: number; size: number }
+    try {
+      stat = statSync(this.file)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        this.cached = null
+        return null
+      }
+      throw error
+    }
+    if (!bypassCache && this.cached && this.cached.mtimeMs === stat.mtimeMs && this.cached.size === stat.size) {
+      return structuredClone(this.cached.data)
+    }
     let content: string
     try {
       content = readFileSync(this.file, 'utf8')
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
+        this.cached = null
+        return null
+      }
       throw error
     }
     try {
-      return z.array(botSchema).parse(JSON.parse(content))
+      const parsed = z.array(botSchema).parse(JSON.parse(content))
+      this.cached = { mtimeMs: stat.mtimeMs, size: stat.size, data: parsed }
+      return structuredClone(parsed)
     } catch (error) {
       throw new Error(`Could not read crew: ${errorMessage(error)}`)
     }
@@ -127,9 +188,11 @@ export class CrewStore {
 
   /** Persist dead-process recovery so an OS PID reuse cannot resurrect an abandoned run. */
   async recover(): Promise<void> {
-    const bots = this.readRaw()
-    if (!bots || !markDeadProcesses(bots)) return
-    await this.change(() => undefined)
+    const bots = this.readRaw(true)
+    if (!bots || !markDeadProcesses(bots, true)) return
+    await this.change((current) => {
+      markDeadProcesses(current, true)
+    })
   }
 
   private async change<T>(fn: (bots: CrewBot[]) => T): Promise<T> {
@@ -145,9 +208,12 @@ export class CrewStore {
         retries: { retries: 15, factor: 1.5, minTimeout: 20, maxTimeout: 250, randomize: true },
         onCompromised: (error) => logWarn(`lost the lock on crew: ${errorMessage(error)}`),
       })
-      const bots = this.list()
-      const result = fn(bots)
-      await writePrivateFile(this.file, `${JSON.stringify(bots, null, 2)}\n`)
+      const raw = this.readRaw(true) ?? []
+      markDeadProcesses(raw)
+      for (const bot of raw) bot.avatar = resolveBotAvatar(bot)
+      const result = fn(raw)
+      this.cached = null
+      await writePrivateFile(this.file, `${JSON.stringify(raw, null, 2)}\n`)
       return result
     } finally {
       try { await release?.() } finally { done() }
@@ -156,10 +222,13 @@ export class CrewStore {
 
   async start(input: { name: string; mission: string; model: string; provider?: string; sessionId: string; botId?: string }): Promise<{ bot: CrewBot; assignment: CrewAssignment }> {
     return this.change((bots) => {
-      const name = input.name.trim()
+      const name = cleanBotName(input.name)
       if (!name || !input.mission.trim()) throw new Error('A bot needs a name and a mission.')
-      let bot = input.botId ? bots.find((entry) => entry.id === input.botId) : undefined
-      if (input.botId && !bot) throw new Error('No bot has that id.')
+      if (name.length > MAX_BOT_NAME_LENGTH) throw new Error(`A bot name must be at most ${MAX_BOT_NAME_LENGTH} characters.`)
+      const requestedId = input.botId?.trim()
+      if (input.botId !== undefined && !requestedId) throw new Error('No bot has that id.')
+      let bot = requestedId ? bots.find((entry) => entry.id === requestedId) : undefined
+      if (requestedId && !bot) throw new Error('No bot has that id.')
       if (bot?.assignments.some((entry) => entry.state === 'running')) throw new Error('This bot is already working.')
       if (!bot) {
         const id = randomUUID()
@@ -168,9 +237,14 @@ export class CrewStore {
       }
       const assignment: CrewAssignment = {
         id: randomUUID(), sessionId: input.sessionId, mission: input.mission,
-        model: input.model, provider: input.provider, state: 'running', startedAt: Date.now(), processId: process.pid,
+        model: input.model, provider: input.provider, state: 'running', startedAt: Date.now(), processId: process.pid, instanceId: PROCESS_INSTANCE_ID,
       }
       bot.assignments.push(assignment)
+      if (bot.assignments.length > MAX_BOT_ASSIGNMENTS) {
+        const running = bot.assignments.filter((entry) => entry.state === 'running')
+        const finished = bot.assignments.filter((entry) => entry.state !== 'running')
+        bot.assignments = [...finished.slice(-(MAX_BOT_ASSIGNMENTS - running.length)), ...running]
+      }
       return { bot, assignment }
     })
   }
@@ -195,6 +269,7 @@ export class CrewStore {
       if (!assignment || assignment.stopRequestedAt) throw new Error('This bot is not accepting guidance.')
       const words = text.trim()
       if (!words) throw new Error('Guidance cannot be empty.')
+      if (words.length > MAX_GUIDANCE_LENGTH) throw new Error(`Guidance must be at most ${MAX_GUIDANCE_LENGTH} characters.`)
       if (!assignment.guidance) assignment.guidance = []
       assignment.guidance.push({ id: randomUUID(), text: words, at: Date.now() })
     })
@@ -215,8 +290,10 @@ export class CrewStore {
     return this.change((bots) => {
       const bot = bots.find((entry) => entry.id === id)
       if (!bot) throw new Error('No bot has that id.')
-      if (!name.trim()) throw new Error('A bot needs a name.')
-      bot.name = name.trim()
+      const clean = cleanBotName(name)
+      if (!clean) throw new Error('A bot needs a name.')
+      if (clean.length > MAX_BOT_NAME_LENGTH) throw new Error(`A bot name must be at most ${MAX_BOT_NAME_LENGTH} characters.`)
+      bot.name = clean
       return bot
     })
   }

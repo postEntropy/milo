@@ -28,7 +28,7 @@ import { runAgent, type RunTrace } from './agent/loop.js'
 import type { TraceWriter } from './traces.js'
 import { withTraceContext } from './trace-context.js'
 import { runSubagent } from './agent/subagent.js'
-import type { CrewStore } from './crew.js'
+import { formatPriorReports, type CrewStore } from './crew.js'
 import type { DelegatedWorkStore } from './delegated-work.js'
 import { buildSystemPrompt, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import { extractProjectMentions, type Project, type ProjectPlacement } from './projects.js'
@@ -249,7 +249,7 @@ export interface SessionOptions {
    * reasons. Swapped in tests, so a test never has to reach the network to know
    * how big a model is.
    */
-  modelProfile?: (model: string) => Promise<ModelProfile | undefined>
+  modelProfile?: (model: string, providerId?: string) => Promise<ModelProfile | undefined>
   /**
    * How hard the model should think, read per turn. A function rather than a
    * value so a surface can change it without the session being rebuilt.
@@ -447,8 +447,64 @@ export class Session {
   }
 
   /** The same active provider and model metadata used when the turn runs. */
-  modelProfile(model: string): Promise<ModelProfile | undefined> {
-    return this.options.modelProfile?.(model) ?? Promise.resolve(undefined)
+  modelProfile(model: string, providerId?: string): Promise<ModelProfile | undefined> {
+    return this.options.modelProfile?.(model, providerId) ?? Promise.resolve(undefined)
+  }
+
+  private wrapProviderForModel(
+    chosenProvider: Provider,
+    targetModel: string,
+    profile: ModelProfile | undefined,
+    displayOnly: ReadonlySet<string> = new Set(),
+  ): { provider: Provider; cannotSee: boolean } {
+    const nativePdf = canSendNativePdf(chosenProvider, targetModel, profile)
+    const cannotSee = profile?.vision === false || (profile?.vision === undefined && targetModel !== this.options.mediaModels?.vision)
+    const provider: Provider = {
+      id: chosenProvider.id,
+      stream: (request) => chosenProvider.stream({
+        ...request,
+        nativePdf,
+        messages: request.messages.map((message) => ({
+          ...message,
+          content: message.content.map((part) => {
+            if (part.type === 'image' && (cannotSee || part.contextOmitted === true || (part.analysisOnly === true && profile?.vision !== true) || displayOnly.has(part.path))) {
+              return { type: 'text' as const, text: `[Image ${part.name} was not sent to this model; consult any accompanying analysis or extraction.]` }
+            }
+            if (cannotSee && part.type === 'tool-result' && part.images?.length) {
+              const { images, ...rest } = part
+              return { ...rest, content: `${part.content}\n[${images.length} image(s) were not sent: ${profile?.vision === false ? 'this model does not accept images' : 'vision support was not confirmed'}.]` }
+            }
+            return part
+          }),
+        })),
+      }),
+    }
+    return { provider, cannotSee }
+  }
+
+  private createAttachmentInspector(targetModel: string, cannotSee: boolean, abort: AbortSignal) {
+    return async (image: import('./providers/types.js').ImagePart, question: string): Promise<import('./tools/types.js').ToolResult> => {
+      if (!cannotSee) {
+        const data = readImageBase64(image)
+        return data ? { content: `Looking at ${image.name}.`, images: [{ mimeType: image.mimeType, data }] } : { content: `Image ${image.name} is no longer available.`, isError: true }
+      }
+      const vision = this.options.mediaModels?.vision
+      if (vision && vision !== targetModel && (await this.modelProfile(vision))?.vision !== false) {
+        try {
+          const result = await this.analyzeImages(vision, [{ ...image, contextOmitted: false }], question, abort)
+          return { content: `Visual analysis by ${vision}:\n${result.text}${result.truncated ? '\n[Visual analysis was truncated.]' : ''}` }
+        } catch (error) {
+          if (abort.aborted) throw error
+          return { content: `Could not analyze ${image.name}: ${errorMessage(error)}`, isError: true }
+        }
+      }
+      try {
+        const text = await readFile(`${image.path}.txt`, 'utf8')
+        return { content: `OCR text from ${image.name} (visual content is not available):\n${text}` }
+      } catch {
+        return { content: `Image ${image.name} cannot be analyzed: no vision model or OCR text is available.`, isError: true }
+      }
+    }
   }
 
   /** Native PDF requires both a capable model and an implemented provider route. */
@@ -869,34 +925,15 @@ export class Session {
     const model = opts?.model ?? (needsVisionModel ? this.options.mediaModels?.vision : undefined) ?? this.options.model
     // What is known about the model this turn runs on: its own output ceiling and
     // whether it has a reasoning mode. Absent fields keep the config's rule.
-    const profile = await this.options.modelProfile?.(model)
+    const profile = await this.options.modelProfile?.(model, this.options.provider.id)
     const maxTokens = profile?.maxOutput ?? this.options.maxTokens
     const chosenProvider = opts?.model || needsVisionModel
       ? this.options.providerFor?.(model) ?? this.options.provider
       : this.options.provider
     // A request can replay history from other models. Decide both image and PDF
     // support for the model actually receiving this request, not its predecessor.
-    const nativePdf = canSendNativePdf(chosenProvider, model, profile)
-    const cannotSee = profile?.vision === false || (profile?.vision === undefined && model !== this.options.mediaModels?.vision)
     const displayOnly = new Set(opts?.imagesForDisplayOnly ? (opts.images ?? []).map((image) => image.path) : [])
-    const provider: Provider = {
-      id: chosenProvider.id,
-      stream: (request) => chosenProvider.stream({
-        ...request,
-        nativePdf,
-        messages: request.messages.map((message) => ({
-          ...message,
-          content: message.content.map((part) => {
-            if (part.type === 'image' && (cannotSee || part.contextOmitted === true || (part.analysisOnly === true && profile?.vision !== true) || displayOnly.has(part.path))) return { type: 'text' as const, text: `[Image ${part.name} was not sent to this model; consult any accompanying analysis or extraction.]` }
-            if (cannotSee && part.type === 'tool-result' && part.images?.length) {
-              const { images, ...rest } = part
-              return { ...rest, content: `${part.content}\n[${images.length} image(s) were not sent: ${profile?.vision === false ? 'this model does not accept images' : 'vision support was not confirmed'}.]` }
-            }
-            return part
-          }),
-        })),
-      }),
-    }
+    const { provider, cannotSee } = this.wrapProviderForModel(chosenProvider, model, profile, displayOnly)
     const signal = opts?.signal
     const steering = opts?.steering
     // Read once for the turn: a switch flipped mid-turn is the next turn's business,
@@ -948,15 +985,17 @@ export class Session {
             remove: (id) => adminSource.remove(id),
           }
         : undefined
-    // A shared chat must not expose assignments from the install's other sessions.
+    // A shared chat or an unattended routine/delegated run must not expose bots
+    // across sessions via the `crew` tool, while `task` still records to crew.
     const crew = opts?.sessionsAllowed === false ? undefined : this.options.crew
+    const crewToolAllowed = crew !== undefined && this.scope.gateway !== ROUTINE_GATEWAY
     const delegatedWork = opts?.sessionsAllowed === false || this.scope.gateway === ROUTINE_GATEWAY ? undefined : this.options.delegatedWork
     const inProject = turnProject?.ok === true
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
       .filter((tool) => tool.name !== 'panel' || canPanel(surface))
       .filter((tool) => tool.name !== 'read_attachment' || Boolean(this.record.attachments?.length || opts?.documents?.length || opts?.images?.some((image) => !image.derivedFromDocument)))
       .filter((tool) => tool.name !== 'sessions' || sessionAdmin !== undefined)
-      .filter((tool) => tool.name !== 'crew' || crew !== undefined)
+      .filter((tool) => tool.name !== 'crew' || crewToolAllowed)
       .filter((tool) => tool.name !== 'delegated_work' || delegatedWork !== undefined)
       // A planning turn may read, keep Milo's own state, or delegate; it may not
       // write, run a command, commit, send a file, or prune the install's sessions.
@@ -1052,28 +1091,7 @@ export class Session {
     // The turn's one signal, one permission decision and one effort, shared by
     // the turn and by any subagent it delegates to.
     const abort = signal ?? new AbortController().signal
-    const inspectAttachmentImage = async (image: import('./providers/types.js').ImagePart, question: string): Promise<import('./tools/types.js').ToolResult> => {
-      if (!cannotSee) {
-        const data = readImageBase64(image)
-        return data ? { content: `Looking at ${image.name}.`, images: [{ mimeType: image.mimeType, data }] } : { content: `Image ${image.name} is no longer available.`, isError: true }
-      }
-      const vision = this.options.mediaModels?.vision
-      if (vision && vision !== model && (await this.modelProfile(vision))?.vision !== false) {
-        try {
-          const result = await this.analyzeImages(vision, [{ ...image, contextOmitted: false }], question, abort)
-          return { content: `Visual analysis by ${vision}:\n${result.text}${result.truncated ? '\n[Visual analysis was truncated.]' : ''}` }
-        } catch (error) {
-          if (abort.aborted) throw error
-          return { content: `Could not analyze ${image.name}: ${errorMessage(error)}`, isError: true }
-        }
-      }
-      try {
-        const text = await readFile(`${image.path}.txt`, 'utf8')
-        return { content: `OCR text from ${image.name} (visual content is not available):\n${text}` }
-      } catch {
-        return { content: `Image ${image.name} cannot be analyzed: no vision model or OCR text is available.`, isError: true }
-      }
-    }
+    const inspectAttachmentImage = this.createAttachmentInspector(model, cannotSee, abort)
     // A model that declared it has no reasoning mode is not sent an effort: the
     // field is a guess about a mode it does not have, and some wires refuse it.
     const effort = profile?.reasoning === false
@@ -1201,7 +1219,7 @@ export class Session {
           recall,
           origin,
           sessionId: this.id,
-          crew,
+          crew: crewToolAllowed ? crew : undefined,
           delegatedWork,
           projectId: turnProject?.ok ? turnProject.project.id : undefined,
           resolveProjectPath: this.options.resolveFolder
@@ -1228,11 +1246,14 @@ export class Session {
             if (!input.provider && botModel !== model && !this.options.providerFor) {
               return { content: 'A different model is not available in this session.', isError: true }
             }
-            const botProvider = input.provider
+            const rawBotProvider = input.provider
               ? this.options.providerForBot?.(input.provider, botModel)
-              : botModel === model ? provider : this.options.providerFor!(botModel)
-            if (!botProvider) return { content: `Provider "${input.provider}" is not configured.`, isError: true }
-            const botProfile = botModel === model ? profile : await this.options.modelProfile?.(botModel)
+              : botModel === model ? chosenProvider : this.options.providerFor!(botModel)
+            if (!rawBotProvider) return { content: `Provider "${input.provider}" is not configured.`, isError: true }
+            const botProfile = botModel === model && (!input.provider || rawBotProvider.id === chosenProvider.id)
+              ? profile
+              : await this.options.modelProfile?.(botModel, input.provider ?? rawBotProvider.id)
+            const { provider: botProvider, cannotSee: botCannotSee } = this.wrapProviderForModel(rawBotProvider, botModel, botProfile, displayOnly)
             const botMaxTokens = botProfile?.maxOutput ?? this.options.maxTokens
             const botEffort = botProfile?.reasoning === false
               ? undefined
@@ -1264,6 +1285,11 @@ export class Session {
             }, 250) : undefined
             watch?.unref?.()
             const botSignal = AbortSignal.any([abort, botStop.signal])
+            const botPrior = entry && input.botId
+              ? formatPriorReports(entry.bot.assignments.slice(0, -1).map((item) => item.report), 'Previous reports from this bot:')
+              : ''
+            const botPrompt = botPrior ? `${input.prompt}\n\n${botPrior}` : input.prompt
+            const botInspectImage = this.createAttachmentInspector(botModel, botCannotSee, botSignal)
             let result: Awaited<ReturnType<typeof runSubagent>>
             try {
               result = await runSubagent({
@@ -1301,25 +1327,46 @@ export class Session {
               maxTokens: botMaxTokens,
               temperature,
               reasoningEffort: botEffort,
-              input: entry && input.botId
-                ? { ...input, prompt: `${input.prompt}\n\nPrevious reports from this bot:\n${entry.bot.assignments.slice(0, -1).filter((item) => item.report).map((item) => item.report).join('\n\n')}` }
-                : input,
-              context: { remember, memories, recall, origin, routine, sendFile, standingGrants: this.scope.gateway === ROUTINE_GATEWAY ? this.options.grantedTools : undefined, attachments: () => this.record.attachments ?? [], inspectAttachmentImage },
+              input: { ...input, prompt: botPrompt },
+              context: { remember, memories, recall, origin, routine, sendFile, standingGrants: this.scope.gateway === ROUTINE_GATEWAY ? this.options.grantedTools : undefined, attachments: () => this.record.attachments ?? [], inspectAttachmentImage: botInspectImage },
               trace: this.runTrace('task', turnId),
               })
             } catch (error) {
-              if (entry) await crew!.finish(entry.bot.id, entry.assignment.id, botSignal.aborted ? 'interrupted' : 'failed', watchFailure ?? errorMessage(error), appliedGuidance)
+              if (entry) {
+                try {
+                  await crew!.finish(entry.bot.id, entry.assignment.id, botSignal.aborted ? 'interrupted' : 'failed', watchFailure ?? errorMessage(error), appliedGuidance)
+                } catch (finishError) {
+                  if (!watchFailure) throw finishError
+                }
+              }
               if (watchFailure) throw new Error(`Could not monitor the bot: ${watchFailure}`)
-              if (botStop.signal.aborted && !abort.aborted) return { content: `Crew bot ${entry!.bot.name} was stopped.`, isError: true }
+              if (botStop.signal.aborted && !abort.aborted) {
+                return { content: entry ? `Crew bot ${entry.bot.name} (${entry.bot.id}) was stopped.` : 'The bot was stopped.', isError: true }
+              }
               throw error
             } finally {
               if (watch) clearInterval(watch)
             }
-            if (watchFailure) result = { content: `Could not monitor the bot: ${watchFailure}`, isError: true }
-            else if (botStop.signal.aborted) result = { content: `Crew bot ${entry!.bot.name} was stopped.`, isError: true }
+            const stopped = botStop.signal.aborted && !abort.aborted
+            const partialReport = stopped && result.isError ? result.content.trim() : ''
+            if (watchFailure) {
+              result = { content: `Could not monitor the bot: ${watchFailure}`, isError: true }
+            }
             if (entry) {
-              const state = await crew!.finish(entry.bot.id, entry.assignment.id, botSignal.aborted ? 'interrupted' : result.isError ? 'failed' : 'completed', result.content, appliedGuidance)
-              if (state === 'interrupted' && !result.isError) result = { content: `Crew bot ${entry.bot.name} was stopped. Partial report:\n${result.content}`, isError: true }
+              const storedReport = stopped
+                ? (partialReport || 'The bot was stopped before producing a report.')
+                : result.content
+              const state = await crew!.finish(entry.bot.id, entry.assignment.id, botSignal.aborted ? 'interrupted' : result.isError ? 'failed' : 'completed', storedReport, appliedGuidance)
+              if (state === 'interrupted') {
+                return {
+                  content: partialReport
+                    ? `Crew bot ${entry.bot.name} (${entry.bot.id}) was stopped. Partial report:\n${partialReport}`
+                    : `Crew bot ${entry.bot.name} (${entry.bot.id}) was stopped.`,
+                  isError: true,
+                }
+              }
+            } else if (stopped) {
+              return { content: partialReport ? `The bot was stopped. Partial report:\n${partialReport}` : 'The bot was stopped.', isError: true }
             }
             return entry ? { ...result, content: `Crew bot ${entry.bot.name} (${entry.bot.id}):\n${result.content}` } : result
           },
