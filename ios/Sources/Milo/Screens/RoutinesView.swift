@@ -84,6 +84,7 @@ private struct RoutineList: View {
 
     @Environment(AppModel.self) private var model
     @State private var feed: [RoutineFeedEntry] = []
+    @State private var feedError: String?
     /// The output being read, risen from the bottom of the screen. A timeline row reads
     /// its run here rather than opening the routine behind it: the person asked for the
     /// output, not for the page it belongs to.
@@ -193,7 +194,21 @@ private struct RoutineList: View {
                     }
                 }
 
-                if !feed.isEmpty {
+                if let feedError {
+                    VStack(alignment: .leading, spacing: MiloTheme.Space.two) {
+                        Text("Recent outputs")
+                            .font(MiloTheme.Text.title)
+                            .foregroundStyle(MiloTheme.foreground)
+                        Text(feedError)
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.danger)
+                        Button("Try again") { Task { await loadFeed() } }
+                            .font(MiloTheme.Text.small.weight(.semibold))
+                    }
+                    .padding(MiloTheme.Space.four)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .miloGlassCard()
+                } else if !feed.isEmpty {
                     VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
                         Text("Recent outputs")
                             .font(MiloTheme.Text.title)
@@ -327,7 +342,12 @@ private struct RoutineList: View {
     }
 
     private func loadFeed() async {
-        feed = (try? await model.routineFeed()) ?? []
+        do {
+            feed = try await model.routineFeed()
+            feedError = nil
+        } catch {
+            feedError = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
     }
 }
 
@@ -1288,10 +1308,11 @@ private struct NewRoutine: View {
         // Taken before the turn starts: everything from here on is this ask and Milo's
         // answer, so the wait and the permission prompt stay beside it.
         if createdFrom == nil { createdFrom = model.messages.count }
-        ask = ""
         // The destination is pinned on the turn, so a routine named for Telegram is made
         // for Telegram even though the chat it was asked in is this one.
-        model.send(text, target: SendTarget(gateway: gateway, chatId: destinationChatId))
+        if model.send(text, target: SendTarget(gateway: gateway, chatId: destinationChatId)) {
+            ask = ""
+        }
     }
 
     private var gateway: SendTarget.Gateway {

@@ -56,7 +56,7 @@ struct GenUiChartView: View {
                             // Without this the series stack on one another; a bar chart
                             // compares them, so each one stands beside the others.
                             .position(by: .value("Series", name))
-                            .cornerRadius(2)
+                            .cornerRadius(MiloTheme.Radius.xs)
                         } else {
                             LineMark(
                                 x: .value("Point", category),

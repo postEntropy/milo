@@ -43,26 +43,44 @@ public func evaluateFormula(_ formula: String, _ values: GenUiValues) -> Double?
  platform's formatter does not always agree on how many digits to keep — so the
  value is rounded by the formatter and then padded to the places asked for.
  */
+private final class GenUiFormatCache: @unchecked Sendable {
+    static let shared = GenUiFormatCache()
+    private let lock = NSLock()
+    private var formatters: [String: NumberFormatter] = [:]
+    let placeholderRegex = try? NSRegularExpression(pattern: "\\{([A-Za-z][A-Za-z0-9_]{0,31})\\}")
+
+    func format(_ value: Double, places: Int) -> String {
+        let locale = Locale.current
+        let key = locale.identifier
+        lock.lock()
+        defer { lock.unlock() }
+        let formatter = formatters[key] ?? {
+            let made = NumberFormatter()
+            made.locale = locale
+            made.numberStyle = .decimal
+            formatters[key] = made
+            return made
+        }()
+        formatter.maximumFractionDigits = places
+        let text = formatter.string(from: NSNumber(value: value)) ?? "\(value)"
+        guard places > 0 else { return text }
+        let separator = (formatter.decimalSeparator).flatMap { $0.isEmpty ? nil : $0 } ?? "."
+        guard let mark = text.lastIndex(of: Character(separator)) else {
+            return text + separator + String(repeating: "0", count: places)
+        }
+        let shown = text.distance(from: text.index(after: mark), to: text.endIndex)
+        return shown >= places ? text : text + String(repeating: "0", count: places - shown)
+    }
+}
+
 public func formatNumber(_ value: Double, decimals: Int? = nil) -> String {
     let places = max(decimals ?? (value == value.rounded() ? 0 : 2), 0)
-    let formatter = NumberFormatter()
-    formatter.locale = .current
-    formatter.numberStyle = .decimal
-    formatter.maximumFractionDigits = places
-    let text = formatter.string(from: NSNumber(value: value)) ?? "\(value)"
-    guard places > 0 else { return text }
-    let separator = (formatter.decimalSeparator).flatMap { $0.isEmpty ? nil : $0 } ?? "."
-    guard let mark = text.lastIndex(of: Character(separator)) else {
-        return text + separator + String(repeating: "0", count: places)
-    }
-    let shown = text.distance(from: text.index(after: mark), to: text.endIndex)
-    return shown >= places ? text : text + String(repeating: "0", count: places - shown)
+    return GenUiFormatCache.shared.format(value, places: places)
 }
 
 /** A `text` node with its `{id}` references filled in from the current inputs. */
 public func interpolate(_ text: String, _ values: GenUiValues) -> String {
-    let pattern = "\\{([A-Za-z][A-Za-z0-9_]{0,31})\\}"
-    guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+    guard let regex = GenUiFormatCache.shared.placeholderRegex else { return text }
     let source = text as NSString
     let matches = regex.matches(in: text, range: NSRange(location: 0, length: source.length))
     var result = ""

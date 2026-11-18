@@ -1366,6 +1366,7 @@ private struct ApiKeysSettingsView: View {
     @State private var editing: String?
     @State private var draft = ""
     @State private var busy = false
+    @State private var removingKey: (group: KeyGroup, id: String, name: String)?
     @FocusState private var typing: Bool
 
     var body: some View {
@@ -1391,6 +1392,18 @@ private struct ApiKeysSettingsView: View {
         }
         .navigationTitle("API keys")
         .navigationBarTitleDisplayMode(.inline)
+        .confirmationDialog(
+            "Remove the \(removingKey?.name ?? "API") key?",
+            isPresented: Binding(get: { removingKey != nil }, set: { if !$0 { removingKey = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Remove key", role: .destructive) {
+                if let target = removingKey {
+                    removingKey = nil
+                    removeKey(group: target.group, id: target.id)
+                }
+            }
+        }
         .toolbar {
             ToolbarItemGroup(placement: .keyboard) {
                 Spacer()
@@ -1475,7 +1488,7 @@ private struct ApiKeysSettingsView: View {
                     beginEditing(group: group, id: id)
                 }
                 Button(role: .destructive) {
-                    removeKey(group: group, id: id)
+                    removingKey = (group, id, name(group: group, id: id))
                 } label: {
                     Label("Remove key", systemImage: "trash")
                 }

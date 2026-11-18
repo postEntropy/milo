@@ -65,7 +65,15 @@ public func highlight(_ code: String, language: String? = nil) -> [CodeRun] {
     let keywords = KEYWORDS[lang] ?? []
     let characters = Array(code)
     var runs: [CodeRun] = []
+    var plainStart: Int?
     var index = 0
+
+    func flushPlain(upTo end: Int) {
+        if let start = plainStart, start < end {
+            runs.append(CodeRun(role: .plain, text: String(characters[start..<end])))
+        }
+        plainStart = nil
+    }
 
     while index < characters.count {
         let character = characters[index]
@@ -73,20 +81,23 @@ public func highlight(_ code: String, language: String? = nil) -> [CodeRun] {
         // A comment runs to the end of its line, or to the `*/` that closes it — and an
         // unclosed one takes the rest of the block, which is what a reply still streaming
         // looks like.
-        if family == .slash, starts(characters, index, "//") {
+        if family == .slash, starts(characters, index, SLASH_SLASH) {
+            flushPlain(upTo: index)
             let end = lineEnd(characters, index)
             push(&runs, .comment, characters[index..<end])
             index = end
             continue
         }
-        if family == .slash, starts(characters, index, "/*") {
-            let close = find(characters, index + 2, "*/")
+        if family == .slash, starts(characters, index, SLASH_STAR) {
+            flushPlain(upTo: index)
+            let close = find(characters, index + 2, STAR_SLASH)
             let end = close.map { $0 + 2 } ?? characters.count
             push(&runs, .comment, characters[index..<end])
             index = end
             continue
         }
         if family == .hash, character == "#" {
+            flushPlain(upTo: index)
             let end = lineEnd(characters, index)
             push(&runs, .comment, characters[index..<end])
             index = end
@@ -95,13 +106,16 @@ public func highlight(_ code: String, language: String? = nil) -> [CodeRun] {
 
         // A triple quote is a string that runs past its own line — Python's one way of
         // writing prose inside code.
-        if lang == .python, starts(characters, index, "\"\"\"") || starts(characters, index, "'''") {
-            let fence = String(characters[index..<index + 3])
-            let close = find(characters, index + 3, fence)
-            let end = close.map { $0 + 3 } ?? characters.count
-            push(&runs, .string, characters[index..<end])
-            index = end
-            continue
+        if lang == .python {
+            let needle = starts(characters, index, TRIPLE_DOUBLE) ? TRIPLE_DOUBLE : (starts(characters, index, TRIPLE_SINGLE) ? TRIPLE_SINGLE : nil)
+            if let needle {
+                flushPlain(upTo: index)
+                let close = find(characters, index + 3, needle)
+                let end = close.map { $0 + 3 } ?? characters.count
+                push(&runs, .string, characters[index..<end])
+                index = end
+                continue
+            }
         }
 
         // A quoted string ends at its own closing quote on the same line: a lone apostrophe in
@@ -109,16 +123,18 @@ public func highlight(_ code: String, language: String? = nil) -> [CodeRun] {
         // file. A backtick (JavaScript's template) is the exception, written to span lines.
         if quotes.contains(character) {
             if let end = stringEnd(characters, index, character, across: character == "`") {
+                flushPlain(upTo: index)
                 push(&runs, .string, characters[index..<end])
                 index = end
             } else {
-                push(&runs, .plain, characters[index..<index + 1])
+                if plainStart == nil { plainStart = index }
                 index += 1
             }
             continue
         }
 
         if isDigit(character) || (character == "." && isDigit(at(characters, index + 1))) {
+            flushPlain(upTo: index)
             let end = numberEnd(characters, index)
             push(&runs, .number, characters[index..<end])
             index = end
@@ -128,15 +144,21 @@ public func highlight(_ code: String, language: String? = nil) -> [CodeRun] {
         if isIdentifierStart(character) {
             let end = identifierEnd(characters, index)
             let word = String(characters[index..<end])
-            push(&runs, keywords.contains(word) ? .keyword : .plain, characters[index..<end])
+            if keywords.contains(word) {
+                flushPlain(upTo: index)
+                push(&runs, .keyword, characters[index..<end])
+            } else if plainStart == nil {
+                plainStart = index
+            }
             index = end
             continue
         }
 
-        push(&runs, .plain, characters[index..<index + 1])
+        if plainStart == nil { plainStart = index }
         index += 1
     }
 
+    flushPlain(upTo: index)
     return runs
 }
 
@@ -385,8 +407,13 @@ private func at(_ characters: [Character], _ index: Int) -> Character? {
     index >= 0 && index < characters.count ? characters[index] : nil
 }
 
-private func starts(_ characters: [Character], _ index: Int, _ text: String) -> Bool {
-    let needle = Array(text)
+private let SLASH_SLASH: [Character] = ["/", "/"]
+private let SLASH_STAR: [Character] = ["/", "*"]
+private let STAR_SLASH: [Character] = ["*", "/"]
+private let TRIPLE_DOUBLE: [Character] = ["\"", "\"", "\""]
+private let TRIPLE_SINGLE: [Character] = ["'", "'", "'"]
+
+private func starts(_ characters: [Character], _ index: Int, _ needle: [Character]) -> Bool {
     guard index + needle.count <= characters.count else { return false }
     for offset in 0..<needle.count where characters[index + offset] != needle[offset] {
         return false
@@ -394,12 +421,11 @@ private func starts(_ characters: [Character], _ index: Int, _ text: String) -> 
     return true
 }
 
-private func find(_ characters: [Character], _ from: Int, _ text: String) -> Int? {
-    let needle = Array(text)
+private func find(_ characters: [Character], _ from: Int, _ needle: [Character]) -> Int? {
     guard !needle.isEmpty else { return from }
     var index = from
     while index + needle.count <= characters.count {
-        if starts(characters, index, text) {
+        if starts(characters, index, needle) {
             return index
         }
         index += 1

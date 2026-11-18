@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import SwiftUI
 
 /**
@@ -25,14 +25,64 @@ struct QRScanner: UIViewControllerRepresentable {
         var onCode: ((String) -> Void)?
         var onError: ((String) -> Void)?
         var onReady: (() -> Void)?
-        // Only start/stop leave the main actor; their queue preserves ordering.
+        // Capture session setup, start, and stop run on the serial capture queue so
+        // AVCaptureSession configuration never blocks the main actor.
         private final class CaptureRunner: @unchecked Sendable {
             let session = AVCaptureSession()
             private let queue = DispatchQueue(label: "milo.qr.capture")
-            func start(_ completed: @escaping @Sendable (Bool) -> Void) {
-                queue.async { self.session.startRunning(); completed(self.session.isRunning) }
+            private var configured = false
+
+            func configureAndStart(
+                delegate: AVCaptureMetadataOutputObjectsDelegate,
+                onConfigured: @escaping @Sendable (Result<Void, Error>) -> Void,
+                onStarted: @escaping @Sendable (Bool) -> Void
+            ) {
+                queue.async {
+                    if !self.configured {
+                        guard let device = AVCaptureDevice.default(for: .video) else {
+                            onConfigured(.failure(CaptureError.message("Could not open the camera. Enter the pairing address and code manually.")))
+                            return
+                        }
+                        do {
+                            let input = try AVCaptureDeviceInput(device: device)
+                            self.session.beginConfiguration()
+                            defer { self.session.commitConfiguration() }
+                            guard self.session.canAddInput(input) else {
+                                onConfigured(.failure(CaptureError.message("Could not open the camera. Enter the pairing address and code manually.")))
+                                return
+                            }
+                            self.session.addInput(input)
+
+                            let output = AVCaptureMetadataOutput()
+                            guard self.session.canAddOutput(output) else {
+                                onConfigured(.failure(CaptureError.message("Could not configure QR scanning. Enter the pairing address and code manually.")))
+                                return
+                            }
+                            self.session.addOutput(output)
+                            output.setMetadataObjectsDelegate(delegate, queue: .main)
+                            output.metadataObjectTypes = [.qr]
+                            self.configured = true
+                        } catch {
+                            onConfigured(.failure(CaptureError.message("Could not open the camera. Enter the pairing address and code manually.")))
+                            return
+                        }
+                    }
+                    onConfigured(.success(()))
+                    self.session.startRunning()
+                    onStarted(self.session.isRunning)
+                }
             }
+
             func stop() { queue.async { self.session.stopRunning() } }
+
+            private enum CaptureError: LocalizedError {
+                case message(String)
+                var errorDescription: String? {
+                    switch self {
+                    case .message(let text): return text
+                    }
+                }
+            }
         }
         private let runner = CaptureRunner()
         private var session: AVCaptureSession { runner.session }
@@ -55,37 +105,41 @@ struct QRScanner: UIViewControllerRepresentable {
             }
         }
 
+        override func viewWillAppear(_ animated: Bool) {
+            super.viewWillAppear(animated)
+            visible = true
+            read = false
+            if preview != nil { configure() }
+        }
+
         private func configure() {
-            guard let device = AVCaptureDevice.default(for: .video),
-                  let input = try? AVCaptureDeviceInput(device: device),
-                  session.canAddInput(input) else {
-                onError?("Could not open the camera. Enter the pairing address and code manually.")
-                return
-            }
-            session.addInput(input)
-
-            let output = AVCaptureMetadataOutput()
-            guard session.canAddOutput(output) else {
-                onError?("Could not configure QR scanning. Enter the pairing address and code manually.")
-                return
-            }
-            session.addOutput(output)
-            output.setMetadataObjectsDelegate(self, queue: .main)
-            output.metadataObjectTypes = [.qr]
-
-            let layer = AVCaptureVideoPreviewLayer(session: session)
-            layer.videoGravity = .resizeAspectFill
-            layer.frame = view.bounds
-            view.layer.addSublayer(layer)
-            preview = layer
-
-            runner.start { [weak self] running in
-                Task { @MainActor in
-                    guard let self, self.visible else { return }
-                    if running { self.onReady?() }
-                    else { self.onError?("The camera could not start. Try again or enter the address and code manually.") }
+            runner.configureAndStart(
+                delegate: self,
+                onConfigured: { [weak self] result in
+                    Task { @MainActor in
+                        guard let self, self.visible else { return }
+                        switch result {
+                        case .success:
+                            if self.preview == nil {
+                                let layer = AVCaptureVideoPreviewLayer(session: self.session)
+                                layer.videoGravity = .resizeAspectFill
+                                layer.frame = self.view.bounds
+                                self.view.layer.addSublayer(layer)
+                                self.preview = layer
+                            }
+                        case .failure(let error):
+                            self.onError?(error.localizedDescription)
+                        }
+                    }
+                },
+                onStarted: { [weak self] running in
+                    Task { @MainActor in
+                        guard let self, self.visible else { return }
+                        if running { self.onReady?() }
+                        else { self.onError?("The camera could not start. Try again or enter the address and code manually.") }
+                    }
                 }
-            }
+            )
         }
 
         override func viewDidLayoutSubviews() {
