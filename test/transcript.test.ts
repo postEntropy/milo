@@ -32,6 +32,10 @@ describe('wrapText', () => {
   it('preserves blank lines and hard-breaks long words', () => {
     expect(wrapText('a\n\nabcdefghij', 4)).toEqual(['a', '', 'abcd', 'efgh', 'ij'])
   })
+
+  it('measures visual width and never splits surrogate pairs', () => {
+    expect(wrapText('🌐🌐🌐', 4)).toEqual(['🌐🌐', '🌐'])
+  })
 })
 
 describe('buildLines', () => {

@@ -1,9 +1,9 @@
-import { spawn } from 'node:child_process'
 import { useEffect, useState, type ReactNode } from 'react'
 import { Box, Text, useInput } from 'ink'
 import TextInput from 'ink-text-input'
 import Spinner from 'ink-spinner'
 import { errorMessage } from '../../../util/errors.js'
+import { openBrowser } from '../../../util/terminal.js'
 import { readAuth, readConfig, resolveApiKey, saveAuth, saveConfig } from '../../../core/config/load.js'
 import { PRESETS, type Preset } from '../../../core/config/presets.js'
 import { ConfigSchema, type Config, type ProviderEntry } from '../../../core/config/schema.js'
@@ -173,11 +173,17 @@ export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone
     // assembled from scratch would drop them — and take every comment with them,
     // which is the whole reason the config is YAML. `ConfigSchema.parse` is what
     // supplies the defaults on a first run, when there is nothing on disk yet.
+    const existingEntry = existing?.providers?.[preset.id]
+    const entry: ProviderEntry = {
+      ...(existingEntry?.headers ? { headers: existingEntry.headers } : {}),
+      ...(existingEntry?.nativePdf !== undefined ? { nativePdf: existingEntry.nativePdf } : {}),
+      ...presetEntry(),
+    }
     const config: Config = ConfigSchema.parse({
       ...(existing ?? {}),
       provider: preset.id,
       model,
-      providers: { ...(existing?.providers ?? {}), [preset.id]: presetEntry() },
+      providers: { ...(existing?.providers ?? {}), [preset.id]: entry },
     })
 
     saveConfig(config)
@@ -307,22 +313,6 @@ export function ModelPicker({ current, theme: activeTheme = defaultTheme, onDone
       )}
     </Box>
   )
-}
-
-function openBrowser(url: string): void {
-  const command =
-    process.platform === 'darwin'
-      ? (['open', [url]] as const)
-      : process.platform === 'win32'
-        ? (['cmd', ['/c', 'start', '', url]] as const)
-        : (['xdg-open', [url]] as const)
-  try {
-    const child = spawn(command[0], [...command[1]], { stdio: 'ignore', detached: true })
-    child.on('error', () => {})
-    child.unref()
-  } catch {
-    // The URL is on screen; opening the browser is a convenience.
-  }
 }
 
 function renderModelList(

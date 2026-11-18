@@ -35,7 +35,17 @@ vi.stubGlobal(
 const { loadConfig } = await import('../src/core/config/load.js')
 const { Shell } = await import('../src/gateways/cli/index.js')
 
-const tick = (ms = 60) => new Promise((resolve) => setTimeout(resolve, ms))
+const tick = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms))
+
+async function waitForFrame(app: ReturnType<typeof render>, check: (frame: string) => boolean, timeoutMs = 4000): Promise<string> {
+  const started = Date.now()
+  while (Date.now() - started < timeoutMs) {
+    const frame = app.lastFrame() ?? ''
+    if (check(frame)) return frame
+    await tick(20)
+  }
+  throw new Error(`timed out waiting for frame:\n${app.lastFrame() ?? ''}`)
+}
 
 function resize(app: ReturnType<typeof render>, columns: number, rows: number): void {
   Object.defineProperty(app.stdout, 'columns', { value: columns, configurable: true })
@@ -55,9 +65,9 @@ describe('Shell layout on small terminals', () => {
   it('keeps the status band on the last row, with the effort beside the model', async () => {
     const app = render(<Shell initial={loadConfig()} cwd={home} startScreen="chat" />)
     resize(app, 60, 20)
-    await tick()
+    const initial = await waitForFrame(app, (frame) => frame.includes('effort medium'))
 
-    const lines = (app.lastFrame() ?? '').split('\n')
+    const lines = initial.split('\n')
     // The chat has no header: the knobs live in the band under the composer, the
     // frame's last row — so the transcript keeps the top of the screen.
     const band = lines.at(-1) ?? ''
@@ -67,22 +77,22 @@ describe('Shell layout on small terminals', () => {
     expect(band).toContain('effort medium')
 
     app.stdin.write('/effort low')
-    await tick(20)
+    await waitForFrame(app, (frame) => frame.includes('/effort low'))
     app.stdin.write('\r')
-    await tick()
+    const updated = await waitForFrame(app, (frame) => (frame.split('\n').at(-1) ?? '').includes('effort low'))
 
-    expect((app.lastFrame() ?? '').split('\n').at(-1)).toContain('effort low')
+    expect(updated.split('\n').at(-1)).toContain('effort low')
   })
 
   it('keeps the filled composer intact while a turn runs on a tiny viewport', async () => {
     const app = render(<Shell initial={loadConfig()} cwd={home} startScreen="chat" />)
     resize(app, 44, 12)
-    await tick()
+    await waitForFrame(app, (frame) => frame.includes('› '))
 
     app.stdin.write(
       'uma mensagem bem longa digitada no celular que passa da largura da linha do composer',
     )
-    await tick(20)
+    await waitForFrame(app, (frame) => frame.includes('celular'))
     app.stdin.write('\r')
     await tick(150)
 
@@ -101,20 +111,20 @@ describe('Shell layout on small terminals', () => {
   it('keeps multiline composer within the viewport height without borders', async () => {
     const app = render(<Shell initial={loadConfig()} cwd={home} startScreen="chat" />)
     resize(app, 44, 12)
-    await tick()
+    await waitForFrame(app, (frame) => frame.includes('› '))
 
     app.stdin.write('line one')
-    await tick(20)
+    await waitForFrame(app, (frame) => frame.includes('line one'))
     app.stdin.write('\u001b[13;2u')
     await tick(20)
     app.stdin.write('line two')
-    await tick(20)
+    await waitForFrame(app, (frame) => frame.includes('line two'))
     app.stdin.write('\u001b[13;2u')
     await tick(20)
     app.stdin.write('line three')
-    await tick(40)
+    const multiline = await waitForFrame(app, (frame) => frame.includes('line three'))
 
-    const lines = (app.lastFrame() ?? '').split('\n')
+    const lines = multiline.split('\n')
     expect(lines.length).toBeLessThanOrEqual(12)
     expect(lines.filter((line) => ROUNDED.test(line))).toHaveLength(0)
     expect(lines.some((line) => line.includes('─'))).toBe(false)
@@ -125,9 +135,7 @@ describe('Shell layout on small terminals', () => {
   it('shows the adaptive empty-state hero and ● MILO badge without box borders', async () => {
     const app = render(<Shell initial={loadConfig()} cwd={home} startScreen="chat" />)
     resize(app, 70, 22)
-    await tick()
-
-    const normalFrame = stripAnsi(app.lastFrame() ?? '')
+    const normalFrame = stripAnsi(await waitForFrame(app, (frame) => stripAnsi(frame).includes('▄▄█████▄')))
     expect(normalFrame).toContain('▄▄█████▄')
     expect(normalFrame).toContain('▄██████▀')
     expect(normalFrame).toContain('▀█████▀')
@@ -138,8 +146,7 @@ describe('Shell layout on small terminals', () => {
     expect(normalFrame).not.toMatch(/[─╭╰╮╯│]/)
 
     resize(app, 42, 12)
-    await tick()
-    const tinyFrame = stripAnsi(app.lastFrame() ?? '')
+    const tinyFrame = stripAnsi(await waitForFrame(app, (frame) => stripAnsi(frame).includes('MILO · ready')))
     expect(tinyFrame.split('\n').length).toBeLessThanOrEqual(12)
     expect(tinyFrame).toContain('MILO · ready')
     expect(tinyFrame).not.toContain('▄▄█████▄')
@@ -149,9 +156,9 @@ describe('Shell layout on small terminals', () => {
   it('draws the ● MILO status badge in the non-chat Shell header', async () => {
     const app = render(<Shell initial={loadConfig()} cwd={home} startScreen="settings" />)
     resize(app, 80, 24)
-    await tick()
+    const frame = stripAnsi(await waitForFrame(app, (frame) => stripAnsi(frame).includes('● ▀▄ MILO')))
 
-    const headerLine = stripAnsi((app.lastFrame() ?? '').split('\n')[0] ?? '')
+    const headerLine = frame.split('\n')[0] ?? ''
     expect(headerLine).toContain('● ▀▄ MILO')
     expect(headerLine).toContain('deepseek-v4.1-flash')
   })

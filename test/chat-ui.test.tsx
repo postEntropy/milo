@@ -26,7 +26,7 @@ const UP = '\u001b[A'
 const DOWN = '\u001b[B'
 
 /** Waits for a side effect (the history file) instead of racing it. */
-async function waitUntil(check: () => boolean, timeoutMs = 1500): Promise<void> {
+async function waitUntil(check: () => boolean, timeoutMs = 4000): Promise<void> {
   const started = Date.now()
   while (Date.now() - started < timeoutMs) {
     if (check()) return

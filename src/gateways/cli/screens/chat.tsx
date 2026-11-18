@@ -16,7 +16,8 @@ import type {
   ReasoningEffort,
 } from '../../../core/providers/types.js'
 import type { AgentRuntime } from '../../../core/runtime.js'
-import { MAX_INCOMING_BYTES, MAX_INCOMING_TOTAL_BYTES } from '../../../core/media.js'
+import { incomingMime, MAX_INCOMING_BYTES, MAX_INCOMING_TOTAL_BYTES } from '../../../core/media.js'
+import { saveCommandCodeAttachments } from '../../../core/command-code-attachments.js'
 import { prepareTurnMedia } from '../../media.js'
 import {
   describeRebase,
@@ -58,21 +59,39 @@ import { describePanelRequest, itemsFromMessages, summarizeGenUi } from '../hist
 import { readInputHistory, saveInputHistory } from '../input-history.js'
 import { isCopyKey, isCtrlC, isExpandToolKey, isMouseToggleKey } from '../keys.js'
 import { theme as defaultTheme, type ThemeColor, type TuiTheme } from '../theme.js'
-import { buildLines, padToBottom, visibleWindow, type Item, type Line, type LineSegment } from '../transcript.js'
+import { buildLines, padToBottom, visibleWindow, wrapText, type Item, type Line, type LineSegment } from '../transcript.js'
 import { useElapsed } from '../use-elapsed.js'
 import { useTerminalSize } from '../use-terminal-size.js'
 
 type Phase = 'idle' | 'thinking' | 'writing' | 'tool' | 'asking' | 'waiting' | 'compacting'
 
 const HEADER_ROWS = 0
-/** The permission prompt: the question and the key it is waiting on. */
-const PERMISSION_ROWS = 3
 /** Interval in ms used to coalesce streaming text and reasoning deltas. */
 const STREAM_FLUSH_MS = 24
 /** How long file completion suggestions are cached per root directory. */
 const FILE_CACHE_TTL_MS = 5000
 /** Duration in ms for transient footer/status notices. */
 const FLASH_NOTICE_MS = 2500
+
+function BusyStatus({
+  label,
+  startedAt,
+  queued,
+  color,
+}: {
+  label: string
+  startedAt: number
+  queued: number
+  color: ThemeColor
+}) {
+  const elapsed = useElapsed(true, startedAt)
+  return (
+    <Text color={color}>
+      <Spinner type="dots" /> {label} {formatSeconds(elapsed)}
+      {queued > 0 ? ` · ${queued} queued` : ''}
+    </Text>
+  )
+}
 
 /**
  * What the turn runs on. Kept in parts rather than as one string: the band under
@@ -299,7 +318,6 @@ export function ChatScreen({
   }, [runtime, sessionId])
 
   const busy = phase !== 'idle'
-  const elapsed = useElapsed(busy, startedAt)
 
   const abortRef = useRef<AbortController | null>(null)
   const toolArgsRef = useRef<unknown>({})
@@ -407,13 +425,20 @@ export function ChatScreen({
   const activePopupRows = Math.min(popupRows, maxPopupRows)
   const pickerHeight = Math.max(4, Math.min(12, rows - 4))
 
+  const permissionWidth = Math.max(8, columns - 4)
+  const permissionRows = permission
+    ? 2 +
+      wrapText(`  ${permission.summary}`, permissionWidth).length +
+      (permission.approvalScope ? wrapText(`  ${permission.approvalScope}`, permissionWidth).length : 0)
+    : 0
+
   // Everything below the transcript: whichever footer mode is active, plus the
   // status line above it and the metadata band under it.
   const footerRows =
     (activePicker
       ? pickerHeight
       : permission
-        ? PERMISSION_ROWS
+        ? permissionRows
         : composerRows + activePopupRows) + 2
   // A floor of 1, not 3: on a short viewport the old floor made the frame one
   // row taller than the screen, and the composer at the bottom is what it ate.
@@ -688,6 +713,7 @@ export function ChatScreen({
 
   const buildCliCommandContext = (
     session: Awaited<ReturnType<AgentRuntime['getSession']>>,
+    signal?: AbortSignal,
   ): CommandContext => ({
     policy:
       runtime.permissions ??
@@ -750,6 +776,7 @@ export function ChatScreen({
     setSessionFolder: runtime.setSessionFolder
       ? async (nextFolder) => {
           await runtime.setSessionFolder(session.id, nextFolder)
+          session.refreshFolder?.()
           const resolved = session.project?.ok ? session.project.project.path : null
           updateFolder(resolved)
           return resolved
@@ -757,7 +784,7 @@ export function ChatScreen({
       : undefined,
     listSessions: runtime.listSessions ? () => runtime.listSessions() : undefined,
     sessionStats: session.stats ? () => session.stats() : undefined,
-    compactSession: session.compact ? () => session.compact() : undefined,
+    compactSession: session.compact ? () => session.compact(signal) : undefined,
     skills: () => runtime.skills ?? [],
     jobs: () => runtime.jobs?.list(sessionId ?? undefined) ?? [],
     crew: runtime.crew ? () => runtime.crew!.list() : undefined,
@@ -836,12 +863,15 @@ export function ChatScreen({
       }
       case 'compact': {
         const session = await runtime.getSession(scope)
+        const controller = new AbortController()
+        abortRef.current = controller
         setPhase('compacting')
         setStartedAt(Date.now())
         try {
-          const result = await handleCommand(raw, buildCliCommandContext(session))
+          const result = await handleCommand(raw, buildCliCommandContext(session, controller.signal))
           if (result.handled && result.reply) push({ kind: 'info', text: result.reply })
         } finally {
+          if (abortRef.current === controller) abortRef.current = null
           setPhase('idle')
         }
         return
@@ -1267,21 +1297,27 @@ export function ChatScreen({
         if (sizes.reduce((total, info) => total + info.size, 0) > MAX_INCOMING_TOTAL_BYTES) throw new Error('Attachments together are larger than 50 MB.')
         const files = await Promise.all(fileTokens.map(async (file) => {
           const resolved = resolveToolPath(attachmentBase, file)
-          const bytes = await readFile(resolved)
-          const ext = path.extname(file).toLowerCase()
-          const mimeType = ({ '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.pdf': 'application/pdf', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.ogg': 'audio/ogg', '.txt': 'text/plain', '.md': 'text/markdown' } as Record<string, string>)[ext] ?? 'application/octet-stream'
-          return { name: path.basename(file), mimeType, data: bytes }
+          const data = await readFile(resolved)
+          const name = path.basename(file)
+          return { name, mimeType: incomingMime({ name, mimeType: 'application/octet-stream', data }), data }
         }))
         const session = await runtime.getSession(scope)
-        const prepared = await prepareTurnMedia(session, text, files)
-        prompt = prepared.prompt
-        images = prepared.images
-        audio = prepared.audio
-        documents = prepared.documents
-        imagesForDisplayOnly = prepared.imagesForDisplayOnly
-        mediaNotices = prepared.notices
-        mediaModel = prepared.model
-        for (const notice of prepared.notices) push({ kind: 'error', text: notice })
+        if (session.backend?.kind === 'command-code') {
+          const placement = session.project
+          if (!placement?.ok) throw new Error('Command Code attachments require an available Work project.')
+          const paths = await saveCommandCodeAttachments(placement.project.path, session.id, files)
+          prompt = [text || 'Please inspect the attached files.', 'Attached project files:', ...paths.map((filePath) => `- ${filePath}`)].join('\n')
+        } else {
+          const prepared = await prepareTurnMedia(session, text, files)
+          prompt = prepared.prompt
+          images = prepared.images
+          audio = prepared.audio
+          documents = prepared.documents
+          imagesForDisplayOnly = prepared.imagesForDisplayOnly
+          mediaNotices = prepared.notices
+          mediaModel = prepared.model
+          for (const notice of prepared.notices) push({ kind: 'error', text: notice })
+        }
       }
     } catch (error) {
       push({ kind: 'error', text: `Could not read attachment: ${errorMessage(error)}` })
@@ -1333,7 +1369,7 @@ export function ChatScreen({
               ? 'writing…'
               : 'thinking…'
 
-  const statusText = `${statusLabel} ${formatSeconds(elapsed)}${queued > 0 ? ` · ${queued} queued` : ''}`
+  const statusText = `${statusLabel} 00.0s${queued > 0 ? ` · ${queued} queued` : ''}`
   const scrolled = window.offset > 0 ? `▲ scrolled (${window.offset}/${window.maxOffset})` : ''
   const idleText = flashNotice || scrolled
   const contextRatio =
@@ -1461,9 +1497,7 @@ export function ChatScreen({
 
       <Box paddingX={2} width={columns} justifyContent="space-between">
         {busy ? (
-          <Text color={activeTheme.warning}>
-            <Spinner type="dots" /> {statusText}
-          </Text>
+          <BusyStatus label={statusLabel} startedAt={startedAt} queued={queued} color={activeTheme.warning} />
         ) : jobNotice ? (
           <Text color={activeTheme.warning}>
             <Spinner type="dots" /> {jobText}
@@ -1527,6 +1561,7 @@ export function ChatScreen({
                 return
               }
               await runtime.setSessionFolder(session.id, folderPath)
+              session.refreshFolder?.()
               const resolved = session.project?.ok ? session.project.project.path : null
               updateFolder(resolved)
               push({

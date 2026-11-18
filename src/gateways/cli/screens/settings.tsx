@@ -75,6 +75,7 @@ import { errorMessage } from '../../../util/errors.js'
 import { describeAccess } from '../../access.js'
 import { isCtrlC } from '../keys.js'
 import { theme } from '../theme.js'
+import { useTerminalSize } from '../use-terminal-size.js'
 
 type GatewayId = 'telegram' | 'discord'
 
@@ -82,7 +83,7 @@ interface KeySlot {
   id: string
   label: string
   env: string
-  kind: 'provider' | 'search' | 'gateway'
+  kind: 'provider' | 'search' | 'audio' | 'gateway'
 }
 
 const KEY_SLOTS: KeySlot[] = [
@@ -94,17 +95,19 @@ const KEY_SLOTS: KeySlot[] = [
   { id: 'tavily', label: 'Tavily (web search)', env: 'TAVILY_API_KEY', kind: 'search' },
   { id: 'exa', label: 'Exa (web search)', env: 'EXA_API_KEY', kind: 'search' },
   { id: 'parallel', label: 'Parallel (web search)', env: 'PARALLEL_API_KEY', kind: 'search' },
+  { id: 'groq', label: 'Groq (audio transcription)', env: 'GROQ_API_KEY', kind: 'audio' },
   { id: 'telegram', label: 'Telegram bot', env: 'TELEGRAM_BOT_TOKEN', kind: 'gateway' },
   { id: 'discord', label: 'Discord bot', env: 'DISCORD_BOT_TOKEN', kind: 'gateway' },
 ]
 
 /**
- * The key screen is one list but three kinds of thing. The headers say which is
+ * The key screen is one list but four kinds of thing. The headers say which is
  * which — and the order here is the order the cursor walks them in.
  */
 const KEY_GROUPS: { kind: KeySlot['kind']; label: string }[] = [
   { kind: 'provider', label: 'Providers' },
   { kind: 'search', label: 'Web search' },
+  { kind: 'audio', label: 'Audio' },
   { kind: 'gateway', label: 'Gateways' },
 ]
 
@@ -411,23 +414,28 @@ export function SettingsScreen({
   const installBrowser = async (): Promise<void> => {
     setNotices([])
     setBusy('Looking up the current Chrome…')
-    const installed = await tryInstall(browserChromeDir(), (line) => setBusy(line))
-    setBusy(null)
-    if (!installed) {
-      setNotices([{ text: 'Could not install a browser — see the line above.', tone: 'danger' }])
-      return
+    try {
+      const installed = await tryInstall(browserChromeDir(), (line) => setBusy(line))
+      if (!installed) {
+        setNotices([{ text: 'Could not install a browser — see the line above.', tone: 'danger' }])
+        return
+      }
+      updateConfig((current) => ({
+        ...current,
+        browser: { ...current.browser, chromePath: installed.path, enabled: true },
+      }))
+      setBrowser({ hint: `Google Chrome ${installed.version}`, path: installed.path, version: installed.version, found: browser.found })
+      setNotices([
+        {
+          text: `Chrome ${installed.version} ready, and the browser is on — the three tools arrive with the next session`,
+          tone: 'success',
+        },
+      ])
+    } catch (error) {
+      setNotices([{ text: `Could not install browser: ${errorMessage(error)}`, tone: 'danger' }])
+    } finally {
+      setBusy(null)
     }
-    updateConfig((current) => ({
-      ...current,
-      browser: { ...current.browser, chromePath: installed.path, enabled: true },
-    }))
-    setBrowser({ hint: `Google Chrome ${installed.version}`, path: installed.path, version: installed.version, found: browser.found })
-    setNotices([
-      {
-        text: `Chrome ${installed.version} ready, and the browser is on — the three tools arrive with the next session`,
-        tone: 'success',
-      },
-    ])
   }
 
   /**
@@ -1263,7 +1271,12 @@ export function SettingsScreen({
         else if (key.downArrow) setIndex((value) => Math.min(keys.order.length - 1, value + 1))
         else if (key.return) {
           const slot = keys.order[index]!
-          const current = slot.kind === 'provider' ? auth.providers[slot.id] : slot.kind === 'search' ? auth.search[slot.id] : auth.gateways[slot.id]
+          const current =
+            slot.kind === 'provider' || slot.kind === 'audio'
+              ? auth.providers[slot.id]
+              : slot.kind === 'search'
+                ? auth.search[slot.id]
+                : auth.gateways[slot.id]
           go({ kind: 'keyEdit', slot }, current ?? '')
         } else if (key.escape) go({ kind: 'menu' })
         break
@@ -1620,7 +1633,7 @@ export function SettingsScreen({
       const slot = view.slot
       patchAuth((current) => {
         const trimmed = value.trim()
-        if (slot.kind === 'provider') {
+        if (slot.kind === 'provider' || slot.kind === 'audio') {
           if (trimmed) current.providers[slot.id] = trimmed
           else delete current.providers[slot.id]
         } else if (slot.kind === 'search') {
@@ -2400,6 +2413,7 @@ function Notices({ notices }: { notices: Notice[] }) {
 }
 
 function Menu({ items, index }: { items: MenuItem[]; index: number }) {
+  const { rows } = useTerminalSize()
   // Headers are labels, not rows: the cursor never lands on one, and leaving them
   // out of the width keeps the values beside the rows aligned in a column.
   const labelWidth = Math.max(
@@ -2408,13 +2422,22 @@ function Menu({ items, index }: { items: MenuItem[]; index: number }) {
   )
   // A blank gutter on a list that never uses icons is three columns of nothing.
   const icons = items.some((item) => item.icon)
+  const maxVisible = Math.max(5, rows - 8)
+  let start = 0
+  if (items.length > maxVisible) {
+    start = Math.max(0, Math.min(items.length - maxVisible, index - Math.floor(maxVisible / 2)))
+  }
+  const end = Math.min(items.length, start + maxVisible)
+  const visible = items.slice(start, end)
 
   return (
     <Box flexDirection="column">
-      {items.map((item, itemIndex) => {
+      {start > 0 ? <Text color={theme.muted}>  ↑ {start} more above</Text> : null}
+      {visible.map((item, visibleOffset) => {
+        const itemIndex = start + visibleOffset
         if (item.header) {
           return (
-            <Box key={item.label} marginTop={itemIndex === 0 ? 0 : 1}>
+            <Box key={item.label} marginTop={visibleOffset === 0 ? 0 : 1}>
               <Text bold color={theme.secondary}>
                 {item.label}
               </Text>
@@ -2451,6 +2474,7 @@ function Menu({ items, index }: { items: MenuItem[]; index: number }) {
           </Text>
         )
       })}
+      {end < items.length ? <Text color={theme.muted}>  ↓ {items.length - end} more below</Text> : null}
     </Box>
   )
 }
@@ -2488,7 +2512,7 @@ function keyLayout(auth: Auth): { items: MenuItem[]; order: KeySlot[]; positions
 }
 
 function keyState(slot: KeySlot, auth: Auth): string {
-  if (slot.kind === 'provider') {
+  if (slot.kind === 'provider' || slot.kind === 'audio') {
     if (process.env[slot.env]) return `env ${slot.env}`
     return auth.providers[slot.id] ? 'stored' : 'not set'
   }

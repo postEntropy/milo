@@ -81,14 +81,15 @@ const MAX_EXPANDED_ARGS_LINES = 12
 const MAX_EXPANDED_RESULT_LINES = 16
 const MAX_EXPANDED_DIFF_LINES = 30
 
-interface CachedItem {
+interface CachedRender {
   width: number
   themeKey: string
   expanded: boolean
   lines: Line[]
 }
 
-const itemCache = new WeakMap<Item, CachedItem>()
+const MAX_ITEM_CACHE_WIDTHS = 2
+const itemCache = new WeakMap<Item, CachedRender[]>()
 
 function themeSignature(activeTheme: TuiTheme): string {
   return [
@@ -105,6 +106,60 @@ function themeSignature(activeTheme: TuiTheme): string {
   ].join('|')
 }
 
+function codePointWidth(cp: number): number {
+  if (
+    cp === 0 ||
+    (cp >= 0x0300 && cp <= 0x036f) ||
+    (cp >= 0x1ab0 && cp <= 0x1aff) ||
+    (cp >= 0x1dc0 && cp <= 0x1dff) ||
+    (cp >= 0x200b && cp <= 0x200f) ||
+    (cp >= 0x202a && cp <= 0x202e) ||
+    (cp >= 0xfe00 && cp <= 0xfe0f) ||
+    (cp >= 0xfe20 && cp <= 0xfe2f) ||
+    (cp >= 0xe0100 && cp <= 0xe01ef)
+  ) {
+    return 0
+  }
+  if (
+    cp >= 0x1100 &&
+    (cp <= 0x115f ||
+      cp === 0x2329 ||
+      cp === 0x232a ||
+      (cp >= 0x2e80 && cp <= 0xa4cf && cp !== 0x303f) ||
+      (cp >= 0xac00 && cp <= 0xd7a3) ||
+      (cp >= 0xf900 && cp <= 0xfaff) ||
+      (cp >= 0xfe10 && cp <= 0xfe19) ||
+      (cp >= 0xfe30 && cp <= 0xfe6f) ||
+      (cp >= 0xff00 && cp <= 0xff60) ||
+      (cp >= 0xffe0 && cp <= 0xffe6) ||
+      (cp >= 0x1f300 && cp <= 0x1faf8) ||
+      (cp >= 0x20000 && cp <= 0x3fffd))
+  ) {
+    return 2
+  }
+  return 1
+}
+
+function visualWidth(text: string): number {
+  let width = 0
+  for (const ch of text) width += codePointWidth(ch.codePointAt(0) ?? 0)
+  return width
+}
+
+function splitByVisualWidth(text: string, limit: number): { head: string; rest: string } {
+  let width = 0
+  let splitAt = 0
+  const chars = [...text]
+  for (let i = 0; i < chars.length; i++) {
+    const w = codePointWidth(chars[i]!.codePointAt(0) ?? 0)
+    if (width + w > limit && splitAt > 0) break
+    width += w
+    splitAt = i + 1
+  }
+  if (splitAt === 0 && chars.length > 0) splitAt = 1
+  return { head: chars.slice(0, splitAt).join(''), rest: chars.slice(splitAt).join('') }
+}
+
 export function wrapText(text: string, width: number): string[] {
   const limit = Math.max(1, width)
   const out: string[] = []
@@ -115,17 +170,25 @@ export function wrapText(text: string, width: number): string[] {
       continue
     }
     let line = ''
+    let lineWidth = 0
     for (const word of paragraph.split(/\s+/).filter(Boolean)) {
-      if (line === '') line = word
-      else if (line.length + 1 + word.length <= limit) line += ` ${word}`
-      else {
+      const wordWidth = visualWidth(word)
+      if (line === '') {
+        line = word
+        lineWidth = wordWidth
+      } else if (lineWidth + 1 + wordWidth <= limit) {
+        line += ` ${word}`
+        lineWidth += 1 + wordWidth
+      } else {
         out.push(line)
         line = word
+        lineWidth = wordWidth
       }
     }
-    while (line.length > limit) {
-      out.push(line.slice(0, limit))
-      line = line.slice(limit)
+    while (visualWidth(line) > limit) {
+      const { head, rest } = splitByVisualWidth(line, limit)
+      out.push(head)
+      line = rest
     }
     out.push(line)
   }
@@ -145,14 +208,25 @@ export function buildLines(items: Item[], width: number, activeTheme: TuiTheme =
     }
 
     const expanded = item.kind === 'tool' ? Boolean(item.expanded) : false
-    const cached = itemCache.get(item)
-    if (cached && cached.width === width && cached.themeKey === key && cached.expanded === expanded) {
+    const entries = itemCache.get(item)
+    const cached = entries?.find(
+      (entry) => entry.width === width && entry.themeKey === key && entry.expanded === expanded,
+    )
+    if (cached) {
       lines.push(...cached.lines)
       return
     }
 
     const rendered = renderItem(item, width, activeTheme)
-    itemCache.set(item, { width, themeKey: key, expanded, lines: rendered })
+    const compatible =
+      entries?.filter((entry) => entry.themeKey === key && entry.expanded === expanded) ?? []
+    itemCache.set(
+      item,
+      [{ width, themeKey: key, expanded, lines: rendered }, ...compatible].slice(
+        0,
+        MAX_ITEM_CACHE_WIDTHS,
+      ),
+    )
     lines.push(...rendered)
   })
 
