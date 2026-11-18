@@ -119,6 +119,12 @@ describe('runSubagent', () => {
     expect(result.content).toBe('the report')
   })
 
+  it('reports a provider error even when it produced partial text', async () => {
+    const result = await run({ provider: new ScriptedProvider([[{ type: 'text', delta: 'partial report' }, { type: 'done', finishReason: 'error' }]]) })
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('partial report')
+  })
+
   it('says a step of its own that may have changed something in the folder', async () => {
     const provider = new ScriptedProvider([
       [

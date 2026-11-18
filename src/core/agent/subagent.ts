@@ -168,7 +168,11 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
       trace: options.trace,
     })) {
       if (event.type === 'text-delta') { confirmSteers(); text += event.delta }
-      else if (event.type === 'reasoning-delta' || event.type === 'usage' || event.type === 'done') confirmSteers()
+      else if (event.type === 'reasoning-delta' || event.type === 'usage') confirmSteers()
+      else if (event.type === 'done') {
+        if (event.finishReason === 'error') failure = 'The model ended with an error.'
+        else confirmSteers()
+      }
       else if (event.type === 'steer') unconfirmedSteers.push(event.text)
       else if (event.type === 'tool-start') {
         confirmSteers()
