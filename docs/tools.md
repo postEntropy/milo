@@ -34,7 +34,9 @@
 | `mail_labels` | conditional | Lists and edits Milo's own mail labels — local to `~/.milo/labels.json`, never written to Gmail — and says which messages carry one. A connected account is required; editing asks, or needs a standing grant for an unattended run. |
 | `drive_search` | yes | Search the connected Drive. |
 | `drive_read` | yes | One Drive file as text; Docs and Sheets come back exported. |
-| `task` | — | Runs a subtask in its own context; only the report comes back. In a project the model may delegate on its own; outside one, only on request. Never asks itself. |
+| `task` | — | Runs a subtask in its own context (creating or reusing a Crew bot); only the report comes back. Works with or without a Session folder; never asks itself. |
+| `crew` | — | Lists, inspects, renames, customizes avatars, guides or stops persistent Crew bots; withheld from autonomous `ROUTINE_GATEWAY` runs and subagents. |
+| `delegated_work` | conditional | Creates, lists, shows, updates, pauses, resumes or cancels persistent background objectives executed by `milo serve`; creating with `allow`, updating or resuming asks for confirmation first, and `gmail_send` cannot be granted. |
 | `browser_open` | yes | Opens an http(s) URL and returns the page as numbered elements. Only when the browser is on. |
 | `browser_snapshot` | yes | The current page again: its elements, its text, or a picture of the viewport for the model. |
 | `browser_screenshot` | no | A picture of the viewport written to a file, for the person. Asks, because it writes. |
