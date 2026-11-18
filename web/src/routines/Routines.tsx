@@ -151,7 +151,7 @@ export function Routines({ chatId, chat, tick }: { chatId: string; chat: Routine
     let live = true
     void api<FeedEntry[]>('routine-feed')
       .then((entries) => { if (live) setFeed(entries) })
-      .catch(() => { if (live) setFeed([]) })
+      .catch((error) => { if (live) setNotice({ text: message(error), error: true }) })
     return () => { live = false }
   }, [tick, routines])
 
@@ -667,7 +667,22 @@ function NewRoutine({ chatId, chat, initialAsk = '', onBack, inSplit }: { chatId
   /** What has been asked here and answered here: nothing until the first ask. */
   const thread = createdFrom === null ? [] : chat.messages.slice(createdFrom)
 
-  return <div className="routine-drawer-layer">
+  useEffect(() => {
+    const previous = document.activeElement
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onBack()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
+    }
+  }, [onBack])
+
+  return <div className="routine-drawer-layer" role="dialog" aria-modal="true" aria-label="New routine">
   <button className="routine-drawer-scrim" type="button" aria-label="Close new routine" onClick={onBack} />
   <div className="routine-drawer">
   <Panel inSplit={inSplit} head={<PageHeader

@@ -39,14 +39,26 @@ export function attachmentUrl(id: string): string {
   return `/attachment/${encodeURIComponent(id)}?t=${encodeURIComponent(apiToken())}`
 }
 
-/**
- * Where a panel artifact is fetched, inline rather than as a download: the panel
- * frames an HTML page or a PDF and shows an image, so the server serves it with
- * the disposition the page needs. It shares the attachment id space — the same
- * files, drawn differently.
- */
-export function panelUrl(id: string): string {
-  return `/panel/${encodeURIComponent(id)}?t=${encodeURIComponent(apiToken())}`
+/** Authorization header for direct `fetch` calls so the token stays out of URLs. */
+export function authHeaders(): Record<string, string> {
+  const token = apiToken()
+  return token ? { authorization: `Bearer ${token}` } : {}
+}
+
+/** Where a panel document is fetched via `fetch()` with an Authorization header. */
+export function panelApiUrl(id: string): string {
+  return `/panel/${encodeURIComponent(id)}`
+}
+
+/** Where a panel artifact (`<img>` or `<iframe>`) is fetched via an artifact-scoped ticket. */
+export function panelTicketUrl(id: string, ticket: string): string {
+  return `/panel/${encodeURIComponent(id)}?p=${encodeURIComponent(ticket)}`
+}
+
+/** Mints an artifact-scoped ticket so framed panel HTML never receives the bearer token. */
+export async function issuePanelTicket(id: string): Promise<string> {
+  const result = await api<{ ticket: string }>('panel-ticket', { id })
+  return result.ticket
 }
 
 /** The live browser as an MJPEG stream, drawn directly in an `<img>`. */
@@ -54,22 +66,31 @@ export function browserFramesUrl(): string {
   return `/browser/frames?t=${encodeURIComponent(apiToken())}`
 }
 
+async function readJsonSafe(response: Response): Promise<unknown> {
+  try {
+    return await response.json()
+  } catch {
+    return null
+  }
+}
+
 export async function api<T>(action: string, body: Record<string, unknown> = {}): Promise<T> {
   const response = await fetch(`/api/${action}`, {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${apiToken()}`,
+      ...authHeaders(),
       'content-type': 'application/json',
     },
     body: JSON.stringify(body),
   })
-  const payload = await response.json() as T | { error?: string }
+  const payload = await readJsonSafe(response)
   if (!response.ok) {
     const error = payload && typeof payload === 'object' && 'error' in payload && typeof payload.error === 'string'
       ? payload.error
-      : response.statusText
+      : response.statusText || `HTTP ${response.status}`
     throw new ApiError(error, response.status)
   }
+  if (payload === null) throw new ApiError('Server returned an unreadable response.', response.status)
   return payload as T
 }
 
@@ -77,13 +98,14 @@ export async function uploadFile(file: File): Promise<string> {
   const response = await fetch('/upload', {
     method: 'POST',
     headers: {
-      authorization: `Bearer ${apiToken()}`,
+      ...authHeaders(),
       'content-type': file.type || 'application/octet-stream',
       'x-file-name': encodeURIComponent(file.name),
     },
     body: file,
   })
-  const payload = await response.json() as { uploadId?: string; error?: string }
-  if (!response.ok || !payload.uploadId) throw new ApiError(payload.error ?? response.statusText, response.status)
+  const payload = await readJsonSafe(response) as { uploadId?: string; error?: string } | null
+  const error = payload && typeof payload.error === 'string' ? payload.error : response.statusText || `HTTP ${response.status}`
+  if (!response.ok || !payload?.uploadId) throw new ApiError(error, response.status)
   return payload.uploadId
 }

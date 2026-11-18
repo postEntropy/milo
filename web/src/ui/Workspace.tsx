@@ -7,7 +7,7 @@ import { Notice } from './Notice.js'
  * its own one-pane flow, so it never draws this — `usePhone()` decides.
  */
 export function SplitWorkspace({ label, rail, children }: { label: string; rail: ReactNode; children: ReactNode }) {
-  return <main className="settings-workspace">
+  return <div className="settings-workspace">
     <div className="workspace-split">
       <aside className="workspace-rail" aria-label={label}>
         {rail}
@@ -18,7 +18,7 @@ export function SplitWorkspace({ label, rail, children }: { label: string; rail:
         </div>
       </div>
     </div>
-  </main>
+  </div>
 }
 
 /**
@@ -41,11 +41,11 @@ export function Panel({ head, notice, onDismiss, inSplit, children }: {
     </div>
   </section>
   if (inSplit) return section
-  return <main className="settings-workspace">
+  return <div className="settings-workspace">
     <div className="settings-inner">
       <div className="settings-panel-stack">
         {section}
       </div>
     </div>
-  </main>
+  </div>
 }

@@ -18,6 +18,7 @@ export class MiloSocket {
   private retry = 0
   private closed = false
   private timer: number | undefined
+  private listenersBound = false
   /** Whether the handshake finished for the socket open now; reset on each attempt. */
   private ready = false
   /** What the server said when it refused, before the handshake finished. */
@@ -28,8 +29,22 @@ export class MiloSocket {
     this.chatId = chatId
     this.genui = genui
     this.closed = false
+    this.bindNetworkWakeup()
     this.retire()
     this.open()
+  }
+
+  private bindNetworkWakeup(): void {
+    if (this.listenersBound) return
+    this.listenersBound = true
+    const wake = (): void => {
+      if (this.closed || !this.chatId) return
+      if (document.visibilityState === 'hidden') return
+      if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING) return
+      this.reconnect()
+    }
+    window.addEventListener('online', wake)
+    document.addEventListener('visibilitychange', wake)
   }
 
   close(): void {
@@ -167,7 +182,8 @@ export class MiloSocket {
     const { retry, status } = closeOutcome({ everOnline: this.ready, error: this.refusal || undefined, reachable })
     this.status(status)
     if (!retry) return
-    const delay = Math.min(500 * (2 ** this.retry), 8000)
+    const baseDelay = Math.min(500 * (2 ** this.retry), 8000)
+    const delay = Math.round(baseDelay * (0.75 + Math.random() * 0.5))
     this.retry += 1
     this.timer = window.setTimeout(() => this.open(), delay)
   }

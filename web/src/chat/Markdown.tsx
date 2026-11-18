@@ -75,11 +75,10 @@ export const Markdown = memo(function Markdown({ text }: { text: string }) {
   const container = useRef<HTMLDivElement>(null)
   const [blocks, setBlocks] = useState<HTMLElement[]>([])
   useEffect(() => {
-    // React has written `html` into the container by the time this runs; the
-    // dependency is what moves the copy buttons onto a new answer. An empty
-    // answer has no fences, and clearing here keeps the dependency honest.
-    if (!html) {
-      setBlocks([])
+    // React has written `html` into the container by the time this runs; skip
+    // DOM queries and extra state churn for answers without fenced code blocks.
+    if (!html.includes('<pre')) {
+      setBlocks((current) => (current.length === 0 ? current : []))
       return
     }
     setBlocks(Array.from(container.current?.querySelectorAll<HTMLElement>('pre') ?? []))

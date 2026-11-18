@@ -15,6 +15,7 @@ import type {
   GenUiTextInput,
 } from '../../../../src/core/genui.ts'
 import { Code } from '../../ui/Code.js'
+import { Select } from '../../ui/Select.js'
 import { Chart, Sparkline } from './Chart.js'
 import { evaluateFormula, formatNumber, interpolate, type GenUiInputValue, type GenUiValues } from './evaluate.js'
 import { Inline } from './Inline.js'
@@ -269,12 +270,16 @@ function Node({
   }
   if (node.kind === 'select') {
     return (
-      <label className="genui-field">
+      <div className="genui-field">
         <span className="genui-field-label">{node.label}</span>
-        <select className="genui-select" value={String(values[node.id] ?? node.value)} onChange={(event) => set(node.id, event.target.value)}>
-          {node.options.map((option) => <option key={option} value={option}>{option}</option>)}
-        </select>
-      </label>
+        <Select
+          className="genui-select"
+          label={node.label}
+          value={String(values[node.id] ?? node.value)}
+          choices={node.options.map((option) => ({ value: option, label: option }))}
+          onChange={(next) => set(node.id, next)}
+        />
+      </div>
     )
   }
   if (node.kind === 'multiselect') return <MultiSelect node={node} values={values} set={set} />
@@ -338,7 +343,8 @@ function ChoiceCards({ node, values, set }: { node: GenUiChoiceCards; values: Ge
 }
 
 function TextInput({ node, values, set }: { node: GenUiTextInput; values: GenUiValues; set(id: string, value: GenUiInputValue): void }) {
-  const id = `genui-${node.id}`
+  const uid = useId()
+  const id = `genui-${node.id}-${uid}`
   const value = typeof values[node.id] === 'string' ? String(values[node.id]) : node.value ?? ''
   return <label className="genui-field" htmlFor={id}><span className="genui-field-label">{node.label}{node.required && <span aria-hidden="true"> *</span>}</span>
     {node.multiline

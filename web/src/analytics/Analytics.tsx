@@ -3,6 +3,7 @@ import type { AnalyticsEvent, AnalyticsReport, AnalyticsTurnsReport, SessionTrac
 import { api } from '../lib/api.js'
 import { message } from '../lib/format.js'
 import { PageHeader } from '../ui/PageHeader.js'
+import { Select } from '../ui/Select.js'
 
 export interface AnalyticsSessionTarget {
   id: string
@@ -213,7 +214,7 @@ export function Analytics({
   }
   const orderedTurns = sessionReport ? (ascending ? [...sessionReport.turns].reverse() : sessionReport.turns) : []
   const summary = view === 'turns' ? turnsReport : report
-  return <main className="settings-workspace"><div className="settings-inner analytics">
+  return <div className="settings-workspace"><div className="settings-inner analytics">
     <PageHeader
       title={session ? `Traces · ${session.label}` : 'Analytics'}
       description={session ? `Execution timeline for Session ${session.id}.` : 'Requests, tools and turns across Milo.'}
@@ -255,12 +256,31 @@ export function Analytics({
       </section>}
       <div className="analytics-filters">
         <input aria-label="Search traces" placeholder="Search model, Session or tool" value={query} onChange={(e) => update(() => setQuery(e.target.value))} />
-        <select aria-label="Event type" value={event} onChange={(e) => update(() => setEvent(e.target.value))}>
-          <option value="all">All events</option><option value="model.request">Model requests</option><option value="embedding.request">Embedding requests</option><option value="tool.call">Tool calls</option><option value="turn">Turns</option><option value="classifier.request">Classifier requests</option><option value="verification">Verification</option>
-        </select>
-        <select aria-label="Period" value={days} onChange={(e) => update(() => setDays(e.target.value))}>
-          <option value="0">All time</option><option value="1">Last 24 hours</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option>
-        </select>
+        <Select
+          label="Event type"
+          value={event}
+          choices={[
+            { value: 'all', label: 'All events' },
+            { value: 'model.request', label: 'Model requests' },
+            { value: 'embedding.request', label: 'Embedding requests' },
+            { value: 'tool.call', label: 'Tool calls' },
+            { value: 'turn', label: 'Turns' },
+            { value: 'classifier.request', label: 'Classifier requests' },
+            { value: 'verification', label: 'Verification' },
+          ]}
+          onChange={(next) => update(() => setEvent(next))}
+        />
+        <Select
+          label="Period"
+          value={days}
+          choices={[
+            { value: '0', label: 'All time' },
+            { value: '1', label: 'Last 24 hours' },
+            { value: '7', label: 'Last 7 days' },
+            { value: '30', label: 'Last 30 days' },
+          ]}
+          onChange={(next) => update(() => setDays(next))}
+        />
       </div>
     </>}
     <div className="analytics-layout">
@@ -306,5 +326,5 @@ export function Analytics({
         </>}
       </section>
     </div>
-  </div></main>
+  </div></div>
 }

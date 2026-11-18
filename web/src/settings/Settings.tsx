@@ -615,7 +615,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
     {requiresRestart && <p className="notice restart-notice" role="status">Restart the web server to reach the chat with: {restartReasons.join(', ')}.</p>}
   </>
 
-  return <main className="settings-workspace">
+  return <div className="settings-workspace">
     {busy && <div className="settings-inner"><p role="status">Reading Milo’s settings…</p></div>}
     {!busy && !data && <div className="settings-inner"><div className="notice error">{notice?.text ?? 'Could not open settings.'} <button className="button" type="button" onClick={() => void load()}>Try again</button></div></div>}
     {data && draft && <div className="settings-layout">
@@ -638,7 +638,9 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
             <>
               <div className="mobile-model-card">
                 <div className="mobile-model-card-info">
-                  <span className="mobile-model-card-label">Active model</span>
+                  <span className="mobile-model-card-label">
+                    {draft.model === data.config.model && draft.provider === data.config.provider ? 'Active model' : 'Selected model (unsaved)'}
+                  </span>
                   <span className="mobile-model-card-name">{draft.model}</span>
                   <span className="mobile-model-card-provider">
                     {data.presets.find((item) => item.id === draft.provider)?.name ?? draft.provider}
@@ -1028,7 +1030,7 @@ export function Settings({ section, onSection, chatId, sessionId, onClose, onSes
         </div>}
       </div>}
     </div>}
-  </main>
+  </div>
 }
 
 /** What a section holds right now, in a few words, for its row in the index. */

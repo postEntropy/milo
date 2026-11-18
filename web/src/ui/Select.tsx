@@ -110,6 +110,7 @@ export function Select({
     const onKey = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape') return
       event.preventDefault()
+      event.stopPropagation()
       close()
       trigger.current?.focus()
     }

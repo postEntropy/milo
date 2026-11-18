@@ -104,7 +104,7 @@ export function SessionRow({
           />
         </form>
       ) : (
-        <button className="session-row" type="button" onClick={onClick}>
+        <button className="session-row" type="button" aria-current={active ? 'page' : undefined} aria-label={session.label} onClick={onClick}>
           <span className="session-content">
             <span className="session-title-row">
               <span className="session-title">{session.label}</span>

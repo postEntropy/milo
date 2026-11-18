@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ModelInfo } from '../../../src/core/providers/models.js'
 import { Icon } from '../ui/Icons.js'
 import { ModelDetails } from '../ui/ModelDetails.js'
@@ -30,15 +30,32 @@ export function MobileModelSheet({
   onClose(): void
 }) {
   const [filter, setFilter] = useState('')
+  const backRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    const previous = document.activeElement
+    backRef.current?.focus()
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+      }
+    }
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('keydown', onKey)
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus()
+    }
+  }, [onClose])
   const query = filter.trim().toLowerCase()
   const shown = (catalog ?? []).filter((item) =>
     `${item.id} ${item.name ?? ''}`.toLowerCase().includes(query),
   )
 
   return (
-    <div className="mobile-model-sheet" role="dialog" aria-label="Select model">
+    <div className="mobile-model-sheet" role="dialog" aria-modal="true" aria-label="Select model">
       <header className="mobile-model-sheet-head">
         <button
+          ref={backRef}
           className="settings-strip-back"
           type="button"
           aria-label="Close"
@@ -95,7 +112,7 @@ export function MobileModelSheet({
         ) : shown.length === 0 ? (
           <p className="model-picker-note">
             {catalog.length === 0
-              ? 'This provider reports no models. Type an id in the field below if you know it.'
+              ? 'This provider reports no models.'
               : 'No model matches that.'}
           </p>
         ) : (

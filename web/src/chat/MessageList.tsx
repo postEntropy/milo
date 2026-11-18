@@ -278,7 +278,16 @@ function SessionCards({
   )
 }
 
-export function MessageList({
+function isSafeHttpUrl(raw: string): boolean {
+  try {
+    const parsed = new URL(raw)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
+
+export const MessageList = memo(function MessageList({
   messages,
   thinking,
   onPrompt,
@@ -365,7 +374,7 @@ export function MessageList({
     : undefined
 
   return <>
-    <div className={`thread-inner${messages[0]?.loaded ? ' is-opened' : ''}`} aria-live="polite" aria-relevant="additions text">
+    <div className={`thread-inner${messages[0]?.loaded ? ' is-opened' : ''}`}>
       {visibleMessages.map((message, index) => (
         <MessageRow
           key={message.id}
@@ -389,7 +398,7 @@ export function MessageList({
     </div>
     {onQuote && <QuoteButton onQuote={onQuote} />}
   </>
-}
+})
 
 /**
  * The way to answer one particular stretch of a reply. While words are picked
@@ -536,14 +545,14 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
                     </span>
                   )
                 }
-                if (btn.url) {
+                if (btn.url && isSafeHttpUrl(btn.url)) {
                   return (
                     <a
                       key={btn.id}
                       className={`action-btn ${btn.style ? `action-${btn.style}` : ''}`}
                       href={btn.url}
                       target="_blank"
-                      rel="noreferrer"
+                      rel="noreferrer noopener"
                     >
                       {btn.label}
                     </a>
@@ -725,12 +734,21 @@ function MessageMenu({ at, tokens, thoughtMs, prose, raw, rawNoOutput, onFork, t
       const widest = Math.max(margin, window.innerWidth - size.width - margin)
       setSpot({ up, left: Math.min(Math.max(margin, from.left), widest), top: Math.max(margin, top) })
     }
+    let raf: number | null = null
+    const schedulePlace = (): void => {
+      if (raf !== null) return
+      raf = requestAnimationFrame(() => {
+        raf = null
+        place()
+      })
+    }
     place()
-    window.addEventListener('resize', place)
-    document.addEventListener('scroll', place, true)
+    window.addEventListener('resize', schedulePlace)
+    document.addEventListener('scroll', schedulePlace, true)
     return () => {
-      window.removeEventListener('resize', place)
-      document.removeEventListener('scroll', place, true)
+      if (raf !== null) cancelAnimationFrame(raf)
+      window.removeEventListener('resize', schedulePlace)
+      document.removeEventListener('scroll', schedulePlace, true)
     }
   }, [open])
 
@@ -749,12 +767,21 @@ function MessageMenu({ at, tokens, thoughtMs, prose, raw, rawNoOutput, onFork, t
       const top = Math.min(Math.max(margin, from.top), Math.max(margin, window.innerHeight - size.height - margin))
       setSubSpot({ left: Math.max(margin, left), top, leftOf })
     }
+    let raf: number | null = null
+    const schedulePlace = (): void => {
+      if (raf !== null) return
+      raf = requestAnimationFrame(() => {
+        raf = null
+        place()
+      })
+    }
     place()
-    window.addEventListener('resize', place)
-    document.addEventListener('scroll', place, true)
+    window.addEventListener('resize', schedulePlace)
+    document.addEventListener('scroll', schedulePlace, true)
     return () => {
-      window.removeEventListener('resize', place)
-      document.removeEventListener('scroll', place, true)
+      if (raf !== null) cancelAnimationFrame(raf)
+      window.removeEventListener('resize', schedulePlace)
+      document.removeEventListener('scroll', schedulePlace, true)
     }
   }, [open, copyOpen])
 

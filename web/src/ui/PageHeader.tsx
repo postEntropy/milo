@@ -24,7 +24,7 @@ export function PageHeader({ titleId, title, description, action, back }: {
     {back && <div className="page-header-back">{back}</div>}
     {main && <div className="page-header-main">
       <div className="page-header-text">
-        {title && <h2 id={titleId} className="page-header-title">{title}</h2>}
+        {title && <h1 id={titleId} className="page-header-title">{title}</h1>}
         {description && <p className="page-header-description">{description}</p>}
       </div>
       {action && <div className="page-header-action">{action}</div>}

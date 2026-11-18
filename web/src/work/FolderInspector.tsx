@@ -78,7 +78,7 @@ type ProjectRules = {
 
 
 function Shell({ head, notice, onDismiss, children }: { head: ReactNode; notice: Notice | null; onDismiss(): void; children: ReactNode }) {
-  return <main className="settings-workspace">
+  return <div className="settings-workspace">
     <div className="settings-inner">
       <div className="settings-panel-stack">
         <section className="settings-section">
@@ -90,7 +90,7 @@ function Shell({ head, notice, onDismiss, children }: { head: ReactNode; notice:
         </section>
       </div>
     </div>
-  </main>
+  </div>
 }
 
 export function FolderPicker({ onChoose, onClose }: { onChoose(path: string): void; onClose(): void }) {

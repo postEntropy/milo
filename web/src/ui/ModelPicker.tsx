@@ -40,7 +40,8 @@ export function ModelPicker({ presets, provider, model, browsing, catalog, onBro
     <div className="model-picker-pane">
       <h3>Providers</h3>
       <div className="model-picker-list">
-        {presets.map((preset) => <button
+        {presets.length === 0 ? <p className="model-picker-note">No provider with a key is configured yet. Add one in Settings.</p>
+          : presets.map((preset) => <button
           key={preset.id}
           type="button"
           className={`model-picker-row ${preset.id === browsing ? 'browsing' : ''} ${preset.id === provider ? 'chosen' : ''}`}
@@ -64,7 +65,7 @@ export function ModelPicker({ presets, provider, model, browsing, catalog, onBro
       </label>
       <div className="model-picker-list">
         {catalog === null ? <p className="model-picker-note">Reading this provider’s models…</p>
-          : shown.length === 0 ? <p className="model-picker-note">{catalog.length === 0 ? note ?? 'This provider reports no models. Type an id below if you know it.' : 'No model matches that.'}</p>
+          : shown.length === 0 ? <p className="model-picker-note">{catalog.length === 0 ? note ?? 'This provider reports no models.' : 'No model matches that.'}</p>
             : shown.map((item) => {
               const isChosen = item.id === model && browsing === provider
               return <button

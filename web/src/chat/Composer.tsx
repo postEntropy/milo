@@ -50,7 +50,6 @@ interface Props {
   /** Sets the pair: the model, and the provider it answers through. */
   onModelChange(model: string, provider: string): Promise<void>
   onEffortChange(effort: 'low' | 'medium' | 'high'): void
-  onProviderChange(provider: string): Promise<void>
 }
 
 
@@ -98,8 +97,20 @@ function oneLine(text: string): string {
   return flat.length > 80 ? `${flat.slice(0, 77)}…` : flat
 }
 
+const MAX_FILE_DRAFTS = 8
+
+function setBoundedFileDraft(map: Map<string, File[]>, key: string, files: File[]): void {
+  map.delete(key)
+  if (files.length > 0) map.set(key, files)
+  while (map.size > MAX_FILE_DRAFTS) {
+    const oldest = map.keys().next().value
+    if (oldest === undefined) break
+    map.delete(oldest)
+  }
+}
+
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { busy, queued, jobs, onKillJob, folders = [], provider, providerName, draftKey, pendingDraftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, onEffortChange, onProviderChange },
+  { busy, queued, jobs, onKillJob, folders = [], provider, providerName, draftKey, pendingDraftKey, model, context, effort, plan, planReady, canPlan, onPlanChange, onApprovePlan, focusSignal, onSend, onStop, onModelChange, onEffortChange },
   handle,
 ) {
   const ref = useRef<HTMLTextAreaElement>(null)
@@ -283,6 +294,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
         setDraftStorageError(false)
       } catch { setDraftStorageError(true) }
       drafts.current.delete(previous)
+    }
+    const earlyFiles = previous === pendingDraftKey ? fileDrafts.current.get(previous) : undefined
+    if (earlyFiles?.length && !fileDrafts.current.has(draftKey)) {
+      setBoundedFileDraft(fileDrafts.current, draftKey, earlyFiles)
+      fileDrafts.current.delete(previous)
     }
     setDraft(restored)
     setFiles(fileDrafts.current.get(draftKey) ?? [])
@@ -483,7 +499,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       <div className="composer-box">
         {draftStorageError && <div className="composer-upload-error" role="alert">This draft could not be saved on this device.</div>}
         {uploadError && <div className="composer-upload-error" role="alert">{uploadError}</div>}
-        {files.length > 0 && <div className="composer-files" aria-live="polite">{files.map((file, index) => <span className="composer-file" key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name}<button type="button" aria-label={`Remove ${file.name}`} title={`Remove ${file.name}`} onClick={() => setFiles((current) => { const next = current.filter((_, item) => item !== index); fileDrafts.current.set(draftKey, next); return next })}><Icon name="x" size={12} /></button></span>)}</div>}
+        {files.length > 0 && <div className="composer-files" aria-live="polite">{files.map((file, index) => <span className="composer-file" key={`${file.name}-${file.size}-${file.lastModified}`}>{file.name}<button type="button" aria-label={`Remove ${file.name}`} title={`Remove ${file.name}`} onClick={() => setFiles((current) => { const next = current.filter((_, item) => item !== index); setBoundedFileDraft(fileDrafts.current, draftKey, next); return next })}><Icon name="x" size={12} /></button></span>)}</div>}
         {palette.length > 0 && <div className="command-menu" role="listbox" aria-label="Commands">
           {palette.map((command, index) => <button className={`command-option ${index === highlight ? 'active' : ''}`} type="button" role="option" aria-selected={index === highlight} key={command.name} onMouseEnter={() => setHighlight(index)} onClick={() => choose(command.name)}><code className="command-name">/{command.name}</code><small>{command.hint}</small></button>)}
         </div>}
@@ -507,7 +523,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           onKeyDown={key}
         />
         <div className="composer-toolbar">
-          <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } fileDrafts.current.set(draftKey, next); return next }); event.target.value = '' }} />
+          <input ref={uploadRef} type="file" accept="image/*,audio/*,application/pdf,text/*,.docx,.xlsx,.pptx" multiple hidden onChange={(event) => { setFiles((current) => { const next = [...current]; const seen = new Set(current.map((file) => `${file.name}:${file.size}:${file.lastModified}`)); for (const file of Array.from(event.target.files ?? [])) { const key = `${file.name}:${file.size}:${file.lastModified}`; if (!seen.has(key)) { next.push(file); seen.add(key) } } setBoundedFileDraft(fileDrafts.current, draftKey, next); return next }); event.target.value = '' }} />
           <button className="composer-pill attach-button" type="button" title="Attach files" aria-label="Attach files" onClick={() => uploadRef.current?.click()}><Icon name="plus" size={14} /></button>
           {canPlan && <button
             type="button"
@@ -539,10 +555,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
               filterExtra={wide ? undefined : <div className="composer-provider">
                 <Select
                   label="Provider"
-                  value={provider}
-                  triggerLabel={providerName}
+                  value={browsing}
+                  triggerLabel={providers?.find((item) => item.id === browsing)?.name ?? providerName}
                   choices={(providers ?? []).map((item) => ({ value: item.id, label: item.name }))}
-                  onChange={(next) => void onProviderChange(next)}
+                  onChange={(next) => void browse(next)}
                   onOpen={() => void loadProviders()}
                   note="No other provider with a key is configured."
                 />

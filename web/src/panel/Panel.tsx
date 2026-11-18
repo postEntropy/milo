@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { PanelInput, PanelTab, PanelView } from '@protocol'
-import { attachmentUrl, browserFramesUrl, panelUrl } from '../lib/api.js'
+import { attachmentUrl, authHeaders, browserFramesUrl, issuePanelTicket, panelApiUrl, panelTicketUrl } from '../lib/api.js'
 import { boundaryOf, frameParser } from './frames.js'
 import { panelInputFor, typedInput } from './keys.js'
 import { Markdown } from '../chat/Markdown.js'
@@ -68,18 +68,9 @@ function renderBody(state: PanelTab, nonce: number, onInput: (input: PanelInput)
   if (state.kind === 'browser') return <BrowserView state={state} onInput={onInput} />
   const artifact = state.artifact
   if (!artifact) return <p className="panel-state">Nothing to show.</p>
-  const url = panelUrl(artifact.id)
 
-  if (state.kind === 'image') {
-    return <div className="panel-image"><img src={url} alt={artifact.name} /></div>
-  }
-  if (state.kind === 'pdf') {
-    return <iframe className="panel-frame" src={url} title={artifact.name} />
-  }
-  if (state.kind === 'page') {
-    // Sandboxed without `allow-same-origin`: the page's own scripts run, but the
-    // frame's origin is opaque, so a page can never reach the app around it.
-    return <iframe className="panel-frame" src={url} title={artifact.name} sandbox="allow-scripts allow-forms allow-popups allow-modals" />
+  if (state.kind === 'image' || state.kind === 'pdf' || state.kind === 'page') {
+    return <ArtifactFrame kind={state.kind} id={artifact.id} name={artifact.name} nonce={nonce} />
   }
   if (state.kind === 'document') {
     return <DocumentBody id={artifact.id} name={artifact.name} nonce={nonce} />
@@ -88,6 +79,33 @@ function renderBody(state: PanelTab, nonce: number, onInput: (input: PanelInput)
     <p className="panel-state">Milo can’t render this here.</p>
     <a className="panel-download" href={attachmentUrl(artifact.id)} download={artifact.name}><Icon name="download" size={16} /><span>{artifact.name}</span></a>
   </div>
+}
+
+/** Loads a framed or inline panel artifact through a scoped ticket so the bearer token stays out of `src`. */
+function ArtifactFrame({ kind, id, name, nonce }: { kind: 'image' | 'pdf' | 'page'; id: string; name: string; nonce: number }) {
+  const [url, setUrl] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `nonce` refreshes the artifact with a fresh ticket
+  useEffect(() => {
+    let live = true
+    setUrl(null)
+    setError(null)
+    void issuePanelTicket(id)
+      .then((ticket) => { if (live) setUrl(panelTicketUrl(id, ticket)) })
+      .catch((failure: unknown) => {
+        if (live) setError(failure instanceof Error ? failure.message : String(failure))
+      })
+    return () => { live = false }
+  }, [id, nonce])
+
+  if (error) return <p className="panel-state">{error}</p>
+  if (!url) return <p className="panel-state">Loading…</p>
+  if (kind === 'image') return <div className="panel-image"><img src={url} alt={name} /></div>
+  if (kind === 'pdf') return <iframe className="panel-frame" src={url} title={name} />
+  // Sandboxed without `allow-same-origin`: the page's own scripts run, but the
+  // frame's origin is opaque, so a page can never reach the app around it.
+  return <iframe className="panel-frame" src={url} title={name} sandbox="allow-scripts allow-forms allow-popups allow-modals" />
 }
 
 /** The most of a file the panel draws: past this it is the tab that breaks, not the file. */
@@ -105,7 +123,7 @@ function DocumentBody({ id, name, nonce }: { id: string; name: string; nonce: nu
     setText(null)
     setCut(false)
     setError(null)
-    void readCapped(panelUrl(id), DOC_MAX_BYTES, controller.signal)
+    void readCapped(panelApiUrl(id), DOC_MAX_BYTES, controller.signal)
       .then((read) => { if (live) { setText(read.text); setCut(read.cut) } })
       .catch((failure: unknown) => {
         if (live && !controller.signal.aborted) setError(failure instanceof Error ? failure.message : String(failure))
@@ -131,7 +149,7 @@ function DocumentBody({ id, name, nonce }: { id: string; name: string; nonce: nu
  * moment the ceiling is passed.
  */
 async function readCapped(url: string, limit: number, signal: AbortSignal): Promise<{ text: string; cut: boolean }> {
-  const response = await fetch(url, { signal })
+  const response = await fetch(url, { headers: authHeaders(), signal })
   if (!response.ok) throw new Error(`could not read the file (${response.status})`)
   const reader = response.body?.getReader()
   if (!reader) {
@@ -223,9 +241,14 @@ function BrowserView({ state, onInput }: { state: PanelTab; onInput: (input: Pan
       const node = image.current
       if (!node) return
       const url = URL.createObjectURL(new Blob([frame], { type: 'image/jpeg' }))
-      node.src = url
-      if (lastFrame.current) URL.revokeObjectURL(lastFrame.current)
+      const previous = lastFrame.current
       lastFrame.current = url
+      const release = (): void => {
+        if (previous) URL.revokeObjectURL(previous)
+      }
+      node.addEventListener('load', release, { once: true })
+      node.addEventListener('error', release, { once: true })
+      node.src = url
     }
 
     const arm = (): void => {

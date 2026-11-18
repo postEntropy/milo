@@ -15,8 +15,8 @@ export type Report = (notice: Notice) => void
  */
 export function useAutoDismiss(notice: Notice | null, clear: (notice: Notice | null) => void): void {
   useEffect(() => {
-    if (!notice) return
-    const timer = window.setTimeout(() => clear(null), notice.error ? 9000 : 5000)
+    if (!notice || notice.error) return
+    const timer = window.setTimeout(() => clear(null), 5000)
     return () => window.clearTimeout(timer)
   }, [notice, clear])
 }

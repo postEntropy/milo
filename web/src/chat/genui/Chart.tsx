@@ -36,10 +36,12 @@ export function Chart({ node }: { node: GenUiChart }) {
   const left = 36
   const plotWidth = Math.max(40, width - left)
   const count = node.labels.length
-  const band = plotWidth / count
+  const safeCount = Math.max(1, count)
+  const band = plotWidth / safeCount
   const center = (index: number): number => left + band * index + band / 2
   const bounds = chartBounds(node.series.map((entry) => entry.values), node.type === 'bar')
-  const y = (value: number): number => top + (1 - (value - bounds.min) / (bounds.max - bounds.min)) * plot
+  const span = bounds.max - bounds.min
+  const y = (value: number): number => span === 0 ? top + plot / 2 : top + (1 - (value - bounds.min) / span) * plot
   const floor = y(bounds.min)
   const baseline = y(Math.min(bounds.max, Math.max(bounds.min, 0)))
 
