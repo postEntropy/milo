@@ -800,7 +800,10 @@ struct ToolRow: View {
             // on a failure — and the word beside it says the failure for whoever cannot
             // see the colour.
             if let botAvatar = taskBotAvatar {
-                CrewBotAvatar(avatar: botAvatar, state: tool.state, size: 18)
+                CrewBotAvatar(avatar: botAvatar, state: tool.state, size: 18, animated: running)
+            } else if tool.name == "crew" || tool.name == "delegated_work" {
+                CrewDrawerMark()
+                    .foregroundStyle(state)
             } else {
                 Image(systemName: ToolIcons.symbol(tool.name))
                     .font(.system(size: 14, weight: .medium))
@@ -925,18 +928,47 @@ struct ToolRow: View {
 
     private var isShellCommand: Bool { tool.name == "shell_command" }
 
+    private func readInputField(_ key: String) -> String? {
+        guard let input = tool.input, !input.isEmpty else { return nil }
+        for line in input.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if trimmed.hasPrefix("\(key):") {
+                let value = trimmed.dropFirst(key.count + 1).trimmingCharacters(in: .whitespaces)
+                if !value.isEmpty { return value }
+            }
+        }
+        return nil
+    }
+
     private var taskBotAvatar: CrewAvatarModel? {
         guard tool.name == "task" else { return nil }
-        if let result = tool.result, result.hasPrefix("Crew bot "),
-           let openParen = result.firstIndex(of: "("),
-           let closeParen = result[openParen...].firstIndex(of: ")") {
-            let botName = String(result[result.index(result.startIndex, offsetBy: 9)..<openParen]).trimmingCharacters(in: .whitespaces)
-            let botId = String(result[result.index(after: openParen)..<closeParen]).trimmingCharacters(in: .whitespaces)
-            if !botName.isEmpty { return .fromSeed(id: botId.isEmpty ? botName : botId, name: botName) }
+        if let result = tool.result, result.hasPrefix("Crew bot ") {
+            let rest = String(result.dropFirst(9))
+            let header = rest.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first.map(String.init) ?? rest
+            for suffix in [":", " was stopped."] {
+                if let range = header.range(of: suffix, options: .backwards) ?? (header.hasSuffix(" was stopped") ? header.range(of: " was stopped", options: .backwards) : nil) {
+                    let prefix = String(header[..<range.lowerBound])
+                    if let open = prefix.lastIndex(of: "("),
+                       let close = prefix.lastIndex(of: ")"),
+                       open < close,
+                       close == prefix.index(before: prefix.endIndex) {
+                        let botName = String(prefix[..<open]).trimmingCharacters(in: .whitespaces)
+                        let botId = String(prefix[prefix.index(after: open)..<close]).trimmingCharacters(in: .whitespaces)
+                        if !botName.isEmpty { return .fromSeed(id: botId.isEmpty ? botName : botId, name: botName) }
+                    }
+                    let botName = prefix.trimmingCharacters(in: .whitespaces)
+                    if !botName.isEmpty { return .fromSeed(id: readInputField("botId") ?? botName, name: botName) }
+                }
+            }
+        }
+        let inputName = readInputField("name")
+        let inputBotId = readInputField("botId")
+        if let inputName {
+            return .fromSeed(id: inputBotId ?? inputName, name: inputName)
         }
         let stripped = tool.text.replacingOccurrences(of: "^Task\\s+", with: "", options: .regularExpression)
         let botName = stripped.components(separatedBy: " · ").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return botName.isEmpty ? nil : .fromSeed(id: botName, name: botName)
+        return botName.isEmpty ? nil : .fromSeed(id: inputBotId ?? botName, name: botName)
     }
 
     /// Whether there is anything under the call to open: the lines it changed, or what it

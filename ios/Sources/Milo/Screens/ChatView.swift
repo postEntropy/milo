@@ -660,6 +660,7 @@ struct ChatView: View {
                 .equatable()
         } else if crew {
             CrewView(account: account, pushed: $crewPage, onSessions: openDrawer)
+                .equatable()
         } else if tasks {
             TaskListsView(pushed: $taskPage, onSessions: openDrawer)
                 .equatable()

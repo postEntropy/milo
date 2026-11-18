@@ -15,8 +15,8 @@ struct CrewAvatarModel: Decodable, Hashable, Sendable {
 
     private static func hashSeed(_ seed: String) -> UInt32 {
         var h: UInt32 = 2_166_136_261
-        for byte in seed.utf8 {
-            h ^= UInt32(byte)
+        for unit in seed.utf16 {
+            h ^= UInt32(unit)
             h = h &* 16_777_619
         }
         return h
@@ -108,9 +108,15 @@ private struct DelegatedRun: Decodable, Identifiable {
     let sessionId: String?
     let result: String
     let report: String?
+    let failure: String?
     let deliveryError: String?
     let startedAt: Double
     let finishedAt: Double?
+}
+
+private struct DelegatedTarget: Decodable {
+    let gateway: String
+    let chatId: String?
 }
 
 private struct DelegatedWork: Decodable, Identifiable {
@@ -120,6 +126,10 @@ private struct DelegatedWork: Decodable, Identifiable {
     let state: String
     let pauseAfterRun: Bool?
     let scheduleLabel: String?
+    let nextAt: Double?
+    let createdAt: Double?
+    let project: String?
+    let target: DelegatedTarget?
     let allow: [String]
     let runs: [DelegatedRun]
 }
@@ -131,6 +141,9 @@ struct CrewBotAvatar: View {
     var state: String? = nil
     var size: CGFloat = 36
     var animated: Bool = false
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.scenePhase) private var scenePhase
 
     private var blinkPhaseOffset: Double {
         var h: UInt32 = 2166136261
@@ -145,9 +158,10 @@ struct CrewBotAvatar: View {
         let top = Color.hex(preset.logoTop)
         let bottom = Color.hex(preset.logoBottom)
         let gradient = LinearGradient(colors: [top, bottom], startPoint: .topLeading, endPoint: .bottomTrailing)
+        let shouldAnimate = animated && !reduceMotion && scenePhase == .active
 
         Group {
-            if animated {
+            if shouldAnimate {
                 TimelineView(.animation(minimumInterval: 1.0 / 30.0)) { timeline in
                     let t = timeline.date.timeIntervalSinceReferenceDate
                     let speed = state == "running" ? 3.2 : 1.9
@@ -208,44 +222,62 @@ struct CrewBotAvatar: View {
                     p.addArc(center: pt(20, 24.8), radius: 13.5 * s, startAngle: .degrees(0), endAngle: .degrees(180), clockwise: false)
                     p.addCurve(to: pt(20, 5.5), control1: pt(6.5, 18), control2: pt(12.5, 13))
                 case "puff":
-                    p.addRoundedRect(in: rect(6.5, 8.5, 27, 24), cornerSize: CGSize(width: 12 * s, height: 12 * s))
-                    p.addEllipse(in: rect(12, 6, 16, 16))
+                    p.move(to: pt(20, 6.5))
+                    p.addCurve(to: pt(27.8, 11.2), control1: pt(23.8, 6.5), control2: pt(26.8, 8.3))
+                    p.addCurve(to: pt(33.8, 19.8), control1: pt(31.6, 12.2), control2: pt(33.8, 15.2))
+                    p.addCurve(to: pt(28.8, 28.6), control1: pt(33.8, 23.8), control2: pt(31.8, 26.8))
+                    p.addCurve(to: pt(20, 34.5), control1: pt(26.8, 32.4), control2: pt(23.8, 34.5))
+                    p.addCurve(to: pt(11.2, 28.6), control1: pt(16.2, 34.5), control2: pt(13.2, 32.4))
+                    p.addCurve(to: pt(6.2, 19.8), control1: pt(8.2, 26.8), control2: pt(6.2, 23.8))
+                    p.addCurve(to: pt(12.2, 11.2), control1: pt(6.2, 15.2), control2: pt(8.4, 12.2))
+                    p.addCurve(to: pt(20, 6.5), control1: pt(13.2, 8.3), control2: pt(16.2, 6.5))
                 case "gem":
-                    p.move(to: pt(14, 7))
-                    p.addLine(to: pt(26, 7))
-                    p.addLine(to: pt(33, 14))
-                    p.addLine(to: pt(33, 27))
-                    p.addLine(to: pt(26, 34))
-                    p.addLine(to: pt(14, 34))
-                    p.addLine(to: pt(7, 27))
-                    p.addLine(to: pt(7, 14))
+                    p.move(to: pt(14.2, 7))
+                    p.addLine(to: pt(25.8, 7))
+                    p.addLine(to: pt(33, 14.2))
+                    p.addLine(to: pt(33, 26.8))
+                    p.addLine(to: pt(25.8, 34))
+                    p.addLine(to: pt(14.2, 34))
+                    p.addLine(to: pt(7, 26.8))
+                    p.addLine(to: pt(7, 14.2))
                     p.closeSubpath()
                 case "dome":
-                    p.addRoundedRect(in: rect(7, 14, 26, 20), cornerSize: CGSize(width: 4 * s, height: 4 * s))
-                    p.addEllipse(in: rect(7, 7.5, 26, 22))
+                    p.move(to: pt(7, 22.5))
+                    p.addCurve(to: pt(20, 7.5), control1: pt(7, 13.2), control2: pt(12.4, 7.5))
+                    p.addCurve(to: pt(33, 22.5), control1: pt(27.6, 7.5), control2: pt(33, 13.2))
+                    p.addLine(to: pt(33, 29.5))
+                    p.addCurve(to: pt(28.5, 34), control1: pt(33, 32), control2: pt(31, 34))
+                    p.addLine(to: pt(11.5, 34))
+                    p.addCurve(to: pt(7, 29.5), control1: pt(9, 34), control2: pt(7, 32))
+                    p.closeSubpath()
                 case "star":
-                    p.move(to: pt(20, 6))
-                    p.addQuadCurve(to: pt(34, 20.5), control: pt(25, 15.5))
-                    p.addQuadCurve(to: pt(20, 35), control: pt(25, 25.5))
-                    p.addQuadCurve(to: pt(6, 20.5), control: pt(15, 25.5))
-                    p.addQuadCurve(to: pt(20, 6), control: pt(15, 15.5))
+                    p.move(to: pt(20, 6.5))
+                    p.addCurve(to: pt(33.5, 20.5), control1: pt(22.8, 12.8), control2: pt(27.2, 17.2))
+                    p.addCurve(to: pt(20, 34.5), control1: pt(27.2, 23.8), control2: pt(22.8, 28.2))
+                    p.addCurve(to: pt(6.5, 20.5), control1: pt(17.2, 28.2), control2: pt(12.8, 23.8))
+                    p.addCurve(to: pt(20, 6.5), control1: pt(12.8, 17.2), control2: pt(17.2, 12.8))
                 default:
                     p.addEllipse(in: rect(6.5, 7.5, 27, 27))
                 }
                 return p
             }()
 
-            context.fill(
-                bodyPath,
-                with: .linearGradient(
-                    Gradient(colors: [top, bottom]),
-                    startPoint: CGPoint(x: 8 * s, y: 6 * s + dy),
-                    endPoint: CGPoint(x: 32 * s, y: 35 * s + dy)
-                )
+            let bodyGradient: GraphicsContext.Shading = .linearGradient(
+                Gradient(colors: [top, bottom]),
+                startPoint: CGPoint(x: 8 * s, y: 6 * s + dy),
+                endPoint: CGPoint(x: 32 * s, y: 35 * s + dy)
             )
-            var shine = Path()
-            shine.addEllipse(in: rect(11, 9.5, 13, 6))
-            context.fill(shine, with: .color(.white.opacity(0.22)))
+            context.fill(bodyPath, with: bodyGradient)
+            if avatar.shape == "gem" || avatar.shape == "star" {
+                let edgeWidth = (avatar.shape == "star" ? 3.5 : 2.5) * s
+                context.stroke(bodyPath, with: bodyGradient, style: StrokeStyle(lineWidth: edgeWidth, lineJoin: .round))
+            }
+            context.drawLayer { layer in
+                layer.clip(to: bodyPath)
+                var shine = Path()
+                shine.addEllipse(in: rect(11, 9.5, 13, 6))
+                layer.fill(shine, with: .color(.white.opacity(0.22)))
+            }
 
             if blinking && avatar.eyes != "visor" {
                 var closed = Path()
@@ -266,6 +298,10 @@ struct CrewBotAvatar: View {
                 case "curious":
                     context.fill(Path(ellipseIn: rect(12.2, 18.2, 5.6, 5.6)), with: .color(.white))
                     context.fill(Path(ellipseIn: rect(22.8, 17.6, 4.0, 4.0)), with: .color(.white))
+                    var brow = Path()
+                    brow.move(to: pt(22.3, 15.8))
+                    brow.addQuadCurve(to: pt(27.3, 15.8), control: pt(24.8, 14.3))
+                    context.stroke(brow, with: .color(.white), style: StrokeStyle(lineWidth: 1.7 * s, lineCap: .round))
                 case "visor":
                     let visor = Path(roundedRect: rect(9.8, 16.4, 20.4, 7.6), cornerSize: CGSize(width: 3.8 * s, height: 3.8 * s))
                     context.fill(visor, with: .color(Color.black.opacity(0.68)))
@@ -360,16 +396,21 @@ private struct IdentifiableBotId: Identifiable {
     let id: String
 }
 
-struct CrewView: View {
+struct CrewView: View, Equatable {
     let account: Account
     @Binding var pushed: Bool
     let onSessions: () -> Void
+    nonisolated static func == (lhs: CrewView, rhs: CrewView) -> Bool {
+        lhs.account == rhs.account
+    }
+    @Environment(\.scenePhase) private var scenePhase
     @State private var bots: [CrewBot] = []
     @State private var work: [DelegatedWork] = []
     @State private var path: [CrewPage] = []
     @State private var error: String?
     @State private var loading = true
     @State private var busy = false
+    @State private var refreshGeneration = 0
     @State private var customizingBot: IdentifiableBotId?
     @State private var expandedMissions: Set<String> = []
     @State private var editingWork = false
@@ -402,12 +443,16 @@ struct CrewView: View {
                 onRefresh: { await refresh() },
                 botCard: { bot in
                     botCard(bot) {
+                        guidanceDraft = ""
+                        expandedMissions = []
                         path.append(.bot(bot.id))
                     }
                 },
                 workRow: { item in
                     workRow(item) {
                         objectiveDraft = item.objective
+                        scheduleMode = "every"
+                        scheduleDraft = ""
                         editingWork = false
                         path.append(.work(item.id))
                     }
@@ -433,7 +478,8 @@ struct CrewView: View {
         }
         .onChange(of: path) { _, next in pushed = !next.isEmpty }
         .onAppear { pushed = !path.isEmpty }
-        .task {
+        .task(id: scenePhase) {
+            guard scenePhase == .active else { return }
             while !Task.isCancelled {
                 await refresh()
                 do { try await Task.sleep(for: .seconds(3)) } catch { break }
@@ -516,18 +562,10 @@ struct CrewView: View {
                         .lineLimit(2)
                         .multilineTextAlignment(.leading)
                 }
-
-                Image(systemName: "chevron.right")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(MiloTheme.muted2)
             }
             .padding(MiloTheme.Space.four)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .miloGlassCard(
-                radius: MiloTheme.Radius.xl,
-                tint: isRunning ? MiloTheme.accent.opacity(0.14) : nil,
-                interactive: true
-            )
+            .miloGlassCard(radius: MiloTheme.Radius.xl, interactive: true)
         }
         .buttonStyle(PressableStyle())
         .contextMenu {
@@ -676,17 +714,18 @@ struct CrewView: View {
                                     .foregroundStyle(MiloTheme.foreground)
                                     .padding(.horizontal, MiloTheme.Space.four)
                                     .padding(.vertical, MiloTheme.Space.three)
-                                    .background(MiloTheme.surfaceRaised, in: Capsule())
+                                    .glassEffect(.regular.interactive(), in: Capsule())
                                 Button {
                                     Task { await guide(bot.id) }
                                 } label: {
                                     Image(systemName: "arrow.up")
                                         .font(.system(size: 15, weight: .bold))
                                         .foregroundStyle(MiloTheme.accentOn)
-                                        .frame(width: 42, height: 42)
+                                        .frame(width: 44, height: 44)
                                         .background(MiloTheme.accent, in: Circle())
                                 }
                                 .buttonStyle(PressableStyle())
+                                .accessibilityLabel("Send guidance")
                                 .disabled(busy || guidanceDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                             }
                         }
@@ -697,14 +736,14 @@ struct CrewView: View {
                                 .font(MiloTheme.Text.small.weight(.semibold))
                                 .foregroundStyle(MiloTheme.danger)
                                 .frame(maxWidth: .infinity)
-                                .padding(.vertical, MiloTheme.Space.three)
-                                .background(MiloTheme.danger.opacity(0.14), in: Capsule())
+                                .frame(minHeight: 44)
+                                .glassEffect(.regular.interactive(), in: Capsule())
                         }
                         .buttonStyle(PressableStyle())
                         .disabled(busy || current.stopRequestedAt != nil)
                     }
                     .padding(MiloTheme.Space.four)
-                    .miloGlassCard(radius: MiloTheme.Radius.xl, tint: MiloTheme.accent.opacity(0.14))
+                    .miloGlassCard(radius: MiloTheme.Radius.xl)
                 }
 
                 // Missions History
@@ -763,9 +802,8 @@ struct CrewView: View {
             }
             .foregroundStyle(MiloTheme.foreground)
             .padding(.horizontal, MiloTheme.Space.three)
-            .padding(.vertical, MiloTheme.Space.two + 2)
-            .frame(maxWidth: .infinity)
-            .background(MiloTheme.surfaceRaised, in: Capsule())
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .glassEffect(.regular.interactive(), in: Capsule())
         }
         .buttonStyle(PressableStyle())
         .disabled(disabled)
@@ -851,7 +889,7 @@ struct CrewView: View {
                                 .font(MiloTheme.Text.small)
                                 .foregroundStyle(MiloTheme.foreground2)
                             Spacer()
-                            Text(item.appliedAt != nil ? "Applied" : assignment.state == "running" ? "Queued" : "Skipped")
+                            Text(item.appliedAt != nil ? "Applied" : assignment.state == "running" ? "Queued" : "Not applied")
                                 .font(MiloTheme.Text.meta)
                                 .foregroundStyle(MiloTheme.muted)
                         }
@@ -914,6 +952,22 @@ struct CrewView: View {
                     )
                     .font(MiloTheme.Text.small)
                     .foregroundStyle(MiloTheme.muted)
+
+                    if let target = item.target, target.gateway != "none" {
+                        Label("Delivers to \(target.gateway)\(target.chatId.map { " · \($0)" } ?? "")", systemImage: "paperplane")
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                    }
+                    if let nextAt = item.nextAt {
+                        Label("Next run \(RelativeTime.when(nextAt))", systemImage: "calendar.badge.clock")
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                    }
+                    if let project = item.project, !project.isEmpty {
+                        Label("Folder \(project)", systemImage: "folder")
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                    }
                 }
                 .padding(MiloTheme.Space.five)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -929,11 +983,11 @@ struct CrewView: View {
                                 .font(MiloTheme.Text.small.weight(.semibold))
                                 .foregroundStyle(MiloTheme.accentOn)
                                 .padding(.horizontal, MiloTheme.Space.four)
-                                .padding(.vertical, MiloTheme.Space.two + 2)
+                                .frame(minHeight: 44)
                                 .background(MiloTheme.accent, in: Capsule())
                         }
                         .buttonStyle(PressableStyle())
-                        .disabled(busy || objectiveDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || objectiveDraft == item.objective)
+                        .disabled(busy || objectiveDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || objectiveDraft.trimmingCharacters(in: .whitespacesAndNewlines) == item.objective.trimmingCharacters(in: .whitespacesAndNewlines))
 
                         Picker("Schedule", selection: $scheduleMode) {
                             Text("Interval").tag("every")
@@ -956,7 +1010,7 @@ struct CrewView: View {
                                 .font(MiloTheme.Text.small.weight(.semibold))
                                 .foregroundStyle(MiloTheme.accentOn)
                                 .padding(.horizontal, MiloTheme.Space.four)
-                                .padding(.vertical, MiloTheme.Space.two + 2)
+                                .frame(minHeight: 44)
                                 .background(MiloTheme.accent, in: Capsule())
                         }
                         .buttonStyle(PressableStyle())
@@ -1087,8 +1141,8 @@ struct CrewView: View {
                             .font(MiloTheme.Text.meta.weight(.semibold))
                             .foregroundStyle(MiloTheme.foreground)
                             .padding(.horizontal, MiloTheme.Space.three)
-                            .padding(.vertical, MiloTheme.Space.one + 2)
-                            .background(MiloTheme.surfaceRaised, in: Capsule())
+                            .frame(minHeight: 44)
+                            .glassEffect(.regular.interactive(), in: Capsule())
                     }
                     .buttonStyle(PressableStyle())
                 }
@@ -1099,8 +1153,14 @@ struct CrewView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
 
-            if let failure = run.deliveryError {
-                Label("Could not deliver: \(failure)", systemImage: "exclamationmark.triangle")
+            if let failure = run.failure, !failure.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Label(failure, systemImage: "exclamationmark.triangle")
+                    .font(MiloTheme.Text.small)
+                    .foregroundStyle(MiloTheme.danger)
+            }
+
+            if let deliveryFailure = run.deliveryError {
+                Label("Could not deliver: \(deliveryFailure)", systemImage: "exclamationmark.triangle")
                     .font(MiloTheme.Text.small)
                     .foregroundStyle(MiloTheme.danger)
             }
@@ -1110,6 +1170,8 @@ struct CrewView: View {
                     HStack(spacing: MiloTheme.Space.two) {
                         ForEach(runBots) { bot in
                             Button {
+                                guidanceDraft = ""
+                                expandedMissions = []
                                 path.append(.bot(bot.id))
                             } label: {
                                 HStack(spacing: MiloTheme.Space.two) {
@@ -1119,8 +1181,8 @@ struct CrewView: View {
                                         .foregroundStyle(MiloTheme.foreground)
                                 }
                                 .padding(.horizontal, MiloTheme.Space.three)
-                                .padding(.vertical, MiloTheme.Space.one + 2)
-                                .background(MiloTheme.surfaceRaised, in: Capsule())
+                                .frame(minHeight: 44)
+                                .glassEffect(.regular.interactive(), in: Capsule())
                             }
                             .buttonStyle(PressableStyle())
                         }
@@ -1241,32 +1303,45 @@ struct CrewView: View {
     // MARK: - API Actions
 
     @MainActor private func refresh() async {
+        refreshGeneration += 1
+        let mine = refreshGeneration
         do {
             async let nextBots = MiloApi.call("crew", account: account, as: [CrewBot].self)
             async let nextWork = MiloApi.call("delegated-work", account: account, as: [DelegatedWork].self)
-            (bots, work) = try await (nextBots, nextWork)
+            let (fetchedBots, fetchedWork) = try await (nextBots, nextWork)
+            guard mine == refreshGeneration else { return }
+            bots = fetchedBots
+            work = fetchedWork
             error = nil
-        } catch { self.error = error.localizedDescription }
+        } catch {
+            if mine == refreshGeneration { self.error = error.localizedDescription }
+        }
         loading = false
     }
 
     @MainActor private func rename(_ id: String, name: String) async {
         busy = true; defer { busy = false }
-        do { _ = try await MiloApi.call("crew-rename", ["id": id, "name": name], account: account, as: CrewBot.self); await refresh() }
-        catch { self.error = error.localizedDescription }
+        do {
+            let updated = try await MiloApi.call("crew-rename", ["id": id, "name": name], account: account, as: CrewBot.self)
+            refreshGeneration += 1
+            bots = bots.map { $0.id == updated.id ? updated : $0 }
+            error = nil
+        } catch { self.error = error.localizedDescription }
     }
 
     @MainActor private func updateAvatar(_ id: String, field: String, value: String = "") async {
         busy = true; defer { busy = false }
         do {
+            let updated: CrewBot
             if field == "shuffle" {
-                _ = try await MiloApi.call("crew-avatar", ["id": id, "shuffle": true], account: account, as: CrewBot.self)
+                updated = try await MiloApi.call("crew-avatar", ["id": id, "shuffle": true], account: account, as: CrewBot.self)
             } else {
-                _ = try await MiloApi.call("crew-avatar", ["id": id, field: value], account: account, as: CrewBot.self)
+                updated = try await MiloApi.call("crew-avatar", ["id": id, field: value], account: account, as: CrewBot.self)
             }
-            await refresh()
-        }
-        catch { self.error = error.localizedDescription }
+            refreshGeneration += 1
+            bots = bots.map { $0.id == updated.id ? updated : $0 }
+            error = nil
+        } catch { self.error = error.localizedDescription }
     }
 
     @MainActor private func stop(_ id: String) async {
@@ -1285,21 +1360,30 @@ struct CrewView: View {
 
     @MainActor private func control(_ id: String, action: String) async {
         busy = true; defer { busy = false }
-        do { _ = try await MiloApi.call("delegated-work-control", ["id": id, "action": action], account: account, as: DelegatedWork.self); await refresh() }
-        catch { self.error = error.localizedDescription }
+        do {
+            let updated = try await MiloApi.call("delegated-work-control", ["id": id, "action": action], account: account, as: DelegatedWork.self)
+            refreshGeneration += 1
+            work = work.map { $0.id == updated.id ? updated : $0 }
+            error = nil
+        } catch { self.error = error.localizedDescription }
     }
 
     @MainActor private func edit(_ id: String, field: String, value: String) async {
         busy = true; defer { busy = false }
         do {
+            let updated: DelegatedWork
             if field == "once" {
-                _ = try await MiloApi.call("delegated-work-edit", ["id": id, "once": true], account: account, as: DelegatedWork.self)
+                updated = try await MiloApi.call("delegated-work-edit", ["id": id, "once": true], account: account, as: DelegatedWork.self)
             } else {
-                _ = try await MiloApi.call("delegated-work-edit", ["id": id, field: value], account: account, as: DelegatedWork.self)
+                updated = try await MiloApi.call("delegated-work-edit", ["id": id, field: value], account: account, as: DelegatedWork.self)
             }
-            scheduleDraft = ""; editingWork = false; await refresh()
-        }
-        catch { self.error = error.localizedDescription }
+            refreshGeneration += 1
+            work = work.map { $0.id == updated.id ? updated : $0 }
+            objectiveDraft = updated.objective
+            scheduleDraft = ""
+            editingWork = false
+            error = nil
+        } catch { self.error = error.localizedDescription }
     }
 }
 
@@ -1335,7 +1419,7 @@ private struct BotAppearanceSheet: View {
                     MiloIconButton(
                         systemName: "sparkles",
                         size: 15,
-                        span: 36,
+                        span: 44,
                         glass: true,
                         disabled: busy,
                         action: onShuffle
@@ -1344,7 +1428,7 @@ private struct BotAppearanceSheet: View {
                     MiloIconButton(
                         systemName: "xmark",
                         size: 15,
-                        span: 36,
+                        span: 44,
                         glass: true,
                         action: { dismiss() }
                     )
@@ -1405,9 +1489,11 @@ private struct BotAppearanceSheet: View {
                                     in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
                                 )
                             }
+                            .frame(minHeight: 44)
                             .buttonStyle(PressableStyle())
                             .disabled(busy)
                             .accessibilityLabel(itemPreset.label)
+                            .accessibilityAddTraits(selected ? .isSelected : [])
                         }
                     }
                 }
@@ -1476,18 +1562,20 @@ private struct BotAppearanceSheet: View {
                             Text(label(item))
                                 .font(MiloTheme.Text.meta.weight(isSelected ? .semibold : .medium))
                                 .foregroundStyle(isSelected ? MiloTheme.accent : MiloTheme.foreground2)
-                                .lineLimit(1)
+                                .multilineTextAlignment(.center)
+                                .minimumScaleFactor(0.85)
                         }
                         .padding(.vertical, MiloTheme.Space.three)
                         .padding(.horizontal, MiloTheme.Space.two)
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, minHeight: 44)
                         .background(
-                            isSelected ? MiloTheme.accent.opacity(0.15) : MiloTheme.surface,
+                            isSelected ? MiloTheme.surfaceRaised : MiloTheme.surface,
                             in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
                         )
                     }
                     .buttonStyle(PressableStyle())
                     .disabled(busy)
+                    .accessibilityAddTraits(isSelected ? .isSelected : [])
                 }
             }
         }
@@ -1514,6 +1602,19 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
 
     private var totalMissionsCount: Int {
         bots.reduce(0) { $0 + $1.assignments.count }
+    }
+
+    private var summaryLine: String {
+        var parts: [String] = []
+        if activeBotsCount > 0 { parts.append("\(activeBotsCount) working") }
+        parts.append("\(bots.count) \(bots.count == 1 ? "bot" : "bots")")
+        if totalMissionsCount > 0 {
+            parts.append("\(totalMissionsCount) \(totalMissionsCount == 1 ? "mission" : "missions")")
+        }
+        if !work.isEmpty {
+            parts.append("\(work.count) delegated")
+        }
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
@@ -1550,28 +1651,11 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
                         .font(MiloTheme.Text.body)
                         .foregroundStyle(MiloTheme.muted)
 
-                    HStack(spacing: MiloTheme.Space.two) {
-                        if activeBotsCount > 0 {
-                            Label("\(activeBotsCount) working", systemImage: "bolt.fill")
-                                .foregroundStyle(MiloTheme.accent)
-                            Text("·").foregroundStyle(MiloTheme.muted)
-                        }
-                        Text("\(bots.count) \(bots.count == 1 ? "bot" : "bots")")
-                            .foregroundStyle(bots.isEmpty ? MiloTheme.muted : MiloTheme.foreground2)
-                        if totalMissionsCount > 0 {
-                            Text("·").foregroundStyle(MiloTheme.muted)
-                            Text("\(totalMissionsCount) \(totalMissionsCount == 1 ? "mission" : "missions")")
-                                .foregroundStyle(MiloTheme.muted)
-                        }
-                        if !work.isEmpty {
-                            Text("·").foregroundStyle(MiloTheme.muted)
-                            Text("\(work.count) scheduled")
-                                .foregroundStyle(MiloTheme.muted)
-                        }
-                        Spacer()
-                    }
-                    .font(MiloTheme.Text.small.weight(.medium))
-                    .padding(.top, MiloTheme.Space.one)
+                    Text(summaryLine)
+                        .font(MiloTheme.Text.small.weight(.medium))
+                        .foregroundStyle(MiloTheme.foreground2)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, MiloTheme.Space.one)
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(MiloTheme.Space.five)

@@ -2541,6 +2541,8 @@ private struct TurnTimelineCard: View {
                                 .glassEffect(.regular.interactive(), in: Capsule())
                         }
                         .buttonStyle(PressableStyle())
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                     }
                     if let summary = turn.summaryEvent {
                         Button {
@@ -2556,6 +2558,8 @@ private struct TurnTimelineCard: View {
                                 .glassEffect(.regular.tint(MiloTheme.accent.opacity(0.18)).interactive(), in: Capsule())
                         }
                         .buttonStyle(PressableStyle())
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
                     }
                 }
             }

@@ -960,16 +960,22 @@ struct RunDetail: View {
                         .font(MiloTheme.Text.small)
                         .foregroundStyle(MiloTheme.danger)
                 } else if let thread {
-                    VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
-                        ForEach(Array(thread.enumerated()), id: \.element.id) { index, message in
-                            MessageRow(
-                                message: message,
-                                turn: index + 1,
-                                regenerate: nil,
-                                onQuote: { _ in },
-                                onEdit: { _, _ in },
-                                readOnly: true
-                            )
+                    if thread.isEmpty {
+                        Text("No run transcript is stored for this run.")
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.muted)
+                    } else {
+                        VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                            ForEach(Array(thread.enumerated()), id: \.element.id) { index, message in
+                                MessageRow(
+                                    message: message,
+                                    turn: index + 1,
+                                    regenerate: nil,
+                                    onQuote: { _ in },
+                                    onEdit: { _, _ in },
+                                    readOnly: true
+                                )
+                            }
                         }
                     }
                 } else {

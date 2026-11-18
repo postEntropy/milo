@@ -1,3 +1,34 @@
+import SwiftUI
+
+/// The mark shared by the Crew drawer tab and bot-management tool lines.
+struct CrewDrawerMark: View {
+    var body: some View {
+        Canvas { context, size in
+            let s = min(size.width, size.height) / 24.0
+            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * s, y: y * s) }
+            func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect { CGRect(x: x * s, y: y * s, width: w * s, height: h * s) }
+
+            let head = Path(roundedRect: rect(4, 7, 16, 14), cornerSize: CGSize(width: 5.5 * s, height: 5.5 * s))
+            context.stroke(head, with: .foreground, style: StrokeStyle(lineWidth: 1.8 * s, lineCap: .round, lineJoin: .round))
+
+            var lines = Path()
+            lines.move(to: pt(12, 7))
+            lines.addLine(to: pt(12, 4))
+            lines.move(to: pt(2.5, 12.5))
+            lines.addLine(to: pt(2.5, 15.5))
+            lines.move(to: pt(21.5, 12.5))
+            lines.addLine(to: pt(21.5, 15.5))
+            context.stroke(lines, with: .foreground, style: StrokeStyle(lineWidth: 1.8 * s, lineCap: .round))
+
+            context.fill(Path(ellipseIn: rect(10.8, 1.8, 2.4, 2.4)), with: .foreground)
+            context.fill(Path(roundedRect: rect(8.3, 11.5, 2.4, 5), cornerSize: CGSize(width: 1.2 * s, height: 1.2 * s)), with: .foreground)
+            context.fill(Path(roundedRect: rect(13.3, 11.5, 2.4, 5), cornerSize: CGSize(width: 1.2 * s, height: 1.2 * s)), with: .foreground)
+        }
+        .frame(width: 18, height: 18)
+        .accessibilityHidden(true)
+    }
+}
+
 /// The mark a tool call wears on this surface.
 ///
 /// The choice of *which* mark a tool gets is one question with an answer per surface:
