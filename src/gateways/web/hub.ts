@@ -14,6 +14,7 @@ import {
   buildCommandContext,
   handleCommand,
   handleTurnControl,
+  isImmediateCrewCommand,
   parseTurnControl,
   turnOf,
   type CommandContext,
@@ -496,6 +497,12 @@ export class WebHub {
         this.sendState(chatId)
         return
       }
+      if (!files.length && isImmediateCrewCommand(frame.text)) {
+        void this.runImmediateCommand(client, chat, frame.text)
+          .then(() => accept())
+          .catch((error: unknown) => reject(errorMessage(error)))
+        return
+      }
       if (files.length) {
         this.startTurn(key, frame.text, frame.target, [], files, undefined, frame.requestId)
         accept()
@@ -633,6 +640,20 @@ export class WebHub {
    */
   routinesChanged(): void {
     const frame: ServerFrame = { type: 'routines-changed' }
+    for (const chat of this.chats.values()) {
+      for (const client of chat.clients) client.send(frame)
+    }
+  }
+
+  crewChanged(): void {
+    const frame: ServerFrame = { type: 'crew-changed' }
+    for (const chat of this.chats.values()) {
+      for (const client of chat.clients) client.send(frame)
+    }
+  }
+
+  delegatedWorkChanged(): void {
+    const frame: ServerFrame = { type: 'delegated-work-changed' }
     for (const chat of this.chats.values()) {
       for (const client of chat.clients) client.send(frame)
     }
@@ -1440,6 +1461,10 @@ export class WebHub {
       this.sendState(chat.scope.chatId)
       return
     }
+    if (isImmediateCrewCommand(text)) {
+      await this.runImmediateCommand(client, chat, text, messageId)
+      return
+    }
     // The state frame goes on the queue's settle handler, not inside `work`: read
     // from there it would still say `busy: true` for this very command — a slash
     // command is instantaneous, and the page would be left holding the stop
@@ -1468,6 +1493,28 @@ export class WebHub {
         this.broadcastSession(beforeSessionId, chat.scope.chatId, frame)
       }
     }, () => this.sendState(chat.scope.chatId))
+  }
+
+  private async runImmediateCommand(client: WebClient, chat: Chat, text: string, messageId?: string): Promise<void> {
+    const controller = new AbortController()
+    const current = await this.runtime.getSession(chat.scope)
+    chat.session = current
+    const response = await handleCommand(text, this.commandContext(chat, current, controller.signal))
+    if (!response.handled) return
+    const frame: ServerFrame = {
+      type: 'command-result',
+      reply: response.reply ?? '',
+      markdown: response.markdown,
+      actions: response.actions,
+      cards: response.cards,
+      sessionId: current.id,
+      ...(messageId ? { messageId } : {}),
+    }
+    if (messageId) {
+      client.send(frame)
+    } else {
+      this.broadcastSession(current.id, chat.scope.chatId, frame)
+    }
   }
 
   private commandContext(chat: Chat, session: Session, signal: AbortSignal): CommandContext {

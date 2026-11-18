@@ -310,6 +310,10 @@ export type ServerFrame =
   | { type: 'session-folder'; project: ProjectView | null }
   /** A routine ran somewhere in this install: re-read whatever shows the history. */
   | { type: 'routines-changed' }
+  /** Crew bot state changed somewhere in this install. */
+  | { type: 'crew-changed' }
+  /** Delegated work state or history changed somewhere in this install. */
+  | { type: 'delegated-work-changed' }
   /** A session's turn began or ended here: re-read the list that shows it running. */
   | { type: 'sessions-changed' }
   /**

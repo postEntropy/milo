@@ -76,4 +76,12 @@ export class WebGateway implements Gateway {
   routinesChanged(): void {
     this.running?.routinesChanged()
   }
+
+  crewChanged(): void {
+    this.running?.crewChanged()
+  }
+
+  delegatedWorkChanged(): void {
+    this.running?.delegatedWorkChanged()
+  }
 }

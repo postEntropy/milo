@@ -92,6 +92,8 @@ export interface RunningWebServer {
   showNotice(chatId: string, message: OutgoingMessage): Promise<void>
   /** Tells every open page that a routine ran, so the history it shows re-reads. */
   routinesChanged(): void
+  crewChanged(): void
+  delegatedWorkChanged(): void
   stop(): Promise<void>
 }
 
@@ -269,6 +271,8 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
     deliver: (chatId, message) => hub.deliver(chatId, message),
     showNotice: (chatId, message) => hub.showNotice(chatId, message),
     routinesChanged: () => hub.routinesChanged(),
+    crewChanged: () => hub.crewChanged(),
+    delegatedWorkChanged: () => hub.delegatedWorkChanged(),
     stop: () => new Promise<void>((resolve, reject) => {
       hub.close()
       // A page left open holds a keep-alive connection and a websocket, and
@@ -362,7 +366,8 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
       const result = await settings.handle(action, body)
       return json(response, 200, result)
     } catch (error) {
-      return json(response, 400, { error: error instanceof Error ? error.message : String(error) })
+      const message = error instanceof Error ? error.message : String(error)
+      return json(response, apiErrorStatus(message), { error: message })
     }
   }
   if (request.method !== 'GET' && request.method !== 'HEAD') return json(response, 405, { error: 'Method not allowed.' })
@@ -658,6 +663,14 @@ export async function readRawBody(request: IncomingMessage, limit: number = MAX_
     chunks.push(buffer)
   }
   return Buffer.concat(chunks)
+}
+
+function apiErrorStatus(message: string): number {
+  if (/is not available\.?$/i.test(message)) return 503
+  if (/has that id\.?$|not found\.?$|no bot has that id|no delegated work/i.test(message)) return 404
+  if (/already working|not working|current run|not accepting guidance|cannot be (paused|resumed|edited)|already finished/i.test(message)) return 409
+  if (/^could not read /i.test(message)) return 500
+  return 400
 }
 
 function json(response: ServerResponse, status: number, value: unknown): void {

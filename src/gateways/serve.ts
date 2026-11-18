@@ -58,7 +58,12 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   // names wins over the one the config holds.
   const web = loaded.config.web
   /** Kept so the scheduler can tell an open Routines screen that a run happened. */
-  let webUi: { routinesChanged(): void; showNotice(chatId: string, message: OutgoingMessage): Promise<void> } | undefined
+  let webUi: {
+    routinesChanged(): void
+    crewChanged(): void
+    delegatedWorkChanged(): void
+    showNotice(chatId: string, message: OutgoingMessage): Promise<void>
+  } | undefined
   if (!options.noWeb && web.enabled) {
     const { WebGateway } = await import('./web/gateway.js')
     const gateway = new WebGateway({
@@ -134,10 +139,32 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
       if (!gateway?.deliver) throw new Error(`no ${work.target.gateway} surface to deliver to`)
       await gateway.deliver(work.target.chatId, message)
     },
+    onChanged: () => webUi?.delegatedWorkChanged(),
     log: (line) => console.error(line),
   }) : undefined
-  await runtime.crew?.recover()
-  await delegated?.start()
+
+  let shuttingDown = false
+
+  /** Lets go of everything this run holds. The port is free once it returns. */
+  const stop = async (): Promise<void> => {
+    scheduler.stop()
+    delegated?.stop()
+    await delegated?.settle().catch(() => undefined)
+    detachJobs()
+    for (const gateway of gateways) {
+      await gateway.stop().catch(() => undefined)
+    }
+    // Whatever the runtime still owns goes with it — the recaps in flight.
+    await runtime.close().catch(() => undefined)
+  }
+
+  try {
+    await runtime.crew?.recover()
+    await delegated?.start()
+  } catch (error) {
+    await stop()
+    throw error
+  }
   const routines = readRoutines().filter((routine) => routine.enabled).length
 
   console.error(`Milo serving: ${gateways.map((gateway) => gateway.id).join(', ')}`)
@@ -158,20 +185,6 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
       MILO_HOME,
     ].join(' · '),
   )
-
-  let shuttingDown = false
-
-  /** Lets go of everything this run holds. The port is free once it returns. */
-  const stop = async (): Promise<void> => {
-    scheduler.stop()
-    delegated?.stop()
-    detachJobs()
-    for (const gateway of gateways) {
-      await gateway.stop().catch(() => undefined)
-    }
-    // Whatever the runtime still owns goes with it — the recaps in flight.
-    await runtime.close().catch(() => undefined)
-  }
 
   const shutdown = async (): Promise<void> => {
     // A second Ctrl+C is the person insisting: stop waiting for a clean exit.

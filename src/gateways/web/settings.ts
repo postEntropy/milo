@@ -106,6 +106,8 @@ export class WebSettings {
       paletteChanged?: (state: PaletteState) => void
       sessionsChanged?: () => void
       projectUpdated?: (id?: string) => void
+      crewChanged?: () => void
+      delegatedWorkChanged?: () => void
     },
   ) {
     this.email = new WebEmailSettings(runtime)
@@ -165,30 +167,43 @@ export class WebSettings {
       }
       case 'crew-rename': {
         if (typeof body.id !== 'string' || typeof body.name !== 'string') throw new Error('Enter a bot id and name.')
+        if (/[\r\n]/.test(body.name)) throw new Error('A bot name must fit on one line.')
         if (!this.runtime.crew) throw new Error('Crew is not available.')
-        return this.runtime.crew.rename(body.id, body.name)
+        const bot = await this.runtime.crew.rename(body.id, body.name)
+        this.files?.crewChanged?.()
+        return bot
       }
       case 'crew-avatar': {
         if (typeof body.id !== 'string') throw new Error('Enter a bot id.')
         if (!this.runtime.crew) throw new Error('Crew is not available.')
-        if (body.shuffle === true) return this.runtime.crew.updateAvatar(body.id, 'shuffle')
-        return this.runtime.crew.updateAvatar(body.id, {
-          ...(typeof body.shape === 'string' ? { shape: body.shape as never } : {}),
-          ...(typeof body.eyes === 'string' ? { eyes: body.eyes as never } : {}),
-          ...(typeof body.accessory === 'string' ? { accessory: body.accessory as never } : {}),
-          ...(typeof body.palette === 'string' ? { palette: body.palette as never } : {}),
-        })
+        if (body.shuffle === true) {
+          const bot = await this.runtime.crew.updateAvatar(body.id, 'shuffle')
+          this.files?.crewChanged?.()
+          return bot
+        }
+        const patch: Record<string, string> = {}
+        for (const key of ['shape', 'eyes', 'accessory', 'palette'] as const) {
+          if (body[key] === undefined) continue
+          if (typeof body[key] !== 'string' || !body[key].trim()) throw new Error(`Invalid avatar ${key}.`)
+          patch[key] = body[key]
+        }
+        if (Object.keys(patch).length === 0) throw new Error('Choose shuffle or at least one avatar trait.')
+        const bot = await this.runtime.crew.updateAvatar(body.id, patch)
+        this.files?.crewChanged?.()
+        return bot
       }
       case 'crew-stop': {
         if (typeof body.id !== 'string') throw new Error('Enter a bot id.')
         if (!this.runtime.crew) throw new Error('Crew is not available.')
         await this.runtime.crew.stop(body.id)
+        this.files?.crewChanged?.()
         return { requested: true }
       }
       case 'crew-guide': {
         if (typeof body.id !== 'string' || typeof body.text !== 'string') throw new Error('Enter a bot id and guidance.')
         if (!this.runtime.crew) throw new Error('Crew is not available.')
         await this.runtime.crew.guide(body.id, body.text)
+        this.files?.crewChanged?.()
         return { queued: true }
       }
       case 'delegated-work': {
@@ -198,21 +213,46 @@ export class WebSettings {
       case 'delegated-work-control': {
         if (typeof body.id !== 'string' || (body.action !== 'pause' && body.action !== 'resume' && body.action !== 'cancel')) throw new Error('Provide a work id and choose pause, resume or cancel.')
         if (!this.runtime.delegatedWork) throw new Error('Delegated work is not available.')
-        return this.runtime.delegatedWork.control(body.id, body.action)
+        const work = await this.runtime.delegatedWork.control(body.id, body.action)
+        this.files?.delegatedWorkChanged?.()
+        return { ...work, scheduleLabel: work.schedule ? describeWhen(work.schedule) : 'Runs once' }
       }
       case 'delegated-work-edit': {
         if (typeof body.id !== 'string') throw new Error('Enter a work id.')
         if (!this.runtime.delegatedWork) throw new Error('Delegated work is not available.')
-        if (body.objective !== undefined && typeof body.objective !== 'string') throw new Error('Enter an objective.')
+        if (body.objective !== undefined && (typeof body.objective !== 'string' || body.objective.trim().length > 8_000)) {
+          throw new Error('Enter an objective up to 8000 characters.')
+        }
         if (body.every !== undefined && typeof body.every !== 'string') throw new Error('Enter an interval.')
         if (body.at !== undefined && typeof body.at !== 'string') throw new Error('Enter a time.')
+        const stringList = (value: unknown, field: string): string[] | undefined => {
+          if (value === undefined) return undefined
+          if (!Array.isArray(value) || value.some((item) => typeof item !== 'string')) throw new Error(`Invalid ${field}.`)
+          return value
+        }
+        const days = stringList(body.days, 'days')
+        const dayOfMonth = stringList(body.dayOfMonth, 'dayOfMonth')
+        const month = stringList(body.month, 'month')
         if (body.once !== undefined && typeof body.once !== 'boolean') throw new Error('Choose whether the work runs once.')
-        const scheduled = body.every !== undefined || body.at !== undefined
+        if (body.every !== undefined && body.at !== undefined && body.every.trim() !== '' && body.at.trim() === '') {
+          throw new Error('Choose an interval or a time, not an empty time.')
+        }
+        const scheduled = body.every !== undefined || body.at !== undefined || days !== undefined || dayOfMonth !== undefined || month !== undefined
         if (body.once === true && scheduled) throw new Error('Choose a schedule or one-time work, not both.')
-        const schedule = scheduled ? parseWhen({ every: body.every as string | undefined, at: body.at as string | undefined }) : undefined
+        const schedule = scheduled
+          ? parseWhen({
+              every: body.every as string | undefined,
+              at: body.at as string | undefined,
+              days,
+              dayOfMonth,
+              month,
+            })
+          : undefined
         if (scheduled && !schedule) throw new Error('Choose a valid interval or local time.')
         if (body.objective === undefined && !scheduled && body.once !== true) throw new Error('Enter an objective or schedule.')
-        return this.runtime.delegatedWork.edit(body.id, { objective: body.objective as string | undefined, schedule: body.once === true ? null : schedule ?? undefined })
+        const work = await this.runtime.delegatedWork.edit(body.id, { objective: body.objective as string | undefined, schedule: body.once === true ? null : schedule ?? undefined })
+        this.files?.delegatedWorkChanged?.()
+        return { ...work, scheduleLabel: work.schedule ? describeWhen(work.schedule) : 'Runs once' }
       }
       case 'task-lists': return readTaskLists()
       case 'task-list-action': return this.taskListAction(body)
