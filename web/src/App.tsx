@@ -1,6 +1,4 @@
-import { Analytics } from './analytics/Analytics.js'
-import { Crew } from './crew/Crew.js'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, uploadFile, withToken } from './lib/api.js'
 import { copyText } from './lib/clipboard.js'
 import { message } from './lib/format.js'
@@ -15,13 +13,12 @@ import { appendDeltas, withDelta, type PendingDelta } from './chat/parts.js'
 import { applyEvent, settled, thoughtMsFor } from './chat/frames.js'
 import { buildSuggestions } from './chat/suggestions.js'
 import { Permissions } from './chat/Permissions.js'
-import { Routines } from './routines/Routines.js'
-import { TaskLists } from './tasks/TaskLists.js'
 import { Email } from './email/Email.js'
-import { Settings } from './settings/Settings.js'
 import { settingsSectionFromPath } from './settings/sections.js'
 import { Panel } from './panel/Panel.js'
-import type { ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, ThinkingDisplay } from '@protocol'
+import type { ClientFrame, ServerFrame, PermissionRequest, PanelInput, PanelView, JobView, SendTarget, ThinkingDisplay } from '@protocol'
+import type { SessionBackendKind, SessionBackendView } from '../../src/core/sessions/types.js'
+import { SessionFolder } from './sessions/Folder.js'
 import { SessionRow } from './sessions/SessionRow.js'
 import type { SessionSummary } from './sessions/types.js'
 import { chatSessions } from './sessions/scopes.js'
@@ -30,6 +27,14 @@ import { Icon } from './ui/Icons.js'
 import { ConnectionChip } from './ui/ConnectionChip.js'
 import { Notice, useAutoDismiss, type Report } from './ui/Notice.js'
 import { MiloMark } from './ui/MiloMark.js'
+import { SessionBackendMark } from './ui/SessionBackendMark.js'
+
+const Analytics = lazy(() => import('./analytics/Analytics.js').then((m) => ({ default: m.Analytics })))
+const Crew = lazy(() => import('./crew/Crew.js').then((m) => ({ default: m.Crew })))
+const Routines = lazy(() => import('./routines/Routines.js').then((m) => ({ default: m.Routines })))
+const TaskLists = lazy(() => import('./tasks/TaskLists.js').then((m) => ({ default: m.TaskLists })))
+const Settings = lazy(() => import('./settings/Settings.js').then((m) => ({ default: m.Settings })))
+const FolderInspector = lazy(() => import('./work/FolderInspector.js').then((m) => ({ default: m.FolderInspector })))
 import {
   COLOR_PALETTE_PRESETS,
   DEFAULT_PALETTE_STATE,
@@ -55,7 +60,7 @@ function readPendingMessages(): PendingMessage[] {
   } catch { return [] }
 }
 type SessionGroup = { label: string; sessions: SessionSummary[] }
-type NewSessionContext = { project?: string; firstMessage?: string; plan?: boolean }
+type NewSessionContext = { project?: string; backend?: SessionBackendKind; firstMessage?: string; plan?: boolean }
 /** A past turn the search box found, with the session it belongs to. */
 type HistoryHit = { session: string; at: string; kind: string; text: string }
 
@@ -128,6 +133,10 @@ export default function App() {
   const [turnEnds, setTurnEnds] = useState(0)
   /** Remembered folders across this install, ordered by most recent use. */
   const [projects, setProjects] = useState<ProjectView[] | null>(null)
+  const [sessionProject, setSessionProject] = useState<ProjectView | null>(null)
+  const [backend, setBackend] = useState<SessionBackendView>({ kind: 'milo' })
+  const [folderOpen, setFolderOpen] = useState(false)
+  const [inspectProject, setInspectProject] = useState<ProjectView | null>(null)
   /** Bumped when the server says a routine ran, so the history on screen re-reads. */
   const [routinesTick, setRoutinesTick] = useState(0)
   const [thinking, setThinking] = useState<ThinkingDisplay>('expanded')
@@ -141,6 +150,7 @@ export default function App() {
   const [emailRoute, setEmailRoute] = useState<string | null>(() => emailRouteFromPath(location.pathname))
   /** Mail that arrived since the person last looked at the inbox, for the Email tab's badge. */
   const [mailUnread, setMailUnread] = useState<{ count: number; more: boolean } | null>(null)
+  const [mailConnected, setMailConnected] = useState(false)
   /** The section open in Settings; null is the index of them, which a phone shows first. */
   const [settingsSection, setSettingsSection] = useState<string | null>(() => settingsSectionFromPath(location.pathname))
   /** Whether the settings hold edits that were never saved. */
@@ -155,7 +165,9 @@ export default function App() {
   const [searchOpen, setSearchOpen] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
   /** The desktop sidebar, folded away; the phone keeps its drawer instead. */
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => localStorage.getItem('milo-sidebar') === 'collapsed')
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try { return localStorage.getItem('milo-sidebar') === 'collapsed' } catch { return false }
+  })
   const [paletteMenuOpen, setPaletteMenuOpen] = useState(false)
   const [paletteMenuClosing, setPaletteMenuClosing] = useState(false)
   const paletteMenuRef = useRef<HTMLDivElement>(null)
@@ -190,7 +202,9 @@ export default function App() {
   const [panel, setPanel] = useState<PanelView | null>(null)
   /** The background jobs still running, for the strip above the composer. */
   const [jobs, setJobs] = useState<JobView[]>([])
-  const [panelOpen, setPanelOpen] = useState(() => localStorage.getItem('milo-panel') === 'open')
+  const [panelOpen, setPanelOpen] = useState(() => {
+    try { return localStorage.getItem('milo-panel') === 'open' } catch { return false }
+  })
   /** A tab opened while the panel was folded away, for the dot on its toggle. */
   const [panelNew, setPanelNew] = useState(false)
   const panelTabCount = useRef(0)
@@ -258,14 +272,19 @@ export default function App() {
    * app is open appears without a reload — and again when the tab regains focus.
    */
   const refreshMailUnread = useCallback((): void => {
+    if (!mailConnected) return
     void api<{ count: number; more: boolean }>('email-unread')
       .then(setMailUnread)
       // A background count that fails leaves the last one standing rather than
       // raising a notice once a minute.
       .catch(() => {})
-  }, [])
+  }, [mailConnected])
 
   useEffect(() => {
+    if (!mailConnected) {
+      setMailUnread(null)
+      return
+    }
     refreshMailUnread()
     const timer = window.setInterval(() => {
       if (document.visibilityState === 'visible') refreshMailUnread()
@@ -275,7 +294,7 @@ export default function App() {
       window.clearInterval(timer)
       window.removeEventListener('focus', refreshMailUnread)
     }
-  }, [refreshMailUnread])
+  }, [mailConnected, refreshMailUnread])
 
   /** Looking at the inbox is what clears the badge; the write itself is server-side. */
   const clearMailBadge = useCallback((): void => setMailUnread({ count: 0, more: false }), [])
@@ -602,6 +621,8 @@ export default function App() {
       // What the panel was left showing, resolved by the server from the session's
       // own history, so a reload comes back to the same view.
       setPanel(frame.panel ?? null)
+      setSessionProject(frame.project ?? null)
+      setBackend(frame.backend ?? { kind: 'milo' })
       setPlan(frame.plan ?? false)
       // A reload joins the plan where it stands; a new proposal is what earns approval.
       setPlanSince(frame.messages.length)
@@ -660,6 +681,15 @@ export default function App() {
       return
     }
     if (frame.type === 'sessions-changed') { void refreshSessions(); return }
+    if (frame.type === 'session-folder') {
+      setSessionProject(frame.project)
+      void refreshProjects()
+      return
+    }
+    if (frame.type === 'session-backend') {
+      setBackend(frame.backend)
+      return
+    }
     if (frame.type === 'panel') {
       // Milo shows something and the panel opens itself — that is the "here, look
       // at this". A resolved `null` is the model taking it down.
@@ -759,7 +789,7 @@ export default function App() {
       }
       void refreshSessions()
     }
-  }, [refreshSessions, markSeen, markSeenOnChat, changePending])
+  }, [refreshSessions, markSeen, markSeenOnChat, changePending, refreshProjects])
 
   const newChat = useCallback(async (
     context: NewSessionContext = {},
@@ -772,13 +802,16 @@ export default function App() {
     try {
       const session = await api<{ id: string }>('new-session', {
         chatId: nextChatId,
-        backend: 'milo',
+        backend: context.backend ?? 'milo',
+        ...(context.project ? { project: context.project } : {}),
         ...(context.plan ? { plan: true } : {}),
       })
       socket.close()
       setMessages([])
       setPanel(null)
       setPlan(false)
+      setSessionProject(context.project ? ((projects ?? []).find((p) => p.id === context.project) ?? null) : null)
+      setBackend({ kind: context.backend ?? 'milo' })
       setSessionId(session.id)
       setView('chat')
       setSidebarOpen(false)
@@ -789,7 +822,7 @@ export default function App() {
       fail(error)
       return false
     }
-  }, [socket, fail, setView])
+  }, [socket, fail, setView, projects])
 
   const newSessionHere = useCallback((): Promise<boolean> => newChat(), [newChat])
 
@@ -1001,10 +1034,15 @@ export default function App() {
     void send(text, 'queue', undefined, target)
   }
 
+  /** Sends a WebSocket frame safely, turning a disconnected socket into a visible notice. */
+  const sendSocket = useCallback((frame: ClientFrame): void => {
+    try { socket.send(frame) } catch (error) { fail(error) }
+  }, [socket, fail])
+
   /** The answer to a permission prompt, wherever on screen it is drawn. */
   function decide(action: 'allow' | 'always' | 'deny'): void {
     if (!pendingPermission) return
-    socket.send({ type: 'control', action, id: pendingPermission.id })
+    sendSocket({ type: 'control', action, id: pendingPermission.id })
   }
 
   const openSession = useCallback(async (id: string): Promise<void> => {
@@ -1113,7 +1151,7 @@ export default function App() {
    * revealing the panel never comes to read as the person's own preference.
    */
   const setPanelVisible = useCallback((open: boolean): void => {
-    localStorage.setItem('milo-panel', open ? 'open' : 'closed')
+    try { localStorage.setItem('milo-panel', open ? 'open' : 'closed') } catch { /* private browsing */ }
     setPanelOpen(open)
   }, [])
 
@@ -1152,6 +1190,7 @@ export default function App() {
   }
 
   async function deleteSession(id: string, report: Report = setNotice): Promise<void> {
+    if (!window.confirm('Delete this session permanently? The history log keeps its record, but it disappears from the session list.')) return
     try {
       if (id === sessionId) {
         // Move off the session first — and only delete it if that worked. Ending
@@ -1207,14 +1246,6 @@ export default function App() {
     } catch (error) { fail(error) }
   }, [identity, fail])
 
-  const changeProvider = useCallback(async (provider: string): Promise<void> => {
-    try {
-      const result = await api<{ provider: string; providerName: string; model: string }>('set-provider', { provider })
-      setIdentity({ provider: result.provider, providerName: result.providerName, model: result.model })
-      setNotice(null)
-    } catch (error) { fail(error) }
-  }, [fail])
-
   const changeEffort = useCallback(async (next: 'low' | 'medium' | 'high'): Promise<void> => {
     try {
       setEffort(next)
@@ -1263,12 +1294,14 @@ export default function App() {
       if (!item || !composerRef.current?.restore(item.text, pendingFiles.current.get(id) ?? [])) return
       try { changePending((items) => items.filter((entry) => entry.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) }
     }} onDismissPending={(id) => { try { changePending((items) => items.filter((item) => item.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) } }} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} />
-    {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(action) => socket.send({ type: 'control', action, id: pendingPermission.id })} /></article>}
+    {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(action) => sendSocket({ type: 'control', action, id: pendingPermission.id })} /></article>}
   </>
+
+  const workProject = inspectProject ?? sessionProject ?? projects?.[0] ?? null
 
   return <div className={`app-shell ${sidebarOpen ? 'drawer-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'chat' && panelOpen && panel && panel.tabs.length > 0 ? 'panel-open' : ''}`}>
     {sidebarOpen && <button className="sidebar-scrim" type="button" aria-label="Close menu" onClick={() => setSidebarOpen(false)} />}
-    <aside className="sidebar" aria-label="Main navigation">
+    <aside className="sidebar" aria-label="Main navigation" inert={(phone && !sidebarOpen) || (!phone && sidebarCollapsed) ? true : undefined} aria-hidden={(phone && !sidebarOpen) || (!phone && sidebarCollapsed) ? true : undefined}>
       <div className="sidebar-chat-nav">
         <div className="brand-row"><button ref={paletteMenuTriggerRef} className="brand-mark-button" type="button" aria-label="Choose colour palette" aria-expanded={paletteMenuOpen} onClick={() => { if (paletteMenuOpen) closePaletteMenu(); else { setPaletteMenuClosing(false); setPaletteMenuOpen(true) } }}><MiloMark size={30} className="brand-mark" /></button><span className="brand-name" translate="no">Milo</span><button className="sidebar-toggle" type="button" aria-label={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} title={sidebarCollapsed ? 'Show sidebar' : 'Hide sidebar'} aria-pressed={sidebarCollapsed} onClick={() => setSidebarCollapsed((collapsed) => !collapsed)}><Icon name="panel-left" size={17} /></button>
           {(paletteMenuOpen || paletteMenuClosing) && <div ref={paletteMenuRef} className={`brand-palette-menu ${paletteMenuClosing && !paletteMenuOpen ? 'closing' : ''}`} role="menu" aria-label="Colour palette" onAnimationEnd={(event) => { if (event.currentTarget === event.target && !paletteMenuOpen) setPaletteMenuClosing(false) }}>{COLOR_PALETTE_PRESETS.map((option) => <button key={option.id} type="button" role="menuitemradio" aria-checked={effectivePalette === option.id} className={`brand-palette-option ${effectivePalette === option.id ? 'active' : ''}`} onClick={() => { closePaletteMenu(); void changePalette(option.id).catch((error: unknown) => setNotice({ text: error instanceof Error ? error.message : 'Could not change colour palette.', error: true })) }}><MiloMark palette={option.id} size={22} /><span>{option.label}{option.id === 'peach' ? ' (Default)' : ''}</span>{effectivePalette === option.id && <Icon name="check" size={15} />}</button>)}</div>}
@@ -1316,6 +1349,18 @@ export default function App() {
         <button className="sidebar-expand" type="button" aria-label="Show sidebar" title="Show sidebar" onClick={() => setSidebarCollapsed(false)}><Icon name="panel-left" size={17} /></button>
         <div className="topbar-title">{view === 'chat' && <>
           {messages.length > 0 && <h1>{currentSession ? currentSession.label : 'New session'}</h1>}
+          <div className={`topbar-project-group ${backend.kind === 'command-code' ? 'with-backend' : ''}`}>
+            {backend.kind === 'command-code' && <span className="topbar-backend-wrap" title="Command Code Session"><SessionBackendMark backend="command-code" size={16} /></span>}
+            <button
+              className={`topbar-project topbar-folder ${sessionProject ? '' : 'empty'} ${sessionProject?.error ? 'gone' : ''}`}
+              type="button"
+              title={sessionProject ? (sessionProject.error ?? sessionProject.path) : 'Choose a folder for this Session'}
+              onClick={() => setFolderOpen(true)}
+            >
+              <Icon name="folder" size={14} />
+              <span>{sessionProject ? sessionProject.name : 'Folder'}</span>
+            </button>
+          </div>
         </>}</div>
         <div className="topbar-actions">
           {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''} ${panelNew ? 'has-new' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelVisible(!panelOpen)}><Icon name="panel-right" size={18} /></button>}
@@ -1323,6 +1368,7 @@ export default function App() {
           {view === 'chat' && <ConnectionChip state={connection.state} reason={connection.reason} onReconnect={() => socket.reconnect()} />}
         </div>
       </header>
+      <Suspense fallback={<div className="panel-state" role="status">Loading…</div>}>
       {view === 'settings'
         ? <Settings section={settingsSection} onSection={setSettingsSection} chatId={chatId} sessionId={sessionId} onClose={leaveSettings} onSessionChange={handleSessionChange} onOpenSession={(id) => void openSession(id)} theme={theme} onThemeChange={setTheme} palette={effectivePalette} paletteSync={sharedPalette.sync} onPaletteChange={changePalette} onPaletteSyncChange={changePaletteSync} onPaletteStateLoaded={syncSharedPalette} onDirtyChange={noteDirty} />
         : view === 'routines'
@@ -1333,21 +1379,54 @@ export default function App() {
         ? <Crew />
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
+        : view === 'work' && workProject
+        ? <FolderInspector project={workProject} tick={turnEnds} onClose={() => { setInspectProject(null); setView('chat') }} onAskRules={(prompt) => { void send(prompt, 'queue'); setInspectProject(null); setView('chat') }} />
         : view === 'chat'
         ? <section className="chat-view">
+          {backend.kind === 'command-code' && backend.pendingTurn && <section className="command-code-recovery" role="status">
+            <div className="command-code-recovery-copy">
+              <strong>Command Code turn awaiting recovery</strong>
+              <span>{backend.pendingTurn.input}</span>
+            </div>
+            <button className="button primary" type="button" onClick={() => sendSocket({ type: 'control', action: 'retry-command-code', id: backend.pendingTurn!.id, confirmed: true })}>Retry turn</button>
+          </section>}
           <div className="messages" id="messages" ref={messagesRef} onScroll={updateMessagesTop}>{thread}</div>
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock" ref={composerDockRef}>
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => socket.send({ type: 'job-kill', id })} folders={projects ?? []} provider={identity.provider} providerName={identity.providerName} draftKey={sessionId || chatId} pendingDraftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={true} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); socket.send({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => socket.send({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => socket.send({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} onProviderChange={changeProvider} />
+            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => sendSocket({ type: 'job-kill', id })} folders={projects ?? []} provider={identity.provider} providerName={identity.providerName} draftKey={sessionId || chatId} pendingDraftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={backend.kind !== 'command-code'} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); sendSocket({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => sendSocket({ type: 'control', action: 'approve-plan' })} onSend={send} onStop={() => sendSocket({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} />
           </div>
         </section>
         : null}
+      </Suspense>
       {/* The Email view is always mounted and hidden rather than torn down and rebuilt,
           so its inbox is read from the start and opening it draws mail instead of a
           loading line. It is told the view itself, not the path, so this is where it draws. */}
-      <Email active={view === 'email'} route={emailRoute} onRoute={setEmailRoute} onSeen={clearMailBadge} />
+      <Email active={view === 'email'} route={emailRoute} onRoute={setEmailRoute} onSeen={clearMailBadge} onStatus={setMailConnected} />
     </main>
+    {folderOpen && <SessionFolder
+      current={sessionProject}
+      recent={projects ?? []}
+      disabled={busy || backend.kind === 'command-code'}
+      onChoose={async (folder) => {
+        const result = await api<{ project: ProjectView | null }>('session-folder', { id: sessionId, folder })
+        setSessionProject(result.project)
+        void refreshProjects()
+      }}
+      onInspect={(id) => {
+        const found = (projects ?? []).find((p) => p.id === id) ?? sessionProject
+        if (found) {
+          setInspectProject(found)
+          setFolderOpen(false)
+          setView('work')
+        }
+      }}
+      onStart={(id, chosenBackend) => {
+        setFolderOpen(false)
+        void newChat({ project: id, backend: chosenBackend })
+      }}
+      onClose={() => setFolderOpen(false)}
+    />}
     {view === 'chat' && panelOpen && panel && panel.tabs.length > 0 && <Panel view={panel} onClose={() => setPanelVisible(false)} onInput={panelInput} onActivateTab={activateTab} onCloseTab={closeTab} />}
   </div>
 }

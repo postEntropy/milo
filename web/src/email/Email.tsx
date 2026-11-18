@@ -111,9 +111,11 @@ function withUnread<T extends MailSummary>(mail: T, unread: boolean): T {
  * for the composer, and otherwise a thread id. That is what lets the browser's own
  * Back leave a thread for the inbox instead of leaving the app.
  */
-export function Email({ active, route, onRoute, onSeen }: { active: boolean; route: string | null; onRoute(next: string | null): void; onSeen(): void }) {
+export function Email({ active, route, onRoute, onSeen, onStatus }: { active: boolean; route: string | null; onRoute(next: string | null): void; onSeen(): void; onStatus?(connected: boolean): void }) {
   const [status, setStatus] = useState<Status | null>(null)
+  const [statusError, setStatusError] = useState<string | null>(null)
   const [inbox, setInbox] = useState<MailSummary[] | null>(null)
+  const [inboxError, setInboxError] = useState<string | null>(null)
   const [nextPage, setNextPage] = useState<string | undefined>(undefined)
   const [labels, setLabels] = useState<MailLabel[]>([])
   const [colors, setColors] = useState<string[]>([])
@@ -128,6 +130,9 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
   /** The reading in flight, by its title, so its wait stands where the answer will. */
   const [asking, setAsking] = useState<{ title: string; label: string } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [confirmSend, setConfirmSend] = useState(false)
+  const [confirmDiscard, setConfirmDiscard] = useState(false)
   /** Whether the next page is being fetched — the list scrolls into it on its own. */
   const [pageLoading, setPageLoading] = useState(false)
   /** Which message is having its body read past the thread's cut. */
@@ -159,24 +164,30 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
   const narrowing = JSON.stringify([filter, query])
   const narrowingRef = useRef(narrowing)
   /** The panel itself, which is what scrolls — so a fresh page can start at the top. */
-  const workspace = useRef<HTMLElement>(null)
+  const workspace = useRef<HTMLDivElement>(null)
+  const inboxSeq = useRef(0)
 
   const loadStatus = useCallback(async (): Promise<void> => {
+    setStatusError(null)
     try {
       const next = await api<Status>('email-status')
       setStatus(next)
       sortingRef.current = next.kind === 'connected' && next.sorting
+      onStatus?.(next.kind === 'connected')
     } catch (error) {
-      setNotice({ text: message(error), error: true })
+      const err = message(error)
+      setStatusError(err)
+      onStatus?.(false)
+      setNotice({ text: err, error: true })
     }
-  }, [])
+  }, [onStatus])
 
   /**
    * Asks the server to sort the rows the inbox could not place, and folds the labels
    * back onto them. Its own call, after the mail is already drawn, so a slow or down
    * classifier delays the labels and never the list.
    */
-  const sortRows = useCallback(async (rows: MailSummary[], ids: string[]): Promise<void> => {
+  const sortRows = useCallback(async (rows: MailSummary[], ids: string[], seq: number): Promise<void> => {
     if (!sortingRef.current || ids.length === 0) return
     const wanted = new Set(ids)
     try {
@@ -185,20 +196,24 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
           .filter((row) => wanted.has(row.id))
           .map(({ id, threadId, from, subject, snippet }) => ({ id, threadId, from, subject, snippet })),
       })
+      if (seq !== inboxSeq.current) return
       setLabels(result.labels)
       setInbox((current) => current?.map((mail) => (result.byMessage[mail.id] ? { ...mail, labels: result.byMessage[mail.id] } : mail)) ?? current)
     } catch (error) {
-      setNotice({ text: message(error), error: true })
+      if (seq === inboxSeq.current) setNotice({ text: message(error), error: true })
     }
   }, [])
 
   const loadInbox = useCallback(async (pageToken?: string): Promise<void> => {
+    const mine = pageToken ? inboxSeq.current : ++inboxSeq.current
+    setInboxError(null)
     try {
       const page = await api<InboxPage>('email-inbox', {
         ...(pageToken ? { pageToken } : {}),
         ...(filter ? { filter } : {}),
         ...(query ? { search: query } : {}),
       })
+      if (mine !== inboxSeq.current) return
       setLabels(page.labels)
       setColors(page.colors)
       setInbox((current) => (pageToken && current ? [...current, ...page.messages] : page.messages))
@@ -207,9 +222,12 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
       // rebuilding the view used to land, which is what a kept-mounted view must keep doing.
       if (!pageToken) workspace.current?.scrollTo({ top: 0 })
       // The rows with no label yet are sorted after the mail is on screen, never before.
-      void sortRows(page.messages, page.unsorted ?? [])
+      void sortRows(page.messages, page.unsorted ?? [], mine)
     } catch (error) {
-      setNotice({ text: message(error), error: true })
+      if (mine !== inboxSeq.current) return
+      const err = message(error)
+      setInboxError(err)
+      setNotice({ text: err, error: true })
     }
   }, [filter, query, sortRows])
 
@@ -219,13 +237,16 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
   const loadMore = useCallback((): void => {
     if (!nextPage || loadingMore.current) return
     const token = nextPage
+    const seq = inboxSeq.current
     loadingMore.current = true
     setPageLoading(true)
     void loadInbox(token).finally(() => {
-      loadingMore.current = false
-      setPageLoading(false)
+      if (seq === inboxSeq.current || !pageLoading) {
+        loadingMore.current = false
+        setPageLoading(false)
+      }
     })
-  }, [nextPage, loadInbox])
+  }, [nextPage, loadInbox, pageLoading])
 
   // What was typed becomes the query a beat after typing stops, so a search is one
   // Gmail call rather than one per keystroke.
@@ -250,7 +271,11 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
     if (!connected) return
     // A different narrowing empties the list, so the loading line is honest; the same one
     // keeps it, and the fresh page lands behind the mail already on screen.
-    if (narrowingRef.current !== narrowing) setInbox(null)
+    if (narrowingRef.current !== narrowing) {
+      setInbox(null)
+      loadingMore.current = false
+      setPageLoading(false)
+    }
     narrowingRef.current = narrowing
     void loadInbox()
   }, [connected, narrowing, loadInbox])
@@ -380,7 +405,14 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
   }
 
   /** Back to the inbox from anywhere in the screen's own path. */
-  function toInbox(): void {
+  function toInbox(force = false): void {
+    const dirtyDraft = Boolean(draft && (draft.to.trim() || draft.subject.trim() || draft.body.trim()))
+    if (!force && composing && dirtyDraft) {
+      setConfirmDiscard(true)
+      return
+    }
+    setConfirmSend(false)
+    setConfirmDiscard(false)
     setDraft(null)
     setAssist(null)
     onRoute(null)
@@ -395,27 +427,38 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
   }
 
   async function saveDraft(): Promise<void> {
-    if (!draft) return
+    if (!draft || sending) return
+    setSending(true)
     try {
       await api('email-draft', { draft })
       setNotice({ text: 'Draft saved to Gmail.', error: false })
-      toInbox()
+      toInbox(true)
     } catch (error) {
       setNotice({ text: message(error), error: true })
+    } finally {
+      setSending(false)
     }
   }
 
-  async function send(): Promise<void> {
-    if (!draft) return
-    // The only irreversible, outward action here, so it is the one that asks first.
-    if (!window.confirm(`Send this message to ${draft.to}?`)) return
+  function requestSend(): void {
+    if (!draft || sending || !draft.to.trim() || !draft.body.trim()) return
+    setConfirmDiscard(false)
+    setConfirmSend(true)
+  }
+
+  async function confirmAndSend(): Promise<void> {
+    if (!draft || sending) return
+    setSending(true)
     try {
       await api('email-send', { draft })
       setNotice({ text: 'Sent.', error: false })
-      toInbox()
+      toInbox(true)
       await loadInbox()
     } catch (error) {
       setNotice({ text: message(error), error: true })
+    } finally {
+      setSending(false)
+      setConfirmSend(false)
     }
   }
 
@@ -461,7 +504,7 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
 
   const head = <PageHeader
     back={route !== null
-      ? <button className="settings-back" type="button" onClick={toInbox}><Icon name="arrow-left" /><span>Inbox</span></button>
+      ? <button className="settings-back" type="button" onClick={() => toInbox()}><Icon name="arrow-left" /><span>Inbox</span></button>
       : undefined}
     title={route === null ? 'Inbox' : undefined}
     action={connected && route === null ? <div className="panel-count">
@@ -473,7 +516,7 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
     </div> : undefined}
   />
 
-  return <main className="settings-workspace mail-workspace" ref={workspace} hidden={!active}>
+  return <div className="settings-workspace mail-workspace" ref={workspace} hidden={!active}>
     <div className="settings-inner">
       <div className="settings-panel-stack">
         <section className="settings-section">
@@ -498,16 +541,18 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
           {connected && route === null && <Labels labels={labels} colors={colors} active={labelFilter} sorting={connected.sorting} onFilter={setLabelFilter} onCreate={createLabel} onDelete={removeLabel} />}
           <div className="panel-body">
             {status === null
-              ? <div className="mail-wait"><WaitLine label="Reading the connection…" /></div>
+              ? statusError
+                ? <div className="panel-empty"><p className="panel-empty-copy">{statusError}</p><button className="button" type="button" onClick={() => void loadStatus()}>Try again</button></div>
+                : <div className="mail-wait"><WaitLine label="Reading the connection…" /></div>
               : connected === null
               ? <NotConnected status={status} />
               : composing
-              ? <Compose draft={draft ?? EMPTY_DRAFT} access={access} onChange={setDraft} onSave={() => void saveDraft()} onSend={() => void send()} onDiscard={toInbox} />
+              ? <Compose draft={draft ?? EMPTY_DRAFT} access={access} busy={sending} confirmingSend={confirmSend} confirmingDiscard={confirmDiscard} onCancelConfirm={() => { setConfirmSend(false); setConfirmDiscard(false) }} onConfirmSend={() => void confirmAndSend()} onConfirmDiscard={() => toInbox(true)} onChange={setDraft} onSave={() => void saveDraft()} onSend={requestSend} onDiscard={() => toInbox()} />
               : threadId !== null
               ? thread?.id === threadId
                 ? <ThreadView thread={thread} access={access} busy={busy} labels={labels} readingMore={readingMore} onReply={reply} onDraft={() => void draftReply()} onModify={modify} onAsk={ask} onAssign={assign} onReadMore={(mail) => void readMore(mail)} />
                 : <div className="mail-wait"><WaitLine label="Reading the thread…" /></div>
-              : <Inbox inbox={visible} access={access} onOpen={(mail) => onRoute(mail.threadId)} onModify={modify} onMore={loadMore} loading={pageLoading} nextPage={nextPage} narrowed={narrowed} onClear={clearNarrowing} />}
+              : <Inbox inbox={visible} error={inboxError} onRetry={() => void loadInbox()} access={access} onOpen={(mail) => onRoute(mail.threadId)} onModify={modify} onMore={loadMore} loading={pageLoading} nextPage={nextPage} narrowed={narrowed} onClear={clearNarrowing} />}
             {asking && <section className="mail-assist">
               <h3>{asking.title}</h3>
               <div className="mail-assist-wait"><WaitLine label={asking.label} /></div>
@@ -521,7 +566,7 @@ export function Email({ active, route, onRoute, onSeen }: { active: boolean; rou
         </section>
       </div>
     </div>
-  </main>
+  </div>
 }
 
 /** What to do before there is anything to draw: the command to run, and the levels. */
@@ -552,6 +597,8 @@ function NotConnected({ status }: { status: Status }) {
 
 function Inbox({
   inbox,
+  error,
+  onRetry,
   access,
   onOpen,
   onModify,
@@ -562,6 +609,8 @@ function Inbox({
   onClear,
 }: {
   inbox: MailSummary[] | null
+  error?: string | null
+  onRetry?(): void
   access: Access | undefined
   onOpen(summary: MailSummary): void
   onModify(id: string, op: string): Promise<void>
@@ -588,7 +637,10 @@ function Inbox({
     return () => observer.disconnect()
   }, [nextPage, onMore])
 
-  if (inbox === null) return <SkeletonList rows={6} label="Reading the inbox…" />
+  if (inbox === null) {
+    if (error) return <div className="panel-empty"><p className="panel-empty-copy">{error}</p>{onRetry && <button className="button" type="button" onClick={onRetry}>Try again</button>}</div>
+    return <SkeletonList rows={6} label="Reading the inbox…" />
+  }
   if (inbox.length === 0) return <div className="panel-empty">
     <span className="panel-empty-mark"><Icon name="inbox" size={22} /></span>
     <h3>{narrowed ? 'Nothing matches' : 'The inbox is empty'}</h3>
@@ -951,6 +1003,12 @@ function ThreadView({
 function Compose({
   draft,
   access,
+  busy,
+  confirmingSend,
+  confirmingDiscard,
+  onCancelConfirm,
+  onConfirmSend,
+  onConfirmDiscard,
   onChange,
   onSave,
   onSend,
@@ -958,6 +1016,12 @@ function Compose({
 }: {
   draft: Draft
   access: Access | undefined
+  busy: boolean
+  confirmingSend: boolean
+  confirmingDiscard: boolean
+  onCancelConfirm(): void
+  onConfirmSend(): void
+  onConfirmDiscard(): void
   onChange(draft: Draft): void
   onSave(): void
   onSend(): void
@@ -965,18 +1029,44 @@ function Compose({
 }) {
   return <div className="mail-compose">
     <Field label="To">
-      <input value={draft.to} placeholder="someone@example.com" onChange={(event) => onChange({ ...draft, to: event.target.value })} />
+      <input value={draft.to} disabled={busy} placeholder="someone@example.com" onChange={(event) => onChange({ ...draft, to: event.target.value })} />
     </Field>
     <Field label="Subject">
-      <input value={draft.subject} onChange={(event) => onChange({ ...draft, subject: event.target.value })} />
+      <input value={draft.subject} disabled={busy} onChange={(event) => onChange({ ...draft, subject: event.target.value })} />
     </Field>
     <Field label="Message">
-      <textarea rows={12} value={draft.body} onChange={(event) => onChange({ ...draft, body: event.target.value })} />
+      <textarea rows={12} disabled={busy} value={draft.body} onChange={(event) => onChange({ ...draft, body: event.target.value })} />
     </Field>
+    {confirmingSend && (
+      <section className="mail-assist" role="alertdialog" aria-label="Confirm sending email">
+        <h3>Confirm send</h3>
+        <p className="mail-assist-text">
+          <strong>To:</strong> {draft.to}
+          {'\n'}
+          <strong>Subject:</strong> {draft.subject || '(no subject)'}
+          {'\n\n'}
+          {draft.body}
+        </p>
+        <div className="ask-actions">
+          <button className="button primary" type="button" disabled={busy} onClick={onConfirmSend}>{busy ? 'Sending…' : 'Send email'}</button>
+          <button className="button" type="button" disabled={busy} onClick={onCancelConfirm}>Cancel</button>
+        </div>
+      </section>
+    )}
+    {confirmingDiscard && (
+      <section className="mail-assist" role="alertdialog" aria-label="Discard unsaved draft">
+        <h3>Discard draft?</h3>
+        <p className="mail-assist-text">Your unsaved draft changes will be lost.</p>
+        <div className="ask-actions">
+          <button className="button danger" type="button" disabled={busy} onClick={onConfirmDiscard}>Discard</button>
+          <button className="button" type="button" disabled={busy} onClick={onCancelConfirm}>Keep editing</button>
+        </div>
+      </section>
+    )}
     <div className="ask-actions">
-      <button className="button" type="button" disabled={!can(access, 'compose')} onClick={onSave}>Save draft</button>
-      <button className="button primary" type="button" disabled={!can(access, 'send') || !draft.to.trim() || !draft.body.trim()} onClick={onSend}>Send</button>
-      <button className="button" type="button" onClick={onDiscard}>Discard</button>
+      <button className="button" type="button" disabled={busy || !can(access, 'compose')} onClick={onSave}>{busy ? 'Working…' : 'Save draft'}</button>
+      <button className="button primary" type="button" disabled={busy || !can(access, 'send') || !draft.to.trim() || !draft.body.trim()} onClick={onSend}>Send</button>
+      <button className="button" type="button" disabled={busy} onClick={onDiscard}>Back to inbox</button>
     </div>
     {!can(access, 'send') && <p className="mail-tier-note">
       {can(access, 'compose')
