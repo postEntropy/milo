@@ -15,6 +15,7 @@ import type {
 } from '../src/core/providers/types.js'
 import type { HistoryEntry } from '../src/core/history.js'
 import { ROUTINE_GATEWAY } from '../src/core/routines.js'
+import { CrewStore } from '../src/core/crew.js'
 import { Session, type SendOptions, type SessionOptions } from '../src/core/session.js'
 import { MemorySessionStore } from '../src/core/sessions/memory-store.js'
 import { DEFAULT_SESSIONS, type SessionsConfig } from '../src/core/config/schema.js'
@@ -558,7 +559,7 @@ describe('Session', () => {
     expect(provider.lastEffort).toBeUndefined()
   })
 
-  it('lets a project turn delegate on its own, and keeps the ask outside one', async () => {
+  it('lets turns delegate when useful both inside and outside a project', async () => {
     const inProject = new CapturingProvider()
     const { session } = await sessionWith(inProject, {
       project: {
@@ -570,7 +571,7 @@ describe('Session', () => {
       // drain
     }
     expect(inProject.lastTools?.find((tool) => tool.name === 'task')?.description).toContain(
-      'on your own initiative',
+      'when that helps',
     )
 
     const outside = new CapturingProvider()
@@ -579,7 +580,7 @@ describe('Session', () => {
       // drain
     }
     expect(outside.lastTools?.find((tool) => tool.name === 'task')?.description).toContain(
-      'do not delegate on your own initiative',
+      'when that helps',
     )
   })
 
@@ -1358,7 +1359,7 @@ describe('delegation to a subagent', () => {
     }
   }
 
-  async function delegate(provider: Provider) {
+  async function delegate(provider: Provider, crew?: CrewStore, providerFor?: (model: string) => Provider, providerForBot?: (provider: string, model: string) => Provider | undefined) {
     const dir = mkdtempSync(path.join(tmpdir(), 'milo-session-'))
     const store = new MemorySessionStore()
     const scope: MemoryScope = { gateway: 'cli', chatId: 'task' }
@@ -1373,6 +1374,9 @@ describe('delegation to a subagent', () => {
       record,
       cwd: process.cwd(),
       provider,
+      crew,
+      providerFor,
+      providerForBot,
       maxSteps: 4,
     })
 
@@ -1427,6 +1431,174 @@ describe('delegation to a subagent', () => {
     ])
     const toolMessage = onDisk.messages.find((message) => message.role === 'tool')
     expect(toolMessage?.content[0]).toMatchObject({ content: 'SUBAGENT REPORT' })
+  })
+
+  it('records a named bot and its report in Crew', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-crew-session-'))
+    const crew = new CrewStore(path.join(dir, 'crew.json'))
+    const provider = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'task', args: { name: 'Scout', description: 'survey', prompt: 'Read the code' } },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      [{ type: 'text', delta: 'REPORT' }, { type: 'done', finishReason: 'stop' }],
+      [{ type: 'text', delta: 'DONE' }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const { events } = await delegate(provider, crew)
+    expect(crew.list()).toMatchObject([{ name: 'Scout', assignments: [{ mission: 'Read the code', model: 'test-model', state: 'completed', report: 'REPORT' }] }])
+    expect(events.find((event) => event.type === 'tool-end' && event.name === 'task')).toMatchObject({ result: expect.stringContaining('Crew bot Scout') })
+  })
+
+  it('uses the requested model for the bot without switching the parent', async () => {
+    const alternate = new CapturingProvider()
+    const parent = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'task', args: { name: 'Scout', description: 'survey', prompt: 'Read', model: 'other-model' } },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      [{ type: 'text', delta: 'DONE' }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-crew-model-'))
+    const crew = new CrewStore(path.join(dir, 'crew.json'))
+    await delegate(parent, crew, () => alternate)
+    expect(alternate.lastModel).toBe('other-model')
+    expect(parent.calls).toBe(2)
+    expect(crew.list()[0]?.assignments[0]?.model).toBe('other-model')
+  })
+
+  it('uses another configured provider for a bot without switching the parent', async () => {
+    const alternate = new CapturingProvider()
+    const parent = new ScriptedProvider([
+      [{ type: 'tool-call', id: 'c1', name: 'task', args: { name: 'Scout', description: 'survey', prompt: 'Read', provider: 'other', model: 'other-model' } }, { type: 'done', finishReason: 'tool_calls' }],
+      [{ type: 'text', delta: 'DONE' }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-crew-provider-'))
+    const crew = new CrewStore(path.join(dir, 'crew.json'))
+    const requested: string[] = []
+    await delegate(parent, crew, undefined, (id, model) => { requested.push(`${id}/${model}`); return alternate })
+    expect(requested).toEqual(['other/other-model'])
+    expect(alternate.lastModel).toBe('other-model')
+    expect(parent.calls).toBe(2)
+    expect(crew.list()[0]?.assignments[0]).toMatchObject({ provider: alternate.id, model: 'other-model' })
+  })
+
+  it('reports an unavailable bot provider instead of silently using another', async () => {
+    const parent = new ScriptedProvider([
+      [{ type: 'tool-call', id: 'c1', name: 'task', args: { name: 'Scout', description: 'survey', prompt: 'Read', provider: 'missing', model: 'other-model' } }, { type: 'done', finishReason: 'tool_calls' }],
+      [{ type: 'text', delta: 'DONE' }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-crew-provider-'))
+    const crew = new CrewStore(path.join(dir, 'crew.json'))
+    const { events } = await delegate(parent, crew, undefined, () => undefined)
+    expect(events.find((event) => event.type === 'tool-end' && event.name === 'task')).toMatchObject({ isError: true, result: expect.stringContaining('not configured') })
+    expect(crew.list()).toEqual([])
+  })
+
+  it('stops one bot when another process requests it', async () => {
+    let started!: () => void
+    const ready = new Promise<void>((resolve) => { started = resolve })
+    const alternate: Provider = {
+      id: 'slow',
+      async *stream(request) {
+        started()
+        await new Promise<void>((resolve) => {
+          if (request.signal?.aborted) resolve()
+          else request.signal?.addEventListener('abort', () => resolve(), { once: true })
+        })
+        throw new DOMException('Stopped', 'AbortError')
+      },
+    }
+    const parent = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'task', args: { name: 'Scout', description: 'survey', prompt: 'Read', model: 'slow' } },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      [{ type: 'text', delta: 'DONE' }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-crew-stop-'))
+    const file = path.join(dir, 'crew.json')
+    const crew = new CrewStore(file)
+    const work = delegate(parent, crew, () => alternate)
+    await ready
+    const bot = crew.list()[0]!
+    await new CrewStore(file).stop(bot.id)
+    const { events } = await work
+    expect(crew.list()[0]?.assignments[0]?.state).toBe('interrupted')
+    expect(events.find((event) => event.type === 'tool-end' && event.name === 'task')).toMatchObject({ isError: true, result: expect.stringContaining('stopped') })
+    expect(parent.calls).toBe(2)
+  })
+
+  it('delivers guidance at the bot’s next step and records that it was applied', async () => {
+    let started!: () => void
+    let continueFirst!: () => void
+    const ready = new Promise<void>((resolve) => { started = resolve })
+    const proceed = new Promise<void>((resolve) => { continueFirst = resolve })
+    const seen: ChatRequest[] = []
+    const alternate: Provider = {
+      id: 'guided',
+      async *stream(request) {
+        seen.push(structuredClone({ ...request, signal: undefined }))
+        if (seen.length === 1) { started(); await proceed }
+        yield { type: 'text', delta: 'Report' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+    const parent = new ScriptedProvider([
+      [{ type: 'tool-call', id: 'c1', name: 'task', args: { name: 'Scout', description: 'survey', prompt: 'Read', model: 'guided' } }, { type: 'done', finishReason: 'tool_calls' }],
+      [{ type: 'text', delta: 'DONE' }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-crew-guide-'))
+    const file = path.join(dir, 'crew.json')
+    const crew = new CrewStore(file)
+    const work = delegate(parent, crew, () => alternate)
+    await ready
+    await new CrewStore(file).guide(crew.list()[0]!.id, 'Check the tests too')
+    await new Promise((resolve) => setTimeout(resolve, 400))
+    continueFirst()
+    await work
+    expect(seen).toHaveLength(2)
+    expect(JSON.stringify(seen[1]?.messages)).toContain('Check the tests too')
+    expect(crew.list()[0]?.assignments[0]?.guidance?.[0]?.appliedAt).toBeTypeOf('number')
+  })
+
+  it('applies the bot model profile instead of inheriting the parent model limits', async () => {
+    let seenRequest: ChatRequest | undefined
+    const alternate: Provider = {
+      id: 'alt',
+      async *stream(request) {
+        seenRequest = structuredClone({ ...request, signal: undefined })
+        yield { type: 'text', delta: 'Report' }
+        yield { type: 'done', finishReason: 'stop' }
+      },
+    }
+    const parent = new ScriptedProvider([
+      [{ type: 'tool-call', id: 'c1', name: 'task', args: { name: 'Scout', description: 'survey', prompt: 'Read', model: 'fast-non-reasoning' } }, { type: 'done', finishReason: 'tool_calls' }],
+      [{ type: 'text', delta: 'DONE' }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const dir = mkdtempSync(path.join(tmpdir(), 'milo-crew-profile-'))
+    const store = new MemorySessionStore()
+    const record = await store.create()
+    const session = new Session({
+      model: 'test-model',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new SqliteMemory({ dir }),
+      store,
+      scope: { gateway: 'cli', chatId: 'task-profile' },
+      record,
+      cwd: process.cwd(),
+      provider: parent,
+      providerFor: () => alternate,
+      modelProfile: async (id) => id === 'fast-non-reasoning'
+        ? { id, maxOutput: 2048, reasoning: false }
+        : { id, maxOutput: 16384, reasoning: true },
+      reasoningEffort: () => 'high',
+      crew: new CrewStore(path.join(dir, 'crew.json')),
+      maxSteps: 4,
+    })
+    for await (const _event of session.send('go')) { /* drain */ }
+    expect(seenRequest?.maxTokens).toBe(2048)
+    expect(seenRequest?.reasoningEffort).toBeUndefined()
   })
 })
 

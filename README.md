@@ -72,6 +72,7 @@ On the first run an onboarding wizard asks for a provider, API key and model, an
 - `~/.milo/task-lists.json` — the named task lists, shared by every session
   (see [Task lists](docs/sessions.md#task-lists)).
 - `~/.milo/routines.json` — the prompts Milo runs on a timer (see [Routines](docs/routines.md)).
+- `~/.milo/crew.json` and `~/.milo/delegated-work.json` — named bots, their assignments and delegated objectives (see [Crew](docs/crew.md)).
 - `~/.milo/labels.json` — the mail labels Milo sorts with, never written back to Gmail;
   `mail-seen.json` is the sidebar badge's watermark (see [Google](docs/google.md#google)).
 - `~/.milo/mcp.json` — the external tool servers, hand-edited (see [MCP servers](docs/mcp.md#mcp-servers)).
@@ -448,6 +449,7 @@ The deep reference lives in `docs/`:
 | [Google](docs/google.md) | Gmail and Drive — connecting, the access levels, and what each tool may do. |
 | [MCP servers](docs/mcp.md) | Calling tools that live in an external server, over stdio. |
 | [Routines](docs/routines.md) | Prompts Milo runs on a timer and delivers to a chat. |
+| [Crew](docs/crew.md) | Bots and work delegated to Milo. |
 | [Sessions](docs/sessions.md) | Sessions, task lists and compaction. |
 | [Session folders](docs/work.md) | Session folders, recent folders, files, changes, rules, and Plan/Build. |
 | [The agent](docs/agent.md) | What a turn is told: persona, family, code manual, rules and verification. |

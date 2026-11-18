@@ -528,7 +528,23 @@ async function executeCall(
   call: { id: string; name: string; args: unknown },
   context: ToolContext,
 ): Promise<ToolResult> {
-  const blocked = await checkPermission(permission, registry, call.name, call.args)
+  let approvalArgs = call.args
+  if (call.name === 'delegated_work' && call.args && typeof call.args === 'object' && context.delegatedWork) {
+    const args = call.args as Record<string, unknown>
+    if (args.action === 'create') {
+      const destination = args.gateway === 'none' ? 'none' : typeof args.gateway === 'string' && typeof args.chatId === 'string'
+        ? `${args.gateway}:${args.chatId}` : context.origin && ['web', 'telegram', 'discord'].includes(context.origin.gateway)
+          ? `${context.origin.gateway}:${context.origin.chatId}` : 'none'
+      approvalArgs = { ...args, destination, folder: context.cwd }
+    } else if ((args.action === 'resume' || args.action === 'update') && typeof args.id === 'string') {
+      const work = context.delegatedWork.list().find((item) => item.id === args.id)
+      if (work) {
+        const folder = work.project ? (context.resolveProjectPath?.(work.project) ?? work.project) : 'default directory'
+        approvalArgs = { ...args, name: work.name, allow: work.allow, objective: args.action === 'resume' ? work.objective : args.objective, currentObjective: work.objective, currentSchedule: work.schedule, destination: work.target.gateway === 'none' ? 'none' : `${work.target.gateway}:${work.target.chatId}`, folder }
+      }
+    }
+  }
+  const blocked = await checkPermission(permission, registry, call.name, approvalArgs, context)
   return blocked
     ? { content: blocked, isError: true, blocked: true }
     : registry.execute(call.name, call.args, context)
@@ -563,18 +579,22 @@ async function checkPermission(
   registry: ToolRegistry,
   name: string,
   args: unknown,
+  context: ToolContext,
 ): Promise<string | null> {
-  if (!permission) return null
   const tool = registry.get(name)
   if (!tool) return null
+
+  const standing = tool.allowStandingConfirmation === true && context.standingGrants?.includes(name) === true
+  const mustConfirm = tool.requiresConfirmation?.(args) === true && !standing
+  if (!permission) return mustConfirm ? `Tool "${name}" requires confirmation, but this surface cannot ask the user.` : null
 
   const decision = await permission.policy.decide(
     tool,
     args,
     permission.cwd ? { cwd: permission.cwd } : undefined,
   )
-  if (decision === 'allow') return null
   if (decision === 'deny') return `Tool "${name}" is denied by the permission policy.`
+  if (decision === 'allow' && !mustConfirm) return null
 
   if (!permission.ask) {
     return `Tool "${name}" requires confirmation, but this surface cannot ask the user.`

@@ -49,6 +49,8 @@ export interface SubagentRun {
   mcp?: McpFacts | null
   google?: GoogleState | null
   signal: AbortSignal
+  steering?: string[]
+  onSteer?: (text: string) => void
   /**
    * Whether this subtask is planning rather than doing. Its catalog keeps the tools
    * that read, stay inside Milo, or delegate; the permission it inherits from the
@@ -71,7 +73,7 @@ export interface SubagentRun {
   /** The subtask, exactly as the `task` tool received it. */
   input: { description: string; prompt: string }
   /** The parent's memory, recall, address and delivery, so the subagent's tools still work. */
-  context: Pick<ToolContext, 'remember' | 'memories' | 'recall' | 'origin' | 'routine' | 'sendFile' | 'attachments' | 'inspectAttachmentImage'>
+  context: Pick<ToolContext, 'remember' | 'memories' | 'recall' | 'origin' | 'routine' | 'sendFile' | 'standingGrants' | 'attachments' | 'inspectAttachmentImage'>
   /** Carried through from the parent turn, so the subtask's requests are logged too. */
   trace?: RunTrace
 }
@@ -92,7 +94,7 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
   // pruning the install's conversations is the main turn's act, and the subagent's
   // context carries no session to manage or refuse against.
   const tools = options.registry.specs()
-    .filter((tool) => tool.name !== 'task' && tool.name !== 'todo' && tool.name !== 'sessions')
+    .filter((tool) => tool.name !== 'task' && tool.name !== 'crew' && tool.name !== 'delegated_work' && tool.name !== 'todo' && tool.name !== 'sessions')
     .filter((tool) => !options.plan || isPlanTool(options.registry.get(tool.name)))
   const system = buildSystemPrompt({
     base: SUBAGENT_SYSTEM_PROMPT,
@@ -125,6 +127,7 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     origin: options.context.origin,
     routine: options.context.routine,
     sendFile: options.context.sendFile,
+    standingGrants: options.context.standingGrants,
     attachments: options.context.attachments,
     inspectAttachmentImage: options.context.inspectAttachmentImage,
   }
@@ -144,11 +147,13 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
     temperature: options.temperature,
     reasoningEffort: options.reasoningEffort,
     signal: options.signal,
+    steering: options.steering,
     permission: options.permission,
     onSideEffect: options.onSideEffect,
     trace: options.trace,
   })) {
     if (event.type === 'text-delta') text += event.delta
+    else if (event.type === 'steer') options.onSteer?.(event.text)
     else if (event.type === 'tool-start') {
       text = closeParagraph(text)
     }
@@ -158,11 +163,10 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
   }
 
   const report = text.trim()
+  if (failure) return { content: `The subagent could not finish: ${failure}${report ? `\n\nPartial report:\n${report}` : ''}`, isError: true }
   if (report) return { content: report }
   return {
-    content: failure
-      ? `The subagent could not finish: ${failure}`
-      : 'The subagent finished without a report.',
+    content: 'The subagent finished without a report.',
     isError: true,
   }
 }

@@ -913,7 +913,7 @@ private struct RunRow: View {
  from the daemon as the drawer opens, and the drawer says it is reading them rather than
  standing there empty.
  */
-private struct RunDetail: View {
+struct RunDetail: View {
     let run: RoutineRun
     /// What the drawer calls it, in the words the row it came from carried.
     let name: String

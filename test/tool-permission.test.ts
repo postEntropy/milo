@@ -85,6 +85,8 @@ describe('tool permission gating', () => {
       send_file: false,
       panel: false,
       task: false,
+      crew: false,
+      delegated_work: false,
       todo: false,
       task_lists: false,
       shell_command: false,
@@ -100,7 +102,7 @@ describe('tool permission gating', () => {
   it('never asks for a tool whose side effect is Milo\'s own state', () => {
     const internal = builtinTools.filter((tool) => tool.internal).map((tool) => tool.name)
 
-    expect(internal).toEqual(['remember', 'panel', 'todo', 'task_lists'])
+    expect(internal).toEqual(['remember', 'panel', 'crew', 'todo', 'task_lists'])
   })
 
   it('asks before a session is removed, but not before the list is read', () => {

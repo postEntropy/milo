@@ -27,6 +27,7 @@ const paths = {
   eye: <><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" /><circle cx="12" cy="12" r="2.5" /></>,
   audio: <><path d="M3 10v4m4-7v10m4-14v18m4-15v12m4-9v6m3-4v2" /></>,
   spark: <><path d="m12 3 1.6 4.4L18 9l-4.4 1.6L12 15l-1.6-4.4L6 9l4.4-1.6Z" /><path d="m19 15 .7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7Z" /></>,
+  crew: <><rect x="4" y="7" width="16" height="14" rx="5.5" /><path d="M12 7V4M2.5 12.5v3M21.5 12.5v3" /><circle cx="12" cy="3" r="1.2" fill="currentColor" stroke="none" /><rect x="8.3" y="11.5" width="2.4" height="5" rx="1.2" fill="currentColor" stroke="none" /><rect x="13.3" y="11.5" width="2.4" height="5" rx="1.2" fill="currentColor" stroke="none" /></>,
   history: <><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 4v4h4m5 0v4l3 2" /></>,
   menu: <><path d="M4 7h16M4 12h16M4 17h16" /></>,
   ellipsis: <><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></>,

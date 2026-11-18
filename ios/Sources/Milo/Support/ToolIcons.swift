@@ -41,6 +41,8 @@ enum ToolIcons {
         "git": "point.3.connected.trianglepath.dotted",
         "git_commit": "point.3.connected.trianglepath.dotted",
         "task": "sparkles",
+        "crew": "sparkles",
+        "delegated_work": "clock.badge.checkmark",
         // A code mark rather than Apple's colored Terminal app icon, which stands out
         // against the monochrome symbols in the tool line.
         "shell_command": "chevron.left.forwardslash.chevron.right",
@@ -90,6 +92,8 @@ enum ToolIcons {
         "job_status": "Job status",
         "job_kill": "Stopped job",
         "task": "Task",
+        "crew": "Crew",
+        "delegated_work": "Delegated work",
         "todo": "Plan",
         "send_file": "Sent file",
         "panel": "Panel",

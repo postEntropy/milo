@@ -68,18 +68,14 @@ describe('task tool', () => {
     expect(result.content).toBe('the report')
   })
 
-  it('is offered, but the description tells the model to delegate only on request', async () => {
-    // The description is the whole mechanism: the model reads it in the tool
-    // list every turn, so this is what keeps it from delegating on its own.
-    expect(taskTool.description).toContain('only when the user has explicitly asked')
-    expect(taskTool.description).toContain('do not delegate on your own initiative')
+  it('lets the agent choose whether delegation helps', async () => {
+    expect(taskTool.description).toContain('when that helps')
+    expect(taskTool.description).toContain('short name')
   })
 
-  it('lets a project turn delegate on its own, with the same confirmations', () => {
-    expect(taskDescription(true)).toContain('on your own initiative')
-    expect(taskDescription(true)).not.toContain('do not delegate on your own initiative')
+  it('offers delegation on every surface with the same confirmations', () => {
     expect(taskDescription(true)).toContain('put to the user the same way')
-    expect(taskDescription(false)).toContain('do not delegate on your own initiative')
+    expect(taskDescription(false)).toEqual(taskDescription(true))
   })
 
   it('never asks on its own, but deny still blocks it', async () => {

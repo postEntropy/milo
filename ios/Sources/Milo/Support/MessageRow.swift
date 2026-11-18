@@ -799,9 +799,13 @@ struct ToolRow: View {
             // The mark is the state: quiet at rest, accent for the call running now, red
             // on a failure — and the word beside it says the failure for whoever cannot
             // see the colour.
-            Image(systemName: ToolIcons.symbol(tool.name))
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(state)
+            if let botAvatar = taskBotAvatar {
+                CrewBotAvatar(avatar: botAvatar, state: tool.state, size: 18)
+            } else {
+                Image(systemName: ToolIcons.symbol(tool.name))
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundStyle(state)
+            }
             // A call in flight is one swept line — the name and its value as the server
             // drew them, lit together, which is the browser's own treatment. Settled, the
             // whole line is drawn in the quiet tone, the mark being what carries the
@@ -920,6 +924,20 @@ struct ToolRow: View {
     }
 
     private var isShellCommand: Bool { tool.name == "shell_command" }
+
+    private var taskBotAvatar: CrewAvatarModel? {
+        guard tool.name == "task" else { return nil }
+        if let result = tool.result, result.hasPrefix("Crew bot "),
+           let openParen = result.firstIndex(of: "("),
+           let closeParen = result[openParen...].firstIndex(of: ")") {
+            let botName = String(result[result.index(result.startIndex, offsetBy: 9)..<openParen]).trimmingCharacters(in: .whitespaces)
+            let botId = String(result[result.index(after: openParen)..<closeParen]).trimmingCharacters(in: .whitespaces)
+            if !botName.isEmpty { return .fromSeed(id: botId.isEmpty ? botName : botId, name: botName) }
+        }
+        let stripped = tool.text.replacingOccurrences(of: "^Task\\s+", with: "", options: .regularExpression)
+        let botName = stripped.components(separatedBy: " · ").first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return botName.isEmpty ? nil : .fromSeed(id: botName, name: botName)
+    }
 
     /// Whether there is anything under the call to open: the lines it changed, or what it
     /// came back with. A call that wrote draws the change, because the sentence the tool

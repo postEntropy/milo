@@ -54,11 +54,21 @@ afterEach(() => {
 })
 
 describe('the mail_labels tool', () => {
-  it('is internal — a label is Milo’s own state, so it never asks', () => {
+  it('asks before sorting or changing labels while allowing the label list to be read', () => {
     const tools = createMailLabelTools({ account, classifier: null })
     expect(tools.map((tool) => tool.name)).toEqual(['mail_labels'])
-    expect(tools[0]!.internal).toBe(true)
+    expect(tools[0]!.internal).toBeUndefined()
     expect(tools[0]!.readOnly).toBeUndefined()
+    expect(tools[0]!.requiresConfirmation?.({ action: 'create', name: 'Invoices', color: 'teal' })).toBe(true)
+    expect(tools[0]!.requiresConfirmation?.({ action: 'list' })).toBe(false)
+    expect(tools[0]!.requiresConfirmation?.({ action: 'messages', label: 'Invoices' })).toBe(true)
+  })
+
+  it('requires a connected account to manage labels', async () => {
+    const [tool] = createMailLabelTools({ account: null, classifier: null })
+    const result = await tool!.execute({ action: 'list' }, {} as never)
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('not connected')
   })
 
   it('creates a label, lists it, and drops it by name', async () => {

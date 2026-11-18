@@ -90,6 +90,8 @@ struct ChatView: View {
     @State private var taskPage = false
     @State private var analytics = false
     @State private var analyticsPage = false
+    @State private var crew = false
+    @State private var crewPage = false
     /// The composer's panel, when one is open — raised by the `+` or by a long press on the
     /// send control, drawn over the composer, dismissed by a tap anywhere but itself.
     @State private var menu: ComposerMenu?
@@ -309,7 +311,7 @@ struct ChatView: View {
                         .ignoresSafeArea()
                 }
                 .overlay(alignment: .top) {
-                    if !routines && !tasks && !analytics && !model.messages.isEmpty {
+                    if !routines && !tasks && !analytics && !crew && !model.messages.isEmpty {
                         GeometryReader { geometry in
                             StatusBarBlur()
                                 .mask {
@@ -561,6 +563,7 @@ struct ChatView: View {
                 tasksSelected = false
                 tasks = false
                 analytics = false
+                crew = false
                 routinesSelected = true
                 routines = true
             }
@@ -570,6 +573,7 @@ struct ChatView: View {
                 tasksSelected = false
                 tasks = false
                 analytics = false
+                crew = false
                 routinesSelected = true
                 routines = true
             }
@@ -597,6 +601,7 @@ struct ChatView: View {
             routinesSelected: routinesSelected,
             tasksSelected: tasksSelected,
             analyticsSelected: analytics,
+            crewSelected: crew,
             revealed: drawer,
             swiping: touching && held == true,
             onClose: closeDrawer,
@@ -606,6 +611,7 @@ struct ChatView: View {
             onRoutines: openRoutines,
             onTasks: openTasks,
             onAnalytics: openAnalytics,
+            onCrew: openCrew,
             onTraces: { session in
                 tracesTarget = SessionTracesTarget(id: session.id, title: session.label)
             }
@@ -632,6 +638,8 @@ struct ChatView: View {
         } else if analytics {
             AnalyticsView(account: account, pushed: $analyticsPage, onSessions: openDrawer)
                 .equatable()
+        } else if crew {
+            CrewView(account: account, pushed: $crewPage, onSessions: openDrawer)
         } else if tasks {
             TaskListsView(pushed: $taskPage, onSessions: openDrawer)
                 .equatable()
@@ -667,7 +675,7 @@ struct ChatView: View {
     /// Whether the thread is what the person is looking at: the chat's card is the one
     /// showing and the sessions are not over it. A reply that lands while this is false is
     /// unread — leaving the chat before the answer is what that means.
-    private var threadOnScreen: Bool { !routines && !tasks && !analytics && !settings && !drawer }
+    private var threadOnScreen: Bool { !routines && !tasks && !analytics && !crew && !settings && !drawer }
 
     /// How wide the panel comes out: most of the screen, because it carries reading matter
     /// rather than a list — and never all of it, so the chat it slid over stays the thing the
@@ -741,7 +749,7 @@ struct ChatView: View {
     private func claims(_ across: CGFloat, from start: CGPoint) -> Bool {
         if drawer || panelShown { return true }
         guard !sideways.frames.contains(where: { $0.contains(start) }) else { return false }
-        return across > 0 ? !((routines && routinePage) || (tasks && taskPage) || (analytics && analyticsPage)) : hasPanel
+        return across > 0 ? !((routines && routinePage) || (tasks && taskPage) || (analytics && analyticsPage) || (crew && crewPage)) : hasPanel
     }
 
     /// Where a drag that has just been let go leaves the card: past halfway, or flicked there,
@@ -773,7 +781,7 @@ struct ChatView: View {
     }
 
     /// Which of the three pages the drawer opens.
-    private enum Page { case routines, tasks, analytics }
+    private enum Page { case routines, tasks, analytics, crew }
 
     /// The drawer's actions, named rather than written inline: the drawer is a stack of
     /// arguments as it is, and the shell's body was one expression the type checker could
@@ -786,6 +794,7 @@ struct ChatView: View {
         tasksSelected = false
         tasks = false
         analytics = false
+        crew = false
         Task { @MainActor in
             drawer = false
         }
@@ -800,6 +809,7 @@ struct ChatView: View {
         tasksSelected = false
         tasks = false
         analytics = false
+        crew = false
         // The drawer leaves in the tap's own update, as the Work side's control does, so the
         // card is already coming back when the field takes the cursor.
         drawer = false
@@ -817,6 +827,7 @@ struct ChatView: View {
         routinesSelected = false
         tasks = false
         analytics = false
+        crew = false
         tasksSelected = false
         drawer = false
         starting = true
@@ -833,12 +844,14 @@ struct ChatView: View {
         tasksSelected = false
         tasks = false
         analytics = false
+        crew = false
         settings = true
     }
 
     private func openRoutines() { openPage(.routines) }
     private func openTasks() { openPage(.tasks) }
     private func openAnalytics() { openPage(.analytics) }
+    private func openCrew() { openPage(.crew) }
     /// Coming out of the drawer onto a page: the page takes its place on the card first while
     /// `drawer` is still up (`rest` unchanged, so no animation transaction runs on the swap),
     /// and the next turn closes `drawer` so `.animation(reduceMotion ? nil : Self.lidMove, value: rest)` slides the
@@ -851,6 +864,7 @@ struct ChatView: View {
         tasksSelected = page == .tasks
         tasks = page == .tasks
         analytics = page == .analytics
+        crew = page == .crew
         Task { @MainActor in
             drawer = false
         }

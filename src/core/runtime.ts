@@ -14,6 +14,8 @@ import type { ModelProfile } from './providers/profile.js'
 import type { Skill, SkillLibrary } from './skills/index.js'
 import type { PermissionPolicy } from './tools/index.js'
 import type { RoutineStore, ToolRegistry } from './tools/index.js'
+import type { CrewStore } from './crew.js'
+import type { DelegatedWorkStore } from './delegated-work.js'
 import { ROUTINE_GATEWAY } from './routines.js'
 import { addProject, placeProject, withProjectPlacement as lockProjectPlacement, type Project, type ProjectLookup, type ProjectPlacement } from './projects.js'
 import type { VerificationResult } from './verification.js'
@@ -50,6 +52,7 @@ export interface RuntimeOptions {
    * for. Absent on a runtime holding a fixed provider: a test, a script.
    */
   providerFor?: (model: string) => Provider
+  providerForBot?: (provider: string, model: string) => Provider | undefined
   /**
    * The install's providers, so the runtime can move between them live. `use`
    * makes `id` the one later models resolve against (resolved from disk at that
@@ -126,6 +129,8 @@ export interface RuntimeOptions {
    * cleanly.
    */
   routine?: RoutineStore
+  crew?: CrewStore
+  delegatedWork?: DelegatedWorkStore
   /**
    * What is known about a model — its window, output ceiling and reasoning mode —
    * for the compaction ceiling and the request's own limits.
@@ -170,6 +175,7 @@ const DEFAULT_MAX_CACHED_SESSIONS = 16
 export interface NewSessionOptions {
   /** Tools the run may use with nobody to ask — a routine's standing grants. */
   grantedTools?: string[]
+  strictGrants?: boolean
   /** The chat its turns may send files to — a routine's own target. */
   deliverTo?: { gateway: string; chatId: string }
   /**
@@ -595,6 +601,14 @@ export class AgentRuntime {
     return this.options.jobs ?? null
   }
 
+  get crew(): CrewStore | undefined {
+    return this.options.crew
+  }
+
+  get delegatedWork(): DelegatedWorkStore | undefined {
+    return this.options.delegatedWork
+  }
+
   /** The skills on this install, for `/skills`. */
   get skills(): Skill[] {
     return this.options.skills?.list() ?? []
@@ -826,6 +840,7 @@ export class AgentRuntime {
       provider: this.options.provider,
       commandCode: this.options.commandCode,
       providerFor: this.options.providerFor,
+      providerForBot: this.options.providerForBot,
       mediaModels: this.options.mediaModels,
       model: this.options.model,
       system: this.options.system,
@@ -862,6 +877,7 @@ export class AgentRuntime {
       derive: this.options.derive,
       permissionPolicy: this.options.permissionPolicy,
       grantedTools: options?.grantedTools,
+      strictGrants: options?.strictGrants,
       deliverTo: options?.deliverTo,
       record,
       store: this.store,
@@ -870,6 +886,8 @@ export class AgentRuntime {
       history: this.options.history,
       traces: this.options.traces,
       routine: this.options.routine,
+      crew: this.options.crew,
+      delegatedWork: this.options.delegatedWork,
       // The same list and drop the `/sessions` surface reads, so the agent's view
       // of the install's sessions cannot drift from the person's: one
       // implementation per behaviour. `listSessions` already hides routine runs,

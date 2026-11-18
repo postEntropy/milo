@@ -1,0 +1,122 @@
+import { COLOR_PALETTE_IDS, type ColorPaletteId } from './color-palettes.js'
+
+export const CREW_AVATAR_SHAPES = ['orb', 'pebble', 'capsule', 'droplet', 'puff', 'gem', 'dome', 'star'] as const
+export const CREW_AVATAR_EYES = ['capsule', 'happy', 'curious', 'visor', 'wink', 'spark'] as const
+export const CREW_AVATAR_ACCESSORIES = ['none', 'antenna', 'sprout', 'glasses', 'headphones', 'crown'] as const
+
+export type CrewAvatarShape = (typeof CREW_AVATAR_SHAPES)[number]
+export type CrewAvatarEyes = (typeof CREW_AVATAR_EYES)[number]
+export type CrewAvatarAccessory = (typeof CREW_AVATAR_ACCESSORIES)[number]
+
+export interface CrewAvatar {
+  shape: CrewAvatarShape
+  eyes: CrewAvatarEyes
+  accessory: CrewAvatarAccessory
+  palette: ColorPaletteId
+}
+
+function hashSeed(seed: string): number {
+  let h = 2166136261
+  for (let i = 0; i < seed.length; i += 1) {
+    h ^= seed.charCodeAt(i)
+    h = Math.imul(h, 16777619)
+  }
+  return h >>> 0
+}
+
+/** Deterministic Dot/Grok-style companion traits derived from a bot's identity. */
+export function defaultBotAvatar(id: string, name = ''): CrewAvatar {
+  const h1 = hashSeed(`${id}:${name}`)
+  const h2 = hashSeed(`${name}:${id}:eyes`)
+  const h3 = hashSeed(`${id}:acc:${name}`)
+  const h4 = hashSeed(`${name}:pal:${id}`)
+  return {
+    shape: CREW_AVATAR_SHAPES[h1 % CREW_AVATAR_SHAPES.length]!,
+    eyes: CREW_AVATAR_EYES[h2 % CREW_AVATAR_EYES.length]!,
+    accessory: CREW_AVATAR_ACCESSORIES[h3 % CREW_AVATAR_ACCESSORIES.length]!,
+    palette: COLOR_PALETTE_IDS[h4 % COLOR_PALETTE_IDS.length]!,
+  }
+}
+
+const EYE_GLYPHS: Record<CrewAvatarEyes, string> = {
+  capsule: '▮▮',
+  happy: '^^',
+  curious: 'oO',
+  visor: '▬▬',
+  wink: '-•',
+  spark: '✦✦',
+}
+
+/** Compact text badge for terminal and chat gateways. */
+export function formatBotAvatarBadge(avatar: CrewAvatar): string {
+  return `[${EYE_GLYPHS[avatar.eyes]} ${avatar.palette} ${avatar.shape}${avatar.accessory !== 'none' ? ` + ${avatar.accessory}` : ''}]`
+}
+
+export interface ToolBotPreview {
+  id: string
+  name: string
+  task?: string
+  mission?: string
+  model?: string
+  report?: string
+  avatar: CrewAvatar
+}
+
+function readInputField(input: string | null | undefined, key: string): string | undefined {
+  if (!input) return undefined
+  const match = new RegExp(`^${key}:\\s*(.+)$`, 'm').exec(input)
+  return match?.[1]?.trim() || undefined
+}
+
+/** Extracts a Crew bot identity and avatar from a `task` tool call for organic inline display. */
+export function extractToolBot(tool: {
+  name: string
+  text?: string
+  input?: string | null
+  result?: string | null
+}): ToolBotPreview | null {
+  if (tool.name !== 'task') return null
+  const resultMatch = tool.result ? /^Crew bot (.+?) \(([^)\n]+)\):\n([\s\S]*)$/.exec(tool.result) : null
+  const stoppedMatch = !resultMatch && tool.result ? /^Crew bot (.+?) was stopped\.?(?:\s*Partial report:\n([\s\S]*))?$/.exec(tool.result) : null
+  const inputName = readInputField(tool.input, 'name')
+  const inputBotId = readInputField(tool.input, 'botId')
+  const inputDesc = readInputField(tool.input, 'description')
+  const inputModel = readInputField(tool.input, 'model')
+  const inputProvider = readInputField(tool.input, 'provider')
+
+  const strippedText = tool.text?.replace(/^Task\s+/i, '').trim() ?? ''
+  const [textFirst, ...textRest] = strippedText.split(' · ')
+  const name = (
+    resultMatch?.[1] ??
+    stoppedMatch?.[1] ??
+    inputName ??
+    (textRest.length > 0 ? textFirst : undefined) ??
+    inputDesc ??
+    strippedText
+  )?.trim()
+
+  if (!name) return null
+  const id = (resultMatch?.[2] ?? inputBotId ?? name).trim()
+  const task = (inputDesc ?? (textRest.length > 0 ? textRest.join(' · ') : strippedText)).trim() || undefined
+  const model = inputModel ? (inputProvider ? `${inputProvider}/${inputModel}` : inputModel) : undefined
+  const report = (resultMatch?.[3] ?? stoppedMatch?.[2] ?? tool.result ?? '')?.trim() || undefined
+
+  let mission: string | undefined
+  if (tool.input) {
+    const promptMatch = /^prompt:\n?([\s\S]*)$/m.exec(tool.input)
+    if (promptMatch?.[1]) {
+      mission = promptMatch[1].replace(/^ {2}/gm, '').trim()
+    }
+  }
+
+  return {
+    id,
+    name,
+    task: task && task !== name ? task : undefined,
+    mission,
+    model,
+    report,
+    avatar: defaultBotAvatar(id, name),
+  }
+}
+

@@ -21,13 +21,15 @@ import { DEFAULT_REASONING_EFFORT, type Message, type Provider, type ReasoningEf
 import type { ModelProfile } from './providers/profile.js'
 import type { PermissionAsker, PermissionPolicy, RoutineStore, SendFileFn, SessionAdmin, ToolEffect, ToolRegistry } from './tools/index.js'
 import type { JobManager } from './jobs/index.js'
-import { approvalKey, approvalScope, isPlanTool, withApprovals, withGrants, withPlan } from './tools/index.js'
+import { approvalKey, approvalScope, DefaultPermissionPolicy, isPlanTool, withApprovals, withDelegatedGrants, withGrants, withPlan } from './tools/index.js'
 import { taskDescription } from './tools/task.js'
 import type { AgentEvent } from './agent/events.js'
 import { runAgent, type RunTrace } from './agent/loop.js'
 import type { TraceWriter } from './traces.js'
 import { withTraceContext } from './trace-context.js'
 import { runSubagent } from './agent/subagent.js'
+import type { CrewStore } from './crew.js'
+import type { DelegatedWorkStore } from './delegated-work.js'
 import { buildSystemPrompt, type PanelFacts, type SurfaceKind, type SystemPromptInput } from './agent/system.js'
 import { extractProjectMentions, type Project, type ProjectPlacement } from './projects.js'
 import { verificationText, type VerificationResult } from './verification.js'
@@ -147,6 +149,7 @@ export interface SessionOptions {
   scope: MemoryScope
   provider: Provider
   providerFor?: (model: string) => Provider
+  providerForBot?: (provider: string, model: string) => Provider | undefined
   mediaModels?: MediaModelsConfig
   model: string
   system: string
@@ -217,6 +220,8 @@ export interface SessionOptions {
    * one, so it cannot make, change or drop another.
    */
   routine?: RoutineStore
+  crew?: CrewStore
+  delegatedWork?: DelegatedWorkStore
   /**
    * The install's session list, for a turn that may read it and prune it. Absent
    * on a bare test session; a routine's own run and a surface that pools several
@@ -237,6 +242,7 @@ export interface SessionOptions {
    * session only, and only where the rules do not bar the act anyway.
    */
   grantedTools?: string[]
+  strictGrants?: boolean
   /**
    * What is known about a model: its window, output ceiling and whether it
    * reasons. Swapped in tests, so a test never has to reach the network to know
@@ -941,13 +947,16 @@ export class Session {
             remove: (id) => adminSource.remove(id),
           }
         : undefined
-    // The catalog is what the model reads, so the one rule that depends on where
-    // the turn works is said there: in a project, delegation is the model's call.
+    // A shared chat must not expose assignments from the install's other sessions.
+    const crew = opts?.sessionsAllowed === false ? undefined : this.options.crew
+    const delegatedWork = opts?.sessionsAllowed === false || this.scope.gateway === ROUTINE_GATEWAY ? undefined : this.options.delegatedWork
     const inProject = turnProject?.ok === true
     const tools = registry.specs().filter((tool) => tool.name !== 'send_file' || canSendFiles)
       .filter((tool) => tool.name !== 'panel' || canPanel(surface))
       .filter((tool) => tool.name !== 'read_attachment' || Boolean(this.record.attachments?.length || opts?.documents?.length || opts?.images?.some((image) => !image.derivedFromDocument)))
       .filter((tool) => tool.name !== 'sessions' || sessionAdmin !== undefined)
+      .filter((tool) => tool.name !== 'crew' || crew !== undefined)
+      .filter((tool) => tool.name !== 'delegated_work' || delegatedWork !== undefined)
       // A planning turn may read, keep Milo's own state, or delegate; it may not
       // write, run a command, commit, send a file, or prune the install's sessions.
       .filter((tool) => !plan || isPlanTool(registry.get(tool.name)))
@@ -1073,8 +1082,11 @@ export class Session {
     // the policy refuses one that reaches the gate anyway — a subagent's own call,
     // a tool from a source that filtered nothing. The grant is layered first so a
     // standing grant cannot widen a planning turn.
-    const granted = permissionPolicy
-      ? withGrants(permissionPolicy, this.options.grantedTools ?? [], cwd)
+    const basePolicy = permissionPolicy ?? (this.options.strictGrants ? new DefaultPermissionPolicy() : undefined)
+    const granted = basePolicy
+      ? this.options.strictGrants
+        ? withDelegatedGrants(basePolicy, this.options.grantedTools ?? [], cwd)
+        : withGrants(basePolicy, this.options.grantedTools ?? [], cwd)
       : undefined
     const shaped = granted ? (plan ? withPlan(granted) : granted) : undefined
     // What this conversation already said "Always" to, and what it says during
@@ -1188,6 +1200,17 @@ export class Session {
           recall,
           origin,
           sessionId: this.id,
+          crew,
+          delegatedWork,
+          projectId: turnProject?.ok ? turnProject.project.id : undefined,
+          resolveProjectPath: this.options.resolveFolder
+            ? (id) => {
+                const resolved = this.options.resolveFolder!(id)
+                return resolved.project?.ok ? resolved.project.project.path : undefined
+              }
+            : undefined,
+          standingGrants: this.scope.gateway === ROUTINE_GATEWAY ? this.options.grantedTools : undefined,
+          availableTools: registry.specs().map((tool) => tool.name),
           routine,
           sessionAdmin,
           sendFile,
@@ -1195,10 +1218,56 @@ export class Session {
           // A subtask runs in its own context, but under this turn's model,
           // tools, permissions and stop: the same `ask` puts the subagent's
           // confirmations to the user, and the same signal stops both.
-          task: (input) =>
-            runSubagent({
-              provider,
-              model,
+          task: async (input) => {
+            if (input.botId && !crew) {
+              return { content: 'Crew is not available in this session.', isError: true }
+            }
+            const botModel = input.model?.trim() || model
+            if (input.provider && !input.model?.trim()) return { content: 'Choose a model id for the requested provider.', isError: true }
+            if (!input.provider && botModel !== model && !this.options.providerFor) {
+              return { content: 'A different model is not available in this session.', isError: true }
+            }
+            const botProvider = input.provider
+              ? this.options.providerForBot?.(input.provider, botModel)
+              : botModel === model ? provider : this.options.providerFor!(botModel)
+            if (!botProvider) return { content: `Provider "${input.provider}" is not configured.`, isError: true }
+            const botProfile = botModel === model ? profile : await this.options.modelProfile?.(botModel)
+            const botMaxTokens = botProfile?.maxOutput ?? this.options.maxTokens
+            const botEffort = botProfile?.reasoning === false
+              ? undefined
+              : this.options.reasoningEffort?.() ?? DEFAULT_REASONING_EFFORT
+            const entry = crew
+              ? await crew.start({ name: input.name?.trim() || input.description, mission: input.prompt, model: botModel, provider: botProvider.id, sessionId: this.id, botId: input.botId })
+              : undefined
+            const botStop = new AbortController()
+            const botSteering: string[] = []
+            const queuedGuidance: string[] = []
+            const seenGuidance = new Set<string>()
+            const appliedGuidance: string[] = []
+            let watchFailure: string | undefined
+            const watch = entry ? setInterval(() => {
+              try {
+                const assignment = crew!.list().find((bot) => bot.id === entry.bot.id)?.assignments.find((item) => item.id === entry.assignment.id)
+                if (!assignment) throw new Error('The bot assignment disappeared.')
+                if (assignment.stopRequestedAt) botStop.abort()
+                for (const guidance of assignment.guidance ?? []) {
+                  if (seenGuidance.has(guidance.id)) continue
+                  seenGuidance.add(guidance.id)
+                  queuedGuidance.push(guidance.id)
+                  botSteering.push(guidance.text)
+                }
+              } catch (error) {
+                watchFailure = errorMessage(error)
+                botStop.abort()
+              }
+            }, 250) : undefined
+            watch?.unref?.()
+            const botSignal = AbortSignal.any([abort, botStop.signal])
+            let result: Awaited<ReturnType<typeof runSubagent>>
+            try {
+              result = await runSubagent({
+              provider: botProvider,
+              model: botModel,
               registry,
               cwd,
               skills: this.options.skills?.(),
@@ -1217,7 +1286,9 @@ export class Session {
               browser: this.browserFacts(),
               mcp: this.mcpFacts(),
               google: this.options.google ?? null,
-              signal: abort,
+              signal: botSignal,
+              steering: botSteering,
+              onSteer: () => { const id = queuedGuidance.shift(); if (id) appliedGuidance.push(id) },
               // The subtask is planning too: its catalog drops the writes, and the
               // permission it inherits refuses one that is still called.
               plan,
@@ -1226,13 +1297,31 @@ export class Session {
               // announced the same way: the subtask is not a second, silent writer.
               onSideEffect: sideEffect,
               maxSteps,
-              maxTokens,
+              maxTokens: botMaxTokens,
               temperature,
-              reasoningEffort: effort,
-              input,
-              context: { remember, memories, recall, origin, routine, sendFile, attachments: () => this.record.attachments ?? [], inspectAttachmentImage },
+              reasoningEffort: botEffort,
+              input: entry && input.botId
+                ? { ...input, prompt: `${input.prompt}\n\nPrevious reports from this bot:\n${entry.bot.assignments.slice(0, -1).filter((item) => item.report).map((item) => item.report).join('\n\n')}` }
+                : input,
+              context: { remember, memories, recall, origin, routine, sendFile, standingGrants: this.scope.gateway === ROUTINE_GATEWAY ? this.options.grantedTools : undefined, attachments: () => this.record.attachments ?? [], inspectAttachmentImage },
               trace: this.runTrace('task', turnId),
-            }),
+              })
+            } catch (error) {
+              if (entry) await crew!.finish(entry.bot.id, entry.assignment.id, botSignal.aborted ? 'interrupted' : 'failed', watchFailure ?? errorMessage(error), appliedGuidance)
+              if (watchFailure) throw new Error(`Could not monitor the bot: ${watchFailure}`)
+              if (botStop.signal.aborted && !abort.aborted) return { content: `Crew bot ${entry!.bot.name} was stopped.`, isError: true }
+              throw error
+            } finally {
+              if (watch) clearInterval(watch)
+            }
+            if (watchFailure) result = { content: `Could not monitor the bot: ${watchFailure}`, isError: true }
+            else if (botStop.signal.aborted) result = { content: `Crew bot ${entry!.bot.name} was stopped.`, isError: true }
+            if (entry) {
+              const state = await crew!.finish(entry.bot.id, entry.assignment.id, botSignal.aborted ? 'interrupted' : result.isError ? 'failed' : 'completed', result.content, appliedGuidance)
+              if (state === 'interrupted' && !result.isError) result = { content: `Crew bot ${entry.bot.name} was stopped. Partial report:\n${result.content}`, isError: true }
+            }
+            return entry ? { ...result, content: `Crew bot ${entry.bot.name} (${entry.bot.id}):\n${result.content}` } : result
+          },
         },
         maxSteps,
         maxTokens,

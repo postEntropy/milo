@@ -1,4 +1,5 @@
 import { Analytics } from './analytics/Analytics.js'
+import { Crew } from './crew/Crew.js'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api, uploadFile, withToken } from './lib/api.js'
 import { copyText } from './lib/clipboard.js'
@@ -58,10 +59,10 @@ type NewSessionContext = { project?: string; firstMessage?: string; plan?: boole
 /** A past turn the search box found, with the session it belongs to. */
 type HistoryHit = { session: string; at: string; kind: string; text: string }
 
-type View = 'chat' | 'settings' | 'routines' | 'tasks' | 'work' | 'email' | 'analytics'
+type View = 'chat' | 'settings' | 'routines' | 'tasks' | 'work' | 'email' | 'analytics' | 'crew'
 
 /** The address each screen lives at, so a link can be shared and Back works. */
-const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', tasks: '/tasks', work: '/work', email: '/email', analytics: '/analytics', settings: '/settings' }
+const VIEW_PATH: Record<View, string> = { chat: '/', routines: '/routines', tasks: '/tasks', work: '/work', email: '/email', analytics: '/analytics', crew: '/crew', settings: '/settings' }
 
 /** Which screen a path names; anything that is not one of them is the chat. */
 function viewFromPath(pathname: string): View {
@@ -1285,6 +1286,7 @@ export default function App() {
         </div>
         <div className="sidebar-pad">
           <button className={`sidebar-tab ${view === 'analytics' ? 'active' : ''}`} type="button" onClick={() => { setAnalyticsSession(null); setView(view === 'analytics' ? 'chat' : 'analytics'); setSidebarOpen(false) }}><Icon name="chart" size={18} /><span>Analytics</span></button>
+          <button className={`sidebar-tab ${view === 'crew' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'crew' ? 'chat' : 'crew'); setSidebarOpen(false) }}><Icon name="crew" size={18} /><span>Crew</span></button>
           <button className={`sidebar-tab ${view === 'routines' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'routines' ? 'chat' : 'routines'); setSidebarOpen(false) }}><Icon name="repeat" size={18} /><span>Routines</span></button>
           <button className={`sidebar-tab ${view === 'tasks' ? 'active' : ''}`} type="button" onClick={() => { setView(view === 'tasks' ? 'chat' : 'tasks'); setSidebarOpen(false) }}><Icon name="list-check" size={18} /><span>Task lists</span></button>
           <button className={`sidebar-tab ${view === 'email' ? 'active' : ''}`} type="button" onClick={() => { setEmailRoute(null); setView(view === 'email' ? 'chat' : 'email'); setSidebarOpen(false) }}><Icon name="mail" size={18} /><span>Email</span>{mailUnread !== null && mailUnread.count > 0 && <span className="sidebar-badge">{mailUnread.more ? `${mailUnread.count}+` : mailUnread.count}</span>}</button>
@@ -1327,6 +1329,8 @@ export default function App() {
         ? <Routines chatId={chatId} tick={routinesTick} chat={{ messages, thinking, busy, connection: connection.state, turnEnds, pendingPermission, send: askRoutine, decide }} />
         : view === 'analytics'
         ? <Analytics session={analyticsSession} onSessionChange={setAnalyticsSession} />
+        : view === 'crew'
+        ? <Crew />
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
         : view === 'chat'

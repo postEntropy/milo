@@ -7,6 +7,7 @@ struct SessionsDrawer: View, Equatable {
     let routinesSelected: Bool
     let tasksSelected: Bool
     let analyticsSelected: Bool
+    let crewSelected: Bool
     /// Which world the session in front belongs to: the card is a project's, or the chat is
     /// a session working in one. The list the drawer opens on follows it.
     /// Whether the drawer is uncovered, so the list starts on the world in front each time
@@ -20,12 +21,14 @@ struct SessionsDrawer: View, Equatable {
     let onRoutines: () -> Void
     let onTasks: () -> Void
     let onAnalytics: () -> Void
+    let onCrew: () -> Void
     let onTraces: (SessionSummary) -> Void
 
     nonisolated static func == (lhs: SessionsDrawer, rhs: SessionsDrawer) -> Bool {
         lhs.routinesSelected == rhs.routinesSelected
             && lhs.tasksSelected == rhs.tasksSelected
             && lhs.analyticsSelected == rhs.analyticsSelected
+            && lhs.crewSelected == rhs.crewSelected
             && lhs.revealed == rhs.revealed
             && lhs.swiping == rhs.swiping
     }
@@ -137,6 +140,7 @@ struct SessionsDrawer: View, Equatable {
             // inside the list the switch narrows.
             VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
                 pageTab("Analytics", symbol: "chart.bar", selected: analyticsSelected, action: onAnalytics)
+                pageTab("Crew", symbol: "crew", selected: crewSelected, action: onCrew)
                 pageTab("Routines", symbol: "clock", selected: routinesSelected, action: onRoutines)
                 pageTab("Task lists", symbol: "checklist", selected: tasksSelected, action: onTasks)
             }
@@ -226,10 +230,16 @@ struct SessionsDrawer: View, Equatable {
     private func pageTab(_ title: String, symbol: String, selected: Bool, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             HStack(spacing: MiloTheme.Space.two) {
-                Image(systemName: symbol)
-                    .font(MiloTheme.Text.body)
-                    .foregroundStyle(MiloTheme.foreground)
-                    .frame(width: MiloTheme.Space.six)
+                Group {
+                    if symbol == "crew" {
+                        CrewDrawerMark()
+                    } else {
+                        Image(systemName: symbol)
+                            .font(MiloTheme.Text.body)
+                    }
+                }
+                .foregroundStyle(MiloTheme.foreground)
+                .frame(width: MiloTheme.Space.six)
                 Text(title)
                     .font(MiloTheme.Text.body.weight(.medium))
                     .foregroundStyle(MiloTheme.foreground)
@@ -423,5 +433,33 @@ struct SessionsDrawer: View, Equatable {
             onTraces: { onTraces(session) }
         )
         .equatable()
+    }
+}
+
+private struct CrewDrawerMark: View {
+    var body: some View {
+        Canvas { context, size in
+            let s = min(size.width, size.height) / 24.0
+            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * s, y: y * s) }
+            func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect { CGRect(x: x * s, y: y * s, width: w * s, height: h * s) }
+
+            let head = Path(roundedRect: rect(4, 7, 16, 14), cornerSize: CGSize(width: 5.5 * s, height: 5.5 * s))
+            context.stroke(head, with: .foreground, style: StrokeStyle(lineWidth: 1.8 * s, lineCap: .round, lineJoin: .round))
+
+            var lines = Path()
+            lines.move(to: pt(12, 7))
+            lines.addLine(to: pt(12, 4))
+            lines.move(to: pt(2.5, 12.5))
+            lines.addLine(to: pt(2.5, 15.5))
+            lines.move(to: pt(21.5, 12.5))
+            lines.addLine(to: pt(21.5, 15.5))
+            context.stroke(lines, with: .foreground, style: StrokeStyle(lineWidth: 1.8 * s, lineCap: .round))
+
+            context.fill(Path(ellipseIn: rect(10.8, 1.8, 2.4, 2.4)), with: .foreground)
+            context.fill(Path(roundedRect: rect(8.3, 11.5, 2.4, 5), cornerSize: CGSize(width: 1.2 * s, height: 1.2 * s)), with: .foreground)
+            context.fill(Path(roundedRect: rect(13.3, 11.5, 2.4, 5), cornerSize: CGSize(width: 1.2 * s, height: 1.2 * s)), with: .foreground)
+        }
+        .frame(width: 18, height: 18)
+        .accessibilityHidden(true)
     }
 }

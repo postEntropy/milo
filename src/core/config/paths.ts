@@ -77,6 +77,10 @@ export const scratchDir = (): string =>
   path.join(os.tmpdir(), `milo-${process.getuid?.() ?? 'user'}`, 'scratch')
 /** The prompts Milo runs on a timer, one list for the whole install. */
 export const routinesFile = (): string => path.join(MILO_HOME, 'routines.json')
+/** The named assistants and their delegated assignments. */
+export const crewFile = (): string => path.join(MILO_HOME, 'crew.json')
+/** Delegated work and its execution history. */
+export const delegatedWorkFile = (): string => path.join(MILO_HOME, 'delegated-work.json')
 /** Named task lists shared by every session in this Milo install. */
 export const taskListsFile = (): string => path.join(MILO_HOME, 'task-lists.json')
 /**

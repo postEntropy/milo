@@ -24,6 +24,58 @@ import { TurnQueue } from '../src/gateways/turns.js'
 import type { MemoryItem } from '../src/core/memory/index.js'
 import type { JobInfo } from '../src/core/jobs/index.js'
 
+describe('/crew', () => {
+  it('lists bots and shows an assignment by its id', async () => {
+    const bots = [{ id: 'bot-1', name: 'Scout', createdAt: 1, assignments: [{ id: 'a', sessionId: 's', mission: 'Review', model: 'm', state: 'completed' as const, startedAt: 1, report: 'Done' }] }]
+    expect((await handleCommand('/crew', { crew: () => bots })).reply).toContain('Scout (bot-1)')
+    expect((await handleCommand('/crew bot-1', { crew: () => bots })).reply).toContain('Done')
+    expect((await handleCommand('/crew unknown', { crew: () => bots })).reply).toContain('No bot')
+  })
+
+  it('does not expose Crew when session access is locked', async () => {
+    const result = await handleCommand('/crew', { sessionLocked: 'Sessions are locked.', crew: () => { throw new Error('should not read') } })
+    expect(result.reply).toBe('Sessions are locked.')
+  })
+
+  it('renames a bot through /crew rename', async () => {
+    const renamed: Array<[string, string]> = []
+    const result = await handleCommand('/crew rename bot-1 Sage Prime', {
+      crew: () => [],
+      renameCrewBot: async (id, name) => {
+        renamed.push([id, name])
+        return { id, name, createdAt: 1, assignments: [] }
+      },
+    })
+    expect(renamed).toEqual([['bot-1', 'Sage Prime']])
+    expect(result.reply).toBe('Renamed bot bot-1 to Sage Prime.')
+    expect((await handleCommand('/crew rename bot-1', { crew: () => [], renameCrewBot: async () => { throw new Error('unused') } })).reply).toBe('Usage: /crew rename <id> <name>.')
+  })
+
+  it('shuffles or customizes a bot avatar through /crew avatar', async () => {
+    const updates: Array<[string, unknown]> = []
+    const shuffled = await handleCommand('/crew avatar bot-1 shuffle', {
+      crew: () => [],
+      updateCrewAvatar: async (id, patch) => {
+        updates.push([id, patch])
+        return { id, name: 'Scout', createdAt: 1, avatar: { shape: 'dome', eyes: 'visor', accessory: 'antenna', palette: 'mint' }, assignments: [] }
+      },
+    })
+    expect(updates).toEqual([['bot-1', 'shuffle']])
+    expect(shuffled.reply).toContain('Updated avatar for Scout')
+    expect(shuffled.reply).toContain('mint dome + antenna')
+
+    const custom = await handleCommand('/crew avatar bot-1 shape=orb eyes=happy palette=ocean', {
+      crew: () => [],
+      updateCrewAvatar: async (id, patch) => {
+        updates.push([id, patch])
+        return { id, name: 'Scout', createdAt: 1, avatar: { shape: 'orb', eyes: 'happy', accessory: 'none', palette: 'ocean' }, assignments: [] }
+      },
+    })
+    expect(updates[1]).toEqual(['bot-1', { shape: 'orb', eyes: 'happy', palette: 'ocean' }])
+    expect(custom.reply).toContain('ocean orb')
+  })
+})
+
 describe('/jobs', () => {
   const job = (over: Partial<JobInfo> = {}): JobInfo => ({
     id: 'job_1',

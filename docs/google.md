@@ -24,9 +24,9 @@ sending, needing the `compose` grant. `gmail_send` sends a message as the accoun
 person. `mail_labels` lists and edits Milo's own mail labels, which live in
 `~/.milo/labels.json`, are never written back to Gmail, and answer which messages carry one now. Email
 writes are a shared core capability: the web **Email** screen and the agent reach them through the same
-functions. The agent's `gmail_modify`, `gmail_draft` and `gmail_send` ask before acting and need their
-grant — `modify`, `compose` and `send` — and a routine that acts on mail with nobody there has to name
-the tool in `allow`, which is how "from now on, bin everything with label X" is made. Drive stays read-only. The scopes follow the level: `gmail.readonly` +
+functions. The agent's `gmail_modify`, `gmail_draft`, `gmail_send` and label edits ask before acting and need their
+grant — `modify`, `compose`, `send`, or the connected account for local labels. A routine that acts on mail with nobody there has to name
+the tool in `allow`, which is how "from now on, bin everything with label X" is made. Sending still asks for each message and cannot run unattended. Drive stays read-only. The scopes follow the level: `gmail.readonly` +
 `drive.readonly` are the base, and `gmail.modify`, `gmail.compose` and `gmail.send` are added as the
 level rises, never before. A Google Doc or Sheet comes back as exported text; a file Milo cannot read
 as text says so by type instead of pretending. `milo google status` names the tools a connection

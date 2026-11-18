@@ -1,4 +1,6 @@
 import { DEFAULT_SYSTEM_PROMPT } from './agent/system.js'
+import { CrewStore } from './crew.js'
+import { DelegatedWorkStore } from './delegated-work.js'
 import { BrowserSession } from './browser/index.js'
 import { chatGptModels } from './chatgpt/models.js'
 import { browserProfileDir, embedEngineDir, historyDir, memoryDir, recapsDir, sessionsDir, scratchDir, skillsDir } from './config/paths.js'
@@ -202,6 +204,10 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     // id, so a model switched later resolves a provider of its own instead of
     // keeping the wire of the one it replaced.
     providerFor: (model) => traced(createProvider(activeProvider, model, { onOutputCap: learnOutputCap(model) })),
+    providerForBot: (id, model) => {
+      const selected = resolveActive(id)
+      return selected && selected.apiKey !== undefined ? traced(createProvider(selected, model, { onOutputCap: learnOutputCap(model) })) : undefined
+    },
     providerSwitch: {
       use: (id) => {
         const next = resolveActive(id)
@@ -233,6 +239,8 @@ export function createRuntime(loaded: LoadedConfig, cwd: string): AgentRuntime {
     // The routine list the model reads and changes, backed by the install's file;
     // `milo serve` is what runs it.
     routine: routines,
+    crew: new CrewStore(),
+    delegatedWork: new DelegatedWorkStore(),
     skills,
     sessions: loaded.config.sessions,
     // Where a model's shape comes from: its window, output ceiling and reasoning

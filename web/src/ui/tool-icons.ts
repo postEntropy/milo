@@ -45,6 +45,8 @@ const TOOL_ICONS: Record<string, IconName> = {
   drive_search: 'drive',
   drive_read: 'drive',
   task: 'spark',
+  crew: 'crew',
+  delegated_work: 'crew',
   shell_command: 'terminal',
   browser_open: 'compass',
   browser_snapshot: 'eye',

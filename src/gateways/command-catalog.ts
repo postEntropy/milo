@@ -38,6 +38,8 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   { name: 'folder', usage: ' [path|none]', hint: 'choose or clear the working folder for this session' },
   { name: 'stats', hint: 'numbers for the current session' },
   { name: 'jobs', usage: ' [kill <id>]', hint: 'the background jobs, and how they are doing' },
+  { name: 'crew', usage: ' [id | rename <id> <name> | avatar <id> [shuffle] | stop <id> | guide <id> <text>]', hint: 'list, inspect, rename, customize, guide or stop a bot' },
+  { name: 'delegated', usage: ' [id | pause|resume|cancel <id>]', hint: 'inspect or control delegated work' },
   {
     name: 'compact',
     hint: 'fold the oldest turns into the summary now, instead of when the context fills up',

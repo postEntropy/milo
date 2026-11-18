@@ -81,6 +81,8 @@ export interface PermissionPolicy {
   readonly mode: PermissionMode
   setMode(mode: PermissionMode): void
   update(options: PermissionPolicyUpdate): void
+  /** Explicit denials remain binding on unattended delegated work in every mode. */
+  explicitlyDenies?(tool: Tool<unknown>, args: unknown, cwd: string): boolean
   /**
    * The answer for one call. `cwd` is the directory the call is being made from,
    * when the caller knows it: the same words mean a different thing under a
@@ -152,6 +154,12 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     if (options.allow) this.allow = new Set(options.allow)
     if (options.deny) this.deny = new Set(options.deny)
     if (typeof options.threshold === 'number') this.threshold = options.threshold
+  }
+
+  explicitlyDenies(tool: Tool<unknown>, args: unknown, cwd: string): boolean {
+    if (this.deny.has(tool.name)) return true
+    const command = extractCommandText(args)
+    return command ? matchingRule(this.rules(cwd), command)?.action === 'deny' : false
   }
 
   decide(
@@ -235,7 +243,7 @@ export function approvalKey(tool: string, args: unknown, cwd: string): string | 
 
   // Each mail action needs its own confirmation; an earlier message or recipient
   // is not an approval of a later one.
-  if (tool === 'gmail_send' || tool === 'gmail_modify' || tool === 'mail_labels') return null
+  if (tool === 'gmail_send' || tool === 'gmail_draft' || tool === 'gmail_modify' || tool === 'mail_labels' || tool === 'delegated_work') return null
 
   if (tool === 'shell_command') {
     const command = typeof record.command === 'string' ? record.command : ''
@@ -357,6 +365,26 @@ export function withGrants(
   }
 }
 
+/** Delegated work may act only with its own grants, even in unrestricted mode. */
+export function withDelegatedGrants(policy: PermissionPolicy, granted: string[], cwd: string): PermissionPolicy {
+  return {
+    get mode() { return policy.mode },
+    setMode: (mode) => policy.setMode(mode),
+    update: (options) => policy.update(options),
+    decide: async (tool, args, options) => {
+      const directory = options?.cwd ?? cwd
+      if (policy.explicitlyDenies?.(tool, args, directory)) return 'deny'
+      // Sending needs an action-specific approval with the recipient and body visible.
+      if (tool.name === 'gmail_send') return 'deny'
+      const decision = await policy.decide(tool, args, options)
+      if (decision === 'deny') return 'deny'
+      if (!actsOnSomething(tool, args)) return decision
+      if (!granted.includes(tool.name) || barredByRules(args, directory)) return 'deny'
+      return 'allow'
+    },
+  }
+}
+
 /**
  * Whether a planning turn may keep this tool: it reads, its effect stays inside
  * Milo's own state, or it delegates — and the subtask's own calls pass through the
@@ -399,6 +427,29 @@ export function withPlan(policy: PermissionPolicy): PermissionPolicy {
 export function summarizeToolCall(args: unknown, tool?: string): string {
   if (args && typeof args === 'object') {
     const record = args as Record<string, unknown>
+    if (tool === 'delegated_work') {
+      const action = typeof record.action === 'string' ? record.action : 'create'
+      const objective = typeof record.objective === 'string' ? record.objective : typeof record.currentObjective === 'string' ? record.currentObjective : ''
+      const grants = Array.isArray(record.allow) ? record.allow : Array.isArray(record.currentAllow) ? record.currentAllow : []
+      return [`${action === 'create' ? 'Create' : action === 'update' ? 'Update' : 'Resume'} delegated work${typeof record.name === 'string' ? `: ${record.name}` : ''}`,
+        objective ? `Objective: ${objective}` : '', `Unattended tools: ${grants.length ? grants.join(', ') : 'none'}`,
+        typeof record.every === 'string' ? `Every: ${record.every}` : '', typeof record.at === 'string' ? `At: ${record.at}` : '',
+        Array.isArray(record.days) ? `Days: ${record.days.join(', ')}` : '', Array.isArray(record.dayOfMonth) ? `Dates: ${record.dayOfMonth.join(', ')}` : '', Array.isArray(record.month) ? `Months: ${record.month.join(', ')}` : '',
+        record.once === true ? 'Runs once' : '', typeof record.destination === 'string' ? `Destination: ${record.destination}` : '', typeof record.folder === 'string' ? `Folder: ${record.folder}` : '',
+        record.currentSchedule ? `Current schedule: ${JSON.stringify(record.currentSchedule)}` : '',
+      ].filter(Boolean).join('\n')
+    }
+    if (tool === 'gmail_send' || tool === 'gmail_draft') {
+      const to = typeof record.to === 'string' ? record.to.trim() : ''
+      const subject = typeof record.subject === 'string' ? record.subject.trim() : ''
+      const body = typeof record.body === 'string' ? (tool === 'gmail_send' ? record.body : preview(record.body)) : ''
+      const verb = tool === 'gmail_draft' ? 'Draft mail to' : 'Send mail to'
+      return [`${verb} ${to}`, subject ? `Subject: ${subject}` : '', body].filter(Boolean).join('\n')
+    }
+    if (tool === 'gmail_modify' && typeof record.op === 'string' && typeof record.id === 'string') {
+      const verb: Record<string, string> = { archive: 'Archive', read: 'Mark read', unread: 'Mark unread', trash: 'Move to the bin' }
+      return `${verb[record.op] ?? record.op} message ${record.id}`
+    }
     if (typeof record.command === 'string') {
       const cwd = typeof record.cwd === 'string' ? record.cwd.trim() : ''
       return cwd ? `cd ${cwd} && ${record.command}` : record.command
@@ -440,15 +491,6 @@ export function summarizeToolCall(args: unknown, tool?: string): string {
         trash: 'Move to the bin',
       }
       return `${verb[record.op] ?? record.op} message ${record.id}`
-    }
-    // Mail written in the turn: who it goes to and what it says. A prompt that
-    // showed neither would be asking someone to approve a blank.
-    if (tool === 'gmail_send' || tool === 'gmail_draft') {
-      const to = typeof record.to === 'string' ? record.to.trim() : ''
-      const subject = typeof record.subject === 'string' ? record.subject.trim() : ''
-      const body = typeof record.body === 'string' ? preview(record.body) : ''
-      const verb = tool === 'gmail_draft' ? 'Draft mail to' : 'Send mail to'
-      return [`${verb} ${to}`, subject ? `Subject: ${subject}` : '', body].filter(Boolean).join('\n')
     }
     // A rule, and where it lands: the prompt carries it from the next turn on, in
     // every session of that scope — so the rule itself is what is being approved.

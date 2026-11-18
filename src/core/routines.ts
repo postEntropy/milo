@@ -652,6 +652,7 @@ const SILENT_RUN =
 export async function runRoutineOnce(
   runtime: AgentRuntime,
   routine: Routine,
+  options?: { signal?: AbortSignal; project?: string; strictGrants?: boolean },
 ): Promise<RoutineRunResult> {
   const session = await runtime.newSession(
     { gateway: ROUTINE_GATEWAY, chatId: routine.id },
@@ -662,6 +663,8 @@ export async function runRoutineOnce(
     // the destination named here is the run itself.
     {
       grantedTools: routine.allow,
+      strictGrants: options?.strictGrants,
+      project: options?.project,
       deliverTo: routine.target.gateway === 'none'
         ? { gateway: ROUTINE_GATEWAY, chatId: routine.id }
         : routine.target,
@@ -670,13 +673,14 @@ export async function runRoutineOnce(
   let answer = ''
   let failure: string | null = null
   const silent = routine.silent === true
-  for await (const event of session.send(routine.prompt, silent ? { aside: SILENT_RUN } : undefined)) {
+  for await (const event of session.send(routine.prompt, { signal: options?.signal, ...(silent ? { aside: SILENT_RUN } : {}) })) {
     if (event.type === 'text-delta') answer += event.delta
     else if (event.type === 'tool-start') {
       answer = closeParagraph(answer)
     }
     else if (event.type === 'error') failure = event.message
   }
+  if (options?.signal?.aborted && !failure) failure = 'The work was stopped.'
   // Read once the turn is done: the files it asked the surfaces to send, which
   // it collected rather than posted — a delivery takes the lease the turn holds.
   const files = session.takeOutgoing()

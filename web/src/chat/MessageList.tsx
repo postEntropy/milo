@@ -19,6 +19,8 @@ import { MiloMark } from '../ui/MiloMark.js'
 import { toolIconName } from '../ui/tool-icons.js'
 import { ImageViewer } from '../ui/ImageViewer.js'
 import { WaitLine } from '../ui/WaitLine.js'
+import { extractToolBot } from '../../../src/core/crew-avatars.js'
+import { BotAvatar } from '../crew/BotAvatar.js'
 import { defaultSuggestions, type Suggestion } from './suggestions.js'
 import type { ChatMessage } from './message.js'
 
@@ -57,10 +59,23 @@ function ToolLine({ tool }: { tool: ToolMark }) {
   const result = tool.result || null
   const hasDetail = change !== null || result !== null || !!tool.input
   const canOpen = hasDetail || tool.state === 'running'
+  const bot = extractToolBot(tool)
   const line = <code>
-    <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />{' '}
-    {toolName && <span className="tool-name">{toolName}</span>}
-    {value && <span className={sole ? 'tool-name tool-command' : 'tool-value'}>{value}</span>}
+    {bot
+      ? <BotAvatar avatar={bot.avatar} state={tool.state} size={20} className="tool-bot-avatar" />
+      : <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />}{' '}
+    {bot ? (
+      <>
+        <span className="tool-name">{bot.name}</span>
+        {(bot.task || value) && <span className="tool-value">{bot.task ?? value}</span>}
+        {bot.model && <span className="tool-bot-model">{bot.model}</span>}
+      </>
+    ) : (
+      <>
+        {toolName && <span className="tool-name">{toolName}</span>}
+        {value && <span className={sole ? 'tool-name tool-command' : 'tool-value'}>{value}</span>}
+      </>
+    )}
     {(totals.additions > 0 || totals.deletions > 0) && <span className="tool-change-count">
       {totals.additions > 0 && <span className="plus">+{totals.additions}</span>}
       {totals.deletions > 0 && <span className="minus">−{totals.deletions}</span>}
@@ -92,9 +107,23 @@ function ToolLine({ tool }: { tool: ToolMark }) {
           {copied === 'failed' && <span className="message-tool-label">Copy failed</span>}
         </button>
       </div>
-      {open && tool.input && <ToolResult text={tool.input} />}
+      {open && bot && (
+        <div className="tool-result tool-bot-detail">
+          <div className="tool-bot-detail-head">
+            <BotAvatar avatar={bot.avatar} state={tool.state} size={32} />
+            <div className="tool-bot-detail-meta">
+              <strong>{bot.name}</strong>
+              {bot.model && <span>{bot.model}</span>}
+            </div>
+          </div>
+          {bot.mission && <pre className="tool-result-body">{bot.mission}</pre>}
+          {bot.report && <pre className="tool-result-body">{bot.report}</pre>}
+          {!bot.mission && !bot.report && tool.input && <pre className="tool-result-body">{tool.input}</pre>}
+        </div>
+      )}
+      {open && !bot && tool.input && <ToolResult text={tool.input} />}
       {open && change && <ToolChange files={change} />}
-      {open && !change && result && <ToolResult text={result} />}
+      {open && !bot && !change && result && <ToolResult text={result} />}
       {open && !hasDetail && <div className="tool-result tool-running" role="status">{tool.state === 'running' ? 'Tool is still running.' : 'No output is available.'}</div>}
     </div>
   )

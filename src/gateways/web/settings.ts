@@ -76,6 +76,7 @@ import type { RegisterFile } from './transcript.js'
 import { WebEmailSettings } from './settings/email.js'
 import { WebWorkSettings } from './settings/work.js'
 import { WebRoutineSettings } from './settings/routines.js'
+import { describeWhen, parseWhen } from '../../core/routines.js'
 import { optionalText, sessionId } from './settings/input.js'
 import { listCommandCodeModels } from '../../core/command-code-models.js'
 
@@ -158,6 +159,61 @@ export class WebSettings {
       case 'analytics-detail': return analyticsDetail(typeof body.id === 'string' ? body.id : '')
       case 'session-traces': return sessionTraces(typeof body.session === 'string' ? body.session : '')
       case 'routines': return this.routines.listRoutines()
+      case 'crew': {
+        if (!this.runtime.crew) throw new Error('Crew is not available.')
+        return this.runtime.crew.list()
+      }
+      case 'crew-rename': {
+        if (typeof body.id !== 'string' || typeof body.name !== 'string') throw new Error('Enter a bot id and name.')
+        if (!this.runtime.crew) throw new Error('Crew is not available.')
+        return this.runtime.crew.rename(body.id, body.name)
+      }
+      case 'crew-avatar': {
+        if (typeof body.id !== 'string') throw new Error('Enter a bot id.')
+        if (!this.runtime.crew) throw new Error('Crew is not available.')
+        if (body.shuffle === true) return this.runtime.crew.updateAvatar(body.id, 'shuffle')
+        return this.runtime.crew.updateAvatar(body.id, {
+          ...(typeof body.shape === 'string' ? { shape: body.shape as never } : {}),
+          ...(typeof body.eyes === 'string' ? { eyes: body.eyes as never } : {}),
+          ...(typeof body.accessory === 'string' ? { accessory: body.accessory as never } : {}),
+          ...(typeof body.palette === 'string' ? { palette: body.palette as never } : {}),
+        })
+      }
+      case 'crew-stop': {
+        if (typeof body.id !== 'string') throw new Error('Enter a bot id.')
+        if (!this.runtime.crew) throw new Error('Crew is not available.')
+        await this.runtime.crew.stop(body.id)
+        return { requested: true }
+      }
+      case 'crew-guide': {
+        if (typeof body.id !== 'string' || typeof body.text !== 'string') throw new Error('Enter a bot id and guidance.')
+        if (!this.runtime.crew) throw new Error('Crew is not available.')
+        await this.runtime.crew.guide(body.id, body.text)
+        return { queued: true }
+      }
+      case 'delegated-work': {
+        if (!this.runtime.delegatedWork) throw new Error('Delegated work is not available.')
+        return this.runtime.delegatedWork.list().map((work) => ({ ...work, scheduleLabel: work.schedule ? describeWhen(work.schedule) : 'Runs once' }))
+      }
+      case 'delegated-work-control': {
+        if (typeof body.id !== 'string' || (body.action !== 'pause' && body.action !== 'resume' && body.action !== 'cancel')) throw new Error('Provide a work id and choose pause, resume or cancel.')
+        if (!this.runtime.delegatedWork) throw new Error('Delegated work is not available.')
+        return this.runtime.delegatedWork.control(body.id, body.action)
+      }
+      case 'delegated-work-edit': {
+        if (typeof body.id !== 'string') throw new Error('Enter a work id.')
+        if (!this.runtime.delegatedWork) throw new Error('Delegated work is not available.')
+        if (body.objective !== undefined && typeof body.objective !== 'string') throw new Error('Enter an objective.')
+        if (body.every !== undefined && typeof body.every !== 'string') throw new Error('Enter an interval.')
+        if (body.at !== undefined && typeof body.at !== 'string') throw new Error('Enter a time.')
+        if (body.once !== undefined && typeof body.once !== 'boolean') throw new Error('Choose whether the work runs once.')
+        const scheduled = body.every !== undefined || body.at !== undefined
+        if (body.once === true && scheduled) throw new Error('Choose a schedule or one-time work, not both.')
+        const schedule = scheduled ? parseWhen({ every: body.every as string | undefined, at: body.at as string | undefined }) : undefined
+        if (scheduled && !schedule) throw new Error('Choose a valid interval or local time.')
+        if (body.objective === undefined && !scheduled && body.once !== true) throw new Error('Enter an objective or schedule.')
+        return this.runtime.delegatedWork.edit(body.id, { objective: body.objective as string | undefined, schedule: body.once === true ? null : schedule ?? undefined })
+      }
       case 'task-lists': return readTaskLists()
       case 'task-list-action': return this.taskListAction(body)
       case 'projects': return this.work.projects()

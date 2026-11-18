@@ -2,6 +2,10 @@ import { z } from 'zod'
 import type { Tool } from './types.js'
 
 const schema = z.object({
+  name: z.string().min(1).optional().describe('A short name for the bot. Give a name when creating a Crew bot.'),
+  botId: z.string().optional().describe('The id of an existing bot to reuse for this assignment.'),
+  model: z.string().min(1).optional().describe('A model id available from the chosen provider. Omit to use the current model; do not guess a model id.'),
+  provider: z.string().min(1).optional().describe('An already configured provider id. Supply its model id too; omit both to use the current provider and model.'),
   description: z
     .string()
     .describe('A short label (a few words) naming the subtask, shown on its activity line.'),
@@ -21,10 +25,9 @@ export type TaskArgs = z.infer<typeof schema>
  * catalog carries is where the two differ.
  */
 const TASK_DESCRIPTION =
-  'Delegate a subtask to a subagent that runs in its own context and returns only its final report — for a broad search, a read through many files, or a long investigation, whose intermediate steps would otherwise crowd this session. Use it only when the user has explicitly asked for a subagent or for the work to be delegated; do not delegate on your own initiative — do the work yourself with the tools you already have. The subagent does not see this session and cannot ask questions, so the prompt must stand on its own. It runs the same tools you do, though it cannot delegate again, and anything it needs confirmed is put to the user the same way yours would be.'
+  'Delegate a self-contained subtask to a Crew bot when that helps the work, or do it yourself when delegation would not help. Give the bot a short name and a complete mission: it has its own context and cannot see this session. To choose a different model or provider, first discover the available ids with the crew tool. It returns a report, runs the same tools as you, cannot delegate again, and anything it needs confirmed is put to the user the same way yours would be.'
 
-const TASK_DESCRIPTION_IN_PROJECT =
-  'Delegate a subtask to a subagent that runs in its own context and returns only its final report — for a broad search, a read through many files, or a long investigation, whose intermediate steps would otherwise crowd this session. In a project, use it on your own initiative when the work is self-contained and reading it here would crowd this session; do not hand it a decision that needs this session. The subagent does not see this session and cannot ask questions, so the prompt must stand on its own. It runs the same tools you do, though it cannot delegate again, and anything it needs confirmed is put to the user the same way yours would be.'
+const TASK_DESCRIPTION_IN_PROJECT = TASK_DESCRIPTION
 
 /** The description the catalog carries: whether the turn works in a project changes it. */
 export function taskDescription(project: boolean): string {

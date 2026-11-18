@@ -60,6 +60,8 @@ const TOOLS: Record<string, { icon: string; label: string; brand?: ToolBrand }> 
   job_status: { icon: '📊', label: 'Job status' },
   job_kill: { icon: '🛑', label: 'Stopped job' },
   task: { icon: '🤖', label: 'Task' },
+  crew: { icon: '🤖', label: 'Crew' },
+  delegated_work: { icon: '⏱️', label: 'Delegated work' },
   todo: { icon: '🗒', label: 'Plan' },
   send_file: { icon: '📎', label: 'Sent file' },
   panel: { icon: '🪟', label: 'Panel' },
@@ -438,6 +440,9 @@ export function toolDetail(args: unknown): string {
   // whole instruction, and has no place on a one-line activity log); `url` and
   // `name` are the one interesting value of `fetch_url` and `read_skill`; `to` is
   // who mail is for, which is what a draft or a send line is about.
+  if (typeof record.name === 'string' && record.name.trim() && typeof record.description === 'string' && record.description.trim()) {
+    return gist(`${record.name.trim()} · ${record.description.trim()}`)
+  }
   for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name', 'to', 'app', 'message', 'mode']) {
     const value = record[key]
     if (typeof value === 'string' && value.trim()) return gist(value)

@@ -73,6 +73,9 @@ describe('toolLine', () => {
     expect(toolLine('task', { description: 'survey deps', prompt: 'a long instruction' })).toBe(
       '🤖 Task survey deps',
     )
+    expect(toolLine('task', { name: 'Scout', description: 'survey deps', prompt: 'a long instruction' })).toBe(
+      '🤖 Task Scout · survey deps',
+    )
   })
 
   it('shows the fact Milo kept, and counts the others rather than dumping the list', () => {

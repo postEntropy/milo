@@ -8,6 +8,8 @@ import { formatWhen } from '../core/time.js'
 import type { CompactResult, SessionStats, SessionSummary } from '../core/sessions/index.js'
 import { formatSkillList, type SkillSummary } from '../core/skills/index.js'
 import { jobSummary, type JobInfo } from '../core/jobs/index.js'
+import { formatBotAvatarBadge, resolveBotAvatar, type CrewAvatar, type CrewBot } from '../core/crew.js'
+import type { DelegatedWork } from '../core/delegated-work.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
 import {
   DEFAULT_REASONING_EFFORT,
@@ -89,6 +91,13 @@ export interface CommandContext {
   jobs?: () => JobInfo[]
   /** Stops a running job by id, for `/jobs kill <id>`. */
   killJob?: (id: string) => boolean
+  crew?: () => CrewBot[]
+  renameCrewBot?: (id: string, name: string) => Promise<CrewBot>
+  updateCrewAvatar?: (id: string, patch: Partial<CrewAvatar> | 'shuffle') => Promise<CrewBot>
+  stopCrewBot?: (id: string) => Promise<void>
+  guideCrewBot?: (id: string, text: string) => Promise<void>
+  delegatedWork?: () => DelegatedWork[]
+  controlDelegatedWork?: (id: string, action: 'pause' | 'resume' | 'cancel') => Promise<DelegatedWork>
 }
 
 export interface CommandResult {
@@ -335,6 +344,13 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
     // not what another conversation is doing.
     jobs: () => runtime.jobs?.list(session.id) ?? [],
     killJob: (id) => runtime.jobs?.kill(id, session.id) ?? false,
+    crew: runtime.crew ? () => runtime.crew!.list() : undefined,
+    renameCrewBot: runtime.crew ? (id, name) => runtime.crew!.rename(id, name) : undefined,
+    updateCrewAvatar: runtime.crew ? (id, patch) => runtime.crew!.updateAvatar(id, patch) : undefined,
+    stopCrewBot: runtime.crew ? (id) => runtime.crew!.stop(id) : undefined,
+    guideCrewBot: runtime.crew ? (id, text) => runtime.crew!.guide(id, text) : undefined,
+    delegatedWork: runtime.delegatedWork ? () => runtime.delegatedWork!.list() : undefined,
+    controlDelegatedWork: runtime.delegatedWork ? (id, action) => runtime.delegatedWork!.control(id, action) : undefined,
     compactSession: () => session.compact(signal),
     memories: (limit, query, offset) => session.memories(limit, query, offset),
     updateMemory: (id, text) => session.updateMemory(id, text),
@@ -672,6 +688,86 @@ export async function handleCommand(
 
     case 'jobs':
       return { handled: true, reply: jobsReply(argument, context) }
+
+    case 'crew': {
+      if (context.sessionLocked) return { handled: true, reply: context.sessionLocked }
+      if (!context.crew) return { handled: true, reply: 'Crew is not available on this surface.' }
+      try {
+        const bots = context.crew()
+        const id = argument.trim()
+        if (id === 'avatar' || id.startsWith('avatar ')) {
+          const parts = id.slice(6).trim().split(/\s+/).filter(Boolean)
+          const [botId, ...rest] = parts
+          if (!botId) return { handled: true, reply: 'Usage: /crew avatar <id> [shuffle | shape=<shape> eyes=<eyes> accessory=<accessory> palette=<palette>].' }
+          if (!context.updateCrewAvatar) return { handled: true, reply: 'Updating a bot avatar is not available on this surface.' }
+          if (rest.length === 0 || (rest.length === 1 && rest[0] === 'shuffle')) {
+            const bot = await context.updateCrewAvatar(botId, 'shuffle')
+            return { handled: true, reply: `Updated avatar for ${bot.name}: ${formatBotAvatarBadge(resolveBotAvatar(bot))}.` }
+          }
+          const patch: Partial<CrewAvatar> = {}
+          for (const token of rest) {
+            const [key, val] = token.split('=')
+            if (!val || !['shape', 'eyes', 'accessory', 'palette'].includes(key ?? '')) {
+              return { handled: true, reply: 'Usage: /crew avatar <id> [shuffle | shape=<shape> eyes=<eyes> accessory=<accessory> palette=<palette>].' }
+            }
+            ;(patch as Record<string, string>)[key!] = val
+          }
+          const bot = await context.updateCrewAvatar(botId, patch)
+          return { handled: true, reply: `Updated avatar for ${bot.name}: ${formatBotAvatarBadge(resolveBotAvatar(bot))}.` }
+        }
+        if (id === 'rename' || id.startsWith('rename ')) {
+          const match = /^rename\s+(\S+)\s+([\s\S]+)$/.exec(id)
+          if (!match) return { handled: true, reply: 'Usage: /crew rename <id> <name>.' }
+          if (!context.renameCrewBot) return { handled: true, reply: 'Renaming a bot is not available on this surface.' }
+          const bot = await context.renameCrewBot(match[1]!, match[2]!)
+          return { handled: true, reply: `Renamed bot ${bot.id} to ${bot.name}.` }
+        }
+        if (id === 'guide' || id.startsWith('guide ')) {
+          const match = /^guide\s+(\S+)\s+([\s\S]+)$/.exec(id)
+          if (!match) return { handled: true, reply: 'Usage: /crew guide <id> <text>.' }
+          if (!context.guideCrewBot) return { handled: true, reply: 'Guiding a bot is not available on this surface.' }
+          await context.guideCrewBot(match[1]!, match[2]!)
+          return { handled: true, reply: 'Guidance queued for the bot.' }
+        }
+        if (id === 'stop') return { handled: true, reply: 'Usage: /crew stop <id>.' }
+        if (id.startsWith('stop ')) {
+          if (!context.stopCrewBot) return { handled: true, reply: 'Stopping a bot is not available on this surface.' }
+          const target = id.slice(5).trim()
+          if (!target || target.includes(' ')) return { handled: true, reply: 'Usage: /crew [id | rename <id> <name> | avatar <id> [shuffle] | stop <id> | guide <id> <text>].' }
+          await context.stopCrewBot(target)
+          return { handled: true, reply: 'Stop requested.' }
+        }
+        if (id.includes(' ')) return { handled: true, reply: 'Usage: /crew [id | rename <id> <name> | avatar <id> [shuffle] | stop <id> | guide <id> <text>].' }
+        if (!id) return { handled: true, reply: bots.length ? bots.map((bot) => {
+          const last = bot.assignments.at(-1)
+          return `${formatBotAvatarBadge(resolveBotAvatar(bot))} ${bot.name} (${bot.id}) — ${last?.state ?? 'available'}${last ? ` — ${last.mission}` : ''}`
+        }).join('\n') : 'No Crew bots yet.' }
+        const bot = bots.find((entry) => entry.id === id)
+        if (!bot) return { handled: true, reply: 'No bot has that id. Use /crew to list bots, or /crew stop <id> to stop one.' }
+        return { handled: true, reply: [`${formatBotAvatarBadge(resolveBotAvatar(bot))} ${bot.name}`, ...bot.assignments.map((item) => `${item.state} · ${item.provider ? `${item.provider} · ` : ''}${item.model}\n${item.mission}${(item.guidance ?? []).map((g) => `\n${g.text} — ${g.appliedAt ? 'applied' : item.state === 'running' ? 'queued' : 'not applied'}`).join('')}${item.report ? `\n${item.report}` : ''}`)].join('\n\n') }
+      } catch (error) {
+        return { handled: true, reply: `Could not read Crew: ${errorMessage(error)}` }
+      }
+    }
+
+    case 'delegated': {
+      if (context.sessionLocked) return { handled: true, reply: context.sessionLocked }
+      if (!context.delegatedWork) return { handled: true, reply: 'Delegated work is not available on this surface.' }
+      try {
+        const parts = argument.trim().split(/\s+/).filter(Boolean)
+        if (parts.length === 2 && ['pause', 'resume', 'cancel'].includes(parts[0]!)) {
+          if (!context.controlDelegatedWork) return { handled: true, reply: 'Controlling delegated work is not available on this surface.' }
+          const work = await context.controlDelegatedWork(parts[1]!, parts[0] as 'pause' | 'resume' | 'cancel')
+          return { handled: true, reply: `${work.name}: ${work.state}${work.pauseAfterRun ? ' (will pause after this run)' : ''}.` }
+        }
+        if (parts.length > 1 || ['pause', 'resume', 'cancel'].includes(parts[0] ?? '')) return { handled: true, reply: 'Usage: /delegated [id | pause|resume|cancel <id>].' }
+        const items = context.delegatedWork()
+        if (!parts.length) return { handled: true, reply: items.length ? items.map((item) => `${item.name} (${item.id}) — ${item.state}`).join('\n') : 'No delegated work yet.' }
+        const work = items.find((item) => item.id === parts[0])
+        if (!work) return { handled: true, reply: 'No delegated work has that id. Use /delegated to list work.' }
+        return { handled: true, reply: [work.name, work.objective, `Status: ${work.state}`, ...work.runs.map((run) => `${run.result}${run.sessionId ? ` · Session ${run.sessionId}` : ''}${run.report ? `: ${run.report}` : ''}${run.deliveryError ? `\nCould not deliver: ${run.deliveryError}` : ''}`)].join('\n\n') }
+      } catch (error) { return { handled: true, reply: `Could not manage delegated work: ${errorMessage(error)}` } }
+    }
 
     case 'clear':
       await context.resetSession?.()

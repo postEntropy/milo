@@ -34,6 +34,8 @@ import { ToolRegistry } from './registry.js'
 import { shellTool } from './shell.js'
 import { createReadSkillTool } from './read-skill.js'
 import { taskTool } from './task.js'
+import { crewTool } from './crew.js'
+import { delegatedWorkTool } from './delegated-work.js'
 import { todoTool } from './todo.js'
 import { taskListsTool } from './task-lists.js'
 import { instructionsTool } from './instructions.js'
@@ -101,6 +103,8 @@ export const builtinTools = [
   sendFileTool,
   panelTool,
   taskTool,
+  crewTool,
+  delegatedWorkTool,
   todoTool,
   taskListsTool,
   shellTool,

@@ -6,6 +6,7 @@ import { MILO_HOME } from '../core/config/paths.js'
 import { attachJobNotifier } from '../core/jobs/index.js'
 import type { OutgoingMessage } from '../core/outgoing.js'
 import { readRoutines, RoutineScheduler } from '../core/routines.js'
+import { DelegatedScheduler } from '../core/delegated-scheduler.js'
 import type { Gateway } from './types.js'
 
 export interface ServeOptions {
@@ -124,6 +125,19 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
     log: (line) => console.error(line),
   })
   scheduler.start()
+  const delegated = runtime.delegatedWork ? new DelegatedScheduler({
+    store: runtime.delegatedWork,
+    runtime,
+    deliver: async (work, message) => {
+      if (work.target.gateway === 'none') return
+      const gateway = gateways.find((candidate) => candidate.id === work.target.gateway)
+      if (!gateway?.deliver) throw new Error(`no ${work.target.gateway} surface to deliver to`)
+      await gateway.deliver(work.target.chatId, message)
+    },
+    log: (line) => console.error(line),
+  }) : undefined
+  await runtime.crew?.recover()
+  await delegated?.start()
   const routines = readRoutines().filter((routine) => routine.enabled).length
 
   console.error(`Milo serving: ${gateways.map((gateway) => gateway.id).join(', ')}`)
@@ -150,6 +164,7 @@ export async function runServe(options: ServeOptions = {}): Promise<void> {
   /** Lets go of everything this run holds. The port is free once it returns. */
   const stop = async (): Promise<void> => {
     scheduler.stop()
+    delegated?.stop()
     detachJobs()
     for (const gateway of gateways) {
       await gateway.stop().catch(() => undefined)

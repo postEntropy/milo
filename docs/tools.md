@@ -30,8 +30,8 @@
 | `gmail_read` | yes | One message in full, by the id `gmail_search` returned. |
 | `gmail_modify` | no | Archive, mark read/unread, or move a message to the bin, by id. Needs the `modify` grant; asks before acting, and a routine must name it in `allow`. |
 | `gmail_draft` | no | Writes a message and leaves it in Drafts — nothing is sent. One address or several, optionally in a thread. Needs the `compose` grant; asks before writing, and a routine must name it in `allow`. |
-| `gmail_send` | no | Sends a message as the connected account — one address or several, optionally in a thread. It leaves the account and cannot be recalled. Needs the `send` grant; asks before sending, and a routine must name it in `allow`. |
-| `mail_labels` | — | Lists and edits Milo's own mail labels — local to `~/.milo/labels.json`, never written to Gmail — and says which messages carry one. Sorts mail to answer, so it is not read-only, but only touches Milo's own state, so it never asks. |
+| `gmail_send` | no | Sends a message as the connected account — one address or several, optionally in a thread. It leaves the account and cannot be recalled. Needs the `send` grant and asks before each message; it cannot send unattended. |
+| `mail_labels` | conditional | Lists and edits Milo's own mail labels — local to `~/.milo/labels.json`, never written to Gmail — and says which messages carry one. A connected account is required; editing asks, or needs a standing grant for an unattended run. |
 | `drive_search` | yes | Search the connected Drive. |
 | `drive_read` | yes | One Drive file as text; Docs and Sheets come back exported. |
 | `task` | — | Runs a subtask in its own context; only the report comes back. In a project the model may delegate on its own; outside one, only on request. Never asks itself. |
@@ -273,10 +273,12 @@ simply not registered.
 ## Subagents
 
 `task` hands a self-contained piece of work to a subagent: it runs the same loop with a **fresh
-transcript** and returns only its final report. Outside a project it is **on request only**; in a
-project the model may delegate on its own, because a long read is exactly what crowds a code session.
-The subagent does not see the session and cannot ask anything, and it runs the same tools as the parent
-**except `task` itself**, so a delegation is one level deep. `task` never asks on its own, while every
+transcript** and returns its report. The model may delegate when that helps, in or outside a project.
+When given a name, the assignment and report are kept in Crew. The `crew` tool lists and renames
+those bots, and a bot can be reused by id with its earlier reports for context. An assignment can
+select a model on another configured provider.
+The subagent does not see the session and cannot ask anything. Its catalog excludes `task`, `crew`,
+`delegated_work`, `sessions` and `todo`, so a delegation is one level deep. `task` never asks on its own, while every
 write or command the subagent attempts is put to the user the same way the parent's would be; a `deny`
 entry for `task` blocks the delegation outright. Its own reads and searches are not streamed — only the
 report comes back.

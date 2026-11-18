@@ -8,6 +8,8 @@ import type { AttachmentPart, ImageMime, ImagePart } from '../providers/types.js
 import type { NewRoutine, Routine } from '../routines.js'
 import type { SessionSummary } from '../sessions/types.js'
 import type { TodoItem } from '../todos.js'
+import type { CrewStore } from '../crew.js'
+import type { DelegatedWorkStore } from '../delegated-work.js'
 
 /**
  * How a session hands a tool the ability to write to its memory. Injected
@@ -50,7 +52,7 @@ export interface SessionAdmin {
  * calls — and returns only what it finally answers. Delegation is one level:
  * the context handed to the subagent carries no `task` of its own.
  */
-export type TaskFn = (input: { description: string; prompt: string }) => Promise<ToolResult>
+export type TaskFn = (input: { description: string; prompt: string; name?: string; botId?: string; model?: string; provider?: string }) => Promise<ToolResult>
 
 /**
  * How a session hands a tool the install's routine list: read it, make one, change
@@ -111,6 +113,13 @@ export interface ToolContext {
   sessionAdmin?: SessionAdmin
   /** Absent on a context that cannot delegate (a subagent's own, a bare test one). */
   task?: TaskFn
+  crew?: CrewStore
+  delegatedWork?: DelegatedWorkStore
+  projectId?: string
+  resolveProjectPath?: (id: string) => string | undefined
+  /** Tools explicitly approved for an unattended run. */
+  standingGrants?: string[]
+  availableTools?: string[]
   /**
    * The address this turn is speaking to: the session it came from, or the
    * destination the surface pinned for it. It is where a routine created here
@@ -223,6 +232,10 @@ export interface Tool<A = unknown> {
    * that may run a command. Absent means the flags above are the whole answer.
    */
   asksWhen?(args: A): boolean
+  /** A standing grant needs an explicit decision even in unrestricted mode. */
+  requiresConfirmation?(args: A): boolean
+  /** A standing grant may replace the per-call confirmation for unattended work. */
+  allowStandingConfirmation?: boolean
   /**
    * The tool's own effect is to hand work to a subagent, whose individual tool
    * calls are each put to the same policy. So it needs no confirmation of its

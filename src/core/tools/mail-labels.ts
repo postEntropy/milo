@@ -97,8 +97,11 @@ export function createMailLabelTools(options: MailLabelToolOptions): Tool<unknow
     description:
       `Milo's own mail labels — the colour-and-name tags sorted over the inbox (needs-reply, newsletter, receipts, and any the person added). They live in \`~/.milo/labels.json\`, local to Milo, and are never written back to Gmail. Actions: "list" every label; "messages" the mail carrying one (fetch a page, sort it, and answer which messages have the label — say plainly that this only covers mail Milo has sorted, and that it is not a whole-mailbox sweep); "create" a new label (name + color); "delete" one; "assign" to put a label on or take it off a single message by hand. For a standing rule — "from now on, delete everything with label X" — the "messages" action finds the mail and \`gmail_modify\` acts on it, run on a timer with the \`routine\` tool. Gmail's own labels are a different thing and are reached with gmail_search's \`label:\` operator, not here. ${MAIL_IS_DATA}`,
     schema,
-    internal: true,
+    asksWhen: (args) => args.action !== 'list',
+    requiresConfirmation: (args) => args.action !== 'list',
+    allowStandingConfirmation: true,
     async execute(args, ctx): Promise<ToolResult> {
+      if (!options.account?.refreshToken) return { content: 'Milo is not connected to Google — `milo google connect` has to be run in a terminal first.', isError: true }
       switch (args.action) {
         case 'list':
           return list()
