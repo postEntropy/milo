@@ -407,6 +407,54 @@ describe('the catalog before anything is started', () => {
     }
   })
 
+  it('restarts a running server when its command/env changes and clears state when mcp.json breaks on reload', async () => {
+    writeServers({ fixture: server({ MCP_ERA: 'modern' }) })
+    const manager = createMcpServers(cwd)
+    const close = vi.spyOn(McpClient.prototype, 'close')
+    try {
+      await manager.check('fixture')
+      expect(manager.status()[0]?.state).toBe('ready')
+
+      writeServers({ fixture: server({ MCP_ERA: 'modern', EXTRA_FLAG: '1' }) })
+      manager.reload()
+      expect(close).toHaveBeenCalled()
+
+      writeFileSync(mcpFile(), '{ "broken": ')
+      manager.reload()
+      expect(manager.configError).toBeTruthy()
+      expect(manager.status()).toEqual([])
+    } finally {
+      close.mockRestore()
+      await manager.close()
+    }
+  })
+
+  it('filters ambient secret environment variables from spawned MCP servers unless explicitly configured', async () => {
+    const prev = process.env.ANTHROPIC_API_KEY
+    process.env.ANTHROPIC_API_KEY = 'sk-ant-should-not-leak'
+    const script = [
+      "const rl = require('readline').createInterface({ input: process.stdin });",
+      "rl.on('line', (l) => {",
+      "  const m = JSON.parse(l);",
+      "  if (m.method === 'server/discover') process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { supportedVersions: ['2026-07-28'] } }) + '\\n');",
+      "  else if (m.method === 'tools/call') process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: m.id, result: { content: [{ type: 'text', text: process.env.ANTHROPIC_API_KEY ?? 'absent' }] } }) + '\\n');",
+      '});',
+    ].join('')
+    const client = new McpClient(
+      { command: process.execPath, args: ['-e', script], enabled: true, env: {}, readOnly: [], timeoutMs: 5_000 },
+      { name: 'env-test', cwd },
+    )
+    try {
+      await client.connect()
+      const res = (await client.callTool('probe', {})) as { content: { text: string }[] }
+      expect(res.content[0]?.text).toBe('absent')
+    } finally {
+      await client.close()
+      if (prev === undefined) delete process.env.ANTHROPIC_API_KEY
+      else process.env.ANTHROPIC_API_KEY = prev
+    }
+  })
+
   it('reports a config it cannot read instead of starting anything', async () => {
     writeFileSync(mcpFile(), '{ "servers": { "github": { "command": "npx", "comand": "typo" } } }')
     const manager = createMcpServers(cwd)

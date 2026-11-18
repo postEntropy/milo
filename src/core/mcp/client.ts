@@ -84,6 +84,51 @@ export interface McpClientOptions {
   onExit?: (error: Error) => void
 }
 
+const SAFE_ENV_KEYS = [
+  'PATH',
+  'HOME',
+  'USER',
+  'LOGNAME',
+  'SHELL',
+  'LANG',
+  'LC_ALL',
+  'LC_CTYPE',
+  'TERM',
+  'TMPDIR',
+  'TMP',
+  'TEMP',
+  'TZ',
+  'XDG_CONFIG_HOME',
+  'XDG_DATA_HOME',
+  'XDG_CACHE_HOME',
+  'XDG_RUNTIME_DIR',
+  'SSL_CERT_FILE',
+  'SSL_CERT_DIR',
+  'NODE_EXTRA_CA_CERTS',
+  'HTTP_PROXY',
+  'HTTPS_PROXY',
+  'NO_PROXY',
+  'http_proxy',
+  'https_proxy',
+  'no_proxy',
+  'SystemRoot',
+  'COMSPEC',
+  'APPDATA',
+  'LOCALAPPDATA',
+  'USERPROFILE',
+  'ProgramFiles',
+  'ProgramFiles(x86)',
+] as const
+
+function baseEnv(): Record<string, string> {
+  const out: Record<string, string> = {}
+  for (const key of SAFE_ENV_KEYS) {
+    const value = process.env[key]
+    if (value !== undefined) out[key] = value
+  }
+  return out
+}
+
 export class McpClient {
   private child: ChildProcessWithoutNullStreams | null = null
   private reader: Interface | null = null
@@ -136,7 +181,8 @@ export class McpClient {
     const command = this.server.command
     const child = spawn(command, this.server.args, {
       stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, ...env },
+      detached: process.platform !== 'win32',
+      env: { ...baseEnv(), ...env },
       cwd: this.server.cwd ? resolveToolPath(this.options.cwd, this.server.cwd) : this.options.cwd,
     })
     this.child = child
@@ -436,9 +482,9 @@ export class McpClient {
     // A short grace, not a long one: a server that honors end-of-input is
     // already gone, and one that does not must not hold up Milo's own exit.
     if (await this.waitExit(750)) return
-    child.kill('SIGTERM')
+    signalChildGroup(child, 'SIGTERM')
     if (await this.waitExit(750)) return
-    child.kill('SIGKILL')
+    signalChildGroup(child, 'SIGKILL')
     await this.waitExit(750)
   }
 
@@ -471,6 +517,22 @@ function supportedVersionsFromError(error: JsonRpcCallError): string[] {
  * handshake is the only thing it can offer a server that does not list the
  * modern one.
  */
+function signalChildGroup(child: ChildProcessWithoutNullStreams, signal: NodeJS.Signals): void {
+  if (process.platform !== 'win32' && child.pid) {
+    try {
+      process.kill(-child.pid, signal)
+      return
+    } catch {
+      // Fall back to signaling the direct child if process group already exited.
+    }
+  }
+  try {
+    child.kill(signal)
+  } catch {
+    // Already gone.
+  }
+}
+
 function pickVersion(versions: string[]): string {
   const known = versions.filter((version) => version <= MODERN_PROTOCOL_VERSION).sort()
   return known[known.length - 1] ?? LEGACY_PROTOCOL_VERSION

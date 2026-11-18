@@ -186,7 +186,10 @@ export class McpServers {
     const registry = this.registry
     if (!registry) return
     const wanted = new Map<string, Tool<unknown>>()
-    const used = new Set<string>()
+    // Seed with existing built-in/other tools so an MCP server can never collide with them.
+    const used = new Set<string>(
+      registry.list().map((tool) => tool.name).filter((name) => !this.registered.has(name)),
+    )
     for (const [name, server] of this.enabledServers()) {
       const definitions = this.listings.get(name)
       if (!definitions) continue
@@ -235,6 +238,8 @@ export class McpServers {
    * not after the slowest server in the file has booted.
    */
   reload(): void {
+    if (this.closed) return
+    const previousServers = this.config.servers
     try {
       this.config = readMcpConfig()
       this.problem = undefined
@@ -244,14 +249,20 @@ export class McpServers {
       this.rebuild()
     } catch (error) {
       this.problem = errorMessage(error)
+      this.config = { servers: {} }
+      for (const [name, entry] of [...this.live]) {
+        this.live.delete(name)
+        void entry.client.close().catch(() => undefined)
+      }
+      this.rebuild()
       logWarn(`could not re-read mcp.json: ${this.problem}`)
       return
     }
-    // A server taken out of the file, or turned off in it, must not keep running:
-    // the file is the interface, and the process follows the file. Only the ones
-    // still on are left for the warm below.
+    // A server taken out of the file, turned off, or reconfigured must not keep
+    // running on its old process: the file is the interface.
     for (const [name, entry] of [...this.live]) {
-      if (this.config.servers[name]?.enabled) continue
+      const next = this.config.servers[name]
+      if (next?.enabled && sameServerConfig(previousServers[name], next)) continue
       this.live.delete(name)
       void entry.client.close().catch(() => undefined)
     }
@@ -267,6 +278,7 @@ export class McpServers {
    * which is therefore held off a dead server for a moment.
    */
   private async client(name: string, options: { ignoreFloor?: boolean } = {}): Promise<McpClient> {
+    if (this.closed) throw new Error(`mcp server "${name}" is shutting down.`)
     const server = this.config.servers[name]
     if (!server) throw new Error(`mcp.json has no server named "${name}".`)
     // Off means its process is not run at all, whichever path reached here — a
@@ -309,6 +321,10 @@ export class McpServers {
     entry.promise = client
       .connect()
       .then((result) => {
+        if (this.closed || this.live.get(name) !== entry) {
+          void client.close().catch(() => undefined)
+          throw new Error(`mcp server "${name}" is shutting down.`)
+        }
         entry.state = 'ready'
         entry.error = undefined
         entry.promise = undefined
@@ -375,6 +391,7 @@ export class McpServers {
    * it asked for instead of one a newer refresh has already invalidated.
    */
   private async refresh(name: string): Promise<void> {
+    if (this.closed) return
     const inFlight = this.refreshing.get(name)
     if (inFlight) {
       inFlight.again = true
@@ -389,7 +406,7 @@ export class McpServers {
       this.refreshing.delete(name)
       // A request that arrived in the last instant, after the loop had looked,
       // still gets its listing rather than being folded into one already gone.
-      if (state.again) await this.refresh(name)
+      if (state.again && !this.closed) await this.refresh(name)
     }
   }
 
@@ -496,4 +513,16 @@ export class McpServers {
     await Promise.all([...this.live.values()].map((entry) => entry.client.close().catch(() => undefined)))
     this.live.clear()
   }
+}
+
+function sameServerConfig(a: McpServerConfig | undefined, b: McpServerConfig | undefined): boolean {
+  if (!a || !b) return false
+  if (a.command !== b.command || a.cwd !== b.cwd || a.timeoutMs !== b.timeoutMs) return false
+  if (a.args.length !== b.args.length || a.args.some((arg, i) => arg !== b.args[i])) return false
+  const aEnv = Object.entries(a.env ?? {}).sort(([k1], [k2]) => k1.localeCompare(k2))
+  const bEnv = Object.entries(b.env ?? {}).sort(([k1], [k2]) => k1.localeCompare(k2))
+  return (
+    aEnv.length === bEnv.length &&
+    aEnv.every(([k, v], i) => bEnv[i]![0] === k && bEnv[i]![1] === v)
+  )
 }
