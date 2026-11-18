@@ -441,7 +441,14 @@ export function toolDetail(args: unknown): string {
   // `name` are the one interesting value of `fetch_url` and `read_skill`; `to` is
   // who mail is for, which is what a draft or a send line is about.
   if (typeof record.name === 'string' && record.name.trim() && typeof record.description === 'string' && record.description.trim()) {
-    return gist(`${record.name.trim()} · ${record.description.trim()}`)
+    const base = `${record.name.trim()} · ${record.description.trim()}`
+    const modelTag = typeof record.provider === 'string' && record.provider.trim() && typeof record.model === 'string' && record.model.trim()
+      ? `${record.provider.trim()}/${record.model.trim()}`
+      : typeof record.model === 'string' && record.model.trim()
+        ? record.model.trim()
+        : ''
+    const botId = typeof record.botId === 'string' && record.botId.trim() ? record.botId.trim() : ''
+    return gist([base, modelTag, botId].filter(Boolean).join(' · '))
   }
   for (const key of ['command', 'query', 'pattern', 'path', 'url', 'description', 'name', 'to', 'app', 'message', 'mode']) {
     const value = record[key]

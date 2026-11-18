@@ -996,20 +996,26 @@ export function ChatScreen({
             // status line, so the turn reads as plain thinking. A tool whose own
             // call is not drawn never reaches the status line either.
             if (display.tools === 'off' || !showsToolCall(name)) return
-            setToolName(toolDisplayName(name))
+            const detail = display.tools === 'full' ? toolDetail(args) : ''
+            setToolName(detail ? `${toolDisplayName(name)} · ${detail}` : toolDisplayName(name))
             setPhase('tool')
           },
           onToolEnd: (name, result, isError, change) => {
             // A failure is always shown, even with tools off.
             if ((display.tools !== 'off' && showsToolCall(name)) || isError) {
+              const storedResult = display.tools === 'off' && !isError
+                ? undefined
+                : result && result.length > 8_000
+                  ? `${result.slice(0, 8_000)}\n… (truncated)`
+                  : result
               push({
                 kind: 'tool',
                 name,
                 detail: display.tools === 'name' ? '' : toolDetail(toolArgsRef.current),
                 ok: !isError,
                 counts: display.tools === 'full' ? changeCounts(change) : '',
-                args: toolArgsRef.current,
-                result,
+                args: display.tools === 'name' ? undefined : toolArgsRef.current,
+                result: storedResult,
                 change,
               })
             }

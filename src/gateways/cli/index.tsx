@@ -81,6 +81,9 @@ export function Shell({
   // which a long-lived terminal may not reach for hours.
   useEffect(() => {
     if (!runtime) return
+    void runtime.crew?.recover().catch((error) => {
+      console.error(`Could not recover crew state: ${errorMessage(error)}`)
+    })
     return () => {
       void runtime.close()
     }

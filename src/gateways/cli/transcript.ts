@@ -546,7 +546,8 @@ function expandedToolLines(item: Extract<Item, { kind: 'tool' }>, width: number,
   }
 
   if (item.result?.trim()) {
-    const rawLines = item.result.replace(/\s+$/, '').split('\n')
+    const formatted = formatResultForDisplay(item.result)
+    const rawLines = formatted.replace(/\s+$/, '').split('\n')
     let count = 0
     let truncated = false
     for (const raw of rawLines) {
@@ -564,6 +565,18 @@ function expandedToolLines(item: Extract<Item, { kind: 'tool' }>, width: number,
   }
 
   return lines
+}
+
+function formatResultForDisplay(raw: string): string {
+  const trimmed = raw.trim()
+  if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
+    try {
+      return JSON.stringify(JSON.parse(trimmed), null, 2)
+    } catch {
+      return raw
+    }
+  }
+  return raw
 }
 
 /**
