@@ -53,6 +53,7 @@ export function Crew({ tick = 0 }: { tick?: number }) {
   const [transcript, setTranscript] = useState<ChatMessage[] | null>(null)
   const [runError, setRunError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [refreshError, setRefreshError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   const generation = useRef(0)
 
@@ -90,10 +91,10 @@ export function Crew({ tick = 0 }: { tick?: number }) {
         api<WorkView[]>('delegated-work', undefined, signal),
       ])
       if (mine !== generation.current) return
-      setBots(nextBots); setWork(nextWork); setError(null)
+      setBots(nextBots); setWork(nextWork); setRefreshError(null)
     } catch (cause) {
       if (cause instanceof DOMException && cause.name === 'AbortError') return
-      if (mine === generation.current) setError(message(cause))
+      if (mine === generation.current) setRefreshError(message(cause))
     }
   }, [])
 
@@ -213,7 +214,7 @@ export function Crew({ tick = 0 }: { tick?: number }) {
       : <PageHeader title="Crew" description="The work and bots Milo is looking after." />
 
   return <div className="crew-page"><Panel head={head}>
-    {error && <div className="panel-state" role="alert">{error}</div>}
+    {(error || refreshError) && <div className="panel-state" role="alert">{error || refreshError}{error && <button className="button" type="button" onClick={() => setError(null)}>Dismiss</button>}</div>}
     {bots === null || work === null ? <SkeletonList rows={4} label="Loading Crew…" /> : job ? <>
       <div className="crew-work-hero">
         <div className="crew-work-hero-head">

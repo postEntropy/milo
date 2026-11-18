@@ -419,6 +419,7 @@ struct CrewView: View, Equatable {
     @State private var work: [DelegatedWork] = []
     @State private var path: [CrewPage] = []
     @State private var error: String?
+    @State private var refreshError: String?
     @State private var loading = true
     @State private var busy = false
     @State private var refreshGeneration = 0
@@ -449,7 +450,8 @@ struct CrewView: View, Equatable {
                 bots: sortedBots,
                 work: work,
                 loading: loading,
-                error: error,
+                error: error ?? refreshError,
+                onDismissError: { error = nil; refreshError = nil },
                 onSessions: onSessions,
                 onRefresh: { await refresh() },
                 botCard: { bot in
@@ -661,7 +663,7 @@ struct CrewView: View, Equatable {
 
         return ScrollView {
             VStack(alignment: .leading, spacing: MiloTheme.Space.six) {
-                if let error { MiloErrorPill(text: error) }
+                if let message = error ?? refreshError { HStack { MiloErrorPill(text: message); Button("Dismiss") { error = nil; refreshError = nil } } }
 
                 // Character Profile Stage Card
                 VStack(spacing: MiloTheme.Space.four) {
@@ -939,7 +941,7 @@ struct CrewView: View, Equatable {
 
         return ScrollView {
             VStack(alignment: .leading, spacing: MiloTheme.Space.six) {
-                if let error { MiloErrorPill(text: error) }
+                if let message = error ?? refreshError { HStack { MiloErrorPill(text: message); Button("Dismiss") { error = nil; refreshError = nil } } }
 
                 VStack(alignment: .leading, spacing: MiloTheme.Space.four) {
                     HStack {
@@ -1005,11 +1007,11 @@ struct CrewView: View, Equatable {
                         .disabled(busy || objectiveDraft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || objectiveDraft.trimmingCharacters(in: .whitespacesAndNewlines) == item.objective.trimmingCharacters(in: .whitespacesAndNewlines))
 
                         Picker("Schedule", selection: $scheduleMode) {
-                            Text("Interval").tag("every")
-                            Text("Daily time").tag("at")
                             if item.schedule?.kind == "at" && item.schedule?.restricted == true {
                                 Text(item.scheduleLabel ?? "Current schedule").tag("existing")
                             }
+                            Text("Interval").tag("every")
+                            Text("Daily time").tag("at")
                             Text("Run once").tag("once")
                         }
                         .pickerStyle(.segmented)
@@ -1330,9 +1332,9 @@ struct CrewView: View, Equatable {
             guard mine == refreshGeneration else { return }
             bots = fetchedBots
             work = fetchedWork
-            error = nil
+            refreshError = nil
         } catch {
-            if mine == refreshGeneration { self.error = error.localizedDescription }
+            if mine == refreshGeneration { self.refreshError = error.localizedDescription }
         }
         loading = false
     }
@@ -1392,14 +1394,14 @@ struct CrewView: View, Equatable {
             let updated: DelegatedWork
             if field == "once" {
                 updated = try await MiloApi.call("delegated-work-edit", ["id": id, "once": true], account: account, as: DelegatedWork.self)
-            } else {
-                updated = try await MiloApi.call("delegated-work-edit", ["id": id, field: value], account: account, as: DelegatedWork.self)
             } else if field == "existing", let schedule = work.first(where: { $0.id == id })?.schedule {
                 var body: [String: Any] = ["id": id, "at": value]
                 if let days = schedule.days { body["days"] = days.map(String.init) }
                 if let dates = schedule.dayOfMonth { body["dayOfMonth"] = dates.map(String.init) }
                 if let months = schedule.month { body["month"] = months.map(String.init) }
                 updated = try await MiloApi.call("delegated-work-edit", body, account: account, as: DelegatedWork.self)
+            } else {
+                updated = try await MiloApi.call("delegated-work-edit", ["id": id, field: value], account: account, as: DelegatedWork.self)
             }
             refreshGeneration += 1
             work = work.map { $0.id == updated.id ? updated : $0 }
@@ -1613,6 +1615,7 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
     let work: [DelegatedWork]
     let loading: Bool
     let error: String?
+    let onDismissError: () -> Void
     let onSessions: () -> Void
     let onRefresh: () async -> Void
     @ViewBuilder let botCard: (CrewBot) -> BotCardView
@@ -1685,7 +1688,7 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
                 .padding(MiloTheme.Space.five)
                 .miloGlassCard(radius: MiloTheme.Radius.xl)
 
-                if let error { MiloErrorPill(text: error) }
+                if let error { HStack { MiloErrorPill(text: error); Button("Dismiss", action: onDismissError) } }
 
                 if loading && bots.isEmpty && work.isEmpty {
                     HStack { Spacer(); ProgressView(); Spacer() }
