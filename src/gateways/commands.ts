@@ -10,6 +10,7 @@ import { formatSkillList, type SkillSummary } from '../core/skills/index.js'
 import { jobSummary, type JobInfo } from '../core/jobs/index.js'
 import { formatBotAvatarBadge, resolveBotAvatar, type CrewAvatar, type CrewBot } from '../core/crew.js'
 import type { DelegatedWork } from '../core/delegated-work.js'
+import { describeWhen } from '../core/routines.js'
 import { DEFAULT_DISPLAY, type DisplayConfig } from '../core/config/schema.js'
 import {
   DEFAULT_REASONING_EFFORT,
@@ -692,12 +693,14 @@ export async function handleCommand(
     case 'crew': {
       if (context.sessionLocked) return { handled: true, reply: context.sessionLocked }
       if (!context.crew) return { handled: true, reply: 'Crew is not available on this surface.' }
+      const id = argument.trim()
+      const tokens = id.split(/\s+/).filter(Boolean)
+      const sub = tokens[0] ?? ''
+      let mutating = false
       try {
-        const bots = context.crew()
-        const id = argument.trim()
-        if (id === 'avatar' || id.startsWith('avatar ')) {
-          const parts = id.slice(6).trim().split(/\s+/).filter(Boolean)
-          const [botId, ...rest] = parts
+        if (sub === 'avatar') {
+          mutating = true
+          const [, botId, ...rest] = tokens
           if (!botId) return { handled: true, reply: 'Usage: /crew avatar <id> [shuffle | shape=<shape> eyes=<eyes> accessory=<accessory> palette=<palette>].' }
           if (!context.updateCrewAvatar) return { handled: true, reply: 'Updating a bot avatar is not available on this surface.' }
           if (rest.length === 0 || (rest.length === 1 && rest[0] === 'shuffle')) {
@@ -706,47 +709,62 @@ export async function handleCommand(
           }
           const patch: Partial<CrewAvatar> = {}
           for (const token of rest) {
-            const [key, val] = token.split('=')
-            if (!val || !['shape', 'eyes', 'accessory', 'palette'].includes(key ?? '')) {
+            const eq = token.indexOf('=')
+            const key = eq === -1 ? '' : token.slice(0, eq)
+            const val = eq === -1 ? '' : token.slice(eq + 1)
+            if (!val || !['shape', 'eyes', 'accessory', 'palette'].includes(key)) {
               return { handled: true, reply: 'Usage: /crew avatar <id> [shuffle | shape=<shape> eyes=<eyes> accessory=<accessory> palette=<palette>].' }
             }
-            ;(patch as Record<string, string>)[key!] = val
+            ;(patch as Record<string, string>)[key] = val
           }
           const bot = await context.updateCrewAvatar(botId, patch)
           return { handled: true, reply: `Updated avatar for ${bot.name}: ${formatBotAvatarBadge(resolveBotAvatar(bot))}.` }
         }
-        if (id === 'rename' || id.startsWith('rename ')) {
-          const match = /^rename\s+(\S+)\s+([\s\S]+)$/.exec(id)
+        if (sub === 'rename') {
+          mutating = true
+          const match = /^\S+\s+(\S+)\s+([\s\S]+)$/.exec(id)
           if (!match) return { handled: true, reply: 'Usage: /crew rename <id> <name>.' }
+          if (/[\r\n]/.test(match[2]!)) return { handled: true, reply: 'A bot name must fit on one line.' }
           if (!context.renameCrewBot) return { handled: true, reply: 'Renaming a bot is not available on this surface.' }
           const bot = await context.renameCrewBot(match[1]!, match[2]!)
           return { handled: true, reply: `Renamed bot ${bot.id} to ${bot.name}.` }
         }
-        if (id === 'guide' || id.startsWith('guide ')) {
-          const match = /^guide\s+(\S+)\s+([\s\S]+)$/.exec(id)
+        if (sub === 'guide') {
+          mutating = true
+          const match = /^\S+\s+(\S+)\s+([\s\S]+)$/.exec(id)
           if (!match) return { handled: true, reply: 'Usage: /crew guide <id> <text>.' }
           if (!context.guideCrewBot) return { handled: true, reply: 'Guiding a bot is not available on this surface.' }
           await context.guideCrewBot(match[1]!, match[2]!)
           return { handled: true, reply: 'Guidance queued for the bot.' }
         }
-        if (id === 'stop') return { handled: true, reply: 'Usage: /crew stop <id>.' }
-        if (id.startsWith('stop ')) {
+        if (sub === 'stop') {
+          mutating = true
+          if (tokens.length !== 2) return { handled: true, reply: 'Usage: /crew stop <id>.' }
           if (!context.stopCrewBot) return { handled: true, reply: 'Stopping a bot is not available on this surface.' }
-          const target = id.slice(5).trim()
-          if (!target || target.includes(' ')) return { handled: true, reply: 'Usage: /crew [id | rename <id> <name> | avatar <id> [shuffle] | stop <id> | guide <id> <text>].' }
-          await context.stopCrewBot(target)
+          await context.stopCrewBot(tokens[1]!)
           return { handled: true, reply: 'Stop requested.' }
         }
-        if (id.includes(' ')) return { handled: true, reply: 'Usage: /crew [id | rename <id> <name> | avatar <id> [shuffle] | stop <id> | guide <id> <text>].' }
-        if (!id) return { handled: true, reply: bots.length ? bots.map((bot) => {
+        if (tokens.length > 1) return { handled: true, reply: 'Usage: /crew [id | rename <id> <name> | avatar <id> [shuffle] | stop <id> | guide <id> <text>].' }
+        const bots = context.crew()
+        if (!tokens.length) return { handled: true, reply: bots.length ? bots.map((bot) => {
           const last = bot.assignments.at(-1)
           return `${formatBotAvatarBadge(resolveBotAvatar(bot))} ${bot.name} (${bot.id}) — ${last?.state ?? 'available'}${last ? ` — ${last.mission}` : ''}`
         }).join('\n') : 'No Crew bots yet.' }
-        const bot = bots.find((entry) => entry.id === id)
+        const bot = bots.find((entry) => entry.id === tokens[0])
         if (!bot) return { handled: true, reply: 'No bot has that id. Use /crew to list bots, or /crew stop <id> to stop one.' }
-        return { handled: true, reply: [`${formatBotAvatarBadge(resolveBotAvatar(bot))} ${bot.name}`, ...bot.assignments.map((item) => `${item.state} · ${item.provider ? `${item.provider} · ` : ''}${item.model}\n${item.mission}${(item.guidance ?? []).map((g) => `\n${g.text} — ${g.appliedAt ? 'applied' : item.state === 'running' ? 'queued' : 'not applied'}`).join('')}${item.report ? `\n${item.report}` : ''}`)].join('\n\n') }
+        return {
+          handled: true,
+          reply: [
+            `${formatBotAvatarBadge(resolveBotAvatar(bot))} ${bot.name}`,
+            ...[...bot.assignments].reverse().map((item) => {
+              const status = item.stopRequestedAt && item.state === 'running' ? `${item.state} (stop requested)` : item.state
+              const guidance = (item.guidance ?? []).map((g) => `\n${g.text} — ${g.appliedAt ? 'applied' : item.state === 'running' ? 'queued' : 'not applied'}`).join('')
+              return `${status} · ${item.provider ? `${item.provider} · ` : ''}${item.model}\n${item.mission}${guidance}${item.report ? `\n${item.report}` : ''}`
+            }),
+          ].join('\n\n'),
+        }
       } catch (error) {
-        return { handled: true, reply: `Could not read Crew: ${errorMessage(error)}` }
+        return { handled: true, reply: `${mutating ? 'Could not manage Crew' : 'Could not read Crew'}: ${errorMessage(error)}` }
       }
     }
 
@@ -765,7 +783,17 @@ export async function handleCommand(
         if (!parts.length) return { handled: true, reply: items.length ? items.map((item) => `${item.name} (${item.id}) — ${item.state}`).join('\n') : 'No delegated work yet.' }
         const work = items.find((item) => item.id === parts[0])
         if (!work) return { handled: true, reply: 'No delegated work has that id. Use /delegated to list work.' }
-        return { handled: true, reply: [work.name, work.objective, `Status: ${work.state}`, ...work.runs.map((run) => `${run.result}${run.sessionId ? ` · Session ${run.sessionId}` : ''}${run.report ? `: ${run.report}` : ''}${run.deliveryError ? `\nCould not deliver: ${run.deliveryError}` : ''}`)].join('\n\n') }
+        return {
+          handled: true,
+          reply: [
+            work.name,
+            work.objective,
+            `Status: ${work.state}${work.pauseAfterRun ? ' (will pause after this run)' : ''}`,
+            `Schedule: ${work.schedule ? describeWhen(work.schedule) : 'Runs once'}`,
+            `Allowed: ${work.allow.length ? work.allow.join(', ') : 'none'}`,
+            ...[...work.runs].reverse().map((run) => `${run.result}${run.sessionId ? ` · Session ${run.sessionId}` : ''}${run.report ? `: ${run.report}` : ''}${run.failure ? `\nFailure: ${run.failure}` : ''}${run.deliveryError ? `\nCould not deliver: ${run.deliveryError}` : ''}`),
+          ].join('\n\n'),
+        }
       } catch (error) { return { handled: true, reply: `Could not manage delegated work: ${errorMessage(error)}` } }
     }
 
@@ -908,6 +936,13 @@ export function parseTurnControl(raw: string): TurnControl | null {
     default:
       return null
   }
+}
+
+/** Whether a slash command inspects or controls bots and must bypass TurnQueue. */
+export function isImmediateCrewCommand(raw: string): boolean {
+  if (!raw.startsWith('/')) return false
+  const cmd = parse(raw).command.toLowerCase()
+  return cmd === 'crew' || cmd === 'delegated'
 }
 
 /**

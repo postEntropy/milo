@@ -15,6 +15,7 @@ import {
   encodePermission,
   handleCommand,
   handleTurnControl,
+  isImmediateCrewCommand,
   parseTurnControl,
   sessionLockMessage,
   turnOf,
@@ -240,6 +241,24 @@ export class TelegramGateway implements Gateway {
         return
       }
 
+      // `/crew` and `/delegated` inspect or steer active background bots, so queuing
+      // behind a parent turn blocked on `task` would deadlock `/crew stop` and `/crew guide`.
+      if (isImmediateCrewCommand(text)) {
+        const userId = ctx.from?.id === undefined ? undefined : String(ctx.from.id)
+        void (async () => {
+          const scope: MemoryScope = { gateway: 'telegram', chatId }
+          const session = await this.options.runtime.sessionFor(scope)
+          const command = await handleCommand(
+            text,
+            buildCommandContext({ runtime: this.options.runtime, scope, session, allowlist: this.options.allowlist, userId }),
+          )
+          await this.reply(bot, chatId, command)
+        })().catch((error) =>
+          logWarn(`telegram: failed to handle crew command: ${errorMessage(error)}`),
+        )
+        return
+      }
+
       // A message sent while a turn is running is a correction: it joins that
       // turn at its next step boundary — after the tool call in flight — rather
       // than starting a second turn to race it over the same session. Commands
@@ -445,7 +464,8 @@ export class TelegramGateway implements Gateway {
           html = false
         }
       }
-      await withRetryAfter(() => bot.api.sendMessage(chatId, toPlain(part), { reply_markup }))
+      const plain = markdown ? toPlain(part) : part
+      await withRetryAfter(() => bot.api.sendMessage(chatId, plain, { reply_markup }))
     }
   }
 

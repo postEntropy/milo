@@ -11,6 +11,7 @@ import {
   buildCommandContext,
   handleCommand,
   handleTurnControl,
+  isImmediateCrewCommand,
   parseTurnControl,
   sessionLockMessage,
   turnOf,
@@ -215,6 +216,32 @@ export class DiscordGateway implements Gateway {
         })
         void this.replyChunked(message, result.reply ?? '').catch((error) =>
           logWarn(`discord: failed to reply: ${errorMessage(error)}`),
+        )
+        return
+      }
+
+      // `/crew` and `/delegated` inspect or steer running bots out-of-band so they
+      // cannot deadlock behind a parent turn waiting for a `task` call.
+      if (isImmediateCrewCommand(text)) {
+        void (async () => {
+          const scope: MemoryScope = { gateway: 'discord', chatId: message.channelId }
+          const session = await this.options.runtime.sessionFor(scope)
+          const command = await handleCommand(
+            text,
+            buildCommandContext({
+              runtime: this.options.runtime,
+              scope,
+              session,
+              allowlist: this.options.allowlist,
+              userId: message.author.id,
+            }),
+          )
+          const components = this.builders
+            ? toDiscordComponents<ActionRowBuilder<ButtonBuilder>>(command.actions, this.builders)
+            : []
+          await this.replyChunked(message, command.markdown ?? command.reply ?? '', components)
+        })().catch((error) =>
+          logWarn(`discord: failed to handle crew command: ${errorMessage(error)}`),
         )
         return
       }

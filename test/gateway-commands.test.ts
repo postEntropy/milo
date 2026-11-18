@@ -10,6 +10,7 @@ import {
   encodePermission,
   handleCommand,
   handleTurnControl,
+  isImmediateCrewCommand,
   memoryLockMessage,
   modeLockMessage,
   modelLockMessage,
@@ -73,6 +74,66 @@ describe('/crew', () => {
     })
     expect(updates[1]).toEqual(['bot-1', { shape: 'orb', eyes: 'happy', palette: 'ocean' }])
     expect(custom.reply).toContain('ocean orb')
+  })
+
+  it('flags /crew and /delegated as immediate queue-bypassing commands and formats details safely', async () => {
+    expect(isImmediateCrewCommand('/crew stop bot-1')).toBe(true)
+    expect(isImmediateCrewCommand('/delegated pause work-1')).toBe(true)
+    expect(isImmediateCrewCommand('/sessions')).toBe(false)
+
+    let avatarPatch: unknown
+    const malformed = await handleCommand('/crew\tavatar\tbot-1\tshape=orb=extra', {
+      crew: () => [],
+      updateCrewAvatar: async (_id, patch) => {
+        avatarPatch = patch
+        throw new Error('Invalid enum value')
+      },
+    })
+    expect(avatarPatch).toEqual({ shape: 'orb=extra' })
+    expect(malformed.reply).toContain('Invalid enum value')
+
+    const newlineRename = await handleCommand('/crew rename bot-1 Bad\nName', {
+      crew: () => [],
+      renameCrewBot: async () => { throw new Error('should not apply newline name') },
+    })
+    expect(newlineRename.reply).toContain('one line')
+
+    const botWithHistory = [{
+      id: 'bot-1',
+      name: 'Scout',
+      createdAt: 1,
+      assignments: [
+        { id: 'a1', sessionId: 's1', mission: 'First', model: 'm', state: 'completed' as const, startedAt: 1 },
+        { id: 'a2', sessionId: 's2', mission: 'Second', model: 'm', state: 'running' as const, startedAt: 2, stopRequestedAt: 3 },
+      ],
+    }]
+    const botReply = (await handleCommand('/crew bot-1', { crew: () => botWithHistory })).reply ?? ''
+    expect(botReply.indexOf('Second')).toBeLessThan(botReply.indexOf('First'))
+    expect(botReply).toContain('stop requested')
+
+    const workItem = [{
+      id: 'w-1',
+      name: 'Nightly',
+      objective: 'Audit repo',
+      state: 'failed' as const,
+      schedule: { kind: 'every' as const, minutes: 60 },
+      allow: ['gmail_modify'],
+      target: { gateway: 'none' as const },
+      originSessionId: 's0',
+      createdAt: 1,
+      updatedAt: 2,
+      pauseAfterRun: true,
+      runs: [
+        { id: 'r1', startedAt: 10, finishedAt: 11, result: 'completed' as const, processId: 123 },
+        { id: 'r2', startedAt: 20, finishedAt: 21, result: 'failed' as const, failure: 'Provider 503', processId: 123 },
+      ],
+    }]
+    const delegatedReply = (await handleCommand('/delegated w-1', { delegatedWork: () => workItem })).reply ?? ''
+    expect(delegatedReply).toContain('Allowed: gmail_modify')
+    expect(delegatedReply).toContain('will pause after this run')
+    expect(delegatedReply).toContain('Schedule: every 1h')
+    expect(delegatedReply).toContain('Failure: Provider 503')
+    expect(delegatedReply.indexOf('Failure: Provider 503')).toBeLessThan(delegatedReply.indexOf('completed'))
   })
 })
 
