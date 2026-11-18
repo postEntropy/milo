@@ -10,7 +10,8 @@ process.env.MILO_HOME = home
 
 const { connectGoogle } = await import('../src/core/google/connect.js')
 const { TOKEN_ENDPOINT } = await import('../src/core/google/oauth.js')
-const { readAuth, readConfig, saveConfig } = await import('../src/core/config/load.js')
+const { readAuth, readConfig, saveAuth, saveConfig } = await import('../src/core/config/load.js')
+const { tokenSource } = await import('../src/core/google/access.js')
 const { ConfigSchema } = await import('../src/core/config/schema.js')
 
 /** The real fetch, kept because the loopback request in these tests is real. */
@@ -71,8 +72,12 @@ describe('the connect flow both surfaces drive', () => {
     })
 
     const url = await consentUrlOf({ consent: () => consent })
-    const redirect = new URL(new URL(url).searchParams.get('redirect_uri')!)
-    const answered = await realFetch(`${redirect.origin}/?code=abc`)
+    const parsedUrl = new URL(url)
+    const redirect = new URL(parsedUrl.searchParams.get('redirect_uri')!)
+    const state = parsedUrl.searchParams.get('state')!
+    const favicon = await realFetch(`${redirect.origin}/favicon.ico`)
+    expect(favicon.status).toBe(404)
+    const answered = await realFetch(`${redirect.origin}/?code=abc&state=${encodeURIComponent(state)}`)
     expect(answered.status).toBe(200)
 
     const connected = await flow
@@ -108,8 +113,10 @@ describe('the connect flow both surfaces drive', () => {
     })
 
     const url = await consentUrlOf({ consent: () => consent })
-    const redirect = new URL(new URL(url).searchParams.get('redirect_uri')!)
-    await realFetch(`${redirect.origin}/?code=abc`)
+    const parsedUrl = new URL(url)
+    const redirect = new URL(parsedUrl.searchParams.get('redirect_uri')!)
+    const state = parsedUrl.searchParams.get('state')!
+    await realFetch(`${redirect.origin}/?code=abc&state=${encodeURIComponent(state)}`)
 
     const connected = await flow
     expect(connected.ok).toBe(false)
@@ -139,13 +146,101 @@ describe('the connect flow both surfaces drive', () => {
     })
 
     const url = await consentUrlOf({ consent: () => consent })
-    const redirect = new URL(new URL(url).searchParams.get('redirect_uri')!)
-    await realFetch(`${redirect.origin}/?code=abc`)
+    const parsedUrl = new URL(url)
+    const redirect = new URL(parsedUrl.searchParams.get('redirect_uri')!)
+    const state = parsedUrl.searchParams.get('state')!
+    await realFetch(`${redirect.origin}/?code=abc&state=${encodeURIComponent(state)}`)
 
     const connected = await flow
     expect(connected.ok).toBe(true)
     if (!connected.ok) return
     expect(connected.value.warning).toContain('would not say which address')
     expect(readAuth().google?.refreshToken).toBe('rt')
+  })
+
+  it('rejects a mismatched OAuth state parameter', async () => {
+    googleIsFake()
+    let consent = ''
+    const flow = connectGoogle({
+      clientId: 'cid',
+      clientSecret: 'shh',
+      access: 'none',
+      onUrl: (url) => {
+        consent = url
+      },
+    })
+
+    const url = await consentUrlOf({ consent: () => consent })
+    const redirect = new URL(new URL(url).searchParams.get('redirect_uri')!)
+    const answered = await realFetch(`${redirect.origin}/?code=abc&state=wrong-state`)
+    expect(answered.status).toBe(400)
+
+    const connected = await flow
+    expect(connected.ok).toBe(false)
+    if (!connected.ok) expect(connected.error).toContain('state')
+  })
+
+  it('rejects partial consent when Google does not return every requested scope', async () => {
+    vi.stubGlobal('fetch', async (input: Parameters<typeof fetch>[0], init?: RequestInit) => {
+      const url = String(input)
+      if (url.startsWith(TOKEN_ENDPOINT)) {
+        return answer({
+          access_token: 'at',
+          expires_in: 3600,
+          refresh_token: 'rt',
+          scope: 'https://www.googleapis.com/auth/gmail.readonly',
+        })
+      }
+      return realFetch(input, init)
+    })
+
+    let consent = ''
+    const flow = connectGoogle({
+      clientId: 'cid',
+      clientSecret: 'shh',
+      access: 'modify',
+      onUrl: (url) => {
+        consent = url
+      },
+    })
+
+    const url = await consentUrlOf({ consent: () => consent })
+    const parsedUrl = new URL(url)
+    const redirect = new URL(parsedUrl.searchParams.get('redirect_uri')!)
+    const state = parsedUrl.searchParams.get('state')!
+    await realFetch(`${redirect.origin}/?code=abc&state=${encodeURIComponent(state)}`)
+
+    const connected = await flow
+    expect(connected.ok).toBe(false)
+    if (!connected.ok) expect(connected.error).toContain('permission')
+    expect(readAuth().google).toBeUndefined()
+  })
+
+  it('deduplicates concurrent token refreshes and updates rotated refresh token in memory', async () => {
+    saveAuth({
+      providers: {},
+      gateways: {},
+      search: {},
+      google: { clientId: 'cid', clientSecret: 'shh', refreshToken: 'rt-1', access: 'none' },
+    })
+    let calls = 0
+    const account = { clientId: 'cid', clientSecret: 'shh', refreshToken: 'rt-1', access: 'none' as const }
+    vi.stubGlobal('fetch', async () => {
+      calls += 1
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      return answer({ access_token: `at-${calls}`, expires_in: 0, refresh_token: `rt-${calls + 1}` })
+    })
+
+    const getToken = tokenSource(account)
+    const [a, b] = await Promise.all([getToken(), getToken()])
+    expect(a.ok && b.ok).toBe(true)
+    expect(calls).toBe(1)
+    expect(account.refreshToken).toBe('rt-2')
+    expect(readAuth().google?.refreshToken).toBe('rt-2')
+
+    const c = await getToken()
+    expect(c.ok).toBe(true)
+    expect(calls).toBe(2)
+    expect(account.refreshToken).toBe('rt-3')
   })
 })

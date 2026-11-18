@@ -48,6 +48,7 @@ export interface GoogleTokens {
   accessToken: string
   expiresAt: number
   refreshToken?: string
+  scopes?: string[]
 }
 
 /**
@@ -66,12 +67,13 @@ export function newVerifier(): string {
   return randomBytes(32).toString('base64url')
 }
 
-/** Where the person is sent to say yes — the state parameter is not, the PKCE verifier is. */
+/** Where the person is sent to say yes — with a PKCE verifier and optional CSRF state. */
 export function consentUrl(request: {
   clientId: string
   redirectUri: string
   verifier: string
   access: GoogleAccess
+  state?: string
 }): string {
   const url = new URL(AUTH_ENDPOINT)
   url.searchParams.set('client_id', request.clientId)
@@ -80,6 +82,7 @@ export function consentUrl(request: {
   url.searchParams.set('scope', scopesFor(request.access).join(' '))
   url.searchParams.set('code_challenge', challengeFor(request.verifier))
   url.searchParams.set('code_challenge_method', 'S256')
+  if (request.state) url.searchParams.set('state', request.state)
   // `offline` is what asks for a refresh token at all, and `consent` is what makes
   // Google hand one back *again* when someone reconnects — without it a reconnect
   // returns no refresh token and Milo would keep the old one, which is the one
@@ -127,10 +130,14 @@ export async function awaitCode(request: {
   }
 
   const redirectUri = `http://127.0.0.1:${port}/`
+  const state = randomBytes(16).toString('base64url')
 
   try {
     const answer = await new Promise<GoogleOutcome<string>>((resolve) => {
+      let settled = false
       const finish = (outcome: GoogleOutcome<string>): void => {
+        if (settled) return
+        settled = true
         clearTimeout(timer)
         resolve(outcome)
       }
@@ -140,6 +147,17 @@ export async function awaitCode(request: {
       )
       server.on('request', (incoming, response) => {
         const url = new URL(incoming.url ?? '/', redirectUri)
+        if (url.pathname !== '/') {
+          response.writeHead(404)
+          response.end()
+          return
+        }
+        if (url.searchParams.get('state') !== state) {
+          response.writeHead(400, { 'content-type': 'text/html; charset=utf-8' })
+          response.end(FAILED_PAGE)
+          finish({ ok: false, error: 'Google OAuth callback state mismatch.' })
+          return
+        }
         const code = url.searchParams.get('code')
         const refused = url.searchParams.get('error')
         response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' })
@@ -147,7 +165,7 @@ export async function awaitCode(request: {
         if (code) finish({ ok: true, value: code })
         else finish({ ok: false, error: `Google refused the consent: ${refused ?? 'no code came back'}` })
       })
-      request.onUrl(consentUrl({ clientId: request.clientId, redirectUri, verifier: request.verifier, access: request.access }))
+      request.onUrl(consentUrl({ clientId: request.clientId, redirectUri, verifier: request.verifier, access: request.access, state }))
     })
     if (!answer.ok) return answer
     return { ok: true, value: { code: answer.value, redirectUri } }
@@ -182,6 +200,9 @@ async function tokenRequest(body: Record<string, string>): Promise<GoogleOutcome
   const accessToken = typeof payload.access_token === 'string' ? payload.access_token : ''
   if (!accessToken) return { ok: false, error: 'Google answered without an access token.' }
   const expiresIn = typeof payload.expires_in === 'number' ? payload.expires_in : 3600
+  const scopes = typeof payload.scope === 'string'
+    ? payload.scope.split(/\s+/).filter(Boolean)
+    : undefined
   return {
     ok: true,
     value: {
@@ -189,6 +210,7 @@ async function tokenRequest(body: Record<string, string>): Promise<GoogleOutcome
       // A minute early, so a token is never handed out on the edge of its life.
       expiresAt: Date.now() + (expiresIn - 60) * 1000,
       ...(typeof payload.refresh_token === 'string' ? { refreshToken: payload.refresh_token } : {}),
+      ...(scopes ? { scopes } : {}),
     },
   }
 }

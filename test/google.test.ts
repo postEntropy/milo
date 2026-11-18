@@ -502,9 +502,11 @@ describe('the way to connecting', () => {
     // `onUrl` arrives before the answer — it is the address the flow opens, and the
     // one Google would hit with the code. Hitting it is what proves the port.
     for (let attempt = 0; attempt < 100 && consent === ''; attempt += 1) await new Promise((r) => setTimeout(r, 10))
-    const redirect = new URL(new URL(consent).searchParams.get('redirect_uri')!)
+    const parsed = new URL(consent)
+    const redirect = new URL(parsed.searchParams.get('redirect_uri')!)
+    const state = parsed.searchParams.get('state')!
 
-    const answered = await fetch(`${redirect.origin}/?code=abc`)
+    const answered = await fetch(`${redirect.origin}/?code=abc&state=${encodeURIComponent(state)}`)
     expect(answered.status).toBe(200)
     expect(await answered.text()).toContain('Connected')
 

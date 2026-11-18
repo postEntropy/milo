@@ -8,10 +8,10 @@
  * failures that are the flow's own (a missing refresh token, an address Gmail
  * would not name).
  */
-import { readAuth, readConfig, saveAuth, saveConfig } from '../config/load.js'
+import { readConfig, saveConfig, updateAuth } from '../config/load.js'
 import type { GoogleAccount } from '../config/schema.js'
 import { profile } from './gmail.js'
-import { awaitCode, exchangeCode, newVerifier, type GoogleOutcome } from './oauth.js'
+import { awaitCode, exchangeCode, newVerifier, scopesFor, type GoogleOutcome } from './oauth.js'
 import type { GoogleAccess } from './tiers.js'
 
 export interface ConnectResult {
@@ -67,6 +67,19 @@ export async function connectGoogle(request: {
     }
   }
 
+  if (tokens.value.scopes) {
+    const granted = new Set(tokens.value.scopes)
+    const missing = scopesFor(request.access).filter((scope) => !granted.has(scope))
+    if (missing.length > 0) {
+      return {
+        ok: false,
+        error:
+          `Google did not grant every requested permission (missing: ${missing.join(', ')}). ` +
+          'Reconnect and approve all requested permissions.',
+      }
+    }
+  }
+
   // The address is read back from Google, so the connection is proven rather than
   // assumed — and `status` can say who it is without spending a call.
   const who = await profile(tokens.value)
@@ -79,9 +92,9 @@ export async function connectGoogle(request: {
     connectedAt: new Date().toISOString(),
     access: request.access,
   }
-  const auth = readAuth()
-  auth.google = account
-  saveAuth(auth)
+  await updateAuth((auth) => {
+    auth.google = account
+  })
 
   // Wanted is what registers the tools, so connecting without turning it on would
   // leave a grant nothing could use.
