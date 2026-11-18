@@ -533,11 +533,16 @@ export class AgentRuntime {
       await cached.rename(trimmed)
       return true
     }
-    const record = await this.store.load(id)
-    if (!record) return false
-    record.title = trimmed || undefined
-    await this.store.save(record, record.version)
-    return true
+    const lease = await this.store.acquire(id)
+    try {
+      const record = lease.latest ?? await this.store.load(id)
+      if (!record) return false
+      record.title = trimmed || undefined
+      await this.store.save(record, record.version)
+      return true
+    } finally {
+      await lease.release()
+    }
   }
 
   /**

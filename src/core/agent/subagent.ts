@@ -94,7 +94,17 @@ export async function runSubagent(options: SubagentRun): Promise<ToolResult> {
   // pruning the install's conversations is the main turn's act, and the subagent's
   // context carries no session to manage or refuse against.
   const tools = options.registry.specs()
-    .filter((tool) => tool.name !== 'task' && tool.name !== 'crew' && tool.name !== 'delegated_work' && tool.name !== 'todo' && tool.name !== 'sessions')
+    .filter(
+      (tool) =>
+        tool.name !== 'task' &&
+        tool.name !== 'crew' &&
+        tool.name !== 'delegated_work' &&
+        tool.name !== 'todo' &&
+        tool.name !== 'sessions' &&
+        tool.name !== 'panel' &&
+        tool.name !== 'job_status' &&
+        tool.name !== 'job_kill',
+    )
     .filter((tool) => !options.plan || isPlanTool(options.registry.get(tool.name)))
   const system = buildSystemPrompt({
     base: SUBAGENT_SYSTEM_PROMPT,

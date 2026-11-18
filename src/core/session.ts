@@ -84,7 +84,7 @@ const VERIFICATION_WRITES = new Set([
 ])
 
 interface PreparedCompaction {
-  provider: Provider
+  baseProvider: Provider
   model: string
   ceiling: number
   fixed: number
@@ -94,6 +94,7 @@ interface PreparedCompaction {
   startedAt: number
   done: boolean
   finishedAt?: number
+  abort: AbortController
   summary: Promise<string | null>
 }
 
@@ -1017,7 +1018,7 @@ export class Session {
     const incoming: Message[] = opts?.notice
       ? []
       : [{ role: 'user', content: [{ type: 'text', text: input }, ...(opts?.images ?? []), ...(opts?.audio ?? []), ...(opts?.documents ?? [])] }]
-    yield* this.compactIfNeeded(prompt, signal, provider, model, incoming, turnId)
+    yield* this.compactIfNeeded(prompt, signal, provider, chosenProvider, model, incoming, turnId)
 
     const systemPrompt = buildSystemPrompt({
       ...prompt,
@@ -1387,10 +1388,10 @@ export class Session {
           !errored &&
           !abort.aborted &&
           this.wroteThisTurn &&
-          this.options.project?.ok &&
+          turnProject?.ok &&
           this.options.verify
         ) {
-          const project = this.options.project.project
+          const project = turnProject.project
           const startedVerification = Date.now()
           let result: VerificationResult
           try {
@@ -1520,7 +1521,7 @@ export class Session {
       const alreadyRunning = [...this.background]
       this.inBackground(withTraceContext({ turn: turnId, session: this.id, surface: this.scope.gateway }, async () => {
         await Promise.all(alreadyRunning)
-        await this.prepareCompaction(provider, model)
+        await this.prepareCompaction(provider, chosenProvider, model)
       }))
     }
   }
@@ -1793,9 +1794,15 @@ export class Session {
    * `/clear`, a fold — and saying nothing there leaves a person reading a
    * conversation the model can no longer see.
    */
+  private discardPreparedCompaction(): void {
+    if (!this.preparedCompaction) return
+    this.preparedCompaction.abort.abort()
+    this.preparedCompaction = undefined
+  }
+
   private adoptLatest(latest: SessionRecord): { added: number; removed: number; compacted: boolean } | null {
     if (latest.version === this.baseVersion) return null
-    this.preparedCompaction = undefined
+    this.discardPreparedCompaction()
     const before = this.messages.length
     // Compared before `summary` is replaced: a summary that was not there, or
     // reads differently, is the other Milo having summarized the older turns.
@@ -1832,7 +1839,7 @@ export class Session {
     // is what makes this the session as it actually stands.
     const lease = await this.store.acquire(this.id)
     try {
-      this.preparedCompaction = undefined
+      this.discardPreparedCompaction()
       if (lease.latest) this.adoptLatest(lease.latest)
       this.messages.length = 0
       this.summary = undefined
@@ -2004,11 +2011,12 @@ export class Session {
       reason,
     })
     if (!config?.compaction) return nothing('compaction is off in this install')
-    this.preparedCompaction = undefined
+    this.discardPreparedCompaction()
 
     // The window is a fact about the model, not about this session: wait for the
     // lookup only if it has not finished already.
     await this.resolving
+    if (signal?.aborted) return nothing('stopped before folding')
 
     // Pictures, page snapshots and fetched pages first: they are the parts of a
     // transcript that a handful of turns can push over the ceiling on their own,
@@ -2037,6 +2045,7 @@ export class Session {
     } catch {
       summary = null
     }
+    if (signal?.aborted) return nothing('stopped before folding')
 
     if (summary) this.summary = summary
     this.record.droppedTokens = (this.record.droppedTokens ?? 0) + estimateTokens(dropped)
@@ -2085,6 +2094,7 @@ export class Session {
     prompt: Omit<SystemPromptInput, 'summary'>,
     signal?: AbortSignal,
     provider: Provider = this.options.provider,
+    baseProvider: Provider = provider,
     model: string = this.options.model,
     incoming: Message[] = [],
     turn?: string,
@@ -2119,12 +2129,17 @@ export class Session {
     const prepared = this.preparedCompaction
     if (
       prepared &&
-      this.canUsePreparedCompaction(prepared, provider, model, ceiling, fixed) &&
+      this.canUsePreparedCompaction(prepared, baseProvider, model, ceiling, fixed) &&
       estimateTokens(this.messages.slice(prepared.cut)) + fixed + incomingTokens <= ceiling
     ) {
       this.preparedCompaction = undefined
       if (!prepared.done) yield { type: 'compacting' }
       const summary = await awaitPreparedSummary(prepared.summary, signal)
+      if (signal?.aborted) {
+        const error = new Error('the turn was stopped')
+        error.name = 'AbortError'
+        throw error
+      }
       const dropped = this.messages.slice(0, prepared.cut)
       if (summary) this.summary = summary
       const tokens = estimateTokens(dropped)
@@ -2139,7 +2154,7 @@ export class Session {
       }
       return
     }
-    if (prepared) this.preparedCompaction = undefined
+    this.discardPreparedCompaction()
 
     // The floor is a preference, not a promise: when the turns it protects are
     // themselves bigger than the ceiling, the cut recuses past them, and 0 comes
@@ -2171,8 +2186,14 @@ export class Session {
         dropped,
         signal,
       }))
-    } catch {
+    } catch (error) {
+      if (signal?.aborted || isAbort(error)) throw error
       summary = null
+    }
+    if (signal?.aborted) {
+      const error = new Error('the turn was stopped')
+      error.name = 'AbortError'
+      throw error
     }
 
     if (summary) this.summary = summary
@@ -2199,7 +2220,7 @@ export class Session {
   }
 
   /** Start the next summary during the gap after an answer, before it is needed. */
-  private async prepareCompaction(provider: Provider, model: string): Promise<void> {
+  private async prepareCompaction(provider: Provider, baseProvider: Provider, model: string): Promise<void> {
     const config = this.options.sessions
     const ceiling = this.ceiling ?? config?.maxInputTokens
     const fixed = this.lastFixedTokens
@@ -2215,8 +2236,9 @@ export class Session {
     })
     if (cut <= 0) return
 
+    const abort = new AbortController()
     const prepared: PreparedCompaction = {
-      provider,
+      baseProvider,
       model,
       ceiling,
       fixed,
@@ -2225,6 +2247,7 @@ export class Session {
       prefix: this.messages.slice(0, cut),
       startedAt: Date.now(),
       done: false,
+      abort,
       summary: Promise.resolve(null),
     }
     this.preparedCompaction = prepared
@@ -2233,8 +2256,11 @@ export class Session {
       model,
       previous: prepared.previous,
       dropped: prepared.prefix,
+      signal: abort.signal,
     }).catch((error) => {
-      logWarn(`could not prepare compaction for session ${this.id}: ${errorMessage(error)}`)
+      if (!abort.signal.aborted) {
+        logWarn(`could not prepare compaction for session ${this.id}: ${errorMessage(error)}`)
+      }
       return null
     }).then((summary) => {
       prepared.done = true
@@ -2246,13 +2272,13 @@ export class Session {
 
   private canUsePreparedCompaction(
     prepared: PreparedCompaction,
-    provider: Provider,
+    baseProvider: Provider,
     model: string,
     ceiling: number,
     fixed: number,
   ): boolean {
     if (
-      prepared.provider !== provider ||
+      prepared.baseProvider !== baseProvider ||
       prepared.model !== model ||
       prepared.ceiling !== ceiling ||
       prepared.fixed !== fixed ||

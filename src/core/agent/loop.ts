@@ -333,6 +333,8 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
       return
     }
 
+    const answeredIds = new Set<string>()
+
     for (let index = 0; index < toolCalls.length; ) {
       // A turn stopped between two calls stops here rather than running the rest
       // and only noticing at the next request. The tools read `context.signal`
@@ -347,20 +349,7 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
         // request that follows until the history is repaired by hand. Each call
         // that never ran is answered as stopped instead, so the history stays one
         // the model can be sent again.
-        for (const call of toolCalls.slice(index)) {
-          messages.push({
-            role: 'tool',
-            content: [
-              {
-                type: 'tool-result',
-                id: call.id,
-                name: call.name,
-                content: STOPPED_CALL_RESULT,
-                isError: true,
-              },
-            ],
-          })
-        }
+        pushStoppedToolResults(toolCalls, answeredIds, messages)
         throw abortError()
       }
       // A run of calls that hold no shared state is started together, then read
@@ -391,8 +380,10 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
           record(!result.isError, { output: result })
           return result
         } catch (error) {
-          record(false, { error: errorMessage(error) })
-          throw error
+          const message = errorMessage(error)
+          record(false, { error: message })
+          if (options.signal?.aborted || options.context.signal.aborted) throw error
+          return { content: `Tool "${call.name}" failed: ${message}`, isError: true }
         }
       }
       const pending =
@@ -408,46 +399,56 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
             })
           : null
 
-      for (let at = 0; at < run.length; at += 1) {
-        const call = run[at]
-        yield { type: 'tool-start', id: call.id, name: call.name, args: call.args }
-        const result = pending ? await pending[at] : await executeTraced(call)
-        yield {
-          type: 'tool-end',
-          id: call.id,
-          name: call.name,
-          result: result.content,
-          isError: Boolean(result.isError),
-          ...(result.change && result.change.length > 0 ? { change: result.change } : {}),
+      let abortedRun = false
+      try {
+        for (let at = 0; at < run.length; at += 1) {
+          const call = run[at]
+          yield { type: 'tool-start', id: call.id, name: call.name, args: call.args }
+          const result = pending ? await pending[at] : await executeTraced(call)
+          yield {
+            type: 'tool-end',
+            id: call.id,
+            name: call.name,
+            result: result.content,
+            isError: Boolean(result.isError),
+            ...(result.change && result.change.length > 0 ? { change: result.change } : {}),
+          }
+          // Said whether or not the call reported a failure: a command that exits nonzero
+          // has usually written some of what it was doing, and a screen left showing the
+          // folder as it was before is worse than one re-read for nothing.
+          const ran = registry.get(call.name)
+          if (ran && actsOnSomething(ran, call.args) && !result.blocked) {
+            options.onSideEffect?.({ tool: call.name, args: call.args })
+          }
+          // The plan is drawn by the surfaces and nothing the model needs told
+          // back, so it rides as its own event rather than into the transcript.
+          if (result.todos) yield { type: 'todo', items: result.todos }
+          // The panel is the same shape of display state: the web gateway resolves
+          // the request into a view, and none of it goes back to the model.
+          if (result.panel) yield { type: 'panel', request: result.panel }
+          const images = await persistImages(result.images)
+          answeredIds.add(call.id)
+          messages.push({
+            role: 'tool',
+            content: [
+              {
+                type: 'tool-result',
+                id: call.id,
+                name: call.name,
+                content: result.content,
+                isError: result.isError,
+                ...(images.length > 0 ? { images } : {}),
+                ...(result.change && result.change.length > 0 ? { change: result.change } : {}),
+              },
+            ],
+          })
         }
-        // Said whether or not the call reported a failure: a command that exits nonzero
-        // has usually written some of what it was doing, and a screen left showing the
-        // folder as it was before is worse than one re-read for nothing.
-        const ran = registry.get(call.name)
-        if (ran && actsOnSomething(ran, call.args) && !result.blocked) {
-          options.onSideEffect?.({ tool: call.name, args: call.args })
-        }
-        // The plan is drawn by the surfaces and nothing the model needs told
-        // back, so it rides as its own event rather than into the transcript.
-        if (result.todos) yield { type: 'todo', items: result.todos }
-        // The panel is the same shape of display state: the web gateway resolves
-        // the request into a view, and none of it goes back to the model.
-        if (result.panel) yield { type: 'panel', request: result.panel }
-        const images = await persistImages(result.images)
-        messages.push({
-          role: 'tool',
-          content: [
-            {
-              type: 'tool-result',
-              id: call.id,
-              name: call.name,
-              content: result.content,
-              isError: result.isError,
-              ...(images.length > 0 ? { images } : {}),
-              ...(result.change && result.change.length > 0 ? { change: result.change } : {}),
-            },
-          ],
-        })
+      } catch (error) {
+        abortedRun = true
+        throw error
+      } finally {
+        if (pending) await Promise.allSettled(pending)
+        if (abortedRun) pushStoppedToolResults(toolCalls, answeredIds, messages)
       }
     }
   }
@@ -490,6 +491,29 @@ export async function* runAgent(options: RunAgentOptions): AsyncGenerator<AgentE
     message: closing
       ? `Stopped after ${maxSteps} steps — it answered with what it had.`
       : `Stopped after ${maxSteps} steps without a final answer.`,
+  }
+}
+
+function pushStoppedToolResults(
+  toolCalls: { id: string; name: string }[],
+  answeredIds: Set<string>,
+  messages: Message[],
+): void {
+  for (const call of toolCalls) {
+    if (answeredIds.has(call.id)) continue
+    answeredIds.add(call.id)
+    messages.push({
+      role: 'tool',
+      content: [
+        {
+          type: 'tool-result',
+          id: call.id,
+          name: call.name,
+          content: STOPPED_CALL_RESULT,
+          isError: true,
+        },
+      ],
+    })
   }
 }
 
@@ -588,10 +612,11 @@ async function checkPermission(
   const mustConfirm = tool.requiresConfirmation?.(args) === true && !standing
   if (!permission) return mustConfirm ? `Tool "${name}" requires confirmation, but this surface cannot ask the user.` : null
 
+  const cwd = permission.cwd ?? context.cwd
   const decision = await permission.policy.decide(
     tool,
     args,
-    permission.cwd ? { cwd: permission.cwd } : undefined,
+    cwd ? { cwd } : undefined,
   )
   if (decision === 'deny') return `Tool "${name}" is denied by the permission policy.`
   if (decision === 'allow' && !mustConfirm) return null

@@ -167,7 +167,15 @@ function directoryStamp(dir: string): string | null {
   const parts: string[] = []
   for (const entry of entries) {
     try {
-      parts.push(`${entry}:${statSync(path.join(dir, entry)).mtimeMs}`)
+      const entryPath = path.join(dir, entry)
+      const dirMtime = statSync(entryPath).mtimeMs
+      let skillMtime = 0
+      try {
+        skillMtime = statSync(path.join(entryPath, SKILL_FILE)).mtimeMs
+      } catch {
+        // Not a skill directory with SKILL.md yet, or file removed between listing and stat.
+      }
+      parts.push(`${entry}:${dirMtime}:${skillMtime}`)
     } catch {
       // Gone between the listing and the stat: the next read sees it missing.
     }
@@ -192,7 +200,6 @@ export function formatSkillList(skills: SkillSummary[]): string {
     return [
       'No skills found.',
       'Add one at ~/.milo/skills/<name>/SKILL.md, with a `name` and a `description` in the frontmatter.',
-      'Restart to pick it up.',
     ].join('\n')
   }
   const lines = skills.map((skill) => `- ${skill.name} — ${skill.description}`)

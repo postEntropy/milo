@@ -192,3 +192,26 @@ export function createToolRegistry(options: ToolRegistryOptions = {}): ToolRegis
   options.mcp?.register(registry)
   return registry
 }
+
+/**
+ * Every tool a routine can be explicitly granted when created or edited outside
+ * an LLM turn (`milo routines` CLI and web settings).
+ */
+export const GRANTABLE_ROUTINE_TOOLS: ReadonlySet<string> = new Set([
+  ...builtinTools.map((tool) => tool.name),
+  'web_search',
+  'read_skill',
+  'browser_open',
+  'browser_snapshot',
+  'browser_screenshot',
+  'browser_act',
+  'gmail_modify',
+  'gmail_draft',
+  'gmail_send',
+  'mail_labels',
+])
+
+/** Returns any names in `allow` not present in `GRANTABLE_ROUTINE_TOOLS`. */
+export function unknownGrantableTools(allow: readonly string[]): string[] {
+  return allow.filter((name) => !GRANTABLE_ROUTINE_TOOLS.has(name))
+}

@@ -849,3 +849,136 @@ describe('the execution log along a turn', () => {
   })
 })
 
+describe('runAgent — concurrent tool error & abort pairing', () => {
+  it('turns an unexpected non-abort failure in a concurrent run into an error tool-result', async () => {
+    const firstRead: Tool = {
+      name: 'boom_read',
+      description: 'fails in policy decide',
+      schema: z.object({}),
+      readOnly: true,
+      concurrent: true,
+      async execute() {
+        return { content: 'unreachable' }
+      },
+    }
+    const okRead: Tool = {
+      name: 'ok_read',
+      description: 'succeeds',
+      schema: z.object({}),
+      readOnly: true,
+      concurrent: true,
+      async execute() {
+        return { content: 'fine' }
+      },
+    }
+    const provider = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'boom_read', args: {} },
+        { type: 'tool-call', id: 'c2', name: 'ok_read', args: {} },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+      [{ type: 'text', delta: 'recovered' }, { type: 'done', finishReason: 'stop' }],
+    ])
+    const registry = new ToolRegistry([firstRead, okRead])
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'go' }] }]
+
+    const events: AgentEvent[] = []
+    for await (const event of runAgent({
+      provider,
+      model: 'm',
+      tools: registry.specs(),
+      registry,
+      messages,
+      context: { cwd: process.cwd(), signal: new AbortController().signal },
+      permission: {
+        policy: {
+          mode: 'ask',
+          setMode() {},
+          update() {},
+          decide(tool) {
+            if (tool.name === 'boom_read') throw new Error('policy exploded')
+            return 'allow'
+          },
+        },
+      },
+    })) {
+      events.push(event)
+    }
+
+    const parts = messages.flatMap((message) => message.content)
+    const called = parts.filter((part): part is ToolCallPart => part.type === 'tool-call').map((part) => part.id)
+    const answered = parts.filter((part): part is ToolResultPart => part.type === 'tool-result').map((part) => part.id)
+    expect(called).toEqual(['c1', 'c2'])
+    expect(answered).toEqual(['c1', 'c2'])
+    expect(events.find((event) => event.type === 'tool-end' && event.id === 'c1')).toMatchObject({
+      isError: true,
+      result: 'Tool "boom_read" failed: policy exploded',
+    })
+  })
+
+  it('fills stopped tool-results when aborted mid-concurrent run', async () => {
+    const controller = new AbortController()
+    const abortingRead: Tool = {
+      name: 'aborting_read',
+      description: 'aborts via policy',
+      schema: z.object({}),
+      readOnly: true,
+      concurrent: true,
+      async execute() {
+        return { content: 'late' }
+      },
+    }
+    const slowRead: Tool = {
+      name: 'slow_read',
+      description: 'slow',
+      schema: z.object({}),
+      readOnly: true,
+      concurrent: true,
+      async execute() {
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        return { content: 'late' }
+      },
+    }
+    const provider = new ScriptedProvider([
+      [
+        { type: 'tool-call', id: 'c1', name: 'aborting_read', args: {} },
+        { type: 'tool-call', id: 'c2', name: 'slow_read', args: {} },
+        { type: 'done', finishReason: 'tool_calls' },
+      ],
+    ])
+    const registry = new ToolRegistry([abortingRead, slowRead])
+    const messages: Message[] = [{ role: 'user', content: [{ type: 'text', text: 'go' }] }]
+
+    await expect(async () => {
+      for await (const _event of runAgent({
+        provider,
+        model: 'm',
+        tools: registry.specs(),
+        registry,
+        messages,
+        context: { cwd: process.cwd(), signal: controller.signal },
+        permission: {
+          policy: {
+            mode: 'ask',
+            setMode() {},
+            update() {},
+            decide(tool) {
+              if (tool.name === 'aborting_read') {
+                controller.abort()
+                throw new Error('aborted')
+              }
+              return 'allow'
+            },
+          },
+        },
+      })) { /* drain */ }
+    }).rejects.toThrow('aborted')
+
+    const parts = messages.flatMap((message) => message.content)
+    const called = parts.filter((part): part is ToolCallPart => part.type === 'tool-call').map((part) => part.id)
+    const answered = parts.filter((part): part is ToolResultPart => part.type === 'tool-result').map((part) => part.id)
+    expect(called).toEqual(['c1', 'c2'])
+    expect(answered).toEqual(['c1', 'c2'])
+  })
+})
+
