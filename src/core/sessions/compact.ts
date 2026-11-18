@@ -433,6 +433,7 @@ async function call(
   options.signal?.addEventListener('abort', abort, { once: true })
 
   let text = ''
+  let finishReason: string | undefined
   try {
     for await (const event of options.provider.stream({
       model: options.model,
@@ -444,6 +445,10 @@ async function call(
       trace: { purpose: options.purpose ?? 'compaction' },
     })) {
       if (event.type === 'text') text += event.delta
+      else if (event.type === 'done') finishReason = event.finishReason
+    }
+    if (finishReason === 'error') {
+      return { ok: false, aborted: null, error: 'summary call returned an error finish reason' }
     }
     return { ok: true, text }
   } catch (error) {
@@ -635,7 +640,7 @@ function renderTranscript(messages: Message[]): string {
     }
     for (const part of message.content) {
       if (part.type === 'tool-call') {
-        lines.push(`Tool call: ${part.name}(${safeJson(part.args)})`)
+        lines.push(`Tool call: ${part.name}(${truncate(safeJson(part.args), 600)})`)
       } else if (part.type === 'tool-result') {
         const pictures = part.images?.length ? ` [+${part.images.length} screenshot]` : ''
         lines.push(`Tool result (${part.name}): ${truncate(part.content, 600)}${pictures}`)

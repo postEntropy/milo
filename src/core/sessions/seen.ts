@@ -12,7 +12,8 @@
  * It is install-wide, because the install belongs to one person: opening a
  * session on the phone is looking at it, and the browser is not owed the mark.
  */
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { dirname } from 'node:path'
 import { sessionSeenFile } from '../config/paths.js'
 import { logWarn } from '../../util/log.js'
@@ -133,8 +134,13 @@ function read(): Map<string, number> | null {
 function write(map: ReadonlyMap<string, number>): void {
   const file = sessionSeenFile()
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
-  const temp = `${file}.${process.pid}.tmp`
-  writeFileSync(temp, `${JSON.stringify(Object.fromEntries(map), null, 2)}\n`, { mode: 0o600 })
-  renameSync(temp, file)
-  chmodSync(file, 0o600)
+  const temp = `${file}.${process.pid}.${randomUUID()}.tmp`
+  try {
+    writeFileSync(temp, `${JSON.stringify(Object.fromEntries(map), null, 2)}\n`, { mode: 0o600 })
+    renameSync(temp, file)
+    chmodSync(file, 0o600)
+  } catch (error) {
+    rmSync(temp, { force: true })
+    throw error
+  }
 }

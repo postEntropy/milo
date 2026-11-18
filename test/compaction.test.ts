@@ -682,4 +682,81 @@ describe('Session compaction', () => {
       full.session.stats().fixedTokens! - empty.session.stats().fixedTokens!,
     ).toBeGreaterThanOrEqual(catalog)
   })
+
+  it('reuses a background-prepared compaction on the following turn without summarizing twice', async () => {
+    const provider = new ScriptedProvider()
+    const store = new MemorySessionStore()
+    const record = await store.create()
+    const budget = await foldingBudget()
+    record.messages = [
+      text('user', `first ${'x'.repeat(2200)}`),
+      text('assistant', 'ok'),
+      text('user', `second ${'y'.repeat(1600)}`),
+      text('assistant', 'ok'),
+    ]
+
+    const session = new Session({
+      scope: { gateway: 'cli', chatId: 'c' },
+      provider,
+      model: 'm',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
+      cwd: process.cwd(),
+      record,
+      store,
+      sessions: {
+        ...DEFAULT_SESSIONS,
+        maxInputTokens: budget,
+        keepTurns: 1,
+        generateTitles: false,
+      },
+    })
+
+    for await (const _event of session.send('hello')) { /* drain */ }
+    await session.settle()
+    const summariesAfterPrepare = provider.purposes.filter((purpose) => purpose === 'compaction').length
+    expect(summariesAfterPrepare).toBe(1)
+
+    const turn2Events = []
+    for await (const event of session.send(`big follow-up ${'z'.repeat(2000)}`)) turn2Events.push(event)
+    expect(turn2Events.some((event) => event.type === 'compacted' && event.summarized)).toBe(true)
+    // Reusing the prepared summary avoids emitting a synchronous `compacting` wait on turn 2.
+    expect(turn2Events.some((event) => event.type === 'compacting')).toBe(false)
+  })
+
+  it('does not splice messages when compaction is aborted via signal', async () => {
+    const provider = new ScriptedProvider()
+    provider.hanging = true
+    const store = new MemorySessionStore()
+    const record = await store.create()
+    record.messages = longSeed()
+    const beforeCount = record.messages.length
+
+    const session = new Session({
+      scope: { gateway: 'cli', chatId: 'c' },
+      provider,
+      model: 'm',
+      system: 'BASE',
+      registry: createToolRegistry(),
+      memory: new SqliteMemory({ dir: mkdtempSync(path.join(tmpdir(), 'milo-comp-')) }),
+      cwd: process.cwd(),
+      record,
+      store,
+      sessions: {
+        ...DEFAULT_SESSIONS,
+        maxInputTokens: 100_000,
+        keepTurns: 1,
+        generateTitles: false,
+      },
+    })
+
+    const controller = new AbortController()
+    const pending = session.compact(controller.signal)
+    setTimeout(() => controller.abort(), 15)
+    const result = await pending
+
+    expect(result.folded).toBe(0)
+    expect(session.messages).toHaveLength(beforeCount)
+  })
 })

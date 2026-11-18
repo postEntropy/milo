@@ -323,6 +323,24 @@ describe('pruning old sessions', () => {
     expect(await recaps.read('calm-otter-1')).toBeNull()
     expect(await recaps.read('tidy-heron-3')).not.toBeNull()
   })
+
+  it('does not let protected routine runs crowd interactive sessions out of keep', async () => {
+    const store = new FileSessionStore({ dir: tempDir() })
+    await seed(store)
+    await store.save(record('run-a-1', 500), INITIAL_SESSION_VERSION)
+    await store.save(record('run-b-2', 600), INITIAL_SESSION_VERSION)
+    await store.save(record('run-c-3', 700), INITIAL_SESSION_VERSION)
+
+    const removed = await store.prune({ keep: 2, protect: ['run-a-1', 'run-b-2', 'run-c-3'] })
+    expect(removed).toEqual(['calm-otter-1'])
+    expect((await store.list()).map((entry) => entry.id)).toEqual([
+      'run-c-3',
+      'run-b-2',
+      'run-a-1',
+      'tidy-heron-3',
+      'brave-wolf-2',
+    ])
+  })
 })
 
 // A run that opens a conversation and never speaks in it leaves a record nothing

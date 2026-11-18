@@ -39,13 +39,6 @@ const LOCK_STALE_MS = 10_000
 /** Save windows are short and rare: waiting is cheaper than failing the turn. */
 const WRITE_LOCK_RETRIES = { retries: 15, factor: 1.5, minTimeout: 20, maxTimeout: 250, randomize: true }
 /**
- * A turn holds its lease for as long as it runs — minutes, if the model is slow
- * or a permission prompt is waiting on a person — so this is not a short retry
- * budget but a poll that keeps going until the holder is done or the waiter is
- * stopped.
- */
-const TURN_LOCK_RETRIES = { forever: true, factor: 1.2, minTimeout: 200, maxTimeout: 1000, randomize: true }
-/**
  * A turn's lease lives beside the record, never on the record's own lock: a turn
  * writes while it holds the lease, so the two must not be the same lock.
  */
@@ -58,6 +51,27 @@ function turnTarget(file: string): string {
 /** proper-lockfile's "somebody else holds this" error. */
 function isLocked(error: unknown): boolean {
   return (error as NodeJS.ErrnoException)?.code === 'ELOCKED'
+}
+
+function lockAbortError(): Error {
+  const error = new Error('the wait was aborted')
+  error.name = 'AbortError'
+  return error
+}
+
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(lockAbortError())
+  return new Promise((resolve, reject) => {
+    const onAbort = () => {
+      clearTimeout(timer)
+      reject(lockAbortError())
+    }
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
+    signal?.addEventListener('abort', onAbort, { once: true })
+  })
 }
 
 export interface FileSessionStoreOptions {
@@ -104,7 +118,7 @@ export class FileSessionStore implements SessionStore {
   async withCreationLock<T>(key: string, work: () => Promise<T>): Promise<T> {
     ensurePrivateDir(this.dir)
     const digest = createHash('sha256').update(key).digest('hex')
-    const release = await this.takeLock(path.join(this.dir, `.creation-${digest}`), TURN_LOCK_RETRIES)
+    const release = await this.acquireLock(path.join(this.dir, `.creation-${digest}`))
     try {
       return await work()
     } finally {
@@ -265,7 +279,7 @@ export class FileSessionStore implements SessionStore {
     const unlock = await waitForLease(this.leases.acquire(id), options?.signal)
     let release: () => Promise<void>
     try {
-      release = await waitForLease(this.takeLock(turnTarget(file), TURN_LOCK_RETRIES), options?.signal)
+      release = await this.acquireLock(turnTarget(file), options?.signal)
     } catch (error) {
       unlock()
       throw error
@@ -281,9 +295,27 @@ export class FileSessionStore implements SessionStore {
     return {
       latest: await this.load(id),
       release: async () => {
-        await release()
-        unlock()
+        try {
+          await release()
+        } finally {
+          unlock()
+        }
       },
+    }
+  }
+
+  private async acquireLock(target: string, signal?: AbortSignal): Promise<() => Promise<void>> {
+    let waitMs = 200
+    for (;;) {
+      if (signal?.aborted) throw lockAbortError()
+      try {
+        return await this.takeLock(target, 0)
+      } catch (error) {
+        if (!isLocked(error)) throw error
+      }
+      const jitter = Math.round(waitMs * (0.8 + Math.random() * 0.4))
+      await sleepAbortable(jitter, signal)
+      waitMs = Math.min(1_000, Math.round(waitMs * 1.2))
     }
   }
 
@@ -348,7 +380,7 @@ export class FileSessionStore implements SessionStore {
     if (!this.pending.has(id) && !existsSync(file)) return
     const unlock = await this.leases.acquire(id)
     try {
-      const release = await this.takeLock(turnTarget(file), TURN_LOCK_RETRIES)
+      const release = await this.acquireLock(turnTarget(file))
       try {
         this.pending.delete(id)
         rmSync(file, { force: true })
@@ -432,16 +464,21 @@ export class FileSessionStore implements SessionStore {
 
   async prune(options: { keep: number; protect?: Iterable<string> }): Promise<string[]> {
     if (options.keep <= 0) return []
-    // Newest first, so the ones beyond `keep` are the oldest.
+    // Newest first. Exclude routine runs and Command Code sessions before slicing
+    // so they never crowd ordinary sessions out of `keep`; still spare any bound
+    // conversation past the limit so an active scope is never dropped.
     const summaries = await this.list()
-    if (summaries.length <= options.keep) return []
+    const protect = new Set(options.protect ?? [])
+    const bound = new Set(this.boundIds())
 
-    const keep = new Set(options.protect ?? [])
-    for (const id of this.boundIds()) keep.add(id)
+    const candidates = summaries.filter(
+      (summary) => !protect.has(summary.id) && summary.backend?.kind !== 'command-code',
+    )
+    if (candidates.length <= options.keep) return []
 
     const removed: string[] = []
-    for (const summary of summaries.slice(options.keep)) {
-      if (keep.has(summary.id) || summary.backend?.kind === 'command-code') continue
+    for (const summary of candidates.slice(options.keep)) {
+      if (bound.has(summary.id)) continue
       await this.remove(summary.id)
       removed.push(summary.id)
     }
