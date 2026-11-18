@@ -14,7 +14,7 @@ describe('parseShell', () => {
 
   it('splits on the operators a shell uses', () => {
     expect(segments('cd /tmp && rm -rf build').map((segment) => segment.program)).toEqual(['cd', 'rm'])
-    expect(segments('a; b || c | d\ne').map((segment) => segment.program)).toEqual(['a', 'b', 'c', 'd', 'e'])
+    expect(segments('a; b || c | d & f\ne').map((segment) => segment.program)).toEqual(['a', 'b', 'c', 'd', 'f', 'e'])
   })
 
   it('keeps a separator inside quotes, and resolves the quotes', () => {
@@ -53,6 +53,9 @@ describe('parseShell', () => {
       'xargs rm',
       'find . -exec rm {} \\;',
       "env -S 'rm -rf /'",
+      '(rm -rf /)',
+      '{ rm -rf /; }',
+      '{rm,-rf,/}',
     ]) {
       expect(parseShell(command), command).toMatchObject({ ok: false })
     }

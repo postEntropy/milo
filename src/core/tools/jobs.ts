@@ -33,7 +33,7 @@ export function createJobStatusTool(jobs: JobManager): Tool<z.infer<typeof statu
     async execute(args, ctx): Promise<ToolResult> {
       if (args.id) {
         const job = jobs.get(args.id)
-        if (!job || !isMine(job, ctx.sessionId)) return { content: `No job "${args.id}".` }
+        if (!job || !isMine(job, ctx.sessionId)) return { content: `No job "${args.id}".`, isError: true }
         return { content: describeJob(job, 40).trimEnd() }
       }
       const all = jobs.list(ctx.sessionId)

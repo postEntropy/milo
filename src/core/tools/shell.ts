@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import { z } from 'zod'
 import type { Tool, ToolResult } from './types.js'
 import { clipMiddle } from './output.js'
+import { resolveScopedPath } from './walk.js'
 
 const schema = z.object({
   command: z.string().describe('Shell command to run (executed with /bin/sh).'),
@@ -102,6 +103,12 @@ export function sandboxArgs(command: string, cwd: string, workspace: string): st
     addMaskedParents(args, projectHiddenRoot!, workspace)
     args.push('--symlink', projectMount, workspace)
   }
+  if (path.resolve(workspace) === home) {
+    for (const secretDir of ['.ssh', '.gnupg', '.aws', '.milo', '.docker', '.kube']) {
+      const target = path.join(home, secretDir)
+      if (existsSync(target)) args.push('--tmpfs', target)
+    }
+  }
   if (runtimeIsHidden) {
     addMaskedParents(args, runtimeHiddenRoot!, runtime)
     args.push('--symlink', runtimeMount, runtime)
@@ -157,7 +164,12 @@ export const shellTool: Tool<ShellArgs> = {
   schema,
   readOnly: false,
   async execute(args, ctx): Promise<ToolResult> {
-    const cwd = args.cwd ? path.resolve(ctx.cwd, args.cwd) : ctx.cwd
+    let cwd = ctx.cwd
+    if (args.cwd?.trim()) {
+      const scoped = resolveScopedPath(ctx.cwd, args.cwd, ctx.confineTo)
+      if (!scoped.ok) return { content: scoped.error, isError: true }
+      cwd = scoped.path
+    }
 
     const canBackground = Boolean(ctx.jobs) && ctx.origin?.gateway !== ROUTINE_GATEWAY
     const sandboxed = ctx.sandbox === 'workspace'
@@ -231,7 +243,7 @@ export const shellTool: Tool<ShellArgs> = {
       if (sandboxed) {
         // The workspace is the project's folder; a turn with no project works in
         // its own cwd, so that is the only thing it may write to.
-        const workspace = ctx.confineTo ?? cwd
+        const workspace = ctx.confineTo ?? ctx.cwd
         execFile(
           'bwrap',
           sandboxArgs(args.command, cwd, workspace),

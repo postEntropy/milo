@@ -1,3 +1,4 @@
+import { realpathSync } from 'node:fs'
 import path from 'node:path'
 import { placeProject } from './projects.js'
 import { runGit } from './tools/git.js'
@@ -179,7 +180,8 @@ export async function startTracking(id: string): Promise<WorkTrackOutcome> {
   const toplevel = await runGit(root, ['rev-parse', '--show-toplevel'])
   if ('failed' in toplevel) return { ok: false, error: toplevel.failed }
   const inside = toplevel.code === 0 ? toplevel.body.split('\n')[0]!.trim() : ''
-  if (inside !== '' && inside !== root) {
+  const sameRoot = inside !== '' && canonicalDir(inside) === canonicalDir(root)
+  if (inside !== '' && !sameRoot) {
     return { ok: false, error: `${placement.project.name} is inside the repository at ${inside} — nothing was written there.` }
   }
 
@@ -382,15 +384,53 @@ function diffGitPaths(line: string): string[] {
   return rest.split(' ').map((token) => unquotePath(token))
 }
 
-/** A path as git wrote it: quoted and escaped when it holds anything awkward, raw otherwise. */
+/** A path as git wrote it: C-quoted with octal UTF-8 byte escapes when non-ASCII, raw otherwise. */
 function unquotePath(raw: string): string {
   const value = raw.trim()
-  if (!value.startsWith('"')) return value
+  if (!value.startsWith('"') || !value.endsWith('"') || value.length < 2) return value
+  const inner = value.slice(1, -1)
+  const bytes: number[] = []
+  for (let i = 0; i < inner.length; i += 1) {
+    const ch = inner[i]!
+    if (ch !== '\\') {
+      const encoded = Buffer.from(ch, 'utf8')
+      for (const b of encoded) bytes.push(b)
+      continue
+    }
+    const next = inner[i + 1]
+    if (next === undefined) {
+      bytes.push(0x5c)
+      break
+    }
+    if (next >= '0' && next <= '7') {
+      const oct = inner.slice(i + 1, i + 4)
+      if (/^[0-7]{3}$/.test(oct)) {
+        bytes.push(Number.parseInt(oct, 8))
+        i += 3
+        continue
+      }
+    }
+    i += 1
+    if (next === 'n') bytes.push(0x0a)
+    else if (next === 'r') bytes.push(0x0d)
+    else if (next === 't') bytes.push(0x09)
+    else if (next === 'b') bytes.push(0x08)
+    else if (next === 'f') bytes.push(0x0c)
+    else if (next === 'a') bytes.push(0x07)
+    else if (next === 'v') bytes.push(0x0b)
+    else {
+      const encoded = Buffer.from(next, 'utf8')
+      for (const b of encoded) bytes.push(b)
+    }
+  }
+  return Buffer.from(bytes).toString('utf8')
+}
+
+function canonicalDir(dir: string): string {
   try {
-    const parsed: unknown = JSON.parse(value)
-    return typeof parsed === 'string' ? parsed : value
+    return realpathSync(dir)
   } catch {
-    return value
+    return path.resolve(dir)
   }
 }
 

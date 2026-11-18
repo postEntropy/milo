@@ -230,4 +230,12 @@ describe('the second command on a line', () => {
     expect(text).toContain('Segments:')
     expect(text).toContain('rm -rf build')
   })
+
+  it('catches trailing slashes on destructive rm targets and later write verbs in unparsed lines', () => {
+    expect(scanCommand('rm -rf /etc/')).toMatchObject({ rule: 'rm-destructive' })
+    expect(scanCommand('rm -rf /home///')).toMatchObject({ rule: 'rm-destructive' })
+    expect(scanCommandTargets('echo $(id); rm a; rm ~/.ssh/id_rsa', process.cwd())).toMatchObject({
+      rule: 'write-secret-store',
+    })
+  })
 })

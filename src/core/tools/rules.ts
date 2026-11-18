@@ -132,6 +132,15 @@ export function extractCommandText(args: unknown): string | null {
   return null
 }
 
+/** Extracts an explicit working directory override (`args.cwd`) when set. */
+export function extractCommandCwd(args: unknown): string | null {
+  if (args && typeof args === 'object') {
+    const record = args as Record<string, unknown>
+    if (typeof record.cwd === 'string' && record.cwd.trim()) return record.cwd.trim()
+  }
+  return null
+}
+
 /**
  * Free text a call would type into whatever is in front of it — the screen, a
  * form field. Keyed on the browser action shape rather than a generic `text` field:
@@ -246,16 +255,16 @@ function scanTargets(command: string, cwd: string): RuleHit | null {
 
 /** Commands whose arguments name something to write, and which side of them. */
 const WRITE_VERBS: { pattern: RegExp; operands: 'all' | 'last' }[] = [
-  { pattern: /\brm\b/, operands: 'all' },
-  { pattern: /\btruncate\b/, operands: 'all' },
-  { pattern: /\bshred\b/, operands: 'all' },
-  { pattern: /\btee\b/, operands: 'all' },
-  { pattern: /\bsed\b[^\n;&|]*\s(?:-i|--in-place)\b/, operands: 'all' },
+  { pattern: /\brm\b/g, operands: 'all' },
+  { pattern: /\btruncate\b/g, operands: 'all' },
+  { pattern: /\bshred\b/g, operands: 'all' },
+  { pattern: /\btee\b/g, operands: 'all' },
+  { pattern: /\bsed\b[^\n;&|]*\s(?:-i|--in-place)\b/g, operands: 'all' },
   // Only the last argument is written to, so `cp /etc/hosts ./copy` stays legal.
-  { pattern: /\bmv\b/, operands: 'last' },
-  { pattern: /\bcp\b/, operands: 'last' },
-  { pattern: /\bln\b/, operands: 'last' },
-  { pattern: /\binstall\b/, operands: 'last' },
+  { pattern: /\bmv\b/g, operands: 'last' },
+  { pattern: /\bcp\b/g, operands: 'last' },
+  { pattern: /\bln\b/g, operands: 'last' },
+  { pattern: /\binstall\b/g, operands: 'last' },
 ]
 
 function commandWriteTargets(command: string): string[] {
@@ -269,14 +278,14 @@ function commandWriteTargets(command: string): string[] {
   for (const match of command.matchAll(/>>?\s*([^\s;&|<>]+)/g)) add(match[1])
 
   for (const verb of WRITE_VERBS) {
-    const match = verb.pattern.exec(command)
-    if (!match) continue
-    const rest = command.slice(match.index + match[0].length)
-    const segment = rest.split(/[;&|\n]/)[0] ?? ''
-    const operands = segment
-      .split(/\s+/)
-      .filter((token) => token.length > 0 && !token.startsWith('-'))
-    for (const token of verb.operands === 'all' ? operands : operands.slice(-1)) add(token)
+    for (const match of command.matchAll(verb.pattern)) {
+      const rest = command.slice(match.index + match[0].length)
+      const segment = rest.split(/[;&|\n]/)[0] ?? ''
+      const operands = segment
+        .split(/\s+/)
+        .filter((token) => token.length > 0 && !token.startsWith('-'))
+      for (const token of verb.operands === 'all' ? operands : operands.slice(-1)) add(token)
+    }
   }
 
   for (const match of command.matchAll(/\bdd\b[^\n;&|]*?\bof=([^\s;&|]+)/g)) add(match[1])
@@ -379,7 +388,8 @@ function findDestructiveRm(command: string): RuleHit | null {
     const force = flags.includes('f') || segments.includes('--force')
     for (const target of segments.filter((segment) => !segment.startsWith('-'))) {
       const cleaned = target.replace(/^["']|["']$/g, '')
-      if (DESTRUCTIVE_TARGETS.has(cleaned)) {
+      const normalizedTarget = cleaned.length > 1 ? cleaned.replace(/\/+$/, '') : cleaned
+      if (DESTRUCTIVE_TARGETS.has(cleaned) || DESTRUCTIVE_TARGETS.has(normalizedTarget)) {
         return {
           rule: 'rm-destructive',
           reason: `recursively deletes ${cleaned}${force ? ' (forced)' : ''}`,

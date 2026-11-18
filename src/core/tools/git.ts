@@ -56,6 +56,10 @@ export function runGit(
           resolve({ failed: 'the git command was stopped.' })
           return
         }
+        if (nodeError && typeof nodeError.code !== 'number') {
+          resolve({ failed: nodeError.message })
+          return
+        }
         const combined = options.raw
           ? stdout
           : `${stdout}${stderr ? `${stdout ? '\n' : ''}${stderr}` : ''}`.trim()

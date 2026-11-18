@@ -32,7 +32,9 @@ export const readAttachmentTool: Tool<z.infer<typeof schema>> = {
     try {
       const text = await readFile(`${document.path}.txt`, 'utf8')
       const offset = args.offset ?? 0
-      if (offset > text.length) return { content: `Offset ${offset} is past the end of ${document.name} (${text.length} characters).`, isError: true }
+      if (offset >= text.length && (text.length > 0 || offset > 0)) {
+        return { content: `Offset ${offset} is past the end of ${document.name} (${text.length} characters).`, isError: true }
+      }
       const end = Math.min(offset + 20_000, text.length)
       const continuation = end < text.length ? `\n[Continue with offset=${end}; ${text.length - end} characters remain.]` : ''
       return { content: `${document.name}, characters ${offset}–${end} of ${text.length}:\n${text.slice(offset, end)}${continuation}` }

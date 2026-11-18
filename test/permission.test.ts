@@ -553,3 +553,21 @@ describe('an always answer', () => {
     expect(await policy.decide(writeFile, { path: '/p/src/a.ts', content: 'x' })).toBe('deny')
   })
 })
+
+describe('policy wrappers and args.cwd', () => {
+  it('evaluates barredByRules against args.cwd', () => {
+    expect(barredByRules({ command: 'rm -rf id_rsa', cwd: '~/.ssh' }, '/tmp')).toBe(true)
+    expect(barredByRules({ command: 'echo x > hosts', cwd: '/etc' }, '/tmp')).toBe(true)
+    expect(barredByRules({ command: 'rm -rf dist', cwd: './packages/app' }, '/tmp/repo')).toBe(false)
+  })
+
+  it('preserves explicitlyDenies across withApprovals, withGrants and withPlan', () => {
+    const base = new DefaultPermissionPolicy({
+      mode: 'ask',
+      rules: () => ({ kind: 'rules', rules: [{ match: 'rm *', action: 'deny' }] }),
+    })
+    const wrapped = withPlan(withGrants(withApprovals(base, new Set(), '/p'), ['shell_command'], '/p'))
+    expect(wrapped.explicitlyDenies?.(writeTool, { command: 'rm -rf build' }, '/p')).toBe(true)
+    expect(wrapped.explicitlyDenies?.(writeTool, { command: 'ls' }, '/p')).toBe(false)
+  })
+})

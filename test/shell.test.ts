@@ -1,3 +1,6 @@
+import { mkdtempSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { shellTool } from '../src/core/tools/shell.js'
 
@@ -39,5 +42,15 @@ describe('shell_command', () => {
   it('leaves a short output untouched', async () => {
     const result = await shellTool.execute({ command: `echo short` }, ctx)
     expect(result.content).not.toContain('omitted')
+  })
+
+  it('refuses args.cwd outside a confined project folder', async () => {
+    const workspace = mkdtempSync(path.join(tmpdir(), 'milo-shell-'))
+    const result = await shellTool.execute(
+      { command: 'pwd', cwd: tmpdir() },
+      { ...ctx, cwd: workspace, confineTo: workspace },
+    )
+    expect(result.isError).toBe(true)
+    expect(result.content).toContain('outside')
   })
 })

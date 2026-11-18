@@ -111,18 +111,22 @@ export function formatCommand(
 /** The files a working tree has changed, relative to `cwd`. Deleted files are not formatted. */
 async function changedFiles(cwd: string, signal: AbortSignal): Promise<string[]> {
   const output = await new Promise<string>((resolve, reject) => {
-    execFile('git', ['status', '--porcelain'], { cwd, signal, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
+    execFile('git', ['status', '--porcelain', '-z'], { cwd, signal, maxBuffer: 4 * 1024 * 1024 }, (error, stdout) => {
       if (error) reject(error)
       else resolve(stdout)
     })
   })
 
+  const fields = output.split('\u0000')
   const files: string[] = []
-  for (const line of output.split('\n')) {
-    if (line.trim() === '') continue
-    const status = line.slice(0, 2)
+  for (let i = 0; i < fields.length; i += 1) {
+    const entry = fields[i]!
+    if (entry.length < 4) continue
+    const status = entry.slice(0, 2)
+    const name = entry.slice(3)
+    const renamed = status.startsWith('R') || status.startsWith('C')
+    if (renamed) i += 1
     if (status.includes('D')) continue
-    const name = line.slice(3).split(' -> ').pop()?.trim()
     if (name) files.push(name)
   }
   return files
@@ -178,7 +182,14 @@ export const formatTool: Tool<FormatArgs> = {
     } else {
       try {
         files = (await changedFiles(ctx.cwd, ctx.signal)).filter((file) => owned(formatter, file))
-      } catch {
+      } catch (error) {
+        const nodeError = error as (NodeJS.ErrnoException & { killed?: boolean }) | null
+        if (nodeError?.name === 'AbortError' || nodeError?.killed) {
+          return { content: 'Formatting check was stopped.', isError: true }
+        }
+        if (nodeError?.code === 'ENOENT') {
+          return { content: 'Could not read the changes here: git is not installed.', isError: true }
+        }
         return {
           content: 'Could not read the changes here: this folder is not a git repository.',
           isError: true,

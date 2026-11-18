@@ -1,4 +1,5 @@
 import {
+  extractCommandCwd,
   extractCommandText,
   extractTypedText,
   reviewText,
@@ -159,7 +160,10 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
   explicitlyDenies(tool: Tool<unknown>, args: unknown, cwd: string): boolean {
     if (this.deny.has(tool.name)) return true
     const command = extractCommandText(args)
-    return command ? matchingRule(this.rules(cwd), command)?.action === 'deny' : false
+    if (!command) return false
+    const targetCwd = commandDirectory(args, cwd)
+    if (matchingRule(this.rules(cwd), command)?.action === 'deny') return true
+    return targetCwd !== cwd && matchingRule(this.rules(targetCwd), command)?.action === 'deny'
   }
 
   decide(
@@ -176,7 +180,14 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
     // The rule file, when the turn is a shell command. A `deny` here outranks a
     // blanket `allow` below; that is the point of writing one down.
     const command = extractCommandText(args)
-    const rule = command ? matchingRule(this.rules(cwd), command) : undefined
+    const targetCwd = command ? commandDirectory(args, cwd) : cwd
+    const cwdRule = command ? matchingRule(this.rules(cwd), command) : undefined
+    const targetRule = command && targetCwd !== cwd ? matchingRule(this.rules(targetCwd), command) : undefined
+    const rule = cwdRule?.action === 'deny'
+      ? cwdRule
+      : targetRule?.action === 'deny'
+        ? targetRule
+        : cwdRule ?? targetRule
     if (rule?.action === 'deny') return 'deny'
 
     // The config's blanket yes, as it has always been. A rule that only asks
@@ -213,6 +224,11 @@ export class DefaultPermissionPolicy implements PermissionPolicy {
 /** How much of a written file or a replacement is shown before it is approved. */
 const SUMMARY_PREVIEW = 400
 
+function commandDirectory(args: unknown, cwd: string): string {
+  const explicit = extractCommandCwd(args)
+  return explicit ? canonicalToolPath(cwd, explicit) : cwd
+}
+
 /**
  * The acts the deterministic rules bar whatever the mode: a destructive command,
  * or a write into a protected path. Shared, so the same words are refused whether
@@ -222,7 +238,7 @@ export function barredByRules(args: unknown, cwd: string): boolean {
   const command = extractCommandText(args)
   // The shell reaches the same protected paths as a file write, so it is held to
   // the same rule instead of being judged differently for the same act.
-  if (command && (scanCommand(command) || scanCommandTargets(command, cwd))) return true
+  if (command && (scanCommand(command) || scanCommandTargets(command, commandDirectory(args, cwd)))) return true
   // The same words typed onto a screen run the same way as they would in a shell.
   const typed = extractTypedText(args)
   if (typed && scanCommand(typed)) return true
@@ -304,25 +320,33 @@ export function approvalScope(key: string | null): string | null {
  * `npm test` once did not approve a destructive command that happens to share a
  * key, and `barredByRules` is the backstop that says so.
  */
-export function withApprovals(
-  policy: PermissionPolicy,
-  approved: Set<string>,
-  cwd: string,
-): PermissionPolicy {
+/** Wraps `policy` with a custom `decide` while forwarding mode changes and `explicitlyDenies`. */
+function wrapPolicy(policy: PermissionPolicy, decide: PermissionPolicy['decide']): PermissionPolicy {
   return {
     get mode(): PermissionMode {
       return policy.mode
     },
     setMode: (mode) => policy.setMode(mode),
     update: (options) => policy.update(options),
-    decide: async (tool, args, options) => {
-      const decision = await policy.decide(tool, args, options)
-      if (decision !== 'ask') return decision
-      const key = approvalKey(tool.name, args, options?.cwd ?? cwd)
-      if (!key || !approved.has(key)) return decision
-      return barredByRules(args, options?.cwd ?? cwd) ? 'deny' : 'allow'
-    },
+    ...(policy.explicitlyDenies
+      ? { explicitlyDenies: (tool, args, cwd) => policy.explicitlyDenies!(tool, args, cwd) }
+      : {}),
+    decide,
   }
+}
+
+export function withApprovals(
+  policy: PermissionPolicy,
+  approved: Set<string>,
+  cwd: string,
+): PermissionPolicy {
+  return wrapPolicy(policy, async (tool, args, options) => {
+    const decision = await policy.decide(tool, args, options)
+    if (decision !== 'ask') return decision
+    const key = approvalKey(tool.name, args, options?.cwd ?? cwd)
+    if (!key || !approved.has(key)) return decision
+    return barredByRules(args, options?.cwd ?? cwd) ? 'deny' : 'allow'
+  })
 }
 
 /**
@@ -346,43 +370,31 @@ export function withGrants(
   // here rather than in `decide` is what keeps a grant from being *more*
   // restrictive than no grant — under yolo, `barredByRules` is off for everyone.
   if (granted.length === 0 || policy.mode === 'yolo') return policy
-  return {
-    get mode(): PermissionMode {
-      return policy.mode
-    },
-    setMode: (mode) => policy.setMode(mode),
-    update: (options) => policy.update(options),
-    decide: async (tool, args, options) => {
-      // The answer is judged from where the call is being made, which the caller
-      // knows and this object — the install's, shared by every session in the
-      // process — does not. The grant path below already has that directory: it
-      // was handed the turn's own when it was built.
-      const decision = await policy.decide(tool, args, options)
-      if (decision === 'deny') return 'deny'
-      if (!granted.includes(tool.name)) return decision
-      return barredByRules(args, options?.cwd ?? cwd) ? 'deny' : 'allow'
-    },
-  }
+  return wrapPolicy(policy, async (tool, args, options) => {
+    // The answer is judged from where the call is being made, which the caller
+    // knows and this object — the install's, shared by every session in the
+    // process — does not. The grant path below already has that directory: it
+    // was handed the turn's own when it was built.
+    const decision = await policy.decide(tool, args, options)
+    if (decision === 'deny') return 'deny'
+    if (!granted.includes(tool.name)) return decision
+    return barredByRules(args, options?.cwd ?? cwd) ? 'deny' : 'allow'
+  })
 }
 
 /** Delegated work may act only with its own grants, even in unrestricted mode. */
 export function withDelegatedGrants(policy: PermissionPolicy, granted: string[], cwd: string): PermissionPolicy {
-  return {
-    get mode() { return policy.mode },
-    setMode: (mode) => policy.setMode(mode),
-    update: (options) => policy.update(options),
-    decide: async (tool, args, options) => {
-      const directory = options?.cwd ?? cwd
-      if (policy.explicitlyDenies?.(tool, args, directory)) return 'deny'
-      // Sending needs an action-specific approval with the recipient and body visible.
-      if (tool.name === 'gmail_send') return 'deny'
-      const decision = await policy.decide(tool, args, options)
-      if (decision === 'deny') return 'deny'
-      if (!actsOnSomething(tool, args)) return decision
-      if (!granted.includes(tool.name) || barredByRules(args, directory)) return 'deny'
-      return 'allow'
-    },
-  }
+  return wrapPolicy(policy, async (tool, args, options) => {
+    const directory = options?.cwd ?? cwd
+    if (policy.explicitlyDenies?.(tool, args, directory)) return 'deny'
+    // Sending needs an action-specific approval with the recipient and body visible.
+    if (tool.name === 'gmail_send') return 'deny'
+    const decision = await policy.decide(tool, args, options)
+    if (decision === 'deny') return 'deny'
+    if (!actsOnSomething(tool, args)) return decision
+    if (!granted.includes(tool.name) || barredByRules(args, directory)) return 'deny'
+    return 'allow'
+  })
 }
 
 /**
@@ -406,15 +418,9 @@ export function isPlanTool(tool: Tool<unknown> | undefined): boolean {
  * pass through this same wrapper, so its writes are refused one level down.
  */
 export function withPlan(policy: PermissionPolicy): PermissionPolicy {
-  return {
-    get mode(): PermissionMode {
-      return policy.mode
-    },
-    setMode: (mode) => policy.setMode(mode),
-    update: (options) => policy.update(options),
-    decide: (tool, args, options) =>
-      actsOnSomething(tool, args) ? 'deny' : policy.decide(tool, args, options),
-  }
+  return wrapPolicy(policy, (tool, args, options) =>
+    actsOnSomething(tool, args) ? 'deny' : policy.decide(tool, args, options),
+  )
 }
 
 /**

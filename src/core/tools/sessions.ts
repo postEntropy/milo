@@ -65,17 +65,19 @@ async function listAll(admin: SessionAdmin): Promise<{ content: string }> {
   }
 }
 
-async function removeOne(id: string | undefined, admin: SessionAdmin): Promise<{ content: string }> {
+async function removeOne(id: string | undefined, admin: SessionAdmin): Promise<{ content: string; isError?: boolean }> {
   const target = id?.trim()
   if (!target) {
     return {
       content:
         'Which one? Give the id from action "list": sessions { "action": "remove", "id": "<id>" }.',
+      isError: true,
     }
   }
   if (target === admin.current) {
     return {
       content: `That is the session I am in (${admin.current}) — I will not remove it. Switch to another first (/new or /resume).`,
+      isError: true,
     }
   }
   return (await admin.remove(target))

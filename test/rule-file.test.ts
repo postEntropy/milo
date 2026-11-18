@@ -73,12 +73,28 @@ describe('matchingRule', () => {
   })
 
   it('tests each command on the line, with sudo peeled off', () => {
-    expect(matchingRule(book({ match: 'npm test*', action: 'allow' }), 'cd app && npm test')).toMatchObject({
+    expect(matchingRule(book({ match: 'npm test*', action: 'allow' }), 'sudo -u root npm test')).toMatchObject({
       action: 'allow',
     })
+    expect(
+      matchingRule(
+        book({ match: 'npm test*', action: 'allow' }, { match: 'npm run lint*', action: 'allow' }),
+        'npm test && npm run lint',
+      ),
+    ).toMatchObject({ action: 'allow' })
     expect(matchingRule(book({ match: 'rm *', action: 'deny' }), 'true; sudo -u root rm -rf /')).toMatchObject({
       action: 'deny',
     })
+  })
+
+  it('requires every segment to be allowed and lets deny beat an earlier allow', () => {
+    expect(matchingRule(book({ match: 'npm test*', action: 'allow' }), 'npm test && rm -rf build')).toBeUndefined()
+    expect(
+      matchingRule(
+        book({ match: 'npm test*', action: 'allow' }, { match: 'rm *', action: 'deny' }),
+        'npm test && rm -rf build',
+      ),
+    ).toMatchObject({ action: 'deny' })
   })
 
   it('never lets an unreadable command match an allow', () => {

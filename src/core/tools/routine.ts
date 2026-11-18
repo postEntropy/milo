@@ -100,20 +100,38 @@ export type RoutineArgs = z.infer<typeof schema>
 const NOT_A_TIME =
   'That is not a time I can set. Say it as an interval ("every 30 minutes"), a time ("every day at 8"), or a date ("the 1st of each month", "every 25 December", "weekdays in July"), and I will make it a routine.'
 
+const routineAsksWhen = (args: RoutineArgs): boolean =>
+  args.action === 'remove'
+  || (args.allow?.length ?? 0) > 0
+  || (args.action === 'update'
+    && (args.prompt !== undefined
+      || args.enabled === true
+      || args.gateway !== undefined
+      || args.chatId !== undefined))
+
+function validateRoutineAllow(allow: string[] | undefined, availableTools: string[] | undefined): string | null {
+  if (!allow?.length) return null
+  if (allow.includes('gmail_send')) {
+    return 'Sending mail needs approval for each message and cannot be granted to a routine.'
+  }
+  const unknown = availableTools ? allow.filter((name) => !availableTools.includes(name)) : []
+  if (unknown.length > 0) {
+    return `Unknown tools: ${unknown.join(', ')}. Available tools: ${availableTools!.join(', ')}.`
+  }
+  return null
+}
+
 export const routineTool: Tool<RoutineArgs> = {
   name: 'routine',
   description:
     'Manage routines: a prompt Milo runs on a timer and delivers to a chat — or to no chat at all — with nobody there when it fires. Use it when the person wants something to happen on a schedule ("every two hours", "every weekday at 8", "the 1st of each month") or wants to change, pause or drop one they already have. What the person says comes in natural language; you turn it into a routine. "every two hours" is `every: "2h"`; "every 30 seconds" is `every: "30s"` (seconds and minutes are both fine — the shortest is one second); "every day at 8" is `at: "08:00"`; "every Monday at 9" is `at: "09:00"` with `days: ["mon"]`; "weekdays at 8" is `at: "08:00"` with `days: ["mon-fri"]`; "the 1st of each month at 9" is `at: "09:00"` with `dayOfMonth: ["1"]`; "every 25 December" is `at: "09:00"` with `month: ["dec"]` and `dayOfMonth: ["25"]`; and "every Monday in July" is `at: "09:00"` with `days: ["mon"]` and `month: ["jul"]` — a day of the week and a day of the month are never combined, so pick one. A routine fires at its next time and every time after; it does not run while `milo serve` is down, and a time missed that way is skipped rather than caught up. A routine repeats forever unless it is given a ceiling: `limit: 5` runs it at most five times and then it stops itself, and a run the person asks for by hand is not counted against it. "Every minute for five minutes" is `every: "1m"` with `limit: 5` — do that arithmetic and say it back to the person. It delivers to the chat the request came from when that chat can receive messages; from a surface that cannot (the CLI), name `gateway` and `chatId` — ask the person which chat, do not guess. A routine may also deliver nowhere: `gateway: "none"` (what the web UI calls "Routines screen only") keeps every run on the Routines screen and posts to no chat — reach for it whenever the person does not want the answer in a chat, and say that back to them. Its answer is text, and it can also deliver files with `send_file` — a picture as a picture, anything else as a document. That is the only thing that makes a picture a picture: the file lands on the run\'s own record, which is what the Routines screen draws, so a routine whose output IS an image must `send_file` it even when it delivers nowhere — a path in the answer is text. So "every morning, screenshot the screen and send it" is `shell_command` plus `send_file`, both named in `allow`. A routine runs with nobody to confirm anything: reading needs no permission, but anything that writes, runs a command, sends a file or changes mail has to be named in `allow` — so "every day, bin anything labelled newsletter" needs `gmail_modify` (with `mail_labels` to find it) — and the person is asked to approve those tools before the routine exists. Ask them in the current session rather than deciding for them, and keep the list to what the prompt actually needs. Always say the name, the time, the destination and the granted tools back, so they can correct it before it ever fires.\n\nTo change or remove a routine, first call this tool with `action: "list"` — it names every routine with its id. Then call again with `action: "update"` or `"remove"` and that `id`. Do not guess an id. On `update`, pass only what changes: a new `at`/`every` (and the `days`, `dayOfMonth` or `month` it keeps — restate the whole schedule, the fields you leave out are not carried over), a new `gateway`+`chatId` or `"none"`, a new `prompt` or `name`, `enabled` to pause or resume, or a new `allow`. An `update` with nothing to change changes nothing. Say what the routine is now after an update, and confirm which one you removed — by name, not id. A routine can also be made to speak only when there is something to report: when the person says "only tell me if…", "only if it goes above…" or "otherwise say nothing", set `silent: true` and keep the condition itself in the `prompt` — a run that has nothing to report then sends nothing, while a failure still speaks. Say that back to them too.',
   schema,
   // Creating a prompt that only reads is the person's own request; but changing an
-  // existing routine's prompt, or re-arming it, is a change to a standing instruction
-  // that will run with whatever grants it already carries and nobody there to ask.
-  // The args alone cannot say whether it has any, so an edit of what it does is put
-  // to the person.
-  asksWhen: (args) =>
-    args.action === 'remove'
-    || (args.allow?.length ?? 0) > 0
-    || (args.action === 'update' && (args.prompt !== undefined || args.enabled === true)),
+  // existing routine's prompt, destination, or re-arming it, is a change to a standing
+  // instruction that will run with whatever grants it already carries and nobody there
+  // to ask.
+  asksWhen: routineAsksWhen,
+  requiresConfirmation: routineAsksWhen,
   async execute(args, ctx) {
     const routines = ctx.routine
     if (!routines) {
@@ -124,7 +142,7 @@ export const routineTool: Tool<RoutineArgs> = {
       case 'list':
         return handleList(routines)
       case 'update':
-        return await handleUpdate(args, routines)
+        return await handleUpdate(args, ctx, routines)
       case 'remove':
         return await handleRemove(args, routines)
       default:
@@ -162,6 +180,8 @@ async function handleCreate(args: RoutineArgs, ctx: ToolContext, routines: Routi
   if (!prompt) {
     return { content: 'A routine needs a prompt — what to do when it fires.', isError: true }
   }
+  const grantError = validateRoutineAllow(args.allow, ctx.availableTools)
+  if (grantError) return { content: grantError, isError: true }
   const when = parseWhen({
     every: args.every,
     at: args.at,
@@ -203,11 +223,13 @@ async function handleCreate(args: RoutineArgs, ctx: ToolContext, routines: Routi
   }
 }
 
-async function handleUpdate(args: RoutineArgs, routines: RoutineStore): Promise<ToolResult> {
+async function handleUpdate(args: RoutineArgs, ctx: ToolContext, routines: RoutineStore): Promise<ToolResult> {
   const id = args.id?.trim()
   if (!id) {
     return { content: 'Name the routine by its id — pass `action: "list"` to see them.', isError: true }
   }
+  const grantError = validateRoutineAllow(args.allow, ctx.availableTools)
+  if (grantError) return { content: grantError, isError: true }
   const existing = routines.list().find((routine) => routine.id === id)
   if (!existing) return { content: `No routine ${id}.`, isError: true }
 

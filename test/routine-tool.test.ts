@@ -379,5 +379,23 @@ describe('the routine tool changing and dropping one', () => {
     // A pure reschedule or rename is not a change to what it does.
     expect(routineTool.asksWhen?.({ action: 'update', id: 'x', at: '09:00' })).toBe(false)
     expect(routineTool.asksWhen?.({ action: 'update', id: 'x', name: 'another name' })).toBe(false)
+    // Changing where it delivers can redirect sensitive output, and triggers confirmation.
+    expect(routineTool.asksWhen?.({ action: 'update', id: 'x', gateway: 'discord', chatId: '42' })).toBe(true)
+    expect(routineTool.requiresConfirmation?.({ action: 'update', id: 'x', prompt: 'new' })).toBe(true)
+  })
+
+  it('rejects gmail_send and unknown tool grants', async () => {
+    const { ctx } = harness({
+      origin: { gateway: 'telegram', chatId: '123' },
+      availableTools: ['read_file', 'shell_command'],
+    })
+
+    const sendGrant = await routineTool.execute({ prompt: 'mail', every: '1h', allow: ['gmail_send'] }, ctx)
+    expect(sendGrant.isError).toBe(true)
+    expect(sendGrant.content).toContain('Sending mail')
+
+    const unknownGrant = await routineTool.execute({ prompt: 'x', every: '1h', allow: ['nonexistent_tool'] }, ctx)
+    expect(unknownGrant.isError).toBe(true)
+    expect(unknownGrant.content).toContain('nonexistent_tool')
   })
 })

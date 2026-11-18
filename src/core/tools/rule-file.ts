@@ -140,22 +140,33 @@ export function loadRules(cwd: string, globalFile: string = rulesFile()): RuleBo
 /**
  * The first rule in the book that matches the command, or undefined.
  *
- * Each command on the line is tested on its own, with `sudo`/`env` peeled off,
- * so `npm test*` matches the `npm test` in `cd app && npm test`. A command the
- * parser cannot read is tested as the raw line: `deny` and `ask` still apply,
- * but `allow` is skipped — unknown never becomes a yes.
+ * Each command on the line is tested on its own, with `sudo`/`env` peeled off.
+ * A chain gets `allow` only when every segment in the chain is allowed; `deny`
+ * and `ask` on any segment outrank `allow` elsewhere. A command the parser
+ * cannot read is tested as the raw line: `deny` and `ask` still apply, but
+ * `allow` is skipped — unknown never becomes a yes.
  */
 export function matchingRule(book: RuleBook, command: string): PermissionRule | undefined {
   if (book.kind !== 'rules') return undefined
 
   const parsed = parseShell(command)
-  const texts = parsed.ok ? parsed.segments.map((segment) => effectiveSegment(segment).text) : [command]
-
-  for (const rule of book.rules) {
-    if (rule.action === 'allow' && !parsed.ok) continue
-    if (texts.some((text) => ruleMatches(rule, text))) return rule
+  if (!parsed.ok) {
+    for (const rule of book.rules) {
+      if (rule.action === 'allow') continue
+      if (ruleMatches(rule, command)) return rule
+    }
+    return undefined
   }
-  return undefined
+
+  const texts = parsed.segments.map((segment) => effectiveSegment(segment).text)
+  if (texts.length === 0) return undefined
+
+  const matched = texts.map((text) => book.rules.find((rule) => ruleMatches(rule, text)))
+  const denied = matched.find((rule) => rule?.action === 'deny')
+  if (denied) return denied
+  const asked = matched.find((rule) => rule?.action === 'ask')
+  if (asked) return asked
+  return matched.every((rule) => rule?.action === 'allow') ? matched[0] : undefined
 }
 
 export function ruleMatches(rule: PermissionRule, text: string): boolean {

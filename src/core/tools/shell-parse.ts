@@ -243,6 +243,12 @@ export function parseShell(command: string): ShellParse {
     if (char === '>' && command[index + 1] === '(') {
       return { ok: false, reason: 'process substitution (>(…))' }
     }
+    if (char === '(' || char === ')') {
+      return { ok: false, reason: 'a subshell or group' }
+    }
+    if (char === '{' || char === '}') {
+      return { ok: false, reason: 'a brace group or expansion' }
+    }
     if (char === ';' || char === '\n') {
       endSegment()
       index += 1
@@ -253,9 +259,20 @@ export function parseShell(command: string): ShellParse {
       index += command[index + 1] === '|' ? 2 : 1
       continue
     }
-    if (char === '&' && command[index + 1] === '&') {
+    if (char === '&') {
+      if (command[index + 1] === '&') {
+        endSegment()
+        index += 2
+        continue
+      }
+      const previous = command[index - 1]
+      if (previous === '>' || previous === '<') {
+        push(char)
+        index += 1
+        continue
+      }
       endSegment()
-      index += 2
+      index += 1
       continue
     }
     if (char === ' ' || char === '\t' || char === '\r') {
