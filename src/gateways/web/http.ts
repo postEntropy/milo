@@ -3,12 +3,14 @@ import { createReadStream, existsSync, readFileSync, statSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { networkInterfaces } from 'node:os'
 import path from 'node:path'
+import { pipeline } from 'node:stream'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer, type WebSocket } from 'ws'
 import type { AgentRuntime } from '../../core/runtime.js'
 import { isImage, type OutgoingMessage } from '../../core/outgoing.js'
 import { MAX_INCOMING_BYTES } from '../../core/media.js'
 import { errorMessage } from '../../util/errors.js'
+import { logWarn } from '../../util/log.js'
 import { hyperlink } from '../../util/terminal.js'
 import { helloVersion, parseClientFrame, PROTOCOL_VERSION, protocolRefusal, type ServerFrame } from './protocol.js'
 import { WebHub } from './hub.js'
@@ -93,22 +95,56 @@ export interface RunningWebServer {
   stop(): Promise<void>
 }
 
+const PANEL_TICKET_TTL_MS = 60 * 60 * 1000
+const PANEL_TICKET_MAX = 512
+
+class PanelTickets {
+  private readonly issued = new Map<string, { attachmentId: string; expiresAt: number }>()
+
+  issue(attachmentId: string, now = Date.now()): string {
+    for (const [key, entry] of this.issued) {
+      if (entry.expiresAt <= now) this.issued.delete(key)
+    }
+    while (this.issued.size >= PANEL_TICKET_MAX) {
+      const oldest = this.issued.keys().next().value
+      if (!oldest) break
+      this.issued.delete(oldest)
+    }
+    const ticket = randomBytes(24).toString('base64url')
+    this.issued.set(ticket, { attachmentId, expiresAt: now + PANEL_TICKET_TTL_MS })
+    return ticket
+  }
+
+  allows(ticket: string | null, attachmentId: string, now = Date.now()): boolean {
+    if (!ticket) return false
+    const entry = this.issued.get(ticket)
+    if (!entry) return false
+    if (entry.expiresAt <= now) {
+      this.issued.delete(ticket)
+      return false
+    }
+    return entry.attachmentId === attachmentId
+  }
+}
+
 export async function startWebServer(options: WebServerOptions): Promise<RunningWebServer> {
   const token = options.token ?? randomBytes(32).toString('base64url')
   const hub = new WebHub(options.runtime, options.cwd)
   const settings = new WebSettings(options.runtime, options.cwd, hub)
   const webSocketServer = new WebSocketServer({ noServer: true, maxPayload: 64 * 1024 })
-  // Per server, so one daemon's failed pairings do not slow another's down.
+  const MAX_WS_BUFFERED_BYTES = 4 * 1024 * 1024
+// Per server, so one daemon's failed pairings do not slow another's down.
   const claims = new ClaimLimiter()
+  const panelTickets = new PanelTickets()
   const server = createServer((request, response) => {
-    void handleHttp(request, response, token, settings, hub, claims).catch((error: unknown) => {
+    void handleHttp(request, response, token, settings, hub, claims, panelTickets).catch((error: unknown) => {
       if (!response.headersSent) json(response, 500, { error: error instanceof Error ? error.message : String(error) })
       else response.destroy()
     })
   })
   server.on('upgrade', (request, socket, head) => {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
-    if (url.pathname !== '/ws' || !authorized(request, token, url.searchParams.get('t'))) {
+    if (isOpaqueOrigin(request) || url.pathname !== '/ws' || !authorized(request, token, url.searchParams.get('t'))) {
       socket.write('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n')
       socket.destroy()
       return
@@ -138,9 +174,19 @@ export async function startWebServer(options: WebServerOptions): Promise<Running
           socket.terminate()
           return
         }
-        if (socket.readyState === socket.OPEN) socket.send(JSON.stringify(frame))
+        if (socket.readyState === socket.OPEN) {
+          if (socket.bufferedAmount > MAX_WS_BUFFERED_BYTES) {
+            socket.close(1008, 'Slow consumer')
+            return
+          }
+          socket.send(JSON.stringify(frame))
+        }
       },
     }
+    socket.on('error', (error) => {
+      logWarn(`web socket error: ${errorMessage(error)}`)
+      socket.terminate()
+    })
     socket.on('message', (data) => {
       if (!stillAuthorized()) {
         socket.terminate()
@@ -253,7 +299,7 @@ export function panelHeaders(mimeType: string, size: number): Record<string, str
   }
 }
 
-async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, settings: WebSettings, hub: WebHub, claims: ClaimLimiter): Promise<void> {
+async function handleHttp(request: IncomingMessage, response: ServerResponse, token: string, settings: WebSettings, hub: WebHub, claims: ClaimLimiter, panelTickets: PanelTickets): Promise<void> {
   const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`)
   // Redeeming a pairing code: the one route with no token behind it, because the
   // app is here to get its first one. The code is what it spends instead — six
@@ -262,6 +308,9 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
   // else is behind `authorized()`.
   if (url.pathname === '/pair/claim') {
     if (request.method !== 'POST') return json(response, 405, { error: 'Use POST.' })
+    if (isOpaqueOrigin(request)) return json(response, 403, { error: 'Forbidden.' })
+    const contentType = request.headers['content-type']?.toLowerCase() ?? ''
+    if (!contentType.includes('application/json')) return json(response, 415, { error: 'Expected application/json.' })
     if (!claims.allow(request.socket.remoteAddress ?? 'unknown')) {
       return json(response, 429, { error: 'Too many pairing attempts. Wait a minute and try again.' })
     }
@@ -286,7 +335,7 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
     })
   }
   if (url.pathname === '/upload') {
-    if (!authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
+    if (isOpaqueOrigin(request) || !authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
     if (request.method !== 'POST') return json(response, 405, { error: 'Use POST.' })
     try {
       const name = decodeURIComponent(String(request.headers['x-file-name'] ?? 'attachment'))
@@ -299,11 +348,17 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
     }
   }
   if (url.pathname.startsWith('/api/')) {
-    if (!authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
+    if (isOpaqueOrigin(request) || !authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
     if (request.method !== 'POST') return json(response, 405, { error: 'Use POST.' })
     try {
       const body = await readBody(request)
       const action = url.pathname.slice('/api/'.length)
+      if (action === 'panel-ticket') {
+        const id = typeof body.id === 'string' ? body.id : ''
+        const known = id ? hub.attachment(id) : undefined
+        if (!known) return json(response, 404, { error: 'Not found.' })
+        return json(response, 200, { ticket: panelTickets.issue(id) })
+      }
       const result = await settings.handle(action, body)
       return json(response, 200, result)
     } catch (error) {
@@ -334,16 +389,19 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
       response.end()
       return
     }
-    createReadStream(known.path).pipe(response)
+    streamFile(known.path, response)
     return
   }
 
   // A panel artifact drawn inline. The same files the chat serves, but rendered
   // rather than downloaded: a canvas and a PDF are framed by the page, an image
-  // is shown — so the disposition is always inline here.
+  // is shown — so the disposition is always inline here. Web frames load via an
+  // artifact-scoped ticket (`?p=`) so the bearer token stays out of iframe URLs.
   if (url.pathname.startsWith('/panel/')) {
-    if (!authorized(request, token, url.searchParams.get('t'))) return json(response, 401, { error: 'Unauthorized.' })
-    const known = hub.attachment(url.pathname.slice('/panel/'.length))
+    const id = url.pathname.slice('/panel/'.length)
+    const allowed = authorized(request, token, url.searchParams.get('t')) || panelTickets.allows(url.searchParams.get('p'), id)
+    if (!allowed) return json(response, 401, { error: 'Unauthorized.' })
+    const known = hub.attachment(id)
     const stats = known ? statSync(known.path, { throwIfNoEntry: false }) : undefined
     if (!known || !stats?.isFile()) return json(response, 404, { error: 'Not found.' })
     response.writeHead(200, panelHeaders(known.mimeType, stats.size))
@@ -351,7 +409,7 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
       response.end()
       return
     }
-    createReadStream(known.path).pipe(response)
+    streamFile(known.path, response)
     return
   }
 
@@ -367,7 +425,7 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
     let off: (() => void) | null = null
     try {
       off = await hub.watchBrowser((frame) => {
-        if (!streaming || response.writableEnded) return
+        if (!streaming || response.writableEnded || response.writableNeedDrain) return
         response.write(`--${boundary}\r\ncontent-type: image/jpeg\r\ncontent-length: ${frame.length}\r\n\r\n`)
         response.write(frame)
         response.write('\r\n')
@@ -421,7 +479,13 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
     return
   }
 
-  const candidate = path.resolve(root, `.${decodeURIComponent(url.pathname)}`)
+  let decodedPath: string
+  try {
+    decodedPath = decodeURIComponent(url.pathname)
+  } catch {
+    return json(response, 400, { error: 'Invalid path.' })
+  }
+  const candidate = path.resolve(root, `.${decodedPath}`)
   const inside = candidate === root || candidate.startsWith(root + path.sep)
   const file = inside && existsSync(candidate) && statSync(candidate).isFile()
     ? candidate
@@ -452,7 +516,21 @@ async function handleHttp(request: IncomingMessage, response: ServerResponse, to
     response.end(html)
     return
   }
-  createReadStream(file).pipe(response)
+  streamFile(file, response)
+}
+
+function streamFile(filePath: string, response: ServerResponse): void {
+  const source = createReadStream(filePath)
+  pipeline(source, response, (error) => {
+    if (!error) return
+    const code = (error as { code?: string }).code
+    if (code === 'ERR_STREAM_PREMATURE_CLOSE' || code === 'ECONNRESET' || code === 'EPIPE') return
+    logWarn(`web stream error for ${filePath}: ${errorMessage(error)}`)
+  })
+}
+
+function isOpaqueOrigin(request: IncomingMessage): boolean {
+  return request.headers.origin?.trim().toLowerCase() === 'null'
 }
 
 /** A filename safe in a header: a quote or a control character would break it. */
@@ -472,9 +550,9 @@ function headerName(name: string): string {
  * token is immune to a cross-site request on its own: another origin cannot read
  * this one's token, so it cannot send it.
  *
- * Two kinds of token open it: the install's own, and one minted for a device at
- * pairing. The second is why a phone can be let in without being handed the key
- * that also writes the config — and why it can be taken back on its own.
+ * Two kinds of token open it: the install's own, and one minted for a paired device
+ * (such as the iPhone app, which shares the same surfaces including settings and
+ * can be revoked independently via `milo devices`).
  */
 function authorized(request: IncomingMessage, token: string, queryToken?: string | null): boolean {
   const supplied = suppliedToken(request, queryToken)

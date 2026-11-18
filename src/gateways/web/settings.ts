@@ -52,7 +52,6 @@ import {
   ConfigSchema,
   DEFAULT_LOCAL_EMBED_MODEL,
   type Config,
-  type ProviderEntry,
 } from '../../core/config/schema.js'
 import { chromeVersion, copyProfile, findProfiles, listBrowsers, tryInstall } from '../../core/browser/index.js'
 import { INSTALL_SCOPE, memoryStatus } from '../../core/memory/index.js'
@@ -103,6 +102,7 @@ export class WebSettings {
     private readonly cwd: string,
     private readonly files?: {
       register?: RegisterFile
+      isLive?: (sessionId: string) => boolean
       paletteChanged?: (state: PaletteState) => void
       sessionsChanged?: () => void
       projectUpdated?: (id?: string) => void
@@ -377,13 +377,6 @@ export class WebSettings {
       const patch = body.config
       if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Expected a config object.')
       const patchConfig = patch as Record<string, unknown>
-      const patchedProviders = patchConfig.providers && typeof patchConfig.providers === 'object'
-        ? patchConfig.providers as Record<string, ProviderEntry>
-        : current.providers
-      const providers = Object.fromEntries(Object.entries(patchedProviders).map(([id, entry]) => [
-        id,
-        { ...entry, headers: entry.headers ?? current.providers[id]?.headers },
-      ]))
       // A patch is merged section by section, not laid over the whole config: a
       // nested object the client sent only part of keeps the keys it left out
       // instead of resetting them to the schema's defaults on the way through.
@@ -413,7 +406,7 @@ export class WebSettings {
         return out
       }
       const merged = merge(current, patchConfig) as Record<string, unknown>
-      const next = ConfigSchema.parse({ ...merged, providers })
+      const next = ConfigSchema.parse(merged)
       saveConfig(next)
       this.runtime.permissions?.update({
         mode: next.permissions.mode,
@@ -698,6 +691,9 @@ export class WebSettings {
     const id = sessionId(body.id)
     if (typeof body.current === 'string' && body.current === id) {
       throw new Error('That is the session you are in — start a new one first.')
+    }
+    if (this.files?.isLive?.(id)) {
+      throw new Error('That session has a turn running — stop it before deleting.')
     }
     if (!(await this.runtime.removeSession(id))) throw new Error('Session not found.')
     return { removed: true }

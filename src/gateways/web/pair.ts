@@ -82,6 +82,16 @@ export class ClaimLimiter {
 
   /** Whether another try from this address is allowed, counting this one. */
   allow(from: string, now = Date.now()): boolean {
+    if (this.seen.size >= 1024) {
+      for (const [key, item] of this.seen) {
+        if (item.resetAt <= now) this.seen.delete(key)
+      }
+      while (this.seen.size >= 1024) {
+        const oldest = this.seen.keys().next().value
+        if (oldest === undefined) break
+        this.seen.delete(oldest)
+      }
+    }
     const entry = this.seen.get(from)
     if (!entry || entry.resetAt <= now) {
       this.seen.set(from, { count: 1, resetAt: now + this.windowMs })

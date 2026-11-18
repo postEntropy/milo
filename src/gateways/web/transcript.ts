@@ -96,9 +96,10 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
     if (message.role === 'user') {
       closeAssistant()
       const shown = message.displayText ?? text
-      const attachments = message.content.flatMap((part) => (part.type === 'image' && !part.derivedFromDocument) || part.type === 'document'
-        ? [register({ path: part.path, name: part.name, mimeType: part.mimeType })]
-        : [])
+      const attachments = message.content.flatMap((part) =>
+        (part.type === 'image' && !part.derivedFromDocument) || part.type === 'document' || part.type === 'audio'
+          ? [register({ path: part.path, name: part.name, mimeType: part.mimeType })]
+          : [])
       if (shown || attachments.length) {
         transcript.push({ role: 'user', parts: shown ? [{ kind: 'text', text: shown }] : [], ...(attachments.length ? { attachments } : {}), ...(message.at !== undefined ? { at: message.at } : {}) })
       }

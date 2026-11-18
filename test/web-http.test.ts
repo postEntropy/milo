@@ -1,5 +1,10 @@
 import { afterEach, describe, expect, it } from 'vitest'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { Readable } from 'node:stream'
+import WebSocket from 'ws'
+import { PROTOCOL_VERSION } from '../src/gateways/web/protocol.js'
 import { bindProblem, panelHeaders, readRawBody, startWebServer, webReachLines } from '../src/gateways/web/http.js'
 
 const running: Array<{ stop(): Promise<void> }> = []
@@ -44,6 +49,48 @@ describe('web server authentication', () => {
     running.push(server)
     const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/upload`, { method: 'POST', body: 'file bytes' })
     expect(response.status).toBe(401)
+  })
+
+  it('rejects null origins on ws/api/pair and non-JSON simple POSTs on /pair/claim', async () => {
+    const server = await startWebServer({ runtime, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
+    running.push(server)
+    const base = `http://127.0.0.1:${portOf(server.url)}`
+
+    const apiNull = await fetch(`${base}/api/overview`, {
+      method: 'POST',
+      headers: { authorization: 'Bearer test-token', origin: 'null', 'content-type': 'application/json' },
+      body: '{}',
+    })
+    expect(apiNull.status).toBe(401)
+
+    const pairNull = await fetch(`${base}/pair/claim`, {
+      method: 'POST',
+      headers: { origin: 'null', 'content-type': 'application/json' },
+      body: '{"code":"123456"}',
+    })
+    expect(pairNull.status).toBe(403)
+
+    const pairSimple = await fetch(`${base}/pair/claim`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: '{"code":"123456"}',
+    })
+    expect(pairSimple.status).toBe(415)
+
+    const wsStatus = await new Promise<number>((resolve, reject) => {
+      const ws = new WebSocket(`ws://127.0.0.1:${portOf(server.url)}/ws?t=test-token`, { headers: { origin: 'null' } })
+      ws.on('unexpected-response', (_req, res) => resolve(res.statusCode ?? 0))
+      ws.on('open', () => { ws.close(); resolve(101) })
+      ws.on('error', (err) => reject(err))
+    })
+    expect(wsStatus).toBe(401)
+  })
+
+  it('returns 400 or 503 (never 500) on malformed percent-encoded paths', async () => {
+    const server = await startWebServer({ runtime, cwd: process.cwd(), host: '127.0.0.1', port: 0, token: 'test-token' })
+    running.push(server)
+    const response = await fetch(`http://127.0.0.1:${portOf(server.url)}/%ZZ`)
+    expect([400, 503]).toContain(response.status)
   })
 
   it('accepts raw authenticated file uploads for a later chat send', async () => {
@@ -213,6 +260,79 @@ describe('web server panel artifacts', () => {
       // the allowances keep HTML and the PDF viewer working under an opaque origin.
       'content-security-policy': 'sandbox allow-scripts allow-forms allow-popups allow-modals',
     })
+  })
+
+  it('serves a panel artifact via an artifact-scoped ticket without accepting it on API or WS', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'milo-panel-ticket-'))
+    const htmlFile = path.join(dir, 'chart.html')
+    writeFileSync(htmlFile, '<h1>hi</h1>', 'utf8')
+    const stubSession = {
+      id: 'sess-panel',
+      backend: { kind: 'milo' as const },
+      backendView: { kind: 'milo' as const },
+      planMode: false,
+      messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+      project: null,
+      appendNotice: async () => undefined,
+      refreshFolder: () => {},
+      setPlan: () => {},
+    }
+    const stubRuntime = {
+      ...(runtime as Record<string, unknown>),
+      provider: { id: 'test' },
+      providerName: 'Test',
+      model: 'test-model',
+      sessionFor: async () => stubSession,
+      getSession: async () => stubSession,
+    } as never
+    try {
+      const server = await startWebServer({ runtime: stubRuntime, cwd: dir, host: '127.0.0.1', port: 0, token: 'test-token' })
+      running.push(server)
+      const base = `http://127.0.0.1:${portOf(server.url)}`
+
+      const ws = new WebSocket(`ws://127.0.0.1:${portOf(server.url)}/ws?t=test-token`)
+      const ready = await new Promise<{ attachments: string[] }>((resolve, reject) => {
+        const attachments: string[] = []
+        ws.on('error', reject)
+        ws.on('open', () => {
+          ws.send(JSON.stringify({ type: 'hello', version: PROTOCOL_VERSION, chatId: '11111111-2222-3333-4444-555555555555' }))
+        })
+        ws.on('message', async (raw) => {
+          const frame = JSON.parse(raw.toString()) as { type: string; message?: string; attachments?: Array<{ id: string }> }
+          if (frame.type === 'error') {
+            reject(new Error(`WS error frame: ${frame.message ?? raw.toString()}`))
+          } else if (frame.type === 'ready') {
+            await server.deliver('11111111-2222-3333-4444-555555555555', {
+              text: 'here',
+              files: [{ path: htmlFile, name: 'chart.html', mimeType: 'text/html' }],
+            })
+          } else if (frame.type === 'command-result' && frame.attachments?.[0]?.id) {
+            attachments.push(frame.attachments[0].id)
+            resolve({ attachments })
+          }
+        })
+      })
+      ws.close()
+
+      const id = ready.attachments[0]!
+      const ticketRes = await fetch(`${base}/api/panel-ticket`, {
+        method: 'POST',
+        headers: { authorization: 'Bearer test-token', 'content-type': 'application/json' },
+        body: JSON.stringify({ id }),
+      })
+      expect(ticketRes.status).toBe(200)
+      const { ticket } = await ticketRes.json() as { ticket: string }
+
+      const panelOk = await fetch(`${base}/panel/${id}?p=${encodeURIComponent(ticket)}`)
+      expect(panelOk.status).toBe(200)
+      expect(await panelOk.text()).toBe('<h1>hi</h1>')
+
+      expect((await fetch(`${base}/panel/other-id?p=${encodeURIComponent(ticket)}`)).status).toBe(401)
+      expect((await fetch(`${base}/attachment/${id}?t=${encodeURIComponent(ticket)}`)).status).toBe(401)
+      expect((await fetch(`${base}/api/overview?t=${encodeURIComponent(ticket)}`, { method: 'POST', body: '{}' })).status).toBe(401)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 })
 

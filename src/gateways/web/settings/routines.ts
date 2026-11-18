@@ -8,6 +8,7 @@ import { readDisplay } from '../../../core/config/load.js'
 import { transcriptOf, type RegisterFile } from '../transcript.js'
 import { sessionId } from './input.js'
 import { optionalText } from './input.js'
+import { GRANTABLE_ROUTINE_TOOLS, unknownGrantableTools } from '../../../core/tools/index.js'
 import type { Message } from '../../../core/providers/types.js'
 import { SILENT } from '../../../core/silent.js'
 
@@ -79,6 +80,12 @@ export class WebRoutineSettings {
     })
     if (!when) throw new Error('Set a time: an interval like "2h", or a clock time like "08:00" with optional days, a day of the month, or a month.')
     const allow = stringList(body.allow)
+    if (allow && allow.length > 0) {
+      const unknown = unknownGrantableTools(allow)
+      if (unknown.length > 0) {
+        throw new Error(`Not a tool I know: ${unknown.join(', ')}. Valid tools: ${[...GRANTABLE_ROUTINE_TOOLS].sort().join(', ')}.`)
+      }
+    }
     const routine = await addRoutine({
       prompt,
       name: optionalText(body.name),

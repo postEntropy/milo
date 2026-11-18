@@ -10,7 +10,14 @@ import { isImage, mimeFor, type OutgoingFile, type OutgoingMessage } from '../..
 import type { PanelRequest } from '../../core/panel.js'
 import { placedProject, type ProjectPlacement } from '../../core/projects.js'
 import { readDisplay, readPalette } from '../../core/config/load.js'
-import { buildCommandContext, handleCommand, handleTurnControl, turnOf, type CommandContext } from '../commands.js'
+import {
+  buildCommandContext,
+  handleCommand,
+  handleTurnControl,
+  parseTurnControl,
+  turnOf,
+  type CommandContext,
+} from '../commands.js'
 import { PendingDecisions } from '../pending.js'
 import { TurnQueue } from '../turns.js'
 import { rawTurn } from '../raw.js'
@@ -137,6 +144,9 @@ interface Chat {
   panel?: { requests: PanelRequest[]; active: number }
 }
 
+const MAX_ATTACHMENTS = 2000
+const MAX_IDLE_CHATS = 100
+
 export class WebHub {
   private readonly chats = new Map<string, Chat>()
   /**
@@ -238,6 +248,7 @@ export class WebHub {
         clients: new Set(),
       }
       this.chats.set(chatId, chat)
+      this.pruneIdleChats()
     } else if (!this.turns.busy(chatId)) {
       chat.session = await this.runtime.getSession(chat.scope)
     }
@@ -329,6 +340,22 @@ export class WebHub {
    */
   disconnect(client: WebClient): void {
     for (const chat of this.chats.values()) chat.clients.delete(client)
+    this.pruneIdleChats()
+  }
+
+  /** Whether a session currently has a live turn in flight on this daemon. */
+  isLive(sessionId: string): boolean {
+    return this.live.has(sessionId)
+  }
+
+  private pruneIdleChats(): void {
+    if (this.chats.size <= MAX_IDLE_CHATS) return
+    for (const [id, chat] of this.chats) {
+      if (this.chats.size <= MAX_IDLE_CHATS) break
+      if (chat.clients.size > 0) continue
+      if (this.turns.busy(id) || this.live.has(chat.session.id)) continue
+      this.chats.delete(id)
+    }
   }
 
   handle(client: WebClient, frame: ClientFrame, chatId: string): void {
@@ -361,7 +388,7 @@ export class WebHub {
           client.send({ type: 'error', message: 'This Command Code turn is no longer awaiting recovery.' })
           return
         }
-        this.startTurn(chatId, pending.input, undefined, [], undefined, pending.id)
+        this.startTurn(this.liveOwner(chat.session.id) ?? chatId, pending.input, undefined, [], undefined, pending.id)
         return
       }
       if (frame.action === 'stop') {
@@ -388,7 +415,7 @@ export class WebHub {
         }
         chat.session.setPlan(false)
         this.emitTurn(chat.session.id, { type: 'plan', plan: false })
-        this.startTurn(chatId, PLAN_APPROVAL)
+        this.startTurn(this.liveOwner(chat.session.id) ?? chatId, PLAN_APPROVAL)
       } else if (frame.id) {
         const allowed = frame.action !== 'deny'
         const remember = frame.action === 'always'
@@ -447,6 +474,28 @@ export class WebHub {
       // which the lease serialises into `waiting`/`waited` exactly as before.
       const sessionId = chat.session.id
       const key = this.liveOwner(sessionId) ?? chatId
+      if (!files.length && parseTurnControl(frame.text)) {
+        let queued = false
+        const result = handleTurnControl(frame.text, {
+          turn: turnOf(this.turns, key),
+          start: (pending) => {
+            queued = true
+            this.startTurn(key, pending, frame.target, [], undefined, undefined, frame.requestId)
+          },
+        })
+        if (!queued) {
+          this.broadcastSession(sessionId, chatId, {
+            type: 'command-result',
+            reply: result.reply ?? '',
+            sessionId,
+          })
+          accept()
+        } else {
+          accept()
+        }
+        this.sendState(chatId)
+        return
+      }
       if (files.length) {
         this.startTurn(key, frame.text, frame.target, [], files, undefined, frame.requestId)
         accept()
@@ -741,7 +790,13 @@ export class WebHub {
   register(file: OutgoingFile): FrameAttachment {
     const id = createHash('sha1').update(file.path).digest('hex')
     const size = statSync(file.path, { throwIfNoEntry: false })?.size ?? 0
+    this.attachments.delete(id)
     this.attachments.set(id, { path: file.path, name: file.name, mimeType: file.mimeType })
+    while (this.attachments.size > MAX_ATTACHMENTS) {
+      const oldest = this.attachments.keys().next().value
+      if (oldest === undefined) break
+      this.attachments.delete(oldest)
+    }
     return { id, name: file.name, mimeType: file.mimeType, size, image: isImage(file.mimeType) }
   }
 
@@ -771,12 +826,13 @@ export class WebHub {
       chat.panel = { requests: [], active: 0 }
       return
     }
-    const state = this.resolvePanel(request)
+    const baseDir = this.sessionBaseDir(chat)
+    const state = this.resolvePanel(request, baseDir)
     if (!state) return
     const tabs = chat.panel?.requests ?? []
     const key = panelKeyOf(state)
     const existing = tabs.findIndex((one) => {
-      const resolved = this.resolvePanel(one)
+      const resolved = this.resolvePanel(one, baseDir)
       return resolved ? panelKeyOf(resolved) === key : false
     })
     chat.panel = existing >= 0
@@ -793,11 +849,12 @@ export class WebHub {
   private panelView(chat: Chat): PanelView | null {
     const panel = chat.panel
     if (!panel || panel.requests.length === 0) return null
+    const baseDir = this.sessionBaseDir(chat)
     const tabs: PanelTab[] = []
     const kept: PanelRequest[] = []
     let active = 0
     panel.requests.forEach((request, index) => {
-      const state = this.resolvePanel(request)
+      const state = this.resolvePanel(request, baseDir)
       if (!state) return
       if (index === panel.active) active = tabs.length
       kept.push(request)
@@ -842,7 +899,7 @@ export class WebHub {
     const index = this.panelView(chat)?.tabs.findIndex((tab) => tab.key === key) ?? -1
     if (index < 0 || !chat.panel) return
     chat.panel = { requests: chat.panel.requests, active: index }
-    this.broadcast(chatId, { type: 'panel', panel: this.panelView(chat) })
+    this.broadcastPanel(chat)
   }
 
   /** Closes a tab, by key. Closing the last one leaves the panel down. */
@@ -853,7 +910,15 @@ export class WebHub {
     if (index < 0 || !chat.panel) return
     const requests = chat.panel.requests.filter((_, at) => at !== index)
     chat.panel = { requests, active: Math.min(index, Math.max(0, requests.length - 1)) }
-    this.broadcast(chatId, { type: 'panel', panel: this.panelView(chat) })
+    this.broadcastPanel(chat)
+  }
+
+  private broadcastPanel(chat: Chat): void {
+    const view = this.panelView(chat)
+    for (const target of this.chatsOf(chat.session.id)) {
+      if (target !== chat) target.panel = chat.panel ? { requests: [...chat.panel.requests], active: chat.panel.active } : undefined
+      this.broadcast(target.scope.chatId, { type: 'panel', panel: view })
+    }
   }
 
   /**
@@ -876,13 +941,17 @@ export class WebHub {
     return (chat.panel?.requests ?? []).some((request) => request.browser)
   }
 
+  private sessionBaseDir(chat: Chat): string {
+    return chat.session.project?.ok ? chat.session.project.project.path : this.cwd
+  }
+
   /**
    * A panel request as a view the browser can draw. A browser request needs no
    * file; a path is registered so its bytes are served inline by id, and the kind
    * is decided by what the file is. A file that is gone resolves to no panel
    * rather than a broken one.
    */
-  private resolvePanel(request: PanelRequest): PanelState | null {
+  private resolvePanel(request: PanelRequest, baseDir: string = this.cwd): PanelState | null {
     if (request.close) return null
     const title = request.title?.trim() || undefined
     if (request.browser) {
@@ -890,7 +959,7 @@ export class WebHub {
       return { kind: 'browser', ...(title ? { title } : {}), url: this.runtime.browser?.status.url ?? null }
     }
     if (!request.path) return null
-    const path = resolveToolPath(this.cwd, request.path)
+    const path = resolveToolPath(baseDir, request.path)
     const stats = statSync(path, { throwIfNoEntry: false })
     if (!stats?.isFile()) return null
     const name = basename(path)
@@ -1096,17 +1165,29 @@ export class WebHub {
       // `owner` is the chat whose queue is running it.
       let sessionId = activeChat?.session.id
       let live: LiveTurn | undefined
+      let turnStarted = false
       if (activeChat && sessionId) {
         live = { id, at: Date.now(), frames: [], from: activeChat.session.messages.length, owner: chatId }
         this.live.set(sessionId, live)
       }
-      if (sessionId) this.emitTurn(sessionId, { type: 'turn-start', id, text: files?.length
-        ? [text, files.map((file) => `Attached ${file.name}`).join(', ')].filter(Boolean).join('\n')
-        : text, ...(pendingRetry ? { retryPendingId: pendingRetry } : {}), ...(requestId ? { requestId } : {}) })
       // Said again now the live turn is open: the state frame the caller sent when it
       // queued this turn read `busy` before the queue had registered it, so it still
       // said false. This is the one that turns the sibling's composer busy.
       this.sendState(chatId)
+      const emitTurnStart = (): void => {
+        if (turnStarted) return
+        turnStarted = true
+        if (!sessionId) return
+        this.emitTurn(sessionId, {
+          type: 'turn-start',
+          id,
+          text: files?.length
+            ? [text, files.map((file) => `Attached ${file.name}`).join(', ')].filter(Boolean).join('\n')
+            : text,
+          ...(pendingRetry ? { retryPendingId: pendingRetry } : {}),
+          ...(requestId ? { requestId } : {}),
+        })
+      }
       let status: 'done' | 'stopped' | 'error' = 'done'
       /** The first refusal the turn itself reported, kept for the written record. */
       let failureReason: string | undefined
@@ -1169,20 +1250,40 @@ export class WebHub {
             ? { handled: false as const }
             : await handleCommand(currentText, this.commandContext(chat, session, signal))
           if (command.handled) {
+            const beforeSessionId = session.id
             session = await this.runtime.getSession(chat.scope)
             chat.session = session
-            this.broadcast(chatId, { type: 'command-result', reply: command.reply ?? '', markdown: command.markdown, actions: command.actions, cards: command.cards, sessionId: session.id })
+            this.broadcastSession(beforeSessionId, chatId, {
+              type: 'command-result',
+              reply: command.reply ?? '',
+              markdown: command.markdown,
+              actions: command.actions,
+              cards: command.cards,
+              sessionId: session.id,
+            })
             const queuedText = inbox.shift()
             if (queuedText?.startsWith('/')) {
               const queuedCommand = await handleCommand(queuedText, this.commandContext(chat, session, signal))
+              const queuedBeforeId = chat.session.id
               chat.session = await this.runtime.getSession(chat.scope)
-              if (queuedCommand.handled) this.broadcast(chatId, { type: 'command-result', reply: queuedCommand.reply ?? '', markdown: queuedCommand.markdown, actions: queuedCommand.actions, cards: queuedCommand.cards, sessionId: chat.session.id })
+              if (queuedCommand.handled) {
+                this.broadcastSession(queuedBeforeId, chatId, {
+                  type: 'command-result',
+                  reply: queuedCommand.reply ?? '',
+                  markdown: queuedCommand.markdown,
+                  actions: queuedCommand.actions,
+                  cards: queuedCommand.cards,
+                  sessionId: chat.session.id,
+                })
+              }
               currentText = inbox.shift() ?? ''
             } else {
               currentText = queuedText ?? ''
             }
             continue
           }
+
+          emitTurnStart()
 
           const sendOptions: SendOptions = {
             signal,
@@ -1233,7 +1334,7 @@ export class WebHub {
             // `close` request leaves no tabs, which is the model taking the panel down.
             if (event.type === 'panel') {
               this.showPanel(chat, event.request)
-              this.broadcast(chatId, { type: 'panel', panel: this.panelView(chat) })
+              this.broadcastPanel(chat)
               continue
             }
             displayEvent(event, id, display, (frame) => { if (sessionId) this.emitTurn(sessionId, frame) })
@@ -1264,6 +1365,7 @@ export class WebHub {
         if (signal.aborted) {
           status = 'stopped'
         } else {
+          emitTurnStart()
           status = 'error'
           this.reportTurnFailure(chatId, id, errorMessage(error))
         }
@@ -1282,7 +1384,7 @@ export class WebHub {
           : null
         const raw = messages ? rawTurn(messages) : null
         const noOutput = messages ? rawTurn(messages, { output: false }) : null
-        if (sessionId) {
+        if (sessionId && turnStarted) {
           this.emitTurn(sessionId, { type: 'turn-end', id, status, ...(raw ? { raw } : {}), ...(noOutput && noOutput !== raw ? { rawNoOutput: noOutput } : {}) })
           const updated = this.chatsOf(sessionId)[0]?.session
           if (updated?.backend.kind === 'command-code') this.emitTurn(sessionId, { type: 'session-backend', backend: updated.backendView })
@@ -1318,7 +1420,6 @@ export class WebHub {
   }
 
   private async command(client: WebClient, chat: Chat, text: string, messageId?: string): Promise<void> {
-    const context = this.commandContext(chat, chat.session, new AbortController().signal)
     // The turn controls act on the session, not the asking chat: `/stop`,
     // `/steer` and `/queue` reach the queue the session's turn is running in.
     const key = this.liveOwner(chat.session.id) ?? chat.scope.chatId
@@ -1327,7 +1428,15 @@ export class WebHub {
       start: (pending) => this.startTurn(key, pending),
     })
     if (result.handled) {
-      client.send({ type: 'command-result', reply: result.reply ?? '', ...(messageId ? { messageId } : {}) })
+      if (messageId) {
+        client.send({ type: 'command-result', reply: result.reply ?? '', messageId })
+      } else {
+        this.broadcastSession(chat.session.id, chat.scope.chatId, {
+          type: 'command-result',
+          reply: result.reply ?? '',
+          sessionId: chat.session.id,
+        })
+      }
       this.sendState(chat.scope.chatId)
       return
     }
@@ -1335,12 +1444,16 @@ export class WebHub {
     // from there it would still say `busy: true` for this very command — a slash
     // command is instantaneous, and the page would be left holding the stop
     // button with nothing running to stop.
-    this.turns.run(key, async () => {
+    this.turns.run(key, async (_inbox, signal) => {
+      const current = await this.runtime.getSession(chat.scope)
+      chat.session = current
+      const beforeSessionId = current.id
+      const context = this.commandContext(chat, current, signal)
       const response = await handleCommand(text, context)
       if (!response.handled) return
       const refreshed = await this.runtime.getSession(chat.scope)
       chat.session = refreshed
-      client.send({
+      const frame: ServerFrame = {
         type: 'command-result',
         reply: response.reply ?? '',
         markdown: response.markdown,
@@ -1348,7 +1461,12 @@ export class WebHub {
         cards: response.cards,
         sessionId: refreshed.id,
         ...(messageId ? { messageId } : {}),
-      })
+      }
+      if (messageId) {
+        client.send(frame)
+      } else {
+        this.broadcastSession(beforeSessionId, chat.scope.chatId, frame)
+      }
     }, () => this.sendState(chat.scope.chatId))
   }
 
@@ -1401,6 +1519,22 @@ export class WebHub {
 
   private broadcast(chatId: string, frame: ServerFrame): void {
     for (const client of this.chats.get(chatId)?.clients ?? []) client.send(frame)
+  }
+
+  private broadcastSession(sessionId: string, chatId: string, frame: ServerFrame): void {
+    const seen = new Set<WebClient>()
+    for (const bound of this.chatsOf(sessionId)) {
+      for (const client of bound.clients) {
+        if (seen.has(client)) continue
+        seen.add(client)
+        client.send(frame)
+      }
+    }
+    for (const client of this.chats.get(chatId)?.clients ?? []) {
+      if (seen.has(client)) continue
+      seen.add(client)
+      client.send(frame)
+    }
   }
 
   /**

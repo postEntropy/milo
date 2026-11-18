@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { MILO_HOME, devicesFile } from '../../core/config/paths.js'
 import { errorMessage } from '../../util/errors.js'
 import { logWarn } from '../../util/log.js'
@@ -17,26 +17,42 @@ export interface PairedDevice {
   createdAt: string
 }
 
+let cached: { file: string; mtimeNs: bigint; size: bigint; devices: PairedDevice[] } | null = null
+
 export function readDevices(): PairedDevice[] {
-  if (!existsSync(devicesFile())) return []
+  const file = devicesFile()
+  const stats = statSync(file, { bigint: true, throwIfNoEntry: false })
+  if (!stats) {
+    cached = null
+    return []
+  }
+  if (cached && cached.file === file && cached.mtimeNs === stats.mtimeNs && cached.size === stats.size) {
+    return cached.devices
+  }
   try {
-    const parsed = JSON.parse(readFileSync(devicesFile(), 'utf8')) as { devices?: unknown }
-    return Array.isArray(parsed.devices) ? parsed.devices.filter(isDevice) : []
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { devices?: unknown }
+    const devices = Array.isArray(parsed.devices) ? parsed.devices.filter(isDevice) : []
+    cached = { file, mtimeNs: stats.mtimeNs, size: stats.size, devices }
+    return devices
   } catch (error) {
-    logWarn(`could not read ${devicesFile()} (ignoring it): ${errorMessage(error)}`)
+    cached = null
+    logWarn(`could not read ${file} (ignoring it): ${errorMessage(error)}`)
     return []
   }
 }
 
 /** `0600`, like `auth.json`: it holds a credential, even hashed. */
 function writeDevices(devices: PairedDevice[]): void {
+  const file = devicesFile()
   mkdirSync(MILO_HOME, { recursive: true })
-  writeFileSync(devicesFile(), `${JSON.stringify({ devices }, null, 2)}\n`, { mode: 0o600 })
+  writeFileSync(file, `${JSON.stringify({ devices }, null, 2)}\n`, { mode: 0o600 })
   try {
-    chmodSync(devicesFile(), 0o600)
+    chmodSync(file, 0o600)
   } catch {
     // best effort on platforms without chmod
   }
+  const stats = statSync(file, { bigint: true, throwIfNoEntry: false })
+  cached = stats ? { file, mtimeNs: stats.mtimeNs, size: stats.size, devices } : null
 }
 
 /** The digest a token is recognised by, kept in place of the token itself. */
