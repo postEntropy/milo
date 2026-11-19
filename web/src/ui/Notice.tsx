@@ -24,8 +24,11 @@ export function useAutoDismiss(notice: Notice | null, clear: (notice: Notice | n
 /** The one notice every surface draws, with its own way out. */
 export function Notice({ notice, onDismiss }: { notice: Notice | null; onDismiss(): void }) {
   if (!notice) return null
-  return <p className={`notice ${notice.error ? 'error' : 'success'}`} role={notice.error ? 'alert' : 'status'}>
-    {notice.text}
-    <button className="icon-button" type="button" aria-label="Dismiss notice" title="Dismiss" onClick={onDismiss}><Icon name="x" size={15} /></button>
-  </p>
+  return <div className={`notice ${notice.error ? 'error' : 'success'}`} role={notice.error ? 'alert' : 'status'}>
+    <span className="notice-icon" aria-hidden="true">
+      <Icon name={notice.error ? 'alert-circle' : 'check-circle'} size={15} />
+    </span>
+    <span className="notice-text">{notice.text}</span>
+    <button className="notice-dismiss" type="button" aria-label="Dismiss notice" title="Dismiss" onClick={onDismiss}><Icon name="x" size={14} /></button>
+  </div>
 }

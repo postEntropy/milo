@@ -14,9 +14,11 @@ const LABEL: Record<ConnectionState, string> = {
  */
 export function ConnectionChip({ state, reason, onReconnect }: { state: ConnectionState; reason?: string; onReconnect?: () => void }) {
   if (state === 'online') return null
-  return <div className={`connection-status ${state}`} role="status" aria-live="polite">
-    <span aria-hidden="true" />
-    <div>{LABEL[state]}{reason && <div>{reason}</div>}{state === 'offline' && <div>Milo may still be working on the server.</div>}</div>
-    {onReconnect && state !== 'connecting' && <button type="button" className="connection-retry" onClick={onReconnect}>Reconnect</button>}
+  const hint = reason || (state === 'offline' ? 'Milo may still be working on the server.' : undefined)
+  const canRetry = Boolean(onReconnect && state !== 'connecting')
+  return <div className={`connection-status ${state}`} role="status" aria-live="polite" title={hint}>
+    <span className="connection-dot" aria-hidden="true" />
+    <span className="connection-label">{LABEL[state]}</span>
+    {canRetry && <button type="button" className="connection-retry" onClick={onReconnect}>Reconnect</button>}
   </div>
 }

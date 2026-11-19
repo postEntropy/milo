@@ -13,6 +13,8 @@ const paths = {
   code: <><path d="m9 8-5 4 5 4" /><path d="m15 8 5 4-5 4" /></>,
   quote: <g transform="scale(1.5)" strokeWidth="1.2"><path d="m6.25 3.75h-4.5v5.5c0 3.5 2.5 4.5 4.5 4-1.5-1.5-1.5-2.5-1.5-4h1.5z" /><path d="m13.25 3.75h-4.5v5.5c0 3.5 2.5 4.5 4.5 4-1.5-1.5-1.5-2.5-1.5-4h1.5z" /></g>,
   check: <><path d="m5 13 4 4L19 7" /></>,
+  'check-circle': <><circle cx="12" cy="12" r="9" /><path d="m8.5 12.5 2.5 2.5 4.5-5" /></>,
+  'alert-circle': <><circle cx="12" cy="12" r="9" /><path d="M12 8v4.5M12 16h.01" /></>,
   circle: <><circle cx="12" cy="12" r="9" /></>,
   'circle-dot': <><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" fill="currentColor" stroke="none" /></>,
   'list-check': <><path d="m4 6 1.5 1.5L8 5" /><path d="M11 6h9M11 12h9M11 18h9" /><path d="m4 12 1.5 1.5L8 11m-4 7 1.5 1.5L8 17" /></>,
