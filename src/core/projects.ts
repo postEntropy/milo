@@ -288,6 +288,73 @@ export function matchProjectMention(
   return { kind: 'project', project, text: rest.slice(longest).replace(/^[\s,;:]+/, '') }
 }
 
+export interface ProjectMentionMatch {
+  project: Project
+  /** Character offset of `@` in the source text. */
+  start: number
+  /** Character offset immediately after the matched folder token. */
+  end: number
+}
+
+/**
+ * Extracts `@<folder>` mention spans anywhere in a message in order of appearance,
+ * matching remembered projects (by name or id) as well as existing directory paths
+ * prefixed with `@/` or `@~/`.
+ */
+export function extractProjectMentionMatches(
+  text: string,
+  projects: readonly Project[] = readProjects(),
+): ProjectMentionMatch[] {
+  if (!text.includes('@')) return []
+  const candidates = projects
+    .flatMap((project) => [project.name, project.id].map((token) => ({ project, token: token.trim() })))
+    .filter(({ token }) => token !== '')
+    .sort((a, b) => b.token.length - a.token.length)
+
+  const found: ProjectMentionMatch[] = []
+  const pattern = /(?:^|[\s([{"'])@/g
+  let minStart = 0
+  for (const match of text.matchAll(pattern)) {
+    const atIndex = match.index! + match[0].length - 1
+    if (atIndex < minStart) continue
+    const rest = text.slice(atIndex + 1)
+    if (!rest) continue
+
+    const matched = candidates.filter(({ token }) => beginsWithMention(rest, token))
+    if (matched.length > 0) {
+      const longest = matched[0]!.token.length
+      const best = matched.filter(({ token }) => token.length === longest)
+      const distinct = [...new Map(best.map((entry) => [entry.project.id, entry.project])).values()]
+      if (distinct.length === 1) {
+        const end = atIndex + 1 + longest
+        found.push({ project: distinct[0]!, start: atIndex, end })
+        minStart = end
+        continue
+      }
+    }
+
+    const token = rest.split(/[\s,;:)>"']/, 1)[0] ?? ''
+    if (token.startsWith('/') || token.startsWith('~/')) {
+      const resolved = resolveToolPath(process.cwd(), token)
+      try {
+        if (statSync(resolved).isDirectory()) {
+          const name = basename(resolved) || resolved
+          const end = atIndex + 1 + token.length
+          found.push({
+            project: { id: name, name, path: resolved, createdAt: Date.now() },
+            start: atIndex,
+            end,
+          })
+          minStart = end
+        }
+      } catch {
+        // Non-existent path mention: leave as plain text.
+      }
+    }
+  }
+  return found
+}
+
 /**
  * Extracts `@<folder>` mentions anywhere in a message in order of appearance,
  * matching remembered projects (by name or id) as well as existing directory paths
@@ -297,48 +364,12 @@ export function extractProjectMentions(
   text: string,
   projects: readonly Project[] = readProjects(),
 ): Project[] {
-  if (!text.includes('@')) return []
-  const candidates = projects
-    .flatMap((project) => [project.name, project.id].map((token) => ({ project, token: token.trim() })))
-    .filter(({ token }) => token !== '')
-    .sort((a, b) => b.token.length - a.token.length)
-
   const seen = new Set<string>()
   const found: Project[] = []
-  const pattern = /(?:^|[\s([{"'])@/g
-  for (const match of text.matchAll(pattern)) {
-    const atIndex = match.index! + match[0].length - 1
-    const rest = text.slice(atIndex + 1)
-    if (!rest) continue
-
-    const matched = candidates.filter(({ token }) => beginsWith(rest, token))
-    if (matched.length > 0) {
-      const longest = matched[0]!.token.length
-      const best = matched.filter(({ token }) => token.length === longest)
-      const distinct = [...new Map(best.map((entry) => [entry.project.id, entry.project])).values()]
-      if (distinct.length === 1) {
-        const project = distinct[0]!
-        if (!seen.has(project.path)) {
-          seen.add(project.path)
-          found.push(project)
-        }
-        continue
-      }
-    }
-
-    const token = rest.split(/[\s,;:)>"']/, 1)[0] ?? ''
-    if (token.startsWith('/') || token.startsWith('~/')) {
-      const resolved = resolveToolPath(process.cwd(), token)
-      try {
-        if (statSync(resolved).isDirectory() && !seen.has(resolved)) {
-          seen.add(resolved)
-          const name = basename(resolved) || resolved
-          found.push({ id: name, name, path: resolved, createdAt: Date.now() })
-        }
-      } catch {
-        // Non-existent path mention: leave as plain text.
-      }
-    }
+  for (const { project } of extractProjectMentionMatches(text, projects)) {
+    if (seen.has(project.path)) continue
+    seen.add(project.path)
+    found.push(project)
   }
   return found
 }
@@ -349,6 +380,19 @@ function beginsWith(text: string, token: string): boolean {
   if (text.slice(0, token.length).toLowerCase() !== token.toLowerCase()) return false
   const after = text[token.length]
   return after === undefined || /[\s,;:]/.test(after)
+}
+
+/** Whether a folder mention inside prose ends cleanly after `token`. */
+function beginsWithMention(text: string, token: string): boolean {
+  if (text.length < token.length) return false
+  if (text.slice(0, token.length).toLowerCase() !== token.toLowerCase()) return false
+  const after = text[token.length]
+  if (after === undefined || /[\s,;:!?)\]}"']/.test(after)) return true
+  if (after === '.') {
+    const next = text[token.length + 1] ?? ''
+    return !/[a-zA-Z0-9_/-]/.test(next)
+  }
+  return false
 }
 
 /** The projects a person may name, said the way a refusal says them. */

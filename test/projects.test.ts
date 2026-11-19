@@ -10,6 +10,7 @@ process.env.MILO_HOME = home
 const {
   addProject,
   byRecentUse,
+  extractProjectMentionMatches,
   extractProjectMentions,
   findProject,
   matchProjectMention,
@@ -391,5 +392,17 @@ describe('extractProjectMentions', () => {
     const dir = folder('direct-dir')
     const found = extractProjectMentions(`Check @${dir} for recent changes`)
     expect(found.map((project) => project.path)).toEqual([dir])
+  })
+
+  it('matches multi-word folder mentions with trailing punctuation and returns full spans', async () => {
+    const notesDir = folder('personal-notes')
+    const notes = await addProject({ path: notesDir, name: 'Personal Notes' })
+    if (!notes.ok) throw new Error('project was not added')
+
+    const text = 'What is inside @Personal Notes?'
+    const matches = extractProjectMentionMatches(text)
+    expect(matches).toHaveLength(1)
+    expect(matches[0]!.project.id).toBe(notes.project.id)
+    expect(text.slice(matches[0]!.start, matches[0]!.end)).toBe('@Personal Notes')
   })
 })
