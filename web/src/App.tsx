@@ -20,7 +20,6 @@ import type { BotAuthor, ClientFrame, ServerFrame, PermissionRequest, PanelInput
 import type { CrewBot } from '../../src/core/crew.js'
 import type { SessionBackendKind, SessionBackendView } from '../../src/core/sessions/types.js'
 import { BotAvatar, botAvatarOf } from './crew/BotAvatar.js'
-import { SessionFolder } from './sessions/Folder.js'
 import { SessionRow } from './sessions/SessionRow.js'
 import type { SessionSummary } from './sessions/types.js'
 import { chatSessions } from './sessions/scopes.js'
@@ -29,7 +28,6 @@ import { Icon } from './ui/Icons.js'
 import { ConnectionChip } from './ui/ConnectionChip.js'
 import { Notice, useAutoDismiss, type Report } from './ui/Notice.js'
 import { MiloMark } from './ui/MiloMark.js'
-import { SessionBackendMark } from './ui/SessionBackendMark.js'
 
 const Analytics = lazy(() => import('./analytics/Analytics.js').then((m) => ({ default: m.Analytics })))
 const Crew = lazy(() => import('./crew/Crew.js').then((m) => ({ default: m.Crew })))
@@ -139,8 +137,6 @@ export default function App() {
   const [backend, setBackend] = useState<SessionBackendView>({ kind: 'milo' })
   const [sessionBot, setSessionBot] = useState<BotAuthor | null>(null)
   const [crewBots, setCrewBots] = useState<CrewBot[]>([])
-  const [folderOpen, setFolderOpen] = useState(false)
-  const [inspectProject, setInspectProject] = useState<ProjectView | null>(null)
   /** Bumped when the server says a routine ran, so the history on screen re-reads. */
   const [routinesTick, setRoutinesTick] = useState(0)
   const [crewTick, setCrewTick] = useState(0)
@@ -1389,7 +1385,7 @@ export default function App() {
     {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(action) => sendSocket({ type: 'control', action, id: pendingPermission.id })} /></article>}
   </>
 
-  const workProject = inspectProject ?? sessionProject ?? projects?.[0] ?? null
+  const workProject = sessionProject ?? projects?.[0] ?? null
 
   return <div className={`app-shell ${sidebarOpen ? 'drawer-open' : ''} ${sidebarCollapsed ? 'sidebar-collapsed' : ''} ${view === 'chat' && panelOpen && panel && panel.tabs.length > 0 ? 'panel-open' : ''}`}>
     {sidebarOpen && <button className="sidebar-scrim" type="button" aria-label="Close menu" onClick={() => setSidebarOpen(false)} />}
@@ -1447,18 +1443,6 @@ export default function App() {
               <span className="topbar-bot-name">{sessionBot.name}</span>
             </span>
           )}
-          <div className={`topbar-project-group ${backend.kind === 'command-code' ? 'with-backend' : ''}`}>
-            {backend.kind === 'command-code' && <span className="topbar-backend-wrap" title="Command Code Session"><SessionBackendMark backend="command-code" size={16} /></span>}
-            <button
-              className={`topbar-project topbar-folder ${sessionProject ? '' : 'empty'} ${sessionProject?.error ? 'gone' : ''}`}
-              type="button"
-              title={sessionProject ? (sessionProject.error ?? sessionProject.path) : 'Choose a folder for this Session'}
-              onClick={() => setFolderOpen(true)}
-            >
-              <Icon name="folder" size={14} />
-              <span>{sessionProject ? sessionProject.name : 'Folder'}</span>
-            </button>
-          </div>
         </>}</div>
         <div className="topbar-actions">
           {view === 'chat' && panel && panel.tabs.length > 0 && <button className={`panel-toggle ${panelOpen ? 'active' : ''} ${panelNew ? 'has-new' : ''}`} type="button" title={panelOpen ? 'Hide panel' : 'Show panel'} aria-label={panelOpen ? 'Hide panel' : 'Show panel'} aria-pressed={panelOpen} onClick={() => setPanelVisible(!panelOpen)}><Icon name="panel-right" size={18} /></button>}
@@ -1478,7 +1462,7 @@ export default function App() {
         : view === 'tasks'
         ? <TaskLists tick={turnEnds} />
         : view === 'work' && workProject
-        ? <FolderInspector project={workProject} tick={turnEnds} onClose={() => { setInspectProject(null); setView('chat') }} onAskRules={(prompt) => { void send(prompt, 'queue'); setInspectProject(null); setView('chat') }} />
+        ? <FolderInspector project={workProject} tick={turnEnds} onClose={() => setView('chat')} onAskRules={(prompt) => { void send(prompt, 'queue'); setView('chat') }} />
         : view === 'chat'
         ? <section className="chat-view">
           {backend.kind === 'command-code' && backend.pendingTurn && <section className="command-code-recovery" role="status">
@@ -1492,7 +1476,7 @@ export default function App() {
           <Notice notice={notice} onDismiss={() => setNotice(null)} />
           <div className="composer-dock" ref={composerDockRef}>
             {messages.length > 0 && <button className={`jump-latest ${atEnd ? '' : 'on'}`} type="button" title="Go to the latest" aria-label="Go to the latest" onClick={jumpToEnd}><Icon name="arrow-down" size={17} /></button>}
-            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => sendSocket({ type: 'job-kill', id })} folders={projects ?? []} bots={sessionBot ? [] : crewBots} provider={identity.provider} providerName={identity.providerName} draftKey={sessionId || chatId} pendingDraftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={backend.kind !== 'command-code'} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); sendSocket({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => sendSocket({ type: 'control', action: 'approve-plan' })} onSend={(text, intent, files, mentions) => send(text, intent, files, undefined, mentions)} onStop={() => sendSocket({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} />
+            <Composer ref={composerRef} busy={busy} queued={queued} jobs={jobs} onKillJob={(id) => sendSocket({ type: 'job-kill', id })} folders={projects ?? []} bots={sessionBot ? [] : crewBots} provider={identity.provider} providerName={identity.providerName} draftKey={sessionId || chatId} pendingDraftKey={chatId} model={identity.model} context={contextBudget && contextUsed > 0 ? { used: contextUsed, budget: contextBudget } : undefined} effort={effort} focusSignal={composerFocus} plan={plan} planReady={planReady} canPlan={Boolean(sessionProject) && backend.kind !== 'command-code'} onPlanChange={(next) => { setPlan(next); setPlanSince(next ? messages.length : 0); sendSocket({ type: 'control', action: 'plan', plan: next }) }} onApprovePlan={() => sendSocket({ type: 'control', action: 'approve-plan' })} onSend={(text, intent, files, mentions) => send(text, intent, files, undefined, mentions)} onStop={() => sendSocket({ type: 'control', action: 'stop' })} onModelChange={pickModel} onEffortChange={(effort) => void changeEffort(effort)} />
           </div>
         </section>
         : null}
@@ -1502,29 +1486,6 @@ export default function App() {
           loading line. It is told the view itself, not the path, so this is where it draws. */}
       <Email active={view === 'email'} route={emailRoute} onRoute={setEmailRoute} onSeen={clearMailBadge} onStatus={setMailConnected} />
     </main>
-    {folderOpen && <SessionFolder
-      current={sessionProject}
-      recent={projects ?? []}
-      disabled={busy || backend.kind === 'command-code'}
-      onChoose={async (folder) => {
-        const result = await api<{ project: ProjectView | null }>('session-folder', { id: sessionId, folder })
-        setSessionProject(result.project)
-        void refreshProjects()
-      }}
-      onInspect={(id) => {
-        const found = (projects ?? []).find((p) => p.id === id) ?? sessionProject
-        if (found) {
-          setInspectProject(found)
-          setFolderOpen(false)
-          setView('work')
-        }
-      }}
-      onStart={(id, chosenBackend) => {
-        setFolderOpen(false)
-        void newChat({ project: id, backend: chosenBackend })
-      }}
-      onClose={() => setFolderOpen(false)}
-    />}
     {view === 'chat' && panelOpen && panel && panel.tabs.length > 0 && <Panel view={panel} onClose={() => setPanelVisible(false)} onInput={panelInput} onActivateTab={activateTab} onCloseTab={closeTab} />}
   </div>
 }
