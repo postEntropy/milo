@@ -203,7 +203,7 @@ struct MessageRow: View, Equatable {
                         CrewBotAvatar(
                             avatar: CrewAvatarModel.resolved(wire: bot.avatar, id: bot.id, name: bot.name),
                             state: message.streaming ? "running" : nil,
-                            size: 22,
+                            size: 32,
                             animated: message.streaming
                         )
                         Text(bot.name)
@@ -828,7 +828,7 @@ struct ToolRow: View {
             // on a failure — and the word beside it says the failure for whoever cannot
             // see the colour.
             if let botAvatar = taskBotAvatar {
-                CrewBotAvatar(avatar: botAvatar, state: tool.state, size: 18, animated: running)
+                CrewBotAvatar(avatar: botAvatar, state: tool.state, size: 24, animated: running)
             } else if tool.name == "crew" || tool.name == "delegated_work" {
                 CrewDrawerMark()
                     .foregroundStyle(state)

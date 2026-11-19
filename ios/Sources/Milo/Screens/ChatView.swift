@@ -1415,18 +1415,19 @@ struct ChatView: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
 
                 if let activeBot = model.sessionBot {
-                    HStack(spacing: MiloTheme.Space.one + 2) {
+                    HStack(spacing: MiloTheme.Space.two) {
                         CrewBotAvatar(
                             avatar: CrewAvatarModel.resolved(wire: activeBot.avatar, id: activeBot.id, name: activeBot.name),
-                            size: 18
+                            size: 26
                         )
                         Text(activeBot.name)
                             .font(MiloTheme.Text.small.weight(.semibold))
                             .foregroundStyle(MiloTheme.foreground)
                             .lineLimit(1)
                     }
-                    .padding(.horizontal, MiloTheme.Space.three)
-                    .padding(.vertical, MiloTheme.Space.one + 2)
+                    .padding(.leading, MiloTheme.Space.two)
+                    .padding(.trailing, MiloTheme.Space.three)
+                    .padding(.vertical, MiloTheme.Space.one + 1)
                     .glassEffect(.regular, in: Capsule())
                 }
 
@@ -1685,6 +1686,7 @@ struct WelcomeView: View {
     /// room so the four cards never slip behind the composer.
     private var showHero: Bool {
         guard !typing else { return false }
+        if model.sessionBot != nil { return true }
         if keyboardUp, availableHeight > 0, availableHeight < 290 { return false }
         return true
     }
@@ -1695,33 +1697,37 @@ struct WelcomeView: View {
             : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom))
 
         return VStack(spacing: 0) {
-            Spacer(minLength: keyboardUp ? 0 : MiloTheme.Space.three)
+            Spacer(minLength: keyboardUp && model.sessionBot == nil ? 0 : MiloTheme.Space.three)
 
             if !typing {
                 if showHero {
                     hero
                         .transition(contentTransition)
 
-                    Spacer()
-                        .frame(height: keyboardUp ? MiloTheme.Space.two + 2 : MiloTheme.Space.five)
-                }
-
-                VStack(spacing: keyboardUp ? MiloTheme.Space.one + 2 : MiloTheme.Space.three) {
-                    ForEach(Array(model.suggestions.enumerated()), id: \.element.id) { index, suggestion in
-                        let isResume: Bool = {
-                            if case .resume = suggestion.act { return true }
-                            return false
-                        }()
-                        let hasMore = index < model.suggestions.count - 1
-                        card(suggestion, isResume: isResume)
-                            .padding(.bottom, isResume && hasMore ? (keyboardUp ? MiloTheme.Space.one : MiloTheme.Space.two) : 0)
+                    if model.sessionBot == nil {
+                        Spacer()
+                            .frame(height: keyboardUp ? MiloTheme.Space.two + 2 : MiloTheme.Space.five)
                     }
                 }
-                .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: model.ideas)
-                .transition(contentTransition)
+
+                if model.sessionBot == nil {
+                    VStack(spacing: keyboardUp ? MiloTheme.Space.one + 2 : MiloTheme.Space.three) {
+                        ForEach(Array(model.suggestions.enumerated()), id: \.element.id) { index, suggestion in
+                            let isResume: Bool = {
+                                if case .resume = suggestion.act { return true }
+                                return false
+                            }()
+                            let hasMore = index < model.suggestions.count - 1
+                            card(suggestion, isResume: isResume)
+                                .padding(.bottom, isResume && hasMore ? (keyboardUp ? MiloTheme.Space.one : MiloTheme.Space.two) : 0)
+                        }
+                    }
+                    .animation(reduceMotion ? nil : .easeInOut(duration: 0.3), value: model.ideas)
+                    .transition(contentTransition)
+                }
             }
 
-            if !keyboardUp {
+            if !keyboardUp || model.sessionBot != nil {
                 Spacer(minLength: MiloTheme.Space.four)
                 Spacer(minLength: 0)
             }
@@ -1732,37 +1738,78 @@ struct WelcomeView: View {
         .sensoryFeedback(.impact(flexibility: .soft, intensity: 0.5), trigger: pressCount)
     }
 
+    @ViewBuilder
     private var hero: some View {
-        let layout = keyboardUp
-            ? AnyLayout(HStackLayout(alignment: .center, spacing: MiloTheme.Space.three))
-            : AnyLayout(VStackLayout(alignment: .center, spacing: MiloTheme.Space.three))
+        if let bot = model.sessionBot {
+            let avatar = CrewAvatarModel.resolved(wire: bot.avatar, id: bot.id, name: bot.name)
+            let haloTone = Color.hex(MiloPaletteId.resolve(avatar.palette).preset.logoTop)
+            VStack(alignment: .center, spacing: MiloTheme.Space.three) {
+                ZStack {
+                    Circle()
+                        .fill(haloTone.opacity(0.24))
+                        .frame(width: keyboardUp ? 64 : 114, height: keyboardUp ? 64 : 114)
+                        .blur(radius: keyboardUp ? 12 : 20)
+                    Circle()
+                        .fill(haloTone.opacity(0.14))
+                        .frame(width: keyboardUp ? 56 : 100, height: keyboardUp ? 56 : 100)
+                    CrewBotAvatar(
+                        avatar: avatar,
+                        size: keyboardUp ? 44 : 78,
+                        animated: true
+                    )
+                }
 
-        return layout {
-            ZStack {
-                Circle()
-                    .fill(MiloTheme.accent.opacity(0.18))
-                    .frame(width: keyboardUp ? 44 : 72, height: keyboardUp ? 44 : 72)
-                    .blur(radius: keyboardUp ? 10 : 16)
-                MiloMark(size: keyboardUp ? 20 : 34)
-                    .frame(width: keyboardUp ? 36 : 60, height: keyboardUp ? 36 : 60)
-                    .glassEffect(.regular, in: Circle())
-            }
-
-            VStack(alignment: keyboardUp ? .leading : .center, spacing: MiloTheme.Space.one) {
-                Text("What's on your mind?")
-                    .font(MiloTheme.Text.title)
-                    .foregroundStyle(MiloTheme.foreground)
-                    .multilineTextAlignment(keyboardUp ? .leading : .center)
-
-                if !keyboardUp {
-                    Text("Let's make something of it.")
-                        .font(MiloTheme.Text.base)
-                        .foregroundStyle(MiloTheme.mutedStrong)
+                VStack(alignment: .center, spacing: MiloTheme.Space.one) {
+                    Text(bot.name)
+                        .font(MiloTheme.Text.title)
+                        .foregroundStyle(MiloTheme.foreground)
                         .multilineTextAlignment(.center)
+
+                    if let handle = bot.handle, !handle.isEmpty {
+                        Text("@\(handle)")
+                            .font(MiloTheme.Text.small.monospaced())
+                            .foregroundStyle(MiloTheme.muted)
+                    } else if !keyboardUp {
+                        Text("Start a session with \(bot.name).")
+                            .font(MiloTheme.Text.base)
+                            .foregroundStyle(MiloTheme.mutedStrong)
+                            .multilineTextAlignment(.center)
+                    }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .center)
+        } else {
+            let layout = keyboardUp
+                ? AnyLayout(HStackLayout(alignment: .center, spacing: MiloTheme.Space.three))
+                : AnyLayout(VStackLayout(alignment: .center, spacing: MiloTheme.Space.three))
+
+            layout {
+                ZStack {
+                    Circle()
+                        .fill(MiloTheme.accent.opacity(0.18))
+                        .frame(width: keyboardUp ? 44 : 72, height: keyboardUp ? 44 : 72)
+                        .blur(radius: keyboardUp ? 10 : 16)
+                    MiloMark(size: keyboardUp ? 20 : 34)
+                        .frame(width: keyboardUp ? 36 : 60, height: keyboardUp ? 36 : 60)
+                        .glassEffect(.regular, in: Circle())
+                }
+
+                VStack(alignment: keyboardUp ? .leading : .center, spacing: MiloTheme.Space.one) {
+                    Text("What's on your mind?")
+                        .font(MiloTheme.Text.title)
+                        .foregroundStyle(MiloTheme.foreground)
+                        .multilineTextAlignment(keyboardUp ? .leading : .center)
+
+                    if !keyboardUp {
+                        Text("Let's make something of it.")
+                            .font(MiloTheme.Text.base)
+                            .foregroundStyle(MiloTheme.mutedStrong)
+                            .multilineTextAlignment(.center)
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: keyboardUp ? .leading : .center)
         }
-        .frame(maxWidth: .infinity, alignment: keyboardUp ? .leading : .center)
     }
 
     private func card(_ suggestion: Suggestion, isResume: Bool) -> some View {

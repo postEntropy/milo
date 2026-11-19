@@ -192,10 +192,10 @@ struct CrewBotAvatar: View {
                     let floatY = sin(t * speed + blinkPhaseOffset) * (state == "running" ? 1.5 : 0.9)
                     let cycle = (t + blinkPhaseOffset).truncatingRemainder(dividingBy: 4.1)
                     let blinking = cycle > 3.94
-                    avatarCanvas(top: top, bottom: bottom, floatY: floatY, blinking: blinking)
+                    avatarStage(top: top, bottom: bottom, floatY: floatY, blinking: blinking)
                 }
             } else {
-                avatarCanvas(top: top, bottom: bottom, floatY: 0, blinking: false)
+                avatarStage(top: top, bottom: bottom, floatY: 0, blinking: false)
             }
         }
         .frame(width: size, height: size)
@@ -212,25 +212,27 @@ struct CrewBotAvatar: View {
         .accessibilityHidden(true)
     }
 
-    private func avatarCanvas(top: Color, bottom: Color, floatY: Double, blinking: Bool) -> some View {
-        Canvas { context, canvasSize in
-            let s = min(canvasSize.width, canvasSize.height) / 40.0
-            let dy = CGFloat(floatY) * s
-            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: x * s, y: (y + CGFloat(floatY)) * s) }
-            func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect {
-                CGRect(x: x * s, y: (y + CGFloat(floatY)) * s, width: w * s, height: h * s)
-            }
-
+    private func avatarStage(top: Color, bottom: Color, floatY: Double, blinking: Bool) -> some View {
+        let unit = size / 35.0
+        return ZStack {
             if size >= 64 {
                 let shadowScale = CGFloat(1.0 - max(-0.12, min(0.12, floatY * 0.05)))
-                let sw = 18.0 * shadowScale
-                let shadowRect = CGRect(
-                    x: (20.0 - sw / 2.0) * s,
-                    y: 36.4 * s,
-                    width: sw * s,
-                    height: 2.6 * s
-                )
-                context.fill(Path(ellipseIn: shadowRect), with: .color(bottom.opacity(0.22)))
+                Ellipse()
+                    .fill(bottom.opacity(0.22))
+                    .frame(width: 18.0 * shadowScale * unit, height: 2.6 * unit)
+                    .offset(y: size * 0.5 + 1.5 * unit)
+            }
+            avatarCanvas(top: top, bottom: bottom, blinking: blinking)
+                .offset(y: CGFloat(floatY) * unit)
+        }
+    }
+
+    private func avatarCanvas(top: Color, bottom: Color, blinking: Bool) -> some View {
+        Canvas { context, canvasSize in
+            let s = min(canvasSize.width, canvasSize.height) / 35.0
+            func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint { CGPoint(x: (x - 2.5) * s, y: (y - 1.5) * s) }
+            func rect(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat) -> CGRect {
+                CGRect(x: (x - 2.5) * s, y: (y - 1.5) * s, width: w * s, height: h * s)
             }
 
             let bodyPath: Path = {
@@ -242,9 +244,11 @@ struct CrewBotAvatar: View {
                     p.addRoundedRect(in: rect(8.5, 6, 23, 29), cornerSize: CGSize(width: 11.5 * s, height: 11.5 * s))
                 case "droplet":
                     p.move(to: pt(20, 5.5))
-                    p.addCurve(to: pt(33.5, 24.8), control1: pt(27.5, 13), control2: pt(33.5, 18))
-                    p.addArc(center: pt(20, 24.8), radius: 13.5 * s, startAngle: .degrees(0), endAngle: .degrees(180), clockwise: false)
-                    p.addCurve(to: pt(20, 5.5), control1: pt(6.5, 18), control2: pt(12.5, 13))
+                    p.addCurve(to: pt(33.5, 23.8), control1: pt(27.5, 12.6), control2: pt(33.5, 17.4))
+                    p.addCurve(to: pt(20, 35.5), control1: pt(33.5, 30.26), control2: pt(27.46, 35.5))
+                    p.addCurve(to: pt(6.5, 23.8), control1: pt(12.54, 35.5), control2: pt(6.5, 30.26))
+                    p.addCurve(to: pt(20, 5.5), control1: pt(6.5, 17.4), control2: pt(12.5, 12.6))
+                    p.closeSubpath()
                 case "puff":
                     p.move(to: pt(20, 6.5))
                     p.addCurve(to: pt(27.8, 11.2), control1: pt(23.8, 6.5), control2: pt(26.8, 8.3))
@@ -288,8 +292,8 @@ struct CrewBotAvatar: View {
 
             let bodyGradient: GraphicsContext.Shading = .linearGradient(
                 Gradient(colors: [top, bottom]),
-                startPoint: CGPoint(x: 8 * s, y: 6 * s + dy),
-                endPoint: CGPoint(x: 32 * s, y: 35 * s + dy)
+                startPoint: pt(8, 6),
+                endPoint: pt(32, 35)
             )
             context.fill(bodyPath, with: bodyGradient)
             if avatar.shape == "gem" || avatar.shape == "star" {
@@ -364,9 +368,9 @@ struct CrewBotAvatar: View {
             case "antenna":
                 var stem = Path()
                 stem.move(to: pt(20, 7.5))
-                stem.addLine(to: pt(20, 3.2))
+                stem.addLine(to: pt(20, 4.0))
                 context.stroke(stem, with: .color(top), style: StrokeStyle(lineWidth: 2.2 * s, lineCap: .round))
-                context.fill(Path(ellipseIn: rect(17.7, 0.5, 4.6, 4.6)), with: .color(bottom))
+                context.fill(Path(ellipseIn: rect(18.0, 1.7, 4.0, 4.0)), with: .color(bottom))
             case "sprout":
                 var stem = Path()
                 stem.move(to: pt(20, 8.0))
@@ -651,11 +655,11 @@ struct CrewView: View, Equatable {
                 ZStack {
                     RoundedRectangle(cornerRadius: MiloTheme.Radius.md)
                         .fill(haloTone.opacity(0.13))
-                        .frame(width: 60, height: 60)
+                        .frame(width: 68, height: 68)
                     CrewBotAvatar(
                         avatar: bot.resolvedAvatar,
                         state: state,
-                        size: 46,
+                        size: 56,
                         animated: isRunning
                     )
                 }
@@ -752,9 +756,9 @@ struct CrewView: View, Equatable {
                         .foregroundStyle(MiloTheme.muted)
                     Spacer()
                     if !assignedBots.isEmpty {
-                        HStack(spacing: -6) {
+                        HStack(spacing: -8) {
                             ForEach(assignedBots.prefix(4)) { bot in
-                                CrewBotAvatar(avatar: bot.resolvedAvatar, size: 24)
+                                CrewBotAvatar(avatar: bot.resolvedAvatar, size: 30)
                                     .padding(2)
                                     .background(MiloTheme.background, in: Circle())
                             }
@@ -792,11 +796,11 @@ struct CrewView: View, Equatable {
                     ZStack {
                         Circle()
                             .fill(haloTone.opacity(0.15))
-                            .frame(width: 112, height: 112)
+                            .frame(width: 118, height: 118)
                         CrewBotAvatar(
                             avatar: avatar,
                             state: state,
-                            size: 92,
+                            size: 96,
                             animated: true
                         )
                     }
@@ -1383,7 +1387,7 @@ struct CrewView: View, Equatable {
                                 path.append(.bot(bot.id))
                             } label: {
                                 HStack(spacing: MiloTheme.Space.two) {
-                                    CrewBotAvatar(avatar: bot.resolvedAvatar, state: bot.currentState, size: 22)
+                                    CrewBotAvatar(avatar: bot.resolvedAvatar, state: bot.currentState, size: 30)
                                     Text(bot.name)
                                         .font(MiloTheme.Text.small.weight(.medium))
                                         .foregroundStyle(MiloTheme.foreground)
@@ -1710,8 +1714,8 @@ private struct BotAppearanceSheet: View {
                     ZStack {
                         Circle()
                             .fill(haloTone.opacity(0.16))
-                            .frame(width: 118, height: 118)
-                        CrewBotAvatar(avatar: avatar, size: 96, animated: true)
+                            .frame(width: 124, height: 124)
+                        CrewBotAvatar(avatar: avatar, size: 100, animated: true)
                     }
                     Text(bot.name)
                         .font(MiloTheme.Text.body.weight(.semibold))
@@ -1828,7 +1832,7 @@ private struct BotAppearanceSheet: View {
                         onSelect(item)
                     } label: {
                         VStack(spacing: MiloTheme.Space.one + 2) {
-                            CrewBotAvatar(avatar: preview(item), size: 32)
+                            CrewBotAvatar(avatar: preview(item), size: 42)
                             Text(label(item))
                                 .font(MiloTheme.Text.meta.weight(isSelected ? .semibold : .medium))
                                 .foregroundStyle(isSelected ? MiloTheme.accent : MiloTheme.foreground2)
@@ -1908,7 +1912,7 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
                         if !bots.isEmpty {
                             HStack(spacing: -8) {
                                 ForEach(bots.prefix(5)) { bot in
-                                    CrewBotAvatar(avatar: bot.resolvedAvatar, size: 26)
+                                    CrewBotAvatar(avatar: bot.resolvedAvatar, size: 32)
                                         .padding(2)
                                         .background(MiloTheme.background, in: Circle())
                                 }

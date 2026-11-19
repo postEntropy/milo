@@ -380,12 +380,12 @@ struct Composer: View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
             ForEach(mentionOptions) { option in
                 Button { chooseMention(option) } label: {
-                    HStack(alignment: .center, spacing: MiloTheme.Space.two) {
+                    HStack(alignment: .center, spacing: MiloTheme.Space.three) {
                         switch option {
                         case .bot(let bot):
                             CrewBotAvatar(
                                 avatar: CrewAvatarModel.resolved(wire: bot.avatar, id: bot.id, name: bot.name),
-                                size: 20
+                                size: 32
                             )
                             Text("@\(option.insertion)")
                                 .font(MiloTheme.Text.small.weight(.semibold).monospaced())
@@ -395,6 +395,11 @@ struct Composer: View {
                                 .foregroundStyle(MiloTheme.muted)
                                 .lineLimit(1)
                         case .project(let project):
+                            Image(systemName: "folder")
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(MiloTheme.muted)
+                                .frame(width: 32, height: 32)
+                                .background(MiloTheme.surfaceWarm, in: Circle())
                             Text("@\(project.name)")
                                 .font(MiloTheme.Text.small.weight(.semibold).monospaced())
                                 .foregroundStyle(MiloTheme.foreground)
