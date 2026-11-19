@@ -165,12 +165,47 @@ export class WebSettings {
         if (!this.runtime.crew) throw new Error('Crew is not available.')
         return this.runtime.crew.list()
       }
+      case 'crew-create': {
+        if (typeof body.name !== 'string' || !body.name.trim()) throw new Error('Enter a bot name.')
+        if (/[\r\n]/.test(body.name)) throw new Error('A bot name must fit on one line.')
+        if (body.handle !== undefined && typeof body.handle !== 'string') throw new Error('Invalid bot handle.')
+        if (body.instructions !== undefined && typeof body.instructions !== 'string') throw new Error('Invalid bot instructions.')
+        if (!this.runtime.crew) throw new Error('Crew is not available.')
+        const bot = await this.runtime.crew.create({
+          name: body.name,
+          handle: typeof body.handle === 'string' ? body.handle : undefined,
+          instructions: typeof body.instructions === 'string' ? body.instructions : undefined,
+        })
+        this.files?.crewChanged?.()
+        return bot
+      }
+      case 'crew-update': {
+        if (typeof body.id !== 'string' || !body.id.trim()) throw new Error('Enter a bot id.')
+        if (body.name !== undefined && (typeof body.name !== 'string' || /[\r\n]/.test(body.name))) {
+          throw new Error('A bot name must fit on one line.')
+        }
+        if (body.handle !== undefined && typeof body.handle !== 'string') throw new Error('Invalid bot handle.')
+        if (body.instructions !== undefined && typeof body.instructions !== 'string') throw new Error('Invalid bot instructions.')
+        if (body.name === undefined && body.handle === undefined && body.instructions === undefined) {
+          throw new Error('Provide name, handle, or instructions to update.')
+        }
+        if (!this.runtime.crew) throw new Error('Crew is not available.')
+        const bot = await this.runtime.crew.updateProfile(body.id, {
+          ...(typeof body.name === 'string' ? { name: body.name } : {}),
+          ...(typeof body.handle === 'string' ? { handle: body.handle } : {}),
+          ...(typeof body.instructions === 'string' ? { instructions: body.instructions } : {}),
+        })
+        this.files?.crewChanged?.()
+        this.files?.sessionsChanged?.()
+        return bot
+      }
       case 'crew-rename': {
         if (typeof body.id !== 'string' || typeof body.name !== 'string') throw new Error('Enter a bot id and name.')
         if (/[\r\n]/.test(body.name)) throw new Error('A bot name must fit on one line.')
         if (!this.runtime.crew) throw new Error('Crew is not available.')
         const bot = await this.runtime.crew.rename(body.id, body.name)
         this.files?.crewChanged?.()
+        this.files?.sessionsChanged?.()
         return bot
       }
       case 'crew-avatar': {
@@ -179,6 +214,7 @@ export class WebSettings {
         if (body.shuffle === true) {
           const bot = await this.runtime.crew.updateAvatar(body.id, 'shuffle')
           this.files?.crewChanged?.()
+          this.files?.sessionsChanged?.()
           return bot
         }
         const patch: Record<string, string> = {}
@@ -190,6 +226,7 @@ export class WebSettings {
         if (Object.keys(patch).length === 0) throw new Error('Choose shuffle or at least one avatar trait.')
         const bot = await this.runtime.crew.updateAvatar(body.id, patch)
         this.files?.crewChanged?.()
+        this.files?.sessionsChanged?.()
         return bot
       }
       case 'crew-stop': {
@@ -205,6 +242,14 @@ export class WebSettings {
         await this.runtime.crew.guide(body.id, body.text)
         this.files?.crewChanged?.()
         return { queued: true }
+      }
+      case 'crew-remove': {
+        if (typeof body.id !== 'string' || !body.id.trim()) throw new Error('Enter a bot id.')
+        if (!this.runtime.crew) throw new Error('Crew is not available.')
+        await this.runtime.crew.remove(body.id)
+        this.files?.crewChanged?.()
+        this.files?.sessionsChanged?.()
+        return { removed: true }
       }
       case 'delegated-work': {
         if (!this.runtime.delegatedWork) throw new Error('Delegated work is not available.')
@@ -676,6 +721,10 @@ export class WebSettings {
     if (backend === 'command-code' && body.plan === true) {
       throw new Error('Plan mode is controlled by Command Code for this Session.')
     }
+    const botId = optionalText(body.botId)
+    if (botId && backend === 'command-code') {
+      throw new Error('Direct Crew bot Sessions are not supported with the Command Code backend.')
+    }
     const session = await this.runtime.newSession(
       scope,
       typeof body.title === 'string' ? body.title : undefined,
@@ -683,6 +732,7 @@ export class WebSettings {
         ...(project ? { project } : {}),
         ...(surface ? { surface: surface as SessionSurface } : {}),
         ...(backend ? { backend } : {}),
+        ...(botId ? { botId } : {}),
         ...(backend === 'command-code' ? { confirmed: true, creationKey: chatId } : {}),
       },
     )

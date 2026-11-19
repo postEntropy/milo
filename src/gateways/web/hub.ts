@@ -3,6 +3,7 @@ import { statSync } from 'node:fs'
 import { basename, extname } from 'node:path'
 import { deriveIdeas, type Idea } from '../../core/ideas.js'
 import type { AgentRuntime } from '../../core/runtime.js'
+import { resolveBotAuthor, type ExplicitMentionRef } from '../../core/crew-mentions.js'
 import type { SendOptions, Session } from '../../core/session.js'
 import type { SessionSurface } from '../../core/sessions/types.js'
 import { INSTALL_SCOPE, type MemoryScope } from '../../core/memory/index.js'
@@ -290,6 +291,7 @@ export class WebHub {
       version: PROTOCOL_VERSION,
       sessionId: chat.session.id,
       backend: chat.session.backendView,
+      ...(chat.session.bot ? { bot: chat.session.bot } : {}),
       ...(project ? { project } : {}),
       messages: firstChunk,
       ...(rest.length > 0 ? { continues: true } : {}),
@@ -504,7 +506,7 @@ export class WebHub {
         return
       }
       if (files.length) {
-        this.startTurn(key, frame.text, frame.target, [], files, undefined, frame.requestId)
+        this.startTurn(key, frame.text, frame.target, [], files, undefined, frame.requestId, frame.mentions)
         accept()
         return
       }
@@ -517,7 +519,7 @@ export class WebHub {
           return
         }
       }
-      this.startTurn(key, frame.text, frame.target, [], undefined, undefined, frame.requestId)
+      this.startTurn(key, frame.text, frame.target, [], undefined, undefined, frame.requestId, frame.mentions)
       accept()
       return
     }
@@ -1162,7 +1164,7 @@ export class WebHub {
     }
   }
 
-  private startTurn(chatId: string, text: string, target?: SendTarget, images: ImagePart[] = [], files?: IncomingFile[], retryPendingId?: string, requestId?: string): void {
+  private startTurn(chatId: string, text: string, target?: SendTarget, images: ImagePart[] = [], files?: IncomingFile[], retryPendingId?: string, requestId?: string, mentions?: ExplicitMentionRef[]): void {
     // A person who is already typing does not want ideas. The call they started
     // is about to be wasted work, so it is cut here rather than left to finish
     // behind the turn and replace cards nobody is looking at any more.
@@ -1222,6 +1224,7 @@ export class WebHub {
       let displayText: string | undefined
       let mediaNotices: string[] | undefined
       let currentFiles = files
+      let currentMentions = mentions
       let currentModel: string | undefined
       /** Where this run's messages start, so its raw is the run and not the whole thread. */
       let runFrom: number | undefined
@@ -1281,6 +1284,7 @@ export class WebHub {
               actions: command.actions,
               cards: command.cards,
               sessionId: session.id,
+              ...(session.bot ? { bot: session.bot } : {}),
             })
             const queuedText = inbox.shift()
             if (queuedText?.startsWith('/')) {
@@ -1295,6 +1299,7 @@ export class WebHub {
                   actions: queuedCommand.actions,
                   cards: queuedCommand.cards,
                   sessionId: chat.session.id,
+                  ...(chat.session.bot ? { bot: chat.session.bot } : {}),
                 })
               }
               currentText = inbox.shift() ?? ''
@@ -1318,6 +1323,7 @@ export class WebHub {
             displayText,
             mediaNotices,
             ...(currentModel ? { model: currentModel } : {}),
+            ...(currentMentions?.length ? { mentions: currentMentions } : {}),
             ...(target ? { origin: target } : {}),
             panel: this.panelFacts(chat),
             ask: async (request) => {
@@ -1341,14 +1347,23 @@ export class WebHub {
           const turn = pendingRetry
             ? session.retryPendingCommandCode(true, sendOptions)
             : session.send(currentText, sendOptions)
+          currentMentions = undefined
           pendingRetry = undefined
+          let inBot = false
           for await (const event of turn) {
-            if (event.type === 'error') {
-              status = 'error'
-              failureReason ??= event.message
-              failedSession = session
+            if (event.type === 'bot-start') {
+              inBot = true
+            } else if (event.type === 'bot-end') {
+              inBot = false
+            } else if (event.type === 'error') {
+              if (!inBot) {
+                status = 'error'
+                failureReason ??= event.message
+                failedSession = session
+              }
+            } else if (event.type === 'aborted') {
+              status = 'stopped'
             }
-            if (event.type === 'aborted') status = 'stopped'
             // The panel is display state of the surface that draws one — the browser
             // and the phone — not something the other surfaces draw: it is resolved
             // to a view here and sent as its own frame, never as a raw `event`. A
@@ -1485,6 +1500,7 @@ export class WebHub {
         actions: response.actions,
         cards: response.cards,
         sessionId: refreshed.id,
+        ...(refreshed.bot ? { bot: refreshed.bot } : {}),
         ...(messageId ? { messageId } : {}),
       }
       if (messageId) {
@@ -1499,21 +1515,25 @@ export class WebHub {
     const controller = new AbortController()
     const current = await this.runtime.getSession(chat.scope)
     chat.session = current
+    const beforeSessionId = current.id
     const response = await handleCommand(text, this.commandContext(chat, current, controller.signal))
     if (!response.handled) return
+    const refreshed = await this.runtime.getSession(chat.scope)
+    chat.session = refreshed
     const frame: ServerFrame = {
       type: 'command-result',
       reply: response.reply ?? '',
       markdown: response.markdown,
       actions: response.actions,
       cards: response.cards,
-      sessionId: current.id,
+      sessionId: refreshed.id,
+      ...(refreshed.bot ? { bot: refreshed.bot } : {}),
       ...(messageId ? { messageId } : {}),
     }
     if (messageId) {
       client.send(frame)
     } else {
-      this.broadcastSession(current.id, chat.scope.chatId, frame)
+      this.broadcastSession(beforeSessionId, chat.scope.chatId, frame)
     }
   }
 
@@ -1640,7 +1660,12 @@ export class WebHub {
    *  message index — how a late client is handed everything before the running turn. */
   private transcript(session: Session, through?: number): TranscriptMessage[] {
     const messages = through === undefined ? session.messages : session.messages.slice(0, through)
-    return transcriptOf(messages, (file) => this.register(file), readDisplay().tools)
+    return transcriptOf(
+      messages,
+      (file) => this.register(file),
+      readDisplay().tools,
+      (bot) => resolveBotAuthor(bot, this.runtime.crew),
+    )
   }
 }
 

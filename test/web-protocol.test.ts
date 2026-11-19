@@ -82,6 +82,19 @@ describe('web protocol', () => {
     expect(parseClientFrame({ type: 'send', text: '', uploadIds: [1] })).toBeNull()
   })
 
+  it('accepts valid explicit mention references and refuses malformed ones', () => {
+    expect(
+      parseClientFrame({
+        type: 'send',
+        text: '@Scout check',
+        mentions: [{ kind: 'folder', id: 'scout-1', start: 0, end: 6 }],
+      }),
+    ).toMatchObject({ mentions: [{ kind: 'folder', id: 'scout-1', start: 0, end: 6 }] })
+    expect(parseClientFrame({ type: 'send', text: '@Scout', mentions: [{ kind: 'other', id: '1', start: 0, end: 6 }] })).toBeNull()
+    expect(parseClientFrame({ type: 'send', text: '@Scout', mentions: [{ kind: 'bot', id: '', start: 0, end: 6 }] })).toBeNull()
+    expect(parseClientFrame({ type: 'send', text: '@Scout', mentions: [{ kind: 'folder', id: 'x', start: 5, end: 5 }] })).toBeNull()
+  })
+
   it('sends tool calls as events, not folded into the reply text', () => {
     output.length = 0
     displayEvent({ type: 'tool-start', id: '1', name: 'read_file', args: { path: 'a.txt' } }, 'turn', { tools: 'full', thinking: 'expanded' }, send as never)
@@ -150,24 +163,38 @@ describe('web protocol', () => {
     expect(frame).toEqual({ type: 'plan', plan: true })
   })
 
-  it('speaks protocol version 18 and carries the shared palette state frame', () => {
-    expect(PROTOCOL_VERSION).toBe(18)
+  it('speaks protocol version 20 and carries bot authorship, mention refs, and palette state frames', () => {
+    expect(PROTOCOL_VERSION).toBe(20)
     expect(
       helloVersion({
         type: 'hello',
-        version: 18,
+        version: 20,
         chatId: 'e76b3fc7-f93d-4ee2-a1d8-1cc6e7e7ab92',
       }),
     ).toBe(PROTOCOL_VERSION)
     expect(
       helloVersion({
         type: 'hello',
-        version: 17,
+        version: 19,
         chatId: 'e76b3fc7-f93d-4ee2-a1d8-1cc6e7e7ab92',
       }),
-    ).toBe(17)
+    ).toBe(19)
 
-    const frame: ServerFrame = { type: 'palette-state', sync: true, palette: 'ocean' }
-    expect(frame).toEqual({ type: 'palette-state', sync: true, palette: 'ocean' })
+    const paletteFrame: ServerFrame = { type: 'palette-state', sync: true, palette: 'ocean' }
+    expect(paletteFrame).toEqual({ type: 'palette-state', sync: true, palette: 'ocean' })
+
+    const bot = { id: 'bot-1', name: 'Comunista', handle: 'comunista' }
+    const readyFrame: ServerFrame = {
+      type: 'ready',
+      version: 20,
+      sessionId: 's1',
+      messages: [{ role: 'assistant', parts: [{ kind: 'text', text: 'Oi' }], bot }],
+      thinking: 'expanded',
+      provider: 'openai',
+      providerName: 'OpenAI',
+      model: 'gpt-5',
+      bot,
+    }
+    expect(readyFrame.bot?.handle).toBe('comunista')
   })
 })

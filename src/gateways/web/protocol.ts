@@ -7,6 +7,9 @@ import type { TodoItem } from '../../core/todos.js'
 import type { FileChange } from '../../core/change.js'
 import type { VerificationResult } from '../../core/verification.js'
 import { CLIENT_KINDS, type ClientKind } from '../../core/client.js'
+import type { ExplicitMentionRef } from '../../core/crew-mentions.js'
+import type { BotAuthor } from '../../core/providers/types.js'
+export type { BotAuthor, ExplicitMentionRef as MessageMentionRef }
 import { SESSION_SURFACES, type SessionBackendView, type SessionSurface } from '../../core/sessions/types.js'
 import type { CommandEntry } from '../command-catalog.js'
 import type { PermissionRequest } from '../../core/tools/permission.js'
@@ -34,6 +37,8 @@ export {
   type PaletteState,
 }
 
+// 20: Explicit `@mention` selections (`send.mentions`) keep colliding bot/folder picks single-target across surfaces.
+// 19: Crew bot authorship (`bot`, `error`), direct bot Sessions (`ready.bot`), and per-bot turn events (`bot-start`, `bot-end`).
 // 18: the daemon sends the authoritative palette sync state on connect and after changes.
 // 17: a turn identifies the submitted message that started it.
 // 16: clients wait for a send-result before clearing the message they just sent.
@@ -62,7 +67,7 @@ export {
 // is what the version is for. 8 made the handshake's `genui` a flag again: there is
 // one way a turn draws, so a page naming a transport named something that no longer
 // exists.
-export const PROTOCOL_VERSION = 18
+export const PROTOCOL_VERSION = 20
 export const PERMISSION_TIMEOUT_MS = 5 * 60 * 1000
 
 /**
@@ -119,6 +124,8 @@ export type AgentEvent =
   | { type: 'steer'; text: string }
   /** The project's own checks after a turn that wrote. Display state only. */
   | { type: 'verification'; result: VerificationResult; text: string; ok: boolean }
+  | { type: 'bot-start'; bot: BotAuthor }
+  | { type: 'bot-end'; bot: BotAuthor; status: 'done' | 'error' | 'stopped'; error?: string }
   | { type: 'done'; finishReason: string }
   | { type: 'aborted' }
   | { type: 'error'; message: string }
@@ -164,7 +171,7 @@ const CONTROL_ACTIONS = ['stop', 'allow', 'always', 'deny', 'plan', 'approve-pla
 
 export type ClientFrame =
   | { type: 'hello'; version: number; chatId: string; genui?: boolean; client?: ClientKind; surface?: SessionSurface }
-  | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[]; requestId?: string }
+  | { type: 'send'; text: string; intent?: 'steer' | 'queue'; target?: SendTarget; uploadIds?: string[]; mentions?: ExplicitMentionRef[]; requestId?: string }
   | {
       type: 'control'
       /** `always`: allow, and for this session do not ask again about the same act. */
@@ -279,7 +286,7 @@ export interface ActiveTurn {
 export type ServerFrame =
   | { type: 'send-result'; requestId: string; ok: true; steered?: boolean }
   | { type: 'send-result'; requestId: string; ok: false; error: string }
-  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; continues?: boolean; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn; project?: ProjectView; backend?: SessionBackendView; plan?: boolean; commands?: CommandEntry[] }
+  | { type: 'ready'; version: number; sessionId: string; messages: TranscriptMessage[]; continues?: boolean; thinking: ThinkingDisplay; provider: string; providerName: string; model: string; effort?: 'low' | 'medium' | 'high'; panel?: PanelView | null; jobs?: JobView[]; activeTurn?: ActiveTurn; project?: ProjectView; backend?: SessionBackendView; bot?: BotAuthor; plan?: boolean; commands?: CommandEntry[] }
   /**
    * The rest of a transcript too large for the `ready` alone, in order, each one whole
    * rows. A surface appends them to the thread the `ready` opened — before the running
@@ -302,7 +309,7 @@ export type ServerFrame =
   | { type: 'permission-result'; id: string; allowed: boolean; remember?: boolean }
   /** `says` says a stopped turn the same way an event does; see the `event` frame. */
   | { type: 'turn-end'; id: string; status: 'done' | 'stopped' | 'error'; raw?: string; rawNoOutput?: string; says?: string }
-  | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; attachments?: FrameAttachment[]; actions?: ActionRow[]; messageId?: string; cards?: SessionCardItem[]; routine?: RoutineDelivery }
+  | { type: 'command-result'; reply: string; markdown?: string; sessionId?: string; bot?: BotAuthor; attachments?: FrameAttachment[]; actions?: ActionRow[]; messageId?: string; cards?: SessionCardItem[]; routine?: RoutineDelivery }
   | { type: 'state'; busy: boolean; queued: number }
   /** The install-wide accent palette sync state, sent on connect and after any shared write. */
   | { type: 'palette-state'; sync: boolean; palette: ColorPaletteId }
@@ -392,6 +399,10 @@ export interface TranscriptMessage {
    * of drawing an answer nobody in the chat asked for.
    */
   routine?: RoutineDelivery
+  /** Crew bot that authored this assistant response, when applicable. */
+  bot?: BotAuthor
+  /** Error message persisted when this bot response failed. */
+  error?: string
   /** Files delivered into this conversation, still on disk and served by id. */
   attachments?: FrameAttachment[]
   /** When the message was first said, for a surface that shows it. */
@@ -470,6 +481,7 @@ export function parseClientFrame(value: unknown): ClientFrame | null {
     typeof frame.text === 'string' &&
     (frame.requestId === undefined || (typeof frame.requestId === 'string' && frame.requestId.length > 0 && frame.requestId.length <= 128)) &&
     (frame.uploadIds === undefined || (Array.isArray(frame.uploadIds) && frame.uploadIds.every((id) => typeof id === 'string'))) &&
+    (frame.mentions === undefined || (Array.isArray(frame.mentions) && frame.mentions.every(isMessageMentionRef))) &&
     (frame.intent === undefined || frame.intent === 'steer' || frame.intent === 'queue') &&
     (frame.target === undefined || isSendTarget(frame.target))
   ) {
@@ -528,4 +540,18 @@ function isSendTarget(value: unknown): boolean {
   return (TARGET_GATEWAYS as readonly string[]).includes(String(target.gateway))
     && typeof target.chatId === 'string'
     && target.chatId.trim() !== ''
+}
+
+function isMessageMentionRef(value: unknown): boolean {
+  if (!value || typeof value !== 'object') return false
+  const ref = value as Record<string, unknown>
+  return (ref.kind === 'bot' || ref.kind === 'folder')
+    && typeof ref.id === 'string'
+    && ref.id.trim() !== ''
+    && typeof ref.start === 'number'
+    && Number.isInteger(ref.start)
+    && ref.start >= 0
+    && typeof ref.end === 'number'
+    && Number.isInteger(ref.end)
+    && ref.end > ref.start
 }

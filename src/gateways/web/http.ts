@@ -668,7 +668,7 @@ export async function readRawBody(request: IncomingMessage, limit: number = MAX_
 function apiErrorStatus(message: string): number {
   if (/is not available\.?$/i.test(message)) return 503
   if (/has that id\.?$|not found\.?$|no bot has that id|no delegated work/i.test(message)) return 404
-  if (/already working|not working|current run|not accepting guidance|cannot be (paused|resumed|edited)|already finished/i.test(message)) return 409
+  if (/already working|still working|not working|current run|not accepting guidance|cannot be (paused|resumed|edited)|already finished/i.test(message)) return 409
   if (/^could not read /i.test(message)) return 500
   return 400
 }

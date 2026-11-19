@@ -3,7 +3,7 @@ import type { OutgoingFile } from '../../core/outgoing.js'
 import { genUiFromArgs } from '../../core/genui.js'
 import { GenUiFence } from '../../core/genui-fence.js'
 import type { PanelRequest } from '../../core/panel.js'
-import type { Message } from '../../core/providers/types.js'
+import type { BotAuthor, Message } from '../../core/providers/types.js'
 import { todosFromArgs } from '../../core/todos.js'
 import { rawTurn } from '../raw.js'
 import { drawsToolFailure, toolDraw, toolResult, toolText, toolInput, type ToolLevel } from '../tool-line.js'
@@ -31,7 +31,12 @@ export type RegisterFile = (file: OutgoingFile) => FrameAttachment
  * applies it with — a session read back is not allowed to draw more of a call than
  * the turn that made it did.
  */
-export function transcriptOf(messages: Message[], register: RegisterFile, level: ToolLevel = 'full'): TranscriptMessage[] {
+export function transcriptOf(
+  messages: Message[],
+  register: RegisterFile,
+  level: ToolLevel = 'full',
+  resolveBot?: (bot: BotAuthor) => BotAuthor,
+): TranscriptMessage[] {
   const transcript: TranscriptMessage[] = []
   let currentAssistant: TranscriptMessage | null = null
   /** The assistant and `tool` messages behind the group being built, for its raw. */
@@ -129,6 +134,10 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
       continue
     }
     if (message.role === 'assistant') {
+      const resolvedBot = message.bot ? (resolveBot ? resolveBot(message.bot) : message.bot) : undefined
+      if (currentAssistant && currentAssistant.bot?.id !== resolvedBot?.id) {
+        closeAssistant()
+      }
       sources.push(message)
       const parts: TranscriptPart[] = []
       const attachments = message.content.flatMap((part) => part.type === 'file'
@@ -175,6 +184,8 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
         currentAssistant = {
           role: 'assistant',
           parts,
+          ...(resolvedBot ? { bot: resolvedBot } : {}),
+          ...(message.error ? { error: message.error } : {}),
           ...(attachments.length > 0 ? { attachments } : {}),
           // The turn's start, not the last step: a turn drawn as one message is
           // said to have happened when it began.
@@ -186,6 +197,7 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
         transcript.push(currentAssistant)
       } else {
         if (parts.length > 0) currentAssistant.parts.push(...parts)
+        if (message.error) currentAssistant.error = message.error
         if (attachments.length > 0) currentAssistant.attachments = [...(currentAssistant.attachments ?? []), ...attachments]
       }
       continue
@@ -196,7 +208,12 @@ export function transcriptOf(messages: Message[], register: RegisterFile, level:
   }
   closeAssistant()
 
-  return transcript.filter((message) => message.parts.length > 0 || (message.attachments?.length ?? 0) > 0)
+  return transcript.filter(
+    (message) =>
+      message.parts.length > 0 ||
+      (message.attachments?.length ?? 0) > 0 ||
+      Boolean(message.error),
+  )
 }
 
 /**

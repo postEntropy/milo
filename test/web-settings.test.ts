@@ -33,6 +33,7 @@ const { createMcpServers } = await import('../src/core/mcp/servers.js')
 const { mcpFile } = await import('../src/core/config/paths.js')
 const { AgentRuntime } = await import('../src/core/runtime.js')
 const { placeProject } = await import('../src/core/projects.js')
+const { CrewStore } = await import('../src/core/crew.js')
 const { saveAuth, readConfig, readPalette } = await import('../src/core/config/load.js')
 const { fileHistory } = await import('../src/core/history.js')
 const { CLASSIFIER_BACKENDS, COLOR_PALETTES, resolveColorPaletteId } = await import('../src/gateways/web/protocol.js')
@@ -428,6 +429,31 @@ describe('web Settings sessions', () => {
       .toEqual({ removed: true })
     expect((await settings.handle('sessions') as Array<{ id: string }>).some((item) => item.id === session.id)).toBe(false)
     await expect(settings.handle('session-delete', { id: session.id })).rejects.toThrow('not found')
+  })
+
+  it('removes an idle Crew bot and refuses removing a running or unknown one', async () => {
+    writeConfig()
+    const crew = new CrewStore(path.join(home, 'crew.json'))
+    const runtime = new AgentRuntime({
+      provider: { id: 'test', stream: async function* () {} },
+      model: 'test-model',
+      system: '',
+      registry: { specs: () => [] } as never,
+      memory: { remember: async () => undefined, recall: async () => [], list: async () => [], forget: async () => false } as never,
+      cwd: home,
+      crew,
+    })
+    const notifications: string[] = []
+    const settings = new WebSettings(runtime, home, { crewChanged: () => notifications.push('crew') })
+
+    const { bot, assignment } = await crew.start({ name: 'Scout', mission: 'Read', model: 'm', sessionId: 's' })
+    await expect(settings.handle('crew-remove', { id: bot.id })).rejects.toThrow('still working')
+
+    await crew.finish(bot.id, assignment.id, 'completed', 'Done')
+    expect(await settings.handle('crew-remove', { id: bot.id })).toEqual({ removed: true })
+    expect(notifications).toEqual(['crew'])
+    expect(crew.list()).toEqual([])
+    await expect(settings.handle('crew-remove', { id: bot.id })).rejects.toThrow('No bot has that id.')
   })
 
   it('reads where a session left off, for the card a long press lifts', async () => {
