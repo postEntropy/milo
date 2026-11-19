@@ -574,6 +574,23 @@ async function executeCall(
       const folder = work.project ? (context.resolveProjectPath?.(work.project) ?? work.project) : 'default directory'
       approvalArgs = { ...args, name: work.name, allow: work.allow, objective: args.action === 'resume' ? work.objective : args.objective, currentObjective: work.objective, currentSchedule: work.schedule ? describeWhen(work.schedule) : undefined, destination: work.target.gateway === 'none' ? 'none' : `${work.target.gateway}:${work.target.chatId}`, folder }
     }
+  } else if (call.name === 'crew' && call.args && typeof call.args === 'object' && context.crew) {
+    const args = call.args as Record<string, unknown>
+    if (args.action === 'remove' && typeof args.id === 'string') {
+      let bot: ReturnType<NonNullable<ToolContext['crew']>['list']>[number] | undefined
+      try {
+        bot = context.crew.list().find((entry) => entry.id === args.id)
+      } catch (error) {
+        return { content: `Could not access Crew: ${errorMessage(error)}`, isError: true }
+      }
+      if (!bot) {
+        return { content: 'Could not access Crew: No bot has that id.', isError: true }
+      }
+      if (bot.assignments.some((entry) => entry.state === 'running')) {
+        return { content: 'Could not access Crew: This bot is still working — stop it before removing.', isError: true }
+      }
+      approvalArgs = { ...args, name: bot.name, assignments: bot.assignments.length }
+    }
   }
   const blocked = await checkPermission(permission, registry, call.name, approvalArgs, context)
   return blocked
@@ -616,7 +633,11 @@ async function checkPermission(
   if (!tool) return null
 
   const standing = tool.allowStandingConfirmation === true && context.standingGrants?.includes(name) === true
-  const mustConfirm = tool.requiresConfirmation?.(args) === true && !standing
+  const yoloCrewRemove =
+    permission?.policy.mode === 'yolo' &&
+    name === 'crew' &&
+    Boolean(args && typeof args === 'object' && (args as Record<string, unknown>).action === 'remove')
+  const mustConfirm = tool.requiresConfirmation?.(args) === true && !standing && !yoloCrewRemove
   if (!permission) return mustConfirm ? `Tool "${name}" requires confirmation, but this surface cannot ask the user.` : null
 
   const cwd = permission.cwd ?? context.cwd

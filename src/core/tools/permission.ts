@@ -259,7 +259,7 @@ export function approvalKey(tool: string, args: unknown, cwd: string): string | 
 
   // Each mail action needs its own confirmation; an earlier message or recipient
   // is not an approval of a later one.
-  if (tool === 'gmail_send' || tool === 'gmail_draft' || tool === 'gmail_modify' || tool === 'mail_labels' || tool === 'delegated_work') return null
+  if (tool === 'gmail_send' || tool === 'gmail_draft' || tool === 'gmail_modify' || tool === 'mail_labels' || tool === 'delegated_work' || tool === 'crew') return null
 
   if (tool === 'shell_command') {
     const command = typeof record.command === 'string' ? record.command : ''
@@ -513,6 +513,13 @@ export function summarizeToolCall(args: unknown, tool?: string): string {
     // session must not read as one about a routine.
     if (record.action === 'remove') {
       const id = typeof record.id === 'string' ? record.id : ''
+      if (tool === 'crew') {
+        const name = typeof record.name === 'string' ? record.name.trim() : ''
+        const count = typeof record.assignments === 'number' ? record.assignments : undefined
+        const target = name && id ? `${name} (${id})` : name || id
+        const history = count !== undefined ? ` (${count} ${count === 1 ? 'assignment' : 'assignments'})` : ''
+        return `Remove bot${target ? ` ${target}` : ''} and its assignment history${history}`
+      }
       return (tool === 'sessions' ? `Remove session ${id}` : `Remove routine ${id}`).trim()
     }
     if (record.action === 'update') {

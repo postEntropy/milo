@@ -12,8 +12,9 @@ a deterministic Dot-style avatar (shape, eyes, accessory and colour palette) tha
 shuffled or customized on its page. `/crew` lists bots on the terminal and chat gateways;
 `/crew <id>` opens a bot's history, `/crew rename <id> <name>` renames a bot, `/crew avatar
 <id> [shuffle | shape=<shape> eyes=<eyes> accessory=<accessory> palette=<palette>]` updates
-its avatar, `/crew stop <id>` requests a stop, and `/crew guide <id> <text>` queues
-guidance for its next step.
+its avatar, `/crew stop <id>` requests a stop, `/crew guide <id> <text>` queues
+guidance for its next step, and `/crew remove <id>` deletes a bot and its history once it
+is no longer running.
 The history marks guidance as applied, queued, or not applied when a bot finishes before
 it can read it. Stopping one bot does not stop its parent Session. Renaming a bot changes
 its name for every surface and future assignment.

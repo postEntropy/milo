@@ -340,6 +340,9 @@ describe('summarizeToolCall', () => {
     const args = { action: 'remove', id: 'calm-otter-7' }
     expect(summarizeToolCall(args, 'sessions')).toBe('Remove session calm-otter-7')
     expect(summarizeToolCall(args, 'routine')).toBe('Remove routine calm-otter-7')
+    expect(summarizeToolCall({ action: 'remove', id: 'bot-1', name: 'Scout', assignments: 2 }, 'crew')).toBe(
+      'Remove bot Scout (bot-1) and its assignment history (2 assignments)',
+    )
   })
 })
 
@@ -518,7 +521,7 @@ describe('an always answer', () => {
   it('describes the directory and tool covered by a session approval', () => {
     expect(approvalScope(approvalKey('write_file', { path: '/p/src/a.ts' }, '/p'))).toBe('For this session: writing and editing files in /p/src.')
     expect(approvalScope(approvalKey('some_tool', {}, '/p'))).toBe('For this session: all calls to some_tool.')
-    for (const tool of ['gmail_send', 'gmail_modify', 'mail_labels']) {
+    for (const tool of ['gmail_send', 'gmail_modify', 'mail_labels', 'crew']) {
       expect(approvalKey(tool, {}, '/p')).toBeNull()
     }
   })
