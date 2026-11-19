@@ -74,6 +74,7 @@ struct ChatView: View {
     let account: Account
     @Environment(AppModel.self) private var model
     @State private var draft = ""
+    @State private var pickedMentions: [PickedMention] = []
     @State private var draftSession = ""
     @State private var fileDrafts: [String: [AttachmentDraft]] = [:]
     /// The words picked out of an answer, held until the reply is sent — the phone's half
@@ -659,8 +660,17 @@ struct ChatView: View {
             AnalyticsView(account: account, pushed: $analyticsPage, onSessions: openDrawer)
                 .equatable()
         } else if crew {
-            CrewView(account: account, pushed: $crewPage, onSessions: openDrawer)
-                .equatable()
+            CrewView(
+                account: account,
+                pushed: $crewPage,
+                onSessions: openDrawer,
+                onChatWithBot: { botId in
+                    crew = false
+                    crewPage = false
+                    Task { await model.startBotSession(botId: botId) }
+                }
+            )
+            .equatable()
         } else if tasks {
             TaskListsView(pushed: $taskPage, onSessions: openDrawer)
                 .equatable()
@@ -940,7 +950,15 @@ struct ChatView: View {
     private func send(_ intent: ClientFrame.Intent = .queue) {
         guard !submittingEdit else { return }
         guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !drafts.isEmpty else { return }
-        let outgoing = (quote.map(quotedLead) ?? "") + draft
+        let quotePrefix = quote.map(quotedLead) ?? ""
+        let outgoing = quotePrefix + draft
+        let trimmedOutgoing = outgoing.trimmingCharacters(in: .whitespacesAndNewlines)
+        let mentionRefs = PickedMention.resolve(
+            picks: pickedMentions,
+            rawDraft: draft,
+            quotePrefix: quotePrefix,
+            outgoingTrimmed: trimmedOutgoing
+        )
         let attached = drafts
         // An edit is a redo from the turn before the message it changed, and a redo has
         // nowhere to put a file: with one attached the words go as a turn of their own —
@@ -951,7 +969,7 @@ struct ChatView: View {
             editOrigin = origin
             let originalDraft = draft
             Task {
-                let accepted = await model.regenerate(prompt: outgoing, upToTurn: upToTurn)
+                let accepted = await model.regenerate(prompt: outgoing, upToTurn: upToTurn, mentions: mentionRefs)
                 submittingEdit = false
                 if accepted {
                     if UserDefaults.standard.string(forKey: "milo-draft:\(origin)") == originalDraft {
@@ -959,14 +977,16 @@ struct ChatView: View {
                     }
                     if model.sessionId == origin && draft == originalDraft {
                         draft = ""
+                        pickedMentions = []
                         quote = nil
                         editing = nil
                     }
                 } else if model.sessionId == origin { composing = true }
             }
         } else {
-            guard model.queueDraft(outgoing, intent: intent, drafts: attached) else { return }
+            guard model.queueDraft(outgoing, intent: intent, drafts: attached, mentions: mentionRefs) else { return }
             draft = ""
+            pickedMentions = []
             quote = nil
             drafts = []
             editing = nil
@@ -1394,6 +1414,22 @@ struct ChatView: View {
                     // controls and the left one, and that difference was the tilt.
                     .frame(maxWidth: .infinity, alignment: .leading)
 
+                if let activeBot = model.sessionBot {
+                    HStack(spacing: MiloTheme.Space.one + 2) {
+                        CrewBotAvatar(
+                            avatar: CrewAvatarModel.resolved(wire: activeBot.avatar, id: activeBot.id, name: activeBot.name),
+                            size: 18
+                        )
+                        Text(activeBot.name)
+                            .font(MiloTheme.Text.small.weight(.semibold))
+                            .foregroundStyle(MiloTheme.foreground)
+                            .lineLimit(1)
+                    }
+                    .padding(.horizontal, MiloTheme.Space.three)
+                    .padding(.vertical, MiloTheme.Space.one + 2)
+                    .glassEffect(.regular, in: Capsule())
+                }
+
                 // Starting a new session and acting on this one: one surface holding both,
                 // the way this platform pairs two controls that belong together. The
                 // platform's glass button draws a surface of its own, so two of them side
@@ -1596,6 +1632,7 @@ struct ChatView: View {
             }
             Composer(
                 draft: $draft,
+                pickedMentions: $pickedMentions,
                 quote: $quote,
                 drafts: $drafts,
                 editing: $editing,

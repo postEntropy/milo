@@ -22,6 +22,21 @@ struct SessionRow: View, Equatable {
                         .font(MiloTheme.Text.base.weight(current ? .semibold : .regular))
                         .foregroundStyle(MiloTheme.foreground)
                         .lineLimit(1)
+                    if let bot = session.bot {
+                        HStack(spacing: MiloTheme.Space.one) {
+                            CrewBotAvatar(
+                                avatar: CrewAvatarModel.resolved(wire: bot.avatar, id: bot.id, name: bot.name),
+                                size: 14
+                            )
+                            Text(bot.name)
+                                .font(MiloTheme.Text.meta.weight(.medium))
+                                .foregroundStyle(MiloTheme.foreground2)
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 1)
+                        .background(MiloTheme.surfaceWarm, in: Capsule())
+                    }
                     if session.surface == "spotlight" {
                         Text("Spotlight")
                             .font(MiloTheme.Text.meta.weight(.medium))

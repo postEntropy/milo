@@ -7,11 +7,78 @@ enum ComposerMenu: Equatable {
     case running
 }
 
+/// Tracks a disambiguated `@mention` inserted via the composer autocomplete so
+/// colliding bot handles and folder names retain the chosen target on send.
+struct PickedMention: Equatable, Sendable {
+    let kind: MessageMentionRef.Kind
+    let id: String
+    let token: String
+    var start: Int
+    var end: Int
+
+    static func adjust(from previous: String, to next: String, current: [PickedMention]) -> [PickedMention] {
+        guard !current.isEmpty else { return [] }
+        let delta = next.utf16.count - previous.utf16.count
+        var kept: [PickedMention] = []
+        for item in current {
+            if next.utf16Slice(start: item.start, end: item.end) == item.token {
+                kept.append(item)
+                continue
+            }
+            let shiftedStart = item.start + delta
+            let shiftedEnd = item.end + delta
+            if shiftedStart >= 0,
+               shiftedEnd <= next.utf16.count,
+               next.utf16Slice(start: shiftedStart, end: shiftedEnd) == item.token {
+                kept.append(PickedMention(kind: item.kind, id: item.id, token: item.token, start: shiftedStart, end: shiftedEnd))
+            }
+        }
+        return kept
+    }
+
+    static func resolve(
+        picks: [PickedMention],
+        rawDraft: String,
+        quotePrefix: String,
+        outgoingTrimmed: String
+    ) -> [MessageMentionRef] {
+        guard !picks.isEmpty else { return [] }
+        let rawWithQuote = quotePrefix + rawDraft
+        let trimmedStartCount = rawWithQuote.prefix { $0.isWhitespace || $0.isNewline }.utf16.count
+        let shift = quotePrefix.utf16.count - trimmedStartCount
+        return picks.compactMap { item in
+            let start = item.start + shift
+            let end = item.end + shift
+            guard start >= 0,
+                  end <= outgoingTrimmed.utf16.count,
+                  outgoingTrimmed.utf16Slice(start: start, end: end) == item.token else {
+                return nil
+            }
+            return MessageMentionRef(kind: item.kind, id: item.id, start: start, end: end)
+        }
+    }
+}
+
+private extension String {
+    func utf16Slice(start: Int, end: Int) -> String? {
+        guard start >= 0, end >= start, end <= utf16.count,
+              let lower = utf16.index(utf16.startIndex, offsetBy: start, limitedBy: utf16.endIndex),
+              let upper = utf16.index(utf16.startIndex, offsetBy: end, limitedBy: utf16.endIndex),
+              let sLower = String.Index(lower, within: self),
+              let sUpper = String.Index(upper, within: self) else {
+            return nil
+        }
+        return String(self[sLower..<sUpper])
+    }
+}
+
 /// The composer is a filled capsule that floats and stays put: the field grows with what is
 /// typed, on one row in an ordinary chat and with the controls under it in a work session —
 /// see `work`.
 struct Composer: View {
     @Binding var draft: String
+    /// Disambiguated `@mention` picks active in the current draft.
+    @Binding var pickedMentions: [PickedMention]
     /// The words picked out of an answer, held until the reply is sent.
     @Binding var quote: String?
     /// The files picked and not yet sent, held until the reply is sent with them. They are
@@ -144,6 +211,9 @@ struct Composer: View {
         }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: !palette.isEmpty)
         .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: !mentionOptions.isEmpty)
+        .onChange(of: draft) { oldValue, newValue in
+            pickedMentions = PickedMention.adjust(from: oldValue, to: newValue, current: pickedMentions)
+        }
     }
 
     /// What the `+`'s own mark takes: the size it is drawn at, inside the wider box the
@@ -236,35 +306,104 @@ struct Composer: View {
         return atIndex..<draft.endIndex
     }
 
-    private var mentionOptions: [Project] {
+    private enum MentionChoice: Identifiable {
+        case bot(BotAuthor)
+        case project(Project)
+
+        var id: String {
+            switch self {
+            case .bot(let bot): return "bot:\(bot.id)"
+            case .project(let project): return "project:\(project.id)"
+            }
+        }
+
+        var insertion: String {
+            switch self {
+            case .bot(let bot): return bot.handle ?? bot.name
+            case .project(let project): return project.name
+            }
+        }
+    }
+
+    private var mentionOptions: [MentionChoice] {
         guard let range = activeMentionRange else { return [] }
         let query = draft[draft.index(after: range.lowerBound)...].lowercased()
+        let botChoices: [MentionChoice] = model.sessionBot == nil
+            ? model.crewBots
+                .filter { bot in
+                    guard let handle = bot.handle, !handle.isEmpty else { return false }
+                    return query.isEmpty || handle.lowercased().contains(query) || bot.name.lowercased().contains(query)
+                }
+                .prefix(6)
+                .map { .bot($0) }
+            : []
         let valid = model.projects.filter { $0.error == nil }
         let matched = query.isEmpty
             ? valid
             : valid.filter { $0.name.lowercased().contains(query) || $0.path.lowercased().contains(query) }
-        return Array(matched.prefix(8))
+        let projectChoices = matched.prefix(max(0, 8 - botChoices.count)).map { MentionChoice.project($0) }
+        return botChoices + projectChoices
     }
 
-    private func chooseMention(_ project: Project) {
+    private func chooseMention(_ option: MentionChoice) {
         guard let range = activeMentionRange else { return }
-        draft.replaceSubrange(range, with: "@\(project.name) ")
+        let token = "@\(option.insertion)"
+        let inserted = "\(token) "
+        let startUtf16 = draft.utf16.distance(from: draft.startIndex, to: range.lowerBound)
+        let replaceEndUtf16 = draft.utf16.distance(from: draft.startIndex, to: range.upperBound)
+        let delta = inserted.utf16.count - (replaceEndUtf16 - startUtf16)
+        let kept = pickedMentions.compactMap { item -> PickedMention? in
+            if item.end <= startUtf16 { return item }
+            if item.start >= replaceEndUtf16 {
+                return PickedMention(
+                    kind: item.kind,
+                    id: item.id,
+                    token: item.token,
+                    start: item.start + delta,
+                    end: item.end + delta
+                )
+            }
+            return nil
+        }
+        let picked: PickedMention = switch option {
+        case .bot(let bot):
+            PickedMention(kind: .bot, id: bot.id, token: token, start: startUtf16, end: startUtf16 + token.utf16.count)
+        case .project(let project):
+            PickedMention(kind: .folder, id: project.id, token: token, start: startUtf16, end: startUtf16 + token.utf16.count)
+        }
+        pickedMentions = (kept + [picked]).sorted { $0.start < $1.start }
+        draft.replaceSubrange(range, with: inserted)
         focused = true
     }
 
     private var mentionPalette: some View {
         VStack(alignment: .leading, spacing: MiloTheme.Space.one) {
-            ForEach(mentionOptions) { project in
-                Button { chooseMention(project) } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: MiloTheme.Space.two) {
-                        Text("@\(project.name)")
-                            .font(MiloTheme.Text.small.weight(.semibold).monospaced())
-                            .foregroundStyle(MiloTheme.foreground)
-                        Text(project.path)
-                            .font(MiloTheme.Text.small)
-                            .foregroundStyle(MiloTheme.muted)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
+            ForEach(mentionOptions) { option in
+                Button { chooseMention(option) } label: {
+                    HStack(alignment: .center, spacing: MiloTheme.Space.two) {
+                        switch option {
+                        case .bot(let bot):
+                            CrewBotAvatar(
+                                avatar: CrewAvatarModel.resolved(wire: bot.avatar, id: bot.id, name: bot.name),
+                                size: 20
+                            )
+                            Text("@\(option.insertion)")
+                                .font(MiloTheme.Text.small.weight(.semibold).monospaced())
+                                .foregroundStyle(MiloTheme.foreground)
+                            Text(bot.name)
+                                .font(MiloTheme.Text.small)
+                                .foregroundStyle(MiloTheme.muted)
+                                .lineLimit(1)
+                        case .project(let project):
+                            Text("@\(project.name)")
+                                .font(MiloTheme.Text.small.weight(.semibold).monospaced())
+                                .foregroundStyle(MiloTheme.foreground)
+                            Text(project.path)
+                                .font(MiloTheme.Text.small)
+                                .foregroundStyle(MiloTheme.muted)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
                         Spacer(minLength: 0)
                     }
                     .padding(.horizontal, MiloTheme.Space.three)
@@ -276,7 +415,6 @@ struct Composer: View {
                     .contentShape(RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
                 }
                 .buttonStyle(PressableStyle())
-                .accessibilityLabel("@\(project.name), \(project.path)")
             }
         }
         .padding(MiloTheme.Space.two)

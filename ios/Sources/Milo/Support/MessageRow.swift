@@ -198,6 +198,26 @@ struct MessageRow: View, Equatable {
             }
         } else {
             VStack(alignment: .leading, spacing: MiloTheme.Space.three) {
+                if head, let bot = message.bot {
+                    HStack(spacing: MiloTheme.Space.two) {
+                        CrewBotAvatar(
+                            avatar: CrewAvatarModel.resolved(wire: bot.avatar, id: bot.id, name: bot.name),
+                            state: message.streaming ? "running" : nil,
+                            size: 22,
+                            animated: message.streaming
+                        )
+                        Text(bot.name)
+                            .font(MiloTheme.Text.small.weight(.semibold))
+                            .foregroundStyle(MiloTheme.foreground)
+                            .lineLimit(1)
+                        if let handle = bot.handle, !handle.isEmpty {
+                            Text("@\(handle)")
+                                .font(MiloTheme.Text.meta.monospaced())
+                                .foregroundStyle(MiloTheme.muted)
+                                .lineLimit(1)
+                        }
+                    }
+                }
                 // A routine's delivery signs itself: the routine it came from and when
                 // it landed, over the answer. A message nobody in this chat asked for
                 // does not read as the reply to what the person just said.
@@ -259,7 +279,15 @@ struct MessageRow: View, Equatable {
                     if foot, message.waiting, !drawingADraft {
                         WaitLine()
                     }
-                    if foot, let status = message.status {
+                    if foot, let error = message.error {
+                        Text(error)
+                            .font(MiloTheme.Text.small)
+                            .foregroundStyle(MiloTheme.danger)
+                            .padding(.horizontal, MiloTheme.Space.three)
+                            .padding(.vertical, MiloTheme.Space.two)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(MiloTheme.surface, in: RoundedRectangle(cornerRadius: MiloTheme.Radius.md))
+                    } else if foot, let status = message.status {
                         Text(status)
                             .font(MiloTheme.Text.small)
                             .foregroundStyle(MiloTheme.muted)

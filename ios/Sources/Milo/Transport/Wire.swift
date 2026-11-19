@@ -5,7 +5,7 @@ import Foundation
  `src/gateways/web/protocol.ts`; the server refuses any other number aloud, so a
  drift between the two is a refusal rather than a mis-drawn chat.
  */
-let miloProtocolVersion = 18
+let miloProtocolVersion = 20
 
 // MARK: - What the app sends
 
@@ -22,6 +22,25 @@ struct SendTarget: Equatable {
     let chatId: String
 }
 
+struct MessageMentionRef: Equatable, Sendable {
+    enum Kind: String, Sendable {
+        case bot, folder
+    }
+    let kind: Kind
+    let id: String
+    let start: Int
+    let end: Int
+
+    var json: [String: Any] {
+        [
+            "kind": kind.rawValue,
+            "id": id,
+            "start": start,
+            "end": end,
+        ]
+    }
+}
+
 enum ClientFrame {
     enum Intent: String { case steer, queue }
     enum Control: String { case stop, allow, always, deny; case retryCommandCode = "retry-command-code" }
@@ -30,7 +49,7 @@ enum ClientFrame {
     /// The files the message carries: the daemon's names for bytes this app has already
     /// posted to `/upload`, which is how a file reaches a turn — the bytes never ride the
     /// socket. Empty for every message with nothing attached.
-    case send(text: String, intent: Intent? = nil, target: SendTarget? = nil, uploadIds: [String] = [])
+    case send(text: String, intent: Intent? = nil, target: SendTarget? = nil, uploadIds: [String] = [], mentions: [MessageMentionRef] = [])
     case control(Control, id: String? = nil, confirmed: Bool? = nil)
     /// Turn the session's planning mode on or off. The state belongs to the session, so
     /// the daemon answers with a `plan` frame that every screen watching it sees.
@@ -66,13 +85,14 @@ enum ClientFrame {
             // same web gateway, and that is what lets it hold the turn for a phone —
             // shorter answers, spoken to a small screen.
             return ["type": "hello", "version": miloProtocolVersion, "chatId": chatId, "genui": true, "client": "ios"]
-        case .send(let text, let intent, let target, let uploadIds):
+        case .send(let text, let intent, let target, let uploadIds, let mentions):
             var frame: [String: Any] = ["type": "send", "text": text]
             if let intent { frame["intent"] = intent.rawValue }
             if let target {
                 frame["target"] = ["gateway": target.gateway.rawValue, "chatId": target.chatId]
             }
             if !uploadIds.isEmpty { frame["uploadIds"] = uploadIds }
+            if !mentions.isEmpty { frame["mentions"] = mentions.map(\.json) }
             return frame
         case .control(let action, let id, let confirmed):
             var frame: [String: Any] = ["type": "control", "action": action.rawValue]
@@ -210,11 +230,29 @@ struct RoutineDelivery: Decodable, Hashable {
     let failed: Bool?
 }
 
+struct CrewAvatarWire: Codable, Hashable, Equatable, Sendable {
+    let shape: String?
+    let eyes: String?
+    let accessory: String?
+    let palette: String?
+}
+
+struct BotAuthor: Codable, Identifiable, Hashable, Equatable, Sendable {
+    let id: String
+    let name: String
+    let handle: String?
+    let avatar: CrewAvatarWire?
+    let instructions: String?
+}
+
 struct WireMessage: Decodable {
     let role: String
     let parts: [WirePart]
     /// A routine's delivery, when this message is one.
     let routine: RoutineDelivery?
+    /// Crew bot authorship when a Crew bot answered or failed.
+    let bot: BotAuthor?
+    let error: String?
     let attachments: [FrameAttachment]?
     let at: Double?
     /// How long the turn took to say anything, in ms — what the line over its thought
@@ -285,6 +323,7 @@ struct CommandResult: Decodable {
     let reply: String
     let markdown: String?
     let sessionId: String?
+    let bot: BotAuthor?
     let cards: [SessionCardItem]?
     /// The button rows a command carries, the `/sessions` pagination among them.
     let actions: [ActionRow]?
@@ -376,6 +415,8 @@ enum AgentEvent: Decodable {
     /// The project's checks after a turn that wrote. The words are the core's, so
     /// the phone says what the browser and the terminal say.
     case verification(text: String, ok: Bool)
+    case botStart(BotAuthor)
+    case botEnd(bot: BotAuthor, status: String, error: String?)
     /// A widget as the model writes it: the same tree at longer and longer prefixes,
     /// `draft` while the block is still open. It is drawn in place as it grows.
     case ui(GenUi, draft: Bool)
@@ -399,6 +440,7 @@ enum AgentEvent: Decodable {
         case input, type, delta, id, name, isError, drawFailure, items, message, render, draft, text, finishReason, result, ok, change
         case inputTokens, outputTokens, ms, added, removed, compacted
         case folded, tokens, summarized
+        case bot, status, error
     }
 
     init(from decoder: Decoder) throws {
@@ -450,6 +492,18 @@ enum AgentEvent: Decodable {
         case "waiting": self = .waiting
         case "waited": self = .waited(ms: read(.ms, 0))
         case "steer": self = .steer(readText(.text) ?? "")
+        case "bot-start":
+            if let bot = try? container.decode(BotAuthor.self, forKey: .bot) {
+                self = .botStart(bot)
+            } else {
+                self = .other
+            }
+        case "bot-end":
+            if let bot = try? container.decode(BotAuthor.self, forKey: .bot) {
+                self = .botEnd(bot: bot, status: read(.status, "done"), error: readText(.error))
+            } else {
+                self = .other
+            }
         case "done": self = .done(finishReason: readText(.finishReason) ?? "")
         case "aborted": self = .aborted
         case "error": self = .error(read(.message, ""))
@@ -491,6 +545,7 @@ struct Ready: Decodable {
     /// too: which folder the work happens in is a fact of the session, not of its words.
     let project: Project?
     let backend: SessionBackendView?
+    let bot: BotAuthor?
     /// Whether this session's turns are planning turns. Kept on the session, so a screen
     /// that arrives mid-plan opens with the switch already on.
     let plan: Bool?
@@ -526,6 +581,7 @@ enum ServerFrame: Decodable {
     /// The Session's folder changed: every open screen on that Session updates to match.
     case sessionFolder(Project?)
     case routinesChanged
+    case crewChanged
     /// A session's turn began or ended somewhere in the install: re-read the list that
     /// shows it running.
     case sessionsChanged
@@ -606,6 +662,7 @@ enum ServerFrame: Decodable {
         case "session-folder":
             self = .sessionFolder(try container.decodeIfPresent(Project.self, forKey: .project))
         case "routines-changed": self = .routinesChanged
+        case "crew-changed": self = .crewChanged
         case "sessions-changed": self = .sessionsChanged
         case "work-changed": self = .workChanged
         // Absent and null are the same thing here: nothing is open, which is the panel

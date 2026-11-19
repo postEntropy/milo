@@ -56,6 +56,8 @@ final class AppModel {
         /// a card signed with the routine's name and the time it landed, not as an
         /// answer to something the person said.
         var routine: RoutineDelivery? = nil
+        var bot: BotAuthor? = nil
+        var error: String? = nil
 
         nonisolated static func == (lhs: Message, rhs: Message) -> Bool {
             lhs.id == rhs.id
@@ -70,6 +72,8 @@ final class AppModel {
                 && lhs.tokens?.input == rhs.tokens?.input
                 && lhs.tokens?.output == rhs.tokens?.output
                 && lhs.routine == rhs.routine
+                && lhs.bot == rhs.bot
+                && lhs.error == rhs.error
                 && lhs.parts == rhs.parts
                 && lhs.attachments == rhs.attachments
                 && lhs.drafts == rhs.drafts
@@ -124,7 +128,7 @@ final class AppModel {
     }
 
     /// Places the message in the outbox before releasing the composer.
-    func queueDraft(_ text: String, intent: ClientFrame.Intent?, drafts: [AttachmentDraft]) -> Bool {
+    func queueDraft(_ text: String, intent: ClientFrame.Intent?, drafts: [AttachmentDraft], mentions: [MessageMentionRef] = []) -> Bool {
         guard let account, !sessionId.isEmpty || reopening else {
             note = Note("Wait for the session to finish opening.")
             return false
@@ -143,7 +147,7 @@ final class AppModel {
         sendTailIds[destination] = id
         sendTails[destination] = Task {
             await previous?.value
-            _ = await sendDraft(trimmed, intent: intent, drafts: drafts, deliveryId: id, expectedSession: destination.hasPrefix("chat:") ? nil : destination, expectedChat: chat)
+            _ = await sendDraft(trimmed, intent: intent, drafts: drafts, mentions: mentions, deliveryId: id, expectedSession: destination.hasPrefix("chat:") ? nil : destination, expectedChat: chat)
             if sendTailIds[destination] == id {
                 sendTails.removeValue(forKey: destination)
                 sendTailIds.removeValue(forKey: destination)
@@ -190,6 +194,9 @@ final class AppModel {
     private(set) var modelName = ""
     private(set) var providerId = ""
     private(set) var sessionId = ""
+    private(set) var sessionBot: BotAuthor?
+    private(set) var crewBots: [BotAuthor] = []
+    private var turnSawBotStart = false
     private(set) var sessionBackend: SessionBackendView?
     private(set) var sessionBackends: [SessionBackendChoice] = [SessionBackendChoice(id: "milo", available: true, reason: nil)]
     private(set) var sessionBackendsLoading = false
@@ -373,6 +380,7 @@ final class AppModel {
     private var owed: String?
     private var owedIntent: ClientFrame.Intent?
     private var owedUploads: [String] = []
+    private var owedMentions: [MessageMentionRef] = []
     private var reopening = false
     /// Whether the thread on screen is the one being left, kept until the socket hands
     /// over the session being opened. It tells the handshake's own "the person already
@@ -446,6 +454,7 @@ final class AppModel {
                     owed = nil
                     owedIntent = nil
                     owedUploads = []
+                    owedMentions = []
                     busy = false
                     unsent()
                 }
@@ -602,7 +611,7 @@ final class AppModel {
     /// the picture is the feedback while the upload is in flight rather than a wait with
     /// nothing on it. A file the daemon never got stays on the bubble and the note says so —
     /// what was attached is what the message is, even when it did not land.
-    func send(_ text: String, intent: ClientFrame.Intent? = nil, drafts: [AttachmentDraft] = []) {
+    func send(_ text: String, intent: ClientFrame.Intent? = nil, drafts: [AttachmentDraft] = [], mentions: [MessageMentionRef] = []) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !drafts.isEmpty else { return }
         // The chat exists only inside a bound install, so this is the account the upload
@@ -626,7 +635,7 @@ final class AppModel {
             )
         )
         guard !drafts.isEmpty else {
-            deliver(trimmed, intent: intent, uploadIds: [])
+            deliver(trimmed, intent: intent, uploadIds: [], mentions: mentions)
             return
         }
         busy = true
@@ -639,7 +648,7 @@ final class AppModel {
                         try await MiloApi.upload(draft.data, name: draft.name, mimeType: draft.mimeType, account: account)
                     )
                 }
-                deliver(trimmed, intent: intent, uploadIds: ids)
+                deliver(trimmed, intent: intent, uploadIds: ids, mentions: mentions)
             } catch {
                 busy = false
                 failed(error)
@@ -648,7 +657,7 @@ final class AppModel {
     }
 
     /// Keeps the composer's words and files in hand until the daemon accepts them.
-    func sendDraft(_ text: String, intent: ClientFrame.Intent?, drafts: [AttachmentDraft], deliveryId: String? = nil, expectedSession: String? = nil, expectedChat: String? = nil) async -> Bool {
+    func sendDraft(_ text: String, intent: ClientFrame.Intent?, drafts: [AttachmentDraft], mentions: [MessageMentionRef] = [], deliveryId: String? = nil, expectedSession: String? = nil, expectedChat: String? = nil) async -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !drafts.isEmpty, let account else {
             if let deliveryId { updateDelivery(deliveryId, detail: "Milo is disconnected.") }
@@ -685,7 +694,7 @@ final class AppModel {
                 return false
             }
             let frame: ClientFrame = trimmed.hasPrefix("/") && ids.isEmpty
-                ? .command(text: trimmed) : .send(text: trimmed, intent: intent, uploadIds: ids)
+                ? .command(text: trimmed) : .send(text: trimmed, intent: intent, uploadIds: ids, mentions: mentions)
             let message = Message(isUser: true, parts: trimmed.isEmpty ? [] : [.text(trimmed)], attachments: [], drafts: drafts, streaming: false)
             if deliveryId == nil { messages.append(message) }
             let outcome = await client.sendConfirmed(frame, requestId: deliveryId ?? UUID().uuidString)
@@ -712,11 +721,12 @@ final class AppModel {
      session is still completing its bind or socket handshake, so the bubble stays in place
      and the words leave as soon as the socket opens.
      */
-    private func deliver(_ text: String, intent: ClientFrame.Intent?, uploadIds: [String]) {
+    private func deliver(_ text: String, intent: ClientFrame.Intent?, uploadIds: [String], mentions: [MessageMentionRef] = []) {
         if reopening {
             owed = text
             owedIntent = intent
             owedUploads = uploadIds
+            owedMentions = mentions
             if !text.hasPrefix("/") || !uploadIds.isEmpty {
                 busy = true
                 askToStayOn()
@@ -736,7 +746,7 @@ final class AppModel {
         }
         busy = true
         askToStayOn()
-        if !client.send(.send(text: text, intent: intent, uploadIds: uploadIds)) { unsent() }
+        if !client.send(.send(text: text, intent: intent, uploadIds: uploadIds, mentions: mentions)) { unsent() }
     }
 
     /// Sends a turn whose destination is pinned on it — how the Routines screen makes
@@ -995,6 +1005,7 @@ final class AppModel {
         owed = nil
         owedIntent = nil
         owedUploads = []
+        owedMentions = []
         resetSessionState()
         let opened = await openFresh(account) { try await MiloApi.newSession($0) }
         if !opened {
@@ -1002,6 +1013,7 @@ final class AppModel {
             owed = nil
             owedIntent = nil
             owedUploads = []
+            owedMentions = []
             client.connect(to: account)
         }
     }
@@ -1183,17 +1195,18 @@ final class AppModel {
     /// Asking again from an earlier point: the fork, and the words that asked the
     /// first time sent into it.
     @discardableResult
-    func regenerate(prompt: String, upToTurn: Int) async -> Bool {
-        await fork(from: upToTurn, then: prompt)
+    func regenerate(prompt: String, upToTurn: Int, mentions: [MessageMentionRef] = []) async -> Bool {
+        await fork(from: upToTurn, then: prompt, mentions: mentions)
     }
 
     @discardableResult
-    private func fork(from turn: Int, then prompt: String?) async -> Bool {
+    private func fork(from turn: Int, then prompt: String?, mentions: [MessageMentionRef] = []) async -> Bool {
         guard let account, !sessionId.isEmpty else { return false }
         let from = sessionId
         owed = prompt
         owedIntent = nil
         owedUploads = []
+        owedMentions = mentions
         var next = account
         next.chatId = AccountStore.freshChatId()
         do {
@@ -1205,6 +1218,7 @@ final class AppModel {
         } catch {
             owed = nil
             owedUploads = []
+            owedMentions = []
             failed(error)
             return false
         }
@@ -1251,6 +1265,8 @@ final class AppModel {
         // follows says the one being opened's. A bar naming the old folder over a new chat
         // would be naming work that is not happening.
         sessionProject = nil
+        sessionBot = nil
+        turnSawBotStart = false
     }
 
     /// After the bound session changes, the socket is reopened so the daemon
@@ -1611,6 +1627,7 @@ final class AppModel {
         owed = nil
         owedIntent = nil
         owedUploads = []
+        owedMentions = []
         resetSessionState()
         let opened = await openFresh(account) { try await MiloApi.newSession($0, project: project, plan: plan, backend: backend, confirmed: confirmed) }
         if !opened {
@@ -1618,9 +1635,41 @@ final class AppModel {
             owed = nil
             owedIntent = nil
             owedUploads = []
+            owedMentions = []
             client.connect(to: account)
         }
         return opened
+    }
+
+    @discardableResult
+    func startBotSession(botId: String) async -> Bool {
+        guard let account else { return false }
+        reopening = true
+        owed = nil
+        owedIntent = nil
+        owedUploads = []
+        owedMentions = []
+        resetSessionState()
+        let opened = await openFresh(account) { try await MiloApi.newSession($0, botId: botId) }
+        if !opened {
+            reopening = false
+            owed = nil
+            owedIntent = nil
+            owedUploads = []
+            owedMentions = []
+            client.connect(to: account)
+        }
+        return opened
+    }
+
+    func refreshCrewBots() async {
+        guard let account else { return }
+        if let loaded = try? await MiloApi.crew(account) {
+            crewBots = loaded
+            if let current = sessionBot, let updated = loaded.first(where: { $0.id == current.id }) {
+                sessionBot = updated
+            }
+        }
     }
 
     // MARK: - Models
@@ -2488,7 +2537,9 @@ final class AppModel {
             raw: wire.raw,
             rawNoOutput: wire.rawNoOutput,
             // A routine's delivery reads back as the card it arrived as.
-            routine: wire.routine
+            routine: wire.routine,
+            bot: wire.bot,
+            error: wire.error
         )
     }
 
@@ -2514,6 +2565,8 @@ final class AppModel {
             threadKept = false
             reopening = false
             sessionProject = ready.project
+            sessionBot = ready.bot
+            turnSawBotStart = false
             sessionBackend = ready.backend ?? SessionBackendView(kind: "milo", state: nil, nativeSessionId: nil, error: nil, pendingTurn: nil)
             planMode = ready.plan ?? false
             // A reload joins the plan where it stands; a new proposal is what earns approval.
@@ -2582,9 +2635,11 @@ final class AppModel {
             if let owed {
                 let intent = owedIntent
                 let uploads = owedUploads
+                let mentions = owedMentions
                 self.owed = nil
                 self.owedIntent = nil
                 self.owedUploads = []
+                self.owedMentions = []
                 // The bubble is already on screen when this screen holds the thread, and
                 // also when the files waited here with the ids they had already earned — a
                 // file cannot be picked a second time, so the words go out on the bubble
@@ -2594,15 +2649,18 @@ final class AppModel {
                         if !client.send(.command(text: owed)) { unsent() }
                     } else {
                         busy = true
-                        if !client.send(.send(text: owed, intent: intent, uploadIds: uploads)) { unsent() }
+                        if !client.send(.send(text: owed, intent: intent, uploadIds: uploads, mentions: mentions)) { unsent() }
                     }
                 } else {
-                    send(owed, intent: intent)
+                    send(owed, intent: intent, mentions: mentions)
                 }
             }
             // The routines are read at connect, so the reminders are scheduled from what
             // is actually there before the screen is ever opened.
-            Task { await refreshRoutines() }
+            Task {
+                await refreshRoutines()
+                await refreshCrewBots()
+            }
         case .sessionBackend(let backend):
             sessionBackend = backend
         case .history(let chunk):
@@ -2619,6 +2677,7 @@ final class AppModel {
             if let requestId { updateDelivery(requestId, detail: nil) }
             busy = true
             began = false
+            turnSawBotStart = false
             turnStarted = Date()
             withAnimation(SettlesIn.motion) {
                 messages.append(Message(isUser: false, parts: [], attachments: [], streaming: true, thought: nil, waiting: true))
@@ -2669,7 +2728,7 @@ final class AppModel {
             turnStarted = nil
             // The row keeps the provider's reason; a generic toast over it would be
             // the screen saying less than the message behind it.
-            if status == "error", !saidWhy { note = Note("That turn ended in an error.") }
+            if status == "error", !saidWhy, messages.last?.error == nil { note = Note("That turn ended in an error.") }
             // Whatever the phone was kept awake for is over. The holds are let go here —
             // after the notice, where there is one to hand over — because the app is
             // suspended soon after they end, and a post still in flight when that happens
@@ -2682,6 +2741,10 @@ final class AppModel {
                 continuedTurn.end()
             }
         case .commandResult(let result):
+            if let nextSessionId = result.sessionId, nextSessionId != sessionId {
+                sessionId = nextSessionId
+                sessionBot = result.bot
+            }
             // The reply as prose, preferring the markdown the daemon rendered beside the
             // plain words — the same choice the browser makes.
             let parts: [WirePart] = [.text(result.markdown ?? result.reply)]
@@ -2741,6 +2804,11 @@ final class AppModel {
             // The daemon says a routine ran; the list and the reminders are re-read from
             // what it left rather than from the frame, which carries nothing.
             Task { await refreshRoutines() }
+        case .crewChanged:
+            Task {
+                await refreshCrewBots()
+                await refreshSessions()
+            }
         case .sessionsChanged:
             // A session started, stopped, or changed folder anywhere in the install:
             // refresh both recent folders and sessions, and notify open folder inspectors.
@@ -2874,6 +2942,42 @@ final class AppModel {
         case .verification(let text, let ok):
             beganSpeaking()
             mutatingLast { $0.parts.append(.verification(text: text, ok: ok)) }
+        case .botStart(let bot):
+            if !turnSawBotStart, let index = messages.lastIndex(where: { $0.streaming }) {
+                turnSawBotStart = true
+                messages[index].bot = bot
+                messages[index].waiting = true
+            } else {
+                if let prev = messages.lastIndex(where: { $0.streaming }) {
+                    messages[prev].streaming = false
+                    messages[prev].waiting = false
+                    messages[prev].parts = AppModel.settled(messages[prev].parts)
+                }
+                turnSawBotStart = true
+                began = false
+                turnStarted = Date()
+                withAnimation(SettlesIn.motion) {
+                    messages.append(
+                        Message(
+                            isUser: false,
+                            parts: [],
+                            attachments: [],
+                            streaming: true,
+                            thought: nil,
+                            waiting: true,
+                            bot: bot
+                        )
+                    )
+                }
+            }
+        case .botEnd(let bot, let status, let error):
+            if let index = messages.lastIndex(where: { $0.streaming && $0.bot?.id == bot.id }) {
+                messages[index].waiting = false
+                messages[index].parts = AppModel.settled(messages[index].parts)
+                if status == "error", let error {
+                    messages[index].error = error
+                }
+            }
         case .ui(let widget, let draft):
             beganSpeaking()
             // A widget arrives many times over as the model writes it: each draft takes

@@ -43,9 +43,11 @@ struct SessionSummary: Codable, Identifiable, Hashable {
     /// desktop popup. A row wears it as a mark beside the name.
     let surface: String?
     let backend: SessionBackendSummary?
+    let botId: String?
+    let bot: BotAuthor?
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, createdAt, updatedAt, messageCount, preview, label, recap, running, unread, project, work, workInline, searchText, surface, backend
+        case id, title, createdAt, updatedAt, messageCount, preview, label, recap, running, unread, project, work, workInline, searchText, surface, backend, botId, bot
     }
 
     /// Read leniently, and only `id` as the one thing it cannot do without: a row
@@ -65,6 +67,8 @@ struct SessionSummary: Codable, Identifiable, Hashable {
         workInline = try container.decodeIfPresent(Bool.self, forKey: .workInline) ?? (project != nil)
         surface = try container.decodeIfPresent(String.self, forKey: .surface)
         backend = try container.decodeIfPresent(SessionBackendSummary.self, forKey: .backend)
+        botId = try container.decodeIfPresent(String.self, forKey: .botId)
+        bot = try container.decodeIfPresent(BotAuthor.self, forKey: .bot)
         preview = try container.decodeIfPresent(String.self, forKey: .preview) ?? ""
         searchText = try container.decodeIfPresent(String.self, forKey: .searchText)
             ?? "\(title ?? "") \(preview) \(id)".lowercased()
@@ -248,10 +252,15 @@ enum MiloApi {
         try await call("models", ["provider": provider], account: account, as: [ModelInfo].self)
     }
 
-    static func newSession(_ account: Account, title: String? = nil, project: String? = nil, plan: Bool = false, backend: String = "milo", confirmed: Bool = false) async throws {
+    static func crew(_ account: Account) async throws -> [BotAuthor] {
+        try await call("crew", account: account, as: [BotAuthor].self)
+    }
+
+    static func newSession(_ account: Account, title: String? = nil, project: String? = nil, plan: Bool = false, backend: String = "milo", confirmed: Bool = false, botId: String? = nil) async throws {
         var body: [String: Any] = ["chatId": account.chatId, "backend": backend]
         if backend == "command-code" { body["confirmed"] = confirmed }
         if let title { body["title"] = title }
+        if let botId { body["botId"] = botId }
         // The folder this session works in. The daemon refuses an id it does not know,
         // which is what keeps a work session from starting in the install's own folder
         // while saying nothing about why.
