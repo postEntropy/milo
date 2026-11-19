@@ -106,15 +106,11 @@ export function SessionRow({
         </form>
       ) : (
         <button className="session-row" type="button" aria-current={active ? 'page' : undefined} aria-label={session.label} onClick={onClick}>
+          {session.bot && <BotAvatar avatar={botAvatarOf(session.bot)} size={30} />}
           <span className="session-content">
             <span className="session-title-row">
               <span className="session-title">{session.label}</span>
-              {session.bot && (
-                <span className="session-bot-badge">
-                  <BotAvatar avatar={botAvatarOf(session.bot)} size={14} />
-                  <span>{session.bot.name}</span>
-                </span>
-              )}
+              {session.bot && <span className="session-bot-badge">{session.bot.name}</span>}
               {session.surface === 'spotlight' && <span className="session-surface">Spotlight</span>}
             </span>
             <span className="session-preview-row">

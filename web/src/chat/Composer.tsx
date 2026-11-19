@@ -587,15 +587,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           {palette.map((command, index) => <button className={`command-option ${index === highlight ? 'active' : ''}`} type="button" role="option" aria-selected={index === highlight} key={command.name} onMouseEnter={() => setHighlight(index)} onClick={() => choose(command.name)}><code className="command-name">/{command.name}</code><small>{command.hint}</small></button>)}
         </div>}
         {palette.length === 0 && mention && <div className="command-menu" role="listbox" aria-label="Mentions">
-          {mention.options.map((option, index) => <button className={`command-option ${index === highlight ? 'active' : ''}`} type="button" role="option" aria-selected={index === highlight} key={option.key} onMouseEnter={() => setHighlight(index)} onClick={() => chooseMention(option)}>
+          {mention.options.map((option, index) => <button className={`command-option is-mention ${index === highlight ? 'active' : ''}`} type="button" role="option" aria-selected={index === highlight} key={option.key} onMouseEnter={() => setHighlight(index)} onClick={() => chooseMention(option)}>
             {option.kind === 'bot' ? (
               <>
-                <BotAvatar avatar={botAvatarOf(option.bot)} size={18} />
+                <BotAvatar avatar={botAvatarOf(option.bot)} size={30} />
                 <code className="command-name">@{option.insert}</code>
                 <small>{option.bot.name}</small>
               </>
             ) : (
               <>
+                <span className="mention-folder-icon" aria-hidden="true"><Icon name="folder" size={16} /></span>
                 <code className="command-name">@{option.insert}</code>
                 <small>{option.folder.path}</small>
               </>

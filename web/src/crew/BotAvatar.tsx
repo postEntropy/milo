@@ -56,6 +56,10 @@ export function botAvatarOf(bot: Pick<CrewBot, 'id' | 'name' | 'avatar'>): CrewA
   return bot.avatar ?? defaultBotAvatar(bot.id, bot.name)
 }
 
+export function botToneOf(avatar: CrewAvatar): string {
+  return colorPalettePreset(avatar.palette).logoColors[0]
+}
+
 function renderBody(shape: CrewAvatarShape, fill: string) {
   switch (shape) {
     case 'orb':
@@ -65,7 +69,7 @@ function renderBody(shape: CrewAvatarShape, fill: string) {
     case 'capsule':
       return <rect x="8.5" y="6" width="23" height="29" rx="11.5" fill={fill} />
     case 'droplet':
-      return <path d="M20 5.5C27.5 13 33.5 18 33.5 24.8A13.5 12.2 0 1 1 6.5 24.8C6.5 18 12.5 13 20 5.5Z" fill={fill} />
+      return <path d="M20 5.5C27.5 12.6 33.5 17.4 33.5 23.8A13.5 11.7 0 1 1 6.5 23.8C6.5 17.4 12.5 12.6 20 5.5Z" fill={fill} />
     case 'puff':
       return (
         <path
@@ -146,8 +150,8 @@ function renderAccessory(accessory: CrewAvatarAccessory, primary: string, second
     case 'antenna':
       return (
         <g>
-          <path d="M20 7.5V3.2" stroke={primary} strokeWidth="2.2" strokeLinecap="round" />
-          <circle cx="20" cy="2.8" r="2.3" fill={secondary} />
+          <path d="M20 7.5V4" stroke={primary} strokeWidth="2.2" strokeLinecap="round" />
+          <circle cx="20" cy="3.7" r="2" fill={secondary} />
         </g>
       )
     case 'sprout':
@@ -191,11 +195,13 @@ export function BotAvatar({
   avatar,
   state,
   size = 36,
+  animated = false,
   className = '',
 }: {
   avatar: CrewAvatar
   state?: string
   size?: number
+  animated?: boolean
   className?: string
 }) {
   const uid = useId().replace(/:/g, '')
@@ -205,14 +211,15 @@ export function BotAvatar({
   const preset = colorPalettePreset(avatar.palette)
   const [topColor, bottomColor] = preset.logoColors
   const running = state === 'running'
+  const liveDot = Math.max(7, Math.round(size * 0.22))
 
   return (
     <span
-      className={`bot-avatar ${running ? 'bot-avatar-running' : ''} ${className}`.trim()}
+      className={`bot-avatar ${running ? 'bot-avatar-running' : animated ? 'bot-avatar-idle' : ''} ${className}`.trim()}
       style={{ width: size, height: size }}
       aria-hidden="true"
     >
-      <svg width={size} height={size} viewBox="0 0 40 40" fill="none" aria-hidden="true">
+      <svg width={size} height={size} viewBox="2.5 1.5 35 35" fill="none" aria-hidden="true">
         <defs>
           <linearGradient id={gradId} x1="8" y1="6" x2="32" y2="35" gradientUnits="userSpaceOnUse">
             <stop offset="0%" stopColor={topColor} />
@@ -233,7 +240,7 @@ export function BotAvatar({
           {renderAccessory(avatar.accessory, topColor, bottomColor)}
         </g>
       </svg>
-      {running && <span className="bot-avatar-live" />}
+      {running && <span className="bot-avatar-live" style={{ width: liveDot, height: liveDot }} />}
     </span>
   )
 }

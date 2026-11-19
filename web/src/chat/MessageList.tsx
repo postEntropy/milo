@@ -1,10 +1,10 @@
 import { createPortal } from 'react-dom'
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { useCopy, type CopyState } from '../lib/clipboard.js'
 import { formatSeconds } from '../../../src/core/sessions/format.ts'
 import { formatWhen } from '../../../src/core/time.js'
 import { formatTokens, humanSize } from '../../../src/util/format.ts'
-import type { FrameAttachment, SessionCardItem, ThinkingDisplay, ToolMark, TranscriptPart } from '@protocol'
+import type { BotAuthor, FrameAttachment, SessionCardItem, ThinkingDisplay, ToolMark, TranscriptPart } from '@protocol'
 import { proseOf } from '@protocol'
 import type { RoutineDelivery } from '../../../src/core/outgoing.ts'
 import { toolBrand, toolParts, changeTotals } from '../../../src/gateways/tool-line.ts'
@@ -20,7 +20,7 @@ import { toolIconName } from '../ui/tool-icons.js'
 import { ImageViewer } from '../ui/ImageViewer.js'
 import { WaitLine } from '../ui/WaitLine.js'
 import { extractToolBot } from '../../../src/core/crew-avatars.js'
-import { BotAvatar, botAvatarOf } from '../crew/BotAvatar.js'
+import { BotAvatar, botAvatarOf, botToneOf } from '../crew/BotAvatar.js'
 import { defaultSuggestions, type Suggestion } from './suggestions.js'
 import type { ChatMessage } from './message.js'
 
@@ -62,7 +62,7 @@ function ToolLine({ tool }: { tool: ToolMark }) {
   const bot = extractToolBot(tool)
   const line = <code>
     {bot
-      ? <BotAvatar avatar={bot.avatar} state={tool.state} size={20} className="tool-bot-avatar" />
+      ? <BotAvatar avatar={bot.avatar} state={tool.state} size={26} className="tool-bot-avatar" />
       : <Icon className="tool-mark" name={brand ?? toolIconName(tool.name)} size={14} />}{' '}
     {bot ? (
       <>
@@ -110,7 +110,7 @@ function ToolLine({ tool }: { tool: ToolMark }) {
       {open && bot && (
         <div className="tool-result tool-bot-detail">
           <div className="tool-bot-detail-head">
-            <BotAvatar avatar={bot.avatar} state={tool.state} size={32} />
+            <BotAvatar avatar={bot.avatar} state={tool.state} size={46} />
             <div className="tool-bot-detail-meta">
               <strong>{bot.name}</strong>
               {bot.model && <span>{bot.model}</span>}
@@ -300,6 +300,7 @@ export const MessageList = memo(function MessageList({
   onRestorePending,
   suggestions,
   hasIdeas,
+  sessionBot,
   busy,
 }: {
   messages: ChatMessage[]
@@ -319,38 +320,56 @@ export const MessageList = memo(function MessageList({
   suggestions?: Suggestion[]
   /** Whether the model's ideas have replaced the standing four on the home. */
   hasIdeas?: boolean
+  /** The bot bound to this direct Session, when chatting directly with a Crew bot. */
+  sessionBot?: BotAuthor | null
   busy?: boolean
 }) {
-  if (messages.length === 0) return (
-    <section className="empty-state" aria-labelledby="welcome-title">
-      <div className="welcome-mark" aria-hidden="true">
-        <MiloMark size={34} />
-      </div>
-      <h1 id="welcome-title">What’s on your mind?</h1>
-      <p className="welcome-description">Let’s make something of it.</p>
-      {/* Remounted when the ideas take over from the standing four, so the chips
-          fade in rather than the set jumping in place. */}
-      <div className="suggestion-grid" key={hasIdeas ? 'ideas' : 'standing'}>
-        {(suggestions ?? defaultSuggestions).map((item) => {
-          const isResume = Boolean(item.action?.startsWith('resume:'))
-          return (
-            <button
-              className={`suggestion ${isResume ? 'is-resume' : ''}`}
-              key={item.title}
-              type="button"
-              onClick={() => (item.action ? onAction?.(item.action) : onPrompt?.(item.prompt ?? ''))}
-            >
-              <span className="suggestion-icon"><Icon name={item.icon} size={16} /></span>
-              <span className="suggestion-copy">
-                <span className="suggestion-title">{item.title}</span>
-                <span className="suggestion-detail">{item.detail}</span>
-              </span>
-            </button>
-          )
-        })}
-      </div>
-    </section>
-  )
+  if (messages.length === 0) {
+    if (sessionBot) {
+      const avatar = botAvatarOf(sessionBot)
+      return (
+        <section className="empty-state" aria-labelledby="welcome-title">
+          <div className="welcome-mark is-bot" style={{ '--bot-tone': botToneOf(avatar) } as CSSProperties} aria-hidden="true">
+            <BotAvatar avatar={avatar} size={76} animated />
+          </div>
+          <h1 id="welcome-title">{sessionBot.name}</h1>
+          <p className="welcome-description">
+            {sessionBot.handle ? <span className="welcome-bot-handle">@{sessionBot.handle}</span> : `Start a session with ${sessionBot.name}.`}
+          </p>
+        </section>
+      )
+    }
+    return (
+      <section className="empty-state" aria-labelledby="welcome-title">
+        <div className="welcome-mark" aria-hidden="true">
+          <MiloMark size={34} />
+        </div>
+        <h1 id="welcome-title">What’s on your mind?</h1>
+        <p className="welcome-description">Let’s make something of it.</p>
+        {/* Remounted when the ideas take over from the standing four, so the chips
+            fade in rather than the set jumping in place. */}
+        <div className="suggestion-grid" key={hasIdeas ? 'ideas' : 'standing'}>
+          {(suggestions ?? defaultSuggestions).map((item) => {
+            const isResume = Boolean(item.action?.startsWith('resume:'))
+            return (
+              <button
+                className={`suggestion ${isResume ? 'is-resume' : ''}`}
+                key={item.title}
+                type="button"
+                onClick={() => (item.action ? onAction?.(item.action) : onPrompt?.(item.prompt ?? ''))}
+              >
+                <span className="suggestion-icon"><Icon name={item.icon} size={16} /></span>
+                <span className="suggestion-copy">
+                  <span className="suggestion-title">{item.title}</span>
+                  <span className="suggestion-detail">{item.detail}</span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      </section>
+    )
+  }
 
   let currentTurn = 0
   const messageTurns = new Map<string, number>()
@@ -534,7 +553,7 @@ const MessageRow = memo(function MessageRow({ message, thinking, busy, running, 
     <div className="message-content">
       {message.bot && !message.routine && (
         <div className="message-bot-head">
-          <BotAvatar avatar={botAvatarOf(message.bot)} state={running ? 'running' : undefined} size={24} />
+          <BotAvatar avatar={botAvatarOf(message.bot)} state={running ? 'running' : undefined} size={34} />
           <span className="message-bot-name">{message.bot.name}</span>
           {message.bot.handle && <span className="message-bot-handle">@{message.bot.handle}</span>}
         </div>

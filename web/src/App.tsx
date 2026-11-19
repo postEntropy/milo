@@ -1385,7 +1385,7 @@ export default function App() {
       const item = pendingMessagesRef.current.find((entry) => entry.id === id)
       if (!item || !composerRef.current?.restore(item.text, pendingFiles.current.get(id) ?? [])) return
       try { changePending((items) => items.filter((entry) => entry.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) }
-    }} onDismissPending={(id) => { try { changePending((items) => items.filter((item) => item.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) } }} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} />
+    }} onDismissPending={(id) => { try { changePending((items) => items.filter((item) => item.id !== id)); pendingFiles.current.delete(id) } catch (error) { fail(error) } }} suggestions={suggestions} hasIdeas={Boolean(ideas?.length)} sessionBot={sessionBot} />
     {pendingPermission && <article className="message assistant"><Permissions request={pendingPermission.request} expiresAt={pendingPermission.expiresAt} onDecision={(action) => sendSocket({ type: 'control', action, id: pendingPermission.id })} /></article>}
   </>
 
@@ -1443,7 +1443,7 @@ export default function App() {
           {messages.length > 0 && <h1>{currentSession ? currentSession.label : 'New session'}</h1>}
           {sessionBot && (
             <span className="topbar-bot" title={sessionBot.handle ? `@${sessionBot.handle}` : sessionBot.name}>
-              <BotAvatar avatar={botAvatarOf(sessionBot)} size={18} />
+              <BotAvatar avatar={botAvatarOf(sessionBot)} size={24} />
               <span className="topbar-bot-name">{sessionBot.name}</span>
             </span>
           )}

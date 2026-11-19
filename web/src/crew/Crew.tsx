@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react'
 import type { CrewAvatar, CrewBot } from '../../../src/core/crew.js'
 import type { DelegatedWork } from '../../../src/core/delegated-work.js'
 import { api } from '../lib/api.js'
@@ -18,6 +18,7 @@ import {
   ACCESSORY_LABELS,
   BotAvatar,
   botAvatarOf,
+  botToneOf,
   COLOR_PALETTES,
   CREW_AVATAR_ACCESSORIES,
   CREW_AVATAR_EYES,
@@ -320,7 +321,7 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
                 ? <p className="routine-row-meta">No transcript stored for this run.</p>
                 : <MessageList messages={transcript} thinking="collapsed" />)}
           <div className="crew-chip-row">
-            {bots.filter((entry) => entry.assignments.some((assignment) => assignment.sessionId === run.sessionId)).map((entry) => <button className="button crew-bot-chip" type="button" key={entry.id} onClick={() => openBot(entry)}><BotAvatar avatar={botAvatarOf(entry)} state={entry.assignments.at(-1)?.state} size={22} /><span>{entry.name}</span></button>)}
+            {bots.filter((entry) => entry.assignments.some((assignment) => assignment.sessionId === run.sessionId)).map((entry) => <button className="button crew-bot-chip" type="button" key={entry.id} onClick={() => openBot(entry)}><BotAvatar avatar={botAvatarOf(entry)} state={entry.assignments.at(-1)?.state} size={28} /><span>{entry.name}</span></button>)}
           </div>
         </div></section>
       })}
@@ -330,7 +331,9 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
       <button className="button primary" type="button" onClick={() => setCreating(true)}>New bot</button>
     </div> : bot && botAvatar ? <>
       <div className="crew-bot-hero">
-        <BotAvatar avatar={botAvatar} state={botState} size={76} />
+        <span className="crew-bot-stage is-hero" style={{ '--bot-tone': botToneOf(botAvatar) } as CSSProperties}>
+          <BotAvatar avatar={botAvatar} state={botState} size={92} animated />
+        </span>
         <div className="crew-bot-hero-main">
           <div className="crew-card-head">
             <h3>{bot.name}</h3>
@@ -384,19 +387,19 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
         <div className="crew-avatar-group">
           <span className="crew-avatar-label">Shape</span>
           <div className="crew-avatar-choices">
-            {CREW_AVATAR_SHAPES.map((shape) => <button key={shape} type="button" aria-pressed={botAvatar.shape === shape} className={`crew-avatar-choice ${botAvatar.shape === shape ? 'active' : ''}`} disabled={saving} onClick={() => void updateAvatar({ shape })}><BotAvatar avatar={{ ...botAvatar, shape }} size={22} /><span>{SHAPE_LABELS[shape]}</span></button>)}
+            {CREW_AVATAR_SHAPES.map((shape) => <button key={shape} type="button" aria-pressed={botAvatar.shape === shape} className={`crew-avatar-choice ${botAvatar.shape === shape ? 'active' : ''}`} disabled={saving} onClick={() => void updateAvatar({ shape })}><BotAvatar avatar={{ ...botAvatar, shape }} size={34} /><span>{SHAPE_LABELS[shape]}</span></button>)}
           </div>
         </div>
         <div className="crew-avatar-group">
           <span className="crew-avatar-label">Eyes</span>
           <div className="crew-avatar-choices">
-            {CREW_AVATAR_EYES.map((eyes) => <button key={eyes} type="button" aria-pressed={botAvatar.eyes === eyes} className={`crew-avatar-choice ${botAvatar.eyes === eyes ? 'active' : ''}`} disabled={saving} onClick={() => void updateAvatar({ eyes })}><BotAvatar avatar={{ ...botAvatar, eyes }} size={22} /><span>{EYES_LABELS[eyes]}</span></button>)}
+            {CREW_AVATAR_EYES.map((eyes) => <button key={eyes} type="button" aria-pressed={botAvatar.eyes === eyes} className={`crew-avatar-choice ${botAvatar.eyes === eyes ? 'active' : ''}`} disabled={saving} onClick={() => void updateAvatar({ eyes })}><BotAvatar avatar={{ ...botAvatar, eyes }} size={34} /><span>{EYES_LABELS[eyes]}</span></button>)}
           </div>
         </div>
         <div className="crew-avatar-group">
           <span className="crew-avatar-label">Accessory</span>
           <div className="crew-avatar-choices">
-            {CREW_AVATAR_ACCESSORIES.map((accessory) => <button key={accessory} type="button" aria-pressed={botAvatar.accessory === accessory} className={`crew-avatar-choice ${botAvatar.accessory === accessory ? 'active' : ''}`} disabled={saving} onClick={() => void updateAvatar({ accessory })}><BotAvatar avatar={{ ...botAvatar, accessory }} size={22} /><span>{ACCESSORY_LABELS[accessory]}</span></button>)}
+            {CREW_AVATAR_ACCESSORIES.map((accessory) => <button key={accessory} type="button" aria-pressed={botAvatar.accessory === accessory} className={`crew-avatar-choice ${botAvatar.accessory === accessory ? 'active' : ''}`} disabled={saving} onClick={() => void updateAvatar({ accessory })}><BotAvatar avatar={{ ...botAvatar, accessory }} size={34} /><span>{ACCESSORY_LABELS[accessory]}</span></button>)}
           </div>
         </div>
         <div className="crew-avatar-group">
@@ -459,7 +462,9 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
         const avatar = botAvatarOf(entry)
         return <button className={`crew-bot-card ${last?.state === 'running' ? 'is-running' : ''}`} type="button" key={entry.id} onClick={() => openBot(entry)}>
           <div className="crew-bot-card-top">
-            <BotAvatar avatar={avatar} state={last?.state} size={52} />
+            <span className="crew-bot-stage" style={{ '--bot-tone': botToneOf(avatar) } as CSSProperties}>
+              <BotAvatar avatar={avatar} state={last?.state} size={62} />
+            </span>
             <div className="crew-bot-card-identity">
               <div className="crew-card-head">
                 <span className="routine-row-name">{entry.name}</span>
@@ -491,7 +496,7 @@ export function Crew({ tick = 0, onChatWithBot }: { tick?: number; onChatWithBot
           <div className="crew-work-card-foot">
             <span className="routine-row-meta">{entry.scheduleLabel}</span>
             {assignedBots.length > 0 && <span className="crew-avatar-stack">
-              {assignedBots.slice(0, 4).map((b) => <BotAvatar key={b.id} avatar={botAvatarOf(b)} size={22} />)}
+              {assignedBots.slice(0, 4).map((b) => <BotAvatar key={b.id} avatar={botAvatarOf(b)} size={28} />)}
             </span>}
           </div>
         </button>
