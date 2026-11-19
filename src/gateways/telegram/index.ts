@@ -14,6 +14,7 @@ import {
   decodePermission,
   encodePermission,
   handleCommand,
+  handleCrewChatAction,
   handleTurnControl,
   isImmediateCrewCommand,
   parseTurnControl,
@@ -140,6 +141,15 @@ export class TelegramGateway implements Gateway {
         actions: outcome.result.actions,
       })
     })
+    actionRouter.on('crew-chat', (payload, context) =>
+      handleCrewChatAction({
+        runtime: this.options.runtime,
+        allowlist: this.options.allowlist,
+        gateway: 'telegram',
+        payload,
+        context,
+      }),
+    )
 
     bot.on('callback_query:data', async (ctx) => {
       const data = ctx.callbackQuery.data
@@ -420,6 +430,7 @@ export class TelegramGateway implements Gateway {
       images,
       files,
       sessionsAllowed,
+      ignoreMentions: ctx.me?.username ? [ctx.me.username] : undefined,
     })
     // A stop is not a failure, and it is already on screen as "🛑 stopped".
     if (failure) {

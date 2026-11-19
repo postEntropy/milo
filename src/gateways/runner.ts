@@ -6,6 +6,7 @@ import { errorMessage } from '../util/errors.js'
 import type { ChatSurface } from './surface.js'
 import type { AudioPart, DocumentPart, ImagePart } from '../core/providers/types.js'
 import type { IncomingFile } from '../core/media.js'
+import { formatBotAvatarBadge, resolveBotAvatar } from '../core/crew.js'
 import { prepareTurnMedia } from './media.js'
 import { compactReply } from './commands.js'
 import { changeCounts, shellCommand, showsToolCall, toolLabel, toolLine } from './tool-line.js'
@@ -35,6 +36,8 @@ export interface RunTurnOptions {
    * agent must be held to the same rule. Absent: allowed.
    */
   sessionsAllowed?: boolean
+  /** Gateway handles (without `@`) to ignore during Crew mention routing. */
+  ignoreMentions?: string[]
 }
 
 const DEFAULT_FLUSH_MS = 900
@@ -81,7 +84,7 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   const flushMs = options.flushMs ?? DEFAULT_FLUSH_MS
   const display = options.display ?? DEFAULT_DISPLAY
 
-  const messageId = await surface.post(chatId, '…')
+  let messageId = await surface.post(chatId, '…')
   // The transport's own working indicator, kept on for as long as the turn runs.
   // The wait before the first token is the longest part of a turn and a bare '…'
   // does not say whether anything is happening. Stopped in the `finally` below,
@@ -96,6 +99,10 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   let mediaNotices: string[] | undefined
   let mediaModel: string | undefined
   let output = ''
+  let activePrefix = ''
+  let botHandled = false
+  let hasOutputMessage = false
+  let inBot = false
   let lastFlush = 0
   // Whether anything arrived in the answer channel, and how much came through
   // the thinking one: a provider may fill only the second, and then the display
@@ -110,11 +117,13 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
   let openQuote: 'tool' | 'quote' | null = null
   let reasoning = ''
 
+  const composedOutput = (): string => (activePrefix ? `${activePrefix}${output}` : output)
+
   const flush = async (force = false): Promise<void> => {
     const now = Date.now()
     if (!force && now - lastFlush < flushMs) return
     lastFlush = now
-    await surface.edit(chatId, messageId, clamp(output, maxLength))
+    await surface.edit(chatId, messageId, clamp(composedOutput(), maxLength))
   }
 
   /**
@@ -200,9 +209,43 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
       mediaNotices,
       ...(mediaModel ? { model: mediaModel } : {}),
       ...(options.sessionsAllowed === false ? { sessionsAllowed: false } : {}),
+      ...(options.ignoreMentions?.length ? { ignoreMentions: options.ignoreMentions } : {}),
       ask: (request) => surface.ask(chatId, messageId, request),
     })) {
       switch (event.type) {
+        case 'bot-start': {
+          botHandled = true
+          inBot = true
+          if (hasOutputMessage || output !== '' || activePrefix !== '') {
+            await flushReasoning()
+            messageId = await surface.post(chatId, '…')
+          }
+          hasOutputMessage = true
+          const badge = formatBotAvatarBadge(resolveBotAvatar(event.bot))
+          activePrefix = `${badge} **${event.bot.name}**${event.bot.handle ? ` (@${event.bot.handle})` : ''}\n\n`
+          output = ''
+          answered = false
+          reasoningChars = 0
+          atLineEnd = false
+          openQuote = null
+          reasoning = ''
+          lastFlush = 0
+          await flush(true)
+          break
+        }
+        case 'bot-end': {
+          inBot = false
+          await flushReasoning()
+          if (!answered && reasoningChars > 0 && display.thinking === 'collapsed') {
+            output += `${output === '' ? '' : '\n\n'}⚠ no answer came back: this model sends everything it says as reasoning, and /thinking collapsed hides it.`
+          }
+          if (event.status === 'error' && event.error && !output.includes(event.error)) {
+            output += `${output === '' ? '' : '\n\n'}[error] ${event.error}`
+          }
+          const finalBody = `${activePrefix}${output.trim() || '(no response)'}`
+          await surface.edit(chatId, messageId, clamp(finalBody, maxLength))
+          break
+        }
         case 'reasoning-delta':
           reasoningChars += event.delta.length
           if (display.thinking !== 'collapsed') reasoning += event.delta
@@ -307,15 +350,18 @@ export async function runTurn(options: RunTurnOptions): Promise<void> {
     stopTyping()
   }
 
-  await flushReasoning()
-  // Nothing came back in the answer channel while the thinking channel had
-  // content, and the display hid it: a chat that says nothing reads as the bot
-  // being broken, when it is the provider putting both channels in one field.
-  // The CLI says the same thing, for the same reason.
-  if (!answered && reasoningChars > 0 && display.thinking === 'collapsed') {
-    output += `${output === '' ? '' : '\n\n'}⚠ no answer came back: this model sends everything it says as reasoning, and /thinking collapsed hides it.`
+  if (!botHandled || inBot) {
+    await flushReasoning()
+    // Nothing came back in the answer channel while the thinking channel had
+    // content, and the display hid it: a chat that says nothing reads as the bot
+    // being broken, when it is the provider putting both channels in one field.
+    // The CLI says the same thing, for the same reason.
+    if (!answered && reasoningChars > 0 && display.thinking === 'collapsed') {
+      output += `${output === '' ? '' : '\n\n'}⚠ no answer came back: this model sends everything it says as reasoning, and /thinking collapsed hides it.`
+    }
+    const finalBody = `${activePrefix}${output.trim() || '(no response)'}`
+    await surface.edit(chatId, messageId, clamp(finalBody, maxLength))
   }
-  await surface.edit(chatId, messageId, clamp(output.trim() || '(no response)', maxLength))
 
   // The files the turn asked to send, read once it is over: they follow the
   // answer as their own messages rather than riding as a caption on it. Read

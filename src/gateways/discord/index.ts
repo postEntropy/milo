@@ -10,6 +10,7 @@ import { denialMessage, isAllowed } from '../access.js'
 import {
   buildCommandContext,
   handleCommand,
+  handleCrewChatAction,
   handleTurnControl,
   isImmediateCrewCommand,
   parseTurnControl,
@@ -132,6 +133,15 @@ export class DiscordGateway implements Gateway {
         actions: outcome.result.actions,
       })
     })
+    actionRouter.on('crew-chat', (payload, context) =>
+      handleCrewChatAction({
+        runtime: this.options.runtime,
+        allowlist: this.options.allowlist,
+        gateway: 'discord',
+        payload,
+        context,
+      }),
+    )
 
     const ask = async (
       target: Message,
@@ -402,18 +412,17 @@ export class DiscordGateway implements Gateway {
       stopTyping()
     }
 
-    let postedMessage: Message | null = null
+    const postedMessages = new Map<string, Message>()
     const surface: ChatSurface = {
       post: async (_chatId, placeholder) => {
-        postedMessage = await message.reply(placeholder)
-        return postedMessage.id
+        const posted = await message.reply(placeholder)
+        postedMessages.set(posted.id, posted)
+        return posted.id
       },
       edit: async (_chatId, messageId, value) => {
         try {
           const target =
-            postedMessage && postedMessage.id === messageId
-              ? postedMessage
-              : await message.channel.messages.fetch(messageId)
+            postedMessages.get(messageId) ?? (await message.channel.messages.fetch(messageId))
           await target.edit(value)
         } catch (error) {
           logWarn(`discord: could not edit message ${messageId}: ${errorMessage(error)}`)
@@ -425,6 +434,11 @@ export class DiscordGateway implements Gateway {
     }
 
     const display = readDisplay()
+    const ignoreMentions = [
+      'everyone',
+      'here',
+      ...(message.client.user?.username ? [message.client.user.username] : []),
+    ]
     const failure = await runTurns({
       session,
       chatId: message.channelId,
@@ -437,6 +451,7 @@ export class DiscordGateway implements Gateway {
       images,
       files,
       sessionsAllowed,
+      ignoreMentions,
     })
     // A stop is not a failure, and it is already on screen as "🛑 stopped".
     if (failure) {

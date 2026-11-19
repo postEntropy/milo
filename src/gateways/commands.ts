@@ -21,7 +21,7 @@ import type { ModelInfo } from '../core/providers/models.js'
 import type { PermissionMode, PermissionPolicy } from '../core/tools/permission.js'
 import { MEMORY_ID_CHARS, shortId, type MemoryItem } from '../core/memory/index.js'
 import type { TurnQueue } from './turns.js'
-import { buildSessionsList, type ActionRow, type SessionCardItem } from './actions.js'
+import { buildSessionsList, type ActionContext, type ActionRow, type SessionCardItem } from './actions.js'
 import { projectNames } from '../core/projects.js'
 import { normalize } from './access.js'
 import { errorMessage } from '../util/errors.js'
@@ -64,7 +64,7 @@ export interface CommandContext {
   /** Set when this surface may not change the model; used as the reply. */
   modelLocked?: string
   /** Starts a fresh session and binds it to this conversation. */
-  newSession?: (title?: string) => Promise<{ id: string }>
+  newSession?: (title?: string, options?: { botId?: string }) => Promise<{ id: string }>
   /** Binds this conversation to an existing session. */
   resumeSession?: (id: string) => Promise<boolean>
   /** Forks the current session or a named one into a new session. */
@@ -93,10 +93,13 @@ export interface CommandContext {
   /** Stops a running job by id, for `/jobs kill <id>`. */
   killJob?: (id: string) => boolean
   crew?: () => CrewBot[]
+  createCrewBot?: (input: { name: string; handle?: string; instructions?: string }) => Promise<CrewBot>
+  updateCrewProfile?: (id: string, patch: { name?: string; handle?: string; instructions?: string }) => Promise<CrewBot>
   renameCrewBot?: (id: string, name: string) => Promise<CrewBot>
   updateCrewAvatar?: (id: string, patch: Partial<CrewAvatar> | 'shuffle') => Promise<CrewBot>
   stopCrewBot?: (id: string) => Promise<void>
   guideCrewBot?: (id: string, text: string) => Promise<void>
+  removeCrewBot?: (id: string) => Promise<CrewBot>
   delegatedWork?: () => DelegatedWork[]
   controlDelegatedWork?: (id: string, action: 'pause' | 'resume' | 'cancel') => Promise<DelegatedWork>
 }
@@ -326,7 +329,7 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
       return { model: runtime.model }
     },
     modelLocked: modelLockMessage(lock),
-    newSession: (title) => runtime.newSession(scope, title),
+    newSession: (title, opts) => runtime.newSession(scope, title, opts),
     resumeSession: async (id) => (await runtime.resumeSession(scope, id)) !== null,
     forkSession: async (targetId, opts) => {
       const id = targetId ?? (await runtime.getSession(scope)).id
@@ -346,10 +349,13 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
     jobs: () => runtime.jobs?.list(session.id) ?? [],
     killJob: (id) => runtime.jobs?.kill(id, session.id) ?? false,
     crew: runtime.crew ? () => runtime.crew!.list() : undefined,
+    createCrewBot: runtime.crew ? (input) => runtime.crew!.create(input) : undefined,
+    updateCrewProfile: runtime.crew ? (id, patch) => runtime.crew!.updateProfile(id, patch) : undefined,
     renameCrewBot: runtime.crew ? (id, name) => runtime.crew!.rename(id, name) : undefined,
     updateCrewAvatar: runtime.crew ? (id, patch) => runtime.crew!.updateAvatar(id, patch) : undefined,
     stopCrewBot: runtime.crew ? (id) => runtime.crew!.stop(id) : undefined,
     guideCrewBot: runtime.crew ? (id, text) => runtime.crew!.guide(id, text) : undefined,
+    removeCrewBot: runtime.crew ? (id) => runtime.crew!.remove(id) : undefined,
     delegatedWork: runtime.delegatedWork ? () => runtime.delegatedWork!.list() : undefined,
     controlDelegatedWork: runtime.delegatedWork ? (id, action) => runtime.delegatedWork!.control(id, action) : undefined,
     compactSession: () => session.compact(signal),
@@ -358,6 +364,34 @@ export function buildCommandContext(options: BuildCommandContextOptions): Comman
     forgetMemory: (id) => session.forget(id),
     memoryLocked: memoryLockMessage(lock),
   }
+}
+
+export async function handleCrewChatAction(options: {
+  runtime: AgentRuntime
+  allowlist?: string[]
+  gateway: 'telegram' | 'discord'
+  payload: string
+  context: ActionContext
+}): Promise<void> {
+  const { runtime, allowlist, gateway, payload, context } = options
+  const locked = sessionLockMessage({ allowlist, userId: context.userId })
+  if (locked) {
+    await context.answer(locked)
+    return
+  }
+  const bot = runtime.crew?.get(payload)
+  if (!bot) {
+    await context.answer('That bot no longer exists.')
+    return
+  }
+  const session = await runtime.newSession(
+    { gateway, chatId: context.chatId },
+    undefined,
+    { botId: bot.id },
+  )
+  await context.answer(`Started chat with ${bot.name}`)
+  const message = `Started a direct chat session with ${bot.name}: ${session.id}.\nSend a message here to chat with ${bot.name}, or use /resume ${session.id} later.`
+  await context.edit({ text: message, markdown: message, actions: [] })
 }
 
 /** One note per line: what `/memory` shows on every surface. */
@@ -698,6 +732,56 @@ export async function handleCommand(
       const sub = tokens[0] ?? ''
       let mutating = false
       try {
+        if (sub === 'create') {
+          mutating = true
+          const name = id.slice(sub.length).trim()
+          if (!name) return { handled: true, reply: 'Usage: /crew create <name>.' }
+          if (/[\r\n]/.test(name)) return { handled: true, reply: 'A bot name must fit on one line.' }
+          if (!context.createCrewBot) return { handled: true, reply: 'Creating a bot is not available on this surface.' }
+          const bot = await context.createCrewBot({ name })
+          return {
+            handled: true,
+            reply: `Created bot ${bot.name} (@${bot.handle}, id: ${bot.id}).`,
+            actions: [[{ id: `crew-chat:${bot.id}`, label: 'Chat with bot', style: 'primary' }]],
+          }
+        }
+        if (sub === 'handle') {
+          mutating = true
+          if (tokens.length !== 3) return { handled: true, reply: 'Usage: /crew handle <id> <handle>.' }
+          if (!context.updateCrewProfile) return { handled: true, reply: 'Updating a bot handle is not available on this surface.' }
+          const bot = await context.updateCrewProfile(tokens[1]!, { handle: tokens[2]! })
+          return { handled: true, reply: `Updated handle for ${bot.name} to @${bot.handle}.` }
+        }
+        if (sub === 'instructions') {
+          mutating = true
+          const match = /^\S+\s+(\S+)\s+([\s\S]+)$/.exec(id)
+          if (!match) return { handled: true, reply: 'Usage: /crew instructions <id> <text | none>.' }
+          if (!context.updateCrewProfile) return { handled: true, reply: 'Updating bot instructions is not available on this surface.' }
+          const rawText = match[2]!.trim()
+          const instructions = rawText.toLowerCase() === 'none' ? '' : rawText
+          const bot = await context.updateCrewProfile(match[1]!, { instructions })
+          return {
+            handled: true,
+            reply: bot.instructions
+              ? `Updated instructions for ${bot.name}.`
+              : `Cleared instructions for ${bot.name}.`,
+          }
+        }
+        if (sub === 'chat') {
+          mutating = true
+          if (tokens.length !== 2) return { handled: true, reply: 'Usage: /crew chat <id>.' }
+          if (!context.newSession) return { handled: true, reply: 'Session switching is not available on this surface.' }
+          const bots = context.crew()
+          const ref = tokens[1]!
+          const normalized = ref.replace(/^@+/, '').toLowerCase()
+          const bot = bots.find((entry) => entry.id === ref || entry.handle === normalized)
+          if (!bot) return { handled: true, reply: `No bot matched "${ref}". Use /crew to list bots.` }
+          const { id: sessionId } = await context.newSession(undefined, { botId: bot.id })
+          return {
+            handled: true,
+            reply: `Started a direct chat session with ${bot.name}: ${sessionId}. /sessions to list, /resume ${sessionId} to come back.`,
+          }
+        }
         if (sub === 'avatar') {
           mutating = true
           const [, botId, ...rest] = tokens
@@ -744,24 +828,38 @@ export async function handleCommand(
           await context.stopCrewBot(tokens[1]!)
           return { handled: true, reply: 'Stop requested.' }
         }
-        if (tokens.length > 1) return { handled: true, reply: 'Usage: /crew [id | rename <id> <name> | avatar <id> [shuffle] | stop <id> | guide <id> <text>].' }
+        if (sub === 'remove') {
+          mutating = true
+          if (tokens.length !== 2) return { handled: true, reply: 'Usage: /crew remove <id>.' }
+          if (!context.removeCrewBot) return { handled: true, reply: 'Removing a bot is not available on this surface.' }
+          const bot = await context.removeCrewBot(tokens[1]!)
+          return { handled: true, reply: `Removed bot ${bot.name} (${bot.id}).` }
+        }
+        if (tokens.length > 1) return { handled: true, reply: 'Usage: /crew [id | create <name> | rename <id> <name> | handle <id> <handle> | instructions <id> <text|none> | chat <id> | avatar <id> [shuffle] | stop <id> | guide <id> <text> | remove <id>].' }
         const bots = context.crew()
         if (!tokens.length) return { handled: true, reply: bots.length ? bots.map((bot) => {
           const last = bot.assignments.at(-1)
-          return `${formatBotAvatarBadge(resolveBotAvatar(bot))} ${bot.name} (${bot.id}) — ${last?.state ?? 'available'}${last ? ` — ${last.mission}` : ''}`
+          const handleTag = bot.handle ? ` @${bot.handle}` : ''
+          return `${formatBotAvatarBadge(resolveBotAvatar(bot))} ${bot.name}${handleTag} (${bot.id}) — ${last?.state ?? 'available'}${last ? ` — ${last.mission}` : ''}`
         }).join('\n') : 'No Crew bots yet.' }
-        const bot = bots.find((entry) => entry.id === tokens[0])
+        const ref = tokens[0]!
+        const normalizedRef = ref.replace(/^@+/, '').toLowerCase()
+        const bot = bots.find((entry) => entry.id === ref || entry.handle === normalizedRef)
         if (!bot) return { handled: true, reply: 'No bot has that id. Use /crew to list bots, or /crew stop <id> to stop one.' }
+        const handleLine = bot.handle ? `Mention: @${bot.handle} · ID: ${bot.id}` : `ID: ${bot.id}`
+        const instructionsLine = bot.instructions ? `Instructions:\n${bot.instructions}` : undefined
         return {
           handled: true,
           reply: [
-            `${formatBotAvatarBadge(resolveBotAvatar(bot))} ${bot.name}`,
+            `${formatBotAvatarBadge(resolveBotAvatar(bot))} ${bot.name}\n${handleLine}`,
+            ...(instructionsLine ? [instructionsLine] : []),
             ...[...bot.assignments].reverse().map((item) => {
               const status = item.stopRequestedAt && item.state === 'running' ? `${item.state} (stop requested)` : item.state
               const guidance = (item.guidance ?? []).map((g) => `\n${g.text} — ${g.appliedAt ? 'applied' : item.state === 'running' ? 'queued' : 'not applied'}`).join('')
               return `${status} · ${item.provider ? `${item.provider} · ` : ''}${item.model}\n${item.mission}${guidance}${item.report ? `\n${item.report}` : ''}`
             }),
           ].join('\n\n'),
+          actions: [[{ id: `crew-chat:${bot.id}`, label: 'Chat with bot', style: 'primary' }]],
         }
       } catch (error) {
         return { handled: true, reply: `${mutating ? 'Could not manage Crew' : 'Could not read Crew'}: ${errorMessage(error)}` }

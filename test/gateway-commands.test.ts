@@ -76,6 +76,22 @@ describe('/crew', () => {
     expect(custom.reply).toContain('ocean orb')
   })
 
+  it('removes a bot through /crew remove', async () => {
+    const removed: string[] = []
+    const result = await handleCommand('/crew remove bot-1', {
+      crew: () => [],
+      removeCrewBot: async (id) => {
+        removed.push(id)
+        return { id, name: 'Scout', createdAt: 1, assignments: [] }
+      },
+    })
+    expect(removed).toEqual(['bot-1'])
+    expect(result.reply).toBe('Removed bot Scout (bot-1).')
+    expect((await handleCommand('/crew remove', { crew: () => [], removeCrewBot: async () => { throw new Error('unused') } })).reply).toBe('Usage: /crew remove <id>.')
+    expect((await handleCommand('/crew remove bot-1 extra', { crew: () => [], removeCrewBot: async () => { throw new Error('unused') } })).reply).toBe('Usage: /crew remove <id>.')
+    expect((await handleCommand('/crew remove bot-1', { crew: () => [] })).reply).toBe('Removing a bot is not available on this surface.')
+  })
+
   it('flags /crew and /delegated as immediate queue-bypassing commands and formats details safely', async () => {
     expect(isImmediateCrewCommand('/crew stop bot-1')).toBe(true)
     expect(isImmediateCrewCommand('/delegated pause work-1')).toBe(true)

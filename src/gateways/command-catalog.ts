@@ -38,7 +38,12 @@ export const COMMAND_CATALOG: CommandEntry[] = [
   { name: 'folder', usage: ' [path|none]', hint: 'choose or clear the working folder for this session' },
   { name: 'stats', hint: 'numbers for the current session' },
   { name: 'jobs', usage: ' [kill <id>]', hint: 'the background jobs, and how they are doing' },
-  { name: 'crew', usage: ' [id | rename <id> <name> | avatar <id> [shuffle] | stop <id> | guide <id> <text>]', hint: 'list, inspect, rename, customize, guide or stop a bot' },
+  {
+    name: 'crew',
+    usage:
+      ' [id | create <name> | rename <id> <name> | handle <id> <handle> | instructions <id> <text|none> | chat <id> | avatar <id> [shuffle] | stop <id> | guide <id> <text> | remove <id>]',
+    hint: 'list, create, inspect, configure, chat with, customize, guide, stop or remove a bot',
+  },
   { name: 'delegated', usage: ' [id | pause|resume|cancel <id>]', hint: 'inspect or control delegated work' },
   {
     name: 'compact',
