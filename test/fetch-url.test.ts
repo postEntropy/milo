@@ -20,9 +20,15 @@ vi.mock('node:dns', () => ({
 
 // The store pages are kept in is Milo's own, so it is pointed at a scratch home
 // for the run instead of the real one — set before the module reads it, which is
-// why the import below is dynamic.
+// why the import below is dynamic. `PATH` and `HOME` are isolated as well so a
+// machine's installed `firecrawl-local` binary does not hijack the native tests.
 const home = mkdtempSync(path.join(os.tmpdir(), 'milo-fetch-'))
+const emptyPath = mkdtempSync(path.join(os.tmpdir(), 'milo-empty-bin-'))
+const prevPath = process.env.PATH
+const prevHome = process.env.HOME
 process.env.MILO_HOME = home
+process.env.HOME = home
+process.env.PATH = emptyPath
 
 let fetchUrlTool: (typeof import('../src/core/tools/fetch-url.js'))['fetchUrlTool']
 async function reloadFetchUrlTool(): Promise<void> {
@@ -56,7 +62,12 @@ beforeEach(async () => {
   // The store on disk is shared across tests otherwise: wipe it between them.
   rmSync(fetchedDir(), { recursive: true, force: true })
 })
-afterAll(() => rmSync(home, { recursive: true, force: true }))
+afterAll(() => {
+  process.env.PATH = prevPath
+  process.env.HOME = prevHome
+  rmSync(home, { recursive: true, force: true })
+  rmSync(emptyPath, { recursive: true, force: true })
+})
 
 describe('fetch_url', () => {
   it('is read-only, and says the page is untrusted', () => {

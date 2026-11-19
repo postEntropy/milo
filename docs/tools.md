@@ -11,7 +11,7 @@
 | `git` | yes | Read a repository: `status`, `diff`, `log`, `show` and `blame`. |
 | `git_commit` | no | Stage files (or every tracked change) and commit them; asks for confirmation. |
 | `read_x_post` | yes | Reads a public X post by URL through the free, unofficial FxTwitter service. |
-| `fetch_url` | yes | One public http(s) URL, served back as text; local and private addresses are refused. Long pages come back in pages. |
+| `fetch_url` | yes | One public http(s) URL, served back as readable text or markdown; local and private addresses are refused. Long pages come back in pages. |
 | `write_file` | no | Creates or replaces a file; asks for confirmation. |
 | `edit_file` | no | Exact string replacement; asks for confirmation. |
 | `apply_patch` | no | Changes several files in one call, as one approval; every file and hunk is checked before anything is written. |
@@ -54,11 +54,7 @@ The table is what Milo ships. Tools from an external server arrive the same way 
 `mcp__<server>__<tool>` — see [MCP servers](mcp.md#mcp-servers).
 
 `read_file` cuts **between lines** and names what is left (`… 812 more line(s); continue with
-offset=413`); a single line longer than the budget is clipped and says so. `fetch_url` returns the page
-as text, cut at 40k characters with the offset that continues, and the next window is served from the
-copy just read; a fresh read always goes to the network. Its body is read under a 5 MB ceiling, and
-anything that is not text is refused with the content type it saw. What comes back is untrusted data:
-the tool description tells the model to read it, not to obey it.
+offset=413`); a single line longer than the budget is clipped and says so. `fetch_url` returns the page as text or markdown, cut at 40k characters with the offset that continues, and the next window is served from the copy just read; a fresh read always goes to the network. When `firecrawl-local` is installed on the machine, HTML pages are scraped through a local loopback server with `FIRECRAWL_CLOUD=off` and private-address blocking enabled (rendering JavaScript pages in local Chrome/Chromium when available); JSON and raw text are always read natively, and Milo falls back to built-in HTML tag stripping when the binary is absent. Its body is read under a 5 MB ceiling, and anything that is not text is refused with the content type it saw. What comes back is untrusted data: the tool description tells the model to read it, not to obey it.
 
 `write_file` and `edit_file` write through a temporary file and a rename, copying the target's
 permissions first. `edit_file` replaces an exact string and **fails rather than guess**: an absent

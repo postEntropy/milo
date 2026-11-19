@@ -420,6 +420,20 @@ struct CrewBotAvatar: View {
     }
 }
 
+private struct CrewAvatarStack: View {
+    let bots: [CrewBot]
+    var limit: Int = 5
+    var size: CGFloat = 32
+
+    var body: some View {
+        HStack(spacing: -2) {
+            ForEach(bots.prefix(limit)) { bot in
+                CrewBotAvatar(avatar: bot.resolvedAvatar, size: size)
+            }
+        }
+    }
+}
+
 private struct IdentifiableBotId: Identifiable {
     let id: String
 }
@@ -756,13 +770,7 @@ struct CrewView: View, Equatable {
                         .foregroundStyle(MiloTheme.muted)
                     Spacer()
                     if !assignedBots.isEmpty {
-                        HStack(spacing: -8) {
-                            ForEach(assignedBots.prefix(4)) { bot in
-                                CrewBotAvatar(avatar: bot.resolvedAvatar, size: 30)
-                                    .padding(2)
-                                    .background(MiloTheme.background, in: Circle())
-                            }
-                        }
+                        CrewAvatarStack(bots: assignedBots, limit: 4, size: 30)
                     }
                 }
             }
@@ -1910,13 +1918,7 @@ private struct CrewHome<BotCardView: View, WorkRowView: View>: View {
                         Spacer()
 
                         if !bots.isEmpty {
-                            HStack(spacing: -8) {
-                                ForEach(bots.prefix(5)) { bot in
-                                    CrewBotAvatar(avatar: bot.resolvedAvatar, size: 32)
-                                        .padding(2)
-                                        .background(MiloTheme.background, in: Circle())
-                                }
-                            }
+                            CrewAvatarStack(bots: bots)
                         }
                     }
 
